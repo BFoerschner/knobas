@@ -297,6 +297,56 @@ async fn a_row_keeps_its_address_only_where_the_mirror_holds_the_entity() {
     );
 }
 
+/// A page's read (`shown`, ADR-0042) keeps rule 7 and names beside the view
+/// each row it cleared, with the id the adapter named for it (the third
+/// smoothness pass of PR #2479): the repository page reads a branch made on
+/// the forge since the last sync through that id. The row itself stays
+/// plain text, and a row the mirror holds is not named.
+#[tokio::test]
+async fn a_pages_read_names_the_rows_the_mirror_has_not_synced_with_their_ids() {
+    let f = fixture().await;
+    let shown = sources::crud::shown(
+        &f.pool,
+        &f.secrets,
+        &crate::support::shared(DrawingRegistry(f.asked.clone())),
+        &knobas_app::sources::live::LiveSources::default(),
+        &format!("{}:drawn", f.id),
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("drawn");
+    let Block::Entities { rows, .. } = &shown.view.sections[0].blocks[0] else {
+        panic!("{:#?}", shown.view);
+    };
+    assert_eq!(rows[1].entity_id, None, "rule 7 still clears the row");
+    assert_eq!(
+        shown.unsynced,
+        [knobas_app::sources::live::Unsynced {
+            section: "overview".to_owned(),
+            title: "elsewhere".to_owned(),
+            entity_id: format!("{}:never-synced", f.id),
+        }]
+    );
+    let wire = serde_json::to_value(&shown).unwrap();
+    assert_eq!(
+        wire["unsynced"][0]["entity_id"],
+        format!("{}:never-synced", f.id)
+    );
+    // A view whose every row is held carries no `unsynced` on the wire.
+    let plain = knobas_app::sources::live::ShownView {
+        view: shown.view.clone(),
+        held_at: None,
+        unsynced: Vec::new(),
+    };
+    assert!(
+        serde_json::to_value(&plain)
+            .unwrap()
+            .get("unsynced")
+            .is_none()
+    );
+}
+
 /// The read goes to the entity's own source with the section it was asked
 /// for; `None` and a failure come back as what they are.
 #[tokio::test]

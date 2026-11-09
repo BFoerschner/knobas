@@ -403,9 +403,16 @@ async fn fetch_missing_tip(
 /// behind it, to see whether a branch moved since the mirror's sync
 /// (ADR-0041).
 ///
+/// The head the source's compare settled is fetched into a checkout that
+/// lacks it, behind the answer ([`fetch_answered_tip`]): a branch the mirror
+/// has not synced yet, pushed elsewhere since the page drew, reads at the
+/// clone from its next open (the third smoothness pass of PR #2479).
+///
 /// # Errors
 ///
-/// As [`range_diff`].
+/// As [`range_diff`]. [`NotFound`](crate::IpcErrorCode::NotFound) too where
+/// the source answers the compare 404, which is a branch it does not hold:
+/// the page says so only then, never while a read could still find it.
 pub async fn source_range_diff(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
@@ -416,13 +423,77 @@ pub async fn source_range_diff(
     head: &str,
 ) -> Result<RangeDiff, IpcError> {
     let section = format!("compare:{base}...{head}");
-    source_diff(pool, secrets, registry, live, entity_id, &section)
-        .await?
+    let diff =
+        match crate::sources::crud::view(pool, secrets, registry, live, entity_id, Some(&section))
+            .await
+        {
+            Ok(view) => diff_of(view),
+            Err(crate::sources::SourcesError::Source(error)) if error.status() == Some(404) => {
+                return Err(IpcError::not_found(format!(
+                    "the source holds no branch {head} or {base} to compare: {error}"
+                )));
+            }
+            Err(error) => return Err(crate::sources::to_ipc(&error, None)),
+        }
         .ok_or_else(|| {
             IpcError::not_found(format!(
                 "the source draws no diff between {base} and {head}"
             ))
-        })
+        })?;
+    fetch_answered_tip(
+        &fetch::Fetches::global(),
+        pool,
+        registry.as_ref(),
+        entity_id,
+        &diff,
+    )
+    .await;
+    Ok(diff)
+}
+
+/// [`fetch_answered_tip`] through `fetches`, one that admits the testenv's
+/// http. **Tests only**, as [`fetch::Fetches::admitting`].
+#[cfg(feature = "test-util")]
+pub async fn fetch_answered_tip_with(
+    fetches: &std::sync::Arc<fetch::Fetches>,
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    diff: &RangeDiff,
+) {
+    fetch_answered_tip(fetches, pool, registry, entity_id, diff).await;
+}
+
+/// The head commit a source's compare settled, fetched into the checkout
+/// behind the answer where the checkout lacks it (ADR-0041 as amended): the
+/// tip of a branch made on the forge after the last sync, which the mirror
+/// names no tip for. A checked sha, as every fetched one; nothing else of the
+/// answer reaches git.
+async fn fetch_answered_tip(
+    fetches: &std::sync::Arc<fetch::Fetches>,
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    diff: &RangeDiff,
+) {
+    let Some(range) = diff.range.as_ref() else {
+        return;
+    };
+    if !checkout::open::is_sha(&range.head) {
+        return;
+    }
+    let Ok(Some(repo)) = repo_of(pool, entity_id).await.map(|r| r.entity_id) else {
+        return;
+    };
+    let Ok(Some(path)) = resolve(pool, &repo).await.map(|c| c.path) else {
+        return;
+    };
+    if range::holds_commits(Path::new(&path), &[range.head.as_str()]).await {
+        return;
+    }
+    fetches
+        .behind(pool, registry, &repo, &path, &range.head)
+        .await;
 }
 
 /// The change one commit made (#2319, story 78): `sha` against its first
@@ -541,7 +612,13 @@ async fn source_diff(
     let view = crate::sources::crud::view(pool, secrets, registry, live, entity, Some(section))
         .await
         .map_err(|error| crate::sources::to_ipc(&error, None))?;
-    Ok(view.and_then(|view| {
+    Ok(diff_of(view))
+}
+
+/// The diff block of a view's first section, as a [`RangeDiff`] the source
+/// answered.
+fn diff_of(view: Option<knobas_source::view::SourceView>) -> Option<RangeDiff> {
+    view.and_then(|view| {
         view.sections.into_iter().next().and_then(|section| {
             section.blocks.into_iter().find_map(|block| match block {
                 knobas_source::view::Block::Diff {
@@ -559,7 +636,7 @@ async fn source_diff(
                 _ => None,
             })
         })
-    }))
+    })
 }
 
 /// The commit the mirror names for a branch's tree: its declared `commit`

@@ -17,6 +17,16 @@ Amends [ADR-0032](0032-the-app-keeps-live-reads-in-memory-keyed-by-what-they-sta
 - **Grants move.** Jira's, Confluence's and TeamCity's grants are moving, as Gitea's were: answered from memory and asked again behind. They stay in memory: a write is drawn as allowed until its grant answers, and a grant knobas could not ask still refuses (#2306).
 - **Bounded, and gone with what read it.** `sync.held_read` holds 64 MiB, the oldest reads going first, and never a read over 2 MiB. A row is keyed by what the source was built from short of its credential (adapter, address, method, configuration), so an edited source answers none of its old reads; a new credential deletes them, and removing the source deletes them by the foreign key. It sits in `sync` beside the mirror, so a backup, which dumps the `knobas` schema, never carries one.
 
+## A kept page reads again on its return (amended 2026-11-10)
+
+The third smoothness pass of PR #2479, found in the app's own window: a repository page kept open did not read its branch list again on its return, so a branch made after it first drew was unknown to Compare, *New pull request* and the header until a refresh (Björn: "fix that, I don't like this behaviour").
+
+- **When.** A repository page reads its branch list and its pull requests again, each through this ADR's path (at once from what knobas holds, the source behind it), when it is shown again, when another of its tabs is shown, when the window comes back after `HELD_AFTER` or more, when a branch knobas made lands, and when a run of its source ends. A role view reads again when a run of a source filling its role ends with something new while it is shown (`RoleSync::ran`); hidden, it reads once on its return.
+- **A row the mirror has not synced is readable, never linkable.** ADR-0020 rule 7 still clears such a row's `entity_id`, so it links nowhere. `entity_view` now answers beside the view each row it cleared, with the id the adapter named for it (`ShownView.unsynced`: section, title, id; additive, absent when empty). The repository page offers a branch so listed, and reads its view, its files and its commits at that id through the source, as it reads any branch; it offers no write that needs the mirror (*Delete…*) until a sync holds it.
+- **A branch knobas made is offered at once**, from its echo (`MADE`), until a read lists it.
+- **Not found is the source's word, and only after every read that could find it.** Compare reads a branch the list lacks by name; a 404 of the source's compare is `not_found`, and the page says the branch is missing only then and while no read of the list is running.
+- **What the reader is on does not move.** A list read again keeps the first row on screen where it was and focus where it was (`landInPlace`).
+
 ## Rejected
 
 - **Keep ADR-0032's memory-only cache and add a skeleton.** Every restart made every page wait again; at a source 5 s away that is 15 s for a pull request or a run, on every first open of the day.
@@ -24,6 +34,8 @@ Amends [ADR-0032](0032-the-app-keeps-live-reads-in-memory-keyed-by-what-they-sta
 - **Hold reads in the `knobas` schema.** A backup would carry another machine's reads of sources it may not reach, and a restore would answer pages from them.
 
 ## Consequences
+
+- `ShownView` gains `unsynced` (additive; announced under *Frozen surface* in PR #2479). Witnessed by `entity_view.rs` (`a_pages_read_names_the_rows_the_mirror_has_not_synced_with_their_ids`) and the repository page's component tests (`TfRepo.kept.test.svelte.ts`).
 
 - ADR-0032's *never in the database or on disk* is amended to *never in the mirror's tables; a page's reads are held in `sync.held_read`*. Its *Moving* and *Fixed* rules stand; *Live* now means *read every time by everything but a page*.
 - A page can draw something older than the source for the time a read takes, or longer when the source is down, and says so. A write pressed from a held view is checked by the source when it lands, as every write is (ADR-0004); a refusal is told on the write.

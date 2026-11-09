@@ -48,6 +48,12 @@ export interface RoleSync {
   readonly going: number;
   /** Moves once each time every run of an ask has ended. */
   readonly revision: number;
+  /**
+   * Moves each time a run of a source that fills the role ends having changed something, whoever started it: a scheduled
+   * sync, a write's follow-up run (the third smoothness pass of PR #2479). A shown role view reads again on it, so a
+   * ticket made elsewhere comes onto the board without leaving it. Heard from the first time it is read.
+   */
+  readonly ran: number;
   /** Why the last ask was refused, or `null`. */
   readonly failed: string | null;
   /** Ask for the runs; nothing while they still go. `name` is what the answer calls a single run: else its source's name. */
@@ -70,7 +76,7 @@ export const ROLE_SYNC_BRIDGE: RoleSyncPorts = {
 };
 
 export function createRoleSyncs(ports: RoleSyncPorts): RoleSyncs {
-  return createSyncs(ports, (role) => ports.syncRole(role));
+  return createSyncs(ports, (role) => ports.syncRole(role), (role, sourceId) => sourceRoles.filledBy(role, sourceId));
 }
 
 /**
@@ -81,7 +87,11 @@ export function createRoleSyncs(ports: RoleSyncPorts): RoleSyncs {
  * {@link RoleSync.role} is the source's id here.
  */
 export function createSourceSyncs(ports: Omit<RoleSyncPorts, "syncRole">): RoleSyncs {
-  return createSyncs(ports, async (sourceId) => [{ source_id: sourceId, run_id: await ports.syncNow(sourceId) }]);
+  return createSyncs(
+    ports,
+    async (sourceId) => [{ source_id: sourceId, run_id: await ports.syncNow(sourceId) }],
+    (name, sourceId) => name === sourceId,
+  );
 }
 
 /**
@@ -89,17 +99,21 @@ export function createSourceSyncs(ports: Omit<RoleSyncPorts, "syncRole">): RoleS
  * one subject `sync:all`. One for each press, so a press while some still go starts what has ended.
  */
 export function createAllSync(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, syncAll: () => Promise<number[]>): RoleSync {
-  return createRoleSync(ports, "all", async () => (await syncAll()).map((run_id) => ({ source_id: null, run_id })));
+  return createRoleSync(ports, "all", async () => (await syncAll()).map((run_id) => ({ source_id: null, run_id })), () => true);
 }
 
 /** The runs asked for under one name, the same ones each time it is asked for. */
-function createSyncs(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, ask: (name: string) => Promise<RoleRun[]>): RoleSyncs {
+function createSyncs(
+  ports: Pick<RoleSyncPorts, "syncStatus" | "listen">,
+  ask: (name: string) => Promise<RoleRun[]>,
+  counts: (name: string, sourceId: string) => boolean,
+): RoleSyncs {
   const held = new Map<string, RoleSync>();
   return {
     of(name) {
       let sync = held.get(name);
       if (sync === undefined) {
-        sync = createRoleSync(ports, name, () => ask(name));
+        sync = createRoleSync(ports, name, () => ask(name), (sourceId) => counts(name, sourceId));
         held.set(name, sync);
       }
       return sync;
@@ -110,13 +124,33 @@ function createSyncs(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, ask: (
   };
 }
 
-function createRoleSync(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, role: string, ask: () => Promise<AskedRun[]>): RoleSync {
-  const state = $state<{ asking: boolean; pending: Record<string, number>; revision: number; failed: string | null }>({
+function createRoleSync(
+  ports: Pick<RoleSyncPorts, "syncStatus" | "listen">,
+  role: string,
+  ask: () => Promise<AskedRun[]>,
+  counts: (sourceId: string) => boolean,
+): RoleSync {
+  const state = $state<{ asking: boolean; pending: Record<string, number>; revision: number; failed: string | null; ran: number }>({
     asking: false,
     pending: {},
     revision: 0,
     failed: null,
+    ran: 0,
   });
+  /** Whether `ran` is heard yet: from its first read, for as long as the window lives. */
+  let hearing = false;
+  function hearRuns() {
+    if (hearing) return;
+    hearing = true;
+    void ports
+      .listen(EVENTS.syncState, ({ payload }) => {
+        const row = payload as SourceSyncStatus;
+        if (!row.running && row.run_id !== null && row.last_changed !== false && counts(row.source_id)) state.ran += 1;
+      })
+      .catch(() => {
+        hearing = false;
+      });
+  }
   let stop: (() => void) | null = null;
   /** What this ask's runs have said so far, for its answer. */
   let said: { name: string | undefined; runs: number; last: string; failed: Map<string, string[]>; changed: boolean } = { name: undefined, runs: 0, last: role, failed: new Map(), changed: false };
@@ -171,6 +205,10 @@ function createRoleSync(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, rol
     },
     get revision() {
       return state.revision;
+    },
+    get ran() {
+      hearRuns();
+      return state.ran;
     },
     get failed() {
       return state.failed;

@@ -42,6 +42,14 @@
   by a read of the whole repository view. A branch list the app answered from
   memory and then read again behind (`view:fresh`, #2242) is read again here.
 
+  **A kept page sees new branches** (the third smoothness pass of PR #2479,
+  ADR-0042 as amended): the branch list and the pull requests are read again,
+  over what is drawn, when the page is shown again, another tab is shown, the
+  window comes back after a while, a branch made here lands or a run of the
+  source ends. A branch the source lists and the mirror has not synced is
+  offered at the id the source named (`unsynced`); one this session made is
+  offered at once (`withMade`), not to read at until a read lists it.
+
   The repository is read through its source's own view (`entity_view`), so a
   repository nobody cloned reads the same as one on this disk; the checkout
   only adds the `M` marks and the warning on a changed file.
@@ -61,6 +69,7 @@
     PipeStep,
     RangeDiff,
     RefusedWrite,
+    ShownView,
     SourceView,
     ViewBlock,
     ViewFresh,
@@ -75,7 +84,8 @@
   export interface RepoPorts extends OpenJobPorts {
     getEntity: (entityId: string) => Promise<EntityDetail>;
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
-    entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
+    /** A page's view (ADR-0042): what knobas last read, with when (`held_at`) and the rows the mirror lacks (`unsynced`). */
+    entityView: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     entityCheckoutDiff: (entityId: string) => Promise<DiffRead>;
     setCheckoutOverride: (entityId: string, path: string | null) => Promise<CheckoutView>;
@@ -161,7 +171,11 @@
     repoHash,
     repoPrs,
     repoRefusals,
+    sourceName,
     REPO_TABS,
+    MADE,
+    REPO_BRANCHES,
+    withMade,
     type BranchOption,
     type BranchStanding,
     type RepoTab,
@@ -188,7 +202,10 @@
   import { parentPage } from "../page-name.svelte";
   import { itemHash } from "../job/job";
   import { jumpAcross } from "../opener";
-  import { echoesOn } from "../queued.svelte";
+  import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { landInPlace } from "../land-in-place";
+  import { HELD_AFTER_MS } from "./view-fresh.svelte";
+  import type { SourceSyncStatus } from "../../ipc/sources";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -309,12 +326,23 @@
     if (ready && id !== null) readCheckout(id, () => repoId === id);
   }
   onFocusWhileShown(() => visible, checkoutAgain);
-  // The open tab reads again too, over what it drew, as it does on a refresh.
+  // The window back after a while: the lists read again too. A moment away reads nothing more.
+  $effect(() => {
+    if (!visible) return;
+    const back = () => {
+      if (Date.now() - listsAskedAt >= HELD_AFTER_MS) untrack(rereadLists);
+    };
+    window.addEventListener("focus", back);
+    return () => window.removeEventListener("focus", back);
+  });
+  // The open tab reads again too, over what it drew, as it does on a refresh; and the page's own lists, its branches
+  // and pull requests, so a branch made while the page was away is known to Compare and *New pull request*.
   onShownAgain(
     () => visible,
     () => {
       tabs = readShown(tabs);
       writesAsked += 1;
+      rereadLists();
     },
   );
 
@@ -331,17 +359,58 @@
       },
       () => {},
     );
-    // An empty repository has no branches; a source that cannot say reads as
-    // one with only its default branch, which the repository's own view is.
-    const branchesRead = ports.entityView(id, "branches").then(
+    await Promise.all([factsRead, readBranches(id, alive, again), readRow(id, alive, again)]);
+  }
+
+  /** Each branch list read, so only the newest answer lands and `branchesReading` holds until it has. */
+  let branchRead = 0;
+  /** A read of the branch list is under way: Compare does not say a branch is missing while it is. */
+  let branchesReading = $state(false);
+  /** When the lists were last asked for, so a window coming back into focus reads them again only after a while. */
+  let listsAskedAt = 0;
+
+  /**
+   * The branch list (the third smoothness pass of PR #2479): read at once
+   * from what knobas last read, which the app then reads again behind it
+   * (ADR-0042), and read again whenever the page is shown again, a tab is
+   * switched, the window comes back after a while, a branch knobas made
+   * lands or a run of the repository's source ends. A branch the source
+   * lists and the mirror has not synced yet is offered with the id the
+   * source named (`unsynced`). Each branch this session made that the list
+   * now holds settles its echo. An empty repository has no branches; a
+   * source that cannot say reads as one with only its default branch, which
+   * the repository's own view is. Read again, it lands without moving what
+   * the reader is on (`landInPlace`).
+   */
+  function readBranches(id: string, alive: () => boolean, again: boolean): Promise<void> {
+    const mine = ++branchRead;
+    branchesReading = true;
+    listsAskedAt = Date.now();
+    const newest = () => alive() && mine === branchRead;
+    return ports.entityView(id, "branches").then(
       (view) => {
-        if (alive()) branches = branchOptions(view?.sections[0] ?? null);
+        if (!newest()) return;
+        const next = branchOptions(view?.sections[0] ?? null, (view as ShownView | null)?.unsynced ?? []);
+        settleEchoes(id, (echo) => echo.kind === MADE && next.some((option) => option.name === echo.text));
+        if (again) void landInPlace(page, () => (branches = next));
+        else branches = next;
+        branchesReading = false;
       },
       () => {
-        if (alive() && !again) branches = [];
+        if (!newest()) return;
+        if (!again) branches = [];
+        branchesReading = false;
       },
     );
-    await Promise.all([factsRead, branchesRead, readRow(id, alive, again)]);
+  }
+
+  /** The repository's lists again over what the page drew: its branches, and its pull requests with its row. */
+  function rereadLists(): void {
+    const id = repoId;
+    if (!ready || id === null) return;
+    const alive = () => repoId === id;
+    void readBranches(id, alive, true);
+    void readRow(id, alive, true);
   }
 
   /** The branch list again, where the app read it again behind its answer and it moved (#2242). */
@@ -354,12 +423,7 @@
     void listen(EVENTS.viewFresh, ({ payload }) => {
       const fresh = payload as ViewFresh;
       if (!live || fresh.entity_id !== id || fresh.section !== "branches" || fresh.failed) return;
-      ports.entityView(id, "branches").then(
-        (view) => {
-          if (live && repoId === id) branches = branchOptions(view?.sections[0] ?? null);
-        },
-        () => {},
-      );
+      void readBranches(id, () => live && repoId === id, true);
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;
@@ -372,6 +436,47 @@
       live = false;
       stop?.();
     };
+  });
+
+  // A branch made here (*New branch…*, a commit to a new branch) lands, or its source's run ends: the list reads again.
+  $effect(() => {
+    if (!ready || repoId === null) return;
+    const id = repoId;
+    return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
+  });
+
+  // A run of the repository's own source ended (a scheduled sync, *Start work*'s branch landing, a push the run brought in):
+  // the branches and the pull requests read again, over what the page drew.
+  const sourceId = $derived(detail?.row.source_id ?? null);
+  $effect(() => {
+    const from = sourceId;
+    if (!ready || from === null || !visible) return;
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    let live = true;
+    let stop: (() => void) | null = null;
+    void listen(EVENTS.syncState, ({ payload }) => {
+      const row = payload as SourceSyncStatus;
+      if (live && !row.running && row.source_id === from) untrack(rereadLists);
+    }).then(
+      (unlisten) => {
+        if (live) stop = unlisten;
+        else unlisten();
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+      stop?.();
+    };
+  });
+
+  // Another tab of the page shown: the lists read again, so Compare and *New pull request* know a branch made since.
+  let slotWas: string | null = null;
+  $effect(() => {
+    const now = slot;
+    const was = slotWas;
+    slotWas = now;
+    if (was !== null && was !== now) untrack(rereadLists);
   });
 
   // Whether the source offers *New branch…* and a commit onto the branch is
@@ -424,7 +529,10 @@
     };
     await readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
       (rows) => {
-        if (alive()) prs = repoPrs(rows, found.row);
+        if (!alive()) return;
+        const next = repoPrs(rows, found.row);
+        if (again) void landInPlace(page, () => (prs = next));
+        else prs = next;
       },
       () => {
         if (alive() && !again) prs = [];
@@ -440,6 +548,9 @@
     writesAsked += 1;
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
+
+  /** The page's element: where a list read again keeps the reader's place (`landInPlace`). */
+  let page = $state<HTMLElement | undefined>(undefined);
 
   /** The pull requests again, for one this session queued. */
   function rereadPrs(): void {
@@ -483,6 +594,11 @@
     checkout = await ports.setCheckoutOverride(repoId, path);
   }
 
+  /**
+   * The branches the page offers: the list's, then each one this session made that no read holds yet (`withMade`), so a
+   * branch knobas made is in the header, Compare and *New pull request* at once. `null` while the list has not answered.
+   */
+  const known = $derived(branches === null || repoId === null ? branches : withMade(branches, echoesOn(repoId, MADE)));
   /** The default branch: the live list's, else the mirror's (#2243), `null` while neither has said. */
   const defaultBranch = $derived<BranchOption | null>(
     branches?.find((option) => option.isDefault) ??
@@ -494,8 +610,8 @@
   const picked = $derived.by((): BranchOption | null => {
     const held = repoId === null ? undefined : chosen[repoId];
     if (held === undefined) return null;
-    if (branches === null) return { name: held.name, entityId: held.entityId, isDefault: false };
-    return branches.find((option) => option.name === held.name) ?? null;
+    if (known === null) return { name: held.name, entityId: held.entityId, isDefault: false };
+    return known.find((option) => option.name === held.name && (option.entityId !== null || option.isDefault)) ?? null;
   });
   const selected = $derived(picked ?? defaultBranch);
   /**
@@ -536,7 +652,7 @@
 
   /** A tab's count, drawn only above zero once its read answered. */
   function countOf(id: RepoTabId): { n: number; warn: boolean } | null {
-    if (id === "branches" && branches !== null && branches.length > 0) return { n: branches.length, warn: false };
+    if (id === "branches" && known !== null && known.length > 0) return { n: known.length, warn: false };
     // One on its way counts as its row does, so the tab agrees with the list under it (F-242).
     const onTheWay = id === "prs" && repoId !== null ? echoesOn(repoId, MADE_PR).length : 0;
     if (id === "prs" && openPrs + onTheWay > 0) return { n: openPrs + onTheWay, warn: false };
@@ -550,7 +666,7 @@
   const proposed = $derived(
     selected && !selected.isDefault
       ? selected.name
-      : (branches?.find((option) => !option.isDefault && !sentFrom.has(option.name))?.name ?? branches?.find((option) => !option.isDefault)?.name ?? branchName),
+      : (known?.find((option) => !option.isDefault && !sentFrom.has(option.name))?.name ?? known?.find((option) => !option.isDefault)?.name ?? branchName),
   );
 
   /** How many branches the header asks before it gives up on finding one with nothing open: a source's burst stays small. */
@@ -569,7 +685,7 @@
   let openedFrom = $state<BranchStanding["pr"]>(null);
   $effect(() => {
     const choice = selected !== null && !selected.isDefault ? selected : null;
-    const asking = (choice === null ? (branches ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
+    const asking = (choice === null ? (known ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
     void writesAsked;
     let live = true;
     const asked = ready ? asking.slice(0, ASKED) : [];
@@ -630,12 +746,12 @@
   function pick(event: Event) {
     if (repoId === null) return;
     const name = (event.currentTarget as HTMLSelectElement).value;
-    const option = branches?.find((candidate) => candidate.name === name);
+    const option = known?.find((candidate) => candidate.name === name);
     chosen[repoId] = { name, entityId: option?.entityId ?? null };
   }
 
   /** A repository holding one branch has nothing to propose from. */
-  const oneBranch = $derived(branches !== null && branches.length === 1);
+  const oneBranch = $derived(known !== null && known.length === 1);
 
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
 
@@ -672,7 +788,7 @@
   }
 </script>
 
-<div class="tf-full">
+<div class="tf-full" bind:this={page}>
   <TfCrumbs parts={crumbs} {back} />
 
   {#if repoId === null || failed !== null}
@@ -717,9 +833,12 @@
               ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
                 d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
               /></svg
-            ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
-              {#each branches ?? [] as option (option.name)}
-                <option value={option.name}>{option.name}</option>
+            ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={known === null || known.length === 0}>
+              {#each known ?? [] as option (option.name)}
+                <!-- A branch knobas is making has nothing to read at until a read lists it: offered, but not to read at yet. -->
+                <option value={option.name} disabled={option.made !== undefined} title={option.made !== undefined ? `Being made on ${sourceName(source)}: it can be read once it is there` : undefined}
+                  >{option.name}{option.made !== undefined ? ` (${option.made})` : ""}</option
+                >
               {/each}
             </select></label
           >
@@ -727,7 +846,7 @@
         <button
           type="button"
           class="tf-btn"
-          disabled={branches === null || branches.length === 0}
+          disabled={known === null || known.length === 0}
           aria-disabled={branchRefused !== null ? "true" : undefined}
           title={branchRefused ?? undefined}
           onclick={() => {
@@ -787,12 +906,13 @@
                 <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
               {:else if one === "branches"}
                 <TfRepoBranches {ports} {repoId} {source} {refreshed} />
-              {:else if one === "compare" && branches !== null}
+              {:else if one === "compare" && known !== null}
                 <TfRepoCompare
                   {ports}
                   {repoId}
                   {source}
-                  branches={branches}
+                  branches={known}
+                  {branchesReading}
                   head={placeOf(one).branch ?? proposed}
                   base={placeOf(one).base}
                   defaultBranch={defaultBranch?.name ?? null}
@@ -821,7 +941,7 @@
     {repoId}
     repoName={repo?.title ?? repoId}
     {source}
-    branches={(branches ?? []).map((option) => option.name)}
+    branches={(known ?? []).filter((option) => option.made === undefined).map((option) => option.name)}
     from={newBranch.from}
     {job}
     {ports}

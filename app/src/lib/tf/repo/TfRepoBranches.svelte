@@ -24,12 +24,21 @@
   with its echo (`tf/queued.svelte.ts`, #2105), *queued* and then *sent*,
   until the listing holds it or no longer does: read again on the refresh
   event and a run's end, not only as the tab opens.
+
+  A listing knobas held is drawn at once under the held line (ADR-0042, *As
+  knobas read it … Checking …*) and read again behind it. A branch the source
+  lists and the mirror has not synced yet has its standing read at the id
+  the source named (`unsynced`), and offers no *Delete…* until a sync holds
+  it. Read again, the listing lands without moving the row the reader is on
+  (`landInPlace`).
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
   import TfKey from "../TfKey.svelte";
   import { ipcErrorMessage } from "../../ipc";
-  import type { CodeFacts, ViewRow } from "../../ipc/entity";
+  import type { CodeFacts, ShownView, ViewRow } from "../../ipc/entity";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { landInPlace } from "../land-in-place";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -85,6 +94,15 @@
   let reading = $state(false);
   let failed = $state<string | null>(null);
   let standings = $state<Record<string, BranchStanding>>({});
+  /** The id the source named for each listed branch the mirror has not synced yet, by name: its standing is read there. */
+  let unsynced = $state<Map<string, string>>(new Map());
+  /** When the listing drawn was read, where knobas held it (ADR-0042); and why the read behind it failed. */
+  let heldAt = $state<string | null>(null);
+  let heldFailed = $state<string | null>(null);
+  /** The table, where a listing read again keeps the reader's place. */
+  let table = $state<HTMLElement | undefined>(undefined);
+  /** Each listing read, so only the newest answer lands. */
+  let readNo = 0;
   let facts = $state<Record<string, CodeFacts>>({});
 
   $effect(() => {
@@ -113,7 +131,7 @@
     return untrack(() => watchEchoes(REPO_PRS, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
 
-  // The listing knobas held, read again behind it (ADR-0042).
+  // The listing knobas held, read again behind it (ADR-0042); or the read behind it failed, which the held line says.
   onViewFresh(
     () => repoId,
     "branches",
@@ -122,6 +140,7 @@
       void readBranches(id, () => repoId === id, true);
     },
     untrack(() => ports.listen),
+    (why) => (heldFailed = why),
   );
 
   // A refresh of the page reads the listing again, over what the tab drew (#2135).
@@ -140,14 +159,22 @@
    */
   function readBranches(id: string, alive: () => boolean, again = false): Promise<unknown> {
     reading = true;
+    const mine = ++readNo;
     return ports.entityView(id, "branches").then(
       (view) => {
-        if (!alive()) return;
+        if (!alive() || mine !== readNo) return;
         reading = false;
-        listed = viewRows(view?.sections[0]);
-        const names = new Set(listed.map((row) => row.title));
+        const shownView = view as ShownView | null;
+        heldAt = shownView?.held_at ?? null;
+        heldFailed = null;
+        const section = view?.sections[0];
+        unsynced = new Map((shownView?.unsynced ?? []).filter((row) => section === undefined || row.section === section.id).map((row) => [row.title, row.entity_id]));
+        const read = viewRows(section);
+        if (again) void landInPlace(table, () => (listed = read));
+        else listed = read;
+        const names = new Set(read.map((row) => row.title));
         settleEchoes(id, (echo) => (echo.kind === MADE && names.has(echo.text)) || (echo.kind === DELETED && !names.has(echo.text)));
-        const every = listed.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
+        const every = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (every.length > 0)
           ports.codeFacts(every).then(
             (answer) => {
@@ -155,7 +182,10 @@
             },
             () => {},
           );
-        const ids = listed.filter((row) => row.entity_id !== null && row.chip !== "default").map((row) => row.entity_id!);
+        const ids = read.flatMap((row) => {
+          const at = row.entity_id ?? unsynced.get(row.title) ?? null;
+          return at === null || row.chip === "default" ? [] : [at];
+        });
         let next = 0;
         const worker = async () => {
           while (alive() && next < ids.length) {
@@ -171,7 +201,7 @@
         return Promise.all(Array.from({ length: AT_ONCE }, worker));
       },
       (error) => {
-        if (!alive()) return;
+        if (!alive() || mine !== readNo) return;
         reading = false;
         if (!again) failed = ipcErrorMessage(error);
       },
@@ -200,14 +230,15 @@
           // redraws its own row, not every row (#2200's class: a thousand
           // branches rebuilt the list a thousand times).
           get standing() {
-            return row.entity_id !== null ? (standings[row.entity_id] ?? null) : null;
+            const at = row.entity_id ?? unsynced.get(row.title) ?? null;
+            return at !== null ? (standings[at] ?? null) : null;
           },
           // The name the record gives the tip's author, else the account (F-107); `mine` compares the account.
           author: row.entity_id !== null ? (facts[row.entity_id]?.author_name ?? facts[row.entity_id]?.author ?? null) : null,
           mine: row.entity_id !== null && facts[row.entity_id]?.mine === true,
         }),
       ),
-      ...[...made.keys()].map(
+      ...[...made.keys()].filter((name) => !branches.some((row) => row.title === name)).map(
         (name): BranchRow => ({ name, entityId: null, isDefault: false, meta: null, standing: null, author: null, mine: false }),
       ),
     ];
@@ -260,11 +291,12 @@
 <div class="tf-rbar">
   <FilterBar {config} {filter} shown={listed === null ? null : shown.length} total={listed === null ? null : rows.length} />
 </div>
+<TfHeldNote {heldAt} source={sourceName(source)} failed={heldFailed} />
 <TfWaiting phase={waitPhase({ drawn: listed !== null, reading, failed: failed !== null })} error={failed} columns={6}>
 {#if shown.length === 0}
   <TfNoMatch noun="branches" {filter} />
 {:else}
-  <table class="tf-tbl tf-rbranches">
+  <table class="tf-tbl tf-rbranches" bind:this={table}>
     <thead>
       <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Updated</th><th></th></tr>
     </thead>
@@ -272,7 +304,7 @@
       {#each shown as row (row.name)}
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
-        <tr>
+        <tr data-place>
           <td
             ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
@@ -291,7 +323,7 @@
                   class="tf-btn tf-sm"
                   href={compareHash(repoId, row.name)}
                   onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
-                >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
+                >{" "}{/if}{#if standing.deletable && row.entityId !== null}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"
                   aria-disabled={standing.deleteBlocked !== null ? "true" : undefined}

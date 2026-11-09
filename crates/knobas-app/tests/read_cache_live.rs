@@ -924,3 +924,247 @@ async fn a_commits_diff_is_read_at_a_checkout_that_holds_it_and_else_once() {
         "the same change, wherever it was read"
     );
 }
+
+/// **A branch made on the forge since the last sync** (the third smoothness
+/// pass of PR #2479): a kept repository page reads its branch list again and
+/// finds it, with the id the source named though the mirror lacks it; that
+/// id reads the branch's own view; Compare reads it by name from the source,
+/// whose answer names the new tip, which is fetched into a clone that lacks
+/// it; and a branch the forge does not hold answers `not_found`, never a
+/// diff and never an internal error.
+///
+/// It makes one branch, `knobas-fresh-<uuid>`, with one commit of its own
+/// through the contents API, and deletes it again however the test ends.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_branch_made_on_the_forge_since_the_sync_is_read_by_name_and_its_tip_fetched() {
+    use base64::Engine as _;
+    let app = app().await;
+    let repo = app.repo();
+    let token = need("KNOBAS_GITEA_TOKEN");
+    let built = knobas_source_gitea::build(knobas_source::instance::SourceInstance {
+        id: app.source.clone(),
+        kind: "gitea".to_owned(),
+        display_name: app.source.clone(),
+        base_url: need("KNOBAS_GITEA_URL"),
+        auth: Some(AuthMethod::Pat),
+        secret: Some(token.clone()),
+        account: None,
+        config: serde_json::json!({ "repos": [SEEDED] }),
+    })
+    .expect("the source builds");
+    knobas_sync::run_once(&app.pool, built.as_ref(), None)
+        .await
+        .expect("the seeded repository syncs");
+
+    // A clone of its own, as the person's checkout.
+    let url = need("KNOBAS_GITEA_URL");
+    let (scheme, rest) = url.split_once("://").expect("a URL");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join("payout-service");
+    let cloned = std::process::Command::new("git")
+        .args(["clone", "-q"])
+        .arg(format!("{scheme}://knobas:{token}@{rest}/{SEEDED}.git"))
+        .arg(&path)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("git runs");
+    assert!(
+        cloned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+    knobas_app::checkout::set_override(&app.pool, &repo, path.to_str())
+        .await
+        .expect("the checkout is set");
+
+    // The list, read once as the page first drew it.
+    let first = knobas_app::sources::crud::shown(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &repo,
+        Some("branches"),
+    )
+    .await
+    .expect("the list reads")
+    .expect("drawn");
+    app.live.settled().await;
+
+    // Made on the forge after the sync, with a commit the clone lacks.
+    let fresh = format!(
+        "knobas-fresh-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let http = reqwest::Client::new();
+    let auth = format!("token {token}");
+    let api = format!("{url}/api/v1/repos/{SEEDED}");
+    let made = http
+        .post(format!("{api}/contents/{fresh}.txt"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "branch": "main",
+            "new_branch": fresh,
+            "message": "A branch made after the page drew",
+            "content": base64::engine::general_purpose::STANDARD.encode(b"fresh\n"),
+        }))
+        .send()
+        .await
+        .expect("the forge answers");
+    assert!(
+        made.status().is_success(),
+        "the branch is made: {}",
+        made.status()
+    );
+    let made: serde_json::Value = made.json().await.expect("the commit it made");
+    let tip = made["commit"]["sha"].as_str().expect("its sha").to_owned();
+    let _delete = Delete(format!("{api}/branches/{fresh}"), auth.clone());
+    assert!(
+        !knobas_app::checkout::range::holds_commits(&path, &[tip.as_str()]).await,
+        "the clone lacks the new tip"
+    );
+    let names = |view: &knobas_source::view::SourceView| branch_names(view);
+    assert!(!names(&first.view).contains(&fresh));
+
+    // The page reads its list again on the return: the first answer is the
+    // kept one, the read behind it holds the branch, and the next answer has it.
+    let _ = knobas_app::sources::crud::shown(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &repo,
+        Some("branches"),
+    )
+    .await
+    .expect("the list reads again");
+    app.live.settled().await;
+    let again = knobas_app::sources::crud::shown(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &repo,
+        Some("branches"),
+    )
+    .await
+    .expect("the list reads again")
+    .expect("drawn");
+    assert!(
+        names(&again.view).contains(&fresh),
+        "{:?}",
+        names(&again.view)
+    );
+    let named = again
+        .unsynced
+        .iter()
+        .find(|row| row.title == fresh)
+        .unwrap_or_else(|| {
+            panic!(
+                "the mirror lacks it, so its id is named: {:?}",
+                again.unsynced
+            )
+        });
+    assert_eq!(named.section, "branches");
+
+    // Its own view (its standing) reads at that id, though no sync holds it.
+    let standing = knobas_app::sources::crud::shown(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &named.entity_id,
+        None,
+    )
+    .await
+    .expect("the branch's view reads")
+    .expect("drawn");
+    assert!(
+        standing.view.sections.iter().any(|s| s.id == "overview"),
+        "{:?}",
+        standing
+            .view
+            .sections
+            .iter()
+            .map(|s| &s.id)
+            .collect::<Vec<_>>()
+    );
+
+    // Compare by name: the source's answer names the new tip, which is
+    // fetched into the clone behind it.
+    let diff = knobas_app::checkout::source_range_diff(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &repo,
+        "main",
+        &fresh,
+    )
+    .await
+    .expect("the source's compare reads the new branch");
+    assert_eq!(
+        diff.files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect::<Vec<_>>(),
+        [format!("{fresh}.txt")]
+    );
+    let range = diff
+        .range
+        .clone()
+        .expect("the compare settles its two commits");
+    assert_eq!(range.head, tip);
+    let fetches = Arc::new(knobas_app::checkout::fetch::Fetches::admitting(&["http"]));
+    knobas_app::checkout::fetch_answered_tip_with(
+        &fetches,
+        &app.pool,
+        app.registry.as_ref(),
+        &repo,
+        &diff,
+    )
+    .await;
+    let waited = Instant::now();
+    while !knobas_app::checkout::range::holds_commits(&path, &[tip.as_str()]).await {
+        assert!(
+            waited.elapsed() < Duration::from_secs(60),
+            "the new tip was not fetched into the clone"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let refs = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(&path)
+        .args(["for-each-ref", "--format=%(refname)"])
+        .output()
+        .expect("git runs");
+    assert!(
+        !String::from_utf8_lossy(&refs.stdout).contains(&fresh),
+        "the fetch wrote no ref"
+    );
+
+    // A branch the forge does not hold: not found, said by the source.
+    let ghost = format!(
+        "knobas-ghost-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let missing = knobas_app::checkout::source_range_diff(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &repo,
+        "main",
+        &ghost,
+    )
+    .await
+    .expect_err("no such branch");
+    assert_eq!(
+        missing.code,
+        knobas_app::IpcErrorCode::NotFound,
+        "{missing:?}"
+    );
+}

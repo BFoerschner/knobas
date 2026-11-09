@@ -9,6 +9,7 @@ import type { DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewActio
 import {
   ancestors,
   branchOptions,
+  withMade,
   readAllRows,
   branchStanding,
   type BranchRow,
@@ -138,6 +139,39 @@ test("the dropdown offers the default branch first and every branch the mirror h
   expect(branchOptions(section([{ entity_id: null, title: "main", chip: "default" }]))).toEqual([
     { name: "main", entityId: null, isDefault: true },
   ]);
+});
+
+test("a branch the source lists and the mirror has not synced is offered at the id the source named, the cut note still not", () => {
+  const listed = section([
+    { entity_id: `${REPO}@refs/heads/main`, title: "main", chip: "default", tone: "muted" },
+    { entity_id: null, title: "spike/y" },
+    { entity_id: null, title: "More branches on Gitea", tone: "muted" },
+  ]);
+  const unsynced = [
+    { section: "branches", title: "spike/y", entity_id: `${REPO}@refs/heads/spike/y` },
+    // Another section's row of the same name is not this list's.
+    { section: "overview", title: "More branches on Gitea", entity_id: `${REPO}@refs/heads/x` },
+  ];
+  expect(branchOptions(listed, unsynced)).toEqual([
+    { name: "main", entityId: `${REPO}@refs/heads/main`, isDefault: true },
+    { name: "spike/y", entityId: `${REPO}@refs/heads/spike/y`, isDefault: false, unsynced: true },
+  ]);
+});
+
+test("a branch this session made is offered after the listed ones until a read lists it, once per name", () => {
+  const listed = [
+    { name: "main", entityId: "m", isDefault: true },
+    { name: "feature/x", entityId: "x", isDefault: false },
+  ];
+  expect(
+    withMade(listed, [
+      { text: "feature/new", state: "queued" },
+      { text: "feature/x", state: "sent" },
+      // A commit to a new branch, then *New branch…* of the same name: one branch.
+      { text: "feature/new", state: "sent" },
+    ]),
+  ).toEqual([...listed, { name: "feature/new", entityId: null, isDefault: false, made: "queued" }]);
+  expect(withMade(listed, [])).toEqual(listed);
 });
 
 const file = (path: string, old_path: string | null = null): DiffFile => ({

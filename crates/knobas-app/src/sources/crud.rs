@@ -947,7 +947,9 @@ pub async fn view(
     let Some(view) = live.view(&source, entity_id, section).await? else {
         return Ok(None);
     };
-    finish(pool, registry, view).await.map(Some)
+    finish(pool, registry, view)
+        .await
+        .map(|(view, _)| Some(view))
 }
 
 /// [`view`] as a page draws it (ADR-0042): what knobas last read where it
@@ -970,17 +972,22 @@ pub async fn shown(
     let Some(view) = view else {
         return Ok(None);
     };
-    let view = finish(pool, registry, view).await?;
-    Ok(Some(super::live::ShownView { view, held_at }))
+    let (view, unsynced) = finish(pool, registry, view).await?;
+    Ok(Some(super::live::ShownView {
+        view,
+        held_at,
+        unsynced,
+    }))
 }
 
 /// The app's work on a view the adapter answered: rule 7 and the commit
-/// hints, as [`view`] says.
+/// hints, as [`view`] says. Answers beside it each row rule 7 cleared, with
+/// the id the adapter named for it ([`super::live::Unsynced`]).
 async fn finish(
     pool: &PgPool,
     registry: &Arc<dyn AdapterRegistry>,
     mut view: knobas_source::view::SourceView,
-) -> Result<knobas_source::view::SourceView, SourcesError> {
+) -> Result<(knobas_source::view::SourceView, Vec<super::live::Unsynced>), SourcesError> {
     resolve_commit_hints(pool, registry.as_ref(), &mut view).await?;
     let named: Vec<String> = view
         .sections
@@ -994,7 +1001,7 @@ async fn finish(
         .filter_map(|row| row.entity_id.clone())
         .collect();
     if named.is_empty() {
-        return Ok(view);
+        return Ok((view, Vec::new()));
     }
     let held: std::collections::HashSet<String> =
         sqlx::query_scalar("select entity_id from sync.item where entity_id = any($1)")
@@ -1003,16 +1010,25 @@ async fn finish(
             .await?
             .into_iter()
             .collect();
-    for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
-        if let knobas_source::view::Block::Entities { rows, .. } = block {
-            for row in rows {
-                if row.entity_id.as_ref().is_some_and(|id| !held.contains(id)) {
-                    row.entity_id = None;
+    let mut unsynced = Vec::new();
+    for section in &mut view.sections {
+        for block in &mut section.blocks {
+            if let knobas_source::view::Block::Entities { rows, .. } = block {
+                for row in rows {
+                    if row.entity_id.as_ref().is_some_and(|id| !held.contains(id))
+                        && let Some(id) = row.entity_id.take()
+                    {
+                        unsynced.push(super::live::Unsynced {
+                            section: section.id.clone(),
+                            title: row.title.clone(),
+                            entity_id: id,
+                        });
+                    }
                 }
             }
         }
     }
-    Ok(view)
+    Ok((view, unsynced))
 }
 
 /// The bytes of the file at `path` in `entity_id`'s tree, at `commit` (a

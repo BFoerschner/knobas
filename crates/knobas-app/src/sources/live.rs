@@ -166,6 +166,25 @@ pub struct ShownView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub held_at: Option<DateTime<Utc>>,
+    /// The rows ADR-0020 rule 7 drew as plain text because the mirror has not
+    /// synced their entity yet, each with the id its adapter named for it
+    /// (the third smoothness pass of PR #2479): a page may *read* through it,
+    /// as the repository page reads a branch made on the forge since the last
+    /// sync, but never link to it, since no item page holds it. Absent on the
+    /// wire when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<Unsynced>>", optional)]
+    pub unsynced: Vec<Unsynced>,
+}
+
+/// One row of a [`ShownView`] whose entity the mirror does not hold yet: its
+/// section, its title as drawn, and the id the adapter named for it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct Unsynced {
+    pub section: String,
+    pub title: String,
+    pub entity_id: String,
 }
 
 /// A source as built, and what it was built from.

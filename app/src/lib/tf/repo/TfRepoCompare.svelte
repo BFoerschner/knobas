@@ -40,14 +40,21 @@
   request* never waits for the check: a pull request sent before it
   answered and that the check then finds different is told in a toast.
 
-  A branch the mirror does not hold yet (one this session's edit queued) has
-  no view to read: the form still opens, since the pull request names the
-  branch by name, and the change says when it will show.
+  **A branch the list does not hold yet** (the third smoothness pass of PR
+  #2479): one made on the forge since the list was read, or one this
+  session's edit queued. Its compare is read straight from the source by
+  name (`entity_range_diff`), which fetches its tip into the clone behind
+  the answer, so the diff draws without waiting for the list or a sync. A
+  branch the source lists and the mirror has not synced is read at the id
+  the source named, standing and all. The page says a branch is not there
+  only once the source answered the compare 404 and no read of the list is
+  still under way (`branchesReading`); a branch this session is making says
+  so instead, and its diff comes when a read lists it.
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
   import type { DiffFile, DiffRange, RangeDiff } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
@@ -91,6 +98,7 @@
     defaultBranch,
     refreshed = 0,
     branchRefused = null,
+    branchesReading = false,
     shown = true,
     guessed = null,
     onNewBranch = () => {},
@@ -109,6 +117,8 @@
     refreshed?: number;
     /** Why the source draws *New branch…* disabled, where it does. */
     branchRefused?: string | null;
+    /** A read of the branch list is under way, which may yet list a branch the source's compare did not find. */
+    branchesReading?: boolean;
     /** Whether this tab is the one shown: arriving on it, *Title* takes focus if nothing else has it. */
     shown?: boolean;
     /** The branch the header's *New pull request* chose for the reader, and why, which the page says above the form (F-063). */
@@ -136,6 +146,8 @@
   let range = $state<DiffRange | null>(null);
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
+  /** The source answered the compare 404: it holds no such branch, as of that read. */
+  let missing = $state(false);
   /**
    * The drawn diff was read at the checkout between the tips the mirror last synced (ADR-0041): `checked` once the
    * source's compare answered the same. `null` for a diff the source answered.
@@ -162,8 +174,12 @@
   let link = $state(true);
   let busy = $state(false);
 
-  /** The diff read: from *Into* to the branch, once the mirror holds the branch and they are two branches. */
-  const section = $derived(listedId === null || head === null || base === "" || base === head ? null : compareSection(base, head));
+  /** The diff read: from *Into* to the branch, whenever they are two branches, listed or not: the source's compare reads it by name. */
+  const section = $derived(head === null || base === "" || base === head ? null : compareSection(base, head));
+  /** The branch is one this session is making, which no read holds yet: its write's word. */
+  const making = $derived(listed?.made ?? null);
+  /** The source said there is no such branch, and nothing still reading could say otherwise. */
+  const absent = $derived(missing && !branchesReading && making === null && filesFor !== section);
   /**
    * What *Open as diff* and *Open in…* name (Spec 5 of the review of spec #2234): the two commits the source settled
    * the drawn compare between, so the diff page can read it at a checkout that holds both (ADR-0036; a branch name is
@@ -189,11 +205,23 @@
     const asked = section;
     let live = true;
     failed = null;
+    missing = false;
     if (asked === null) return;
     readDiff(asked, () => live);
     return () => {
       live = false;
     };
+  });
+
+  // A branch the list did not hold when its diff was read is listed now (a read of the list found it, or the branch this
+  // session made landed): its diff is read again where none is drawn for it, as the source may hold it now.
+  let listedWas = untrack(() => listedId);
+  $effect(() => {
+    const id = listedId;
+    if (id === listedWas) return;
+    listedWas = id;
+    const asked = untrack(() => section);
+    if (id !== null && asked !== null && untrack(() => files === null || filesFor !== asked)) void readDiff(asked, () => section === asked);
   });
 
   // A refresh of the page reads the branch again, over what the page drew.
@@ -257,7 +285,9 @@
   /** The diff `asked` names; `again` keeps what the page drew when a read fails. */
   function readDiff(asked: string, alive: () => boolean, again = false): Promise<unknown> {
     const fail = (error: unknown) => {
-      if (alive() && !again) failed = ipcErrorMessage(error);
+      if (!alive() || again) return;
+      failed = ipcErrorMessage(error);
+      missing = isIpcError(error) && error.code === "not_found";
     };
     reading = true;
     const [from, to] = [base, head ?? ""];
@@ -266,6 +296,8 @@
     return (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false).then((diff) => {
       if (!alive()) return;
       reading = false;
+      failed = null;
+      missing = false;
       files = diff.files;
       cut = diff.truncated;
       range = diff.range;
@@ -357,9 +389,15 @@
   );
   /** Why the source draws the pull request disabled (#2030): its words, on the button. */
   const refused = $derived(standing?.prBlocked ?? null);
-  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null && sentFrom === undefined);
+  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null && sentFrom === undefined && !absent);
   /** What the primary waits for, in words beside it (design system, the enabled rule). */
-  const needs = $derived(same ? "Into and From are the same branch, so there is nothing to compare." : (refused ?? (title.trim() === "" ? "Give it a title." : null)));
+  const needs = $derived(
+    same
+      ? "Into and From are the same branch, so there is nothing to compare."
+      : absent
+        ? `${sourceName(source)} has no branch ${head ?? ""} to open a pull request from.`
+        : (refused ?? (title.trim() === "" ? "Give it a title." : null)),
+  );
   const commits = $derived(standing?.commits ?? []);
 
   // One commit says what the change is better than its branch's name does (F-241). Only over the name proposed: typed words stay.
@@ -545,10 +583,17 @@
         >
       {/if}
     </h2>
-    {#if listed === null || listed.entityId === null}
-      <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
+    {#if making !== null && files === null}
+      <div class="tf-empty" role="status">
+        {head} is being made on {sourceName(source)} ({making}). What it changes shows here once it is there.
+      </div>
+    {:else if absent}
+      <div class="tf-empty" role="status">{sourceName(source)} has no branch {head}: it was deleted, renamed, or never pushed.</div>
     {:else}
-      <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
+      {#if listed === null && files === null && (reading || missing)}
+        <p class="tf-cnote" role="status">Reading {head} from {sourceName(source)}: knobas had not listed it yet.</p>
+      {/if}
+      <TfWaiting phase={waitPhase({ drawn: files !== null, reading: reading || (missing && branchesReading), failed: failed !== null && !missing })} error={failed} shape="lines">
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}

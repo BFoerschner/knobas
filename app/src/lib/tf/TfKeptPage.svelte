@@ -8,7 +8,9 @@
   at, and tells the components inside it through `pageVisible()`. It draws the
   role frame (#2106) for a page that names a `role`: *Sync now* into its header
   as `sync`, and `syncRevision`, which also moves each time the page is shown
-  again, so a role view re-reads on its return as it does after a run. It
+  again, so a role view re-reads on its return as it does after a run, and when
+  a run of a source filling its role ends with something new while it is shown,
+  whoever started it. It
   keeps the page's scroll across a hide (`keepScroll`, #2248), for as long as it shows the address it was left at.
 -->
 <script lang="ts">
@@ -78,9 +80,20 @@
 
   /** The role this page is a view of, and its *Sync now* (#2106). */
   const roleSync = $derived(page.role === undefined ? null : ctx.roleSyncs.of(page.role));
+  /**
+   * The runs of the role's sources that ended with something new while the page was shown (the third smoothness pass of
+   * PR #2479): a scheduled sync that brought a ticket made elsewhere onto the board reads it again, without leaving it.
+   * A hidden page holds the count it was hidden at, so it reads nothing while hidden and once on its return.
+   */
+  let ranAtHide = 0;
+  const ranShown = $derived.by(() => {
+    const ran = roleSync?.ran ?? 0;
+    if (visible) ranAtHide = ran;
+    return ranAtHide;
+  });
   /** What the frame hands a role view beside its own props: nothing for any other page. */
   const frameProps = $derived<RoleFrameProps>(
-    roleSync === null ? {} : { sync: syncNow, syncRevision: roleSync.revision + shows },
+    roleSync === null ? {} : { sync: syncNow, syncRevision: roleSync.revision + shows + ranShown },
   );
   const Page = page.component;
 </script>

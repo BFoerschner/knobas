@@ -287,6 +287,7 @@ export type {
   TreeSections,
   UncommittedDiff,
   Unfilled,
+  Unsynced,
   UrlMatch,
   ViewAction,
   ViewBlock,

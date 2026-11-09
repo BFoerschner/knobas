@@ -218,3 +218,25 @@ test("Sync all is told only run ids: each ending names its source, and the answe
   toasts.items = [];
   sourceRoles.forget();
 });
+
+test("ran moves when a run of a source filling the role ends with something new, whoever started it (PR #2479)", async () => {
+  sourceRoles.take([
+    { id: "jira", display_name: "Jira", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+    { id: "wiki", display_name: "Wiki", roles: [{ role: "wiki", reads: [] }], role_misses: [] },
+  ]);
+  const { ports, send } = harness([]);
+  const sync = createRoleSyncs(ports).of("ticket-system");
+  expect(sync.ran).toBe(0);
+  await settle();
+
+  send(status("jira", 4, true));
+  expect(sync.ran, "still going").toBe(0);
+  send({ ...status("jira", 4, false), last_changed: false });
+  expect(sync.ran, "a run that brought nothing").toBe(0);
+  send(status("wiki", 5, false));
+  expect(sync.ran, "another role's source").toBe(0);
+  send(status("jira", 6, false));
+  expect(sync.ran).toBe(1);
+  expect(sync.revision, "no press of its own").toBe(0);
+  sourceRoles.forget();
+});

@@ -698,15 +698,17 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
   unmount(view!);
   view = null;
 
-  // A branch the listing does not hold yet: queued by this session's edit.
+  // A branch the listing does not hold yet (pushed since it was read): its compare is read from the source by name, and
+  // what it changes draws without waiting for the list or a sync.
+  reads.length = 0;
   await draw(COMPARE("fix/PAY-231-README"), "PAY-231");
   expect(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!.value).toBe("PAY-231: Retry failed SEPA payouts");
   expect(target.querySelector<HTMLTextAreaElement>(".tf-compare textarea")!.value).toBe(
     "The nightly batch leaves **14** payouts unsettled.\n\nCloses PAY-231.",
   );
-  expect(text(target.querySelector(".tf-compare .tf-empty"))).toBe(
-    "This branch is not on Gitea yet, or knobas has not synced it. What it changes shows here once it has.",
-  );
+  expect(reads).toContainEqual([REPO, "compare:main...fix/PAY-231-README"]);
+  expect(target.querySelector(".tf-cdiff .tf-empty")).toBeNull();
+  expect(target.querySelectorAll(".tf-cdiff .tf-diff .tf-fh").length).toBeGreaterThan(0);
 });
 
 test("Into is the diff's base: picking another reads and draws the change against it (#2271)", async () => {
@@ -1209,16 +1211,24 @@ describe("a repository whose source is not Gitea", () => {
     expect(body).not.toContain("Gitea");
   });
 
-  test("Compare's reviewers line and its not-yet-synced line name it", async () => {
+  test("Compare's reviewers line and its no-such-branch line name it", async () => {
     await draw(COMPARE("spike/sepa-instant"), "PAY-231", forgejo());
     expect(seen()).toContain("Reviewers are asked on Forgejo after it opens.");
     expect(seen()).not.toContain("Gitea");
     unmount(view!);
     view = null;
-    await draw(COMPARE("fix/PAY-231-README"), "PAY-231", forgejo());
-    expect(text(target.querySelector(".tf-compare .tf-empty"))).toBe(
-      "This branch is not on Forgejo yet, or knobas has not synced it. What it changes shows here once it has.",
-    );
+    // The source answers the compare 404: only then, with no read of the list under way, is the branch said not to be there.
+    const base = forgejo();
+    await draw(COMPARE("fix/PAY-231-README"), "PAY-231", {
+      ...base,
+      entityView: async (id, section) => {
+        if (section === "compare:main...fix/PAY-231-README") throw { code: "not_found", message: "the source holds no branch fix/PAY-231-README" };
+        return base.entityView(id, section);
+      },
+    });
+    expect(text(target.querySelector(".tf-cdiff .tf-empty"))).toBe("Forgejo has no branch fix/PAY-231-README: it was deleted, renamed, or never pushed.");
+    expect(text(target.querySelector(".tf-cgo .tf-dwhy"))).toBe("Forgejo has no branch fix/PAY-231-README to open a pull request from.");
+    expect(button("Create pull request", target)!.disabled).toBe(true);
   });
 
   test("Files' edit banner and queued-commit line name it", async () => {

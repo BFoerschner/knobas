@@ -3867,7 +3867,16 @@ editable: boolean, description: string | null, };
  * now. On the wire it is the view's own object with `held_at` beside its
  * fields, absent for a read made now.
  */
-export type ShownView = { held_at?: string, sections: Array<ViewSection>, 
+export type ShownView = { held_at?: string, 
+/**
+ * The rows ADR-0020 rule 7 drew as plain text because the mirror has not
+ * synced their entity yet, each with the id its adapter named for it
+ * (the third smoothness pass of PR #2479): a page may *read* through it,
+ * as the repository page reads a branch made on the forge since the last
+ * sync, but never link to it, since no item page holds it. Absent on the
+ * wire when empty.
+ */
+unsynced?: Array<Unsynced>, sections: Array<ViewSection>, 
 /**
  * What a reader can do to the entity, drawn as a toolbar between the
  * detail's header and the tabs, on every tab (issue #702, spec #701).
@@ -4343,6 +4352,12 @@ untracked_truncated: boolean, };
  *   or one including a page that includes it.
  */
 export type Unfilled = "not_mirrored" | "no_excerpt" | "too_deep" | "cycle";
+
+/**
+ * One row of a [`ShownView`] whose entity the mirror does not hold yet: its
+ * section, its title as drawn, and the id the adapter named for it.
+ */
+export type Unsynced = { section: string, title: string, entity_id: string, };
 
 /**
  * What a pasted URL resolved to: the entity, and the kind that says where it

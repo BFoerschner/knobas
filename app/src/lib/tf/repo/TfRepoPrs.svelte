@@ -134,7 +134,7 @@
   <table class="tf-tbl tf-rprs tf-cprs">
     <tbody>
       {#each sent as echo (echo.write ?? echo.text)}
-        <tr class="tf-rsent">
+        <tr class="tf-rsent" data-place>
           <td class="tf-prno"></td>
           <td><span class="tf-rowt" tabindex="-1" {@attach arrive}>{echo.text}</span></td>
           <td><TfStateChip text={echo.state} tone="info" /></td>
@@ -145,7 +145,7 @@
       {#each shown as row (row.entity_id)}
         {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
         {@const author = authors.get(row.entity_id)}
-        <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
+        <tr class="tf-row" data-place onclick={(event) => open(event, itemHash(row))}>
           <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td
             ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a>{#if author}<span class="tf-sub"><Marked text={author} typed={filter.text} /></span>{/if}</td

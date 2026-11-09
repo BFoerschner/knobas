@@ -24,6 +24,7 @@ import type {
   ViewRow,
   ViewSection,
   RefusedWrite,
+  Unsynced,
   WriteAsk,
 } from "../../ipc/entity";
 import type { WriteSource } from "../../shell/queued-toast";
@@ -228,32 +229,61 @@ export function underRepoHash(kind: UnderRepoKind, entityId: string, repoId: str
 export interface BranchOption {
   name: string;
   /**
-   * The branch's entity id, which its files and commits are read at; `null`
-   * only for the default branch where the mirror does not hold it, which is
-   * read at the repository instead.
+   * The branch's entity id, which its files and commits are read at: the
+   * mirror's, or for a branch the source lists and the mirror has not synced
+   * yet the id its adapter named (`ShownView.unsynced`), read through the
+   * source. `null` for the default branch where the mirror does not hold it,
+   * which is read at the repository instead, and for a branch this session
+   * made that no read holds yet (`made`).
    */
   entityId: string | null;
   isDefault: boolean;
+  /** Not in the mirror yet: read through the source, linked nowhere. */
+  unsynced?: boolean;
+  /** Made by knobas this session and not in any read yet: its write's word, *queued* or *sent*. */
+  made?: "queued" | "sent";
 }
 
 /**
  * The branches the dropdown offers, from the view's *Branches* section, in
- * its order (the default branch first). Only a branch the mirror holds has an
- * id to read at; the view cleared the others' (ADR-0020 rule 7), and the note
- * a cut list ends on has none either. The default branch is offered either
- * way: it is read at the repository.
+ * its order (the default branch first). A branch the mirror holds has its
+ * id; one the source lists and the mirror has not synced yet has the id its
+ * adapter named, which the view moved to `unsynced` (ADR-0020 rule 7), so a
+ * branch made on the forge since the last sync is offered as soon as the
+ * listing names it. The note a cut list ends on has no id either way. The
+ * default branch is offered either way: it is read at the repository.
  */
-export function branchOptions(section: ViewSection | null): BranchOption[] {
+export function branchOptions(section: ViewSection | null, unsynced: readonly Unsynced[] = []): BranchOption[] {
   const options: BranchOption[] = [];
+  const named = new Map(unsynced.filter((row) => section === null || row.section === section.id).map((row) => [row.title, row.entity_id]));
   for (const block of section?.blocks ?? []) {
     if (block.type !== "entities") continue;
     for (const row of block.rows) {
       const isDefault = row.chip === "default";
-      if (row.entity_id === null && !isDefault) continue;
-      options.push({ name: row.title, entityId: row.entity_id, isDefault });
+      const readAt = row.entity_id ?? named.get(row.title) ?? null;
+      if (readAt === null && !isDefault) continue;
+      options.push({ name: row.title, entityId: readAt, isDefault, ...(row.entity_id === null && readAt !== null ? { unsynced: true } : {}) });
     }
   }
   return options;
+}
+
+/**
+ * The branches with each one this session made (`MADE` echoes) that the
+ * listing does not hold yet, after the listed ones: a branch knobas made is
+ * offered at once, without waiting for a read, and goes from here when a
+ * read lists it.
+ */
+export function withMade(listed: readonly BranchOption[], made: readonly { text: string; state: "queued" | "sent" }[]): BranchOption[] {
+  const names = new Set(listed.map((option) => option.name));
+  const extra: BranchOption[] = [];
+  // Two echoes of one name (a commit to a new branch, then *New branch…* of it) are one branch: the list is keyed by name.
+  for (const echo of made) {
+    if (names.has(echo.text)) continue;
+    names.add(echo.text);
+    extra.push({ name: echo.text, entityId: null, isDefault: false, made: echo.state });
+  }
+  return extra.length === 0 ? [...listed] : [...listed, ...extra];
 }
 
 /**
