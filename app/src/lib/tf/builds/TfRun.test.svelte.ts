@@ -1415,7 +1415,7 @@ test("a run's view knobas held draws at once under a line saying from when; a so
     },
   });
   await settle();
-  const line = () => target.querySelector(".tf-held")?.textContent?.trim() ?? null;
+  const line = () => target.querySelector(".tf-heldnote")?.textContent?.trim() ?? null;
   expect(line()).toBe(`As knobas read it 2 h ago. Checking ${PIPELINE.source_name}…`);
   for (const handler of handlers) handler({ payload: { entity_id: "teamcity:build:1187", section: null, failed: "unreachable: no response headers" } });
   await settle();

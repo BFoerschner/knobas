@@ -11,4 +11,4 @@
   const line = $derived(heldLine(heldAt, source, failed));
 </script>
 
-{#if line !== null}<p class="tf-held" role="status">{line}</p>{/if}
+{#if line !== null}<p class="tf-heldnote" role="status">{line}</p>{/if}

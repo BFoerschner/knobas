@@ -1735,12 +1735,12 @@ test("a view knobas held draws at once under a line saying from when, and the fr
       entityView: async () => (reads++ === 0 ? { ...prView(), held_at: old } : prView()),
     }),
   );
-  expect(text(".tf-held")).toBe("As knobas read it 3 h ago. Checking Tidewater Gitea…");
+  expect(text(".tf-heldnote")).toBe("As knobas read it 3 h ago. Checking Tidewater Gitea…");
   expect(text(".tf-fhead .tf-sub")).toContain("feature/PAY-231-sepa-retry into main");
   ear.say({ entity_id: PR, section: null });
   await settle();
   expect(reads).toBe(2);
-  expect(target.querySelector(".tf-held")).toBeNull();
+  expect(target.querySelector(".tf-heldnote")).toBeNull();
 });
 
 test("a source that does not answer behind a held view is named with its reason, and the view stays", async () => {
@@ -1760,6 +1760,6 @@ test("a source that does not answer behind a held view is named with its reason,
   ear.say({ entity_id: PR, section: null, failed: "unreachable: connection refused" });
   await settle();
   expect(reads, "a failure reads nothing again").toBe(1);
-  expect(text(".tf-held")).toBe("As knobas read it 3 h ago. Tidewater Gitea did not answer: unreachable: connection refused");
+  expect(text(".tf-heldnote")).toBe("As knobas read it 3 h ago. Tidewater Gitea did not answer: unreachable: connection refused");
   expect(text(".tf-fhead .tf-sub")).toContain("feature/PAY-231-sepa-retry into main");
 });

@@ -361,11 +361,11 @@
 </script>
 
 {#if failed !== null && predicted !== null && view === undefined}
-  <p class="tf-held" role="status">From your clone, between the two branches as of the last sync. {sourceName ?? "The source"} did not answer: {failed}</p>
+  <p class="tf-heldnote" role="status">From your clone, between the two branches as of the last sync. {sourceName ?? "The source"} did not answer: {failed}</p>
 {:else if failed !== null}
   <p class="tf-cfail">Could not read the changed files: {failed}</p>
 {:else if view === undefined && predicted !== null}
-  <p class="tf-held" role="status">From your clone, between the two branches as of the last sync. Reading {sourceName ?? "the source"}…</p>
+  <p class="tf-heldnote" role="status">From your clone, between the two branches as of the last sync. Reading {sourceName ?? "the source"}…</p>
 {/if}
 {#if failed !== null && !(predicted !== null && view === undefined)}
   <!-- Said above. -->

@@ -89,12 +89,12 @@ test("the clone's diff draws while the source's is out, said to be so, and the s
   let answer: (view: SourceView) => void = () => {};
   draw(new Promise((resolve) => (answer = resolve)));
   await settle();
-  expect(squash(target.querySelector(".tf-held"))).toBe("From your clone, between the two branches as of the last sync. Reading Tidewater Git…");
+  expect(squash(target.querySelector(".tf-heldnote"))).toBe("From your clone, between the two branches as of the last sync. Reading Tidewater Git…");
   expect(paths()).toEqual(["docs/backoff.md"]);
 
   answer(sourceView());
   await settle();
-  expect(target.querySelector(".tf-held")).toBeNull();
+  expect(target.querySelector(".tf-heldnote")).toBeNull();
   expect(paths().sort()).toEqual(["docs/backoff.md", "src/sepa/retry.rs"]);
 });
 
@@ -104,13 +104,13 @@ test("a source that does not answer is named over the clone's diff, which stays"
   await settle();
   fail({ code: "unreachable", message: "connection refused" });
   await settle();
-  expect(squash(target.querySelector(".tf-held"))).toContain("Tidewater Git did not answer");
+  expect(squash(target.querySelector(".tf-heldnote"))).toContain("Tidewater Git did not answer");
   expect(paths()).toEqual(["docs/backoff.md"]);
 });
 
 test("a diff the clone cannot read is not drawn as one", async () => {
   draw(new Promise(() => {}), { ...LOCAL, read_at: "source" });
   await settle();
-  expect(target.querySelector(".tf-held")).toBeNull();
+  expect(target.querySelector(".tf-heldnote")).toBeNull();
   expect(paths()).toEqual([]);
 });
