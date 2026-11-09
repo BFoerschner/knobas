@@ -75,6 +75,7 @@ import type {
   RunPreset,
   RunRow,
   RunTests,
+  ShownView,
   SourceView,
   StandupDigest,
   StartWorkStep,
@@ -264,6 +265,7 @@ export type {
   SignalKind,
   SourceRef,
   SourceStatuses,
+  ShownView,
   SourceView,
   StandupDigest,
   StartWorkOutcome,
@@ -779,12 +781,12 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  * naming it. Rejects with `invalid`, `not_found`, `unauthorized`,
  * `unreachable` or `internal` as {@link reachableTransitions} does.
  */
-export function entityView(entityId: string, section: string | null = null): Promise<SourceView | null> {
-  return invoke<SourceView | null>("entity_view", { entityId, section }).then(withDateWords);
+export function entityView(entityId: string, section: string | null = null): Promise<ShownView | null> {
+  return invoke<ShownView | null>("entity_view", { entityId, section }).then(withDateWords);
 }
 
 /** A view's rows with their meta in the one date form, read here so every list and its filter say the same (`viewDate`). */
-function withDateWords(view: SourceView | null): SourceView | null {
+function withDateWords<V extends SourceView>(view: V | null): V | null {
   if (view === null) return null;
   const now = new Date();
   return {

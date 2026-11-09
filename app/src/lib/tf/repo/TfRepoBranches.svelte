@@ -43,6 +43,7 @@
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import {
     DELETED,
@@ -111,6 +112,17 @@
     const id = repoId;
     return untrack(() => watchEchoes(REPO_PRS, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
+
+  // The listing knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => repoId,
+    "branches",
+    () => {
+      const id = repoId;
+      void readBranches(id, () => repoId === id, true);
+    },
+    untrack(() => ports.listen),
+  );
 
   // A refresh of the page reads the listing again, over what the tab drew (#2135).
   onRefreshed(

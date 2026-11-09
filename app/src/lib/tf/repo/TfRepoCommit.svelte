@@ -29,6 +29,7 @@
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
 
   let {
@@ -142,15 +143,36 @@
         if (mine() && !again) missing = isIpcError(error) && (error.code === "not_found" || error.code === "invalid");
       },
     );
-    const viewRead = ports.entityView(id, null).then((view) => {
-      if (!mine()) return;
-      parent = parentOf(view);
-      start = branchFrom(view);
-    }, fail);
+    // The view adds the parent and *New branch from here…* to what the mirror
+    // and the checkout draw: a source that does not answer leaves the page as
+    // drawn, without them (ADR-0042).
+    const viewRead = readView(id, mine);
     const ws = ignoreWhitespace;
     const diffRead = readDiff(id, ws, () => mine() && ignoreWhitespace === ws, again);
     return Promise.all([rowRead, viewRead, diffRead]);
   }
+
+  /** The commit's view: its parent and *New branch from here…*; a failed read draws neither. */
+  function readView(id: string, mine: () => boolean): Promise<unknown> {
+    return ports.entityView(id, null).then(
+      (view) => {
+        if (!mine()) return;
+        parent = parentOf(view);
+        start = branchFrom(view);
+      },
+      () => {},
+    );
+  }
+
+  // The view knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => commitId,
+    null,
+    () => {
+      const id = commitId;
+      void readView(id, () => commitId === id);
+    },
+  );
 
   const sha = $derived(shaOf(commitId));
   /** The whole sha, for *Open in…*: a merge commit opens as any commit does. */

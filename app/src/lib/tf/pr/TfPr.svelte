@@ -41,6 +41,7 @@
     EntityDetail,
     EntityFilter,
     EntityPage,
+    ShownView,
     SourceView,
     UrlMatch,
   } from "../../ipc/entity";
@@ -51,7 +52,7 @@
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface PrPorts {
     getEntity: (entityId: string) => Promise<EntityDetail>;
-    entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
+    entityView: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
     /** Which of the commits are the reader's own (F-221); the bridge's when left out. */
     codeFacts?: (entityIds: string[]) => Promise<CodeFacts[]>;
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
@@ -137,6 +138,8 @@
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfFindBar from "../TfFindBar.svelte";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { onViewFresh } from "../repo/view-fresh.svelte";
   import TfKey from "../TfKey.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
@@ -198,7 +201,9 @@
   /** Bumped by *Try again*. */
   let attempt = $state(0);
   /** `undefined` while the view has not answered; `null` for a source with none. */
-  let view = $state<SourceView | null | undefined>(undefined);
+  let view = $state<ShownView | SourceView | null | undefined>(undefined);
+  /** Why the source did not answer the read behind a view drawn from what knobas held (ADR-0042). */
+  let heldFailed = $state<string | null>(null);
   let viewFailed = $state<string | null>(null);
   let repo = $state<EntityRow | null>(null);
   let checkout = $state<CheckoutView | null>(null);
@@ -288,6 +293,7 @@
       (answer) => {
         if (!live() || asked !== viewAsked) return;
         view = answer;
+        heldFailed = null;
         readMyCommits(answer, () => live() && asked === viewAsked);
         untrack(() => settleEchoes(id, (echo) => landedIn(answer, echo, sentBefore)));
         for (const row of headerOf(answer).checks) {
@@ -308,6 +314,19 @@
       },
     );
   }
+
+  // The view drawn from what knobas held, or kept, was read again behind it
+  // (ADR-0042): the fresh answer over it, or why the source did not answer.
+  onViewFresh(
+    () => (ready ? prId : null),
+    null,
+    () => {
+      const id = prId;
+      if (id !== null && view != null) readView(id, () => prId === id, true);
+    },
+    untrack(() => ports.listen),
+    (why) => (heldFailed = why),
+  );
 
   // The refresh after one of the page's writes, or a run of its source's end,
   // reads the live view again (#2103), so its echoes settle without the page
@@ -847,6 +866,8 @@
           {pending}
           submitWrite={ports.submitWrite}
           source={detail?.source?.id ?? null}
+          sourceName={detail?.source?.display_name ?? null}
+          predict={repo !== null && header.state?.text === "open" && header.base !== null && header.head !== null ? { repoId: repo.entity_id, base: header.base, head: header.head } : null}
           listen={ports.listen}
           {follower}
           openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
@@ -855,6 +876,7 @@
       {:else}
         <div>
           <TfFindBar root={() => pageEl} />
+          {#if view}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={detail?.source?.display_name ?? "the source"} failed={heldFailed} />{/if}
           {#if viewFailed !== null}
             <p class="tf-cfail">Could not read the pull request: {viewFailed}</p>
           {:else if view === null}

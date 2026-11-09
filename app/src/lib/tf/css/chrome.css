@@ -171,6 +171,8 @@
 
 /* An empty state: centred, says what would fill it, offers the action. */
 .tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* What knobas last read, drawn while the source is read behind it (ADR-0042): the note above it. */
+.tf-held { margin: 0 0 8px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-empty p { max-width: 60ch; }
 /* The one "nothing here" state (`TfNothingHere.svelte`): the same block, held down the page so it reads as the page's answer. */
 .tf-nohere { padding-top: 72px; }

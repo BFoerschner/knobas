@@ -64,6 +64,7 @@
   import { placeRestoring } from "../return-place";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import {
@@ -228,17 +229,30 @@
     ),
   );
 
-  /** The branch's standing; `again` keeps what the page drew when a read fails. */
+  /**
+   * The branch's standing. It adds the commits list and an open pull request's line to a form that can be sent
+   * without them, so a source that does not answer leaves the page as drawn (ADR-0042): the diff is read on its own.
+   */
   function readStanding(id: string, alive: () => boolean, again = false): Promise<unknown> {
+    void again;
     return ports.entityView(id, null).then(
       (answer) => {
         if (alive()) standing = branchStanding(answer);
       },
-      (error: unknown) => {
-        if (alive() && !again) failed = ipcErrorMessage(error);
-      },
+      () => {},
     );
   }
+
+  // The standing knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => listedId,
+    null,
+    () => {
+      const id = listedId;
+      if (id !== null) void readStanding(id, () => listedId === id, true);
+    },
+    untrack(() => ports.listen),
+  );
 
   /** The diff `asked` names; `again` keeps what the page drew when a read fails. */
   function readDiff(asked: string, alive: () => boolean, again = false): Promise<unknown> {

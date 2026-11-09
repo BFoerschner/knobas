@@ -44,7 +44,9 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { entityFileBytes, entityFilePiped, entityRangeDiff, type LineThread, type PipeRun, type PipeStep, type RangeDiff, type SourceView } from "../../ipc/entity";
+  import { entityFileBytes, entityFilePiped, entityRangeDiff, type LineThread, type PipeRun, type PipeStep, type RangeDiff, type ShownView, type SourceView } from "../../ipc/entity";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { onViewFresh } from "../repo/view-fresh.svelte";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import type { RenderPort } from "../../render/port";
@@ -66,6 +68,8 @@
     pending,
     submitWrite = null,
     source = null,
+    sourceName = null,
+    predict = null,
     listen,
     follower,
     render,
@@ -76,7 +80,7 @@
     piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
   }: {
     prId: string;
-    entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
+    entityView: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
     /** The files viewed, by the blob each holds in the diff drawn (#2276). */
     viewedFiles: (prId: string, blobs: Record<string, string>) => Promise<string[]>;
     setViewed: (prId: string, path: string, viewed: boolean, blobs: Record<string, string>) => Promise<string[]>;
@@ -86,6 +90,13 @@
     submitWrite?: ((payload: WriteOpPayload) => Promise<QueuedWrite>) | null;
     /** The pull request's source, whose run's end reads the files again for a queued reply. */
     source?: string | null;
+    /** The source's name, for the line over files drawn from what knobas held (ADR-0042). */
+    sourceName?: string | null;
+    /**
+     * An open pull request's repository and branches (ADR-0042): until the source's *Files* answers, the diff between
+     * the two branches' tips the mirror holds is drawn from the clone, said to be so, with no threads.
+     */
+    predict?: { repoId: string; base: string; head: string } | null;
     /** Hears the refresh that follows a reply or a resolve landing; the bridge's when left out. */
     listen?: EchoListen | undefined;
     follower?: WriteFollower | undefined;
@@ -107,8 +118,12 @@
   const SURFACE = "pr-files";
 
   /** `undefined` while the *Files* read has not answered. */
-  let view = $state<SourceView | null | undefined>(undefined);
+  let view = $state<ShownView | SourceView | null | undefined>(undefined);
   let failed = $state<string | null>(null);
+  /** Why the source did not answer the read behind files drawn from what knobas held (ADR-0042). */
+  let heldFailed = $state<string | null>(null);
+  /** The diff read from the clone while the source's *Files* is out, as a view of one diff block; `null` once it answers. */
+  let predicted = $state<SourceView | null>(null);
   let viewed = $state<string[]>([]);
 
   /** The blob each file holds in `answer`'s diff, by path (#2276): what *Viewed* is kept by. */
@@ -124,6 +139,7 @@
       (answer) => {
         if (!live()) return;
         view = answer;
+        heldFailed = null;
         const head = diffOf(answer)?.commentable?.head ?? null;
         if (head !== null) pending.seen(id, head);
         untrack(() => settleEchoes(id, (echo) => landed(answer, echo)));
@@ -140,10 +156,33 @@
     );
   }
 
+  /** The clone's diff between the branches' tips, drawn until the source's *Files* answers (ADR-0042). */
+  function readPredicted(at: { repoId: string; base: string; head: string }, live: () => boolean) {
+    rangeDiff(at.repoId, at.base, at.head, false).then(
+      (diff) => {
+        if (!live() || view !== undefined || diff.read_at !== "checkout") return;
+        predicted = {
+          sections: [
+            {
+              id: "files",
+              title: "Files",
+              count: diff.files.length,
+              deferred: false,
+              blocks: [{ type: "diff", files: diff.files, truncated: diff.truncated, commentable: null, gone: [], ...(diff.range ? { range: diff.range } : {}) }],
+            },
+          ],
+          actions: [],
+        };
+      },
+      () => {},
+    );
+  }
+
   $effect(() => {
     const id = prId;
     let live = true;
     view = undefined;
+    predicted = null;
     failed = null;
     viewed = [];
     read(id, () => live);
@@ -151,6 +190,29 @@
       live = false;
     };
   });
+
+  // The clone's diff, once the branches are known and while the source's *Files* is out.
+  $effect(() => {
+    const at = predict;
+    void prId;
+    let live = true;
+    if (at !== null && untrack(() => view === undefined && predicted === null)) readPredicted(at, () => live);
+    return () => {
+      live = false;
+    };
+  });
+
+  // Files drawn from what knobas held, read again behind them (ADR-0042).
+  onViewFresh(
+    () => prId,
+    "files",
+    () => {
+      const id = prId;
+      if (view != null) read(id, () => prId === id, true);
+    },
+    untrack(() => listen),
+    (why) => (heldFailed = why),
+  );
 
   // A reply or resolve that landed is read back here (#2277): the refresh after it reads the files again.
   $effect(() => {
@@ -166,7 +228,7 @@
     );
   });
 
-  const diff = $derived(view ? diffOf(view) : null);
+  const diff = $derived(view ? diffOf(view) : view === undefined && predicted !== null ? diffOf(predicted) : null);
   const range = $derived(diff?.range ?? null);
 
   /** The commit picker's choice (#2273), and the compare it reads; all commits is the diff above. */
@@ -298,11 +360,19 @@
   );
 </script>
 
-{#if failed !== null}
+{#if failed !== null && predicted !== null && view === undefined}
+  <p class="tf-held" role="status">From your clone, between the two branches as of the last sync. {sourceName ?? "The source"} did not answer: {failed}</p>
+{:else if failed !== null}
   <p class="tf-cfail">Could not read the changed files: {failed}</p>
+{:else if view === undefined && predicted !== null}
+  <p class="tf-held" role="status">From your clone, between the two branches as of the last sync. Reading {sourceName ?? "the source"}…</p>
+{/if}
+{#if failed !== null && !(predicted !== null && view === undefined)}
+  <!-- Said above. -->
 {:else if view === null}
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
-{:else if view !== undefined}
+{:else if view !== undefined || predicted !== null}
+  {#if view}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={sourceName ?? "the source"} failed={heldFailed} />{/if}
   <div class="tf-prfiles">
   {#if range !== null}
     <div class="tf-pickbar" {@attach pickRoom}>

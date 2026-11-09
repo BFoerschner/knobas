@@ -46,7 +46,9 @@
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { EntityDetail, PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
+  import type { EntityDetail, PipelineRow, PipelineSettings, RunLog, RunRow, ShownView, SourceView } from "../../ipc/entity";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { onViewFresh } from "../repo/view-fresh.svelte";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
@@ -141,7 +143,9 @@
 
   let held = $state<RunRow[] | null>(null);
   let runsFailed = $state<string | null>(null);
-  let view = $state<SourceView | null>(null);
+  let view = $state<ShownView | SourceView | null>(null);
+  /** Why the source did not answer the read behind a view drawn from what knobas held (ADR-0042). */
+  let heldFailed = $state<string | null>(null);
   let viewRead = $state(false);
   let viewFailed = $state<string | null>(null);
   let failure = $state<FirstFailure | null>(null);
@@ -222,6 +226,7 @@
         view = answer;
         viewRead = true;
         viewFailed = null;
+        heldFailed = null;
         if ((sectionOf(answer, "tests")?.count ?? 0) > 0) readFailure(id, mine);
         else failure = null;
       },
@@ -232,6 +237,26 @@
       },
     );
   }
+
+  // The run's view knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => runId,
+    null,
+    () => {
+      const id = runId;
+      if (view !== null) void readView(id, token);
+    },
+    untrack(() => ports.listen),
+    (why) => (heldFailed = why),
+  );
+
+  // The pipeline's settings knobas held, read again behind them (ADR-0042).
+  onViewFresh(
+    () => pipelineId,
+    "settings",
+    () => readSettings(pipelineId, token),
+    untrack(() => ports.listen),
+  );
 
   function readSettings(pipe: string, mine: number) {
     ports.settings(pipe).then(
@@ -572,6 +597,7 @@
   </nav>
 
   <div class="tf-runbody">
+    {#if view !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={pipeline.source_name} failed={heldFailed} />{/if}
     {#if viewFailed !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}
       <p class="tf-dim">The run could not be read from {pipeline.source_name}: {viewFailed}</p>
     {/if}

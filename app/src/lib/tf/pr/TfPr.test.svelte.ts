@@ -1709,3 +1709,57 @@ test("Conversation names people as the source does, and the reader's own message
   const who = [...target.querySelectorAll(".tf-convo .tf-msg .tf-who b")].map((b) => b.textContent);
   expect(who).toEqual(["Jonas Becker", "You"]);
 });
+
+// -- what knobas held (ADR-0042) -----------------------------------------------
+
+/** An ear for `view:fresh` the test speaks into, as the bridge would. */
+function freshEar() {
+  const handlers: ((event: { payload: unknown }) => void)[] = [];
+  return {
+    listen: (async (event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "view:fresh") handlers.push(handler);
+      return () => {};
+    }) as NonNullable<PrPorts["listen"]>,
+    say: (payload: unknown) => handlers.forEach((handler) => handler({ payload })),
+  };
+}
+
+test("a view knobas held draws at once under a line saying from when, and the fresh one replaces it with no line", async () => {
+  const ear = freshEar();
+  const old = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  let reads = 0;
+  await draw(
+    [PR],
+    ports({
+      listen: ear.listen,
+      entityView: async () => (reads++ === 0 ? { ...prView(), held_at: old } : prView()),
+    }),
+  );
+  expect(text(".tf-held")).toBe("As knobas read it 3 h ago. Checking Tidewater Gitea…");
+  expect(text(".tf-fhead .tf-sub")).toContain("feature/PAY-231-sepa-retry into main");
+  ear.say({ entity_id: PR, section: null });
+  await settle();
+  expect(reads).toBe(2);
+  expect(target.querySelector(".tf-held")).toBeNull();
+});
+
+test("a source that does not answer behind a held view is named with its reason, and the view stays", async () => {
+  const ear = freshEar();
+  const old = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  let reads = 0;
+  await draw(
+    [PR],
+    ports({
+      listen: ear.listen,
+      entityView: async () => {
+        reads++;
+        return { ...prView(), held_at: old };
+      },
+    }),
+  );
+  ear.say({ entity_id: PR, section: null, failed: "unreachable: connection refused" });
+  await settle();
+  expect(reads, "a failure reads nothing again").toBe(1);
+  expect(text(".tf-held")).toBe("As knobas read it 3 h ago. Tidewater Gitea did not answer: unreachable: connection refused");
+  expect(text(".tf-fhead .tf-sub")).toContain("feature/PAY-231-sepa-retry into main");
+});

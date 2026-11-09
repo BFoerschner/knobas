@@ -46,9 +46,9 @@ afterEach(() => {
   location.hash = "";
 });
 
-function draw(answer: RangeDiff, withCheck = true) {
+function draw(answer: RangeDiff, withCheck = true, standing: () => Promise<SourceView | null> = () => new Promise<SourceView | null>(() => {})) {
   const ports = {
-    entityView: () => new Promise<SourceView | null>(() => {}),
+    entityView: standing,
     getEntity: () => new Promise<never>(() => {}),
     listSources: async () => [],
     submitWrite: async (payload: unknown) => {
@@ -144,4 +144,12 @@ test("a diff the source answered is not checked again", async () => {
   await settle();
   expect(check).toBeNull();
   expect(note()).toEqual([]);
+});
+
+test("a branch whose standing the source cannot read leaves the clone's diff drawn, with no error (ADR-0042)", async () => {
+  draw(diff([file("pay.py")], HEAD, "2026-11-09T10:00:00Z"), false, () => Promise.reject({ code: "unreachable", message: "connection refused" }));
+  await settle();
+  expect(text(target.querySelector(".tf-cdiff"))).toContain("pay.py");
+  expect(target.querySelector(".tf-cdiff .tf-cfail")).toBeNull();
+  expect(text(target.querySelector(".tf-cdiff"))).not.toContain("connection refused");
 });

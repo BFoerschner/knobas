@@ -39,6 +39,7 @@ import type {
   RunPreset,
   RunRow,
   RunTests,
+  ShownView,
   SourceView,
   TestOutcome,
 } from "../../ipc/entity";
@@ -166,7 +167,7 @@ export const BRIDGE: PipelinePorts = {
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */
 export interface RunPorts extends PipelinePorts {
   /** The run's view (`entity_view`): the whole of it, or the one section named. */
-  view: (runId: string, section?: string) => Promise<SourceView | null>;
+  view: (runId: string, section?: string) => Promise<ShownView | SourceView | null>;
   /** The last lines of the run's whole log, up to the cap, and its steps (`run_log`, #854). */
   log: (runId: string) => Promise<RunLog | null>;
   /** The run's tests, failed first (`run_tests`, #855). */

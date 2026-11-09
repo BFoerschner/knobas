@@ -1018,7 +1018,7 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
       const fresh = payload as ViewFresh;
-      if (live && fresh.entity_id === where && fresh.section === "files") void rereadTop();
+      if (live && fresh.entity_id === where && fresh.section === "files" && !fresh.failed) void rereadTop();
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;

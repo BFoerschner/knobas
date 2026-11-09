@@ -353,7 +353,7 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
       const fresh = payload as ViewFresh;
-      if (!live || fresh.entity_id !== id || fresh.section !== "branches") return;
+      if (!live || fresh.entity_id !== id || fresh.section !== "branches" || fresh.failed) return;
       ports.entityView(id, "branches").then(
         (view) => {
           if (live && repoId === id) branches = branchOptions(view?.sections[0] ?? null);
