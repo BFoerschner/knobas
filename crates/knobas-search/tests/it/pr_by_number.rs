@@ -84,15 +84,71 @@ async fn a_pull_request_is_found_by_its_number_on_every_forge() {
     .unwrap();
 
     // Four #142s whose titles never say the number, two repositories on two forges.
-    item(&pool, "pr", "gitea:tidewater/payout-service#142", "Retry SEPA batch", "", 9).await;
-    item(&pool, "pr", "gitea:tidewater/ledger-api#142", "Ledger rounding", "", 8).await;
-    item(&pool, "pr", "forgejo:tidewater/payout-service#142", "Retry SEPA batch", "", 7).await;
-    item(&pool, "pr", "forgejo:tidewater/ledger-api#142", "Ledger rounding", "", 6).await;
+    item(
+        &pool,
+        "pr",
+        "gitea:tidewater/payout-service#142",
+        "Retry SEPA batch",
+        "",
+        9,
+    )
+    .await;
+    item(
+        &pool,
+        "pr",
+        "gitea:tidewater/ledger-api#142",
+        "Ledger rounding",
+        "",
+        8,
+    )
+    .await;
+    item(
+        &pool,
+        "pr",
+        "forgejo:tidewater/payout-service#142",
+        "Retry SEPA batch",
+        "",
+        7,
+    )
+    .await;
+    item(
+        &pool,
+        "pr",
+        "forgejo:tidewater/ledger-api#142",
+        "Ledger rounding",
+        "",
+        6,
+    )
+    .await;
     // A number the typed one is a prefix of, a pull request that only mentions
     // #142 in its body, and a ticket whose comment does.
-    item(&pool, "pr", "gitea:tidewater/payout-service#1420", "Unrelated", "", 1).await;
-    item(&pool, "pr", "gitea:tidewater/payout-service#150", "Follow-up", "Builds on #142.", 1).await;
-    item(&pool, "ticket", "jira:PAY-9", "Payout notes", "See PR 142.", 1).await;
+    item(
+        &pool,
+        "pr",
+        "gitea:tidewater/payout-service#1420",
+        "Unrelated",
+        "",
+        1,
+    )
+    .await;
+    item(
+        &pool,
+        "pr",
+        "gitea:tidewater/payout-service#150",
+        "Follow-up",
+        "Builds on #142.",
+        1,
+    )
+    .await;
+    item(
+        &pool,
+        "ticket",
+        "jira:PAY-9",
+        "Payout notes",
+        "See PR 142.",
+        1,
+    )
+    .await;
 
     let searcher = Searcher::declaring(pool.clone(), [knobas_source_jira::descriptor_template()])
         .await
@@ -123,6 +179,9 @@ async fn a_pull_request_is_found_by_its_number_on_every_forge() {
     // Still typing, `14` is a prefix of the number.
     let typing = ids(&searcher.search(q("#p 14")).await.unwrap());
     for id in fours {
-        assert!(typing.contains(&id.to_owned()), "`#p 14` reaches {id}: {typing:?}");
+        assert!(
+            typing.contains(&id.to_owned()),
+            "`#p 14` reaches {id}: {typing:?}"
+        );
     }
 }
