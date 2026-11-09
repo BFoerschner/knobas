@@ -1213,7 +1213,12 @@ async fn the_name_roles_move_no_derived_row_either_way() {
     .execute(&pool)
     .await
     .unwrap();
-    assert_eq!(stripped.rows_affected(), 1, "Jira alone declares the roles");
+    // Jira's and, since the live run on #2479, Gitea's declarations.
+    assert_eq!(
+        stripped.rows_affected(),
+        2,
+        "Jira and Gitea declare the roles"
+    );
     assert_eq!(
         derived(&pool).await,
         with_roles,
