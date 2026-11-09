@@ -1275,3 +1275,19 @@ test("Pull requests draws Code's row: the title over its author, the state, and 
   expect(row.closest("table")!.classList.contains("tf-cprs")).toBe(true);
   expect(row.querySelectorAll("td")).toHaveLength(5);
 });
+
+test("Branches names a tip's author by the name the record gives, else the account, and the reader's own reads you (F-107)", async () => {
+  await draw(
+    [REPO, "branches"],
+    ports({
+      codeFacts: async (ids) =>
+        [
+          { entity_id: MAIN, author: "jonas.becker", author_name: "Jonas Becker", mine: false, language: null, teams: [] },
+          { entity_id: FEATURE, author: "mara", author_name: "Mara Lindqvist", mine: true, language: null, teams: [] },
+        ].filter((facts) => ids.includes(facts.entity_id)),
+    }),
+  );
+  const by = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => text(tr.querySelectorAll("td")[3]!));
+  expect(by).toEqual(expect.arrayContaining(["Jonas Becker", "you"]));
+  expect(by).not.toContain("jonas.becker");
+});

@@ -453,6 +453,11 @@ fn payload_paths() -> Vec<KindPaths> {
             parent: repo(&["repository"]),
             commit: vec![PayloadPath::of(["commit", "id"])],
             default_branch: vec![PayloadPath::of(["repository", "default_branch"])],
+            // The tip's author: the login Gitea matched them to, and the name
+            // git recorded, which is the one name a branch record gives
+            // (F-107). Branches draws the name, and compares the login.
+            reporter: vec![PayloadPath::of(["commit", "author", "username"])],
+            reporter_name: vec![PayloadPath::of(["commit", "author", "name"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -637,6 +642,17 @@ mod tests {
         assert_eq!(
             pr.reporter_name,
             vec![PayloadPath::of(["user", "full_name"])]
+        );
+        // A branch record names no profile, only the login Gitea matched the
+        // tip's author to and the name git recorded: the name it gives.
+        let branch = paths(KIND_BRANCH);
+        assert_eq!(
+            branch.reporter,
+            vec![PayloadPath::of(["commit", "author", "username"])]
+        );
+        assert_eq!(
+            branch.reporter_name,
+            vec![PayloadPath::of(["commit", "author", "name"])]
         );
         let ticket = paths(KIND_TICKET);
         assert_eq!(ticket.labels, labels);

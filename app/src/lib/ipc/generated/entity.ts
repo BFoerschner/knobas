@@ -2119,9 +2119,16 @@ export type LaneField = "epic" | "assignee" | "priority" | "issuetype" | "label"
  */
 export type LineComment = { 
 /**
- * Who wrote it, as the source names them (a login).
+ * Who wrote it, as the source names them (a login): what the app
+ * compares with the source's configured username.
  */
-author: string, body: string, 
+author: string, 
+/**
+ * The name to call [`author`](Self::author) by, the profile's name where
+ * the source keeps one (F-107); absent on the wire where the login is
+ * the only name, and the shell then draws the login.
+ */
+author_name?: string, body: string, 
 /**
  * When, as the source's RFC 3339 instant; `None` where it sent none.
  */
@@ -2169,6 +2176,12 @@ id: string | null,
  * the wire reads as `None`.
  */
 resolved_by: string | null, 
+/**
+ * The name to call [`resolved_by`](Self::resolved_by) by, as
+ * [`LineComment::author_name`] is the author's (F-107). Absent on the
+ * wire where the login is the only name.
+ */
+resolved_by_name?: string, 
 /**
  * Whether the source takes a reply on this thread (#2277): Gitea places
  * a reply by line on the current head, so an outdated thread takes none.

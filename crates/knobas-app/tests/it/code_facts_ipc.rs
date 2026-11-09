@@ -259,3 +259,61 @@ async fn a_pull_requests_detail_carries_its_labels() {
     .unwrap();
     assert_eq!(detail.labels.as_deref(), Some(&["Kind/Bug".to_owned()][..]));
 }
+
+/// A branch's tip author is named by the name the branch record gives, the
+/// one git recorded, beside the login `mine` compares (F-107, after the live
+/// run on #2479: Branches drew *jonas.becker*). A record with no name keeps
+/// the account.
+#[tokio::test]
+async fn a_branch_tips_author_is_named_by_the_record() {
+    let pool = pool().await;
+    let src = gitea(&pool, "mara.lindqvist").await;
+    let tip = |username: &str, name: &str| {
+        serde_json::json!({ "name": "b", "commit": { "id": "c0ffee",
+            "author": { "username": username, "name": name, "email": "x@tidewater.test" } } })
+    };
+    let named = item(
+        &pool,
+        &src,
+        "tidewater/payout-service@refs/heads/feature/x",
+        "branch",
+        Some("jonas.becker"),
+        tip("jonas.becker", "Jonas Becker"),
+    )
+    .await;
+    let mine = item(
+        &pool,
+        &src,
+        "tidewater/payout-service@refs/heads/feature/y",
+        "branch",
+        Some("mara.lindqvist"),
+        tip("mara.lindqvist", "Mara Lindqvist"),
+    )
+    .await;
+    let bare = item(
+        &pool,
+        &src,
+        "tidewater/payout-service@refs/heads/feature/z",
+        "branch",
+        Some("tom"),
+        tip("tom", ""),
+    )
+    .await;
+    let facts = code_facts_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &[named.clone(), mine.clone(), bare.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        of(&facts, &named).author_name.as_deref(),
+        Some("Jonas Becker")
+    );
+    assert_eq!(
+        of(&facts, &mine).author_name.as_deref(),
+        Some("Mara Lindqvist")
+    );
+    assert!(of(&facts, &mine).mine, "mine still compares the login");
+    assert_eq!(of(&facts, &bare).author_name, None);
+}

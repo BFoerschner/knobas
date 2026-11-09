@@ -386,14 +386,18 @@ fn login(user: Option<&UserRef>) -> Option<String> {
         .filter(|l| !l.trim().is_empty())
 }
 
-/// What to call a Gitea account (F-107): the profile's name, else its
-/// login, as a ticket's card names its people. `None` with neither.
-fn name_of(user: Option<&UserRef>) -> Option<String> {
+/// A Gitea account's profile name, where it set one (F-107).
+fn profile_name(user: Option<&UserRef>) -> Option<String> {
     user.and_then(|u| u.full_name.as_deref())
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(str::to_owned)
-        .or_else(|| login(user))
+}
+
+/// What to call a Gitea account (F-107): the profile's name, else its
+/// login, as a ticket's card names its people. `None` with neither.
+fn name_of(user: Option<&UserRef>) -> Option<String> {
+    profile_name(user).or_else(|| login(user))
 }
 
 /// A fact naming `user` by [`name_of`] in `value`, carrying the login as

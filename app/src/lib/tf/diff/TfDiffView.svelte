@@ -699,7 +699,7 @@
   {#each comments as comment, n (n)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p title={agoStamp(comment.at)}><b>{talk.isMe(comment.author) ? "You" : comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
+      <p title={agoStamp(comment.at)}><b>{talk.isMe(comment.author) ? "You" : (comment.author_name ?? comment.author)}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
       <TfMarkdown text={comment.body} {render} />
     </div>
   {/each}

@@ -496,6 +496,30 @@ test("the reader's line comments and resolves say You, as Conversation's do; ano
   reader = null;
 });
 
+test("a line comment and a resolver are named as the source names them, and the reader's own still read You by login (F-107)", async () => {
+  reader = "jonas";
+  const named = [
+    {
+      ...RETRY.threads[0]!,
+      comments: [
+        { author: "jonas", author_name: "Jonas Becker", body: "Should the jitter be bounded?", at: null },
+        { author: "priya", author_name: "Priya Nair", body: "Yes.", at: null },
+      ],
+      resolved_by: "priya",
+      resolved_by_name: "Priya Nair",
+    },
+    RETRY.threads[1]!,
+  ];
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }, named), true);
+  expect(squash(RETRY_CARD()!.querySelector(".tf-thread"))).toBe("Resolved by Priya Nair · 2 comments Show Unresolve");
+  [...RETRY_CARD()!.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Show")!.click();
+  flushSync();
+  const authors = [...RETRY_CARD()!.querySelectorAll(".tf-said b")].map((b) => b.textContent);
+  // The second thread's author has no name from the source, so the login stands.
+  expect(authors).toEqual(["You", "Priya Nair", "priya"]);
+  reader = null;
+});
+
 test("#2277: Resolve queues the resolve and collapses the thread; a resolved thread reads collapsed, and Forgejo's offers none", async () => {
   await draw(at("c90d11", { retry: "1111111", note: "2222222" }), true);
   const card = RETRY_CARD()!;

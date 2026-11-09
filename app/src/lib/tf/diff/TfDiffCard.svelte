@@ -319,7 +319,7 @@
   {#each comments as c, k (k)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p title={agoStamp(c.at)}><b>{talk.isMe(c.author) ? "You" : c.author}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
+      <p title={agoStamp(c.at)}><b>{talk.isMe(c.author) ? "You" : (c.author_name ?? c.author)}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
       <TfMarkdown text={c.body} {render} />
     </div>
   {/each}
@@ -335,7 +335,7 @@
   {#if resolved && !talk.isShown(thread)}
     <div class="tf-thr-h">
       <TfStateChip text="Resolved" tone="ok" />
-      <span class="tf-dim">{thread.resolved_by ? `by ${talk.isMe(thread.resolved_by) ? "you" : thread.resolved_by} · ` : ""}{thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}</span>
+      <span class="tf-dim">{thread.resolved_by ? `by ${talk.isMe(thread.resolved_by) ? "you" : (thread.resolved_by_name ?? thread.resolved_by)} · ` : ""}{thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}</span>
       <span class="tf-thr-sp"></span>
       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, true)}>Show</button>
       {#if talk.canResolve(thread)}<button type="button" class="tf-btn tf-sm" onclick={() => talk.resolve(thread, false)}>Unresolve</button>{/if}

@@ -893,6 +893,7 @@ fn said(author: &str, at: &str, body: &str) -> LineComment {
         author: author.into(),
         body: body.into(),
         at: Some(at.into()),
+        author_name: None,
     }
 }
 
@@ -934,6 +935,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     6,
                     &[(DiffLineKind::Add, None, Some(7), "    loop {}")]
                 )),
+                resolved_by_name: None,
             },
         }],
         "{view:#?}"
@@ -955,6 +957,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 replies: true,
                 commit: None,
                 hunk: None,
+                resolved_by_name: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -970,6 +973,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 replies: true,
                 commit: None,
                 hunk: None,
+                resolved_by_name: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -989,6 +993,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                         (DiffLineKind::Add, None, Some(3), "    35"),
                     ]
                 )),
+                resolved_by_name: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -1004,6 +1009,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     39,
                     &[(DiffLineKind::Add, None, Some(40), "    gone")]
                 )),
+                resolved_by_name: None,
             },
         ],
         "{view:#?}"

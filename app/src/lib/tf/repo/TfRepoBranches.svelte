@@ -190,7 +190,8 @@
           get standing() {
             return row.entity_id !== null ? (standings[row.entity_id] ?? null) : null;
           },
-          author: row.entity_id !== null ? (facts[row.entity_id]?.author ?? null) : null,
+          // The name the record gives the tip's author, else the account (F-107); `mine` compares the account.
+          author: row.entity_id !== null ? (facts[row.entity_id]?.author_name ?? facts[row.entity_id]?.author ?? null) : null,
           mine: row.entity_id !== null && facts[row.entity_id]?.mine === true,
         }),
       ),

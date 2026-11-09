@@ -574,7 +574,7 @@ export interface BranchRow {
   meta: string | null;
   /** `null` until its view answers, and for a branch with no id to read at. */
   standing: BranchStanding | null;
-  /** Its tip's author as the source spells the account (`code_facts`, #986), or `null`. */
+  /** Its tip's author by the name the record gives (`code_facts`' `author_name`, F-107), else as the source spells the account (#986), or `null`. */
   author: string | null;
   /** Whether that author is mine. */
   mine: boolean;
