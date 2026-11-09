@@ -780,8 +780,13 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     let mut entries: Vec<(String, Option<String>, String)> = Vec::new();
     for block in conversation {
         match block {
+            // By account: the label names the person by their profile's
+            // name (F-107), and the server's listing names the login.
             Block::Facts { facts } => entries.push((
-                facts[0].label.clone(),
+                facts[0]
+                    .account
+                    .clone()
+                    .unwrap_or_else(|| facts[0].label.clone()),
                 facts
                     .iter()
                     .find(|f| f.label == "Review")
@@ -3766,6 +3771,26 @@ async fn a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_bran
 
 /// What a view's *Conversation* and overview say, as lines: each facts block
 /// as `label=value` pairs, each text as its text.
+/// Whether the overview holds a *Review* fact reading `opening` and a name,
+/// whose account is `login`: the view names a reviewer by their profile's
+/// name and keeps the login as the account (F-107), and the seed's accounts
+/// have names.
+fn verdict_by(view: &knobas_source::view::SourceView, opening: &str, login: &str) -> bool {
+    use knobas_source::view::Block;
+    view.sections
+        .iter()
+        .filter(|s| s.id == "overview")
+        .flat_map(|s| s.blocks.iter())
+        .any(|b| match b {
+            Block::Facts { facts } => facts.iter().any(|f| {
+                f.label == "Review"
+                    && f.value.starts_with(opening)
+                    && f.account.as_deref() == Some(login)
+            }),
+            _ => false,
+        })
+}
+
 fn said(view: &knobas_source::view::SourceView, section: &str) -> Vec<String> {
     use knobas_source::view::Block;
     let section = view
@@ -3892,10 +3917,7 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
         "{conversation:#?}"
     );
     assert!(
-        said(&after, "overview").contains(&format!(
-            "Review=changes requested by {}",
-            env.login().await
-        )),
+        verdict_by(&after, "changes requested by ", &env.login().await),
         "{:#?}",
         said(&after, "overview")
     );
@@ -3918,7 +3940,7 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
         "the approval is the newest thing said: {conversation:#?}"
     );
     assert!(
-        said(&after, "overview").contains(&format!("Review=approved by {}", env.login().await)),
+        verdict_by(&after, "approved by ", &env.login().await),
         "the latest verdict is the standing one: {:#?}",
         said(&after, "overview")
     );
@@ -7710,7 +7732,7 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     assert!(asked.contains(&who.as_str()), "{asked:?} {pull}");
     let after = source.view(&id, None).await.unwrap().unwrap();
     assert!(
-        said(&after, "overview").contains(&format!("Review=requested from {who}")),
+        verdict_by(&after, "requested from ", &who),
         "{:#?}",
         said(&after, "overview")
     );
