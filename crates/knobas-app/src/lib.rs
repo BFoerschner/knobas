@@ -112,6 +112,14 @@ pub mod events {
     /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
     /// every page showing that view reads it again.
     pub const VIEW_FRESH: &str = "view:fresh";
+    /// Payload: `checkout::fetch::Fetched` -- a branch's tip, fetched into
+    /// its checkout behind a read that found it missing, landed (ADR-0041):
+    /// the page showing that tree reads it again at the checkout. Broadcast.
+    pub const CHECKOUT_FETCHED: &str = "checkout:fetched";
+    /// Payload: `checkout::clone_all::State` -- where *Clone all* is: each
+    /// clone's start and end, and the run's (the smoothness pass, PR #2479).
+    /// Broadcast: Code and Settings › Checkouts draw the same run.
+    pub const CLONE_ALL: &str = "clone:all";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -339,6 +347,12 @@ pub fn run() {
             // The clones running in this process, which `clone_repo` starts
             // and stops and the quit stops with their folders (#1633).
             handle.manage(checkout::clone::Clones::global());
+            // A fetch behind a local read that landed (ADR-0041): the page
+            // showing that tree reads it again, now at the checkout.
+            let fetched_to = handle.clone();
+            checkout::fetch::Fetches::global().on_fetched(move |fetched| {
+                events::emit(&fetched_to, None, events::CHECKOUT_FETCHED, fetched);
+            });
 
             // And the database comes up on its own task. M0 blocked here,
             // which froze the event loop for the length of a first run -- a
@@ -716,6 +730,14 @@ pub fn run() {
             // F-327's *Publish again*, appended at the foot: the list is
             // append-only (§10.8).
             commands::entity::publish_standup_protocol_again,
+            // The smoothness pass's local reads (PR #2479, ADR-0041),
+            // appended at the foot: the list is append-only (§10.8).
+            commands::entity::entity_local_tree,
+            commands::entity::entity_local_file,
+            commands::entity::entity_source_range_diff,
+            commands::entity::clone_all_plan,
+            commands::entity::clone_all,
+            commands::entity::clone_all_state,
         ])
         .build(context)
         .expect("build the tauri application")
@@ -1376,6 +1398,8 @@ mod tests {
             super::events::CLONE_PROGRESS,
             super::events::ITEM_REFRESHED,
             super::events::VIEW_FRESH,
+            super::events::CHECKOUT_FETCHED,
+            super::events::CLONE_ALL,
         ];
         names.sort_unstable();
         declared.sort_unstable();

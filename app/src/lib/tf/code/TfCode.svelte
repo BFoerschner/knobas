@@ -19,7 +19,8 @@
   A repository's team and language and a pull request's author are
   `code_facts` (#966), read once for every row the two lists hold. The other
   reads are `list_entities`, `entity_checkout`, `list_sources`,
-  `list_contexts`, `get_entity` and `job_reach`. Rows open
+  `list_contexts`, `get_entity` and `job_reach`. *Clone all…* in the header
+  clones every repository not on this machine (`TfCloneAll`, PR #2479). Rows open
   `#/repo/<entity id>` and `#/pr/<entity id>`. A long list draws only the
   rows near the viewport (`shell/windowed.svelte.ts`, #2210), each group of
   pull requests on its own.
@@ -56,6 +57,7 @@
   import Marked from "../filter/Marked.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { clones } from "../openin/clones.svelte";
+  import TfCloneAll from "../openin/TfCloneAll.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { untrack } from "svelte";
   import TfWaiting from "../TfWaiting.svelte";
@@ -454,6 +456,8 @@
       <a class="tf-btn tf-primary" href={compare}>New pull request</a>
     {/if}
     <!-- With no job's branch to propose there is no button: a repository's own page offers it, on the branch it finds (F-252). -->
+    <!-- *Clone all…* (PR #2479): every repository not on this machine, in the background. -->
+    <TfCloneAll />
     <!-- *Sync now* last in the header (#2238 header order). -->
     {@render sync?.()}
   </div>

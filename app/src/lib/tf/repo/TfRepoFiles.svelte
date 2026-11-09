@@ -23,6 +23,19 @@
   branch's last commit (`TfRepoLastCommit`, #2257): the landing is the tree,
   the last commit and the README, with no second listing of the top.
 
+  **Read from the checkout first** (ADR-0041, the smoothness pass of PR
+  #2479): where the repository has a checkout that holds the commit the
+  mirror names for the branch, the whole tree is read there at once
+  (`entity_local_tree`) and drawn before the source answers, its files read
+  there too (`entity_local_file`), under section ids the tab makes itself
+  (`LOCAL`), never the source's. The source's top is still read behind it:
+  where it stands at the same commit nothing moves and the tree says it was
+  checked; where the branch moved since the last sync the source's tree
+  replaces the checkout's in place, the open directories and the file kept,
+  and a file whose text changed says so. A checkout that lacks the commit is
+  fetched into behind the read (`checkout:fetched`), so the next open is
+  local.
+
   **Read at a commit** (#2241): the source reads the tree at the branch's tip
   and the sections its listings name stand at that commit, so a file opened
   from them costs the source its own two reads, and the app keeps it. Whether
@@ -71,7 +84,7 @@
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
+  import type { CheckoutView, Fetched, LocalTree, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -153,7 +166,7 @@
     stepCommands = appCommandSteps,
     treeSections = null,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped" | "localTree" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -197,6 +210,15 @@
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
   let listings = $state<Record<string, TreeEntry[]>>({});
+  /**
+   * The tree as the checkout holds it at the mirror's tip (ADR-0041), while the
+   * listings are its; `checked` once the source's top stood at the same commit.
+   */
+  let local = $state<{ tree: LocalTree; checked: boolean } | null>(null);
+  /** The branch moved past the checkout's copy, and the file the reader had open changed with it. */
+  let movedNote = $state<string | null>(null);
+  /** The file drawn from the checkout when the source's newer tree replaced it: its path and blob. */
+  let movedFrom: { path: string; sha: string | null } | null = null;
   let treeFailed = $state<string | null>(null);
   /** The section the top listing names for every file at its commit (#2311), `null` where the source has none. */
   let pathsSection = $state<string | null>(null);
@@ -228,8 +250,102 @@
 
   /** The section `section` names, read at `where`: a directory's listing or a file and its actions. */
   async function readSection(section: string, where = at): Promise<ViewSection | undefined> {
+    if (section.startsWith(LOCAL)) return readLocalSection(section, where);
     const view = await ports.entityView(where, section);
     return view?.sections[0];
+  }
+
+  // ---- The checkout's copy (ADR-0041) ----
+
+  /** What begins every section id the tab makes for the checkout's tree: a control character, which no source's id holds. */
+  const LOCAL = "\u0001local\u0000";
+  const localId = (commit: string, kind: "dir" | "file" | "paths", full: string) => `${LOCAL}${commit}\u0000${kind}\u0000${full}`;
+  function parseLocal(section: string): { commit: string; kind: string; full: string } | null {
+    const [commit, kind, full] = section.slice(LOCAL.length).split("\u0000");
+    return commit === undefined || kind === undefined || full === undefined ? null : { commit, kind, full };
+  }
+
+  /** The checkout's tree as the listings the tab draws: each directory's entries, directories first, as the source sorts them. */
+  function localListings(tree: LocalTree): Record<string, TreeEntry[]> {
+    const out: Record<string, TreeEntry[]> = { "": [] };
+    for (const entry of tree.entries) {
+      if (entry.kind === "dir") out[entry.path] ??= [];
+      const parent = parentOf(entry.path);
+      (out[parent] ??= []).push({
+        name: nameOf(entry.path),
+        kind: entry.kind,
+        size: entry.size,
+        section: entry.kind === "submodule" ? null : localId(tree.commit, entry.kind === "dir" ? "dir" : "file", entry.path),
+      });
+    }
+    for (const entries of Object.values(out))
+      entries.sort(
+        (a, b) =>
+          Number(b.kind === "dir") - Number(a.kind === "dir") ||
+          a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
+          (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+      );
+    return out;
+  }
+
+  /** A section the tab made for the checkout's tree: a directory from the tree read, a file read at the checkout, every path. */
+  async function readLocalSection(section: string, where: string): Promise<ViewSection | undefined> {
+    const named = parseLocal(section);
+    const held = local?.tree;
+    if (named === null) return undefined;
+    const wrap = (block: ViewBlock): ViewSection => ({ id: section, title: "Files", count: null, deferred: false, blocks: [block] });
+    if (named.kind === "file") {
+      const read = ports.localFile;
+      const block = read === undefined ? null : await read(where, named.commit, named.full);
+      if (block === null) throw new Error(`Your checkout could not read ${named.full}.`);
+      return wrap(block);
+    }
+    if (held === undefined || held.commit !== named.commit) throw new Error("The checkout's tree was replaced by the source's.");
+    if (named.kind === "paths") {
+      const entries = held.entries
+        .filter((entry) => entry.kind === "file" || entry.kind === "symlink")
+        .map((entry) => ({ name: entry.path, kind: entry.kind, size: entry.size, section: localId(held.commit, "file", entry.path) }));
+      return wrap({ type: "tree", trail: [], entries, truncated: held.truncated, url: null });
+    }
+    return wrap({ type: "tree", trail: [], entries: localListings(held)[named.full] ?? [], truncated: false, url: null });
+  }
+
+  /** The checkout's tree at `where`, drawn where the source has not answered yet. */
+  function readLocal(where: string, mine: number) {
+    const read = ports.localTree;
+    if (read === undefined) return;
+    read(where).then(
+      (tree) => {
+        if (tree === null || mine !== generation || where !== at || listings[""] !== undefined) return;
+        local = { tree, checked: false };
+        listings = localListings(tree);
+        pathsSection = localId(tree.commit, "paths", "");
+      },
+      // No checkout's copy: the source's reads draw the tree, as before.
+      () => {},
+    );
+  }
+
+  /**
+   * The source's top, read behind the checkout's copy: at the same commit it checks it and nothing moves; at another
+   * the branch moved since the last sync, and the source's tree replaces the copy, the open directories and the file
+   * read again through its sections. `true` where it was taken.
+   */
+  function settleLocal(block: Extract<ViewBlock, { type: "tree" }>): boolean {
+    const held = local;
+    if (held === null) return false;
+    if (block.commit === undefined || block.commit === held.tree.commit) {
+      local = { ...held, checked: block.commit !== undefined };
+      return true;
+    }
+    local = null;
+    movedFrom = file === null ? null : { path: file.path, sha: file.sha ?? null };
+    generation += 1;
+    asked = new Set([""]);
+    early = new Map();
+    listings = { "": block.entries };
+    pathsSection = block.paths ?? null;
+    return true;
   }
 
   /**
@@ -241,6 +357,8 @@
 
   /** The read of `place` asked early, once, else -- or where that guess was refused -- a new one of `section`. */
   function take(section: string, place: string, where = at): Promise<ViewSection | undefined> {
+    // The checkout answers at once; a deep link's early guess at the source would only be slower.
+    if (section.startsWith(LOCAL)) return readSection(section, where);
     const read = early.get(place);
     if (read === undefined) return readSection(section, where);
     early.delete(place);
@@ -264,11 +382,13 @@
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
+        if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
         listings[dir] = block?.type === "tree" ? block.entries : [];
         if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
       },
       (error) => {
-        if (mine === generation) treeFailed = ipcErrorMessage(error);
+        // The checkout's copy stands where the source cannot answer.
+        if (mine === generation && !(dir === "" && local !== null)) treeFailed = ipcErrorMessage(error);
       },
     );
   }
@@ -282,7 +402,35 @@
     listings = {};
     treeFailed = null;
     pathsSection = null;
-    untrack(() => readDir("", "files"));
+    local = null;
+    movedNote = null;
+    movedFrom = null;
+    untrack(() => {
+      readLocal(at, generation);
+      readDir("", "files");
+    });
+  });
+
+  // A fetch behind the checkout's read landed (ADR-0041): where the source has not drawn the tree yet, the checkout can now.
+  $effect(() => {
+    const where = at;
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    let live = true;
+    let stop: (() => void) | null = null;
+    void listen(EVENTS.checkoutFetched, ({ payload }) => {
+      const fetched = payload as Fetched;
+      if (live && fetched.entity_id === where && untrack(() => listings[""]) === undefined) readLocal(where, generation);
+    }).then(
+      (unlisten) => {
+        if (live) stop = unlisten;
+        else unlisten();
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+      stop?.();
+    };
   });
 
   // The directories above the file the address names open.
@@ -368,6 +516,12 @@
   function drawFile(read: ViewSection | undefined, section: string) {
     const block = read?.blocks[0];
     file = block?.type === "file" ? block : null;
+    const was = movedFrom;
+    movedFrom = null;
+    movedNote =
+      was !== null && file !== null && file.path === was.path && was.sha !== null && file.sha !== was.sha
+        ? `${branch ?? "This branch"} moved on ${sourceName(source)} since the last sync, and this file changed with it: the newest is shown.`
+        : null;
     drawnSection = section;
     fileReading = false;
     fileFailed = null;
@@ -842,6 +996,7 @@
       (read) => {
         const block = read?.blocks[0];
         if (mine !== generation || block?.type !== "tree") return;
+        if (settleLocal(block)) return;
         const before = (listings[""] ?? []).map((entry) => entry.section).join("\u0000");
         if (block.entries.map((entry) => entry.section).join("\u0000") === before) return;
         generation += 1;
@@ -1128,6 +1283,11 @@
         </TfWaiting>
       {/if}
     </nav>
+    {#if local !== null && !going}
+      <p class="tf-gonote">
+        From your clone at <span class="tf-mono">{local.tree.commit.slice(0, 7)}</span>{local.checked ? `, the same as on ${sourceName(source)}` : ", as of the last sync"}.
+      </p>
+    {/if}
     {#if listings[""] !== undefined}
       <footer class="tf-ftree-keys"><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
     {/if}
@@ -1191,6 +1351,9 @@
         <div class="tf-banner tf-warn">
           A commit of this file {queued.state === "sent" ? "was sent" : "is queued"}: “{queued.text}”. It shows here once {sourceName(source)} has it.
         </div>
+      {/if}
+      {#if movedNote !== null}
+        <div class="tf-banner tf-info" role="status">{movedNote}</div>
       {/if}
       {#if changed.has(file.path)}
         <div class="tf-banner tf-warn">

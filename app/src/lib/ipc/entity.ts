@@ -12,6 +12,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { viewDate } from "../time/format";
 import type {
   ActionItemTicket,
+  CloneAllPlan,
+  CloneAllState,
+  LocalTree,
+  ViewBlock,
   ArtifactEntry,
   ArtifactPreview,
   AttachmentBytes,
@@ -91,6 +95,15 @@ import type { QueuedWrite, WriteOpPayload } from "./sources";
 import type { DayWindow } from "./time";
 
 export type {
+  CloneAllFailure,
+  CloneAllPlan,
+  CloneAllSkipped,
+  CloneAllSource,
+  CloneAllState,
+  Fetched,
+  LocalEntry,
+  LocalTree,
+  MirrorTip,
   ActionField,
   ActionItemTicket,
   ActivityRow,
@@ -1399,6 +1412,50 @@ export function removePullRequestWorktree(path: string): Promise<PullRequestWork
  */
 export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer> {
   return invoke<CloneAnswer>("clone_repo", { entityId, stop: stop ?? null });
+}
+
+/**
+ * `entityId`'s whole tree read at its checkout, at the tip the mirror holds
+ * for its branch — `entity_local_tree` (ADR-0041): what *Files* draws before
+ * the source answers. `null` with no checkout, no tip, or a checkout that
+ * lacks the commit; that last fetches it behind, told on
+ * `EVENTS.checkoutFetched`.
+ */
+export function entityLocalTree(entityId: string): Promise<LocalTree | null> {
+  return invoke<LocalTree | null>("entity_local_tree", { entityId });
+}
+
+/**
+ * The file `path` in `entityId`'s tree at `commit` (a sha {@link entityLocalTree}
+ * answered), read at its checkout — `entity_local_file` (ADR-0041); `null`
+ * where the checkout cannot answer.
+ */
+export function entityLocalFile(entityId: string, commit: string, path: string): Promise<ViewBlock | null> {
+  return invoke<ViewBlock | null>("entity_local_file", { entityId, commit, path });
+}
+
+/**
+ * The diff from `base` to `head` as the source's compare answers it now,
+ * never local — `entity_source_range_diff` (ADR-0041): what a page that drew
+ * a predicted {@link entityRangeDiff} asks behind it.
+ */
+export function entitySourceRangeDiff(entityId: string, base: string, head: string): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_source_range_diff", { entityId, base, head });
+}
+
+/** What *Clone all* would clone now — `clone_all_plan`: reads the mirror and the disk only. */
+export function cloneAllPlan(): Promise<CloneAllPlan> {
+  return invoke<CloneAllPlan>("clone_all_plan");
+}
+
+/** Start *Clone all*, or the run already going — `clone_all`; its states follow on `EVENTS.cloneAll`. */
+export function cloneAll(): Promise<CloneAllState> {
+  return invoke<CloneAllState>("clone_all");
+}
+
+/** Where *Clone all* is, or where its last run ended — `clone_all_state`; `null` before the first. */
+export function cloneAllState(): Promise<CloneAllState | null> {
+  return invoke<CloneAllState | null>("clone_all_state");
 }
 
 /**

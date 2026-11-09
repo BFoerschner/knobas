@@ -135,3 +135,43 @@ test("the reader's own commit reads You, by what code_facts says of it (F-221)",
   expect(lines[0]).toBe("You · 3 hours ago");
   expect(lines[1], "the mirror does not call this one the reader's").toBe("mara · 3 hours ago");
 });
+
+test("the commits the app read again behind its answer are drawn over what the tab drew (PR #2479)", async () => {
+  if (view) unmount(view);
+  let hear: ((event: { payload: unknown }) => void) | null = null;
+  let reads = 0;
+  const newer = {
+    ...VIEW,
+    sections: [{ ...VIEW.sections[0]!, blocks: [{ type: "entities", rows: [commit("aaaa000000000000000000000000000000000000", "a push"), ...SHAS.map((sha, n) => commit(sha, `commit ${n}`))] }] }],
+  } as unknown as SourceView;
+  view = mount(TfRepoCommits, {
+    target,
+    props: {
+      ports: {
+        entityView: async () => (reads++ === 0 ? VIEW : newer),
+        codeFacts: async () => [],
+        listen: async (_event: string, handler: (event: { payload: unknown }) => void) => {
+          hear = handler;
+          return () => (hear = null);
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      defaultBranch: "main",
+    },
+  });
+  for (let n = 0; n < 5; n++) await tick();
+  flushSync();
+  expect(boxes()).toHaveLength(4);
+  // Another entity's, or another section's, moves nothing here.
+  hear!({ payload: { entity_id: "gitea:other/repo", section: "commits" } });
+  hear!({ payload: { entity_id: REPO, section: "branches" } });
+  for (let n = 0; n < 5; n++) await tick();
+  expect(reads).toBe(1);
+  hear!({ payload: { entity_id: REPO, section: "commits" } });
+  for (let n = 0; n < 5; n++) await tick();
+  flushSync();
+  expect(reads).toBe(2);
+  expect(boxes()).toHaveLength(5);
+});

@@ -396,3 +396,104 @@ pub async fn clone_repo<R: tauri::Runtime>(
     let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app));
     crate::checkout::clone::start(&pool, lifecycle.registry(), &clones, events, &entity_id).await
 }
+
+/// `entity_id`'s whole tree read at its checkout, at the commit the mirror
+/// names for its branch (ADR-0041, the smoothness pass of PR #2479): what
+/// *Files* draws before the source answers. `null` where there is no
+/// checkout, no tip in the mirror, or a checkout that lacks that commit; the
+/// last starts a fetch of it behind the answer, told on `checkout:fetched`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_tree`] refuses with.
+#[tauri::command]
+pub async fn entity_local_tree(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<Option<crate::checkout::local::LocalTree>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let fetches = crate::checkout::fetch::Fetches::global();
+    crate::checkout::local_tree(&pool, lifecycle.registry(), Some(&fetches), &entity_id).await
+}
+
+/// The file at `path` in `entity_id`'s tree at `commit` (a sha
+/// `entity_local_tree` answered), read at its checkout (ADR-0041), drawn as
+/// the source's file block is; `null` where the checkout cannot answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_file`] refuses with.
+#[tauri::command]
+pub async fn entity_local_file(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: String,
+    path: String,
+) -> Result<Option<knobas_source::view::Block>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::local_file(&pool, &entity_id, &commit, &path).await
+}
+
+/// What *Clone all* would clone now (the smoothness pass, PR #2479): how
+/// many repositories, from which sources, which are already here and which
+/// cannot be cloned and why. Reads the mirror and the disk only.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn clone_all_plan(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::checkout::clone_all::Plan, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::clone_all::plan(
+        &pool,
+        lifecycle.registry(),
+        &knobas_core::checkout::clone::PROTOCOLS,
+    )
+    .await
+    .map(|(plan, _)| plan)
+}
+
+/// Start *Clone all*, or answer the run already going (the smoothness pass,
+/// PR #2479): every repository [`clone_all_plan`] names, cloned two at a time
+/// in the background, told on `clone:all` and each clone's own
+/// `clone:progress`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) with no clones
+/// root, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn clone_all<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    clones: State<'_, std::sync::Arc<crate::checkout::clone::Clones>>,
+) -> Result<crate::checkout::clone_all::State, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app.clone()));
+    let told = app.clone();
+    crate::checkout::clone_all::start(
+        &state.pool,
+        std::sync::Arc::clone(&state.registry),
+        &clones,
+        &crate::checkout::clone_all::CloneAll::global(),
+        events,
+        std::sync::Arc::new(move |run| {
+            crate::events::emit(&told, None, crate::events::CLONE_ALL, run);
+        }),
+    )
+    .await
+}
+
+/// Where *Clone all* is, or where its last run ended; `null` before the
+/// first run (the smoothness pass, PR #2479).
+#[tauri::command]
+pub fn clone_all_state() -> Option<crate::checkout::clone_all::State> {
+    crate::checkout::clone_all::state(&crate::checkout::clone_all::CloneAll::global())
+}

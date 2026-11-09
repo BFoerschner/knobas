@@ -56,11 +56,13 @@
     EntityDetail,
     EntityFilter,
     EntityPage,
+    LocalTree,
     PipeRun,
     PipeStep,
     RangeDiff,
     RefusedWrite,
     SourceView,
+    ViewBlock,
     ViewFresh,
     WriteAsk,
   } from "../../ipc/entity";
@@ -95,6 +97,12 @@
     rangeDiff?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
     /** One commit's diff, local-first (#2319): the commit tab's; the commit's own `diff` section when left out. */
     commitDiff?: (entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
+    /** The whole tree at the checkout, at the mirror's tip (ADR-0041): what *Files* draws first; the source alone when left out. */
+    localTree?: (entityId: string) => Promise<LocalTree | null>;
+    /** A file of that tree, read at the checkout (ADR-0041). */
+    localFile?: (entityId: string, commit: string, path: string) => Promise<ViewBlock | null>;
+    /** The source's compare now, never local (ADR-0041): what Compare checks a predicted diff against; no check when left out. */
+    sourceRangeDiff?: (entityId: string, base: string, head: string) => Promise<RangeDiff>;
   }
 
   /**
@@ -121,6 +129,9 @@
     entityFilePiped,
     entityRangeDiff,
     entityCommitDiff,
+    entityLocalFile,
+    entityLocalTree,
+    entitySourceRangeDiff,
     entityView,
     getEntity,
     jobReach,
@@ -204,6 +215,9 @@
       piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
       rangeDiff: (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
       commitDiff: (entityId, commitId, sha, ignoreWhitespace) => entityCommitDiff(entityId, commitId, sha, ignoreWhitespace),
+      localTree: (entityId) => entityLocalTree(entityId),
+      localFile: (entityId, commit, path) => entityLocalFile(entityId, commit, path),
+      sourceRangeDiff: (entityId, base, head) => entitySourceRangeDiff(entityId, base, head),
     },
     now: fixedNow,
   }: {

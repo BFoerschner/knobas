@@ -30,6 +30,16 @@
   - **Into and From the same**: nothing to compare, so one line says so where the
     form ends, and there is no diff, no *Commits* and no open pull request's line.
 
+  **Predicted at the checkout, checked behind** (ADR-0041, the smoothness
+  pass of PR #2479): where the repository's checkout holds the tips the
+  mirror last synced for *Into* and *From*, the diff is read there at once
+  (`entity_range_diff` answers `predicted_at`) and drawn, and the source's
+  compare is asked behind it (`entity_source_range_diff`). The same, and a
+  line says it was checked; otherwise a branch moved since the sync, the
+  source's diff replaces it in place and a line says so. *Create pull
+  request* never waits for the check: a pull request sent before it
+  answered and that the check then finds different is told in a toast.
+
   A branch the mirror does not hold yet (one this session's edit queued) has
   no view to read: the form still opens, since the pull request names the
   branch by name, and the change says when it will show.
@@ -39,7 +49,7 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
-  import type { DiffFile, DiffRange } from "../../ipc/entity";
+  import type { DiffFile, DiffRange, RangeDiff } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
@@ -84,7 +94,7 @@
     guessed = null,
     onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -125,6 +135,15 @@
   let range = $state<DiffRange | null>(null);
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
+  /**
+   * The drawn diff was read at the checkout between the tips the mirror last synced (ADR-0041): `checked` once the
+   * source's compare answered the same. `null` for a diff the source answered.
+   */
+  let predicted = $state<{ section: string; checked: boolean } | null>(null);
+  /** The source's compare differed from the predicted diff: a branch moved since the sync, and its diff now stands. */
+  let moved = $state<string | null>(null);
+  /** The check of the drawn predicted diff, by its section: whether the source's compare differed. */
+  let checking: { section: string; differs: Promise<boolean> } | null = null;
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
   const addressed = $derived(named !== null && branches.some((option) => option.name === named) ? named : null);
   let base = $state(untrack(() => addressed ?? into));
@@ -237,6 +256,10 @@
       cut = diff.truncated;
       range = diff.range;
       filesFor = asked;
+      moved = null;
+      predicted = null;
+      checking = null;
+      if (diff.predicted_at !== undefined && ports.sourceRangeDiff !== undefined) checkPredicted(asked, from, to, diff, alive);
     }, (error) => {
       if (!alive()) return;
       reading = false;
@@ -244,6 +267,39 @@
       fail(error);
       files = null;
     });
+  }
+
+  /** Whether two answers for one range are the same diff: the same two commits where both name them, else the same files and counts. */
+  function sameDiff(a: RangeDiff, b: RangeDiff): boolean {
+    if (a.range !== null && b.range !== null) return a.range.base === b.range.base && a.range.head === b.range.head;
+    const shape = (d: RangeDiff) => JSON.stringify(d.files.map((f) => [f.path, f.additions, f.deletions]));
+    return shape(a) === shape(b);
+  }
+
+  /** The source's compare, asked behind a predicted diff: the same checks it; another replaces it in place, and says so. */
+  function checkPredicted(asked: string, from: string, to: string, shown: RangeDiff, alive: () => boolean) {
+    const ask = ports.sourceRangeDiff;
+    if (ask === undefined) return;
+    predicted = { section: asked, checked: false };
+    const differs = ask(repoId, from, to).then(
+      (fresh) => {
+        const same = sameDiff(shown, fresh);
+        if (alive() && filesFor === asked) {
+          if (same) predicted = { section: asked, checked: true };
+          else {
+            files = fresh.files;
+            cut = fresh.truncated;
+            range = fresh.range;
+            predicted = null;
+            moved = `${to} or ${from} moved on ${sourceName(source)} since the last sync: this is the change as it stands there now.`;
+          }
+        }
+        return !same;
+      },
+      // The source could not answer: the prediction stands, unchecked.
+      () => false,
+    );
+    checking = { section: asked, differs };
   }
 
   // The form, proposed for each branch: from its ticket where it names one.
@@ -347,6 +403,17 @@
       toastQueued(`open PR ${words}`, source, { write });
       // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
       echoWrite(repoId, MADE_PR, words, { write, base: head, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
+      // Sent before the check of what the page predicted answered: if the source's compare then differs, the pull
+      // request holds the branches as they stand there now, not as the page drew them, and the reader is told.
+      const pending = checking !== null && predicted?.section === checking.section && !predicted.checked ? checking.differs : null;
+      const from = head;
+      void pending?.then((differs) => {
+        if (differs)
+          push({
+            text: `“${words}” was opened from ${from} as ${sourceName(source)} holds it now, which moved since the last sync: its changes differ from the ones this page showed. Review its files.`,
+            action: { label: "Pull requests", run: () => (location.hash = prs) },
+          });
+      });
       location.hash = prs;
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -471,6 +538,13 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
+          {#if moved !== null}
+            <p class="tf-cnote" role="status">{moved}</p>
+          {:else if predicted !== null && predicted.section === filesFor}
+            <p class="tf-cnote">
+              {predicted.checked ? `Read from your clone: the same as on ${sourceName(source)}.` : `Read from your clone as of the last sync; checking ${sourceName(source)}…`}
+            </p>
+          {/if}
           {#if range === null}
             <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
           {/if}

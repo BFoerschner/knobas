@@ -84,6 +84,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),
   "tf/openin/clones.svelte.ts#clones": async () => (await import("../tf/openin/clones.svelte")).clones.reset(),
+  // *Clone all*'s run and its listener (PR #2479).
+  "tf/openin/clone-all.svelte.ts#cloneAllStore": async () => (await import("../tf/openin/clone-all.svelte")).cloneAllStore.reset(),
   // `forgetEchoes` also stops the follows an echo started.
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),

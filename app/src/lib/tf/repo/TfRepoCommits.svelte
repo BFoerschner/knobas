@@ -32,8 +32,10 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import { commitLine } from "./file-tree";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
@@ -49,7 +51,7 @@
     defaultBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "codeFacts">;
+    ports: Pick<RepoPorts, "entityView" | "codeFacts" | "listen">;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
@@ -77,6 +79,17 @@
       live = false;
     };
   });
+
+  // Kept by the app and read again behind its answer (PR #2479): a move is drawn over what the tab drew.
+  onViewFresh(
+    () => at,
+    "commits",
+    () => {
+      const where = at;
+      void readCommits(where, () => at === where, true);
+    },
+    untrack(() => ports.listen),
+  );
 
   // A refresh of the page reads the commits again, over what the tab drew.
   onRefreshed(

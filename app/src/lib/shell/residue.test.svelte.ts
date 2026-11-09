@@ -379,6 +379,8 @@ const TfPipelinesSettings = (await import("../tf/settings/TfPipelinesSettings.sv
 const { createNamedPipelines, createCommandSteps } = await import("../render/pipelines.svelte");
 const { createRendererDefaults } = await import("../render/defaults.svelte");
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
+const TfCloneAll = (await import("../tf/openin/TfCloneAll.svelte")).default;
+const { createCloneAll } = await import("../tf/openin/clone-all.svelte");
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
 
@@ -1519,6 +1521,28 @@ const CASES: Case[] = [
           apps: residueApps(),
           saveRoot: () => deferred(undefined),
           worktreePorts: { list: () => deferred([]), remove: () => deferred([]) },
+          layers: createLayers(),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * *Clone all…* (PR #2479) reads where a run is when it is drawn. With none going it hears nothing: the store's
+     * ear is for a run, which outlives the button by design.
+     */
+    name: "TfCloneAll",
+    source: "lib/tf/openin/TfCloneAll.svelte",
+    open: (target) => ({
+      app: mount(TfCloneAll, {
+        target,
+        props: {
+          store: createCloneAll({
+            plan: () => deferred({ root: "~/code", names: [], sources: [], already: 0, skipped: [] }),
+            start: () => deferred({ run: 1, total: 0, cloned: 0, adopted: 0, failed: [], current: [], finished: true }),
+            state: () => deferred(null),
+            listen: () => deferred(() => {}),
+          }),
           layers: createLayers(),
         },
       }),

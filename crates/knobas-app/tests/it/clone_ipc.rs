@@ -879,3 +879,100 @@ async fn a_folder_another_repository_is_cloning_into_is_refused() {
     assert!(!root.join("shared").exists());
     server.abort();
 }
+
+/// **Clone all** (the smoothness pass, PR #2479): it says first what it would
+/// clone, clones every repository not on this machine, survives one that
+/// fails with the reason kept, starts one run however often it is asked, and
+/// leaves the failed one to the next plan.
+#[tokio::test]
+async fn clone_all_clones_what_is_missing_once_and_survives_a_failure() {
+    use knobas_app::checkout::clone_all::{CloneAll, State, plan, start_admitting, state};
+
+    let pool = pool().await;
+    let tag = unique();
+    let names = [format!("a-{tag}"), format!("b-{tag}"), format!("c-{tag}")];
+    let mut servers = Vec::new();
+    for name in &names {
+        let (server, base) = upstream("tidewater", name);
+        repo(&pool, "gitea", &base, &format!("tidewater/{name}")).await;
+        servers.push(server);
+    }
+    let (_dir, root) = root(&pool).await;
+    // A folder in the way that is no clone: *Clone* refuses it, and so this one fails.
+    std::fs::create_dir_all(root.join(&names[1])).unwrap();
+    std::fs::write(root.join(&names[1]).join("notes.txt"), "mine\n").unwrap();
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> =
+        Arc::new(Registry::for_process());
+
+    let (said, _) = plan(&pool, registry.as_ref(), &["file"]).await.unwrap();
+    assert_eq!(said.names.len(), 3, "{said:?}");
+    assert_eq!(said.sources.len(), 3, "one source per upstream here");
+    assert_eq!(said.already, 0);
+
+    let all = Arc::new(CloneAll::default());
+    let told: Arc<Mutex<Vec<State>>> = Arc::default();
+    let listener = {
+        let told = told.clone();
+        Arc::new(move |s: State| told.lock().unwrap().push(s))
+    };
+    let seen = Arc::new(Seen::default());
+    let clones = Arc::new(Clones::default());
+    let first = start_admitting(
+        &pool,
+        registry.clone(),
+        &clones,
+        &all,
+        seen.clone(),
+        listener.clone(),
+        &["file"],
+    )
+    .await
+    .unwrap();
+    let again = start_admitting(
+        &pool,
+        registry.clone(),
+        &clones,
+        &all,
+        seen.clone(),
+        listener.clone(),
+        &["file"],
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.run, again.run, "a second press answers the run going");
+    assert_eq!(first.total, 3);
+
+    let mut ended = None;
+    for _ in 0..600 {
+        if let Some(now) = state(&all).filter(|s| s.finished) {
+            ended = Some(now);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let ended = ended.expect("the run ends within a minute");
+    assert_eq!(ended.cloned, 2, "{ended:?}");
+    assert_eq!(ended.failed.len(), 1, "{ended:?}");
+    assert_eq!(ended.failed[0].name, format!("tidewater/{}", names[1]));
+    assert!(
+        ended.failed[0].reason.contains("not a clone"),
+        "{:?}",
+        ended.failed[0].reason
+    );
+    assert!(ended.current.is_empty());
+    assert!(root.join(&names[0]).join(".git").exists());
+    assert!(root.join(&names[2]).join(".git").exists());
+    assert!(
+        root.join(&names[1]).join("notes.txt").exists(),
+        "the folder in the way is left alone"
+    );
+    assert!(
+        told.lock().unwrap().last().is_some_and(|s| s.finished),
+        "the end was told"
+    );
+
+    // What is left is the one that failed; what was cloned is found by the scan.
+    let (left, _) = plan(&pool, registry.as_ref(), &["file"]).await.unwrap();
+    assert_eq!(left.names, [format!("tidewater/{}", names[1])]);
+    assert_eq!(left.already, 2);
+}

@@ -456,6 +456,87 @@ value: string,
 label: string, };
 
 /**
+ * One clone of a run that failed.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllFailure = { entity_id: string, name: string, reason: string, };
+
+/**
+ * What *Clone all* would do, said before it starts.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllPlan = { 
+/**
+ * Where the clones go; `None` when no clones root is set, and nothing
+ * can be cloned.
+ */
+root: string | null, 
+/**
+ * The repositories it would clone, by name, in order.
+ */
+names: Array<string>, sources: Array<CloneAllSource>, 
+/**
+ * Repositories already on this machine, which it leaves alone.
+ */
+already: number, 
+/**
+ * Repositories it cannot clone, each with its reason.
+ */
+skipped: Array<CloneAllSkipped>, };
+
+/**
+ * A repository *Clone all* would not clone, and why.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllSkipped = { entity_id: string, name: string, reason: string, };
+
+/**
+ * One source's share of a plan.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllSource = { source_id: string, name: string, 
+/**
+ * Its repositories this run would clone.
+ */
+repositories: number, };
+
+/**
+ * Where a run of *Clone all* is: the `clone:all` payload and
+ * [`state`]'s answer.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllState = { 
+/**
+ * Each run's own number, so the shell tells a new run from the last.
+ */
+run: number, 
+/**
+ * How many it set out to clone.
+ */
+total: number, 
+/**
+ * Cloned so far.
+ */
+cloned: number, 
+/**
+ * Found already cloned in the clones root when its turn came.
+ */
+adopted: number, failed: Array<CloneAllFailure>, 
+/**
+ * The repositories cloning right now, by name.
+ */
+current: Array<string>, 
+/**
+ * Every repository has had its turn.
+ */
+finished: boolean, };
+
+/**
  * What `clone_repo` answers.
  *
  * - `cloning`: The clone started, or was already running; events follow.
@@ -1725,6 +1806,18 @@ tone: Tone | null,
 account?: string, };
 
 /**
+ * The `checkout:fetched` payload: a fetch behind a read landed, and the
+ * tree of `entity_id` can now be read at its checkout.
+ *
+ * The smoothness pass (PR #2479, ADR-0041).
+ */
+export type Fetched = { entity_id: string, 
+/**
+ * The commit that landed.
+ */
+commit: string, };
+
+/**
  * How an [`ActionField`] asks. Internally tagged (`{"type": "choice", ...}`),
  * a union on `type` in the TypeScript mirror as [`Block`] is.
  *
@@ -2546,6 +2639,45 @@ export type LinkSetRuleRow = { kind: LinkSetRuleKind, value: string,
 title: string | null, };
 
 /**
+ * One entry of a tree read at a checkout.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type LocalEntry = { 
+/**
+ * The whole path from the top (`src/lib.rs`).
+ */
+path: string, kind: EntryKind, 
+/**
+ * A file's size in bytes; `None` for a directory or a submodule.
+ */
+size: number | null, };
+
+/**
+ * A repository's whole tree at one commit, as its checkout holds it.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type LocalTree = { 
+/**
+ * The whole sha it was read at: the mirror's tip of the branch.
+ */
+commit: string, 
+/**
+ * When the mirror last stored that tip (RFC 3339): how old the guess
+ * that it is still the tip is.
+ */
+as_of: string | null, 
+/**
+ * Every directory and file, in git's order.
+ */
+entries: Array<LocalEntry>, 
+/**
+ * [`ENTRY_CAP`] or the read's own cap stopped it short.
+ */
+truncated: boolean, };
+
+/**
  * One line of a log.
  */
 export type LogLine = { 
@@ -2782,6 +2914,22 @@ count: number,
  * Its statuses, in the board's column order; only those it has.
  */
 columns: Array<LaneColumn>, };
+
+/**
+ * The commit the mirror names for a branch's tree: its declared `commit`
+ * as the last sync stored it, and when that was.
+ *
+ * The smoothness pass (PR #2479, ADR-0041).
+ */
+export type MirrorTip = { 
+/**
+ * The whole sha the mirror holds for the branch's tip.
+ */
+commit: string, 
+/**
+ * When the mirror stored it (RFC 3339).
+ */
+as_of: string | null, };
 
 /**
  * What *New page* asks for (R-10.16).
@@ -3427,7 +3575,16 @@ range: DiffRange | null,
  * Local git or the source. Whitespace is ignored only at `checkout`:
  * the source's API cannot return a diff with whitespace ignored.
  */
-read_at: DiffReadAt, };
+read_at: DiffReadAt, 
+/**
+ * Two branch names read at the checkout between the tips the mirror
+ * holds for them (ADR-0041): when the mirror stored the newer of the
+ * two (RFC 3339). The source may have moved since, so the page checks
+ * it with `entity_source_range_diff` behind the answer. `None` for a
+ * diff between two shas, and for every source read. Absent on the wire
+ * when `None`.
+ */
+predicted_at?: string, };
 
 /**
  * Where a reached entity's path came from.
@@ -4374,7 +4531,16 @@ url: string | null,
  * where the source has no such read, and on that answer itself.
  * Absent on the wire when `None`.
  */
-paths?: string, } | { "type": "file", trail: Array<Crumb>, path: string, 
+paths?: string, 
+/**
+ * The whole git sha of the commit the listing was read at, where the
+ * source has one (the smoothness pass, PR #2479): what the shell
+ * holds its checkout's copy of the same tree to, read first, so a
+ * branch that moved since the mirror's sync is noticed. Compared,
+ * never parsed or sent back. `None` where the source cannot say.
+ * Absent on the wire when `None`.
+ */
+commit?: string, } | { "type": "file", trail: Array<Crumb>, path: string, 
 /**
  * Empty for a binary file.
  */

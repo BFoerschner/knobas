@@ -14,8 +14,10 @@
 -->
 <script lang="ts">
   import type { ViewRow } from "../../ipc/entity";
+  import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import { commitHash, repoHash, viewRows } from "./repo";
   import { authorOf, initials } from "./file-tree";
 
@@ -26,7 +28,7 @@
     refreshed = 0,
   }: {
     /** `codeFacts` says whose the commit is; without it the strip names the author as the source does. */
-    ports: Pick<RepoPorts, "entityView"> & Partial<Pick<RepoPorts, "codeFacts">>;
+    ports: Pick<RepoPorts, "entityView"> & Partial<Pick<RepoPorts, "codeFacts" | "listen">>;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
@@ -65,6 +67,17 @@
       },
     );
   }
+
+  // Kept by the app and read again behind its answer (PR #2479): a new tip is drawn over the strip.
+  onViewFresh(
+    () => at,
+    "commits",
+    () => {
+      const where = at;
+      void read(where, () => at === where, true);
+    },
+    untrack(() => ports.listen),
+  );
 
   $effect(() => {
     const where = at;

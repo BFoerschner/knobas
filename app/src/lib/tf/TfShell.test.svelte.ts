@@ -2106,8 +2106,8 @@ test("Code's Sync now is a default-size header button, last in the header (#2238
   await at("#/code");
   const acts = seen(".tf-fhead .tf-acts").find((el) => el.contains(syncButton()));
   const names = [...(acts?.children ?? [])].map((el) => el.textContent?.trim());
-  // No job here, so no *New pull request* either (F-252): a repository's page offers it.
-  expect(names).toEqual(["Sync now"]);
+  // No job here, so no *New pull request* either (F-252): a repository's page offers it. *Clone all…* (PR #2479) before it.
+  expect(names).toEqual(["Clone all…", "Sync now"]);
   expect(syncButton()!.classList.contains("tf-btn")).toBe(true);
   expect(syncButton()!.classList.contains("tf-sm"), "a header button is default size").toBe(false);
 });

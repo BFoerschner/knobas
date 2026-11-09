@@ -5,7 +5,8 @@
   applications with *Make default* and *Edit applications…*. Then the pull
   request worktrees knobas made under the clones root (#2285, ADR-0035), each
   with *Remove…*, which confirms because it deletes a folder and what is in it:
-  a closed one also goes on the next pull request opened.
+  a closed one also goes on the next pull request opened. *Clone all…* beside
+  the clones root clones every repository not on this machine (PR #2479).
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
@@ -21,6 +22,7 @@
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
   import TfAppsManage from "../openin/TfAppsManage.svelte";
   import TfDialog from "./TfDialog.svelte";
+  import TfCloneAll from "../openin/TfCloneAll.svelte";
 
   let {
     apps = sharedApps,
@@ -118,13 +120,15 @@
     <div class="tf-stg-c tf-stg-inl">
       {#if settings.clones_root !== null}<span class="tf-mono">{settings.clones_root}</span>{:else}<span class="tf-dim">Not set</span>{/if}
       <button class="tf-btn tf-sm" onclick={changeRoot}>Change…</button>
+      <TfCloneAll small {layers} />
     </div>
   </div>
   <div class="tf-stg-row">
     <div class="tf-stg-l">
       git<small
-        >knobas runs git to read a checkout, show its uncommitted diff, clone, and fetch a pull request into its own worktree. Never to
-        commit, pull or push.</small
+        >knobas runs git to read a checkout (its files too, so Files opens at once), show its uncommitted diff, clone, fetch a branch's
+        newest commit into it without moving any branch, and fetch a pull request into its own worktree. Never to commit, pull or
+        push.</small
       >
     </div>
     <div class="tf-stg-c">

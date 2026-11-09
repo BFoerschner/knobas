@@ -376,6 +376,35 @@ pub async fn entity_range_diff<R: tauri::Runtime>(
     .await
 }
 
+/// The diff from `base` to `head` of the repository `entity_id` as its
+/// source's compare answers it now, never read locally (ADR-0041): what a
+/// page that drew `entity_range_diff`'s predicted answer (`predicted_at`)
+/// asks behind it, to learn whether a branch moved since the mirror's sync.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what the source's read refuses with.
+#[tauri::command]
+pub async fn entity_source_range_diff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+) -> Result<crate::checkout::RangeDiff, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::checkout::source_range_diff(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &base,
+        &head,
+    )
+    .await
+}
+
 /// The change commit `commit_id` (whole or short `sha`) made, for the
 /// commit tab (#2319, story 78): read by local read-only git when the
 /// checkout of repository `entity_id` holds it, with whitespace ignored when
@@ -459,6 +488,21 @@ pub async fn entity_file_bytes_inner(
     commit: Option<&str>,
 ) -> Result<Vec<u8>, IpcError> {
     use knobas_source::view::{BYTES_CAP, FileBytes};
+    // A file at a sha the checkout holds is read there (ADR-0041): a README's
+    // images, a PDF, with no request to the source.
+    if let Some(commit) = commit {
+        match crate::checkout::local_file_bytes(pool, entity_id, commit, path, BYTES_CAP).await {
+            Some(Ok(bytes)) => return Ok(bytes),
+            Some(Err(size)) => {
+                return Err(IpcError::invalid(format!(
+                    "{path} is {}; knobas reads a file's bytes up to {}",
+                    mebibytes(size),
+                    mebibytes(BYTES_CAP)
+                )));
+            }
+            None => {}
+        }
+    }
     let read =
         crate::sources::crud::file_bytes(pool, secrets, registry, live, entity_id, path, commit)
             .await

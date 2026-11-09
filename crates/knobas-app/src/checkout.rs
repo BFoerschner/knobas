@@ -50,6 +50,9 @@ use knobas_core::entity::EntityRef;
 use crate::IpcError;
 
 pub mod clone;
+pub mod clone_all;
+pub mod fetch;
+pub mod local;
 pub mod open;
 pub mod range;
 pub mod uncommitted;
@@ -308,6 +311,15 @@ pub struct RangeDiff {
     /// Local git or the source. Whitespace is ignored only at `checkout`:
     /// the source's API cannot return a diff with whitespace ignored.
     pub read_at: DiffReadAt,
+    /// Two branch names read at the checkout between the tips the mirror
+    /// holds for them (ADR-0041): when the mirror stored the newer of the
+    /// two (RFC 3339). The source may have moved since, so the page checks
+    /// it with `entity_source_range_diff` behind the answer. `None` for a
+    /// diff between two shas, and for every source read. Absent on the wire
+    /// when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub predicted_at: Option<String>,
 }
 
 /// The diff from `base` to `head` of the repository `entity_id` (#2272,
@@ -337,6 +349,38 @@ pub async fn range_diff(
     if let Some(local) = local_diff(pool, entity_id, base, head, ignore_whitespace).await {
         return Ok(local);
     }
+    if let Some(predicted) = predicted_diff(
+        pool,
+        registry.as_ref(),
+        entity_id,
+        base,
+        head,
+        ignore_whitespace,
+    )
+    .await
+    {
+        return Ok(predicted);
+    }
+    source_range_diff(pool, secrets, registry, live, entity_id, base, head).await
+}
+
+/// The diff from `base` to `head` as the source's compare answers it now,
+/// never local: what a page that drew [`range_diff`]'s predicted answer asks
+/// behind it, to see whether a branch moved since the mirror's sync
+/// (ADR-0041).
+///
+/// # Errors
+///
+/// As [`range_diff`].
+pub async fn source_range_diff(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) -> Result<RangeDiff, IpcError> {
     let section = format!("compare:{base}...{head}");
     source_diff(pool, secrets, registry, live, entity_id, &section)
         .await?
@@ -381,6 +425,47 @@ pub async fn commit_diff(
         .ok_or_else(|| IpcError::not_found(format!("the source draws no diff for {commit}")))
 }
 
+/// [`range_diff`] between two branch names, predicted at the checkout
+/// (ADR-0041): each name looked up in the mirror for the tip it last synced
+/// (compared there, never passed to git), the source's three-dot compare
+/// reproduced as the diff from the two tips' merge base to the head's tip.
+/// `None` when either name has no tip in the mirror, there is no checkout,
+/// or it lacks either commit.
+async fn predicted_diff(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> Option<RangeDiff> {
+    let repo = repo_of(pool, entity_id).await.ok()?.entity_id?;
+    let path = resolve(pool, &repo).await.ok()?.path?;
+    let base_tip = branch_tip(pool, registry, &repo, base).await.ok()??;
+    let head_tip = branch_tip(pool, registry, &repo, head).await.ok()??;
+    let path = Path::new(&path);
+    let from = range::merge_base(path, &base_tip.commit, &head_tip.commit).await?;
+    let local = range::read(path, &from, &head_tip.commit, ignore_whitespace).await?;
+    let predicted_at = match (base_tip.as_of, head_tip.as_of) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    };
+    Some(RangeDiff {
+        files: local.files,
+        truncated: local.truncated,
+        range: local.base.map(|base| knobas_source::view::DiffRange {
+            repository: repo.clone(),
+            base,
+            head: local.head,
+            commits: Vec::new(),
+            reviewed: None,
+        }),
+        read_at: DiffReadAt::Checkout,
+        // The mirror stamps every row, so this is always there.
+        predicted_at: Some(predicted_at.unwrap_or_default()),
+    })
+}
+
 /// [`range_diff`]'s local half: `None` when `entity_id` has no checkout or
 /// its checkout does not hold both ends ([`range::read`]).
 async fn local_diff(
@@ -403,6 +488,7 @@ async fn local_diff(
             reviewed: None,
         }),
         read_at: DiffReadAt::Checkout,
+        predicted_at: None,
     })
 }
 
@@ -434,11 +520,197 @@ async fn source_diff(
                     truncated,
                     range,
                     read_at: DiffReadAt::Source,
+                    predicted_at: None,
                 }),
                 _ => None,
             })
         })
     }))
+}
+
+/// The commit the mirror names for a branch's tree: its declared `commit`
+/// as the last sync stored it, and when that was.
+///
+/// The smoothness pass (PR #2479, ADR-0041).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct MirrorTip {
+    /// The whole sha the mirror holds for the branch's tip.
+    pub commit: String,
+    /// When the mirror stored it (RFC 3339).
+    pub as_of: Option<String>,
+}
+
+/// The tip the mirror holds for `entity_id`'s tree: a branch's own declared
+/// `commit`, or a repository's declared default branch's. `None` where the
+/// mirror holds no such branch or its kind declares no commit. Read off the
+/// mirror alone: no git, no source.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn mirror_tip(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+) -> Result<Option<MirrorTip>, IpcError> {
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let row = sqlx::query(concat!(
+        "select i.kind, i.source_id, ",
+        knobas_core::declared_string!("$2", "commit"),
+        " as commit, ",
+        knobas_core::declared_string!("$2", "default_branch"),
+        " as default_branch, to_char(i.synced_at at time zone 'UTC', \
+           'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as as_of \
+           from sync.live_item i where i.entity_id = $1"
+    ))
+    .bind(entity_id)
+    .bind(declarations.as_param())
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let kind: String = row.get("kind");
+    match kind.as_str() {
+        "branch" => Ok(row
+            .get::<Option<String>, _>("commit")
+            .filter(|sha| checkout::open::is_sha(sha))
+            .map(|commit| MirrorTip {
+                commit,
+                as_of: row.get("as_of"),
+            })),
+        "repo" => match row.get::<Option<String>, _>("default_branch") {
+            Some(name) => branch_tip(pool, registry, entity_id, &name).await,
+            None => Ok(None),
+        },
+        _ => Ok(None),
+    }
+}
+
+/// The tip the mirror holds for the branch `name` of the repository
+/// `repo_id`: the branch item under the repository whose declared `name` is
+/// `name`. The name is compared in the mirror and never passed to git.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn branch_tip(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    repo_id: &str,
+    name: &str,
+) -> Result<Option<MirrorTip>, IpcError> {
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let row = sqlx::query(concat!(
+        "select ",
+        knobas_core::declared_string!("$2", "commit"),
+        " as commit, to_char(i.synced_at at time zone 'UTC', \
+           'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as as_of \
+           from sync.live_item i \
+          where i.kind = 'branch' \
+            and i.source_id = (select source_id from sync.item where entity_id = $1) \
+            and starts_with(i.entity_id, $1) and i.entity_id <> $1 \
+            and (",
+        knobas_core::declared_string!("$2", "name"),
+        " = $3 or i.title = $3) \
+          order by length(i.entity_id) limit 1"
+    ))
+    .bind(repo_id)
+    .bind(declarations.as_param())
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    Ok(row.and_then(|row| {
+        row.get::<Option<String>, _>("commit")
+            .filter(|sha| checkout::open::is_sha(sha))
+            .map(|commit| MirrorTip {
+                commit,
+                as_of: row.get("as_of"),
+            })
+    }))
+}
+
+/// `entity_id`'s whole tree read at its checkout, at the commit the mirror
+/// names for it (ADR-0041): what *Files* draws first. `None` where it has no
+/// checkout, the mirror names no tip, or the checkout does not hold that
+/// commit; then the tab reads the source as before, and a checkout that
+/// lacks the commit is fetched into behind it ([`fetch`]), which tells
+/// `checkout:fetched` when the tree can be read here.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not a
+/// repo or a branch; [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// does not hold it; [`Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+pub async fn local_tree(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    fetches: Option<&std::sync::Arc<fetch::Fetches>>,
+    entity_id: &str,
+) -> Result<Option<local::LocalTree>, IpcError> {
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    let Some(tip) = mirror_tip(pool, registry, entity_id).await? else {
+        return Ok(None);
+    };
+    match local::tree(Path::new(&path), &tip.commit).await {
+        Some(tree) => {
+            let mut tree = (*tree).clone();
+            tree.as_of = tip.as_of;
+            Ok(Some(tree))
+        }
+        None => {
+            if let Some(fetches) = fetches {
+                fetches
+                    .behind(pool, registry, entity_id, &path, &tip.commit)
+                    .await;
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// The file at `file` in `entity_id`'s tree at `commit`, read at its
+/// checkout (ADR-0041); `None` where the checkout cannot answer it.
+/// `commit` is a sha a [`local_tree`] answered; anything else is `None`.
+///
+/// # Errors
+///
+/// As [`local_tree`].
+pub async fn local_file(
+    pool: &PgPool,
+    entity_id: &str,
+    commit: &str,
+    file: &str,
+) -> Result<Option<knobas_source::view::Block>, IpcError> {
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    Ok(local::file(Path::new(&path), commit, file).await)
+}
+
+/// The bytes of `file` in `entity_id`'s tree at `commit`, read at its
+/// checkout where it holds that commit (ADR-0041): `None` where it cannot
+/// answer, so the source is asked; `Some(Err(size))` for a file over `cap`.
+pub async fn local_file_bytes(
+    pool: &PgPool,
+    entity_id: &str,
+    commit: &str,
+    file: &str,
+    cap: u64,
+) -> Option<Result<Vec<u8>, u64>> {
+    if !checkout::open::is_sha(commit) {
+        return None;
+    }
+    let path = resolve(pool, entity_id).await.ok()?.path?;
+    local::file_bytes(Path::new(&path), commit, file, cap).await
 }
 
 /// [`view`] without the working tree read: where the checkout is, and no git.

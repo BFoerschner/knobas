@@ -514,6 +514,15 @@ export function handlers(): Handlers {
     entity_commit_diff: (args) =>
       fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
+    // The demo has no checkout on disk to read a tree at (ADR-0041): Files reads the fake source, as before.
+    entity_local_tree: () => null,
+    entity_local_file: () => null,
+    entity_source_range_diff: (args) =>
+      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),
+    // *Clone all* (PR #2479): the demo's repositories are cloned one at a time from their own rows.
+    clone_all_plan: () => ({ root: fakeSettings().clones_root, names: [], sources: [], already: 0, skipped: [] }),
+    clone_all: () => ({ run: 1, total: 0, cloned: 0, adopted: 0, failed: [], current: [], finished: true }),
+    clone_all_state: () => null,
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
