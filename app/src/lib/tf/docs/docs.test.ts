@@ -20,6 +20,10 @@ import {
   spaceHash,
   spaceId,
   spaceOfPage,
+  spaceLabel,
+  spaceSource,
+  spaceTitle,
+  scopeName,
   statusTone,
 } from "./docs";
 import { parseTfHash } from "../route";
@@ -28,6 +32,7 @@ const TREE: DocsTree = {
   spaces: [
     {
       source_id: "confluence",
+      source_name: "confluence",
       key: "ENG",
       name: "Engineering",
       pages: [
@@ -36,7 +41,7 @@ const TREE: DocsTree = {
         { entity_id: "confluence:3", title: "SEPA payout retry design", parent: "confluence:2" },
       ],
     },
-    { source_id: "confluence", key: "OPS", name: "Operations", pages: [{ entity_id: "confluence:5", title: "On-call handbook", parent: null }] },
+    { source_id: "confluence", source_name: "confluence", key: "OPS", name: "Operations", pages: [{ entity_id: "confluence:5", title: "On-call handbook", parent: null }] },
   ],
   last_read: "confluence:5",
   for_you: [],
@@ -81,6 +86,7 @@ test("a space's pages by level: the top of its tree, then each level below, then
   const page = (id: string, parent: string | null) => ({ entity_id: id, title: id, parent });
   const space = {
     source_id: "c",
+    source_name: "c",
     key: "ADR",
     name: null,
     pages: [page("deep", "one"), page("one", "index"), page("lost", "gone"), page("index", null), page("two", "index")],
@@ -106,7 +112,7 @@ const TWO: DocsTree = {
   ...TREE,
   spaces: [
     ...TREE.spaces,
-    { source_id: "wiki", key: "ENG", name: "Engineering", pages: [{ entity_id: "wiki:home", title: "Eng (wiki)", parent: null }] },
+    { source_id: "wiki", source_name: "wiki", key: "ENG", name: "Engineering", pages: [{ entity_id: "wiki:home", title: "Eng (wiki)", parent: null }] },
   ],
 };
 
@@ -129,7 +135,7 @@ test("a key one source holds keeps the bare address, and a bare key two hold ope
 test("a key holding a colon still opens by the bare address", () => {
   const odd: DocsTree = {
     ...TREE,
-    spaces: [{ source_id: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
+    spaces: [{ source_id: "wiki", source_name: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
   };
   expect(spaceHash(odd.spaces, odd.spaces[0]!)).toBe("#/docs/space/a%3Ab");
   expect(spaceAt(placeOf(["space", "a:b"]), odd)?.key).toBe("a:b");
@@ -344,4 +350,23 @@ test("a parent loop on a bad answer still ends a page's path", () => {
     { entity_id: "y", title: "Y", parent: "x" },
   ];
   expect(pagesByPath({ pages }).map((row) => row.label)).toEqual(["X › Y", "Y › X"]);
+});
+
+test("a space names its source only where another source's space has its name (the live run, 2026-11-09)", () => {
+  const space = (source: string, name: string | null, key = "ENG") => ({ source_id: source, source_name: `Tidewater ${source}`, key, name, pages: [] });
+  const live = space("confluence", "Engineering");
+  const mock = space("mock", "Engineering", "DEV");
+  const ops = space("confluence", "Operations", "OPS");
+  const spaces = [live, mock, ops];
+  expect(spaceTitle(live, spaces)).toBe("Engineering on Tidewater confluence");
+  expect(spaceTitle(mock, spaces)).toBe("Engineering on Tidewater mock");
+  expect(spaceTitle(ops, spaces)).toBe("Operations");
+  expect(spaceSource(ops, spaces)).toBeNull();
+  // One source holding two spaces of one name is not a twin: the source would not tell them apart.
+  expect(spaceSource(live, [live, space("confluence", "Engineering", "ENG2")])).toBeNull();
+  // A space with no name is its key, compared as such.
+  expect(spaceTitle(space("a", null, "X"), [space("a", null, "X"), space("b", "X")])).toBe("X on Tidewater a");
+  expect(spaceLabel({ ...live, pages: [{ entity_id: "confluence:1", title: "Home", parent: null }] }, spaces)).toBe("Engineering on Tidewater confluence (1)");
+  expect(scopeName(live, spaces)).toBe("Engineering on Tidewater confluence");
+  expect(hitWhere({ entity_id: "mock:9", space: { key: "DEV", name: "Engineering" }, path: "Payments" }, true, spaces)).toBe("Engineering on Tidewater mock › Payments");
 });

@@ -2348,7 +2348,7 @@ const CASES: Case[] = [
       app: mount(TfNewPage, {
         target,
         props: {
-          tree: { spaces: [{ source_id: "c", key: "ENG", name: null, pages: [{ entity_id: "c:1", title: "Home", parent: null }] }], last_read: null, for_you: [] },
+          tree: { spaces: [{ source_id: "c", source_name: "c", key: "ENG", name: null, pages: [{ entity_id: "c:1", title: "Home", parent: null }] }], last_read: null, for_you: [] },
           space: "c/ENG",
           parent: null,
           job: "PAY-231",

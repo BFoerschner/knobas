@@ -181,6 +181,10 @@
     spaceHash,
     spaceId,
     spaceLabel,
+    spaceName,
+    spaceSource,
+    spaceTitle,
+    treeSpace,
     spaceOfPage,
     stemsOf,
     provideEmbeds,
@@ -618,7 +622,7 @@
     const kept = found.hits.filter((h) => jobIds?.has(h.entity_id) ?? false);
     return { ...found, total: kept.length, hits: kept };
   });
-  const searchScope = $derived(jobOn ? `${job}'s pages` : scopeName(shownSpace));
+  const searchScope = $derived(jobOn ? `${job}'s pages` : scopeName(shownSpace, tree?.spaces ?? []));
 
   /** What the search can widen to: the whole of Docs from a space, every page from the job's. */
   const searchKept = $derived(jobOn ? ("job" as const) : shownSpace !== undefined ? ("space" as const) : null);
@@ -1489,7 +1493,7 @@
         <select aria-label="Space" value={pickerValue} title={shownSpace?.name ?? undefined} onchange={pick}>
           <option value="*">All spaces ({total})</option>
           {#each tree.spaces as space (spaceId(space))}
-            <option value={spaceId(space)}>{spaceLabel(space)}</option>
+            <option value={spaceId(space)}>{spaceLabel(space, tree.spaces)}</option>
           {/each}
         </select>
       {/if}
@@ -1511,6 +1515,7 @@
             kept={searchKept}
             {me}
             answered={answerHere}
+            spaces={tree?.spaces ?? []}
             onall={widenSearch}
             onpick={openHit}
           />
@@ -1560,6 +1565,7 @@
         {:else if shownSpace === undefined}
           {#each tree.spaces as space (spaceId(space))}
             {@const holds = space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}
+            {@const from = spaceSource(space, tree.spaces)}
             <details
               open={holds || openSpaces.has(spaceId(space))}
               ontoggle={(event) => {
@@ -1567,7 +1573,7 @@
                 else if (!holds) openSpaces.add(spaceId(space));
               }}
             >
-              <summary class="tf-spc"><span class="tf-spc-n" title={space.name ?? space.key}>{space.name ?? space.key}</span> <span class="tf-count">{space.pages.length}</span></summary>
+              <summary class="tf-spc"><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{space.pages.length}</span></summary>
               <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} /></div>
             </details>
           {/each}
@@ -1646,8 +1652,8 @@
         onresume={(id) => (resuming = { id, top: readingAt(id) })}
       />
     {:else if spaceHere !== undefined}
-      <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: spaceHere.name ?? spaceHere.key }]} {back} /></div>
-      <TfDocsSpace space={spaceHere} {sync} />
+      <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: spaceTitle(spaceHere, tree?.spaces ?? []) }]} {back} /></div>
+      <TfDocsSpace space={spaceHere} spaces={tree?.spaces ?? []} {sync} />
     {:else if tree === null}
       {#if treeError !== null}
         <!-- No tree to place the address in: the view's own header, so *Sync now* is still where every view puts it (#2286). -->
@@ -1679,7 +1685,8 @@
       <div class="tf-rd-crumb">
         <a href="#/docs">Docs</a>
         {#if p.space}
-          › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
+          {@const ownSpace = treeSpace(tree?.spaces ?? [], p.source_id, p.space.key)}
+          › <a href={crumbSpace ?? undefined}>{ownSpace ? spaceTitle(ownSpace, tree?.spaces ?? []) : spaceName(p.space)}</a>
         {/if}
         {#if parent}
           › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}

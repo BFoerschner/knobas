@@ -183,6 +183,45 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     );
 }
 
+/// Each space carries its source's name (the live run on #2479): the live
+/// Confluence's *Engineering* and the mock's read the same in Docs, and the
+/// reader tells them apart by where they come from.
+#[tokio::test]
+async fn each_space_names_its_source() {
+    let pool = pool().await;
+    let live = confluence(&pool).await;
+    let mock = confluence(&pool).await;
+    sqlx::query("update knobas.source_config set display_name = $2 where id = $1")
+        .bind(&live)
+        .bind("Tidewater Confluence")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.source_config set display_name = ' ' where id = $1")
+        .bind(&mock)
+        .execute(&pool)
+        .await
+        .unwrap();
+    page(&pool, &live, "1", "Eng home", "ENG", &[], "").await;
+    page(&pool, &mock, "1", "Eng home", "ENG", &[], "").await;
+
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    let named = |source: &str| {
+        tree.spaces
+            .iter()
+            .find(|s| s.source_id == source)
+            .map(|s| s.source_name.clone())
+    };
+    assert_eq!(named(&live).as_deref(), Some("Tidewater Confluence"));
+    assert_eq!(
+        named(&mock),
+        Some(mock.clone()),
+        "a source with a blank name is called by its id"
+    );
+}
+
 /// Only live pages are in the tree: not a withdrawn one, and none of a source
 /// the user turned off (#981 reads the pages without `sync.live_item`).
 #[tokio::test]

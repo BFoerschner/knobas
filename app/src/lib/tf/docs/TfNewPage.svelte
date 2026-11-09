@@ -24,7 +24,7 @@
   import TfKey from "../TfKey.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { drafts } from "../drafts.svelte";
-  import { firstPage, pagesByPath, spaceId } from "./docs";
+  import { firstPage, pagesByPath, spaceId, spaceTitle } from "./docs";
   import { untrack } from "svelte";
 
   let {
@@ -128,7 +128,7 @@
       <span>Space</span>
       <select aria-label="Space" bind:value={picked}>
         {#each tree.spaces as s (spaceId(s))}
-          <option value={spaceId(s)}>{s.name ?? s.key}</option>
+          <option value={spaceId(s)}>{spaceTitle(s, tree.spaces)}</option>
         {/each}
       </select>
       <span>Under</span>

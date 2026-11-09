@@ -204,9 +204,38 @@ export function spaceHash(spaces: readonly SpaceRef[], space: SpaceRef): string 
   return `#/docs/space/${encodeURIComponent(shared ? `${space.source_id}:${space.key}` : space.key)}`;
 }
 
-/** The picker's words for a space: *Engineering (12)*. */
-export function spaceLabel(space: DocSpace): string {
-  return `${space.name ?? space.key} (${space.pages.length})`;
+/** A space's name: its own, else its key. */
+export function spaceName(space: { key: string; name: string | null }): string {
+  return space.name ?? space.key;
+}
+
+/** A space as {@link spaceSource} reads it: where it comes from and what it is called. */
+type NamedSpace = { source_id: string; source_name: string; key: string; name: string | null };
+
+/**
+ * The source a space names beside its name, or `null`. Only where a space of another source in `spaces` has the same
+ * name: the live Confluence's *Engineering* and the mock's read the same in Docs (the live run, 2026-11-09), and a space
+ * whose name is its own needs no more words, as Code's twin rows do (`twinRows`).
+ */
+export function spaceSource(space: NamedSpace, spaces: readonly NamedSpace[]): string | null {
+  const name = spaceName(space);
+  return spaces.some((s) => s.source_id !== space.source_id && spaceName(s) === name) ? space.source_name : null;
+}
+
+/** A space's name, with its source where another source's space has the same name: *Engineering on Tidewater Confluence*. */
+export function spaceTitle(space: NamedSpace, spaces: readonly NamedSpace[]): string {
+  const source = spaceSource(space, spaces);
+  return source === null ? spaceName(space) : `${spaceName(space)} on ${source}`;
+}
+
+/** The tree's space a page or hit of `source_id` names by `key`, for {@link spaceTitle}. */
+export function treeSpace<Space extends NamedSpace>(spaces: readonly Space[], sourceId: string, key: string): Space | undefined {
+  return spaces.find((s) => s.source_id === sourceId && s.key === key);
+}
+
+/** The picker's words for a space: *Engineering (12)*, and its source where another's has its name. */
+export function spaceLabel(space: DocSpace, spaces: readonly DocSpace[] = []): string {
+  return `${spaceTitle(space, spaces)} (${space.pages.length})`;
 }
 
 /**
@@ -674,9 +703,9 @@ export function sectionMatches(blocks: DocBlock[], stems: string[]): Map<number,
   return out;
 }
 
-/** The search field's scope, in the placeholder and the header line: *all spaces* or the space's name. */
-export function scopeName(space: DocSpace | undefined): string {
-  return space === undefined ? "all spaces" : (space.name ?? space.key);
+/** The search field's scope, in the placeholder and the header line: *all spaces* or the space's name, with its source where another's has the name. */
+export function scopeName(space: DocSpace | undefined, spaces: readonly DocSpace[] = []): string {
+  return space === undefined ? "all spaces" : spaceTitle(space, spaces);
 }
 
 /** The hits' header line: *5 pages in all spaces*. */
@@ -692,9 +721,16 @@ export function pagePlace(space: { key: string; name: string | null } | null, pa
   return [space === null ? null : (space.name ?? space.key), path].filter(Boolean).join(" › ");
 }
 
-/** Where a hit sits: {@link pagePlace}, and within one space's search without that space, so only the pages above it, if any. */
-export function hitWhere(hit: Pick<DocHit, "space" | "path">, spanning: boolean): string {
-  return pagePlace(spanning ? hit.space : null, hit.path);
+/**
+ * Where a hit sits: {@link pagePlace}, and within one space's search without that space, so only the pages above it, if
+ * any. A space another source's space shares a name with says its source (`spaceTitle`), read from `spaces`, the tree's.
+ */
+export function hitWhere(hit: Pick<DocHit, "space" | "path"> & { entity_id?: string }, spanning: boolean, spaces: readonly DocSpace[] = []): string {
+  if (!spanning || hit.space === null) return pagePlace(null, hit.path);
+  const id = hit.entity_id ?? "";
+  const source = id.slice(0, Math.max(0, id.indexOf(":")));
+  const space = treeSpace(spaces, source, hit.space.key);
+  return pagePlace(space === undefined ? hit.space : { key: space.key, name: spaceTitle(space, spaces) }, hit.path);
 }
 
 /** What a snippet opens with: its section, or *Comment by Priya*. */

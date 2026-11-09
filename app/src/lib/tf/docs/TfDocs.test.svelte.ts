@@ -24,6 +24,7 @@ const TREE: DocsTree = {
   spaces: [
     {
       source_id: "confluence",
+      source_name: "confluence",
       key: "OPS",
       name: "Operations",
       pages: [
@@ -31,7 +32,7 @@ const TREE: DocsTree = {
         { entity_id: "confluence:2", title: "On-call handbook", parent: "confluence:1" },
       ],
     },
-    { source_id: "confluence", key: "ENG", name: "Engineering", pages: [{ entity_id: "confluence:9", title: "Eng home", parent: null }] },
+    { source_id: "confluence", source_name: "confluence", key: "ENG", name: "Engineering", pages: [{ entity_id: "confluence:9", title: "Eng home", parent: null }] },
   ],
   last_read: "confluence:2",
   for_you: [],
@@ -318,6 +319,7 @@ test("on a page of the second source holding ENG, the breadcrumb's space link op
       ...TREE.spaces,
       {
         source_id: "wiki",
+        source_name: "wiki",
         key: "ENG",
         name: "Engineering",
         pages: [
@@ -339,12 +341,14 @@ test("on a page of the second source holding ENG, the breadcrumb's space link op
   const props = $state({ ready: true, rest: ["wiki:7"], job: null, ports: io });
   view = mount(TfDocs, { target, props });
   await settle();
-  const link = [...target.querySelectorAll<HTMLAnchorElement>(".tf-rd-crumb a")].find((a) => a.textContent === "Engineering")!;
+  // Two spaces called Engineering: each names its source (the live run, 2026-11-09).
+  const link = [...target.querySelectorAll<HTMLAnchorElement>(".tf-rd-crumb a")].find((a) => a.textContent === "Engineering on wiki")!;
   expect(link.getAttribute("href")).toBe("#/docs/space/wiki%3AENG");
   const route = parseTfHash(link.getAttribute("href")!);
   props.rest = route.view === "full" ? route.rest : [];
   await settle();
-  expect(target.querySelector(".tf-dh h1")?.textContent).toBe("Engineering");
+  expect(target.querySelector(".tf-dh h1")?.textContent).toBe("Engineering on wiki");
+  expect([...target.querySelectorAll<HTMLOptionElement>("select[aria-label='Space'] option")].map((o) => o.textContent)).toContain("Engineering on wiki (2)");
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("wiki/ENG");
 });
 
@@ -384,7 +388,7 @@ function bulkTree(n: number, reads: { parent: number }): DocsTree {
       },
     });
   });
-  return { spaces: [{ source_id: "confluence", key: "BULK", name: "Bulk", pages }], last_read: null, for_you: [] };
+  return { spaces: [{ source_id: "confluence", source_name: "confluence", key: "BULK", name: "Bulk", pages }], last_read: null, for_you: [] };
 }
 
 test("a 4,000-page space draws its tree in one pass over the pages, and a closed fold draws nothing under it (#2200)", async () => {
@@ -1674,7 +1678,7 @@ const LINKED: DocPage["backlinks"] = [
 ];
 
 /** The tree, with another source's TEAM: a backlink's space is named from the page's own source only. */
-const TREE_ELSEWHERE: DocsTree = { ...TREE, spaces: [...TREE.spaces, { source_id: "wiki", key: "TEAM", name: "Not this one", pages: [] }] };
+const TREE_ELSEWHERE: DocsTree = { ...TREE, spaces: [...TREE.spaces, { source_id: "wiki", source_name: "wiki", key: "TEAM", name: "Not this one", pages: [] }] };
 
 const article = () => target.querySelector(".tf-rd-page")!;
 const LONG_LINKED: DocPage["backlinks"] = [
@@ -2058,7 +2062,7 @@ test("For you, narrowed to a space, leaves out another source's pages with the s
     ...TREE,
     spaces: [
       ...TREE.spaces,
-      { source_id: "notes", key: "OPS", name: "Notes ops", pages: [{ entity_id: "notes:7", title: "Notes rota", parent: null }] },
+      { source_id: "notes", source_name: "notes", key: "OPS", name: "Notes ops", pages: [{ entity_id: "notes:7", title: "Notes rota", parent: null }] },
     ],
     for_you: [
       { entity_id: "confluence:1", title: "Ops home", space_key: "OPS", by_name: "Priya Nair" },
@@ -2406,7 +2410,7 @@ test("the choice is kept for the session, and without a job there is no switch",
 test("Docs draws the spaces as read and keeps none by source: the read narrows itself to the wiki's fillers (#1296)", async () => {
   const tree: DocsTree = {
     ...TREE,
-    spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
+    spaces: [...TREE.spaces, { source_id: "notes", source_name: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
   };
   await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree) }));
 
@@ -2418,7 +2422,7 @@ test("Docs draws the spaces as read and keeps none by source: the read narrows i
 test("Docs draws the search hits as read, the read being the wiki's (#1296)", async () => {
   const tree: DocsTree = {
     ...TREE,
-    spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
+    spaces: [...TREE.spaces, { source_id: "notes", source_name: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
   };
   const onNotes = { ...HITS.hits[0]!, entity_id: "notes:1", title: "Welcome", space: { key: "HB", name: "Handbook" }, path: null };
   const answer: DocsHits = { ...HITS, total: HITS.hits.length + 1, hits: [...HITS.hits, onNotes] };
@@ -2501,6 +2505,7 @@ test("a page queued under a closed fold opens the folds around it, and they stay
     spaces: [
       {
         source_id: "confluence",
+        source_name: "confluence",
         key: "OPS",
         name: "Operations",
         pages: [
@@ -3605,6 +3610,7 @@ const DEEP: DocsTree = {
   spaces: [
     {
       source_id: "confluence",
+      source_name: "confluence",
       key: "OPS",
       name: "Operations",
       pages: [

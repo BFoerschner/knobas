@@ -13,7 +13,7 @@ import { EMBED_REPORT_MS, EMBED_URL_HEIGHT } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
-  spaces: [{ source_id: "confluence", key: "ENG", name: "Engineering", pages: [{ entity_id: "confluence:5", title: "Payments API", parent: null }] }],
+  spaces: [{ source_id: "confluence", source_name: "confluence", key: "ENG", name: "Engineering", pages: [{ entity_id: "confluence:5", title: "Payments API", parent: null }] }],
   last_read: "confluence:5",
   for_you: [],
 };

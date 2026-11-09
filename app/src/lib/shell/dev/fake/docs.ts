@@ -73,6 +73,8 @@ import { keyOf } from "../../../time/format";
 const WIKI_ROLE = "wiki";
 /** The source the fixture's spaces and pages are of. */
 const SOURCE = "confluence";
+/** What the fake's Confluence is called, as its pages say (`source_name`). */
+const SOURCE_NAME = "Confluence";
 
 /** Whether the fixture's source fills the wiki, which both Docs reads narrow to (#1296). */
 function wikiFilled(): boolean {
@@ -544,6 +546,7 @@ function tree(bulk: FakePage[]): DocsTree {
   if (!wikiFilled() || fakeEmpty("docs")) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
     source_id: SOURCE,
+    source_name: SOURCE_NAME,
     key,
     name,
     pages: PAGES.filter((p) => p.space === key)
@@ -553,6 +556,7 @@ function tree(bulk: FakePage[]): DocsTree {
   if (bulk.length > 0)
     spaces.push({
       source_id: SOURCE,
+      source_name: SOURCE_NAME,
       key: BULK_KEY,
       name: BULK_NAME,
       pages: bulk.map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
@@ -692,7 +696,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
   return {
     entity_id: found.id,
     source_id: "confluence",
-    source_name: "Confluence",
+    source_name: SOURCE_NAME,
     title: found.title,
     space: { key: found.space, name: SPACES[found.space] ?? (found.space === BULK_KEY ? BULK_NAME : null) },
     ancestors: found.parent === null ? [] : [{ title: found.parentTitle ?? "", entity_id: found.parent }],

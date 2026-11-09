@@ -14,6 +14,7 @@
   import TfMarked from "./TfMarked.svelte";
   import { clockLabel } from "../../time/format";
   import { hitLine, hitsLine, hitWhere, pageHash, snippetLabel, stem } from "./docs";
+  import type { DocSpace } from "../../ipc/entity";
 
   let {
     found,
@@ -22,6 +23,7 @@
     kept,
     me,
     answered = false,
+    spaces = [],
     onall,
     onpick,
   }: {
@@ -37,6 +39,8 @@
     me: string[];
     /** The main column says no page matches, so the rail does not say it again. */
     answered?: boolean;
+    /** The tree's spaces, so a hit's space says its source where another's has its name. */
+    spaces?: readonly DocSpace[];
     /** Widen the search: to every space, or from the job's pages to all pages. */
     onall: () => void;
     /** A hit is opened: the reader keeps the query. */
@@ -63,7 +67,7 @@
 </div>
 {#each found.hits as hit (hit.entity_id)}
   {@const label = snippetLabel(hit.snippet)}
-  {@const where = hitWhere(hit, kept !== "space")}
+  {@const where = hitWhere(hit, kept !== "space", spaces)}
   <a
     class="tf-dl-hit"
     href={pageHash(hit.entity_id)}

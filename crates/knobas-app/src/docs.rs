@@ -61,6 +61,10 @@ pub struct DocForYou {
 #[ts(export_to = "entity.ts")]
 pub struct DocSpace {
     pub source_id: String,
+    /// What its source is called, its id where the name is blank: how Docs
+    /// tells two spaces of one name apart, the live one and the mock's
+    /// *Engineering* (the live run on #2479).
+    pub source_name: String,
     pub key: String,
     /// The space's name, `None` where no page of it carries one knobas can
     /// read.
@@ -210,6 +214,7 @@ pub struct DocAncestor {
 /// this way (31 and 21 ms analyzed).
 const PAGES: &str = concat!(
     "select i.entity_id, i.title, p.source_id, p.key, p.name, \
+       coalesce(nullif(btrim(s.display_name), ''), s.id) as source_name, \
        (select pn.name from ",
     knobas_core::declared_parent_names!("$1"),
     " pn order by pn.pos desc, pn.name_ord limit 1) as parent \
@@ -272,6 +277,7 @@ pub async fn tree(
         if !same {
             spaces.push(DocSpace {
                 source_id,
+                source_name: row.get("source_name"),
                 key,
                 name: None,
                 pages: Vec::new(),

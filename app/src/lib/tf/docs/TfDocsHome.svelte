@@ -22,7 +22,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { sourceRoles, WIKI } from "../roles.svelte";
-  import { continueReading, forYouHash, forYouWhy, pageHash, pagesByLevel, spaceHash, spaceId, type JobPageGroup } from "./docs";
+  import { continueReading, forYouHash, forYouWhy, pageHash, pagesByLevel, spaceHash, spaceId, spaceName, spaceSource, type JobPageGroup } from "./docs";
 
   let {
     tree,
@@ -195,11 +195,12 @@
         <div class="tf-dh-spaces">
           {#each tree.spaces as space (spaceId(space))}
             {@const rows = tileRows(space)}
+            {@const from = spaceSource(space, tree.spaces)}
             <article class="tf-panel tf-dh-space">
               <header>
                 <!-- The tile's one link: its whole head, with the chevron a ticket card's rows have, so it says it opens. -->
                 <a class="tf-dh-spacelink" href={spaceHash(tree.spaces, space)}>
-                  <h3>{space.name ?? space.key}</h3>
+                  <h3>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</h3>
                   <span class="tf-count" title={counted(space.pages.length, "page", "pages")}>{space.pages.length}</span>
                   <span class="tf-chev" aria-hidden="true">›</span>
                 </a>

@@ -1161,7 +1161,13 @@ comment_by: string | null, segments: Array<{ text: string, hit: boolean, }>, };
 /**
  * One space and its pages.
  */
-export type DocSpace = { source_id: string, key: string, 
+export type DocSpace = { source_id: string, 
+/**
+ * What its source is called, its id where the name is blank: how Docs
+ * tells two spaces of one name apart, the live one and the mock's
+ * *Engineering* (the live run on #2479).
+ */
+source_name: string, key: string, 
 /**
  * The space's name, `None` where no page of it carries one knobas can
  * read.

@@ -8,9 +8,11 @@
 
   import type { DocSpace } from "../../ipc/entity";
   import { counted } from "../counted";
-  import { childrenByParent, pageHash } from "./docs";
+  import { childrenByParent, pageHash, spaceName, spaceSource } from "./docs";
 
-  let { space, sync }: { space: DocSpace; sync?: Snippet | undefined } = $props();
+  /** `spaces` is the tree's, so a space whose name another source's space has says its source. */
+  let { space, spaces = [], sync }: { space: DocSpace; spaces?: readonly DocSpace[]; sync?: Snippet | undefined } = $props();
+  const from = $derived(spaceSource(space, spaces));
 
   /** The pages in reading order, each with its depth. */
   const rows = $derived.by(() => {
@@ -39,13 +41,13 @@
 <div class="tf-dh">
   <header class="tf-fhead">
     <div>
-      <h1>{space.name ?? space.key}</h1>
+      <h1>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</h1>
       <div class="tf-sub">{counted(space.pages.length, "page", "pages")}</div>
     </div>
     {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
   </header>
   <div class="tf-dh-body">
-    <section class="tf-panel" aria-label="Pages in {space.name ?? space.key}">
+    <section class="tf-panel" aria-label="Pages in {spaceName(space)}{from === null ? '' : ` on ${from}`}">
       <div class="tf-dh-rows">
         {#each rows as row (row.id)}
           <a class="tf-dh-row tf-dh-rowt tf-dh-d{Math.min(row.depth, 4)}" class:tf-dh-holds={row.holds} href={pageHash(row.id)}><span class="tf-dh-t">{row.title}</span></a>

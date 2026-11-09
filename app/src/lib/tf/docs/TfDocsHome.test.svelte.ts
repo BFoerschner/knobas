@@ -14,6 +14,7 @@ const TREE: DocsTree = {
   spaces: [
     {
       source_id: "confluence",
+      source_name: "confluence",
       key: "OPS",
       name: "Operations",
       pages: [
@@ -23,6 +24,7 @@ const TREE: DocsTree = {
     },
     {
       source_id: "confluence",
+      source_name: "confluence",
       key: "ENG",
       name: "Engineering",
       pages: [
@@ -109,6 +111,7 @@ test("each space is a tile: its one link is its name, which opens the space, and
 test("a short top fills its tile from the level below, so an index page does not stand alone in a box (F-407)", () => {
   const space = {
     source_id: "confluence",
+    source_name: "confluence",
     key: "ADR",
     name: "Architecture decisions",
     pages: [
@@ -144,7 +147,7 @@ test("with This job on, a job's row says what else the page is, which its own pa
 });
 
 test("a space with every page listed offers no link to more", () => {
-  const space = { source_id: "confluence", key: "S", name: null, pages: [{ entity_id: "c:1", title: "One", parent: null }] };
+  const space = { source_id: "confluence", source_name: "confluence", key: "S", name: null, pages: [{ entity_id: "c:1", title: "One", parent: null }] };
   draw({ tree: { spaces: [space], last_read: null, for_you: [] } });
   expect(target.querySelector(".tf-dh-space h3")?.textContent).toBe("S");
   expect(target.querySelector(".tf-dh-more")).toBeNull();
@@ -204,7 +207,7 @@ test("an empty tree with a wiki source says it has not synced", () => {
 
 test("a page is listed once: a tile skips what the panels hold and keeps its whole count, and says so when that is all of it", () => {
   const tree: DocsTree = {
-    spaces: [{ source_id: "confluence", key: "S", name: "S", pages: [{ entity_id: "confluence:s1", title: "Only page", parent: null }] }],
+    spaces: [{ source_id: "confluence", source_name: "confluence", key: "S", name: "S", pages: [{ entity_id: "confluence:s1", title: "Only page", parent: null }] }],
     last_read: "confluence:s1",
     for_you: [],
   };
