@@ -35,7 +35,7 @@ use crate::source::GiteaSource;
 const OVERVIEW: &str = "overview";
 const PULLS: &str = "pulls";
 pub(super) const BRANCHES: &str = "branches";
-const COMMITS: &str = "commits";
+pub(super) const COMMITS: &str = "commits";
 
 /// How many branches a *New pull request…* asks whether they are ahead, the
 /// most recently committed first: one request each, on every opening of the

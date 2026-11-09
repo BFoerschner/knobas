@@ -330,6 +330,15 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         paths: Option<String>,
+        /// The whole git sha of the commit the listing was read at, where the
+        /// source has one (the smoothness pass, PR #2479): what the shell
+        /// holds its checkout's copy of the same tree to, read first, so a
+        /// branch that moved since the mirror's sync is noticed. Compared,
+        /// never parsed or sent back. `None` where the source cannot say.
+        /// Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        commit: Option<String>,
     },
     File {
         trail: Vec<Crumb>,
@@ -1036,6 +1045,7 @@ mod tests {
                 truncated: true,
                 url: Some("https://gitea.example/o/r/src/branch/main/src".into()),
                 paths: Some("paths".into()),
+                commit: None,
             },
             Block::File {
                 trail: vec![Crumb {
@@ -1191,6 +1201,7 @@ mod tests {
             truncated: false,
             url: None,
             paths: None,
+            commit: None,
         };
         assert_eq!(
             serde_json::to_value(&tree).unwrap(),

@@ -29,6 +29,7 @@ pub mod code_pages;
 pub mod contract;
 pub mod diff;
 pub mod docs;
+pub mod file_text;
 pub mod fingerprint;
 pub mod grants;
 pub mod instance;

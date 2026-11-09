@@ -38,6 +38,8 @@ use knobas_source::view::{
     Block, Crumb, EntryKind, FileBytes, TreeEntry, TreeSections, ViewSection,
 };
 
+use knobas_source::file_text::{BYTE_CAP, capped, is_binary, language_of};
+
 use super::rows::RepoRecord;
 use crate::map;
 use crate::source::GiteaSource;
@@ -47,12 +49,6 @@ pub(super) const FILES: &str = "files";
 
 /// The most entries of one directory a view carries.
 const ENTRY_CAP: usize = 1_000;
-/// The most of a file a view carries, in bytes.
-const BYTE_CAP: usize = 1_000_000;
-/// The most of a file a view carries, in lines.
-const LINE_CAP: usize = 10_000;
-/// How far into a file a NUL byte makes it binary, as git looks.
-const SNIFF: usize = 8_000;
 /// The whole tree's id (#2311).
 const PATHS: &str = "paths";
 /// How many entries one page of Gitea's recursive tree is asked for: its
@@ -388,6 +384,7 @@ async fn directory(
         truncated,
         url: at.page(url.as_deref()),
         paths: Some(at.id(Place::Every)),
+        commit: Some(at.sha.to_owned()),
     })
 }
 
@@ -500,6 +497,7 @@ async fn every(
         truncated,
         url: None,
         paths: None,
+        commit: Some(at.sha.to_owned()),
     })
 }
 
@@ -522,7 +520,7 @@ async fn file(
             .client
             .raw_capped(owner, repo, path, at.sha, BYTE_CAP),
     )?;
-    let binary = raw.bytes.iter().take(SNIFF).any(|b| *b == 0);
+    let binary = is_binary(&raw.bytes);
     let (text, truncated) = if binary {
         (String::new(), false)
     } else {
@@ -580,33 +578,6 @@ pub(super) async fn bytes(
     Ok(FileBytes::TooLarge { size })
 }
 
-/// A file's text within both caps, and whether either cut it. `cut` says the
-/// read already stopped past [`BYTE_CAP`].
-fn capped(bytes: &[u8], cut: bool) -> (String, bool) {
-    let mut kept = bytes;
-    let mut truncated = cut || bytes.len() > BYTE_CAP;
-    if truncated {
-        let head = &bytes[..BYTE_CAP.min(bytes.len())];
-        // At the last whole line; a cap inside the first line keeps it cut.
-        kept = head
-            .iter()
-            .rposition(|b| *b == b'\n')
-            .map_or(head, |at| &head[..=at]);
-    }
-    if let Some(end) = kept
-        .iter()
-        .enumerate()
-        .filter(|(_, b)| **b == b'\n')
-        .nth(LINE_CAP - 1)
-        .map(|(at, _)| at)
-        && end + 1 < kept.len()
-    {
-        kept = &kept[..=end];
-        truncated = true;
-    }
-    (String::from_utf8_lossy(kept).into_owned(), truncated)
-}
-
 /// The steps from the tree's top (named by the ref) to `path`: a directory's
 /// each, and where `is_file`, the file's own last.
 fn trail(at: &At<'_>, path: &str, is_file: bool) -> Vec<Crumb> {
@@ -637,65 +608,9 @@ fn trail(at: &At<'_>, path: &str, is_file: bool) -> Vec<Crumb> {
     crumbs
 }
 
-/// The language a file's name says it is in, where it is one a reader would
-/// name; `None` otherwise. A hint only: nothing is highlighted (#701).
-fn language_of(path: &str) -> Option<&'static str> {
-    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-    match name.as_str() {
-        "dockerfile" => return Some("dockerfile"),
-        "makefile" | "gnumakefile" => return Some("makefile"),
-        "justfile" => return Some("just"),
-        _ => {}
-    }
-    let (_, ext) = name.rsplit_once('.')?;
-    Some(match ext {
-        "rs" => "rust",
-        "md" | "markdown" | "mdown" | "mkd" => "markdown",
-        "ts" | "tsx" | "mts" | "cts" => "typescript",
-        "js" | "jsx" | "mjs" | "cjs" => "javascript",
-        "svelte" => "svelte",
-        "py" => "python",
-        "go" => "go",
-        "java" => "java",
-        "kt" | "kts" => "kotlin",
-        "rb" => "ruby",
-        "c" | "h" => "c",
-        "cc" | "cpp" | "cxx" | "hpp" | "hh" => "cpp",
-        "cs" => "csharp",
-        "swift" => "swift",
-        "sh" | "bash" | "zsh" => "shell",
-        "sql" => "sql",
-        "json" => "json",
-        "yaml" | "yml" => "yaml",
-        "toml" => "toml",
-        "xml" => "xml",
-        "html" | "htm" => "html",
-        "css" => "css",
-        "scss" => "scss",
-        "gradle" => "gradle",
-        "tf" => "terraform",
-        "proto" => "protobuf",
-        "txt" => "text",
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_file_is_cut_at_whole_lines() {
-        assert_eq!(capped(b"a\nb\n", false), ("a\nb\n".to_owned(), false));
-        assert_eq!(
-            capped(b"no newline", false),
-            ("no newline".to_owned(), false)
-        );
-        // A read cut past the cap keeps the lines that fit.
-        let mut long = b"one\n".to_vec();
-        long.extend(std::iter::repeat_n(b'x', BYTE_CAP + 5));
-        assert_eq!(capped(&long, true), ("one\n".to_owned(), true));
-    }
 
     /// #2298: the scheme the shell builds a deep link's ids by is the one
     /// this tab parses, at the tip.
@@ -720,14 +635,5 @@ mod tests {
                 })
             );
         }
-    }
-
-    #[test]
-    fn languages_are_named_by_extension_or_name() {
-        assert_eq!(language_of("src/lib.rs"), Some("rust"));
-        assert_eq!(language_of("README.MD"), Some("markdown"));
-        assert_eq!(language_of("build/Dockerfile"), Some("dockerfile"));
-        assert_eq!(language_of("LICENSE"), None);
-        assert_eq!(language_of("a.unknownext"), None);
     }
 }

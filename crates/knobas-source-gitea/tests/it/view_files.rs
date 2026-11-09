@@ -964,7 +964,7 @@ async fn a_commit_lists_its_directories_at_its_sha() {
 /// What the app may keep (ADR-0032): a commit's tree and diff at a whole
 /// sha, and a branch's or repository's tree read at the sha its id names
 /// (#2241). A branch's tree by its tip, and a repository's branch list, move
-/// (#2242). A short sha is only unique today, a commit's overview carries
+/// (#2242), and so do a branch's and a repository's latest commits (PR #2479). A short sha is only unique today, a commit's overview carries
 /// checks that move, and a whole view a toolbar.
 #[tokio::test]
 async fn what_names_a_whole_sha_is_fixed_and_what_reads_a_tip_moves() {
@@ -987,6 +987,9 @@ async fn what_names_a_whole_sha_is_fixed_and_what_reads_a_tip_moves() {
         (ENTITY.to_owned(), Some("file:src/lib.rs"), Moving),
         (ENTITY.to_owned(), Some("files"), Moving),
         (ENTITY.to_owned(), Some("branches"), Moving),
+        (ENTITY.to_owned(), Some("commits"), Moving),
+        (BRANCH.to_owned(), Some("commits"), Moving),
+        (at_commit(SHA), Some("commits"), Live),
         (ENTITY.to_owned(), Some("overview"), Live),
         (ENTITY.to_owned(), None, Live),
         (BRANCH.to_owned(), None, Live),

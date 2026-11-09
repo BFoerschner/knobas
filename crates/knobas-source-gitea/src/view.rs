@@ -123,6 +123,12 @@ pub(crate) fn standing(
             Standing::Moving
         }
         (Ok(GiteaKey::Repo { .. }), Some(repo::BRANCHES)) => Standing::Moving,
+        // The latest commits of a branch, or of a repository's default
+        // branch, move with every push and carry no action: kept, and read
+        // again behind (the smoothness pass of PR #2479).
+        (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(repo::COMMITS)) => {
+            Standing::Moving
+        }
         _ => Standing::Live,
     }
 }
