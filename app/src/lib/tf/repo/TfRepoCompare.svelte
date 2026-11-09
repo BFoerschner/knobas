@@ -289,7 +289,9 @@
       failed = ipcErrorMessage(error);
       missing = isIpcError(error) && error.code === "not_found";
     };
-    reading = true;
+    // Read again behind what is drawn (a refresh, the page shown again), the diff stays live: dimmed it would be inert,
+    // and drop the reader's focus. Another base or branch dims what is drawn while its own diff is read (#2246).
+    if (!again) reading = true;
     const [from, to] = [base, head ?? ""];
     // Local-first, as every diff (ADR-0036, Spec 6 of the review of spec #2234): branch names are the source's, and
     // its compare names the two commits (`range`) that *Open as diff* takes to a checkout.

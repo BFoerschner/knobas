@@ -428,3 +428,32 @@ test("a list read again keeps the reader's place and focus: a row added above mo
   expect(document.activeElement).toBe(link);
   scroller.replaceWith(target);
 });
+
+test("Compare at an address naming no branch keeps the branch it proposed when a list read again brings a newer one", async () => {
+  await drawLive([REPO, "compare"]);
+  expect(target.querySelector<HTMLSelectElement>("#tf-cmp-from")!.value).toBe("feature/PAY-231-sepa-retry");
+
+  forge = ["fix/newer"];
+  await raise("view:fresh", { entity_id: REPO, section: "branches" });
+  expect(offered()).toContain("fix/newer");
+  expect(target.querySelector<HTMLSelectElement>("#tf-cmp-from")!.value, "From stays under the reader").toBe("feature/PAY-231-sepa-retry");
+  expect(fromList()).toContain("fix/newer");
+});
+
+test("a listing read again behind what is drawn stays live while it reads: nothing goes inert under the reader's focus", async () => {
+  await drawLive([REPO, "branches"]);
+  const link = [...target.querySelectorAll<HTMLAnchorElement>("tr[data-place] a")].find((a) => text(a) === "New pull request")!;
+  link.focus();
+  let open!: () => void;
+  gate = new Promise((resolve) => (open = resolve));
+  forge = ["fix/slow"];
+  await raise("view:fresh", { entity_id: REPO, section: "branches" });
+  // WebKit drops focus from an inert subtree; jsdom does not, so the subtree is what is checked.
+  expect(link.closest("[inert]"), "the listing went inert while it read").toBeNull();
+  expect(target.querySelector(".tf-wait-dim")).toBeNull();
+  gate = null;
+  open();
+  await settle();
+  expect(document.activeElement).toBe(link);
+  expect(text(target.querySelector("table"))).toContain("fix/slow");
+});

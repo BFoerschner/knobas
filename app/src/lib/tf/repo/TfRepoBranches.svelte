@@ -158,7 +158,8 @@
    * fails.
    */
   function readBranches(id: string, alive: () => boolean, again = false): Promise<unknown> {
-    reading = true;
+    // Read again behind what is drawn, the listing stays live: dimmed it would be inert, and drop the reader's focus.
+    if (!again) reading = true;
     const mine = ++readNo;
     return ports.entityView(id, "branches").then(
       (view) => {

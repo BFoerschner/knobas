@@ -669,6 +669,20 @@
       : (known?.find((option) => !option.isDefault && !sentFrom.has(option.name))?.name ?? known?.find((option) => !option.isDefault)?.name ?? branchName),
   );
 
+  /**
+   * The branch Compare at an address naming none draws (`compare` alone): what the page proposed when it first drew there,
+   * held for that address and branch read at, so a list read again that brings a newer branch does not change *From* under
+   * the reader (the third smoothness pass of PR #2479). Proposed again once the branch held is gone from the list.
+   */
+  let compareHeld: { key: string; head: string | null } | null = null;
+  const compareProposed = $derived.by(() => {
+    const key = `${(held.places.compare ?? []).join("\u0000")}\u0001${at ?? ""}`;
+    const kept = compareHeld;
+    if (kept !== null && kept.key === key && kept.head !== null && (known ?? []).some((option) => option.name === kept.head)) return kept.head;
+    compareHeld = { key, head: proposed };
+    return proposed;
+  });
+
   /** How many branches the header asks before it gives up on finding one with nothing open: a source's burst stays small. */
   const ASKED = 8;
   /** How many of them are read at once, as the Branches tab reads them: one at a time took 2.5 s on a live forge. */
@@ -913,7 +927,7 @@
                   {source}
                   branches={known}
                   {branchesReading}
-                  head={placeOf(one).branch ?? proposed}
+                  head={placeOf(one).branch ?? compareProposed}
                   base={placeOf(one).base}
                   defaultBranch={defaultBranch?.name ?? null}
                   {refreshed}
