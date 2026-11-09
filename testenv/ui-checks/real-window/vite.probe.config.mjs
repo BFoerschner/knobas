@@ -10,8 +10,12 @@ import base from "../../../app/vite.config.ts";
 const appRoot = fileURLToPath(new URL("../../../app", import.meta.url));
 
 const PROBE_ID = "/@rw-probe";
+// RW_LIVE=1 (`real-window.sh start --live`): the page keeps the real bridge
+// and talks to the demo profile's sources, so the window shows live data.
+const live = process.env.RW_LIVE === "1";
+
 const probeSource = `
-if (!new URLSearchParams(location.search).has("fake-ipc")) {
+if (${!live} && !new URLSearchParams(location.search).has("fake-ipc")) {
   location.replace("/?fake-ipc" + (location.hash || "#/inbox"));
 }
 const log = (window.__rwLog = []);
@@ -79,4 +83,4 @@ const probe = {
   },
 };
 
-export default (env) => mergeConfig(typeof base === "function" ? base(env) : base, { root: appRoot, plugins: [rename, probe], optimizeDeps: { exclude: ["@tauri-apps/api", "@tauri-apps/plugin-notification", "@tauri-apps/plugin-opener"] }, cacheDir: `${process.env.RW_STATE ?? "/tmp"}/vite-cache` });
+export default (env) => mergeConfig(typeof base === "function" ? base(env) : base, { root: appRoot, plugins: live ? [probe] : [rename, probe], optimizeDeps: { exclude: ["@tauri-apps/api", "@tauri-apps/plugin-notification", "@tauri-apps/plugin-opener"] }, cacheDir: `${process.env.RW_STATE ?? "/tmp"}/vite-cache${live ? "-live" : ""}` });

@@ -3,11 +3,14 @@
 #
 # headless Chrome (trips.mjs) sends events a page makes; this sends the ones a person makes: CGEvent pointer moves with
 # real movementX, presses, drags, wheels and keys, through the window server into the app's own WKWebView, under its own
-# menu. The page runs under ?fake-ipc, so it reads the same mock corpus as trips.mjs and never a live product. A probe on
+# menu. The page runs under ?fake-ipc, so it reads the same mock corpus as trips.mjs and never a live product, unless
+# started with --live, which keeps the real bridge for the demo profile's sources. A probe on
 # the dev server's HMR socket reads the page back (`js`); nothing here makes an event in the page.
 #
 # Usage: testenv/ui-checks/real-window.sh <command>
-#   start [W H]         start the dev server with the probe and the debug app on the demo profile, its window at W x H (1440 x 900)
+#   start [--live] [W H] start the dev server with the probe and the debug app on the demo profile, its window at W x H (1440 x 900).
+#                       --live keeps the real bridge and the demo profile's stored credentials, so the window shows what the
+#                       profile's sources synced (`just live-sources` puts the live products there) instead of the mock corpus
 #   stop                quit both
 #   restart             quit the app and start it again (a changed system setting, such as Full Keyboard Access, is read at launch)
 #   js EXPR             the value of EXPR in the page, as JSON
@@ -55,16 +58,21 @@ helpers() {
 }
 
 app_start() {
-    local width=$1 height=$2
-    KNOBAS_SECRET_STORE=memory "$repo/target/debug/knobas-app" --demo >"$state/app.log" 2>&1 &
+    local width=$1 height=$2 want=fake-ipc
+    if [ -f "$state/live" ]; then
+        want=live
+        "$repo/target/debug/knobas-app" --demo >"$state/app.log" 2>&1 &
+    else
+        KNOBAS_SECRET_STORE=memory "$repo/target/debug/knobas-app" --demo >"$state/app.log" 2>&1 &
+    fi
     echo $! >"$state/app.pid"
     local r=""
     for _ in $(seq 1 120); do
-        r=$(js '!!document.querySelector(".tf-nav") && location.search' 2>/dev/null || true)
-        case $r in *fake-ipc*) break ;; esac
+        r=$(js '!!document.querySelector(".tf-nav") && (location.search.includes("fake-ipc") ? "fake-ipc" : "live")' 2>/dev/null || true)
+        [ "$r" = "\"$want\"" ] && break
         sleep 1
     done
-    case $r in *fake-ipc*) ;; *) die "the app's window never drew the mock corpus (see $state/app.log)" ;; esac
+    [ "$r" = "\"$want\"" ] || die "the app's window never drew its nav on $want (see $state/app.log)"
     if command -v aerospace >/dev/null; then
         local id
         id=$(aerospace list-windows --all 2>/dev/null | awk -F'|' '/knobas-app/ {gsub(/ /, "", $1); print $1; exit}')
@@ -91,16 +99,21 @@ app_stop() {
 
 case ${1-} in
 start)
+    shift
+    rm -f "$state/live"
+    live=0
+    if [ "${1-}" = --live ]; then live=1; shift; fi
     [ "$(uname -s)" = Darwin ] || die "macOS only"
     [ -x "$repo/target/debug/knobas-app" ] || die "no debug app at target/debug/knobas-app: run \`just demo\` once"
     [ ! -f "$state/vite.pid" ] || ! kill -0 "$(cat "$state/vite.pid")" 2>/dev/null || die "already started (stop first)"
     pgrep -x knobas-app >/dev/null && die "a knobas is already running: quit it first"
     curl -fsS -o /dev/null "http://localhost:$port/" 2>/dev/null && die "something already answers on $port"
     tools
-    env -C "$repo/app" ./node_modules/.bin/vite --config "$here/real-window/vite.probe.config.mjs" >"$state/vite.log" 2>&1 &
+    [ "$live" = 1 ] && : >"$state/live"
+    RW_LIVE=$live env -C "$repo/app" ./node_modules/.bin/vite --config "$here/real-window/vite.probe.config.mjs" >"$state/vite.log" 2>&1 &
     echo $! >"$state/vite.pid"
     for _ in $(seq 1 60); do curl -fsS -o /dev/null "http://localhost:$port/" 2>/dev/null && break; sleep 0.5; done
-    app_start "${2:-1440}" "${3:-900}"
+    app_start "${1:-1440}" "${2:-900}"
     ;;
 stop)
     app_stop
@@ -108,6 +121,7 @@ stop)
         kill "$(cat "$state/vite.pid")" 2>/dev/null || true
         rm -f "$state/vite.pid"
     fi
+    rm -f "$state/live"
     echo "real-window: stopped"
     ;;
 restart)
@@ -154,7 +168,7 @@ tabs)
     echo
     ;;
 *)
-    sed -n '9,21p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '10,22p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

@@ -2744,6 +2744,7 @@ real one can't be replaced, and the window never talks to the demo profile's sou
 
 ```sh
 testenv/ui-checks/real-window.sh start                 # dev server on 1420 and target/debug/knobas-app --demo, window at 1440 x 900
+testenv/ui-checks/real-window.sh start --live          # the same on the demo profile's own sources: run `just live-sources` first
 testenv/ui-checks/real-window.sh js 'location.hash'    # a value from the page
 testenv/ui-checks/real-window.sh ev move 400 225 click 1378 221 key f cmd type retry
 testenv/ui-checks/real-window.sh keys '#/page/confluence%3Asepa' .tf-doc .tf-rd-main
@@ -2752,7 +2753,9 @@ testenv/ui-checks/real-window.sh stop
 ```
 
 It needs a debug build (`just demo` once), `swiftc`, an Accessibility grant for the terminal, and port 1420 free; it
-refuses while another knobas runs. It takes the screen and the pointer while it runs, so it isn't for a Mac someone is
+refuses while another knobas runs. `start --live` is `just live-demo` driven by the same input: the page keeps the real
+bridge and the profile's stored credentials, so the window shows what the live products synced, and its writes are real
+writes to them. Take back what a run wrote. The live run of 2026-11-09 (#2479) used it. It takes the screen and the pointer while it runs, so it isn't for a Mac someone is
 using. `real-window/page-helpers.js` is what `js` can call as `window.__q` (where to press, what has focus, how far a
 box scrolled). A changed system setting such as Full Keyboard Access is read at launch: `restart` after changing one.
 

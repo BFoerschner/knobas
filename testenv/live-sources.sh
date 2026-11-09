@@ -133,8 +133,16 @@ forge() { # product id name seed-flag
             say "$1: this Mac does not trust $url's certificate yet: run 'just live-trust-ca' once"
         fi
     fi
+    # The token's own account, as the Settings form's *Test connection* fills it in: what `@me`, *Mine* and a
+    # commit's *You* read. Without it the live profile had no Gitea identity at all (the live run, 2026-11-09).
+    local user=""
+    if [ -n "$KNOBAS_GITEA_URL" ]; then
+        # The header on stdin, so the token is never in argv.
+        user=$(printf 'Authorization: token %s\n' "$KNOBAS_GITEA_TOKEN" |
+            curl -s -m 10 -H @- "$KNOBAS_GITEA_URL/api/v1/user" | jq -r '.login // empty' 2>/dev/null || true)
+    fi
     add "$1" "$url" "$(source_json "$2" gitea "$3" "$url" Pat \
-        "$(jq -cn --arg o "$KNOBAS_GITEA_OWNER" '{owners: [$o]}')" \
+        "$(jq -cn --arg o "$KNOBAS_GITEA_OWNER" --arg u "$user" '{owners: [$o]} + (if $u == "" then {} else {username: $u} end)')" \
         "$(jq -cn --arg v "$KNOBAS_GITEA_TOKEN" '{value: $v}')")"
 }
 forge gitea live-gitea 'Gitea (live)' --env
