@@ -1685,8 +1685,8 @@
       <div class="tf-rd-crumb">
         <a href="#/docs">Docs</a>
         {#if p.space}
-          {@const ownSpace = treeSpace(tree?.spaces ?? [], p.source_id, p.space.key)}
-          › <a href={crumbSpace ?? undefined}>{ownSpace ? spaceTitle(ownSpace, tree?.spaces ?? []) : spaceName(p.space)}</a>
+          {@const ownSpace = treeSpace(tree.spaces, p.source_id, p.space.key)}
+          › <a href={crumbSpace ?? undefined}>{ownSpace ? spaceTitle(ownSpace, tree.spaces) : spaceName(p.space)}</a>
         {/if}
         {#if parent}
           › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
