@@ -22,7 +22,7 @@
 import type { CheckoutView, EntityRow, MiniBoard, Reached } from "../../ipc/entity";
 import type { AssetDetail } from "../../ipc/assets";
 import { sectionHash } from "../route";
-import { isDone } from "../tickets/tickets";
+import { columnsWithout, isDone } from "../tickets/tickets";
 import type { Subtasks } from "./job-reader.svelte";
 import {
   assetTone,
@@ -141,10 +141,14 @@ export function pressSection(row: CardSection, entityId: string): void {
 /** How many of a ticket's branches have their checkout read for Code's *not pushed* (#2401). */
 export const UNPUSHED_LIMIT = 10;
 
-/** The sub-tasks a ticket's `under:<key>` board holds: a column that is not *Done* is open. */
-export function countSubtasks(board: Pick<MiniBoard, "columns">): Subtasks {
-  const total = board.columns.reduce((sum, column) => sum + column.total, 0);
-  const open = board.columns.filter((column) => !isDone(column.status)).reduce((sum, column) => sum + column.total, 0);
+/**
+ * The sub-tasks a ticket's `under:<key>` board holds, read with every card: a column that is not *Done* is open. The
+ * board holds the ticket `key` too, once per source that has it, and it is not its own sub-task ({@link columnsWithout}).
+ */
+export function countSubtasks(board: Pick<MiniBoard, "columns">, key: string): Subtasks {
+  const columns = columnsWithout(board.columns, key);
+  const total = columns.reduce((sum, column) => sum + column.total, 0);
+  const open = columns.filter((column) => !isDone(column.status)).reduce((sum, column) => sum + column.total, 0);
   return { total, open };
 }
 
@@ -211,7 +215,7 @@ export async function readCardReads(ports: CardReadPorts, id: string): Promise<C
     rows(SECTION_READS.pages),
     rows(SECTION_READS.monitors),
     ports.jobReach(id).catch(() => [] as Reached[]),
-    ports.ticketBoard(`under:${keyOf(id)}`).then(countSubtasks, () => ({ total: 0, open: 0 })),
+    ports.ticketBoard(`under:${keyOf(id)}`).then((board) => countSubtasks(board, keyOf(id)), () => ({ total: 0, open: 0 })),
   ]);
   const [assets, unpushed] = await Promise.all([readAssetLines(ports.getAsset, reached), readUnpushed(ports.entityCheckout, code)]);
   return { entityId: id, subtasks, code, unpushed, builds, pages, monitors, assets };

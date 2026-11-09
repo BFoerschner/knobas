@@ -339,6 +339,30 @@ test("New pull request starts on a branch with nothing open, past one that has (
   expect(primary.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
 });
 
+test("until the branches answer, the primary keeps its room unseen, so it never changes its words under the pointer (the live run, 2026-11-09)", async () => {
+  const base = ports();
+  const held: (() => void)[] = [];
+  await draw(
+    [REPO],
+    ports({
+      entityView: async (id, sectionId) => {
+        if (id === FEATURE && sectionId === null) {
+          await new Promise<void>((release) => held.push(release));
+          return WITH_PR();
+        }
+        return base.entityView(id, sectionId);
+      },
+    }),
+  );
+  expect(held.length).toBeGreaterThan(0);
+  expect(target.querySelector(".tf-fhead a.tf-primary"), "nothing to press while it asks").toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-repoheld")?.getAttribute("aria-hidden")).toBe("true");
+  for (const release of held) release();
+  await settle();
+  expect(target.querySelector(".tf-fhead .tf-repoheld")).toBeNull();
+  expect(target.querySelector(".tf-fhead a.tf-primary")).not.toBeNull();
+});
+
 test("a branch picked with a pull request open from it makes the primary Open PR #N, as Code's does (F-243)", async () => {
   const base = ports();
   await draw(

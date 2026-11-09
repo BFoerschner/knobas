@@ -59,9 +59,9 @@
 
   ## Twins (#1476)
 
-  Two sources can hold one key, and those are two tickets. A row whose key another
-  row in the list has names its source at its end (`twinTickets`), as *Link to…*
-  does; no other row does.
+  Two sources can hold one key, and those are two tickets, pull requests or
+  repositories. A row whose key another row of its kind in the list has names its
+  source at its end (`twinItems`), as *Link to…* does; no other row does.
 
   ## Keys (#2429)
 
@@ -113,7 +113,7 @@
   import { SheetMode } from "./sheet-mode.svelte";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
   import { type LauncherAction, filterActions, navigationActions, placeActions } from "./actions";
-  import { type InboxPreview, type LauncherRow, holdsAnswer, narrowed, rowItem, stepOf, twinTickets, walk } from "./rows";
+  import { type InboxPreview, type LauncherRow, holdsAnswer, narrowed, rowItem, stepOf, twinItems, walk } from "./rows";
   import { modeName, seedKinds, seedName } from "./section";
   import { pastedUrl } from "./url";
   import { opener } from "../tf/inbox/inbox";
@@ -288,10 +288,15 @@
     return panel || pastedUrl(words) !== null ? words : `${seeded}${words}`;
   }
 
-  /** The chip's ×, or Backspace on the empty box: the search is everything again. */
+  /**
+   * The chip's ×, or Backspace on the empty box: the search is everything again, for the words already typed. The × read
+   * *Search everything, not only Tickets* and emptied the box (the live run, 2026-11-09); `Esc` never loses typed words, and
+   * neither does this.
+   */
   function dropSeed() {
+    const words = boxWords;
     seed = null;
-    session.set("");
+    session.set(words);
     box?.focus();
   }
 
@@ -424,8 +429,8 @@
    */
   const scopeAnswers = $derived(!overlay && naming === null && !sheet.current && (session.mode === "board" || session.mode === "results"));
 
-  /** The tickets in this list whose key another ticket here holds (#1476): they say their source, and nothing else does. */
-  const twins = $derived(twinTickets(session.rows.flatMap((row) => rowItem(row) ?? [])));
+  /** The rows in this list whose key another row of their kind here holds (#1476): they say their source, and nothing else does. */
+  const twins = $derived(twinItems(session.rows.flatMap((row) => rowItem(row) ?? [])));
   /** Source id → name, read when a twin is drawn; until it answers a row says the id, which is a true name. */
   let sourceNames = $state<Record<string, string>>({});
   $effect(() => {

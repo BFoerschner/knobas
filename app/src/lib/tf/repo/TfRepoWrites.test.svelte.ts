@@ -331,8 +331,8 @@ test("each branch's standing that lands redraws its own row, not the whole list 
     },
   });
   await draw([REPO, "branches"], null, stand);
-  // Each row's, and the header's for the branch it proposes.
-  expect(held).toHaveLength(5);
+  // Each row's, and the header's first four, read at once for the branch it proposes (the live run, 2026-11-09).
+  expect(held).toHaveLength(8);
   filtered.calls = 0;
   for (const release of held) {
     release();

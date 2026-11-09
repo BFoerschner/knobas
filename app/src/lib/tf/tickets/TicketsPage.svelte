@@ -571,7 +571,7 @@
   // so a read's own answer does not ask for the read again.
   $effect(() => {
     if (!ready) return;
-    const scope = { key: sessionKey, base };
+    const scope = { key: sessionKey, base, without: subtasksOf };
     untrack(() => reader.open({ ...scope, savedView: savedViewId }, filterNow()));
   });
   $effect(() => () => reader.close());

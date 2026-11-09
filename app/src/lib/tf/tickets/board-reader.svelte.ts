@@ -33,6 +33,7 @@ import {
   COLUMN_CAP,
   columnDone,
   drawnCards,
+  withoutTicket,
   LANES_AT_FIRST,
   TYPED_CAP,
   type Lane,
@@ -104,6 +105,11 @@ export interface BoardScope {
   base: string | null;
   /** The saved view the board reads (#877), or `null`. */
   savedView: string | null;
+  /**
+   * The ticket whose sub-tasks the board is narrowed to, by key, or `null`: its base is `under:<key>`, which answers
+   * the ticket itself too, so its cards are dropped ({@link withoutTicket}) and every card is read to drop them all.
+   */
+  without?: string | null;
 }
 
 /** The filter bar as a read sends it. */
@@ -219,7 +225,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     total: null as number | null,
     failed: null as string | null,
     lanesShown: LANES_AT_FIRST,
-    scope: { key: "", base: null, savedView: null } as BoardScope,
+    scope: { key: "", base: null, savedView: null, without: null } as BoardScope,
     filter: { query: "", words: false } as BoardFilter,
     description: null as Prose | null,
     around: null as CardTable | null,
@@ -266,6 +272,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * each lane's column counted on its own (#939).
    */
   function capFor(): number | null {
+    if (state.scope.without) return null;
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
     const answered = board;
     if ((expanded.length === 0 && !listAll) || answered === null) return cap;
@@ -292,17 +299,19 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    */
   function read() {
     clearTimeout(pausing);
-    const { base, savedView } = state.scope;
+    const { base, savedView, without } = state.scope;
     if (base === null) return;
+    const kept = (answer: MiniBoard) => (without ? withoutTicket(answer, without) : answer);
     const query = state.filter.query;
     const mine = ++reading;
     ports
       .board(capFor(), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
       .then((answer) => {
         if (mine !== reading) return;
-        board = answer;
+        const drawn = kept(answer);
+        board = drawn;
         state.failed = null;
-        if (query === base) state.total = sum(answer);
+        if (query === base) state.total = sum(drawn);
       })
       .catch((error: unknown) => {
         if (mine === reading) state.failed = messageOf(error);
@@ -311,9 +320,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     if (query !== base && state.total === null) {
       const at = epoch;
       ports
-        .board(1, base === "" ? null : base, savedView, undefined, TICKET_SYSTEM)
+        .board(without ? null : 1, base === "" ? null : base, savedView, undefined, TICKET_SYSTEM)
         .then((answer) => {
-          if (at === epoch) state.total ??= sum(answer);
+          if (at === epoch) state.total ??= sum(kept(answer));
         })
         .catch(() => {});
     }

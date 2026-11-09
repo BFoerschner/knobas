@@ -16,6 +16,7 @@
 <script lang="ts">
   import { kindTag } from "../assets/tree";
   import { aimed } from "./aim";
+  import { shortKey } from "../tf/tickets/tickets";
   import type { Tone } from "../ipc/entity";
 
   let {
@@ -64,7 +65,9 @@
   onpointermove={aimed(onhover)}
 >
   <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{kindTag(monogram)}</span>
-  <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>
+  <!-- A forge's issue key is told apart by its repository and number, which the cell's ellipsis cut: ten Gitea issues
+       read *tidewater/pay…* on the live run (2026-11-09). Shortened as a ticket card shortens it, the whole on hover. -->
+  <span class="tf-ln-k" class:tf-ln-mono={mono} title={mono && shortKey(cell) !== cell ? cell : undefined}>{mono ? shortKey(cell) : cell}</span>
   <span class="tf-ln-t">{title}</span>
   {#if source}<span class="tf-ln-src" title={source}>{source}</span>{/if}
   {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}

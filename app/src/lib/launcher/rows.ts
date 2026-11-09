@@ -174,14 +174,15 @@ function placeRows(places: readonly LauncherAction[], words: string, nothingElse
 }
 
 /**
- * The tickets in `items` whose key another ticket there holds (#1476): two sources, one key, and those are two tickets.
- * Only these rows name their source. A favourite that is also recent is one ticket, drawn twice, and is no twin.
+ * The items in `items` whose key another item of the same kind there holds (#1476): two sources, one key, and those are two
+ * things. Only these rows name their source. A favourite that is also recent is one item, drawn twice, and is no twin. Every
+ * kind, not tickets only: Gitea and Forgejo both serve `tidewater/payout-service` and its #142, which drew as two rows that
+ * read the same (the live run, 2026-11-09).
  */
-export function twinTickets(items: readonly { kind: string; entity_id: string }[]): ReadonlySet<string> {
+export function twinItems(items: readonly { kind: string; entity_id: string }[]): ReadonlySet<string> {
   const byKey = new Map<string, Set<string>>();
   for (const item of items) {
-    if (item.kind !== "ticket") continue;
-    const key = keyOf(item.entity_id);
+    const key = `${item.kind}\u0000${keyOf(item.entity_id)}`;
     byKey.set(key, (byKey.get(key) ?? new Set()).add(item.entity_id));
   }
   return new Set([...byKey.values()].filter((ids) => ids.size > 1).flatMap((ids) => [...ids]));

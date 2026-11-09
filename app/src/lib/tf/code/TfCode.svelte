@@ -78,6 +78,7 @@
     REPO_FLAGS,
     repoChoices,
     repoTeams,
+    twinRows,
     visiblePrs,
     visibleRepos,
     type PrGroup,
@@ -165,7 +166,7 @@
   let attention = $state.raw<EntityPage | null>(null);
   let everyPr = $state.raw<EntityPage | null>(null);
   let branches = $state<EntityRow[]>([]);
-  let sources = $state<Pick<SourceSummary, "id" | "base_url">[]>([]);
+  let sources = $state<Pick<SourceSummary, "id" | "base_url" | "display_name">[]>([]);
   let failed = $state<string | null>(null);
   /** A re-read under way (#2246): each tab keeps what it drew, dimmed, until its lists have answered. */
   let repoReading = $state(false);
@@ -367,6 +368,12 @@
 
   const scopeOf = (value: string | null) => (value === "job" || value === "mine" ? value : "all");
 
+  /** Rows another source holds under the same name: each says its source (`twinRows`). */
+  const twinRepos = $derived(twinRows(repos?.rows ?? [], (row) => row.title));
+  const twinPrs = $derived(twinRows((lines ?? []).map(({ row, number }) => ({ ...row, number })), (row) => `${row.path ?? ""}${row.number ?? ""}`));
+  /** The source a twin row names, by its name; its id until the sources are read. */
+  const sourceName = (sourceId: string) => sources.find((source) => source.id === sourceId)?.display_name || sourceId;
+
   const shownRepos = $derived(
     repos === null
       ? []
@@ -492,7 +499,7 @@
                 ><a class="tf-mono" href={itemHash(row)}
                   ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></span
                   ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></a
-                >{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</td
+                >{#if twinRepos.has(row.entity_id)}{" "}<span class="tf-dim">on {sourceName(row.source_id)}</span>{/if}{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</td
               >
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
@@ -526,7 +533,7 @@
               <td
                 ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
                   >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
-                    >{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked text={author} typed={prFilter.text} />{/if}{/if}{#if idle}{row.path ||
+                    >{/if}{#if twinPrs.has(row.entity_id)}{row.path ? " " : ""}on {sourceName(row.source_id)}{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked text={author} typed={prFilter.text} />{/if}{/if}{#if idle}{row.path ||
                     author
                       ? ", "
                       : ""}idle for more than 5 days{/if}</span

@@ -134,7 +134,6 @@
   import { listSources, syncStatus } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
   import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
-  import { leftTheInbox } from "../../inbox/inbox.svelte";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { dismiss, push } from "../../shell/toasts.svelte";
@@ -635,12 +634,16 @@
     ackToasts.delete(row.entity_id);
   }
 
-  /** The alert closed while the row was drawn: not a failure, so it says what happened and the row is read again. */
+  /**
+   * The alert closed while the row was drawn: not a failure, so it says what happened and the row is read again. Here
+   * that is the monitor recovering, which the page shows, not the Inbox, which a monitor with no asset never reached
+   * (an *Undo* after a real recovery, the live run 2026-11-09).
+   */
   function refusedAck(row: MonitorRow, error: unknown) {
     if (isIpcError(error) && error.code === "not_found") {
       delete acked[row.entity_id];
       dropAckToast(row);
-      push({ text: leftTheInbox(row.name) });
+      push({ text: `${row.name} has recovered, so its alert is closed.` });
       revision += 1;
       return;
     }

@@ -2478,6 +2478,21 @@ test.each([
   expect(target.querySelector("input")!.placeholder).toBe("Search tickets, code, builds and docs");
 });
 
+test("the chip's × with words in the box searches everything for those words, and keeps them (the live run, 2026-11-09)", async () => {
+  const searched: string[] = [];
+  open({ query: "#t ", ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME } });
+  await settle();
+  await debounced();
+  typeInBox("sepa");
+  await debounced();
+  expect(searched.at(-1)).toBe("#t sepa");
+  target.querySelector<HTMLButtonElement>(".tf-ln-seedx")!.click();
+  await settle();
+  expect(target.querySelector(".tf-ln-seed")).toBeNull();
+  expect(target.querySelector("input")!.value).toBe("sepa");
+  expect(searched.at(-1)).toBe("sepa");
+});
+
 test("Backspace with words in the box edits them and leaves the chip", async () => {
   open({ query: "#b ", ports: { search: async () => response(), launcherHome: async () => HOME } });
   await settle();

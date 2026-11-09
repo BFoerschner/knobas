@@ -276,7 +276,8 @@ test("the launcher sets mono on a ticket's key cell and nowhere else (#1422, #24
   expect(mono).toEqual([".tf-ln-k.tf-ln-mono"]);
   // The key cell is drawn by the row, and only there.
   const row = LAUNCHER[6]!;
-  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\}>\{cell\}<\/span>/);
+  // A forge's issue key is cut to its repository and number there, the whole in its title (the live run, 2026-11-09).
+  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\} title=\{[^}]*\}>\{mono \? shortKey\(cell\) : cell\}<\/span>/);
   expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|mono)\b/);
 });
 

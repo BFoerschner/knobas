@@ -71,3 +71,18 @@ test("only an identifier's cell is drawn in the mono face", () => {
   expect(place.target.querySelector(".tf-ln-k")!.classList.contains("tf-ln-mono")).toBe(false);
   place.done();
 });
+
+test("a forge's issue key is cut to its repository and number, as a card cuts it, whole on hover (the live run, 2026-11-09)", () => {
+  const issue = render({ cell: "tidewater/payout-service/issues/37", mono: true, title: "(reserved)" });
+  const cell = issue.target.querySelector<HTMLElement>(".tf-ln-k")!;
+  expect(cell.textContent).toBe("payout-service#37");
+  expect(cell.title).toBe("tidewater/payout-service/issues/37");
+  issue.done();
+  const key = render({ cell: "PAY-231", mono: true });
+  expect(key.target.querySelector<HTMLElement>(".tf-ln-k")!.hasAttribute("title")).toBe(false);
+  key.done();
+  // A place's cell is words, never a key.
+  const place = render({ cell: "tidewater/payout-service/issues/37" });
+  expect(place.target.querySelector(".tf-ln-k")!.textContent).toBe("tidewater/payout-service/issues/37");
+  place.done();
+});

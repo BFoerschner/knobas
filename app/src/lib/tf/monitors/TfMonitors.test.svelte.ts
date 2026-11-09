@@ -954,7 +954,7 @@ test("an alert that closed under the row says so in words, not as a failure, and
   button(rows()[0]!, "Ack")!.click();
   await settle();
   const said = toasts.items.at(-1)!;
-  expect(said.text).toMatch(/has already left the inbox\. It was resolved at its source\.$/);
+  expect(said.text).toMatch(/ has recovered, so its alert is closed\.$/);
   expect(said.tone).toBeUndefined();
   expect(reads).toBeGreaterThan(before);
 });

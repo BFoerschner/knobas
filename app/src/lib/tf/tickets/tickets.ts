@@ -92,6 +92,39 @@ export function drawnCards(
   return column.cards.slice(0, typing ? TYPED_CAP : done ? DONE_CAP : COLUMN_CAP);
 }
 
+/**
+ * `board` without the ticket `key` names, in every source that holds it: a ticket's sub-tasks. The search reads
+ * `under:<key>` as "under it at any depth, or the ticket itself", so the board it answers holds the ticket too, and a
+ * ticket with no sub-tasks counted itself, once per source that has it (the live run, 2026-11-09). Each total drops by
+ * the cards it held of the ticket, so a board read with every card (`perColumn` null) comes out exact. A column or
+ * lane left with nothing goes.
+ */
+export function withoutTicket(board: MiniBoard, key: string): MiniBoard {
+  const own = (entityId: string) => keyOf(entityId) === key;
+  const columns = columnsWithout(board.columns, key);
+  const lanes = board.lanes
+    .map((lane) => {
+      const cells = lane.columns.map((cell) => {
+        const ids = cell.ids.filter((id) => !own(id));
+        return { ...cell, ids, total: Math.max(0, cell.total - (cell.ids.length - ids.length)) };
+      });
+      const dropped = lane.columns.reduce((all, cell) => all + cell.ids.length, 0) - cells.reduce((all, cell) => all + cell.ids.length, 0);
+      return { ...lane, columns: cells.filter((cell) => cell.total > 0), count: Math.max(0, lane.count - dropped) };
+    })
+    .filter((lane) => lane.count > 0);
+  return { ...board, columns, lanes };
+}
+
+/** {@link withoutTicket}'s columns, for a read that needs no lanes. */
+export function columnsWithout(columns: readonly MiniBoardColumn[], key: string): MiniBoardColumn[] {
+  return columns
+    .map((column) => {
+      const cards = column.cards.filter((card) => keyOf(card.entity_id) !== key);
+      return { ...column, cards, total: Math.max(0, column.total - (column.cards.length - cards.length)) };
+    })
+    .filter((column) => column.total > 0);
+}
+
 /** What the column's *Show N more* button says, or `null` when it draws every card. */
 export function moreLine(column: MiniBoardColumn, drawn: number, done: boolean = columnDone(column)): string | null {
   const rest = column.total - drawn;

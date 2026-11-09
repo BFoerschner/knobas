@@ -186,6 +186,19 @@ function repoKey(sourceId: string, name: string): string {
 }
 
 /** How many open pull requests each repository has, by {@link repoKey}. */
+/**
+ * The rows whose name a row from another source holds too (the live run, 2026-11-09): Gitea and Forgejo both serve
+ * `tidewater/payout-service` and its #142, and two rows that read the same were two places nobody could tell apart. Only
+ * these name their source, as the launcher's twin tickets do (#1476).
+ */
+export function twinRows<Row extends { entity_id: string; source_id: string }>(rows: readonly Row[], name: (row: Row) => string): ReadonlySet<string> {
+  const byName = new Map<string, Row[]>();
+  for (const row of rows) byName.set(name(row), [...(byName.get(name(row)) ?? []), row]);
+  // Grouped by name, never narrowed by source: a name held in more than one source is a twin.
+  const holders = (group: readonly Row[]) => new Set(group.map((row) => row.source_id)).size;
+  return new Set([...byName.values()].filter((group) => holders(group) > 1).flatMap((group) => group.map((row) => row.entity_id)));
+}
+
 export function openPrsOf(lines: readonly PrLine[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const { row } of lines) {

@@ -24,6 +24,7 @@ import {
   splitLanes,
   statusOrder,
   ticketAddress,
+  withoutTicket,
 } from "./tickets";
 
 function card(n: number, status: string | null = null): MiniBoardCard {
@@ -326,4 +327,46 @@ test("a card calls its assignee by name where the source keeps one, else by acco
   expect(firstName("mara")).toBe("mara");
   expect(firstName(null)).toBeNull();
   expect(initials(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" }))).toBe(initials("Mara Lindqvist"));
+});
+
+/** A card of `key` in `source`, standing in `status`. */
+function held(source: string, key: string, status: string): MiniBoardCard {
+  return { ...card(0, status), entity_id: `${source}:${key}`, source_id: source, key };
+}
+
+test("a ticket is not its own sub-task, in any source that holds it (the live run, 2026-11-09)", () => {
+  // `under:PAY-219` as the real engine answered it: three sub-tasks, then the ticket itself from Jira and the mock.
+  const board: MiniBoard = {
+    columns: [
+      { status: "To Do", cards: [held("live-jira", "PAY-266", "To Do"), held("live-jira", "PAY-254", "To Do"), held("live-jira", "PAY-242", "To Do")], total: 3 },
+      { status: "Done", cards: [held("live-jira", "PAY-219", "Done"), held("mock", "PAY-219", "Done")], total: 2 },
+    ],
+    sources: [],
+    lanes: [
+      {
+        key: "mara",
+        count: 3,
+        columns: [
+          { status: "To Do", ids: ["live-jira:PAY-266"], total: 1 },
+          { status: "Done", ids: ["live-jira:PAY-219", "mock:PAY-219"], total: 2 },
+        ],
+      },
+      { key: "", count: 2, columns: [{ status: "To Do", ids: ["live-jira:PAY-254", "live-jira:PAY-242"], total: 2 }] },
+    ],
+    more_lanes: 0,
+  };
+  const kept = withoutTicket(board, "PAY-219");
+  expect(kept.columns.map((column) => [column.status, column.total, column.cards.map((c) => c.key)])).toEqual([
+    ["To Do", 3, ["PAY-266", "PAY-254", "PAY-242"]],
+  ]);
+  expect(kept.lanes.map((lane) => [lane.key, lane.count, lane.columns.map((cell) => [cell.status, cell.total])])).toEqual([
+    ["mara", 1, [["To Do", 1]]],
+    ["", 2, [["To Do", 2]]],
+  ]);
+
+  // A ticket with none: `under:PAY-236` answered only its two copies, and nothing is left.
+  const alone: MiniBoard = { columns: [{ status: "To Do", cards: [held("live-jira", "PAY-236", "To Do"), held("mock", "PAY-236", "To Do")], total: 2 }], sources: [], lanes: [], more_lanes: 0 };
+  expect(withoutTicket(alone, "PAY-236").columns).toEqual([]);
+  // A key that only starts the same is another ticket.
+  expect(withoutTicket(alone, "PAY-23").columns[0]!.total).toBe(2);
 });

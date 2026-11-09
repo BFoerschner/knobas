@@ -13,6 +13,7 @@ import {
   headerLine,
   openPrsOf,
   prLines,
+  twinRows,
   repoTeams,
   visiblePrs,
   visibleRepos,
@@ -231,4 +232,16 @@ test("the header names the one host the repositories come from", () => {
   );
   expect(headerLine(2, [repo("a"), { ...repo("b"), source_id: "gitea-eu" }], [])).toBe("2 repositories, yours first.");
   expect(headerLine(1, [repo("a")], [{ id: "gitea", base_url: "not a url" }])).toBe("1 repository, yours first.");
+});
+
+test("a repository two sources hold names its source, and one only one holds does not (the live run, 2026-11-09)", () => {
+  const rows = [
+    { entity_id: "live-gitea:tidewater/payout-service", source_id: "live-gitea", title: "tidewater/payout-service" },
+    { entity_id: "live-forgejo:tidewater/payout-service", source_id: "live-forgejo", title: "tidewater/payout-service" },
+    { entity_id: "live-gitea:tidewater/milestone-review", source_id: "live-gitea", title: "tidewater/milestone-review" },
+    { entity_id: "mock:payout-service", source_id: "mock", title: "payout-service" },
+  ];
+  expect([...twinRows(rows, (row) => row.title)].sort()).toEqual(["live-forgejo:tidewater/payout-service", "live-gitea:tidewater/payout-service"]);
+  // One source holding a name twice is one place drawn twice, and no twin.
+  expect(twinRows([rows[0]!, { ...rows[0]!, entity_id: "live-gitea:again" }], (row) => row.title).size).toBe(0);
 });

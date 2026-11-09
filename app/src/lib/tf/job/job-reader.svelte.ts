@@ -328,7 +328,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     try {
       const board = await (ports.ticketBoard ?? bridgeTicketBoard)(`under:${keyOf(id)}`);
       if (mine !== token) return;
-      state.subtasks = countSubtasks(board);
+      state.subtasks = countSubtasks(board, keyOf(id));
     } catch {
       if (mine === token) state.subtasks = { total: 0, open: 0 };
     }

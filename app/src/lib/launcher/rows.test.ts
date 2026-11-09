@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { ResultGroup, SearchResponse } from "../ipc";
-import { ticketsFirst, twinTickets } from "./rows";
+import { ticketsFirst, twinItems } from "./rows";
 
 const group = (kind: string): ResultGroup => ({ kind, label: kind, plural: kind, monogram: "", total: 0, hits: [] });
 const answer = (text: string): SearchResponse =>
@@ -22,6 +22,23 @@ test("any other query keeps the engine's order", () => {
 
 test("a ticket is a twin only where another ticket holds its key under another id (F-636)", () => {
   const item = (entity_id: string, kind = "ticket") => ({ kind, entity_id });
-  const twins = twinTickets([item("jira:PAY-231"), item("mock:PAY-231"), item("jira:PAY-228"), item("jira:PAY-228"), item("wiki:PAY-231", "page")]);
+  const twins = twinItems([item("jira:PAY-231"), item("mock:PAY-231"), item("jira:PAY-228"), item("jira:PAY-228"), item("wiki:PAY-231", "page")]);
   expect([...twins].sort()).toEqual(["jira:PAY-231", "mock:PAY-231"]);
+});
+
+test("a pull request or repository two forges serve is a twin too, and names its source (the live run, 2026-11-09)", () => {
+  const item = (entity_id: string, kind: string) => ({ kind, entity_id });
+  const twins = twinItems([
+    item("live-gitea:tidewater/payout-service#142", "pr"),
+    item("live-forgejo:tidewater/payout-service#142", "pr"),
+    item("mock:payout-service#142", "pr"),
+    item("live-gitea:tidewater/payout-service", "repo"),
+    item("live-forgejo:tidewater/payout-service", "repo"),
+  ]);
+  expect([...twins].sort()).toEqual([
+    "live-forgejo:tidewater/payout-service",
+    "live-forgejo:tidewater/payout-service#142",
+    "live-gitea:tidewater/payout-service",
+    "live-gitea:tidewater/payout-service#142",
+  ]);
 });

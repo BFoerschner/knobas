@@ -958,12 +958,16 @@
 {#if dialog}
   <TfDialog why={dialog!.chosen === null && !publishing ? "Choose a page first." : null} title="Where do standup protocols go?" {layers} onclose={() => (dialog = null)}>
     {#snippet body()}
-      <PublishTargetPicker
-        sources={dialog!.sources}
-        search={io.search}
-        refusedWrites={io.refusedWrites}
-        onchange={(chosen) => (dialog!.chosen = chosen)}
-      />
+      <!-- In the fields' frame, as Settings › Standup and *Move notes* draw it: bare, the parent page's box read as a line of
+           text with its placeholder for a value (the live run, 2026-11-09). -->
+      <div class="tf-stg-pick">
+        <PublishTargetPicker
+          sources={dialog!.sources}
+          search={io.search}
+          refusedWrites={io.refusedWrites}
+          onchange={(chosen) => (dialog!.chosen = chosen)}
+        />
+      </div>
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (dialog = null)}>Cancel</button>

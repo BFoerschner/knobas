@@ -541,6 +541,14 @@
 
   /** How many branches the header asks before it gives up on finding one with nothing open: a source's burst stays small. */
   const ASKED = 8;
+  /** How many of them are read at once, as the Branches tab reads them: one at a time took 2.5 s on a live forge. */
+  const ASKED_AT_ONCE = 4;
+  /**
+   * The header is still asking which branch *New pull request* starts on. Its room stays, unseen, until the answer: on a live
+   * forge the button read *New pull request* for 2.5 s and then became *Open PR #144* under the pointer (the live run,
+   * 2026-11-09), so a press in that time started a pull request the page then said it would not.
+   */
+  let seeking = $state(false);
   /** The branch *New pull request* starts on, once the header has found one with nothing open from it (F-243). */
   let toPropose = $state<string | null>(null);
   /** Where every branch it could start on has a pull request open: the loudest button goes there, as a form saying so offers nothing to create. */
@@ -550,22 +558,36 @@
     const asking = (choice === null ? (branches ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
     void writesAsked;
     let live = true;
+    const asked = ready ? asking.slice(0, ASKED) : [];
+    // Before the branches are read the page knows no branch to start on: *main* drew for half a second, then went.
+    untrack(() => (seeking = asked.length > 0 || (ready && choice === null && branches === null)));
     void (async () => {
       let first: BranchStanding["pr"] = null;
-      for (const { name, id } of ready ? asking.slice(0, ASKED) : []) {
-        const standing = await ports.entityView(id, null).then(branchStanding, () => null);
+      // In order, a batch at a time: the first branch in order that stands free wins, as when they were read one by one.
+      for (let at = 0; at < asked.length; at += ASKED_AT_ONCE) {
+        const batch = asked.slice(at, at + ASKED_AT_ONCE);
+        const standings = await Promise.all(batch.map(({ id }) => ports.entityView(id, null).then(branchStanding, () => null)));
         if (!live) return;
-        // A branch that can't be read says nothing about what stands: *proposed* stays, as it was before anything was asked.
-        if (standing === null) break;
-        if (standing.pr === null && (choice !== null || standing.canOpenPr)) {
-          toPropose = name;
-          openedFrom = null;
-          return;
+        for (const [i, standing] of standings.entries()) {
+          // A branch that can't be read says nothing about what stands: *proposed* stays, as it was before anything was asked.
+          if (standing === null) {
+            toPropose = null;
+            openedFrom = first;
+            seeking = false;
+            return;
+          }
+          if (standing.pr === null && (choice !== null || standing.canOpenPr)) {
+            toPropose = batch[i]!.name;
+            openedFrom = null;
+            seeking = false;
+            return;
+          }
+          first ??= standing.pr;
         }
-        first ??= standing.pr;
       }
       toPropose = null;
       openedFrom = first;
+      seeking = false;
     })();
     return () => {
       live = false;
@@ -666,8 +688,9 @@
         <span class="tf-repohold" class:tf-held={tab === "compare"} class:tf-stacked={stacked} inert={tab === "compare"}>
           {#if oneBranch}
             <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
-          {:else if sentWaits}
-            <!-- Its room, unseen, so the tabs under the header hold still until the read brings it back (F-249). -->
+          {:else if sentWaits || seeking}
+            <!-- Its room, unseen, so the tabs under the header hold still until the read brings it back (F-249), or until the
+                 header knows which branch it starts on (`seeking`). -->
             <span class="tf-btn tf-primary tf-repoheld" aria-hidden="true">New pull request</span>
           {:else if openedFrom?.entityId}
             <a class="tf-btn tf-primary" href={itemHash({ entity_id: openedFrom.entityId, kind: "pr" })}>Open PR {openedFrom.number ?? ""}</a>

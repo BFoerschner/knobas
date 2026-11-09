@@ -141,6 +141,16 @@ test("a failed read says why, and the next answer clears it", async () => {
   expect(reader.shown).toBe(17);
 });
 
+test("a ticket's sub-tasks read every card and leave the ticket out, so its count is theirs (the live run, 2026-11-09)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open({ key: "", base: "under:PAY-219", savedView: null, without: "PAY-219" }, { query: "under:PAY-219", words: false });
+  expect(asked()).toEqual([{ perColumn: null, query: "under:PAY-219" }]);
+  reads[0]!.answer(board({ status: "To Do", cards: [card("PAY-266"), card("PAY-254")], total: 2 }, { status: "Done", cards: [card("PAY-219")], total: 1 }));
+  await flush();
+  expect(reader.board?.columns.map((c) => [c.status, c.total])).toEqual([["To Do", 2]]);
+  expect(reader.total).toBe(2);
+});
+
 test("expand raises the cap to that column's count and draws it whole; the others keep theirs", async () => {
   const { reader, reads, asked } = fakes();
   reader.open(ALL, NO_WORDS);

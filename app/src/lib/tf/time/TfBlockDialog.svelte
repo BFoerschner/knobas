@@ -40,7 +40,7 @@
   import { onMount, tick } from "svelte";
 
   import { listSources } from "../../ipc/sources";
-  import { twinTickets } from "../../launcher/rows";
+  import { twinItems } from "../../launcher/rows";
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Layers } from "../layers.svelte";
@@ -121,7 +121,7 @@
   );
 
   /** Two sources can hold one key (#1476, F-059), and those are two tickets: only such a row says its source. */
-  const twins = $derived(twinTickets(choices.map((choice) => ({ kind: "ticket", entity_id: choice.entityId }))));
+  const twins = $derived(twinItems(choices.map((choice) => ({ kind: "ticket", entity_id: choice.entityId }))));
   /** Source id → name, once read; without the read a row says the id, as *Link to…* does. */
   let sourceNames = $state<Record<string, string>>({});
   const whose = (ticket: Ticket) => (ticket.sourceId !== undefined && twins.has(ticket.entityId) ? (sourceNames[ticket.sourceId] || ticket.sourceId) : null);
