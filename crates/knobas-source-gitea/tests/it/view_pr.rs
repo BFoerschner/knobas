@@ -3714,7 +3714,7 @@ async fn people_are_named_by_their_profiles_and_keep_their_logins() {
 /// and says the tabs only Gitea's reads fill are not held. No action.
 #[tokio::test]
 async fn a_pull_request_is_drawn_from_its_record_with_no_request() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let source = knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).unwrap();
     let view = source
         .mirror_view(PR, None, &open_pull())

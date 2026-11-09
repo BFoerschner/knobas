@@ -620,8 +620,7 @@ impl LiveSources {
         self.0.pending.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
         let work = async move {
-            loop {
-                let Ask::Read(ask) = &key.ask else { break };
+            while let Ask::Read(ask) = &key.ask {
                 let held = this
                     .reads()
                     .at_of(&key)
