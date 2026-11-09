@@ -85,6 +85,16 @@ test("a pull request carries its author, and a settled one of yours is under You
   ]);
 });
 
+test("a pull request's opener is named by the profile where the source keeps one, else by the account (F-107)", () => {
+  const id = (n: string) => `gitea:tidewater/payout-service#${n}`;
+  const known = factsById([facts(id("142"), { author: "jonas.becker", author_name: "Jonas Becker" }), facts(id("57"), { author: "tom" })]);
+  const lines = prLines(page([]), page([pr("142", "open"), pr("57", "closed")]), NOW, known);
+  expect(lines.map((line) => [line.number, line.author])).toEqual([
+    ["#142", "Jonas Becker"],
+    ["#57", "tom"],
+  ]);
+});
+
 test("the pull request filter keeps by the repository's team and finds the author (#966)", () => {
   const ledger = { ...pr("9", "open"), path: "tidewater/ledger-api" };
   const repos = [repo("payout-service"), repo("ledger-api")];

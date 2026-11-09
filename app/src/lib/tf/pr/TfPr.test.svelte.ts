@@ -1671,3 +1671,41 @@ test("the chip of a review request names the act and keeps the login as written 
   // Focus stays with the panel, not fallen to the body.
   expect(document.activeElement).not.toBe(document.body);
 });
+
+/** A fact naming a person by display name, with the account the source carries beside it (F-107). */
+const named = (label: string, value: string, account: string, tone: "ok" | "warn" | null = null) => ({ ...fact(label, value), tone, account });
+
+/** The view with its author and reviewers named by profile, Jonas's pull request, Mara reading. */
+function namedView(): SourceView {
+  const pr = prView();
+  const overview = pr.sections[0]!.blocks[0]!;
+  if (overview.type === "facts") {
+    overview.facts = overview.facts
+      .filter((f) => f.label !== "Review")
+      .map((f) => (f.label === "Author" ? named("Author", "Jonas Becker", "jonas") : f))
+      .concat(named("Review", "approved by Mara Lindqvist", "mara", "ok"), named("Review", "changes requested by Priya Nair", "priya", "warn"));
+  }
+  return withBlocks(
+    "conversation",
+    [
+      { type: "facts", facts: [named("Jonas Becker", "2026-08-22T09:30:00", "jonas")] },
+      { type: "text", text: "Should the jitter be bounded?", markdown: false },
+      { type: "facts", facts: [named("Mara Lindqvist", "2026-08-22T10:20:00", "mara")] },
+      { type: "text", text: "Bounded.", markdown: false },
+    ],
+    pr,
+  );
+}
+
+test("the header and Reviewers name people as the source does, and the reader's own review reads You by its account (F-107)", async () => {
+  await draw([PR], ports({ pr: namedView(), author: "jonas" }));
+  expect(text(".tf-fhead .tf-sub")).toContain("by Jonas Becker");
+  const rail = [...target.querySelectorAll(".tf-prreviewers .tf-prit")].map((row) => row.textContent?.replace(/\s+/g, " ").trim());
+  expect(rail).toEqual(["ML You Approved", "PN Priya Nair Changes requested"]);
+});
+
+test("Conversation names people as the source does, and the reader's own message reads You by its account (F-107)", async () => {
+  await draw([PR, "conversation"], ports({ pr: namedView(), author: "jonas" }));
+  const who = [...target.querySelectorAll(".tf-convo .tf-msg .tf-who b")].map((b) => b.textContent);
+  expect(who).toEqual(["Jonas Becker", "You"]);
+});

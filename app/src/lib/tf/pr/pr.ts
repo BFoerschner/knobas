@@ -338,7 +338,10 @@ function unsaid(merge: ViewAction, lines: readonly ReadyLine[]): string | null {
 
 /** One reviewer in the side rail and where their review stands. */
 export interface Reviewer {
+  /** As the source names them: the profile's name where it has one (F-107). */
   who: string;
+  /** Their account: what the reader's username and a review request are compared with. */
+  account: string;
   state: string;
   tone: Tone | null;
 }
@@ -353,11 +356,13 @@ export function reviewersOf(view: SourceView | null): Reviewer[] {
     .filter((fact) => fact.label === "Review")
     .flatMap((fact): Reviewer[] => {
       if (fact.value.startsWith("requested from ")) {
-        return [{ who: fact.value.slice("requested from ".length), state: "Review requested", tone: fact.tone }];
+        const who = fact.value.slice("requested from ".length);
+        return [{ who, account: fact.account ?? who, state: "Review requested", tone: fact.tone }];
       }
       const at = fact.value.lastIndexOf(" by ");
       if (at < 0) return [];
-      return [{ who: fact.value.slice(at + 4), state: opening(fact.value.slice(0, at)), tone: fact.tone }];
+      const who = fact.value.slice(at + 4);
+      return [{ who, account: fact.account ?? who, state: opening(fact.value.slice(0, at)), tone: fact.tone }];
     });
 }
 
@@ -464,7 +469,10 @@ export function reviewChoices(actions: readonly ViewAction[], pending: number, b
 
 /** One thing said in *Conversation*: a comment, or a review with its verdict. */
 export interface PrMessage {
+  /** Who, as the source names them: the profile's name where it has one (F-107). */
   who: string;
+  /** Their account, which the reader's own username is compared with: the fact's `account`, else `who`. */
+  account: string;
   /** When, in the source's words. */
   at: string;
   verdict: { text: string; tone: Tone | null } | null;
@@ -490,6 +498,7 @@ export function conversationParts(view: SourceView | null): (Line | { message: P
       parts.push({
         message: {
           who: said.label,
+          account: said.account ?? said.label,
           at: viewStamp(said.value),
           verdict: review ? { text: review.value, tone: review.tone } : null,
           body: "",

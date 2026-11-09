@@ -230,9 +230,9 @@ test("the checks line: every check passing, else each one that is not, the loude
 
 test("the conversation is one message per facts block: who, when, the review's verdict, then the words", () => {
   expect(conversationOf(VIEW)).toEqual([
-    { who: "jonas", at: stampLabel("2026-08-22T09:30:00"), verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
-    { who: "mara", at: stampLabel("2026-08-22T10:20:00"), verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
-    { who: "priya", at: stampLabel("2026-08-22T11:00:00"), verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
+    { who: "jonas", account: "jonas", at: stampLabel("2026-08-22T09:30:00"), verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
+    { who: "mara", account: "mara", at: stampLabel("2026-08-22T10:20:00"), verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
+    { who: "priya", account: "priya", at: stampLabel("2026-08-22T11:00:00"), verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
   ]);
   expect(conversationOf(null)).toEqual([]);
 });
@@ -387,11 +387,24 @@ test("readiness: not ready while a line is unmet or Merge is refused, ready only
 
 test("the reviewers and their state, from the source's standing verdicts", () => {
   expect(reviewersOf(RAIL(null))).toEqual([
-    { who: "sven", state: "Approved", tone: "ok" },
-    { who: "jonas", state: "Changes requested", tone: "warn" },
-    { who: "priya", state: "Review requested", tone: "muted" },
+    { who: "sven", account: "sven", state: "Approved", tone: "ok" },
+    { who: "jonas", account: "jonas", state: "Changes requested", tone: "warn" },
+    { who: "priya", account: "priya", state: "Review requested", tone: "muted" },
   ]);
   expect(reviewersOf(null)).toEqual([]);
+});
+
+test("a person the source names by display name keeps the account it carries (F-107)", () => {
+  const named = (label: string, value: string, account: string, tone: Tone | null = null) => ({ ...fact(label, value, tone), account });
+  const view: SourceView = {
+    sections: [
+      { id: "overview", title: "Overview", count: null, deferred: false, blocks: [{ type: "facts", facts: [named("Review", "approved by Priya Nair", "priya.nair", "ok")] }] },
+      { id: "conversation", title: "Conversation", count: 1, deferred: false, blocks: [{ type: "facts", facts: [named("Mara Lindqvist", "2026-08-22T10:20:00", "mara")] }] },
+    ],
+    actions: [],
+  } as unknown as SourceView;
+  expect(reviewersOf(view)).toEqual([{ who: "Priya Nair", account: "priya.nair", state: "Approved", tone: "ok" }]);
+  expect(conversationOf(view).map(({ who, account }) => ({ who, account }))).toEqual([{ who: "Mara Lindqvist", account: "mara" }]);
 });
 
 test("conflicts: none, or the base it conflicts with; nothing while the source has not said", () => {

@@ -77,7 +77,7 @@
     let live = true;
     ports.codeFacts(ids).then(
       (facts) => {
-        if (live) authors = new Map(facts.flatMap((fact) => (fact.author ? [[fact.entity_id, fact.mine ? "you" : fact.author] as const] : [])));
+        if (live) authors = new Map(facts.flatMap((fact) => (fact.author ? [[fact.entity_id, fact.mine ? "you" : (fact.author_name ?? fact.author)] as const] : [])));
       },
       () => {},
     );

@@ -707,6 +707,14 @@ pub struct Fact {
     pub value: String,
     /// Colour, only where something is wrong or moving (the Signal design).
     pub tone: Option<Tone>,
+    /// The account of the person the fact names, where its label or value
+    /// names them by the source's display name: what the app compares with
+    /// the source's configured username, and what a write about them sends.
+    /// A Gitea review's *approved by Mara Lindqvist* is `mara`. Absent on
+    /// the wire when `None`, so a fact without one keeps its old shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
 }
 
 /// One row of an [`Block::Entities`] list.
@@ -864,11 +872,13 @@ mod tests {
                         label: "Commit".into(),
                         value: "c90d11a".into(),
                         tone: None,
+                        account: None,
                     },
                     Fact {
                         label: "Outcome".into(),
                         value: "failed".into(),
                         tone: Some(Tone::Err),
+                        account: None,
                     },
                 ],
             },
@@ -1241,6 +1251,7 @@ mod tests {
                 label: "Outcome".into(),
                 value: "failed".into(),
                 tone: Some(Tone::Err),
+                account: None,
             }],
         })
         .unwrap();

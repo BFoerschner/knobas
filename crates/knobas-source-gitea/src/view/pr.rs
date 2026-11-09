@@ -11,7 +11,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::rows::{self, ListedCommit};
-use super::{fact, login, when_of};
+use super::{fact, login, name_of, person_fact, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
@@ -522,14 +522,17 @@ fn conversation(
     let mut blocks = Vec::with_capacity(said.len() * 2 + 1);
     blocks.extend(unread.map(|reason| super::rows::muted_line(reason.clone())));
     for entry in &said {
-        let who = login(entry.user).unwrap_or_else(|| "someone".to_owned());
+        // Named as a ticket's comments name their authors (F-107), the
+        // login beside the name for the reader's own.
+        let who = name_of(entry.user).unwrap_or_else(|| "someone".to_owned());
         let when = entry.at.map(when_of).unwrap_or_default();
-        let mut facts = vec![fact(&who, when)];
+        let mut facts = vec![person_fact(&who, when, entry.user)];
         if let Some((value, tone)) = &entry.verdict {
             facts.push(Fact {
                 label: "Review".to_owned(),
                 value: value.clone(),
                 tone: *tone,
+                account: None,
             });
         }
         blocks.push(Block::Facts { facts });
@@ -648,10 +651,11 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
             label: "State".to_owned(),
             value: state.clone(),
             tone,
+            account: None,
         });
     }
-    if let Some(author) = login(pull.user.as_ref()) {
-        facts.push(fact("Author", author));
+    if let Some(author) = name_of(pull.user.as_ref()) {
+        facts.push(person_fact("Author", author, pull.user.as_ref()));
     }
     if let (Some(head), Some(base)) = (pull.head.as_ref(), pull.base.as_ref())
         && let (Some(head_ref), Some(base_ref)) = (head.r#ref.as_deref(), base.r#ref.as_deref())
@@ -674,7 +678,7 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
     if pull.merged
         && let Some(at) = pull.merged_at.as_deref()
     {
-        let value = match login(pull.merged_by.as_ref()) {
+        let value = match name_of(pull.merged_by.as_ref()) {
             Some(by) => format!("{} by {by}", when_of(at)),
             None => when_of(at),
         };
@@ -691,28 +695,32 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
 /// a reviewer's latest review), and a plain comment after a verdict does not
 /// take it back.
 fn verdicts(reviews: &[Review]) -> Vec<Fact> {
-    let mut standing: Vec<(String, String)> = Vec::new();
+    // By login, as Gitea counts a reviewer, each with the review's account.
+    let mut standing: Vec<(String, String, Option<&UserRef>)> = Vec::new();
     for review in reviews {
         let Some(who) = login(review.user.as_ref()) else {
             continue;
         };
         let state = review.state.as_deref().unwrap_or_default();
         if review.dismissed {
-            standing.retain(|(name, _)| *name != who);
+            standing.retain(|(name, _, _)| *name != who);
             continue;
         }
         if state.is_empty() || state == "PENDING" {
             continue;
         }
-        match standing.iter_mut().find(|(name, _)| *name == who) {
+        match standing.iter_mut().find(|(name, _, _)| *name == who) {
             Some(_) if state == "COMMENT" => {}
-            Some((_, verdict)) => state.clone_into(verdict),
-            None => standing.push((who, state.to_owned())),
+            Some((_, verdict, _)) => state.clone_into(verdict),
+            None => standing.push((who, state.to_owned(), review.user.as_ref())),
         }
     }
     standing
         .into_iter()
-        .map(|(who, state)| {
+        .map(|(login, state, user)| {
+            // Named as a ticket names its people (F-107); the login stays
+            // the fact's account.
+            let who = name_of(user).unwrap_or(login);
             let (value, tone) = match state.as_str() {
                 "APPROVED" => (format!("approved by {who}"), Some(Tone::Ok)),
                 "REQUEST_CHANGES" => (format!("changes requested by {who}"), Some(Tone::Warn)),
@@ -724,9 +732,8 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
                 ),
             };
             Fact {
-                label: "Review".to_owned(),
-                value,
                 tone,
+                ..person_fact("Review", value, user)
             }
         })
         .collect()

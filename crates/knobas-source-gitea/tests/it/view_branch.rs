@@ -622,6 +622,7 @@ async fn a_branch_with_no_pull_request_says_so() {
             label: "Pull request".into(),
             value: "none".into(),
             tone: Some(Tone::Muted),
+            account: None,
         })
     );
     assert!(

@@ -502,16 +502,25 @@
   function closePick() {
     picking = false;
   }
+  /** The name *Request…* shows for `account`, the login a request is sent by (F-107); the account where the source gave none. */
+  function askedName(account: string): string {
+    const field = request?.fields.find((f) => f.name === "reviewers");
+    return (field?.kind.type === "choice" ? field.kind.options.find((option) => option.value === account)?.label : undefined) ?? account;
+  }
   /** The rail's reviewers: the read's, then those asked here that it does not name yet. */
   const railReviewers = $derived.by(() => {
     const read = reviewers.map((reviewer) => ({ ...reviewer, note: null as string | null }));
     if (prId === null) return read;
     for (const echo of echoesOn(prId, REQUESTED))
-      if (!read.some((reviewer) => reviewer.who === echo.text)) read.push({ who: echo.text, state: "Review requested", tone: "muted", note: echo.state });
+      if (!read.some((reviewer) => reviewer.account === echo.text))
+        read.push({ who: askedName(echo.text), account: echo.text, state: "Review requested", tone: "muted", note: echo.state });
     // The reader's own verdict, on its way: until the read holds it, this row says where it went (F-251).
     const verdict = echoOn(prId, "review");
     if (verdict === null) return read;
-    return [...read.filter((reviewer) => reviewer.who !== me), { who: me ?? "You", state: REVIEW_SENT[verdict.text as Verdict].state, tone: "info", note: verdict.state }];
+    return [
+      ...read.filter((reviewer) => reviewer.account !== me),
+      { who: me ?? "You", account: me ?? "", state: REVIEW_SENT[verdict.text as Verdict].state, tone: "info", note: verdict.state },
+    ];
   });
 
   /** Ask `who` for a review (#2303): queued, drawn requested at once, and read back by the refresh after it. */
@@ -522,9 +531,9 @@
     try {
       const write = await ports.submitWrite({ RequestReviewers: { entity: id, reviewers: [who] } });
       echoWrite(id, REQUESTED, who, { write, many: true, following: { name: "Review request" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
-      toastQueued(`review request to ${who} on ${name}`, detail?.source ?? null, { write });
+      toastQueued(`review request to ${askedName(who)} on ${name}`, detail?.source ?? null, { write });
     } catch (cause) {
-      push({ text: `Could not ask ${who} for a review: ${ipcErrorMessage(cause)}`, tone: "err" });
+      push({ text: `Could not ask ${askedName(who)} for a review: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
 
@@ -549,7 +558,7 @@
   function landedIn(answer: SourceView | null, echo: Echo, sentBefore: ReadonlySet<number>): boolean {
     if (echo.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, echo.text));
     // A review request (#2303) lands once the read names the reviewer.
-    if (echo.kind === REQUESTED) return reviewersOf(answer).some((reviewer) => reviewer.who === echo.text);
+    if (echo.kind === REQUESTED) return reviewersOf(answer).some((reviewer) => reviewer.account === echo.text);
     if (!STATE_READ.includes(echo.kind)) return echo.write !== null && sentBefore.has(echo.write);
     const state = headerOf(answer).state?.text ?? null;
     return state !== null && echo.base !== null && state !== echo.base;
@@ -886,7 +895,7 @@
                   {@render mutedLine(part.line)}
                 {:else}
                 {@const message = part.message}
-                {@const own = me !== null && message.who === me}
+                {@const own = me !== null && message.account === me}
                 <article class="tf-msg">
                   <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(message.who)}</span>
                   <div class="tf-msg-body">
@@ -1020,8 +1029,8 @@
                 <p class="tf-prnote">No reviews yet.</p>
               {:else}
                 <div class="tf-prlist">
-                  {#each railReviewers as reviewer (reviewer.who)}
-                    {@const own = me !== null && reviewer.who === me}
+                  {#each railReviewers as reviewer (reviewer.account)}
+                    {@const own = me !== null && reviewer.account === me}
                     <div class="tf-prit">
                       <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
                       <span class="tf-prgrow">{own ? "You" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim">{` · ${reviewer.note}`}</span>{/if}</span>

@@ -2197,9 +2197,32 @@ async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
 /// that moves here would re-deliver every record on a watermark once after the
 /// upgrade. The pull request's own framing is pinned beside it, in
 /// `fingerprint::tests::a_pull_request_keeps_its_fingerprint`.
+///
+/// The records are read as they were when the literals were taken: the fake
+/// has since gained fields real Gitea always sends (a user's `full_name`, a
+/// pull request's `labels`, #2479), which are new data, not a new algorithm.
 #[test]
 fn fixture_records_keep_their_fingerprints() {
-    use knobas_source::fingerprint::of;
+    let of = |record: &serde_json::Value| {
+        let mut record = record.clone();
+        let object = record.as_object_mut().unwrap();
+        // A pull request's labels are new; an issue's always were there.
+        if object.contains_key("head") {
+            object.remove("labels");
+        }
+        if let Some(user) = object.get_mut("user").and_then(|u| u.as_object_mut()) {
+            user.remove("full_name");
+        }
+        for asked in object
+            .get_mut("requested_reviewers")
+            .and_then(|r| r.as_array_mut())
+            .into_iter()
+            .flatten()
+        {
+            asked.as_object_mut().unwrap().remove("full_name");
+        }
+        knobas_source::fingerprint::of(&record)
+    };
     assert_eq!(
         of(&support::repo(
             "tidewater",

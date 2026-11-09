@@ -530,6 +530,13 @@ entity_id: string,
  */
 author: string | null, 
 /**
+ * The name to call [`author`](Self::author) by, through the kind's
+ * declared `reporter_name` (F-107): Gitea's profile name of a pull
+ * request's opener. Absent on the wire where the account is the only
+ * name, and a reader then draws the account.
+ */
+author_name?: string, 
+/**
  * Whether `author` is its own source's configured username, trimmed,
  * compared as the attention read compares it (#712). `false` for a
  * source with no username, whose rows are nobody's.
@@ -1699,7 +1706,15 @@ export type Fact = { label: string, value: string,
 /**
  * Colour, only where something is wrong or moving (the Signal design).
  */
-tone: Tone | null, };
+tone: Tone | null, 
+/**
+ * The account of the person the fact names, where its label or value
+ * names them by the source's display name: what the app compares with
+ * the source's configured username, and what a write about them sends.
+ * A Gitea review's *approved by Mara Lindqvist* is `mara`. Absent on
+ * the wire when `None`, so a fact without one keeps its old shape.
+ */
+account?: string, };
 
 /**
  * How an [`ActionField`] asks. Internally tagged (`{"type": "choice", ...}`),

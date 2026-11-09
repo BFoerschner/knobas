@@ -194,6 +194,7 @@ fn fact(label: &str, value: impl Into<String>, tone: Option<Tone>) -> Fact {
         label: label.to_owned(),
         value: value.into(),
         tone,
+        account: None,
     }
 }
 

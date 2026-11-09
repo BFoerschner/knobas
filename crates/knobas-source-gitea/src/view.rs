@@ -372,6 +372,7 @@ fn fact(label: &str, value: String) -> Fact {
         label: label.to_owned(),
         value,
         tone: None,
+        account: None,
     }
 }
 
@@ -383,6 +384,25 @@ fn short(sha: &str) -> String {
 fn login(user: Option<&UserRef>) -> Option<String> {
     user.and_then(|u| u.login.clone())
         .filter(|l| !l.trim().is_empty())
+}
+
+/// What to call a Gitea account (F-107): the profile's name, else its
+/// login, as a ticket's card names its people. `None` with neither.
+fn name_of(user: Option<&UserRef>) -> Option<String> {
+    user.and_then(|u| u.full_name.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .or_else(|| login(user))
+}
+
+/// A fact naming `user` by [`name_of`] in `value`, carrying the login as
+/// its account, so the app knows the reader's own and what to send.
+fn person_fact(label: &str, value: String, user: Option<&UserRef>) -> Fact {
+    Fact {
+        account: login(user),
+        ..fact(label, value)
+    }
 }
 
 /// `Name <email>`, or whichever half git recorded.

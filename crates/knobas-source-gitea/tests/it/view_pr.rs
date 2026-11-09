@@ -1496,6 +1496,7 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
                 label: "Mergeable".into(),
                 value: format!("no: {lower}"),
                 tone: Some(Tone::Warn),
+                account: None,
             }),
             "{}",
             case.what
@@ -1589,6 +1590,7 @@ async fn what_does_not_stand_in_the_way_leaves_the_merge_enabled() {
             label: "Mergeable".into(),
             value: "yes, behind main".into(),
             tone: None,
+            account: None,
         })
     );
 
@@ -2140,6 +2142,7 @@ async fn the_overview_read_alone_says_the_same_mergeability() {
             label: "Mergeable".into(),
             value: "no: 1 of 2 required approvals".into(),
             tone: Some(Tone::Warn),
+            account: None,
         })
     );
     assert_eq!(mergeable_fact(&alone), mergeable_fact(&whole));
@@ -3595,4 +3598,106 @@ async fn a_diff_is_kept_only_when_the_record_read_after_it_names_the_same_head()
 
 fn source_of(server: &MockServer) -> Box<dyn Source> {
     knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).expect("builds")
+}
+
+// -- People by name (the live run on #2479, F-107) ---------------------------
+
+/// Where Gitea's profiles have names, the view calls people by them, as a
+/// ticket's card does, and keeps each login as the fact's account: the
+/// author, each reviewer's verdict, who said what, who merged, who a review
+/// can be asked of, and a commit Gitea matched to an account. A profile with
+/// no name keeps its login. The live run drew *jonas.becker* beside commits
+/// reading *Mara Lindqvist*.
+#[tokio::test]
+async fn people_are_named_by_their_profiles_and_keep_their_logins() {
+    let named = |login: &str, name: &str| json!({ "login": login, "full_name": name });
+    let mut pull = open_pull();
+    pull["user"] = named("mara.lindqvist", "Mara Lindqvist");
+    pull["base"]["repo"]["permissions"] = json!({ "push": true });
+    let reviews = json!([
+        { "id": 1, "user": named("priya.nair", "Priya Nair"), "state": "APPROVED",
+          "submitted_at": "2026-08-22T11:00:00Z", "body": "Looks right." },
+        { "id": 2, "user": named("lee", ""), "state": "REQUEST_CHANGES",
+          "submitted_at": "2026-08-22T12:00:00Z", "body": "" }
+    ]);
+    let server = gitea(pull.clone(), reviews).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/reviewers")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([named("sven", "Sven Ahlberg"), named("olu", " ")])),
+        )
+        .mount(&server)
+        .await;
+    let mut commits = pr_commits();
+    commits[1]["author"] = named("mara.lindqvist", "Mara L.");
+    answer(&server, format!("{REPO}/pulls/142/commits"), 200, commits).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+
+    let people: Vec<_> = facts_of(section(&view, "overview"))
+        .iter()
+        .filter(|f| f.label == "Author" || f.label == "Review")
+        .map(|f| (f.label.as_str(), f.value.as_str(), f.account.as_deref()))
+        .collect();
+    assert_eq!(
+        people,
+        [
+            ("Author", "Mara Lindqvist", Some("mara.lindqvist")),
+            ("Review", "approved by Priya Nair", Some("priya.nair")),
+            ("Review", "changes requested by lee", Some("lee")),
+        ]
+    );
+
+    let said: Vec<_> = section(&view, "conversation")
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Facts { facts } => Some((facts[0].label.clone(), facts[0].account.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        said.contains(&("Priya Nair".to_owned(), Some("priya.nair".to_owned()))),
+        "{said:?}"
+    );
+    assert!(
+        said.contains(&("jonas.becker".to_owned(), Some("jonas.becker".to_owned()))),
+        "a profile with no name keeps its login: {said:?}"
+    );
+
+    let FieldKind::Choice { options } = &request_of(&view).expect("offered").fields[0].kind else {
+        panic!("a choice");
+    };
+    assert_eq!(
+        options,
+        &[
+            ChoiceOption::new("sven", "Sven Ahlberg"),
+            ChoiceOption::new("olu", "olu")
+        ],
+        "sent by login, shown by name, and a blank name is the login"
+    );
+
+    let Block::Entities { rows, .. } = &section(&view, "commits").blocks[0] else {
+        panic!("commits are a list");
+    };
+    // This mock answers every page alike, so read the first page's two.
+    let authors: Vec<_> = rows.iter().take(2).map(|r| r.author.as_deref()).collect();
+    assert_eq!(
+        authors,
+        [Some("Mara Lindqvist"), Some("Mara L.")],
+        "an unmatched commit keeps git's name; a matched one takes the account's"
+    );
+
+    // Merged: who merged is named the same way.
+    let mut merged = pull;
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    merged["merged_at"] = json!("2026-08-23T08:00:00Z");
+    merged["merged_by"] = named("priya.nair", "Priya Nair");
+    let server = gitea(merged, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        fact(facts_of(section(&view, "overview")), "Merged").map(|f| f.value.as_str()),
+        Some("2026-08-23 08:00 +00:00 by Priya Nair")
+    );
 }

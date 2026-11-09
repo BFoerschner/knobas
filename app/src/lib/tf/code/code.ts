@@ -53,7 +53,7 @@ export interface PrLine {
   number: string | null;
   /** Open, and nothing happened to it for more than five days. */
   idle: boolean;
-  /** Who opened it, as the source spells the account, or `null` before `code_facts` answers or on a miss. */
+  /** Who opened it, by the profile's name where the source keeps one, else as it spells the account; `null` before `code_facts` answers or on a miss. */
   author: string | null;
   /** The reader wrote it: the row says *you*, and the filter still finds the account's name. */
   mine: boolean;
@@ -100,7 +100,8 @@ function line(row: EntityRow, group: PrGroup | null, now: Date, open: boolean, f
     group,
     number: prNumber(row.entity_id),
     idle: open && !Number.isNaN(at) && now.getTime() - at > IDLE_MS,
-    author: facts.get(row.entity_id)?.author ?? null,
+    // The opener as a ticket's card names a person (F-107): the profile's name, else the account.
+    author: facts.get(row.entity_id)?.author_name ?? facts.get(row.entity_id)?.author ?? null,
     mine: facts.get(row.entity_id)?.mine ?? false,
   };
 }
