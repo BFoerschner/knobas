@@ -328,7 +328,9 @@ pub struct RangeDiff {
 /// `compare:<base>...<head>` section, through the read cache, and whitespace
 /// shown as the source answers it.
 ///
-/// A checkout that lacks a commit is never fetched into: the source answers.
+/// A checkout that lacks a branch tip the mirror names answers through the
+/// source, and has that tip fetched behind it (ADR-0041,
+/// [`fetch_missing_tip`]); two shas are never fetched.
 ///
 /// # Errors
 ///
@@ -361,7 +363,39 @@ pub async fn range_diff(
     {
         return Ok(predicted);
     }
+    fetch_missing_tip(pool, registry.as_ref(), entity_id, base, head).await;
     source_range_diff(pool, secrets, registry, live, entity_id, base, head).await
+}
+
+/// A checkout that lacks a branch tip the mirror names for a compare has that
+/// tip fetched behind the source's answer, as *Files* has (ADR-0041), so the
+/// next *New pull request* from a branch pushed elsewhere reads locally. The
+/// head first, which is the one a push elsewhere moves; one fetch per checkout
+/// at a time ([`fetch::Fetches::behind`]).
+async fn fetch_missing_tip(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) {
+    let Ok(Some(repo)) = repo_of(pool, entity_id).await.map(|r| r.entity_id) else {
+        return;
+    };
+    let Ok(Some(path)) = resolve(pool, &repo).await.map(|c| c.path) else {
+        return;
+    };
+    for name in [head, base] {
+        let Ok(Some(tip)) = branch_tip(pool, registry, &repo, name).await else {
+            continue;
+        };
+        if !range::holds_commits(Path::new(&path), &[tip.commit.as_str()]).await {
+            fetch::Fetches::global()
+                .behind(pool, registry, &repo, &path, &tip.commit)
+                .await;
+            return;
+        }
+    }
 }
 
 /// The diff from `base` to `head` as the source's compare answers it now,
