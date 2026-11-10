@@ -40,6 +40,7 @@
 //   enter-walks   Enter, wait 600 ms, Enter. Fails if the second writes nothing: a person must still be able to walk down a list.
 //                 Can't run unless the row left and focus took the next row's same words.
 //   pointer-twice real mouse presses at 15% of a button's width, 120, 300 and 600 ms apart, a page each. Fails if a dialog opens, and with `once` if the second press writes.
+//                 `reveal`: the button is in a row's fading group, so the pointer rests on it first, which brings the group up.
 //   undo-stale    make `changes` to one setting, press Undo, and read `value`. Fails unless it is the value from before the changes, if a
 //                 toast still offers an Undo afterwards, or if the changes leave two toasts up. With two Undos up it tries each, newest first,
 //                 on a fresh page. If no Undo is up and the value is back at the first, there is nothing to press.
@@ -81,6 +82,10 @@
 //                 After it the rows must stand as they stood, with no row held. `aim`: glide to that instead, press it and require `opens` (a selector) to appear, with the hold closed once it has landed.
 //   hold-gutter   Round 16. Press `press` by real pointer, drift right of `list` and down a row, wait for the toast to go (`wait` ms), and come back to the next row's control. Fails if a row moved or the pointer lands on another row's.
 //   hold-leave    Round 16. Press `press` by real pointer, press `via`'s nav entry and `section`'s while the toast stands. Fails if the row came back or a hold outlived the leave. Undo must then bring it back.
+//
+//   row-room      PR #2479. At each of `sizes`, with a pointer that hovers and then with none (touch emulation, as Linux's headless Chrome on the release
+//                 runner reads), every button in a row's `cell` must end inside `table`: at rest, with the pointer on the row, and with keyboard focus in its
+//                 fading group (Tab into it). Fails naming the size, the row, the button and how far it runs past. `query` is added to the address, as for any trip.
 //
 //   comment-view  Round 16. Type in the composer, with *Comment* resting 6 px above the bottom of its scroller, and send by `how` (key or pointer). Fails unless the box and *Comment* end above the status bar. `size` is a [w, h] where the default doesn't scroll.
 //
@@ -193,6 +198,10 @@ const PAGES = [
     { id: "monitors-hide-fast", kind: "enter-fast", strict: true, finding: "F-156", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS },
     { id: "monitors-hide-walks", kind: "enter-walks", strict: true, finding: "F-156", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS },
     { id: "monitors-hide-inbox", kind: "leave-back", finding: "F-356", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS, via: "inbox" },
+    { id: "monitors-ack-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-351", press: { sel: ".tf-mon button.tf-mon-ack" } },
+    { id: "monitors-pause-pointer", kind: "pointer-twice", strict: true, once: true, reveal: true, finding: "F-340", press: { sel: ".tf-mon tbody button", text: "Pause" } },
+    // The README's picture: its query, and the widths the design works at.
+    { id: "monitors-row-room", kind: "row-room", strict: true, finding: "PR #2479", query: "&fake-sources-healthy&fake-timer", table: ".tf-mon", cell: ".tf-mon-acts", sizes: [[1100, 900], [1240, 900], [1440, 900], [1920, 900]] },
   ] },
   { page: "Builds, a run", route: RUN, trips: [
     { id: "builds-rerun", kind: "enter-twice", finding: "F-338", press: { sel: ".tf-bhead .tf-primary" } },
@@ -739,7 +748,7 @@ async function worker(queue, results) {
     await opener.settleAfterChange();
   };
   const open = async (t) => {
-    await opener.openScreen({ name: t.id, route: t.route });
+    await opener.openScreen({ name: t.id, route: t.route, query: t.query });
     if (!(await evaluate(`window.__trip.wrap()`))) throw new Error("no __TAURI_INTERNALS__ to wrap");
     for (const s of t.prep ?? []) {
       if (s.wait) await sleep(s.wait);
@@ -840,8 +849,15 @@ async function worker(queue, results) {
     };
     for (const gap of t.gaps ?? [120, 300, 600]) {
       await open(t);
-      const raw = await evaluate(`window.__trip.point(${JSON.stringify(t.press)})`);
+      let raw = await evaluate(`window.__trip.point(${JSON.stringify(t.press)})`);
       if (!raw) throw new Error(`can't find ${t.press.sel} ${t.press.text ?? t.press.starts ?? ""}`.trim());
+      if (t.reveal && !JSON.parse(raw).under) {
+        // A row's fading group takes no press until the pointer is on the row, as a person's hand is before it presses.
+        const at = JSON.parse(raw);
+        await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+        await sleep(200);
+        raw = await evaluate(`window.__trip.point(${JSON.stringify(t.press)})`);
+      }
       const p = JSON.parse(raw);
       if (!p.under) throw new Error(`something else is at 15% of "${p.words}"`);
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
@@ -941,6 +957,62 @@ async function worker(queue, results) {
         notes.push(`${w} px: ${rowsAtStart} rows, ${moved.size} columns moved`);
       }
     } finally {
+      await fit(1440, 900);
+    }
+    return { reasons, note: notes.join("; ") };
+  }
+
+  async function rowRoom(t) {
+    const reasons = [];
+    const notes = [];
+    const rowsOf = `[...document.querySelectorAll(${JSON.stringify(`${t.table} tbody tr`)})].filter((r) => r.querySelector(${JSON.stringify(t.cell)}))`;
+    // Each button of row i against the table's box, which clips (overflow: clip), so a button past it is cut.
+    const read = async (i) => JSON.parse(await evaluate(`(() => {
+      const box = document.querySelector(${JSON.stringify(t.table)}).getBoundingClientRect();
+      const row = ${rowsOf}[${i}];
+      const name = (row.querySelector("td")?.textContent ?? "").replace(/\\s+/g, " ").trim().slice(0, 30);
+      const past = [...row.querySelectorAll(${JSON.stringify(`${t.cell} button`)})].map((b) => ({ b, r: b.getBoundingClientRect() }))
+        .filter(({ r }) => r.right > box.right + 0.5 || r.left < box.left - 0.5)
+        .map(({ b, r }) => b.textContent.trim() + " by " + Math.ceil(Math.max(r.right - box.right, box.left - r.left)) + " px");
+      return JSON.stringify({ name, past, buttons: row.querySelectorAll(${JSON.stringify(`${t.cell} button`)}).length });
+    })()`));
+    try {
+      for (const hovers of [true, false]) {
+        await send("Emulation.setTouchEmulationEnabled", hovers ? { enabled: false } : { enabled: true, maxTouchPoints: 1 });
+        for (const [w, h] of t.sizes ?? [[1440, 900]]) {
+          await fit(w, h);
+          await open(t);
+          if ((await evaluate(`matchMedia("(hover: hover)").matches`)) !== hovers) throw new Error(`the page reads hover ${!hovers} where the trip set ${hovers}`);
+          const count = await evaluate(`${rowsOf}.length`);
+          if (!count) throw new Error(`no row of ${t.table} holds ${t.cell} at ${w}`);
+          let buttons = 0;
+          for (let i = 0; i < count; i++) {
+            const at = JSON.parse(await evaluate(`(() => { const r = ${rowsOf}[${i}]; r.scrollIntoView({ block: "center" }); const b = r.querySelector("td").getBoundingClientRect(); return JSON.stringify([b.left + 10, b.top + b.height / 2]); })()`));
+            const ways = [["at rest", async () => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 })]];
+            if (hovers) ways.push(["hovered", async () => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at[0], y: at[1] })]);
+            ways.push(["with focus in its group", async () => {
+              await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+              // The control before the group's first, then Tab, so focus arrives as by key and :focus-visible holds.
+              const ok = await evaluate(`(() => { const first = ${rowsOf}[${i}].querySelector(${JSON.stringify(`${t.cell} .tf-rowacts button`)}); if (!first) return false; const all = [...document.querySelectorAll("a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex='-1'])")]; const before = all[all.indexOf(first) - 1]; if (!before) return false; before.focus(); return true; })()`);
+              if (!ok) throw new Error(`row ${i + 1} has no group to Tab into at ${w}`);
+              await key("Tab");
+              if (!(await evaluate(`!!document.activeElement?.matches(":focus-visible") && !!document.activeElement.closest(".tf-rowacts") && ${rowsOf}[${i}].contains(document.activeElement)`))) throw new Error(`Tab did not reach row ${i + 1}'s group at ${w}`);
+            }]);
+            for (const [how, go] of ways) {
+              await go();
+              await sleep(200); // The group's fade is 120 ms.
+              const m = await read(i);
+              buttons = Math.max(buttons, m.buttons);
+              if (m.past.length) reasons.push(`at ${w} px ${hovers ? "with" : "without"} hover, "${m.name}" ${how}: ${m.past.join(", ")} past the table's edge`);
+            }
+            await evaluate(`document.activeElement?.blur()`);
+          }
+          notes.push(`${w} px ${hovers ? "hover" : "no hover"}: ${count} rows, up to ${buttons} buttons`);
+        }
+      }
+    } finally {
+      await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
       await fit(1440, 900);
     }
     return { reasons, note: notes.join("; ") };
@@ -2489,7 +2561,7 @@ async function worker(queue, results) {
     }
   }
 
-  const KINDS = { "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };
