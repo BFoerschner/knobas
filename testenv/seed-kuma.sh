@@ -112,4 +112,4 @@ case "$out" in
     ;;
 esac
 
-echo "seed-kuma: Kuma now holds exactly the monitors monitors.json names"
+echo "seed-kuma: Kuma now holds exactly the monitors monitors.json names, beside any scale-* ones"

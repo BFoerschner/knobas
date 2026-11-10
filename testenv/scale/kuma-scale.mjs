@@ -9,8 +9,9 @@
 // a keyword on a page, Gitea's port over tcp, a ping of the loopback -- and
 // about one in twenty a Gitea path that answers 404, so the estate has some
 // monitors down. Intervals of 2 to 10 minutes keep the load under one check a
-// second. Idempotent by name; `./seed-kuma.sh` deletes every one of them again
-// (it owns the monitor list, testenv/README.md "Monitors").
+// second. Idempotent by name. `./seed-kuma.sh` owns the monitor list but
+// leaves every `scale-...` monitor alone, so they stay until the Kuma volume is
+// reset (testenv/README.md, "Monitors" and "Björn's scale").
 import { io } from "socket.io-client";
 
 const KUMA_URL = process.env.KUMA_URL ?? "http://uptime-kuma:3001";

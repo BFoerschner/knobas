@@ -28,10 +28,13 @@
 // the two-argument form by sniffing for a function, but the three-argument
 // call is the one the handler is written for).
 //
-// THIS SCRIPT OWNS THE MONITOR LIST. `monitors.json` is the whole truth: an
-// entry it no longer names is deleted, an entry whose definition drifted is
-// deleted and re-added, and a matching one is left alone so that a second run
-// changes nothing. See README.md, "Monitors".
+// THIS SCRIPT OWNS THE MONITOR LIST, less another estate's. `monitors.json` is
+// the whole truth: an entry it no longer names is deleted, an entry whose
+// definition drifted is deleted and re-added, and a matching one is left alone
+// so that a second run changes nothing. A monitor named `scale-...` is not
+// this script's: `testenv/scale/kuma-scale.mjs` adds them beside the seed
+// (`just seed-scale kuma`), and the sweep never reads them. See README.md,
+// "Monitors" and "Björn's scale".
 //
 // PROTOCOL WITH THE HOST: stderr carries all progress; stdout carries exactly
 // one line, either `KEY=<api key>` or `KEEP`. seed-kuma.sh parses that. The
@@ -229,8 +232,12 @@ log(`${rows.length} monitor(s) already configured`);
 // names. Keeping the first row of a wanted name and deleting every other row
 // makes that sentence true whatever the instance was holding.
 const wanted = new Set(monitors.map((m) => m.name));
+// Another estate's monitors (`seed-scale.sh kuma`), never this sweep's.
+const foreign = (m) => String(m.name ?? "").startsWith("scale-");
+if (monitors.some(foreign)) die("monitors.json names a scale-* monitor, the prefix the sweep leaves to seed-scale.sh");
 const byName = new Map();
 for (const m of rows) {
+  if (foreign(m)) continue;
   if (wanted.has(m.name) && !byName.has(m.name)) { byName.set(m.name, m); continue; }
   ok(await call("deleteMonitor", m.id, false), `deleteMonitor ${m.name}`);
   log("deleted", JSON.stringify(m.name),
