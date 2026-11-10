@@ -220,6 +220,9 @@ export interface BoardReaderOptions {
 /** How long, in ms, typed words wait for a board read still out before they are read anyway. */
 export const TYPED_WAIT_MOST = 400;
 
+/** How long, in ms, the keys pause before a list showing every ticket reads all of them for its words. */
+export const LIST_SETTLE_MS = 600;
+
 export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderOptions): BoardReader {
   const { typingPause, sessions } = options;
   /**
@@ -245,8 +248,10 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   let pausing: ReturnType<typeof setTimeout> | undefined;
   /** Board reads sent and not yet answered. */
   let out = 0;
-  /** Words typed while a read was out: read once it answers, with the words as they are then. */
-  let queued = false;
+  /** The read words typed while a read was out wait to make: made once it answers, with the words as they are then. */
+  let queued: (() => void) | null = null;
+  /** The list's whole read after its quick one, once the keys have paused ({@link LIST_SETTLE_MS}). */
+  let settling: ReturnType<typeof setTimeout> | undefined;
   /** When the last board read was sent (`Date.now()`). */
   let sentAt = 0;
   /** The ticket previewed, and the generation its answers carry. */
@@ -282,9 +287,10 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * one is expanded (every column's once the list is). In lanes the same,
    * each lane's column counted on its own (#939).
    */
-  function capFor(): number | null {
+  function capFor(quick = false): number | null {
     if (state.scope.without) return null;
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
+    if (quick) return cap;
     const answered = board;
     if ((expanded.length === 0 && !listAll) || answered === null) return cap;
     if (listAll && !laned) return Math.max(cap, ...answered.columns.map((column) => column.total));
@@ -313,7 +319,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * large one a short prefix is the broadest of them; it sends fifty cards a
    * column at most (R-3.4, #1024).
    */
-  function read() {
+  function read(quick = false) {
     clearTimeout(pausing);
     const { base, savedView, without } = state.scope;
     if (base === null) return;
@@ -323,12 +329,13 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     out += 1;
     sentAt = Date.now();
     ports
-      .board(capFor(), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
+      .board(capFor(quick), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
       .finally(() => {
         out -= 1;
         if (out === 0 && queued) {
-          queued = false;
-          read();
+          const run = queued;
+          queued = null;
+          run();
         }
       })
       .then((answer) => {
@@ -402,7 +409,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       state.failed = null;
       reading += 1;
       epoch += 1;
-      queued = false;
+      queued = null;
+      clearTimeout(settling);
       state.scope = { ...scope };
       state.filter = { ...filter };
       if (scope.base !== null) read();
@@ -419,15 +427,23 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     setFilter(filter) {
       state.filter = { ...filter };
       clearTimeout(pausing);
+      clearTimeout(settling);
       reading += 1;
+      // The list showing every ticket reads the capped board first, then all of it once the keys pause: every match
+      // read on every key was 5.8 MB and 1.2 s a key at 20,000 tickets (2026-11-10).
+      const quick = listAll && !laned && layout === "list";
+      const go = () => {
+        read(quick);
+        if (quick) settling = setTimeout(() => read(), LIST_SETTLE_MS);
+      };
       pausing = setTimeout(() => {
         const waited = Date.now() - sentAt;
-        if (out === 0 || waited >= TYPED_WAIT_MOST) return read();
+        if (out === 0 || waited >= TYPED_WAIT_MOST) return go();
         // A read that hangs holds nothing up for long: past the most, the words go anyway.
-        queued = true;
+        queued = go;
         pausing = setTimeout(() => {
-          queued = false;
-          read();
+          queued = null;
+          go();
         }, TYPED_WAIT_MOST - waited);
       }, typingPause);
     },
@@ -483,7 +499,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     },
     close() {
       clearTimeout(pausing);
-      queued = false;
+      clearTimeout(settling);
+      queued = null;
       reading += 1;
       epoch += 1;
       previewing = null;

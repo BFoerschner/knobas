@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import { createBoardReader, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
+import { createBoardReader, LIST_SETTLE_MS, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -220,6 +220,33 @@ test("the list's Show N more reads every column whole and the board keeps its ca
   await flush();
   reader.chooseLayout("board");
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([8, 3]);
+});
+
+test("a list showing every ticket reads fifty a column as words change, and all of them once the keys pause (2026-11-10)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.chooseLayout("list");
+  reader.expandAll();
+  reads[1]!.answer(board(column("To Do", 120), column("Done", 900)));
+  await flush();
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[2]!.perColumn).toBe(50);
+  reads[2]!.answer(board({ ...column("To Do", 50), total: 70 }, { ...column("Done", 50), total: 400 }));
+  await flush();
+  // Another key inside the pause starts it over: no whole read yet.
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[3]!.perColumn).toBe(50);
+  reads[3]!.answer(board({ ...column("To Do", 50), total: 60 }, { ...column("Done", 50), total: 300 }));
+  await flush();
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS - 1);
+  expect(reads).toHaveLength(4);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(reads[4]!.query).toBe("payo");
+  expect(reads[4]!.perColumn).toBe(300);
 });
 
 // #2200's class: the list's Show N more reads every ticket, and a deep proxy
