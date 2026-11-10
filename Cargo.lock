@@ -3254,6 +3254,7 @@ name = "knobas-core"
 version = "3.2.8"
 dependencies = [
  "chrono",
+ "futures-util",
  "knobas-db",
  "knobas-spi-types",
  "serde",

@@ -11,6 +11,9 @@ test-util = []
 
 [dependencies]
 chrono.workspace = true
+# `read_scoped` reads the cards and the sources' statuses side by side
+# (`future::try_join`, the scale pass of 2026-11-10).
+futures-util.workspace = true
 # The SPI's shared types, re-exported as `payload`, `entity` and `tone`
 # (#1234). `sqlx` turns on `Declarations::as_param`, the bind every
 # path-driven statement here shares.

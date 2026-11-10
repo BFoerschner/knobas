@@ -198,13 +198,39 @@ macro_rules! lane_paths {
 /// dropped or sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/it/mini_board.rs`.
+///
+/// **Read with no payload in the statement's own scan** (the scale pass,
+/// 2026-11-10): the walk goes through the ticket's primary key, a probe that
+/// rebinds `i` to the same row, which is what the payload macros read, and
+/// runs only where no stored status answers. `k.eid` is the row's id, from
+/// `cross join lateral (select i.entity_id as eid) k` beside the scan. So the
+/// scan can be an index-only scan of `item_ticket_brief_idx` (migration
+/// `0074`): on 20,000 Jira tickets the heap it read was 113 MB, about 20 ms a
+/// statement.
 macro_rules! status_of_ticket {
     () => {
         $crate::stored_or!(
             "sst",
+            "(select ",
             $crate::first_string_of!(
                 "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
-            )
+            ),
+            " from sync.item i where i.entity_id = k.eid)"
+        )
+    };
+}
+
+/// [`lane_of_ticket!`] behind the same probe as [`status_of_ticket!`],
+/// and `''` without reading the row when the board is not laned (`$lane`
+/// `null`), which is what the walk answers then.
+macro_rules! lane_of_ticket_probed {
+    ($decl:literal, $lane:literal) => {
+        concat!(
+            "(case when ",
+            $lane,
+            "::text is null then '' else (select ",
+            lane_of_ticket!($decl, $lane),
+            " from sync.item i where i.entity_id = k.eid) end)"
         )
     };
 }
@@ -284,9 +310,9 @@ const CARDS: &str = concat!(
        select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
     status_of_ticket!(),
     " as status, ",
-    lane_of_ticket!("$4", "$6"),
+    lane_of_ticket_probed!("$4", "$6"),
     " as lane
-       from sync.item i",
+       from sync.item i cross join lateral (select i.entity_id as eid) k",
     status_join!("$4"),
     "
       where i.kind = 'ticket'
@@ -342,7 +368,9 @@ const CARDS: &str = concat!(
     crate::declared_names_as_parent!("$4"),
     " n)) as parent_title, i.item_updated_at as updated_at, r.total
        from ranked r
-       join sync.item i on i.entity_id = r.entity_id
+       cross join lateral (select it.entity_id, it.source_id, it.kind, it.title,
+                                  it.item_updated_at, it.payload #> '{}'::text[] as payload
+                             from sync.item it where it.entity_id = r.entity_id offset 0) i
        left join lateral (select pn.kind, pn.name, i.source_id from ",
     crate::declared_parent_names!("$4"),
     " pn order by pn.pos desc, pn.name_ord limit 1) par on true
@@ -411,11 +439,11 @@ const OBSERVED_STATUSES: &str = concat!(
        select i.source_id, ",
     status_of_ticket!(),
     " as status
-         from sync.item i",
+         from sync.item i cross join lateral (select i.entity_id as eid) k",
     status_join!("$2"),
     "
         where i.kind = 'ticket'
-          and i.source_id = any($1)
+          and ($1::text[] is null or i.source_id = any($1))
           and ",
     crate::live_by_exclusion!("i"),
     "
@@ -817,26 +845,38 @@ pub async fn read_scoped(
     }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
-    // Planned for its parameters every time (#753): reused, the statement
-    // went to PostgreSQL's generic plan on its sixth execution and an All room
-    // of 15,000 tickets took 6 s where its own plan takes 0.1 s.
-    let rows: Vec<CardRow> = sqlx::query_as(CARDS)
-        .persistent(false)
-        .bind(&members)
-        .bind(&scope)
-        .bind(project)
-        .bind(&declared)
-        .bind(per_column.map(i64::from))
-        .bind(lanes.map(|lanes| lanes.by.as_str()))
-        .bind(
-            lanes
-                .and_then(|lanes| lanes.first)
-                .map(|first| i64::from(first.max(1))),
-        )
-        .fetch_all(pool)
-        .await?;
-    let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
-    let mut signals = signals_of(pool, &kept, &declared, identity).await?;
+    let cards = async {
+        // Planned for its parameters every time (#753): reused, the statement
+        // went to PostgreSQL's generic plan on its sixth execution and an All
+        // room of 15,000 tickets took 6 s where its own plan takes 0.1 s.
+        let rows: Vec<CardRow> = sqlx::query_as(CARDS)
+            .persistent(false)
+            .bind(&members)
+            .bind(&scope)
+            .bind(project)
+            .bind(&declared)
+            .bind(per_column.map(i64::from))
+            .bind(lanes.map(|lanes| lanes.by.as_str()))
+            .bind(
+                lanes
+                    .and_then(|lanes| lanes.first)
+                    .map(|first| i64::from(first.max(1))),
+            )
+            .fetch_all(pool)
+            .await?;
+        let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
+        let signals = signals_of(pool, &kept, &declared, identity).await?;
+        Ok::<_, CoreError>((rows, signals))
+    };
+    // The statuses of every source the scope admits, read beside the cards
+    // rather than after them (the scale pass, 2026-11-10: 60 ms of a typed
+    // word's 400 on 20,000 tickets), and kept below for the sources a card
+    // came from. Per source the same answer [`observed_statuses`] gives,
+    // since each source's statuses are its own tickets'.
+    let (cards, observed) =
+        futures_util::future::try_join(cards, observed_among(pool, scope.as_deref(), declarations))
+            .await?;
+    let (rows, mut signals) = cards;
 
     // Grouped in the order the rows arrived, so the newest-first ordering the
     // statement asks for survives into each column; the columns themselves are
@@ -929,7 +969,7 @@ pub async fn read_scoped(
     };
 
     Ok(MiniBoard {
-        sources: observed_statuses(pool, &sources, declarations).await?,
+        sources: statuses_for(&sources, observed),
         columns,
         lanes,
         more_lanes,
@@ -952,9 +992,9 @@ const STATUSES: &str = concat!(
      select i.entity_id, i.source_id, ",
     status_of_ticket!(),
     " as status, ",
-    lane_of_ticket!("$2", "$3"),
+    lane_of_ticket_probed!("$2", "$3"),
     " as lane, i.item_updated_at
-       from sync.item i",
+       from sync.item i cross join lateral (select i.entity_id as eid) k",
     status_join!("$2"),
     "
       where i.kind = 'ticket'
@@ -1211,28 +1251,48 @@ pub async fn observed_statuses(
         return Ok(Vec::new());
     }
     let ids: Vec<String> = sources.iter().cloned().collect();
+    let observed = observed_among(pool, Some(&ids), declarations).await?;
+    Ok(statuses_for(sources, observed))
+}
+
+/// Every status the live tickets of `among` show (every source's, for
+/// `None`), by source: [`OBSERVED_STATUSES`]' rows, unordered.
+async fn observed_among(
+    pool: &PgPool,
+    among: Option<&[String]>,
+    declarations: &crate::payload::Declarations,
+) -> Result<BTreeMap<String, Vec<String>>, CoreError> {
     let rows: Vec<(String, String)> = sqlx::query_as(OBSERVED_STATUSES)
         .persistent(false)
-        .bind(&ids)
+        .bind(among)
         .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
-
-    let mut by_source: BTreeMap<String, Vec<String>> =
-        ids.into_iter().map(|id| (id, Vec::new())).collect();
+    let mut by_source: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (source_id, status) in rows {
         by_source.entry(source_id).or_default().push(status);
     }
-    Ok(by_source
-        .into_iter()
-        .map(|(source_id, mut statuses)| {
+    Ok(by_source)
+}
+
+/// One [`SourceStatuses`] per source of `sources`, in their order, each its
+/// statuses out of `observed` in the board's order; a source that showed
+/// none has an empty list.
+fn statuses_for(
+    sources: &BTreeSet<String>,
+    mut observed: BTreeMap<String, Vec<String>>,
+) -> Vec<SourceStatuses> {
+    sources
+        .iter()
+        .map(|source_id| {
+            let mut statuses = observed.remove(source_id).unwrap_or_default();
             statuses.sort_by_key(|status| column_rank(Some(status)));
             SourceStatuses {
-                source_id,
+                source_id: source_id.clone(),
                 statuses,
             }
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]

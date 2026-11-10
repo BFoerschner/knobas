@@ -166,4 +166,6 @@ async fn a_searched_laned_board_derives_each_once() {
 const CEILING_INBOX: usize = 4;
 const CEILING_DOCS: usize = 10;
 const CEILING_PROJECTS: usize = 2;
-const CEILING_BOARD: usize = 8;
+// The board reads its sources' statuses beside its cards (the scale pass,
+// 2026-11-10), so a board with no card reads them too: one more here.
+const CEILING_BOARD: usize = 9;
