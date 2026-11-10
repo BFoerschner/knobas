@@ -20,7 +20,7 @@ tickets       #/tickets + see:Document the manual-review SLA
 pull-request  #/pr/mock%3Apayout-service%23142/diff + wait:1500 + see:src/sepa/retry.rs
 file          #/repo/mock%3Atidewater%2Fpayout-service/files/docs/flow.d2 + wait:2000 + see:flow.d2
 build         #/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187 + see:gives_up_after_max_attempts
-docs          #/docs/page/confluence%3Asepa + see:The SEPA batch goes to the PSP
+docs          #/page/confluence%3Asepa + see:The SEPA batch goes to the PSP
 monitors      #/monitors + see:canary
 time          #/time + see:Standup and planning
 standup       #/time/standup + see:Legacy payout reconciliation
