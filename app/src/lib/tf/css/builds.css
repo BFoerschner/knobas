@@ -34,9 +34,9 @@
 /* A day's heading belongs to the rows under it: the larger space is above. */
 .tf .tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 18px 0 6px; }
 /* A day is one windowed row (TfPipeline), so its heading's margin stays inside the box it measures; the first day's
-   12 px and the list's 2 px make the 14 px the heading had when it collapsed through to the list. */
+   heading keeps the 14 px it had. */
 .tf-runs .tf-day { display: flow-root; }
-.tf .tf-runs .tf-day-first .tf-dayh { margin-top: 12px; }
+.tf .tf-runs .tf-day-first .tf-dayh { margin-top: 14px; }
 .tf-runs .tf-run-dur { width: 150px; }
 /* The last value: *Log* and *Run again…* stand in its place on hover, so it is as wide as they are. */
 .tf-runs .tf-run-at { width: 140px; }
