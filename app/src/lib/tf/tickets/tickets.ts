@@ -78,18 +78,30 @@ export function columnDone(column: MiniBoardColumn, listed: readonly string[] = 
 }
 
 /**
- * The cards a column draws (R-3.4): up to eight, three for a done one
- * ({@link columnDone}), fifty of either while the filter has words, and all
- * of them once expanded.
+ * How many cards one press of a column's *Show more* adds (2026-11-10, Björn's mirror): a Done column of 8,000
+ * tickets drew all of them at once, 73,000 nodes, after a read of every card on the board.
  */
+export const MORE_STEP = 50;
+
+/** Past this many cards drawn, a column with more also offers them in the list, which windows its rows. */
+export const LIST_POINTER_AT = 200;
+
+/**
+ * How many cards a column draws (R-3.4): up to eight, three for a done one ({@link columnDone}), fifty of either
+ * while the filter has words, and {@link MORE_STEP} more for each press of its *Show more* (`pages`).
+ */
+export function shownCount(total: number, pages: number, typing: boolean, done: boolean): number {
+  return Math.min(total, (typing ? TYPED_CAP : done ? DONE_CAP : COLUMN_CAP) + pages * MORE_STEP);
+}
+
+/** The cards a column draws: {@link shownCount} of them. */
 export function drawnCards(
   column: MiniBoardColumn,
-  expanded: boolean,
+  pages: number,
   typing: boolean,
   done: boolean = columnDone(column),
 ): MiniBoardCard[] {
-  if (expanded) return column.cards;
-  return column.cards.slice(0, typing ? TYPED_CAP : done ? DONE_CAP : COLUMN_CAP);
+  return column.cards.slice(0, shownCount(column.cards.length, pages, typing, done));
 }
 
 /**
@@ -125,11 +137,29 @@ export function columnsWithout(columns: readonly MiniBoardColumn[], key: string)
     .filter((column) => column.total > 0);
 }
 
-/** What the column's *Show N more* button says, or `null` when it draws every card. */
+/**
+ * What the column's *Show more* button says, or `null` when it draws every card: the {@link MORE_STEP} it adds and,
+ * while more are left than that, of how many (*Show 50 of 8013 more done*).
+ */
 export function moreLine(column: MiniBoardColumn, drawn: number, done: boolean = columnDone(column)): string | null {
   const rest = column.total - drawn;
   if (rest <= 0) return null;
-  return done ? `Show ${rest} more done` : `Show ${rest} more`;
+  const what = rest <= MORE_STEP ? `${rest}` : `${MORE_STEP} of ${rest}`;
+  return done ? `Show ${what} more done` : `Show ${what} more`;
+}
+
+/** The column's way to the list once it draws {@link LIST_POINTER_AT} cards and holds more, or `null`. */
+export function listPointer(column: MiniBoardColumn, drawn: number): string | null {
+  return drawn >= LIST_POINTER_AT && column.total > drawn ? `See all ${column.total} in the list` : null;
+}
+
+/**
+ * The filter words that keep a column's tickets, for its way to the list: its statuses as `status:` values, any one
+ * of which a ticket may have (the grammar reads two values of one key as either). A column of no status has no words.
+ */
+export function columnWords(column: MiniBoardColumn, listed: readonly string[]): string {
+  const statuses = listed.length > 0 ? listed : column.status === null ? [] : [column.status];
+  return statuses.map((status) => `status:${/[\s"]/.test(status) ? `"${status.replace(/"/g, "")}"` : status}`).join(" ");
 }
 
 /**

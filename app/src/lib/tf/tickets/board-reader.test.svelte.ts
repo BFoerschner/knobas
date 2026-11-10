@@ -166,6 +166,22 @@ test("expand raises the cap to that column's count and draws it whole; the other
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([12, 3]);
 });
 
+test("a long column's Show more reads and draws fifty more a press, never the whole board (2026-11-10)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  const long = { ...column("To Do", 8), total: 8016 };
+  reads[0]!.answer(board(long, column("Done", 5)));
+  await flush();
+  reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+  expect(asked().at(-1)).toEqual({ perColumn: 58, query: null });
+  reads[1]!.answer(board({ ...column("To Do", 58), total: 8016 }, column("Done", 5)));
+  await flush();
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([58, 3]);
+  reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+  expect(asked().at(-1)).toEqual({ perColumn: 108, query: null });
+  expect(reader.expanded).toEqual(["To Do", "To Do"]);
+});
+
 test("in lanes, expand raises the cap for that lane's column only", async () => {
   const { reader, reads, view } = fakes();
   view.lanes = "assignee";

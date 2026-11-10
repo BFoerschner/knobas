@@ -17,6 +17,10 @@ import {
   initials,
   laneTitle,
   moreLine,
+  MORE_STEP,
+  shownCount,
+  listPointer,
+  columnWords,
   nextSort,
   previewAction,
   sharedKeys,
@@ -57,35 +61,52 @@ function named(name: string, statuses: (string | null)[]): MiniBoardColumn {
   return { status: name, cards: statuses.map((status, i) => card(i, status)), total: statuses.length };
 }
 
-test("a column draws eight, Done three, fifty of either while words filter, and every card once expanded", () => {
-  expect(drawnCards(column("To Do", 12), false, false)).toHaveLength(8);
-  expect(drawnCards(column("done", 12), false, false)).toHaveLength(3);
-  expect(drawnCards(column("To Do", 12), true, false)).toHaveLength(12);
-  expect(drawnCards(column("Done", 12), false, true)).toHaveLength(12);
-  expect(drawnCards(column("To Do", 60), false, true)).toHaveLength(50);
-  expect(drawnCards(column("Done", 60), false, true)).toHaveLength(50);
-  expect(drawnCards(column("Done", 60), true, true)).toHaveLength(60);
+test("a column draws eight, Done three, fifty of either while words filter, and fifty more a press of Show more", () => {
+  expect(drawnCards(column("To Do", 12), 0, false)).toHaveLength(8);
+  expect(drawnCards(column("done", 12), 0, false)).toHaveLength(3);
+  expect(drawnCards(column("To Do", 12), 1, false)).toHaveLength(12);
+  expect(drawnCards(column("Done", 12), 0, true)).toHaveLength(12);
+  expect(drawnCards(column("To Do", 60), 0, true)).toHaveLength(50);
+  expect(drawnCards(column("Done", 60), 0, true)).toHaveLength(50);
+  expect(drawnCards(column("Done", 60), 1, true)).toHaveLength(60);
+  // An 8,000-card column (2026-11-10): one press is fifty more, not all of them.
+  expect(drawnCards(column("Done", 500), 1, false)).toHaveLength(3 + MORE_STEP);
+  expect(drawnCards(column("To Do", 500), 3, false)).toHaveLength(8 + 3 * MORE_STEP);
+  expect(shownCount(8016, 2, false, true)).toBe(103);
+  expect(shownCount(20, 2, false, true)).toBe(20);
 });
 
 test("a column is done by its tickets' statuses or the statuses it lists, never by its name (#1423)", () => {
   const shipped = named("Shipped", Array(12).fill("Done"));
   expect(columnDone(shipped)).toBe(true);
-  expect(drawnCards(shipped, false, false)).toHaveLength(3);
+  expect(drawnCards(shipped, 0, false)).toHaveLength(3);
   expect(moreLine({ ...shipped, total: 20 }, 3)).toBe("Show 17 more done");
   const done = named("Done", [...Array(11).fill("Done"), "In Progress"]);
   expect(columnDone(done)).toBe(false);
-  expect(drawnCards(done, false, false)).toHaveLength(8);
+  expect(drawnCards(done, 0, false)).toHaveLength(8);
   // The view's own list decides where it has one: every status it gathers done.
   const closed = named("Closed", Array(12).fill("Done"));
-  expect(drawnCards(closed, false, false, columnDone(closed, ["Done"]))).toHaveLength(3);
+  expect(drawnCards(closed, 0, false, columnDone(closed, ["Done"]))).toHaveLength(3);
   expect(columnDone(named("Done", Array(12).fill("Done")), ["In Review", "Done"])).toBe(false);
   expect(columnDone(named("Done", []))).toBe(false);
 });
 
-test("Show N more counts what the column holds past what it draws, Done saying so", () => {
+test("Show N more counts what the column holds past what it draws, Done saying so, and a long one the fifty it adds", () => {
   expect(moreLine(column("To Do", 8, 30), 8)).toBe("Show 22 more");
   expect(moreLine(column("Done", 8, 40), 3)).toBe("Show 37 more done");
   expect(moreLine(column("To Do", 5), 5)).toBeNull();
+  expect(moreLine(column("To Do", 8, 58), 8)).toBe("Show 50 more");
+  expect(moreLine(column("Done", 8, 8016), 3)).toBe("Show 50 of 8013 more done");
+  expect(moreLine(column("To Do", 8, 300), 58)).toBe("Show 50 of 242 more");
+});
+
+test("past 200 cards drawn a column also offers the list, filtered to its statuses (2026-11-10)", () => {
+  expect(listPointer(column("Done", 8, 8016), 199)).toBeNull();
+  expect(listPointer(column("Done", 8, 8016), 203)).toBe("See all 8016 in the list");
+  expect(listPointer(column("Done", 8, 203), 203)).toBeNull();
+  expect(columnWords(column("Done", 1), [])).toBe("status:Done");
+  expect(columnWords(column("Ready", 1), ["Ready for Release", "QA"])).toBe('status:"Ready for Release" status:QA');
+  expect(columnWords({ status: null, cards: [], total: 0 }, [])).toBe("");
 });
 
 test("initials are a person's first and last names' letters, an account's first two letters, or a dash for nobody", () => {

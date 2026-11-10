@@ -114,6 +114,7 @@
     listEntities,
     miniBoard,
     type MiniBoardCard,
+    type MiniBoardColumn,
   } from "../../ipc/entity";
   import {
     deleteTicketView,
@@ -143,7 +144,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { assigneeName, assigneeOptions, columnHead, columnName, LANE_FIELDS, listName, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -616,6 +617,18 @@
     return `${key.slice(0, KEY_ROOM - 1 - end.length)}…${end}`;
   }
 
+  /**
+   * A long column's *See all N in the list*: the list, which draws only the rows on screen, filtered to the column's
+   * statuses by words the box shows, so they read as any other filter and go as one.
+   */
+  function listColumn(column: MiniBoardColumn, listed: readonly string[]) {
+    const words = columnWords(column, listed);
+    filter.text = [filter.text.trim(), words].filter((part) => part !== "").join(" ");
+    switchLayout("list");
+    reader.setFilter(filterNow());
+    reader.refresh();
+  }
+
   /** The other layout, on the same ticket: the one the preview shows, even where nothing was picked yet. */
   function switchLayout(next: "board" | "list") {
     if (current !== null) session.selected = current.card.entity_id;
@@ -905,8 +918,9 @@
             <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
-            {#each drawn as { column, cards, done } (columnKey(column))}
+            {#each drawn as { column, cards, done, listed } (columnKey(column))}
               {@const more = moreLine(column, cards.length, done)}
+              {@const pointer = listPointer(column, cards.length)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               <div class="tf-col">
                 <h3>
@@ -935,6 +949,9 @@
                   {/each}
                   {#if more}
                     <button type="button" class="tf-more" onclick={() => reader.expand(lane, column)}>{more}</button>
+                  {/if}
+                  {#if pointer}
+                    <button type="button" class="tf-more tf-more-list" onclick={() => listColumn(column, listed)}>{pointer}</button>
                   {/if}
                 </div>
               </div>

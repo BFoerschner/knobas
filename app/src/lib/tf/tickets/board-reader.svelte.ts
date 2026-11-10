@@ -33,6 +33,7 @@ import {
   COLUMN_CAP,
   columnDone,
   drawnCards,
+  shownCount,
   withoutTicket,
   LANES_AT_FIRST,
   TYPED_CAP,
@@ -138,8 +139,11 @@ export interface BoardView {
 /** A band of the board (one, untitled, without lanes): each column with the cards it draws. */
 export interface Band {
   lane: Lane;
-  /** `done`: whether the column is a done one ({@link columnDone}), so it draws three. */
-  drawn: { column: MiniBoardColumn; cards: MiniBoardCard[]; done: boolean }[];
+  /**
+   * `done`: whether the column is a done one ({@link columnDone}), so it draws three; `listed`: the statuses the
+   * view's column gathers, none for the board's own.
+   */
+  drawn: { column: MiniBoardColumn; cards: MiniBoardCard[]; done: boolean; listed: readonly string[] }[];
 }
 
 export interface BoardReader {
@@ -170,7 +174,7 @@ export interface BoardReader {
   open(scope: BoardScope, filter: BoardFilter): void;
   /** A change in the filter bar: read once the keys pause. */
   setFilter(filter: BoardFilter): void;
-  /** A column's *Show N more*: that column read whole. */
+  /** A column's *Show more*: {@link MORE_STEP} more of its cards, read and drawn. */
   expand(lane: Lane, column: MiniBoardColumn): void;
   /** The list's *Show N more*: every ticket read. */
   expandAll(): void;
@@ -248,8 +252,6 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const lanes = $derived(own?.lanes ?? view.lanes);
   const laned = $derived(layout === "board" && lanes !== "none");
   const typing = $derived(state.filter.words);
-  /** The board's columns as the view's own columns gather them (R-3.15). */
-  const cols = $derived(viewColumns(board?.columns ?? [], view.columns));
   const bands = $derived(
     boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
       (lane) => ({
@@ -257,7 +259,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         drawn: lane.columns.map((column) => {
           const listed = (view.listed ?? view.columns).find((own) => own.name === column.status)?.statuses ?? [];
           const done = columnDone(column, listed);
-          return { column, cards: drawnCards(column, expanded.includes(expandKey(lane, column)), typing, done), done };
+          return { column, cards: drawnCards(column, pagesOf(expandKey(lane, column)), typing, done), done, listed };
         }),
       }),
     ),
@@ -276,14 +278,19 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
     const answered = board;
     if ((expanded.length === 0 && !listAll) || answered === null) return cap;
-    const wanted = laned
-      ? bands.flatMap(({ lane, drawn }) =>
-          drawn.filter(({ column }) => expanded.includes(expandKey(lane, column))).map(({ column }) => column.total),
-        )
-      : (listAll ? answered.columns : cols.filter((column) => expanded.includes(columnKey(column)))).map(
-          (column) => column.total,
-        );
+    if (listAll && !laned) return Math.max(cap, ...answered.columns.map((column) => column.total));
+    // An expanded column asks for what it draws, not for every card it holds (MORE_STEP).
+    const wanted = bands.flatMap(({ lane, drawn }) =>
+      drawn.map(({ column, done }) => shownCount(column.total, pagesOf(expandKey(lane, column)), typing, done)),
+    );
     return Math.max(cap, ...wanted);
+  }
+
+  /** How many times the reader pressed a column's *Show more*: its key, once a press. */
+  function pagesOf(key: string): number {
+    let pages = 0;
+    for (const held of expanded) if (held === key) pages++;
+    return pages;
   }
 
   /** What a laned read asks for (#939), or `null` without lanes. */

@@ -60,6 +60,9 @@
   color: var(--ink-2); font-size: var(--t-sm);
 }
 .tf-more:hover { border-color: var(--ink-2); color: var(--ink); }
+/* A long column's way to the list: a line under its *Show more*, not a second button like it. */
+.tf-more-list { border-color: transparent; text-decoration: underline; text-underline-offset: 2px; }
+.tf-more-list:hover { border-color: transparent; }
 .tf-tcard {
   display: block; width: 100%; text-align: left; background: var(--sheet); border: 1px solid var(--rule);
   border-radius: 6px; padding: 8px 9px; cursor: pointer;
