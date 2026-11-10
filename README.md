@@ -20,13 +20,13 @@ Pick a ticket and it becomes your job. Its code, builds, docs and monitors sit o
 
 Press ⌘K to find tickets, pages, pull requests and more, then act on them from the keyboard.
 
-<img alt="The launcher open over the Tickets page with the query payout. Results are grouped into ticket views, link sets and tickets, each row with a coloured kind monogram. The footer lists the keys for move, open, actions, back one step and everything, and a Save as list button." src="docs/screenshots/launcher.webp">
+<img alt="The launcher open over the Tickets page with the query payout. Tickets come first, then ticket views and link sets, each row with a kind monogram and, where two sources hold a ticket, the source's name. The footer lists the keys for move, open, actions, clear the words, everything and help, and a Save as list button." src="docs/screenshots/launcher.webp">
 
 ## One inbox for whatever needs you
 
 Review requests, mentions, failed builds and alerts land in one list, each with its next step on the row.
 
-<img alt="The Inbox: a list of rows such as a review request, a monitor that is down and a failed build, each naming its job, with buttons like Review, Open monitor, Ack, Open log, Re-run, Snooze and Done." src="docs/screenshots/inbox.webp">
+<img alt="The Inbox: a list of rows such as a review request, a monitor that is down and a failed build, each naming its job, with buttons like Ack, Re-run, Snooze and Done." src="docs/screenshots/inbox.webp">
 
 ## All your tickets on one board
 
@@ -48,7 +48,7 @@ Files draw as what they are: Markdown, diagrams, PDFs and images.
 
 A failed run opens on the failing test, and tells you whether it failed before.
 
-<img alt="Build 1187 of Payout_IntegrationTests, marked FAILURE. A coloured bar shows each build step and how long it took. A red panel names the failed test and its assertion, says it also failed in build 1185 on this branch and that build 1186 on main passed, and offers Show it in the log, Open the test file and Create ticket. Pipelines with their recent results fill the left rail." src="docs/screenshots/build.webp">
+<img alt="Build 1187 of Payout_IntegrationTests, marked Failed. A coloured bar shows each build step and how long it took. A red panel names the failed test and its assertion, says it also failed in build 1185 on this branch and that build 1186 on main passed, and offers Show in log, Open the test file and Create ticket. Pipelines with their recent results fill the left rail." src="docs/screenshots/build.webp">
 
 ## Confluence pages, drawn in full
 
@@ -60,7 +60,7 @@ Read and write pages here, with the ones that mention you first.
 
 All your Uptime Kuma checks with their last 24 hours. Acknowledge or pause one from its row.
 
-<img alt="The Monitors table: six checks with their state, such as down, slow, pending and up, a 24-hour bar, response time and 30-day uptime, with Ack, Pause and Hide on each row." src="docs/screenshots/monitors.webp">
+<img alt="The Monitors table: six checks with their state, such as down, slow, pending and up, a 24-hour bar, response time and 30-day uptime, with Pause or Resume, Hide and Refresh on each row, and Ack on the one that is down." src="docs/screenshots/monitors.webp">
 
 ## Time tracking that fills in your worklogs
 
