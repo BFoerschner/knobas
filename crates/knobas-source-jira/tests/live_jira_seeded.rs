@@ -219,6 +219,17 @@ struct Seed {
     /// `seed-state.json` written before the seed attached them.
     #[serde(default)]
     attachments: Option<SeededAttachments>,
+    /// The empty project whose workflow narrows (#522), beside the fixture's
+    /// and deliberately not in `projects`. Its key is in the scope
+    /// [`Seeded::clear_leftovers`] works over, since the app's suite files
+    /// into it. `None` in a `seed-state.json` written before #522.
+    #[serde(default)]
+    narrowing: Option<SeededNarrowing>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededNarrowing {
+    key: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -444,6 +455,30 @@ impl Seeded {
         body["issues"].as_array().cloned().unwrap_or_default()
     }
 
+    /// Every row one JQL query answers, page after page: one page is 100
+    /// rows, and the projects this suite owns may hold more than that once a
+    /// killed run's leftovers are counted.
+    async fn jql_all(&self, jql: &str, fields: &str) -> Vec<serde_json::Value> {
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        loop {
+            let (status, body) = self
+                .get(&format!(
+                    "rest/api/2/search?jql={}&startAt={}&maxResults=100&fields={fields}",
+                    url_encode(jql),
+                    rows.len()
+                ))
+                .await;
+            assert_eq!(status, 200, "JQL {jql:?} answered {body}");
+            let page = body["issues"].as_array().cloned().unwrap_or_default();
+            let total = body["total"].as_u64().unwrap_or_default();
+            let empty = page.is_empty();
+            rows.extend(page);
+            if empty || rows.len() as u64 >= total {
+                return rows;
+            }
+        }
+    }
+
     /// The adapter over this instance, authenticating as `./seed --env` says:
     /// user and password, which is what the setup wizard's admin account has
     /// (it holds no personal access token).
@@ -495,6 +530,20 @@ impl Seeded {
         if config.get("favourite_filters").is_none() {
             config["favourite_filters"] = serde_json::Value::Bool(false);
         }
+        // The seed's projects, unless a test names its own scope. A source
+        // with none syncs every project the account sees, and this Jira may
+        // hold other estates beside the seed (`just seed-scale jira`'s SCL*
+        // projects, 20,000 issues), which every exact set here would count.
+        // With `boards: none` beside it unless the test names boards: a source
+        // with no projects brings no boards in under the default scope, and
+        // one scoped to PAY and OPS would bring the seed's two, which no
+        // test that left the scope out counts.
+        if config.get("projects").is_none() && config.get("jql_filter").is_none() {
+            config["projects"] = serde_json::json!(self.seeded_project_keys());
+            if config.get("boards").is_none() {
+                config["boards"] = serde_json::json!("none");
+            }
+        }
         match knobas_source_jira::build(SourceInstance {
             id: "jira".to_owned(),
             kind: knobas_source_jira::ADAPTER_KIND.to_owned(),
@@ -512,6 +561,31 @@ impl Seeded {
     }
 
     /// The fixture's keys, ascending, as the seed recorded them.
+    /// The fixture's projects, `seed-state.json`'s `jira.projects`: the scope
+    /// every source here syncs unless a test names its own.
+    fn seeded_project_keys(&self) -> Vec<String> {
+        self.seed.projects.iter().map(|p| p.key.clone()).collect()
+    }
+
+    /// `order` over the fixture's projects alone, as a source scoped to them
+    /// walks it: `project in (PAY, OPS) ORDER BY …`. A raw read of the walk's
+    /// order over the whole instance would count every other estate on it.
+    fn seeded_jql(&self, order: &str) -> String {
+        format!(
+            "project in ({}) {order}",
+            self.seeded_project_keys().join(", ")
+        )
+    }
+
+    /// The projects this suite and the app's write to: the fixture's and the
+    /// narrowing one. [`Seeded::clear_leftovers`] works inside them and
+    /// nowhere else, so another estate on the same Jira is never touched.
+    fn owned_project_keys(&self) -> Vec<String> {
+        let mut keys = self.seeded_project_keys();
+        keys.extend(self.seed.narrowing.iter().map(|n| n.key.clone()));
+        keys
+    }
+
     fn seeded_keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = self.seed.issues.iter().map(|i| i.key.clone()).collect();
         keys.sort();
@@ -533,7 +607,12 @@ impl Seeded {
     ///
     /// Scoped by `seed-state.json` and by nothing a run remembers, which is the
     /// only way to reach the leftovers of a run that is gone -- the same rule
-    /// the seeded TeamCity suite's clearing works under. Five things can be
+    /// the seeded TeamCity suite's clearing works under. **Inside the projects
+    /// the suites own and nowhere else** ([`Seeded::owned_project_keys`]): the
+    /// search names them, so an issue in any other project -- `just seed-scale
+    /// jira`'s SCL* estate, 20,000 issues with sub-tasks -- is never read, let
+    /// alone deleted (until 2026-11-10 it searched the whole instance and
+    /// deleted SCLDATA-1 to 3 before a 400 on SCLDATA-4's sub-tasks). Five things can be
     /// wrong: the union of what either suite writes, and an attachment, which
     /// neither does:
     ///
@@ -564,17 +643,23 @@ impl Seeded {
     /// Not "sweep": `CONTEXT.md` spends that word on the engine pass that
     /// tombstones what a full sync no longer emitted.
     async fn clear_leftovers(&self) {
+        let owned = self.owned_project_keys().join(", ");
         let rows = self
-            .jql("ORDER BY key ASC", "status,labels,comment,attachment")
+            .jql_all(
+                &format!("project in ({owned}) ORDER BY key ASC"),
+                "status,labels,comment,attachment",
+            )
             .await;
         let mut cleared: Vec<String> = Vec::new();
         for row in &rows {
             let key = row["key"].as_str().expect("an issue has a key").to_owned();
             let Some(seeded) = self.seed.issues.iter().find(|i| i.key == key) else {
+                // `deleteSubtasks`: without it Jira answers 400 for an issue
+                // that has sub-tasks, and the whole clearing stops there.
                 let (status, body) = self
                     .request(
                         reqwest::Method::DELETE,
-                        &format!("rest/api/2/issue/{key}"),
+                        &format!("rest/api/2/issue/{key}?deleteSubtasks=true"),
                         None,
                     )
                     .await;
@@ -3898,7 +3983,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
             .collect()
     };
 
-    let created = order(seeded.jql("ORDER BY created ASC", "key").await);
+    let created = order(
+        seeded
+            .jql(&seeded.seeded_jql("ORDER BY created ASC"), "key")
+            .await,
+    );
     let mut every = created.clone();
     every.sort();
     assert_eq!(
@@ -3906,7 +3995,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
         seeded.seeded_keys(),
         "one page holds the whole corpus"
     );
-    let by_updated = order(seeded.jql("ORDER BY updated ASC", "key").await);
+    let by_updated = order(
+        seeded
+            .jql(&seeded.seeded_jql("ORDER BY updated ASC"), "key")
+            .await,
+    );
     let edited = by_updated[0].clone();
     // Later than every stamp, so the edit lands at the end and nowhere else.
     let latest = stamp_of(&seeded, &by_updated[by_updated.len() - 1]).await;
@@ -3916,7 +4009,13 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     // The index is updated asynchronously: poll for the edit to show.
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
-        let (_, last) = search_page(&seeded, "ORDER BY updated ASC", total - 1, 1).await;
+        let (_, last) = search_page(
+            &seeded,
+            &seeded.seeded_jql("ORDER BY updated ASC"),
+            total - 1,
+            1,
+        )
+        .await;
         if last == std::slice::from_ref(&edited) {
             break;
         }
@@ -3929,7 +4028,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     }
     println!("order: {edited} edited; created order {created:?}");
     assert_eq!(
-        order(seeded.jql("ORDER BY created ASC", "key").await),
+        order(
+            seeded
+                .jql(&seeded.seeded_jql("ORDER BY created ASC"), "key")
+                .await
+        ),
         created,
         "the edit to {edited} moved nothing in the created order"
     );
@@ -3946,8 +4049,8 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
-    const WALK: &str = "ORDER BY created ASC";
     let seeded = seeded();
+    let walk = seeded.seeded_jql("ORDER BY created ASC");
     seeded.clear_leftovers().await;
     let seeded_total = seeded.seeded_keys().len() as u64;
     let sub_task = SubTask::file(&seeded, "PAY-219").await;
@@ -3955,7 +4058,7 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
 
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     let (grown, last) = loop {
-        let page = search_page(&seeded, WALK, seeded_total as u32, 1).await;
+        let page = search_page(&seeded, &walk, seeded_total as u32, 1).await;
         if page.0 == seeded_total + 1 {
             break page;
         }
@@ -3974,7 +4077,7 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
 
     // The guard deletes it and waits for the index to stop naming it.
     drop(sub_task);
-    let (shrunk, past_the_end) = search_page(&seeded, WALK, seeded_total as u32, 1).await;
+    let (shrunk, past_the_end) = search_page(&seeded, &walk, seeded_total as u32, 1).await;
     println!(
         "shrink: total {grown} with {key}, {shrunk} after its deletion; page past the end {past_the_end:?}"
     );
@@ -4022,7 +4125,9 @@ async fn a_walk_in_pages_of_two_returns_the_whole_corpus_once() {
 async fn a_jql_id_range_stays_inside_one_project() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
-    let rows = seeded.jql("ORDER BY id ASC", "key").await;
+    let rows = seeded
+        .jql(&seeded.seeded_jql("ORDER BY id ASC"), "key")
+        .await;
     let id_of = |row: &serde_json::Value| -> u64 {
         row["id"]
             .as_str()
