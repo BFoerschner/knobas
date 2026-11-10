@@ -350,6 +350,24 @@ impl Seeded {
             .unwrap_or_default()
     }
 
+    /// `build_ids` over the seed's projects only: `locator` once per project
+    /// with `affectedProject:` before it (which takes in the nested ones),
+    /// the pages put together newest first, as the server lists builds. What
+    /// the exact-set assertions compare with the seed, so a build in a project
+    /// the seed does not own is not counted.
+    async fn owned_build_ids(&self, locator: &str) -> Vec<i64> {
+        let mut ids: Vec<i64> = Vec::new();
+        for project in self.owned_project_scopes() {
+            ids.extend(
+                self.build_ids(&format!("affectedProject:(id:{project}),{locator}"))
+                    .await,
+            );
+        }
+        ids.sort_unstable_by(|a, b| b.cmp(a));
+        ids.dedup();
+        ids
+    }
+
     /// One build's record, as the adapter's own selector asks for it.
     async fn build(&self, id: i64) -> serde_json::Value {
         let (status, body) = self
@@ -385,8 +403,18 @@ impl Seeded {
         &self,
         base_url: &str,
         token: &str,
-        config: serde_json::Value,
+        mut config: serde_json::Value,
     ) -> Box<dyn Source> {
+        // The seed's projects, unless a test names its own scope. A source
+        // with none reads every project the token sees, and this server may
+        // hold other estates beside the seed (`just seed-scale teamcity`'s
+        // `Scale` tree, 85 configurations and 3,800 builds), which every exact
+        // set here would count. A configured project takes in its nested ones
+        // (#849), so the suite's own `KnobasNested849` and `KnobasChain857`
+        // under `Payout` are still in scope.
+        if config.get("project_ids").is_none() && config.get("build_type_ids").is_none() {
+            config["project_ids"] = serde_json::json!(self.owned_project_scopes());
+        }
         match knobas_source_teamcity::build(SourceInstance {
             id: "teamcity".to_owned(),
             kind: knobas_source_teamcity::ADAPTER_KIND.to_owned(),
@@ -500,10 +528,15 @@ impl Seeded {
     /// Scoped by `seed-state.json` rather than by anything a run remembers,
     /// which is the only way to reach the leftovers of a run that is gone. It
     /// runs *before* a test takes its baseline, so the corpus it measures is
-    /// already clean. Read-only in the ordinary case: a clean server costs one
-    /// listing -- `defaultFilter:false` with no `state:`, which lists queued
-    /// and running builds along with the finished ones (measured 2026-09-02
-    /// with two builds held on the queue: both on the page, `state: queued`).
+    /// already clean. **Inside the seed's projects and nowhere else**: each
+    /// listing is `affectedProject:` one of [`Seeded::owned_project_scopes`],
+    /// so a build in any other project -- `just seed-scale teamcity`'s `Scale`
+    /// tree -- is never listed, let alone deleted (until 2026-11-10 it listed
+    /// the whole server). Read-only in the ordinary case: a clean server costs
+    /// one listing per seed project -- `defaultFilter:false` with no `state:`,
+    /// which lists queued and running builds along with the finished ones
+    /// (measured 2026-09-02 with two builds held on the queue: both on the
+    /// page, `state: queued`).
     ///
     /// Not "sweep": CONTEXT.md spends that word on the engine pass that
     /// tombstones what a full sync no longer emitted.
@@ -523,21 +556,23 @@ impl Seeded {
         // report on the way, so the loop cannot spin on one.
         let mut cleared = 0usize;
         loop {
-            let (status, body) = self
-                .get(
-                    "app/rest/builds?locator=defaultFilter:false,count:100\
-                     &fields=count,build(id,state)",
-                )
-                .await;
-            assert_eq!(status, 200, "{body}");
-            let rows: Vec<(i64, String)> = body["build"]
-                .as_array()
-                .map(|rows| {
-                    rows.iter()
-                        .map(|b| (id_of(b), b["state"].as_str().unwrap_or_default().to_owned()))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let mut rows: Vec<(i64, String)> = Vec::new();
+            for project in self.owned_project_scopes() {
+                let (status, body) = self
+                    .get(&format!(
+                        "app/rest/builds?locator=affectedProject:(id:{project}),\
+                         defaultFilter:false,count:100&fields=count,build(id,state)"
+                    ))
+                    .await;
+                assert_eq!(status, 200, "{body}");
+                rows.extend(
+                    body["build"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|b| (id_of(b), b["state"].as_str().unwrap_or_default().to_owned())),
+                );
+            }
             let held: Vec<i64> = rows
                 .iter()
                 .filter(|(id, state)| seeded.contains(id) && state != "finished")
@@ -575,7 +610,7 @@ impl Seeded {
         }
         if cleared > 0 {
             assert_eq!(
-                self.build_ids("defaultFilter:false,count:100").await,
+                self.owned_build_ids("defaultFilter:false,count:100").await,
                 self.seeded_ids_newest_first(),
                 "after the leftovers are cleared the server holds exactly the seeded builds"
             );
@@ -605,35 +640,58 @@ impl Seeded {
         owned
     }
 
-    /// Delete every project the seed does not own, with its configurations and
-    /// builds (#1560: ~94 `Witness_Alpha_Cfg…` configurations a branch left
-    /// behind reached the licence's limit, so `POST app/rest/buildTypes`
-    /// answered 403, and made the exact-set assertions see 97 configurations
-    /// where they expect 3). Runs after the leftover builds are gone, so
-    /// nothing in a stray project is in flight. A nested project of an owned
-    /// one that a killed run left (`KnobasNested849`) goes the same way; the
-    /// owned projects themselves are never touched.
+    /// [`Seeded::owned_projects`] without `_Root`: the projects that hold the
+    /// seed's configurations, and so the scope of every listing and every
+    /// source here. `_Root` holds the whole server and is never a scope.
+    fn owned_project_scopes(&self) -> Vec<String> {
+        self.owned_projects()
+            .into_iter()
+            .filter(|p| p != "_Root")
+            .collect()
+    }
+
+    /// Delete every project a run of this suite made and a killed run left,
+    /// with its configurations and builds (#1560: ~94 `Witness_Alpha_Cfg…`
+    /// configurations a branch left behind reached the licence's limit, so
+    /// `POST app/rest/buildTypes` answered 403, and made the exact-set
+    /// assertions see 97 configurations where they expect 3). Runs after the
+    /// leftover builds are gone, so nothing in a stray project is in flight.
+    ///
+    /// **A run's own, and nobody else's** ([`made_by_a_run`]): a project
+    /// inside one the seed owns (`KnobasNested849`, `KnobasChain857`), or
+    /// one named the way this suite names what it makes, `Knobas…`
+    /// (`KnobasStray1560`). Any other project the seed does not own is
+    /// another estate on the same server -- `just seed-scale teamcity`'s
+    /// `Scale` tree -- and is left alone; until 2026-11-10 this deleted
+    /// every project the seed did not own, so one run removed the whole
+    /// `Scale` tree. The owned projects themselves are never touched.
     async fn clear_stray_projects(&self) {
         let (status, body) = self
             .get("app/rest/projects?fields=project(id,parentProjectId)")
             .await;
         assert_eq!(status, 200, "{body}");
         let owned = self.owned_projects();
-        let stray: Vec<String> = body["project"]
+        let parents: std::collections::BTreeMap<String, String> = body["project"]
             .as_array()
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(|p| p["id"].as_str())
-                    .filter(|id| !owned.contains(*id))
-                    .map(str::to_owned)
-                    .collect()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                Some((
+                    p["id"].as_str()?.to_owned(),
+                    p["parentProjectId"].as_str().unwrap_or_default().to_owned(),
+                ))
             })
-            .unwrap_or_default();
+            .collect();
+        let stray: Vec<String> = parents
+            .keys()
+            .filter(|id| made_by_a_run(id, &owned, &parents))
+            .cloned()
+            .collect();
         if stray.is_empty() {
             return;
         }
         println!(
-            "live suite: deleting {} project(s) the seed does not own: {stray:?}",
+            "live suite: deleting {} project(s) a killed run made: {stray:?}",
             stray.len()
         );
         for id in &stray {
@@ -651,22 +709,63 @@ impl Seeded {
             let status = response.status().as_u16();
             assert!(
                 (200..300).contains(&status) || status == 404,
-                "a project the seed does not own could not be deleted: {id} -> {status}: {}",
+                "a project a killed run made could not be deleted: {id} -> {status}: {}",
                 response.text().await.unwrap_or_default()
             );
         }
-        let (status, body) = self.get("app/rest/projects?fields=project(id)").await;
+        let (status, body) = self
+            .get("app/rest/projects?fields=project(id,parentProjectId)")
+            .await;
         assert_eq!(status, 200, "{body}");
-        let mut now: Vec<&str> = body["project"]
+        let parents: std::collections::BTreeMap<String, String> = body["project"]
             .as_array()
-            .map(|rows| rows.iter().filter_map(|p| p["id"].as_str()).collect())
-            .unwrap_or_default();
-        now.retain(|id| !owned.contains(*id));
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                Some((
+                    p["id"].as_str()?.to_owned(),
+                    p["parentProjectId"].as_str().unwrap_or_default().to_owned(),
+                ))
+            })
+            .collect();
+        let now: Vec<&String> = parents
+            .keys()
+            .filter(|id| made_by_a_run(id, &owned, &parents))
+            .collect();
         assert!(
             now.is_empty(),
-            "after the stray projects are deleted the server holds only the seed's: {now:?}"
+            "after the stray projects are deleted no project a run made is left: {now:?}"
         );
     }
+}
+
+/// Whether project `id` is one a run of this suite made: not the seed's own,
+/// and either named `Knobas…`, as every project this suite makes is, or
+/// inside a project the seed owns other than `_Root` (`parents` maps each
+/// project to its parent). A project under `_Root` with any other name is
+/// another estate's, never this suite's to delete.
+fn made_by_a_run(
+    id: &str,
+    owned: &std::collections::BTreeSet<String>,
+    parents: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    if owned.contains(id) {
+        return false;
+    }
+    if id.starts_with("Knobas") {
+        return true;
+    }
+    let mut at = parents.get(id);
+    // Bounded by the number of projects, so a cycle in a bad answer ends.
+    for _ in 0..parents.len() {
+        match at {
+            Some(parent) if parent == "_Root" || parent.is_empty() => return false,
+            Some(parent) if owned.contains(parent) => return true,
+            Some(parent) => at = parents.get(parent),
+            None => return false,
+        }
+    }
+    false
 }
 
 /// One build's `state`: `Ok(None)` when the server **says** it has no such
@@ -1596,18 +1695,21 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
          rather than wrong -- re-read `rest::Locator::branch_any` before deleting it."
     );
 
-    // The incremental locator, as `sync::since` sends it.
+    // The incremental locator, as `sync::since` sends it, over the seed's
+    // projects: another estate on this server has default-branch builds too.
     let incremental = "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any";
     assert_eq!(
         seeded
-            .build_ids(&format!("{incremental},branch:default:any,count:100"))
+            .owned_build_ids(&format!("{incremental},branch:default:any,count:100"))
             .await,
         seeded.seeded_ids_newest_first(),
         "every seeded build, newest first: both fixture builds and the change witness's, \
          which are on its own branch"
     );
     assert_eq!(
-        seeded.build_ids(&format!("{incremental},count:100")).await,
+        seeded
+            .owned_build_ids(&format!("{incremental},count:100"))
+            .await,
         vec![on_main],
         "without the dimension only the default-branch build answers: 412 is on `main`, which \
          the seed queues as `<default>`"
@@ -2169,27 +2271,57 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
     }
 
     let probe = |w: i64| format!("sinceBuild:(id:{}),defaultFilter:false,count:100", w - 1);
-    let mut page = seeded.build_ids(&probe(watermark)).await;
+    // The page over the seed's projects, one `affectedProject:` probe each:
+    // another estate on this server (`just seed-scale teamcity`) has builds
+    // newer than the seed's, which the whole server's page would hold first.
+    let mut page = seeded.owned_build_ids(&probe(watermark)).await;
     page.sort_unstable();
     let expected: Vec<i64> = ids.iter().copied().filter(|&id| id >= watermark).collect();
     assert_eq!(
         page, expected,
         "the probe from watermark {watermark} holds it and every newer build, across every \
-         configuration, and nothing older (seeded {ids:?})"
+         configuration of the seed's, and nothing older (seeded {ids:?})"
     );
+    // Above the newest build **on the server**, which is the seed's newest on
+    // a server holding the seed alone and another estate's beside it: every
+    // build above the seed's newest, read in one page.
+    let above = seeded
+        .build_ids(&format!(
+            "sinceBuild:(id:{newest}),defaultFilter:false,count:100000"
+        ))
+        .await;
+    let top = above.iter().copied().fold(newest, i64::max);
     assert_eq!(
-        seeded.build_ids(&probe(newest + 1)).await,
+        seeded.build_ids(&probe(top + 1)).await,
         Vec::<i64>::new(),
         "above the newest build the probe page is empty"
     );
-    // `sinceBuild:(id:newest+1)`: an id that names no build, read as a
+    // An id above `top` that names no build: the first one that answers 404.
+    // Not `top + 1` on trust: TeamCity keeps ids no listing shows answering
+    // by id -- a queued duplicate it merged (`state: unknown`) and the
+    // builds of a configuration deleted since, such as this suite's own
+    // `KnobasChain857_Build` -- and a server with another estate on it has
+    // both above the seed's builds.
+    let mut nothing = top + 1;
+    loop {
+        let (status, _) = seeded
+            .get(&format!("app/rest/builds/id:{nothing}?fields=id"))
+            .await;
+        if status == 404 {
+            break;
+        }
+        assert_eq!(status, 200, "build {nothing} answered {status}");
+        assert!(
+            nothing < top + 1000,
+            "no id from {} to {nothing} names no build",
+            top + 1
+        );
+        nothing += 1;
+    }
+    // `sinceBuild:(id:nothing)`: an id that names no build, read as a
     // number rather than refused.
-    let (status, _) = seeded
-        .get(&format!("app/rest/builds/id:{}?fields=id", newest + 1))
-        .await;
-    assert_eq!(status, 404, "build {} is not on the server", newest + 1);
     assert_eq!(
-        seeded.build_ids(&probe(newest + 2)).await,
+        seeded.build_ids(&probe(nothing + 1)).await,
         Vec::<i64>::new(),
         "a predecessor that names no build is read as a number"
     );
@@ -2312,9 +2444,11 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
         .await;
     assert_eq!(status, 404, "the deleted build is gone by id");
     assert_eq!(
-        seeded.build_ids("defaultFilter:false,count:100").await,
+        seeded
+            .owned_build_ids("defaultFilter:false,count:100")
+            .await,
         seeded.seeded_ids_newest_first(),
-        "the server is back in the plain-seed state"
+        "the seed's projects are back in the plain-seed state"
     );
 
     // Issue #91's replaced-server refusal, on a real 404: nothing the run
@@ -3140,9 +3274,11 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
 
     drop(guard);
     assert_eq!(
-        seeded.build_ids("defaultFilter:false,count:100").await,
+        seeded
+            .owned_build_ids("defaultFilter:false,count:100")
+            .await,
         seeded.seeded_ids_newest_first(),
-        "the server is back in the plain-seed state"
+        "the seed's projects are back in the plain-seed state"
     );
 }
 
@@ -3420,9 +3556,12 @@ async fn refused_and_nothing_queued(
 }
 
 /// The restore point a write test records before it writes (#1699): every
-/// build on the server, which a green run leaves as exactly the seeded ones.
+/// build in the seed's projects, which a green run leaves as exactly the
+/// seeded ones.
 async fn restore_point(seeded: &Seeded, when: &str) -> Vec<i64> {
-    let ids = seeded.build_ids("defaultFilter:false,count:100").await;
+    let ids = seeded
+        .owned_build_ids("defaultFilter:false,count:100")
+        .await;
     println!(
         "SEEDED restore point {when}: {} build(s) {ids:?}",
         ids.len()
@@ -3662,6 +3801,112 @@ async fn a_project_the_seed_does_not_own_is_deleted_by_the_cleanup() {
     for owned in seeded.owned_projects().iter().filter(|p| *p != "_Root") {
         let (status, body) = seeded.get(&format!("app/rest/projects/id:{owned}")).await;
         assert_eq!(status, 200, "the seed's project {owned} is kept: {body}");
+    }
+}
+
+/// **The cleanup leaves another estate alone**: a project under `_Root` that
+/// neither the seed nor a run of this suite made -- what `just seed-scale
+/// teamcity`'s `Scale` tree is -- is still there with its configuration after
+/// `clear_leftovers`, and no source here syncs it. Until 2026-11-10 the
+/// clearing deleted every project the seed did not own, and this test was
+/// red. The project is deleted again from [`Foreign`]'s `Drop`; one a killed
+/// run left is deleted by the next run's [`Foreign::new`], never by the
+/// clearing.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_project_another_estate_owns_is_left_alone_by_the_cleanup() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let _foreign = Foreign::new(&seeded).await;
+
+    seeded.clear_leftovers().await;
+
+    let (status, body) = seeded.get(&format!("app/rest/projects/id:{FOREIGN}")).await;
+    assert_eq!(status, 200, "the other estate's project is kept: {body}");
+    let (status, body) = seeded
+        .get(&format!("app/rest/buildTypes/id:{FOREIGN}_Cfg"))
+        .await;
+    assert_eq!(status, 200, "and its configuration with it: {body}");
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    let foreign: Vec<&str> = of_kind(&items, "build_config")
+        .into_iter()
+        .map(|i| i.entity.key.as_str())
+        .filter(|key| key.contains(FOREIGN))
+        .collect();
+    assert!(
+        foreign.is_empty(),
+        "a source here is scoped to the seed's projects, so the other estate is not synced: \
+         {foreign:?}"
+    );
+}
+
+/// A project under `_Root` named the way another estate's are, not `Knobas…`,
+/// so the leftover clearing must not take it.
+const FOREIGN: &str = "ScaleForeign2479";
+
+/// [`a_project_another_estate_owns_is_left_alone_by_the_cleanup`]'s project,
+/// deleted again when the guard drops, passing or panicking alike.
+struct Foreign {
+    url: String,
+    token: String,
+}
+
+impl Foreign {
+    async fn delete(http: &reqwest::Client, url: &str, token: &str) -> Result<(), String> {
+        let at = format!("{url}/app/rest/projects/id:{FOREIGN}");
+        match http.delete(&at).bearer_auth(token).send().await {
+            Ok(r) if r.status().is_success() || r.status().as_u16() == 404 => Ok(()),
+            Ok(r) => Err(format!("DELETE {at} -> {}", r.status())),
+            Err(e) => Err(format!("DELETE {at}: {e}")),
+        }
+    }
+
+    /// Delete what a killed run left, then make the project with one
+    /// configuration in it.
+    async fn new(seeded: &Seeded) -> Foreign {
+        Self::delete(&seeded.http, &seeded.url, &seeded.token)
+            .await
+            .expect("a killed run's foreign project is deleted");
+        let guard = Foreign {
+            url: seeded.url.clone(),
+            token: seeded.token.clone(),
+        };
+        for (path, body) in [
+            (
+                "app/rest/projects",
+                serde_json::json!({ "id": FOREIGN, "name": FOREIGN, "parentProject": { "id": "_Root" } }),
+            ),
+            (
+                "app/rest/buildTypes",
+                serde_json::json!({
+                    "id": format!("{FOREIGN}_Cfg"), "name": "Cfg", "project": { "id": FOREIGN }
+                }),
+            ),
+        ] {
+            let r = seeded
+                .http
+                .post(format!("{}/{path}", seeded.url))
+                .bearer_auth(&seeded.token)
+                .header("Accept", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("POST {path}: {e}"));
+            assert!(r.status().is_success(), "POST {path}: {}", r.status());
+        }
+        guard
+    }
+}
+
+impl Drop for Foreign {
+    fn drop(&mut self) {
+        let (url, token) = (self.url.clone(), self.token.clone());
+        Cleanup::new(
+            "the live suite did not delete the foreign project it made",
+            format!("{FOREIGN} may still be standing; the next run of its test deletes it"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { Foreign::delete(&client(), &url, &token).await });
     }
 }
 

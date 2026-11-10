@@ -228,6 +228,31 @@ struct SeededBuild {
     real_id: i64,
 }
 
+/// The projects the seed made, by id: the project of every configuration it
+/// recorded (a configuration id is `<project>_<name>`) and the chain's. The
+/// adapter suite's `Seeded::owned_projects`, without `_Root`.
+fn seeded_projects() -> Vec<String> {
+    let whole = live_under::seed_state("KNOBAS_TEAMCITY_SEED_STATE");
+    let tc = &whole["teamcity"];
+    let configs = tc["builds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|b| b["build_type"].as_str())
+        .chain(tc["settings"]["build_type"].as_str())
+        .chain(tc["changes"]["build_type"].as_str());
+    let mut projects: BTreeSet<String> = configs
+        .filter_map(|id| id.split('_').next())
+        .map(str::to_owned)
+        .collect();
+    projects.extend(tc["chain"]["project"].as_str().map(str::to_owned));
+    assert!(
+        !projects.is_empty(),
+        "seed-state.json: no `teamcity.builds` -- run `./seed --teamcity`"
+    );
+    projects.into_iter().collect()
+}
+
 /// Every build the seed recorded.
 fn seeded_builds() -> Vec<SeededBuild> {
     let whole = live_under::seed_state("KNOBAS_TEAMCITY_SEED_STATE");
@@ -326,7 +351,10 @@ async fn app_with(
             display_name: "Tidewater CI (seeded)".to_owned(),
             base_url: env.url.clone(),
             auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
-            config: json!({ "username": account }),
+            // The seed's projects: the server may hold other estates beside
+            // it (`just seed-scale teamcity`'s `Scale` tree), which the
+            // `under:` test's exact sets would otherwise count.
+            config: json!({ "username": account, "project_ids": seeded_projects() }),
             sync_interval_secs: 86_400,
             enabled: true,
         },
@@ -995,8 +1023,8 @@ impl Drop for Parked {
 
 /// The builds the writes queued, canceled and deleted from `Drop` passing or
 /// panicking alike, and checked gone. What a killed run leaves is the
-/// adapter suite's leftover clearing's, which removes every build the seed
-/// did not record.
+/// adapter suite's leftover clearing's, which removes every build in the
+/// seed's projects that the seed did not record.
 struct QueuedBuilds {
     url: String,
     token: String,
