@@ -1399,6 +1399,22 @@ live-sources-remove app="":
 live-demo: (live-sources "")
     just demo
 
+# testenv/README.md, *Björn's scale*: `just seed-scale jira`, `... confluence`,
+# `... teamcity`, `... gitea`, `... forgejo`, `... kuma`, each with `--count N`
+# for another size or `--plan-only` for the plan's numbers without a server.
+# The product must be up (`just live-up <product>`). Idempotent: a rerun on a
+# filled product adds nothing.
+# Fill a live product to Björn's scale, beside the seed.
+seed-scale product *args:
+    testenv/seed-scale.sh {{ product }} {{ args }}
+
+# testenv/scale-sync.sh: the debug app on a scratch profile under `root`, its
+# sources added with --scale, each source's first sync timed. *Björn's scale*
+# says how the saved database was made.
+# Sync the filled products into a database of its own.
+scale-sync root *ids:
+    testenv/scale-sync.sh {{ quote(root) }} {{ ids }}
+
 # For the milestone review's bundle, or the desktop witness's.
 # A built bundle on the demo profile with every live product as a source.
 live-demo-bundle app: (live-sources app)
