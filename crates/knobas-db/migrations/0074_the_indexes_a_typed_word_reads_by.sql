@@ -40,7 +40,7 @@
 -- ## What it costs
 --
 -- No table is rewritten and nothing is recomputed: the first start builds
--- the five indexes, 1.0 s on that mirror read cold and 0.6 s warm (48,000
+-- the five indexes, 0.6 s on that mirror read cold and 0.3 s warm (48,000
 -- items, 258,000 stored fields, 112,000 parent rows), and each later write
 -- to those tables keeps them.
 
