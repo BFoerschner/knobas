@@ -132,6 +132,7 @@
 {:else}
   <!-- Code's row and Code's columns: one list of pull requests, drawn one way. -->
   <table class="tf-tbl tf-rprs tf-cprs">
+    <colgroup><col class="tf-cp-no" /><col /><col class="tf-cp-state" /><col class="tf-cp-job" /><col class="tf-cp-at" /></colgroup>
     <tbody>
       {#each sent as echo (echo.write ?? echo.text)}
         <tr class="tf-rsent" data-place>
