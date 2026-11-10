@@ -180,6 +180,15 @@ test("a role view shown again re-reads, and one never left does not", () => {
   expect(count(log.reads, "builds"), "another address of the shown page is no return").toBe(2);
 });
 
+test("a hidden role view's reads stay asleep while the reader moves elsewhere (2026-11-10: Code re-read on every leave)", () => {
+  log.wakes = [];
+  go("#/builds");
+  const woke = count(log.wakes, "builds");
+  for (const hash of ["#/inbox", "#/docs", "#/monitors", "#/sets"]) go(hash);
+  expect(count(log.wakes, "builds"), "no prop of a hidden page moved").toBe(woke);
+  expect(count(log.reads, "builds")).toBe(1);
+});
+
 test("a shown role view reads again when a run of its role's sources ends with something new; a hidden one waits for its return", () => {
   go("#/builds");
   expect(count(log.reads, "builds")).toBe(1);

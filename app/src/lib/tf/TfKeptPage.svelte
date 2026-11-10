@@ -91,10 +91,25 @@
     if (visible) ranAtHide = ran;
     return ranAtHide;
   });
-  /** What the frame hands a role view beside its own props: nothing for any other page. */
-  const frameProps = $derived<RoleFrameProps>(
-    roleSync === null ? {} : { sync: syncNow, syncRevision: roleSync.revision + shows + ranShown },
-  );
+  /** When a role view reads again: a number, so it tells the page only when it moves. */
+  const revision = $derived(roleSync === null ? 0 : roleSync.revision + shows + ranShown);
+  /**
+   * What the frame hands a role view beside its own props: nothing for any other page. One object whose getters read
+   * {@link revision}, never one rebuilt per change: a spread of a new object tells every prop it holds, and `ctx` is new
+   * at every address, so a hidden Code page read its 4,400 pull requests and ran `git status` in 132 checkouts again
+   * each time the reader left it (2026-11-10, at Björn's mirror's size).
+   */
+  const frameProps: RoleFrameProps =
+    page.role === undefined
+      ? {}
+      : {
+          get sync() {
+            return syncNow;
+          },
+          get syncRevision() {
+            return revision;
+          },
+        };
   const Page = page.component;
 </script>
 

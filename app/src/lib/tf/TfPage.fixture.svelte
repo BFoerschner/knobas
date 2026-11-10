@@ -11,6 +11,8 @@
   export interface PageLog {
     mounts: string[];
     reads: string[];
+    /** Each time anything reading `syncRevision` ran again, moved or not: a page's read effect waking. */
+    wakes?: string[];
   }
 </script>
 
@@ -34,6 +36,7 @@
   let seen = untrack(() => syncRevision);
   $effect(() => {
     const at = syncRevision;
+    pages.wakes?.push(born);
     if (at === seen) return;
     seen = at;
     pages.reads.push(born);
