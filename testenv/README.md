@@ -783,7 +783,9 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   daemon. It is what lets a Docker check created through knobas have a host
   (`kuma-live`'s `a_docker_check_is_published_with_the_seeded_docker_host`).
 - **`./seed-kuma.sh` deletes every monitor `monitors.json` does not name**
-  (since 2026-09-06, #441). That is what makes the seed idempotent, and it is
+  (since 2026-09-06, #441), except one named `scale-…`, which belongs to
+  `just seed-scale kuma` (*Björn's scale*) and is never read by the sweep.
+  That is what makes the seed idempotent, and it is
   also a sweep: a monitor a sibling added by hand, or that knobas itself
   created through the Kuma source's *Create monitor for this asset* (#453,
   landed 2026-09-07), is gone on anyone's next `./seed`, silently and with no
@@ -1145,10 +1147,18 @@ configuration's next number -- 413 after a fresh seed -- and the number
 counter is not wound back, which is harmless: the seed only sets a counter
 while the build with the fixture's number does not exist. Before any test
 that asserts an exact set, the suite **clears what a killed run left**: every
-build whose id is not in `seed-state.json` is canceled if in flight and
-deleted, so recovery from a run that died mid-way is "run the suite again",
-never `testenv/reset`. After a green run the server holds exactly the seeded
-builds again.
+build in the seed's projects (`Ledger`, `Payout`, `SeededChain` and what is
+nested in them) whose id is not in `seed-state.json` is canceled if in flight
+and deleted, and every project a run made -- one named `Knobas…`, or one
+inside a seed project -- is deleted with its configurations. So recovery from
+a run that died mid-way is "run the suite again", never `testenv/reset`. After
+a green run the seed's projects hold exactly the seeded builds again.
+**Nothing outside them is touched or counted**: every listing the clearing and
+the exact sets read is `affectedProject:` one of the seed's projects, every
+source the suite builds is scoped to them unless a test names its own scope,
+and a project under `_Root` with any other name is another estate's (the
+`Scale` tree of *Björn's scale*), which
+`a_project_another_estate_owns_is_left_alone_by_the_cleanup` holds to.
 
 **One owner at a time**, exactly as for the Gitea suites (see *One
 environment, one owner at a time*): the leftover clearing cannot tell a sibling's build
@@ -1351,11 +1361,15 @@ payload, cursor, the real 401 — and `crates/knobas-app/tests/atlassian_live.rs
 write ops read back out of Jira. Both write, and both take back what they wrote
 from a `Drop` that checks rather than assumes. What a *killed* run leaves is put
 back by the next run of the **adapter's** suite, whose leftover clearing works
-from `seed-state.json` rather than from anything a run remembers — a stray issue,
-comment or attachment deleted, the `knobas-live-suite` label removed, a status
-moved back through the workflow — and prints what it put back. So after a green
-run the server holds exactly the seeded corpus, and recovery from a dirty one is
-"run the suite again". The one thing neither can undo is the `PAY` key counter:
+from `seed-state.json` rather than from anything a run remembers — a stray issue
+(with its sub-tasks), comment or attachment deleted, the `knobas-live-suite`
+label removed, a status moved back through the workflow — and prints what it put
+back. It searches **the seed's projects alone** (`jira.projects` and the
+narrowing project, `NARROW`), and every source either suite builds is scoped to
+them unless a test names its own scope, so another estate on the same Jira (the
+SCL* projects of *Björn's scale*) is neither touched nor counted. So after a
+green run those projects hold exactly the seeded corpus, and recovery from a
+dirty one is "run the suite again". The one thing neither can undo is the `PAY` key counter:
 the create leaves the project one key further on, so nothing may assume the
 fixture's keys are the highest ones.
 
@@ -1711,16 +1725,30 @@ in the server's own image).
   beside `knobas-teamcity-agent` for the run and removes them and their agent
   records after it. A build costs about ten seconds of agent time whatever it
   does, so 3,800 builds take about three and a half hours.
-- **The live suites clear what the seed did not make.** They were written for a
-  server holding the seed alone, and their leftover clearing says so:
-  `live_jira_seeded`'s searches `ORDER BY key ASC` across the instance (100
-  rows) and deletes every issue `seed-state.json` does not record, which takes
-  the first ~93 `SCLDATA` issues on each call; `live_teamcity_seeded`'s
-  deletes every build and every project the seed does not own, so one run of
-  `just teamcity-live-seeded` removes the whole `Scale` tree. Gitea's,
-  Forgejo's and Confluence's suites are scoped to `tidewater` and `ENG` and
-  leave the scale data alone. So fill, sync, then run a JVM product's suites;
-  the saved database below is what keeps the filled estate.
+
+**The live suites run beside it** (since 2026-11-10). Every leftover clearing
+and every exact set a suite asserts is scoped to what the seed and the suite
+own, and every source a suite builds is scoped the same way unless a test names
+its own scope, so a run neither touches nor counts the scale estate:
+
+- `live_jira_seeded` and `atlassian_live` search `project in (PAY, OPS,
+  NARROW)` (`jira.projects` and the narrowing project from `seed-state.json`),
+  never the instance. Until then the adapter suite's clearing searched `ORDER BY
+  key ASC` across the instance and deleted every issue the seed did not record:
+  it took SCLDATA-1 to 3 and stopped on a 400 at SCLDATA-4, which has sub-tasks,
+  and 26 of 37 tests failed.
+- `live_teamcity_seeded` lists builds `affectedProject:` each seed project
+  (`Ledger`, `Payout`, `SeededChain`) and deletes only the projects a run makes
+  (named `Knobas…`, or nested in a seed project). Until then it deleted every
+  build and every project the seed did not own, the whole `Scale` tree in one
+  run.
+- `./seed-kuma.sh` leaves every `scale-…` monitor alone, and `live_kuma`
+  counts monitor types over the seeded six.
+- Gitea's, Forgejo's and Confluence's suites were already scoped to
+  `tidewater` and to their own spaces and pages; `atlassian_live`'s wait for
+  a deleted page to leave the CQL index now asks the page's space only, since
+  a 200-row search of the whole instance never reached it past the scale
+  spaces.
 
 **Syncing it: `testenv/scale-sync.sh <root>`.** The debug app
 (`target/debug/knobas-app --demo`, `just demo`'s binary) on a profile of its
@@ -1888,7 +1916,9 @@ it does, which the UI will happily create), deletes and re-adds one whose type,
 URL, hostname or interval drifted, and leaves a matching one alone — so a second
 run changes nothing and an old list's leftovers do not linger. Everything else
 about a monitor (notifications, tags, a paused state a live run left behind) is
-the instance's business and is not touched.
+the instance's business and is not touched. A monitor named `scale-…` is not the
+seed's at all: `just seed-scale kuma` adds those beside it (*Björn's scale*),
+the sweep never reads them, and `monitors.json` may not use the prefix.
 
 ### The canary
 
@@ -2793,7 +2823,7 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 |---|---|
 | `./seed` | Gitea and Kuma, in order. Idempotent — re-running is a no-op that exits 0. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
-| `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted. |
+| `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted, `scale-…` monitors excepted. |
 | `./kuma-monitor.sh` | `add <name> <url>` / `delete <name>` on one throwaway monitor, through the same socket.io channel the seed uses. Idempotent both ways. What `just kuma-live` witnesses a deletion with; not part of the baseline, so `./seed-kuma.sh` sweeps whatever it leaves. |
 | `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. On a remote target it runs on that machine and binds its Docker bridge. |
 | `./stall.sh` | Remote target only: `up` / `down` / `url` on a socket that accepts and never answers (bridge address, port 8298), for `live_kuma`'s refresh-waits witness. `just kuma-live` binds and releases it. |
