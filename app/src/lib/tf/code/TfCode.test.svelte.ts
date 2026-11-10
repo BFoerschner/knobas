@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
+import { pageContext } from "../kept-pages.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
@@ -472,4 +473,34 @@ test("the Pull requests count is the mirror's total while the later pages are he
     }),
   );
   expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe("Pull requests 1503");
+});
+
+test("shown again with no run in between, Code reads only its checkouts, which git changes without a sync (Björn, 2026-11-10)", async () => {
+  const shown = $state({ on: true });
+  let checkoutReads = 0;
+  const stand = ports({ entityCheckout: async (id) => ((checkoutReads += 1), checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null)) });
+  view = mount(TfCode, { target, props: { ready: true, rest: ["repos"], job: null, ports: stand, now: NOW }, context: pageContext(() => shown.on) });
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  const listed = reads.length;
+  const firstCheckouts = checkoutReads;
+  expect(firstCheckouts).toBe(REPOS.length);
+  shown.on = false;
+  flushSync();
+  shown.on = true;
+  flushSync();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(reads.length, "no list read again").toBe(listed);
+  expect(checkoutReads, "each row's checkout again").toBe(firstCheckouts + REPOS.length);
+  expect(target.querySelector(".tf-wait-dim"), "nothing dims").toBeNull();
+});
+
+test("each pull request group declares its five columns, so a windowed group's spacer row sizes none of them (2026-11-10)", async () => {
+  await draw(["prs"]);
+  const tables = [...target.querySelectorAll("table.tf-cprs")];
+  expect(tables.length).toBeGreaterThan(0);
+  for (const table of tables) expect(table.querySelectorAll(":scope > colgroup > col")).toHaveLength(5);
 });

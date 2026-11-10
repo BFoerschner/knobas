@@ -34,7 +34,8 @@ export interface Held<T> {
  *
  * `next` with the key of a held page is that page: it keeps its instance, takes
  * `next.value` (the address it is at now) and moves last. If it was hidden its
- * `shows` moves, which is what a page re-reads on.
+ * `shows` moves: how many times it came back, which no page reads again on
+ * any more (2026-11-10: a role view reads again only on a run that changed something).
  */
 export function hold<T>(held: readonly Held<T>[], next: { key: string; value: T } | null, cap: number): Held<T>[] {
   const hidden = held

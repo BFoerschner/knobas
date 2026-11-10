@@ -16,8 +16,9 @@
   - **The role frame** (#2106, in `TfKeptPage.svelte`): a page that names a
     `role` is a view of that role, and is handed *Sync now* for it as the
     `sync` snippet, which its header draws where its own actions go, and
-    `syncRevision`, which moves when those runs have ended and when the page
-    is shown again. The button and its runs are this frame's, so every role
+    `syncRevision`, which moves when those runs have ended and when a run of
+    the role's sources ends with something new; shown again, a page re-reads
+    only if one did while it was hidden. The button and its runs are this frame's, so every role
     view draws the same one, and its runs outlive a view drawn again.
   - **A bare `#/job`** is home (`home.ts`, spec #2227). While a job is chosen
     (`job/chosen.svelte.ts`) the job page draws it there, under the bare
@@ -104,7 +105,7 @@
 </script>
 
 {#each drawn as one (one.key)}
-  <TfKeptPage entry={one.value.entry} route={one.value.route} visible={one.visible} shows={one.shows} {ctx} />
+  <TfKeptPage entry={one.value.entry} route={one.value.route} visible={one.visible} {ctx} />
 {/each}
 
 {#if page && unknownTab && unknown}

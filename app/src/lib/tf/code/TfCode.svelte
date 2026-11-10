@@ -60,6 +60,8 @@
   import TfCloneAll from "../openin/TfCloneAll.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { untrack } from "svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onShownAgain } from "../while-shown.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
@@ -267,6 +269,19 @@
     };
   });
 
+  /**
+   * Shown again with no run of a forge ending meanwhile, Code reads none of its lists (Björn, 2026-11-10: every return
+   * read all 4,400 pull requests). A checkout is the one thing a sync never brings, since a commit or a clone made in a
+   * terminal changes it, so each row reads its checkout again; a return the lists read again for has its checkouts read
+   * with them, and this reads nothing more.
+   */
+  onShownAgain(pageVisible(), () =>
+    queueMicrotask(() => {
+      if (repos === null || repoReading) return;
+      checkoutReader(() => true)(repos.rows.map((row) => row.entity_id));
+    }),
+  );
+
   // A clone that finished: its row reads its checkout again (R-8.25).
   let seenClones = clones.finished;
   $effect(() => {
@@ -424,7 +439,9 @@
   const prWins = new Map(
     (["open", ...GROUP_ORDER] as const).map((name) => [
       name,
-      new Windowed({ count: () => linesOf(name).length, key: (i) => linesOf(name)[i]!.row.entity_id, estimate: 51 }),
+      // From 100 rows: three groups of under 300 each drew whole, about 550 rows and a 140 ms frame as the tab opened
+      // on the live scale estate (2026-11-10).
+      new Windowed({ count: () => linesOf(name).length, key: (i) => linesOf(name)[i]!.row.entity_id, estimate: 51, from: 100 }),
     ]),
   );
 
@@ -528,6 +545,8 @@
       {/if}
       {@const win = prWins.get(group ?? "open")!}
       <table class="tf-tbl tf-cprs">
+        <!-- Its own widths, every group alike: a fixed table takes them from its first row, which a windowed group's spacer would be (2026-11-10). -->
+        <colgroup><col class="tf-cp-no" /><col /><col class="tf-cp-state" /><col class="tf-cp-job" /><col class="tf-cp-at" /></colgroup>
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
           {#each win.slice(kept) as { row, number, idle, author, mine } (row.entity_id)}
