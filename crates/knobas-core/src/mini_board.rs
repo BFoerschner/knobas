@@ -206,7 +206,8 @@ macro_rules! lane_paths {
 /// `cross join lateral (select i.entity_id as eid) k` beside the scan. So the
 /// scan can be an index-only scan of `item_ticket_brief_idx` (migration
 /// `0074`): on 20,000 Jira tickets the heap it read was 113 MB, about 20 ms a
-/// statement.
+/// statement. The cards' time falls back to `synced_at` the same way, through
+/// the key, since no index may hold that column (#2189's heap-only stamp).
 macro_rules! status_of_ticket {
     () => {
         $crate::stored_or!(
@@ -307,7 +308,8 @@ const CARDS: &str = concat!(
     lane_paths!("$4", "$6"),
     ",
      scoped as materialized (
-       select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
+       select i.entity_id, coalesce(i.item_updated_at,
+                (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, ",
     status_of_ticket!(),
     " as status, ",
     lane_of_ticket_probed!("$4", "$6"),

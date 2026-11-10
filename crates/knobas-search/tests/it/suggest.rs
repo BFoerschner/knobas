@@ -909,9 +909,9 @@ async fn under_scopes_to_a_parent_whose_name_lowercases_differently_in_rust() {
 }
 
 /// `n` repositories in a database of their own, in one statement: repo `i`
-/// called `<t>-<i>`, its time `days(i)` days into 2026, so the newest parent
-/// rows are the ones `days` puts last.
-async fn many_repos(pool: &sqlx::PgPool, t: &str, n: i32, days: &str) {
+/// called `<t>-<i>`, dated `i / 10` days into 2026 when `ties` (ten repos a
+/// day), else `i` days.
+async fn many_repos(pool: &sqlx::PgPool, t: &str, n: i32, ties: bool) {
     sqlx::query(
         "insert into knobas.entity (id, kind, title)
          select 'gitea:Owner' || $1 || '/' || $1 || '-' || g, 'repo', $1 || '-' || g
@@ -922,16 +922,16 @@ async fn many_repos(pool: &sqlx::PgPool, t: &str, n: i32, days: &str) {
     .execute(pool)
     .await
     .unwrap();
-    // `days` is one of the test's own two expressions, never input.
-    sqlx::query(sqlx::AssertSqlSafe(format!(
+    sqlx::query(
         "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
          select 'gitea:Owner' || $1 || '/' || $1 || '-' || g, 'gitea', 'repo', $1 || '-' || g, '',
                 jsonb_build_object('full_name', 'Owner' || $1 || '/' || $1 || '-' || g, 'name', $1 || '-' || g),
-                timestamptz '2026-01-01' + make_interval(days => {days})
-           from generate_series(0, $2 - 1) g"
-    )))
+                timestamptz '2026-01-01' + make_interval(days => case when $3 then g / 10 else g end)
+           from generate_series(0, $2 - 1) g",
+    )
     .bind(t)
     .bind(n)
+    .bind(ties)
     .execute(pool)
     .await
     .unwrap();
@@ -944,14 +944,14 @@ async fn many_repos(pool: &sqlx::PgPool, t: &str, n: i32, days: &str) {
 /// few parents to fill the list, which reads the whole statement again.
 #[tokio::test]
 async fn the_newest_parents_with_nothing_typed_are_the_whole_reads() {
-    for (label, n, days) in [
+    for (label, n, ties) in [
         // Ten repos a day, so the 2,000th newest row shares its time with
         // nine others on either side of the cut.
-        ("ties", 2_500, "g / 10"),
+        ("ties", 2_500, true),
         // Thirty repos, and below three of them 2,100 branches newer than
         // any: the newest 2,000 rows name only those three, so the list is
         // not filled from them and the whole statement is read.
-        ("few", 30, "g"),
+        ("few", 30, false),
     ] {
         let connector =
             knobas_db::test_util::scratch_database(&format!("newest_parents_{label}")).await;
@@ -971,7 +971,7 @@ async fn the_newest_parents_with_nothing_typed_are_the_whole_reads() {
         }
         let t = token();
         let searcher = searcher(&pool).await;
-        many_repos(&pool, &t, n, days).await;
+        many_repos(&pool, &t, n, ties).await;
         if label == "few" {
             sqlx::query(
                 "insert into knobas.entity (id, kind, title)
