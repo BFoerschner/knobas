@@ -178,24 +178,64 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 /// with. `starts_with` is the exact test. `lower` on both sides, in SQL: the
 /// lowering `sql::parent_positions` compares with. A name the trim leaves empty, or
 /// a row without a kind, is not offered.
-const PARENTS_SQL: &str = concat!(
-    "select g.name, g.kind from ( \
-       select p.name collate \"C\" as name, p.kind, max(p.at) as top from ( \
-         select ip.name, ip.kind, ip.at from sync.item_parent ip \
-         union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
-        where lower(p.name) ~>=~ lower($1) \
-          and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
-          and starts_with(lower(p.name), lower($1)) \
-          and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
-        group by p.name collate \"C\", p.kind \
-        order by top desc nulls last, p.name collate \"C\", p.kind \
-       offset 0) g \
-     cross join lateral (select 1 from ",
-    crate::under::parent_names!(),
-    " k where lower(k.name) = lower(g.name collate \"default\") \
-        and k.name = g.name collate \"default\" and k.kind = g.kind limit 1) known \
-     order by g.top desc nulls last, g.name, g.kind \
-     limit $2"
+macro_rules! parents_sql {
+    ($recent:expr, $top:expr) => {
+        concat!(
+            "select g.name, g.kind",
+            $top,
+            " from ( \
+               select p.name collate \"C\" as name, p.kind, max(p.at) as top from ( \
+                 select ip.name, ip.kind, ip.at from sync.item_parent ip",
+            $recent,
+            " union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
+                where lower(p.name) ~>=~ lower($1) \
+                  and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
+                  and starts_with(lower(p.name), lower($1)) \
+                  and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
+                group by p.name collate \"C\", p.kind \
+                order by top desc nulls last, p.name collate \"C\", p.kind \
+               offset 0) g \
+             cross join lateral (select 1 from ",
+            crate::under::parent_names!(),
+            " k where lower(k.name) = lower(g.name collate \"default\") \
+                and k.name = g.name collate \"default\" and k.kind = g.kind limit 1) known \
+             order by g.top desc nulls last, g.name, g.kind \
+             limit $2"
+        )
+    };
+}
+
+/// The statement above over every row: what a prefix reads, and what the
+/// newest rows fall back to ([`RECENT_PARENTS_SQL`]).
+const PARENTS_SQL: &str = parents_sql!("", "");
+
+/// How many of `sync.item_parent`'s newest rows [`RECENT_PARENTS_SQL`] ranks.
+const RECENT_PARENT_ROWS: i64 = 2000;
+
+/// The parent row [`RECENT_PARENTS_SQL`] reads back to: the
+/// [`RECENT_PARENT_ROWS`]th newest with a time, through `item_parent_at_idx`
+/// (migration `0074`); `null` where there are fewer.
+macro_rules! recent_parents_since {
+    () => {
+        "(select b.at from sync.item_parent b where b.at is not null \
+           order by b.at desc nulls last limit 1 offset $3)"
+    };
+}
+
+/// [`PARENTS_SQL`] over the newest parent rows alone, every row at or after
+/// the [`RECENT_PARENT_ROWS`]th newest (`$3` its offset), and every asset;
+/// each answer with its time and the time read back to (the scale pass,
+/// 2026-11-10). With nothing typed the whole statement ranks every row
+/// `sync.item_parent` has, 66 ms at 112,000 rows; this reads 2,000, 3 ms.
+///
+/// **The same answer whenever its last is no older than that time**, which
+/// [`parents`] checks: a name is ranked by its newest row, and every row
+/// that new is read, so each name it offers has its true time, and a name it
+/// left out has none that new and ranks after its last. Otherwise
+/// [`parents`] reads the whole statement.
+const RECENT_PARENTS_SQL: &str = parents_sql!(
+    concat!(" where ip.at >= ", recent_parents_since!()),
+    concat!(", g.top, ", recent_parents_since!(), " as since")
 );
 
 /// How many values one ticket key is offered with (#811): the most used
@@ -230,6 +270,12 @@ pub(crate) const FIELD_SAMPLE: i64 = 200;
 /// a path contributes nothing for that key: the miss direction, offering
 /// fewer values, never a wrong one.
 ///
+/// Each sampled payload is decompressed once, as it is sampled
+/// (`payload #> '{}'`, the whole value), and every field below reads that
+/// copy (the scale pass, 2026-11-10): read from the table, each of the eight
+/// reads decompressed the record again, and on 1,500 sampled Jira tickets
+/// (3 kB compressed each) that was 70 of the statement's 150 ms.
+///
 /// The value keeps the source's spelling, the way a reader knows it; the key
 /// matches it ignoring case. A project is offered by its key, its name beside
 /// it. `sprint` is offered as `current`, once, when a sampled row is in an
@@ -238,7 +284,7 @@ const FIELDS_SQL: &str = concat!(
     "with fdecl as (select $1::jsonb as d), ",
     crate::corpus::field_paths_ctes!(),
     ", sampled as materialized ( \
-       select r.source_id, r.kind, r.payload \
+       select r.source_id, r.kind, r.payload #> '{}'::text[] as payload \
          from (select source_id, kind from fp union select source_id, kind from lp) p \
          cross join lateral (select i.source_id, i.kind, i.payload from sync.item i \
                               where i.source_id = p.source_id and i.kind = p.kind and ",
@@ -339,6 +385,46 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
 ///
 /// [`SearchError::Db`] if the read fails.
 pub(crate) async fn parents(
+    pool: &PgPool,
+    under: &str,
+) -> Result<Vec<ParentSuggestion>, SearchError> {
+    type Recent = (
+        String,
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    );
+    // With nothing typed, the newest rows first ([`RECENT_PARENTS_SQL`]); a
+    // prefix narrows the whole statement through its index already.
+    if under.is_empty() {
+        let recent: Vec<Recent> = sqlx::query_as(RECENT_PARENTS_SQL)
+            .bind(under)
+            .bind(PARENT_SUGGESTIONS)
+            .bind(RECENT_PARENT_ROWS - 1)
+            .persistent(false)
+            .fetch_all(pool)
+            .await?;
+        let whole = usize::try_from(PARENT_SUGGESTIONS).is_ok_and(|n| recent.len() == n);
+        let new_enough = recent.last().is_some_and(
+            |(_, _, top, since)| matches!((top, since), (Some(top), Some(since)) if top >= since),
+        );
+        if whole && new_enough {
+            return Ok(recent
+                .into_iter()
+                .map(|(name, kind, _, _)| ParentSuggestion { name, kind })
+                .collect());
+        }
+    }
+    whole_parents(pool, under).await
+}
+
+/// [`PARENTS_SQL`]'s answer for the prefix `under`: [`parents`] without the
+/// newest rows' shortcut.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if the read fails.
+pub(crate) async fn whole_parents(
     pool: &PgPool,
     under: &str,
 ) -> Result<Vec<ParentSuggestion>, SearchError> {

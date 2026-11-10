@@ -751,6 +751,21 @@ impl Searcher {
         })
     }
 
+    /// The parents [`Searcher::filter_parent_suggestions`] offers, read by
+    /// the whole statement however many parent rows there are: what the
+    /// newest rows' shortcut has to answer the same as.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the read fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn whole_parent_suggestions(
+        &self,
+        under: &str,
+    ) -> Result<Vec<ParentSuggestion>, SearchError> {
+        suggest::whole_parents(&self.pool, under).await
+    }
+
     /// The plan the board's recency read runs under.
     ///
     /// # Errors
