@@ -54,6 +54,7 @@
  * modules answering the same command is an error, not a silent override.
  */
 import type { Answers } from "./fake-answers";
+import { expandScale, seedScale } from "./fake-scale";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
@@ -187,8 +188,10 @@ const FEATURES = Object.entries(import.meta.glob<FakeFeature>("./fake/*.ts", { e
  * real backend was slow to attach.
  */
 export function installIfRequested(): void {
-  const params = new URLSearchParams(location.search);
+  // `fake-scale` turns on the per-area switches it stands for (`fake-scale.ts`).
+  const params = expandScale(new URLSearchParams(location.search));
   if (!params.has("fake-ipc")) return;
+  seedScale(params);
   for (const [, feature] of FEATURES) feature.seed?.(params);
   const bridge = installFakeTauri(holdBack(demoHandlers(params), params));
   for (const [, feature] of FEATURES) feature.attach?.(bridge);

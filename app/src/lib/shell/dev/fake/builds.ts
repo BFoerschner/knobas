@@ -18,6 +18,7 @@
  * `queued`), which is what the adapter declares (#666), and not the
  * prototype's *passed*: the shell draws what the source says.
  */
+import { SCALE_HISTORY } from "../fake-scale";
 import type {
   ChainStepRow,
   JobPipeline,
@@ -371,7 +372,7 @@ const OLDER_DEPTH = 200;
  * history the way it was filled, from a seed of the run it starts from, so
  * two scrolls agree. A history ends {@link OLDER_DEPTH} runs before the story.
  */
-export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number): RunRow[] {
+export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number, depth = OLDER_DEPTH): RunRow[] {
   const random = seeded(Number(before.number ?? 1) * 31 + config.length);
   const base = before.duration_seconds ?? 180;
   const out: RunRow[] = [];
@@ -379,7 +380,7 @@ export function fakeOlderRuns(config: string, before: RunRow, limit: number, sto
   let at = new Date(before.started ?? before.updated_at ?? Date.now()).getTime();
   while (out.length < limit) {
     no -= 1 + Math.floor(random() * 2);
-    if (no <= story - OLDER_DEPTH) break;
+    if (no <= story - depth) break;
     at -= (60 + Math.floor(random() * 700)) * 60_000;
     const st = random() < 0.05 ? "failed" : "success";
     const branch = /Prod/.test(config) || random() < 0.55 ? "main" : "feature/cleanup-87";
@@ -724,6 +725,8 @@ export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const bulk = bulkPipelines(Number(params.get("fake-pipelines") ?? 0) || 0);
   const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
+  // `fake-scale` (`fake-scale.ts`): a history thousands of runs long.
+  const depth = params.has("fake-scale") ? SCALE_HISTORY : OLDER_DEPTH;
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));
@@ -732,7 +735,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const mirrored = history(new Date()).get(config) ?? [];
       // The whole history beyond the mirror, continued from its oldest run:
       // the same chain on every call, so pages join up.
-      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, OLDER_DEPTH, Number(mirrored[0]?.number ?? 0))];
+      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, depth, Number(mirrored[0]?.number ?? 0), depth)];
       const at = all.findIndex((run) => run.entity_id === before);
       return at < 0 ? [] : all.slice(at + 1, at + 1 + limit);
     },

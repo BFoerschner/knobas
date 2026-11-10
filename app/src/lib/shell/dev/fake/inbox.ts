@@ -46,7 +46,7 @@
  *   Inbox at size (`&fake-inbox-items=4000`).
  */
 import type { Handlers } from "../fake-tauri";
-import { CORPUS } from "./corpus";
+import { corpusRow } from "./corpus";
 import { sentenceDay } from "../../../tf/inbox/inbox";
 import { signInFails } from "../../health.svelte";
 import { fakeHiddenMonitors, fakeOpenAlerts } from "./monitors";
@@ -90,7 +90,7 @@ function entry(
       kind,
       // The mirror's own title when the entity is in it, so a row cannot
       // name a ticket differently from the board beside it.
-      title: CORPUS.find((row) => row.entity_id === entity_id)?.title ?? title,
+      title: corpusRow(entity_id)?.title ?? title,
       reason,
       ...(detail === undefined ? {} : { detail }),
       occurred_at: ago(minutes),

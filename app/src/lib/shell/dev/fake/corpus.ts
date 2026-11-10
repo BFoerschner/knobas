@@ -647,7 +647,42 @@ function listProjects() {
 }
 
 /** One card of the fixture's board. */
+/**
+ * One corpus row by its id, through an index rebuilt whenever the corpus grows or goes back to its seed: at
+ * `?fake-scale`'s 30,000 rows a `CORPUS.find` per inbox row or set member made the fixture, not the app, the slow part
+ * of every load.
+ */
+export function corpusRow(id: string | null | undefined): (typeof CORPUS)[number] | undefined {
+  if (id === null || id === undefined) return undefined;
+  if (byId === null || indexed !== CORPUS.length) {
+    // The first row under an id, as `CORPUS.find` read it.
+    byId = new Map();
+    for (const entry of CORPUS) if (!byId.has(entry.entity_id)) byId.set(entry.entity_id, entry);
+    indexed = CORPUS.length;
+  }
+  return byId.get(id);
+}
+let byId: Map<string, (typeof CORPUS)[number]> | null = null;
+let indexed = 0;
+onFakeReset(() => {
+  byId = null;
+  cards = new WeakMap();
+  lastParsed = null;
+});
+
+/**
+ * Cards kept per row once the corpus is past a bulk switch's size (`?fake-scale`, `?fake-tickets`): a board or a count
+ * makes one per ticket on every read. A demo-sized corpus makes them fresh, so a fake write to a payload shows at once.
+ */
+let cards = new WeakMap<(typeof CORPUS)[number], ReturnType<typeof makeCard>>();
 function boardCard(entry: (typeof CORPUS)[number]) {
+  if (CORPUS.length < 5_000) return makeCard(entry);
+  let card = cards.get(entry);
+  if (card === undefined) cards.set(entry, (card = makeCard(entry)));
+  return card;
+}
+
+function makeCard(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() !== "" ? value.trim() : null;
   if (entry.entity_id.startsWith("gitea:")) return giteaCard(entry);
@@ -826,7 +861,13 @@ export const FAKE_IDENTITY = "mara";
  * meaning any of them. A restatement, which certifies nothing: the real
  * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
  */
-function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+/**
+ * A query's keys and words, read once for a whole read rather than once per ticket: the words as the grammar reads
+ * them (#1889), where `or` separates alternatives, `-word` and `-"phrase"` are left out of the one they stand in, and
+ * a phrase is one needle.
+ */
+function parsedQuery(query: string) {
+  if (lastParsed?.query === query) return lastParsed;
   const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
   const keys = new Map<string, { negated: boolean; values: string[] }>();
   for (const [, minus, key, quoted, bare, word] of tokens) {
@@ -836,11 +877,15 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
     held.values.push((quoted ?? bare ?? "").toLowerCase());
     keys.set(name, held);
   }
+  lastParsed = { query, keys, alternatives: wordAlternatives(query) };
+  return lastParsed;
+}
+let lastParsed: { query: string; keys: Map<string, { negated: boolean; values: string[] }>; alternatives: ReturnType<typeof wordAlternatives> } | null = null;
+
+function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+  const { keys, alternatives } = parsedQuery(query);
   const card = boardCard(entry);
   const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
-  // The words as the grammar reads them (#1889): `or` separates alternatives,
-  // `-word` and `-"phrase"` are left out of the one they stand in, a phrase is one needle.
-  const alternatives = wordAlternatives(query);
   const admits = ({ holds, lacks }: { holds: string[]; lacks: string[] }) =>
     holds.every((word) => haystack.includes(word)) && !lacks.some((word) => haystack.includes(word));
   if (alternatives.length > 0 && !alternatives.some(admits)) return false;

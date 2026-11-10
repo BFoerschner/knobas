@@ -42,7 +42,7 @@ import { onePerKey } from "../../../tf/sets/sets";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { fakePipelines } from "./builds";
-import { CORPUS } from "./corpus";
+import { CORPUS, corpusRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { PARENTS, SET_REACH, fakeParentOwn } from "./job-reach";
 import { fakeMonitorRoster } from "./monitors";
@@ -269,6 +269,12 @@ function tickets() {
   return CORPUS.filter((row) => row.kind === "ticket" && row.deleted_at === null);
 }
 
+/** A live ticket by id, through the corpus's index rather than a walk of every ticket. */
+function ticketById(id: string | undefined): (typeof CORPUS)[number] | undefined {
+  const row = corpusRow(id);
+  return row !== undefined && row.kind === "ticket" && row.deleted_at === null ? row : undefined;
+}
+
 function matches(rule: LinkSetRule, ticket: (typeof CORPUS)[number]): boolean {
   const payload = ticket.payload as { epic?: string; fields?: { project?: { key?: string } } };
   switch (rule.kind) {
@@ -278,7 +284,7 @@ function matches(rule: LinkSetRule, ticket: (typeof CORPUS)[number]): boolean {
       return PARENTS[ticket.entity_id] === rule.value;
     case "epic": {
       if (payload.epic === keyOf(rule.value)) return true;
-      const parent = tickets().find((row) => row.entity_id === PARENTS[ticket.entity_id]);
+      const parent = ticketById(PARENTS[ticket.entity_id]);
       return parent !== undefined && parent !== ticket && matches(rule, parent);
     }
     case "project":

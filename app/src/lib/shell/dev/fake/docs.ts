@@ -37,6 +37,8 @@
  *   pages four or five folds deep, to measure Docs at a real space's size
  *   (#2200: `&fake-docs-pages=4000`). Its pages carry the generic body and
  *   the search matches them by title only.
+ * - `?fake-scale` (`fake-scale.ts`) puts 5,000 pages in three spaces instead, one
+ *   parent holding 800 children and one 300.
  * - `?fake-docs-long=<n>` draws *SEPA payout retry design* with its body
  *   and its comments repeated `n` times, each heading numbered, to measure a
  *   very long page (`&fake-docs-long=200`: 4,000 blocks, 400 comments).
@@ -51,6 +53,7 @@
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
+import { SCALE_SPACES, scalePages } from "../fake-scale";
 import type {
   DocBlock,
   DocHit,
@@ -553,13 +556,14 @@ function tree(bulk: FakePage[]): DocsTree {
       .map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent }))
       .sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase())),
   }));
-  if (bulk.length > 0)
+  // The bulk pages, one space per key they carry: `BULK`'s, or `fake-scale`'s three.
+  for (const key of new Set(bulk.map((p) => p.space)))
     spaces.push({
       source_id: SOURCE,
       source_name: SOURCE_NAME,
-      key: BULK_KEY,
-      name: BULK_NAME,
-      pages: bulk.map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
+      key,
+      name: SCALE_SPACES[key] ?? BULK_NAME,
+      pages: bulk.filter((p) => p.space === key).map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
     });
   return {
     spaces,
@@ -905,7 +909,7 @@ var call = "${call}";
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
-  const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
+  const bulk = params.has("fake-scale") ? scalePages(5_000) : bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
     docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),

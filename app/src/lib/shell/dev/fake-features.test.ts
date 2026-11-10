@@ -9,6 +9,7 @@ import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/ent
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers, holdBack } from "./fake-tauri";
+import { expandScale, scaleForge, scalePages, scaleTickets } from "./fake-scale";
 import { historyBuilds } from "./fake/builds";
 import { CORPUS, corpusListBuilds, fakeRoleScope } from "./fake/corpus";
 import { estateScans } from "./fake/estate";
@@ -420,6 +421,41 @@ test("docs: ?fake-docs-long=<n> repeats the SEPA design page's body and comments
   expect(long.comments).toHaveLength(plain.comments.length * 3);
   expect(long.sections).toHaveLength(plain.sections.length * 3);
   expect(JSON.stringify(long.blocks.filter((b) => b.type === "heading"))).toContain("Rollout 3");
+});
+
+test("?fake-scale is Björn's mirror, the same on every load: 20,000 tickets, 5,000 pages with an 800-child parent, 10,000 forge rows", () => {
+  const tickets = scaleTickets(20_000);
+  expect(tickets).toHaveLength(20_000);
+  expect(new Set(tickets.map((t) => t.entity_id)).size).toBe(20_000);
+  expect(scaleTickets(20_000)).toEqual(tickets);
+  // A board of eleven columns, over eight projects.
+  expect(new Set(tickets.map((t) => t.payload["status"])).size).toBe(11);
+  expect(new Set(tickets.map((t) => (t.payload["fields"] as { project: { key: string } }).project.key)).size).toBe(8);
+  // No key the demo corpus already holds.
+  const demo = new Set(CORPUS.map((row) => row.entity_id));
+  expect(tickets.filter((t) => demo.has(t.entity_id))).toEqual([]);
+
+  const pages = scalePages(5_000);
+  expect(pages).toHaveLength(5_000);
+  expect(new Set(pages.map((p) => p.id)).size).toBe(5_000);
+  const children = new Map<string, number>();
+  for (const page of pages) if (page.parent) children.set(page.parent, (children.get(page.parent) ?? 0) + 1);
+  expect([...children.values()].sort((a, b) => b - a).slice(0, 2)).toEqual([800, 300]);
+  const byId = new Map(pages.map((p) => [p.id, p]));
+  const depth = (p: { parent: string | null }): number => (p.parent ? 1 + depth(byId.get(p.parent)!) : 0);
+  expect(Math.max(...pages.map(depth))).toBe(7);
+
+  const forge = scaleForge(10_000);
+  expect(forge).toHaveLength(10_000);
+  expect(new Set(forge.map((row) => row.kind))).toEqual(new Set(["repo", "branch", "pr", "commit"]));
+
+  // The per-area switches it stands for, where the address leaves them out.
+  expect(expandScale(new URLSearchParams("fake-scale&fake-monitors=7")).get("fake-monitors")).toBe("7");
+  expect(expandScale(new URLSearchParams("fake-scale")).get("fake-pipelines")).toBe("300");
+  expect(expandScale(new URLSearchParams("")).has("fake-pipelines")).toBe(false);
+  // Docs draws its pages as three spaces of their own.
+  const keys = ((demoHandlers(new URLSearchParams("fake-scale")) as Calls)["docs_tree"]!({}) as { spaces: { key: string }[] }).spaces.map((s) => s.key);
+  expect(keys.slice(-3)).toEqual(["HB", "RUN", "DSGN"]);
 });
 
 test("docs: ?fake-docs-pages=<n> adds a BULK space of n pages folded under each other, searched by title (#2200)", () => {
