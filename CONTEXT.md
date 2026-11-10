@@ -24,7 +24,7 @@ A clone of a [repo](#kind) on this machine, found under the **clones root** (a d
 _Avoid_: clone (as a noun for the record: the clone is the directory, the checkout is what knobas knows about it), working copy, local path, worktree (one more checkout, set by hand)
 
 **Working tree state**:
-Where a [checkout](#checkout)'s working tree stands right now: its branch or detached head, its upstream and how far ahead and behind, and how many paths are changed, untracked or conflicted. Read by read-only `git status` when the checkout panel opens and when the window regains focus; never stored, never polled. The branch name the mirror holds is compared to it, never passed to git (ADR-0021).
+Where a [checkout](#checkout)'s working tree stands right now: its branch or detached head, its upstream and how far ahead and behind, and how many paths are changed, untracked or conflicted. Read by read-only `git status` when the checkout panel opens and when the window regains focus; never stored, never polled, and not run again where nothing git reads changed since its last answer (ADR-0021 as amended 2026-11-10). The branch name the mirror holds is compared to it, never passed to git (ADR-0021).
 _Avoid_: git status (the command, not the fact), dirty/clean as the whole state, local branch
 
 ## Sync
