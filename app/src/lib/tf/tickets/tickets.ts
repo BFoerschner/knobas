@@ -159,7 +159,14 @@ export function listPointer(column: MiniBoardColumn, drawn: number): string | nu
  */
 export function columnWords(column: MiniBoardColumn, listed: readonly string[]): string {
   const statuses = listed.length > 0 ? listed : column.status === null ? [] : [column.status];
-  return statuses.map((status) => `status:${/[\s"]/.test(status) ? `"${status.replace(/"/g, "")}"` : status}`).join(" ");
+  return statuses.map((status) => "status:" + quotedWord(status)).join(" ");
+}
+
+/** A filter value as the grammar takes it: bare, or in double quotes when it holds a space or a quote of its own. */
+function quotedWord(value: string): string {
+  const QUOTE = String.fromCharCode(34);
+  if (!value.includes(" ") && !value.includes(QUOTE)) return value;
+  return QUOTE + value.split(QUOTE).join("") + QUOTE;
 }
 
 /**
