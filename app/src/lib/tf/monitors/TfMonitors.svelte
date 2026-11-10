@@ -552,8 +552,11 @@
     ...(hiddenRows.length > 0 ? [{ row: null, failed: null }] : []),
     ...(hiddenRows.length > 0 && foldOpen ? withFailures(hiddenRows) : []),
   ]);
-  /** Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. */
-  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42 });
+  /**
+   * Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. A row is 71 nodes with its bars,
+   * so past 100 rows: at the 300 every list starts at, 218 live monitors drew 15,316 nodes and a 140 ms frame (2026-11-10).
+   */
+  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42, from: 100 });
 
   /** A mark comes into view once, as the address names it; a later read of the roster leaves the reader where they are. */
   let broughtIn: string | null = null;
