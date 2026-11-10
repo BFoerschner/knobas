@@ -32,7 +32,8 @@
 # beside the seed (testenv/README.md, *Björn's scale*): the SCL* Jira projects
 # and Confluence spaces and the scale-* Gitea and Forgejo organizations, each
 # only where the product holds it. Without it the sources sync the seed alone,
-# as they always have.
+# as they always have. KNOBAS_LIVE_SCALE (a space-separated list of gitea,
+# forgejo, jira, confluence; all four when unset) narrows which ones widen.
 
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -98,10 +99,11 @@ rm -f "$refused"
 SCALE_JIRA="SCLPAY SCLOPS SCLWEB SCLDATA SCLMOB SCLSEC"
 SCALE_SPACES="SCLENG SCLOPS SCLPRD"
 SCALE_OWNERS="scale-platform scale-commerce scale-data"
-scale_present() { # <url prefix> <header|user:password> <names...>: the names that answer 200, as JSON
-    local prefix=$1 auth=$2 name found=()
-    shift 2
+scale_present() { # <product> <url prefix> <curl config line> <names...>: the names that answer 200, as JSON
+    local product=$1 prefix=$2 auth=$3 name found=()
+    shift 3
     [ -n "$scale" ] || { echo '[]'; return; }
+    case " ${KNOBAS_LIVE_SCALE:-gitea forgejo jira confluence} " in *" $product "*) ;; *) echo '[]'; return ;; esac
     for name in "$@"; do
         if [ "$(printf '%s\n' "$auth" | curl -s -o /dev/null -m 10 -w '%{http_code}' -K - "$prefix$name" || true)" = 200 ]; then
             found+=("$name")
@@ -168,7 +170,7 @@ forge() { # product id name seed-flag
     local more='[]'
     if [ -n "$KNOBAS_GITEA_URL" ]; then
         # shellcheck disable=SC2086 # the names are words
-        more=$(scale_present "$KNOBAS_GITEA_URL/api/v1/orgs/" "header = \"Authorization: token $KNOBAS_GITEA_TOKEN\"" $SCALE_OWNERS)
+        more=$(scale_present "$1" "$KNOBAS_GITEA_URL/api/v1/orgs/" "header = \"Authorization: token $KNOBAS_GITEA_TOKEN\"" $SCALE_OWNERS)
     fi
     add "$1" "$url" "$(source_json "$2" gitea "$3" "$url" Pat \
         "$(jq -cn --arg o "$KNOBAS_GITEA_OWNER" --arg u "$user" --argjson m "$more" '{owners: ([$o] + $m)} + (if $u == "" then {} else {username: $u} end)')" \
@@ -190,12 +192,12 @@ the_rest() {
     spaces=$(jq -c '[.confluence.space // empty]' "$state" 2>/dev/null || echo '[]')
     # shellcheck disable=SC2086 # the names are words
     if [ -n "$KNOBAS_JIRA_URL" ]; then
-        projects=$(jq -c --argjson m "$(scale_present "$KNOBAS_JIRA_URL/rest/api/2/project/" \
+        projects=$(jq -c --argjson m "$(scale_present jira "$KNOBAS_JIRA_URL/rest/api/2/project/" \
             "user = \"$KNOBAS_JIRA_USER:$KNOBAS_JIRA_PASSWORD\"" $SCALE_JIRA)" '. + $m' <<<"$projects")
     fi
     # shellcheck disable=SC2086
     if [ -n "$KNOBAS_CONFLUENCE_URL" ]; then
-        spaces=$(jq -c --argjson m "$(scale_present "$KNOBAS_CONFLUENCE_URL/rest/api/space/" \
+        spaces=$(jq -c --argjson m "$(scale_present confluence "$KNOBAS_CONFLUENCE_URL/rest/api/space/" \
             "user = \"$KNOBAS_CONFLUENCE_USER:$KNOBAS_CONFLUENCE_PASSWORD\"" $SCALE_SPACES)" '. + $m' <<<"$spaces")
     fi
     add jira "$KNOBAS_JIRA_URL" "$(source_json live-jira jira 'Jira (live)' "$KNOBAS_JIRA_URL" UserPassword \

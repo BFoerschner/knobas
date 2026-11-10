@@ -289,7 +289,7 @@ class TeamCity:
             started.append(name)
             if name in running:
                 continue     # a run that was killed left it: keep it, it is registered
-            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+            subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True)
             subprocess.run(["docker", "run", "-d", "--name", name, "--network", net, "--memory", "1g",
                             "-e", "SERVER_URL=http://teamcity:8111", "-e", f"AGENT_NAME=scale-agent-{k}", image],
                            check=True, capture_output=True)
@@ -318,7 +318,7 @@ class TeamCity:
 
     def stop_agents(self, started):
         for name in started:
-            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+            subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True)
         deadline = time.time() + 300
         self.forget_agents()
         while self.scale_agents() and time.time() < deadline:
@@ -366,15 +366,38 @@ class TeamCity:
                 order.append(by_cfg[cid].pop(0))
                 if not by_cfg[cid]:
                     del by_cfg[cid]
+        # A window of builds in flight, topped up as they finish, so the three
+        # agents never wait on a batch's slowest build.
         t0 = time.time()
         done = 0
-        for batch in chunks(order, 60):
-            ids = parallel(P, "queue", batch, self.queue, self.workers, 10 ** 9)
-            self.wait(ids)
-            done += len(batch)
-            self.made["builds"] += len(batch)
-            rate = done / max(time.time() - t0, 1)
-            say(P, f"builds {done}/{len(order)} ({rate * 60:.0f}/min, ~{(len(order) - done) / max(rate, 0.01) / 60:.0f} min left)")
+        pending = set()
+        k = 0
+        last = 0
+        while k < len(order) or pending:
+            if len(pending) < 30 and k < len(order):
+                batch = order[k:k + 30]
+                k += len(batch)
+                pending |= set(parallel(P, "queue", batch, self.queue, self.workers, 10 ** 9))
+            finished = self.finished(pending)
+            pending -= finished
+            done += len(finished)
+            self.made["builds"] += len(finished)
+            if done - last >= 100 or (k >= len(order) and not pending):
+                last = done
+                rate = done / max(time.time() - t0, 1)
+                say(P, f"builds {done}/{len(order)} ({rate * 60:.0f}/min, ~{(len(order) - done) / max(rate, 0.01) / 60:.0f} min left)")
+            if pending:
+                time.sleep(3)
+
+    def finished(self, ids):
+        out = set()
+        for c in chunks(sorted(ids), 50):
+            items = ",".join(f"item:(id:{i})" for i in c)
+            got = self.h.get(f"/app/rest/builds?locator={items},defaultFilter:false&fields=build(id,state)")
+            out |= {bld["id"] for bld in got.get("build", []) if bld["state"] == "finished"}
+        # Only the asked-for ones: a queued id TeamCity gave up can come back
+        # as another build's, and counting it made the progress run past 100 %.
+        return out & set(ids)
 
     def queue(self, job):
         cid, j, b, branches = job
