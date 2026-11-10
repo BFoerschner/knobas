@@ -992,6 +992,7 @@ pin_label $tf/job/TfConversation.svelte 'aria-label="Comment on {jobKey}"' \
     "the ticket page's compose box still has the name the capture driver knows the page by"
 # The shortcut field is found by the focus, because the dialog and its heading
 # answer to its name too (measured 2026-10-18): `TfDialog` focuses its first field.
+# shellcheck disable=SC2016 # the template literal is the text pinned, not an expansion
 pin_label $tf/settings/TfDialog.svelte 'reachable(`.tf-body :is(${FIELD})`)\[0\]' \
     "a dialog still puts the caret in its first field, where the capture driver types"
 # The way to a job the capture driver takes, from Tickets (the demo profile's
