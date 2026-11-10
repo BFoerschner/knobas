@@ -350,6 +350,9 @@
 /* A page that holds others, in a space's list: heavier, with more room above it, so forty rows read as groups. */
 .tf-dh-rows .tf-dh-holds { padding-top: 14px; }
 .tf-dh-rows .tf-dh-holds:first-child { padding-top: 6px; }
+/* A windowed space list's first drawn row is first only at its top: past it, it keeps the rule and room it has in the list. */
+.tf-dh-rows > .tf-dh-row.tf-dh-later:first-child { border-top: 1px solid var(--rule-2); }
+.tf-dh-rows > .tf-dh-holds.tf-dh-later:first-child { padding-top: 14px; }
 .tf-dh-rowt.tf-dh-holds .tf-dh-t { font-weight: 600; }
 .tf-dh-d1 { padding-left: 28px; } .tf-dh-d2 { padding-left: 44px; } .tf-dh-d3 { padding-left: 60px; } .tf-dh-d4 { padding-left: 76px; }
 .tf-dh-wait { padding: 8px 22px; }

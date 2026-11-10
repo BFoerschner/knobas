@@ -9,6 +9,7 @@
   import type { DocSpace } from "../../ipc/entity";
   import { counted } from "../counted";
   import { childrenByParent, pageHash, spaceName, spaceSource } from "./docs";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   /** `spaces` is the tree's, so a space whose name another source's space has says its source. */
   let { space, spaces = [], sync }: { space: DocSpace; spaces?: readonly DocSpace[]; sync?: Snippet | undefined } = $props();
@@ -36,6 +37,8 @@
     }
     return out;
   });
+  /** A space of thousands of pages draws the rows on screen and near it (2026-11-10: 2,250 rows, 4,575 nodes). */
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.id, estimate: 36 });
 </script>
 
 <div class="tf-dh">
@@ -48,9 +51,15 @@
   </header>
   <div class="tf-dh-body">
     <section class="tf-panel" aria-label="Pages in {spaceName(space)}{from === null ? '' : ` on ${from}`}">
-      <div class="tf-dh-rows">
-        {#each rows as row (row.id)}
-          <a class="tf-dh-row tf-dh-rowt tf-dh-d{Math.min(row.depth, 4)}" class:tf-dh-holds={row.holds} href={pageHash(row.id)}><span class="tf-dh-t">{row.title}</span></a>
+      <div class="tf-dh-rows" {@attach win.list}>
+        {#each win.slice(rows) as row, at (row.id)}
+          <a
+            class="tf-dh-row tf-dh-rowt tf-dh-d{Math.min(row.depth, 4)}"
+            class:tf-dh-holds={row.holds}
+            class:tf-dh-later={win.start + at > 0}
+            href={pageHash(row.id)}
+            {@attach win.row(row.id)}><span class="tf-dh-t">{row.title}</span></a
+          >
         {:else}
           <p class="tf-dh-none">This space has no synced pages yet.</p>
         {/each}
