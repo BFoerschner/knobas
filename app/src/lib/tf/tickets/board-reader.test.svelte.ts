@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import { createBoardReader, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
+import { createBoardReader, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -249,13 +249,42 @@ test("the total is counted once per base: from a base answer, or one count read 
   reader.setFilter({ query: "assignee:@me sep", words: true });
   await vi.advanceTimersByTimeAsync(40);
   expect(asked().slice(2)).toEqual([{ perColumn: 50, query: "assignee:@me sep" }]);
-  // A read of the base itself counts the whole as it draws it.
+  // A read of the base itself counts the whole as it draws it, once the read still out has answered.
   reader.setFilter({ query: "assignee:@me", words: false });
   await vi.advanceTimersByTimeAsync(40);
-  reads.at(-1)!.answer(board(column("To Do", 31, 8), column("Done", 4)));
+  expect(reads).toHaveLength(3);
+  reads[2]!.answer(board(column("To Do", 9)));
   await flush();
   expect(reads).toHaveLength(4);
+  reads[3]!.answer(board(column("To Do", 31, 8), column("Done", 4)));
+  await flush();
   expect(reader.total).toBe(35);
+});
+
+test("words typed while a read is out wait for it, then read once as they are by then; a hung read holds them 400 ms at most", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.setFilter({ query: "p", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().map((read) => read.query)).toEqual([null, "p"]);
+  // Two more keys while "p" is out: no read of "pa", one of "pay" when "p" answers, and its answer is not drawn.
+  reader.setFilter({ query: "pa", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().map((read) => read.query)).toEqual([null, "p"]);
+  reads[1]!.answer(board(column("To Do", 50)));
+  await flush();
+  expect(asked().map((read) => read.query)).toEqual([null, "p", "pay"]);
+  expect(reader.board).toBe(FIRST);
+  // "pay" never answers: "payo" waits for it, and goes 400 ms after "pay" was sent.
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked()).toHaveLength(3);
+  await vi.advanceTimersByTimeAsync(TYPED_WAIT_MOST);
+  expect(asked().map((read) => read.query)).toEqual([null, "p", "pay", "payo"]);
 });
 
 test("a laned board reads its first ten lanes, ten more each time, and ten again for another field", async () => {

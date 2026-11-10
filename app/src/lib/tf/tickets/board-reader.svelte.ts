@@ -217,6 +217,9 @@ export interface BoardReaderOptions {
   view: () => BoardView;
 }
 
+/** How long, in ms, typed words wait for a board read still out before they are read anyway. */
+export const TYPED_WAIT_MOST = 400;
+
 export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderOptions): BoardReader {
   const { typingPause, sessions } = options;
   /**
@@ -240,6 +243,12 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   let epoch = 0;
   /** The read a filter change waits to make until the keys pause. */
   let pausing: ReturnType<typeof setTimeout> | undefined;
+  /** Board reads sent and not yet answered. */
+  let out = 0;
+  /** Words typed while a read was out: read once it answers, with the words as they are then. */
+  let queued = false;
+  /** When the last board read was sent (`Date.now()`). */
+  let sentAt = 0;
   /** The ticket previewed, and the generation its answers carry. */
   let previewing: string | null = null;
   let previewed = 0;
@@ -311,8 +320,17 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     const kept = (answer: MiniBoard) => (without ? withoutTicket(answer, without) : answer);
     const query = state.filter.query;
     const mine = ++reading;
+    out += 1;
+    sentAt = Date.now();
     ports
       .board(capFor(), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
+      .finally(() => {
+        out -= 1;
+        if (out === 0 && queued) {
+          queued = false;
+          read();
+        }
+      })
       .then((answer) => {
         if (mine !== reading) return;
         const drawn = kept(answer);
@@ -384,6 +402,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       state.failed = null;
       reading += 1;
       epoch += 1;
+      queued = false;
       state.scope = { ...scope };
       state.filter = { ...filter };
       if (scope.base !== null) read();
@@ -391,13 +410,26 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     /**
      * The read waits until the keys pause for `typingPause`, so a word typed
      * at speed is one read and not one a letter, and an answer still out for
-     * the text before it is never drawn (#897).
+     * the text before it is never drawn (#897). While a read is out the next
+     * waits for its answer and then reads the words as they are by then: at
+     * 20,000 tickets a typed read takes 160 to 240 ms, so a key every 150 ms
+     * had two or three running against each other, each slower for it
+     * (2026-11-10).
      */
     setFilter(filter) {
       state.filter = { ...filter };
       clearTimeout(pausing);
       reading += 1;
-      pausing = setTimeout(read, typingPause);
+      pausing = setTimeout(() => {
+        const waited = Date.now() - sentAt;
+        if (out === 0 || waited >= TYPED_WAIT_MOST) return read();
+        // A read that hangs holds nothing up for long: past the most, the words go anyway.
+        queued = true;
+        pausing = setTimeout(() => {
+          queued = false;
+          read();
+        }, TYPED_WAIT_MOST - waited);
+      }, typingPause);
     },
     expand(lane, column) {
       here().expanded = [...expanded, expandKey(lane, column)];
@@ -451,6 +483,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     },
     close() {
       clearTimeout(pausing);
+      queued = false;
       reading += 1;
       epoch += 1;
       previewing = null;
