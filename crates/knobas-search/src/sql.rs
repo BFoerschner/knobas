@@ -439,14 +439,21 @@ fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> S
     // its own, so a word either holds reads no payload (#897); the declared
     // assignee, then the declared parents, only for a word they both miss.
     // No word holds a space, so this matches what the three joined by
-    // spaces matched.
+    // spaces matched. The assignee is the stored one (`sync.item_field`,
+    // #2184) where the database holds it for these declarations, the
+    // payload's walk where it does not: walked, it was 400 of a typed word's
+    // 445 ms on 20,000 live Jira tickets (2026-11-10), probed, 2 µs a row.
     let row_holds_word = format!(
         "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), w.word) > 0 then true \
               when strpos(lower(i.title), w.word) > 0 then true \
               when strpos(lower(coalesce({}, '')), w.word) > 0 then true \
               else exists (select 1 from sync.item_parent ip \
                            where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0) end",
-        knobas_core::declared_string!("pd.d", "assignee")
+        knobas_core::stored_string!(
+            "pd.d",
+            "assignee",
+            knobas_core::declared_string!("pd.d", "assignee")
+        )
     );
     let predicates: Vec<String> = alternatives
         .iter()

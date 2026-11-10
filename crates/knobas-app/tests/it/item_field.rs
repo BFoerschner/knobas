@@ -251,6 +251,8 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         let texts = [
             format!("project:{project} status:\"In Progress\""),
             format!("project:{project} assignee:mara"),
+            // A typed word reads the assignee too (2026-11-10: the walk was 400 of its 445 ms at 20,000 tickets).
+            format!("project:{project} mara"),
         ];
         let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
         let counts = searcher.readings(&texts, "ticket").await.unwrap();
@@ -267,7 +269,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     let walked = (
         vec![(Some("In Progress".to_owned()), "mara".to_owned())],
         vec!["In Progress".to_owned()],
-        vec![Reading::Count(1), Reading::Count(1)],
+        vec![Reading::Count(1), Reading::Count(1), Reading::Count(1)],
     );
     assert_eq!(read(&pool).await, walked, "stored as the walk reads it");
 
@@ -281,7 +283,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         (
             vec![(Some("Stored".to_owned()), "Stored".to_owned())],
             vec!["Stored".to_owned()],
-            vec![Reading::Count(0), Reading::Count(0)],
+            vec![Reading::Count(0), Reading::Count(0), Reading::Count(0)],
         ),
         "the reads take the stored value"
     );
