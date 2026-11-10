@@ -63,6 +63,7 @@
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import {
     BAR_STEP,
     BAR_WIDTH,
@@ -467,6 +468,11 @@
         ),
   );
   const days = $derived(byDay(kept));
+  /**
+   * A history read back by scrolling holds thousands of runs (2026-11-10: 35,000 nodes and 133 ms frames at 1,400 of
+   * them), so past thirty days only the days on screen and near it are drawn, a day at a time.
+   */
+  const dayWin = new Windowed({ count: () => days.length, key: (i) => days[i]!.label, estimate: 260, from: 30 });
 
   /**
    * A click anywhere on a run row opens the run (R-9.6, prototype-6's
@@ -669,7 +675,9 @@
         {/if}
       </TfNoMatch>
     {/if}
-    {#each days as day (day.label)}
+    <div class="tf-days" {@attach dayWin.list}>
+    {#each dayWin.slice(days) as day, at (day.label)}
+      <div class="tf-day" class:tf-day-first={dayWin.start + at === 0} {@attach dayWin.row(day.label)}>
       <h3 class="tf-dayh">{day.label}</h3>
       <table class="tf-tbl tf-runtbl" aria-label={`Runs, ${day.label}`}>
         <!-- One width per column on every day's table, so they line up down the page (#1452). -->
@@ -735,7 +743,9 @@
           {/each}
         </tbody>
       </table>
+      </div>
     {/each}
+    </div>
     {#if all !== null && all.length > 0}
       <!-- `hidden`, not gone: the sentinel keeps reading older runs while a filter has emptied the page. -->
       <div class="tf-older" hidden={kept.length === 0} bind:this={sentinel}>

@@ -349,6 +349,19 @@ test("a run's test summary sits between how it started and its duration, the fai
   expect(cell(rows[2]!)?.textContent).toBe("");
 });
 
+test("a long history draws the days near the screen, not every one (2026-11-10: 35,000 nodes at 1,400 runs)", async () => {
+  const drawn = draw();
+  drawn.next = Array.from({ length: 400 }, (_, i) => run(5000 - i, i % 7 ? "ok" : "err", daysAgo(Math.floor(i / 4), 10 - (i % 4))));
+  drawn.go([PIPELINE.entity_id, "runs"]);
+  await settle();
+  expect(target.querySelector(".tf-tabs .tf-count")?.textContent).toBe("400");
+  const days = target.querySelectorAll(".tf-day").length;
+  expect(days).toBeGreaterThan(0);
+  expect(days).toBeLessThan(100);
+  // The first day keeps its own spacing class wherever the window stands.
+  expect(target.querySelector(".tf-day")?.classList.contains("tf-day-first")).toBe(true);
+});
+
 test("older runs are asked of the source from the oldest run held, appended, until it answers none", async () => {
   const drawn = draw();
   await settle();
