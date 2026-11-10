@@ -795,24 +795,43 @@ const BLOCKED_STATUSES: &str = "blocked_statuses";
 /// which is ADR-0007's pinned failure direction.
 ///
 /// The declaration is bound as one jsonb parameter and resolved inside the
-/// statement (`declared_string!`, `declared_array!`), so nothing is pulled
+/// statement (`declared_string!`, and the blocked sets out of it by
+/// source and kind), so nothing is pulled
 /// into Rust to be filtered there and nothing is concatenated into SQL.
+///
+/// **Only the kinds that declare a blocked set are read, and the assignee and
+/// the status are the stored ones** (`sync.item_field`, #2184) where the
+/// database holds them for these declarations, walked where it does not
+/// (the scale pass, 2026-11-10). It walked every live item's payload twice,
+/// 1.1 s of the digest's 1.2 s on 48,000 items; a kind with no blocked set
+/// could never match, since its set is empty.
 macro_rules! blocked_by_status {
     () => {
         concat!(
-            "select s.entity_id, s.kind, s.source_id, s.title, s.at, s.status
+            "with blocking as materialized (
+               select sd.key as source_id, kd.key as kind,
+                      kd.value->'blocked_statuses' as blocked
+                 from jsonb_each(case when jsonb_typeof($2::jsonb) = 'object'
+                                      then $2::jsonb else '{}'::jsonb end) sd
+                cross join lateral jsonb_each(case when jsonb_typeof(sd.value) = 'object'
+                                                   then sd.value else '{}'::jsonb end) kd
+                where jsonb_typeof(kd.value->'blocked_statuses') = 'array'
+                  and jsonb_array_length(kd.value->'blocked_statuses') > 0)
+             select s.entity_id, s.kind, s.source_id, s.title, s.at, s.status
                from (select i.entity_id, i.kind, i.source_id, i.title,
                             coalesce(i.item_updated_at, i.synced_at) as at,
                             ",
-            knobas_core::declared_string!("$2", "assignee"),
+            knobas_core::stored_or!("sa", knobas_core::declared_string!("$2", "assignee")),
             " as assignee,
                             ",
-            knobas_core::declared_string!("$2", "status_name"),
+            knobas_core::stored_or!("ss", knobas_core::declared_string!("$2", "status_name")),
             " as status,
-                            ",
-            knobas_core::declared_array!("$2", "blocked_statuses"),
-            " as blocked
-                       from sync.live_item i) s
+                            bl.blocked
+                       from blocking bl
+                       join sync.live_item i on i.source_id = bl.source_id and i.kind = bl.kind",
+            knobas_core::stored_join!("sa", "$2", "assignee"),
+            knobas_core::stored_join!("ss", "$2", "status_name"),
+            ") s
               where s.assignee = any($1)
                 and s.status is not null
                 and exists (select 1
