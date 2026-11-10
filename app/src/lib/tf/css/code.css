@@ -5,10 +5,12 @@
 .tf .tf-cgroup-h:first-child { margin-top: 0; }
 /* One column grid for every group's table, so the groups line up. */
 .tf-cprs { table-layout: fixed; }
-.tf-cprs td:nth-child(1) { width: 80px; }
-.tf-cprs td:nth-child(3) { width: 110px; }
-.tf-cprs td:nth-child(4) { width: 100px; }
-.tf-cprs td:nth-child(5) { width: 150px; }
+/* The widths are the colgroup's, not the first row's cells': a windowed group's first row is its spacer, one cell
+   across all five, and an 80 px on it split the columns in WebKit (2026-11-10). */
+.tf-cprs .tf-cp-no { width: 80px; }
+.tf-cprs .tf-cp-state { width: 110px; }
+.tf-cprs .tf-cp-job { width: 100px; }
+.tf-cprs .tf-cp-at { width: 150px; }
 .tf-cfail { color: var(--err); font-size: var(--t-sm); }
 @media (max-width: 900px) {
   .tf-cbody { padding-left: 16px; padding-right: 16px; overflow-x: auto; }

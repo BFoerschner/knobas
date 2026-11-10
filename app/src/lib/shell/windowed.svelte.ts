@@ -399,13 +399,17 @@ export class Windowed<K = string> {
 /**
  * A table with no header row: its first drawn row's cells give the widths,
  * held by a `colgroup` while it windows (#2210). A first row with a spanning
- * cell gives none, and the columns stay sized by the drawn rows.
+ * cell gives none, and the columns stay sized by the drawn rows. A table with a
+ * `colgroup` of its own keeps it: a fixed table whose first row is the spacer
+ * would otherwise split its columns evenly (Code's pull requests, 2026-11-10).
  */
 function freezeCols(
   table: HTMLTableElement,
   body: HTMLTableSectionElement,
   width: number,
 ) {
+  // A table that declares its columns (a `colgroup`) has its widths already: another would add columns.
+  if (table.querySelector(":scope > colgroup")) return;
   const first = [...body.rows].find((tr) => !tr.classList.contains("tf-wgap"));
   const cells = [...(first?.cells ?? [])];
   if (cells.length === 0 || cells.some((cell) => cell.colSpan > 1)) return;
