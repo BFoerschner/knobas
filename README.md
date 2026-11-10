@@ -10,7 +10,7 @@ This is a toy project just to see how far agents can go with minimal supervision
 
 <img alt="The ticket page for PAY-231, Retry failed SEPA payouts, chosen as the job. A yellow card on the left lists its epic, people, logged time and a table of what surrounds the ticket, each row with its worst state, and a Stop and log button. On the right are the description, attachments and conversation. A timer in the top bar reads 0:34:00." src="docs/screenshots/job.webp">
 
-<sub>Made-up data from a fictional company. Each release redraws these pictures. These are from <!-- shots-version -->main<!-- /shots-version -->.</sub>
+<sub>Made-up data from a fictional company. Each release redraws these pictures. These are from <!-- shots-version -->v3.2.9-ux4<!-- /shots-version -->.</sub>
 
 ## Everything about a ticket on one page
 
