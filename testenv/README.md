@@ -1649,6 +1649,124 @@ snapshot's name, its size and its age.
   hour. The 22k copies are about 0.2 GB each as files; the clone costs little
   until the run writes.
 
+## Björn's scale (`just seed-scale`, `just scale-sync`)
+
+Björn's real sources hold about 5,000 Confluence pages, 20,000 Jira issues,
+4,000 TeamCity objects and 10,000 Gitea items; the seed holds a few dozen of
+each. `testenv/seed-scale.sh` fills the live products to his size **beside**
+the seed, never in it, so a profile that syncs the seed alone sees no change:
+
+| Product | Scope it adds | What it makes (default `--count`) |
+|---|---|---|
+| `jira` | projects `SCLPAY`, `SCLOPS`, `SCLWEB`, `SCLDATA`, `SCLMOB`, `SCLSEC` (*Scale test: …*) | 20,000 issues: epics (one with ~900 children), stories, tasks, bugs, sub-tasks; To Do / In Progress / In Review / Done by age; priorities, assignees and reporters from the fixture's five people and `knobas`, labels, components, monthly fix versions, due dates, estimates; ~20,000 comments written as those people, ~4,500 worklogs, ~7,000 links (Blocks, Relates, Duplicate, Cloners, across projects); a Scrum board per project with 55 two-week sprints (52 closed with their done issues, one active, two future) |
+| `confluence` | spaces `SCLENG`, `SCLOPS`, `SCLPRD` | 5,000 pages in trees up to nine deep, yearly meeting-note folders of ~250 pages each, incident reports, release notes, ADRs, an API reference; storage bodies from 150 bytes to 90 KB (median ~3 KB) with headings, tables, code, panels, status lozenges, expands, task lists, page links, mentions and Jira macros; labels, ~4,000 comments by six people (the fixture's five are made in Confluence, password `tidewater-dev`), ~360 attachments (PNG, PDF, CSV, JSON, text) |
+| `teamcity` | project tree `Scale` (*Scale test*) | 40 projects (8 groups of 3–4), 85 build configurations, 3,800 builds: ~78 % green, failures by exit code and by failed tests, cancelled ones, an OOM-killed few; ~150,000 test results, artifacts on ~30 %; each leaf builds a scale Gitea repository on `main` and its branches |
+| `gitea` / `forgejo` | orgs `scale-platform`, `scale-commerce`, `scale-data` | 58 repositories, ~18,700 commits by the fixture's people dated over the two years, ~1,200 branches, ~1,700 pull requests (two thirds merged, with their merge commits), ~2,600 issues with labels, milestones and assignees, ~4,000 comments, ~1,100 reviews; ~11,000 items as knobas mirrors them at the default budgets |
+| `kuma` | monitors `scale-*` | 200 monitors in 12 groups, checking Gitea over http, keyword, tcp and ping on the compose network, about one in twenty down |
+
+```sh
+just live-up jira                 # the product up and seeded, as for a suite
+just seed-scale jira              # = testenv/seed-scale.sh jira [--count N] [--workers W]
+just seed-scale jira --plan-only  # the plan's numbers, no server
+```
+
+**A plan, not a loop.** `testenv/scale/*.py` (stdlib Python; the shell script
+is the entry point) draw every item from a generator keyed on a fixed seed, the
+product and the item's index, and date the estate over the two years ending
+2026-11-01, not over the run. A rerun makes the same estate. Each product's
+phases are idempotent and recorded on the server once done for a count (a Jira
+project property and a Confluence space property `knobas-scale-seed`, a Gitea
+repository's Actions variable `KNOBAS_SCALE_SEED`), so a rerun on a filled
+product reads those and writes nothing (Jira: 3 s); a run killed mid-phase
+picks the phase up where it stopped. Kuma's monitors are found by name.
+
+**Dates the APIs refuse are written into the product's own database.** Jira
+takes no `created`, `updated` or `resolved` over REST: the seed rewrites them
+(and the comments', change history's and worklogs', and the closed sprints'
+completion dates) in `knobas-jira-db` with `docker exec … psql`, then runs a
+background reindex so JQL sees them. Gitea's history is built locally with
+`git fast-import`, so commit dates are real; pull requests are opened while
+`main` still points at its root commit, the final `main` is pushed after, and
+the forge's manual-merge detection (`autodetect_manual_merge`) marks them
+merged; created, closed and merged times, the merger, comments' and reviews'
+dates are then set in the forge's SQLite (`docker exec … sqlite3`).
+Confluence's page created and modified times (and its comments' and
+attachments') are rewritten in `knobas-confluence-db`, the server restarted so
+its caches read them (which also renews the licence), and the index rebuilt
+over `POST /rest/prototype/1/index/reindex`: CQL's `lastmodified`, which
+knobas' incremental sync walks by, and `version.when` then agree. TeamCity's
+builds run when the seed queues them; afterwards the server is stopped and each
+configuration's builds are spread over the two years in `HISTORY`,
+`LIGHT_HISTORY` and `BUILD_STATE` of its internal HSQLDB, each keeping its
+own duration (`testenv/scale/Sql.java`, run with `java` and `hsqldb-jdk8.jar`
+in the server's own image).
+
+**What it cannot reach.**
+
+- **TeamCity's licence.** The free Professional licence stops at 100 build
+  configurations (#1560 met it), and the fixture, the chain and the live
+  suite's own need some, so the scale tree has 85, not the 400 Björn's real
+  server has. The seed refuses to start when it would pass 100. The licence
+  also allows three agents: the seed starts `knobas-scale-agent-2` and `-3`
+  beside `knobas-teamcity-agent` for the run and removes them and their agent
+  records after it. A build costs about ten seconds of agent time whatever it
+  does, so 3,800 builds take about three and a half hours.
+- **The live suites clear what the seed did not make.** They were written for a
+  server holding the seed alone, and their leftover clearing says so:
+  `live_jira_seeded`'s searches `ORDER BY key ASC` across the instance (100
+  rows) and deletes every issue `seed-state.json` does not record, which takes
+  the first ~93 `SCLDATA` issues on each call; `live_teamcity_seeded`'s
+  deletes every build and every project the seed does not own, so one run of
+  `just teamcity-live-seeded` removes the whole `Scale` tree. Gitea's,
+  Forgejo's and Confluence's suites are scoped to `tidewater` and `ENG` and
+  leave the scale data alone. So fill, sync, then run a JVM product's suites;
+  the saved database below is what keeps the filled estate.
+
+**Syncing it: `testenv/scale-sync.sh <root>`.** The debug app
+(`target/debug/knobas-app --demo`, `just demo`'s binary) on a profile of its
+own: `HOME=<root>` for the app, so its demo profile is
+`<root>/Library/Application Support/dev.knobas.desktop/demo` and Björn's own is
+never touched; `live-sources.sh add --scale --data-dir …` first (`--scale`
+widens each source's scope to the scale projects, spaces and orgs the product
+holds); then the app's own scheduler syncs, and the script prints each
+source's first run (seconds, rows), the mirror's rows per source and kind and
+the database's size, and quits the app. Run it once per JVM product while that
+product is up; the sources are updated in place.
+
+**Measured, 2026-11-10**, on the WSL box (*Live products on a remote
+machine*), the seeds and the app on the Mac through the tunnel:
+
+| Product | Fill | First sync into knobas | Mirror rows |
+|---|---|---|---|
+| Jira | ~25 min (bulk create 20/s over six projects side by side, transitions ~150/s, comments ~100/s, then ~15 min of reindex) | 110 s | 20,007 tickets, 9 views |
+| Confluence | 317 s, restart and reindex included | 74 s | 5,032 pages |
+| Gitea | ~50 min at 8 repositories at a time (an issue or pull request is one request after another inside a repository) | 242 s (the adapter's default 10 requests/s) | 11,486 |
+| TeamCity | 2,613 of 3,800 builds in ~3 h on three agents, ~18 builds/min; stopped there for a deadline | 26 s | 2,711 |
+| Kuma | 30 s | 0.2 s | 218 |
+
+The knobas database then held 693 MB (1.4 GB on disk). The one write that
+crawled was the mirror's upsert: `sync.item`'s 500-row statement passed the
+1 s slow-statement threshold 58 times, up to 2.8 s and 78 s in all, most of it
+inside Jira's first sync. Kuma's scheduled run rewrote all 218 monitors every
+five minutes with nothing changed. A rerun of a filled product: Jira 3 s,
+Confluence 1 s, Gitea and Forgejo seconds per repository.
+
+**Resuming.** A fill that was stopped picks up where it stopped: run the same
+`just seed-scale <product>` with the product up. Jira, Confluence and the
+forges skip each finished phase and take an unfinished one up by reading what
+is there; TeamCity counts the builds each configuration already has and queues
+the rest, then runs the date rewrite (it marks `knobas.scale.seed.builds` and
+`.dates` on the `Scale` project when done). A TeamCity fill killed hard leaves
+`knobas-scale-agent-2`/`-3` running, which the next run keeps; one stopped
+normally removes them with their volumes and their agent records. The 2026-11-10 run stopped with
+TeamCity at 2,613 builds, undated, and Forgejo at about 40 of its 58
+repositories.
+
+**The saved database** of that run is a whole scratch `HOME`, outside the
+repository, with a README of its own: open a clone with `HOME=<clone>
+target/debug/knobas-app --demo`, never the binary without `--demo` and `HOME`
+(that opens the default profile).
+
 ## The estate file
 
 `estate.json` is the estate knobas models, written down: this notebook, the
@@ -2689,6 +2807,8 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. On a remote target: runs on two products go at once, two on one product take turns, a lock with no product is none, and the memory section serialises its takers. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
+| `./seed-scale.sh` | Fills one live product to Björn's scale beside the seed (`testenv/scale/`); `--plan-only` prints the plan. See *Björn's scale*. |
+| `./scale-sync.sh` | Syncs the filled products into a scratch profile with the debug app and times each source's first sync. See *Björn's scale*. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `images.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
