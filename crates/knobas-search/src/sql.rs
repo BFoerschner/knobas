@@ -417,7 +417,12 @@ fn ids_body(
     let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
     predicates.extend(corpus_predicates(corpus, None, &bound));
     if let Some(declarations) = &word_declarations {
-        let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
+        // `o.eid`: the row's id, for the walks' primary-key probes
+        // (`WALKED_ASSIGNEE`), which rebind `i`.
+        let _ = write!(
+            sql,
+            " cross join (select {declarations}::jsonb as d) pd cross join lateral (select i.entity_id as eid) o"
+        );
         predicates.push(words_predicate(builder, alternatives));
     }
     sql.push('\n');
@@ -429,46 +434,33 @@ fn ids_body(
 
 /// [`ids_sql`]'s word filter: the row meets one of `alternatives`, holding
 /// every word it asks for and none it leaves out (#1889). An alternative's
-/// words bind as one array, those it leaves out as another, each word as
-/// typed and folded by the server's `lower()` ([`bind_lowered`], #1988). One with
+/// first word binds on its own ([`row_holds_first_word`]), its other words
+/// as one array and those it leaves out as another, each word as typed and
+/// folded by the server's `lower()` ([`bind_lowered`], #1988). One with
 /// neither admits every row, though `query::word_alternatives` never
 /// returns one.
 fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> String {
     debug_assert!(!alternatives.is_empty(), "no alternative is no word filter");
-    // Whether the row holds `w.word`. The key and the title first, each on
-    // its own, so a word either holds reads no payload (#897); the declared
-    // assignee, then the declared parents, only for a word they both miss.
-    // No word holds a space, so this matches what the three joined by
-    // spaces matched. The assignee is the stored one (`sync.item_field`,
-    // #2184) where the database holds it for these declarations, the
-    // payload's walk where it does not: walked, it was 400 of a typed word's
-    // 445 ms on 20,000 live Jira tickets (2026-11-10), probed, 2 µs a row.
-    let row_holds_word = format!(
-        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), w.word) > 0 then true \
-              when strpos(lower(i.title), w.word) > 0 then true \
-              when strpos(lower(coalesce({}, '')), w.word) > 0 then true \
-              else exists (select 1 from sync.item_parent ip \
-                           where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0) end",
-        knobas_core::stored_string!(
-            "pd.d",
-            "assignee",
-            knobas_core::declared_string!("pd.d", "assignee")
-        )
-    );
     let predicates: Vec<String> = alternatives
         .iter()
         .map(|alternative| {
             let mut parts = Vec::new();
-            if !alternative.holds.is_empty() {
-                let holds_all = bind_lowered(builder, &alternative.holds);
-                parts.push(format!(
-                    "not exists (select 1 from unnest({holds_all}::text[]) w(word) where not ({row_holds_word}))"
-                ));
+            if let Some((first, rest)) = alternative.holds.split_first() {
+                let first = format!("lower({}::text)", builder.param(Bind::Text(first.clone())));
+                parts.push(row_holds_first_word(&first));
+                if !rest.is_empty() {
+                    let holds_rest = bind_lowered(builder, rest);
+                    parts.push(format!(
+                        "not exists (select 1 from unnest({holds_rest}::text[]) w(word) where not ({}))",
+                        row_holds_word("w.word")
+                    ));
+                }
             }
             if !alternative.lacks.is_empty() {
                 let lacks_all = bind_lowered(builder, &alternative.lacks);
                 parts.push(format!(
-                    "not exists (select 1 from unnest({lacks_all}::text[]) w(word) where {row_holds_word})"
+                    "not exists (select 1 from unnest({lacks_all}::text[]) w(word) where {})",
+                    row_holds_word("w.word")
                 ));
             }
             if parts.is_empty() {
@@ -482,6 +474,79 @@ fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> S
         [one] => one.clone(),
         many => format!("(({}))", many.join(")\n    or (")),
     }
+}
+
+/// The declared assignee of the row, walked: [`knobas_core::declared_string!`]
+/// over the row's payload, read through its primary key (the scale pass,
+/// 2026-11-10). In a probe, so the statement's own scan of the tickets reads
+/// no payload and can be an index-only scan (`item_ticket_brief_idx`,
+/// migration `0074`); it rebinds `i` to the same row, which is what the
+/// payload macros read, and `o.eid` is the row's id from [`ids_body`].
+const WALKED_ASSIGNEE: &str = concat!(
+    "(select ",
+    knobas_core::declared_string!("pd.d", "assignee"),
+    " from sync.item i where i.entity_id = o.eid)"
+);
+
+/// The row's declared names of its parents hold `word` (`sync.item_parent`).
+fn parents_hold(word: &str) -> String {
+    format!(
+        "exists (select 1 from sync.item_parent ip \
+                 where ip.entity_id = i.entity_id and strpos(lower(ip.name), {word}) > 0)"
+    )
+}
+
+/// Whether the row holds `word`, a lowered text expression: in its key, its
+/// title, its declared assignee or the names of its declared parents. The key
+/// and the title first, each on its own, so a word either holds reads nothing
+/// more (#897); the assignee, then the parents, only for a word they both
+/// miss. No word holds a space, so this matches what the three joined by
+/// spaces matched. The assignee is the stored one (`sync.item_field`,
+/// #2184) where the database holds it for these declarations, one index
+/// probe a row, and the payload's walk where it does not: walked, it was 400
+/// of a typed word's 445 ms on 20,000 live Jira tickets (2026-11-10).
+fn row_holds_word(word: &str) -> String {
+    format!(
+        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 then true \
+              when strpos(lower(i.title), {word}) > 0 then true \
+              when strpos(lower(coalesce({}, '')), {word}) > 0 then true \
+              else {} end",
+        knobas_core::stored_string!(
+            "pd.d",
+            "assignee",
+            "(select ",
+            knobas_core::declared_string!("pd.d", "assignee"),
+            " from sync.item i where i.entity_id = o.eid)"
+        ),
+        parents_hold(word)
+    )
+}
+
+/// [`row_holds_word`] for an alternative's first word, `word` a bound
+/// parameter: the same answer, with the stored assignee tested against the
+/// set of stored assignees that hold the word, built once and hashed, rather
+/// than probed row by row (the scale pass, 2026-11-10). Where the stored
+/// declarations say no row is stored for the row's paths
+/// ([`knobas_core::stored_under!`]) it walks, as the probe would have. On
+/// 20,000 live Jira tickets the probe was 16,500 index lookups, about 40 of
+/// a word's 90 ms. Only the first word: each word's set is a scan of the
+/// stored assignees, and every row the first word misses is done with.
+fn row_holds_first_word(word: &str) -> String {
+    let paths = "(pd.d::jsonb #> array[i.source_id, i.kind, 'assignee'])";
+    format!(
+        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 then true \
+              when strpos(lower(i.title), {word}) > 0 then true \
+              when {} then ((i.entity_id, {paths}) in (select f.entity_id, f.paths from sync.item_field f \
+                    where f.field = 'assignee' and strpos(lower(coalesce(f.value, '')), {word}) > 0) \
+                or {parents}) \
+              when strpos(lower(coalesce({WALKED_ASSIGNEE}, '')), {word}) > 0 then true \
+              else {parents} end",
+        knobas_core::stored_under!(
+            "assignee",
+            "(pd.d::jsonb #> array[i.source_id, i.kind, 'assignee'])"
+        ),
+        parents = parents_hold(word)
+    )
 }
 
 /// How many rows [`ids_sql`] would answer with, as one `bigint` (#812): a

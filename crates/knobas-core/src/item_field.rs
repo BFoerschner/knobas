@@ -116,6 +116,40 @@ macro_rules! stored_join {
     };
 }
 
+/// Whether `sync.item_field` holds a `$field` row for `i` under the paths
+/// `$paths` (an expression: the candidates the statement's declarations give
+/// `i`'s source and kind), decided from the stored declarations alone and not
+/// from `i`'s own rows (the scale pass, 2026-11-10): a statement that tests a
+/// stored value against a set it built once, a hashed subplan, needs to know
+/// where that set answers without probing every item for its row.
+///
+/// The test is the one `sync.resolve_item_fields` (migration `0063`) writes
+/// by: a row exists for every item, field and non-empty array of candidates a
+/// stored declaration of the item's kind gives that field, whatever its
+/// value. The triggers keep that true in the transaction that writes an item
+/// or a declaration, so where this holds the row is there, and where it does
+/// not the statement walks, as [`stored_string!`] does. Pinned by
+/// `knobas-app`'s `tests/it/item_field.rs`.
+#[macro_export]
+macro_rules! stored_under {
+    ($field:literal, $paths:literal) => {
+        concat!(
+            "(i.kind, ",
+            $paths,
+            ") in (select kp.p->>'kind', kp.p->'",
+            $field,
+            "' from sync.parent_declaration spd cross join lateral jsonb_array_elements(\
+               case when jsonb_typeof(spd.payload_paths) = 'array' \
+                    then spd.payload_paths else '[]'::jsonb end) as kp(p) \
+              where jsonb_typeof(kp.p->'",
+            $field,
+            "') = 'array' and jsonb_array_length(kp.p->'",
+            $field,
+            "') > 0)"
+        )
+    };
+}
+
 /// [`stored_join!`]'s value where there is a row, `$walk` -- the read the
 /// statement made before, [`crate::first_string_of!`]'s rule over the same
 /// candidates -- where there is none.

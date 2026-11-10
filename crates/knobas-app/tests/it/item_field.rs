@@ -293,10 +293,19 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         .execute(&pool)
         .await
         .unwrap();
+    // A typed word's first word asks the stored declarations, not the item,
+    // whether a stored assignee answers (`knobas_core::stored_under!`, the
+    // scale pass of 2026-11-10): the triggers keep a row wherever they say
+    // so, and a row deleted from under them reads as no assignee there. The
+    // status reads and the keys still probe the item and walk.
     assert_eq!(
         read(&pool).await,
-        walked,
-        "nothing stored: the payload is walked"
+        (
+            walked.0.clone(),
+            walked.1.clone(),
+            vec![Reading::Count(1), Reading::Count(1), Reading::Count(0)],
+        ),
+        "nothing stored: the payload is walked, but for the typed word"
     );
 }
 
