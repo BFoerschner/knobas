@@ -1634,7 +1634,7 @@ const CASES: Case[] = [
                 tally: null,
                 groups: null,
               }),
-            entityCheckout: () => deferred({ path: null } as never),
+            entityCheckouts: () => deferred([]),
             codeFacts: () => deferred([]),
             listSources: () => deferred([{ ...sourceFacts("jira"), base_url: "" }]),
             listContexts: () => deferred([]),
