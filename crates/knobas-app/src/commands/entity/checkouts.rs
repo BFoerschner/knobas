@@ -50,6 +50,27 @@ pub async fn entity_checkout(
     crate::checkout::view(&pool, &entity_id).await
 }
 
+/// [`entity_checkout`] for many repos or branches in one call, in the order
+/// asked, leaving out an id it refuses (the scale pass, PR #2479,
+/// 2026-11-10): what Code asks of every repository it lists each time it is
+/// shown. The clones root is walked once, and a working tree nothing touched
+/// since its last read answers that read without git
+/// ([`crate::checkout::views`]).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the clones
+/// root cannot be read.
+#[tauri::command]
+pub async fn entity_checkouts(
+    lifecycle: State<'_, Lifecycle>,
+    entity_ids: Vec<String>,
+) -> Result<Vec<crate::checkout::CheckoutOf>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::views(&pool, &entity_ids).await
+}
+
 /// Set this repository's checkout path by hand, or clear it back to the scan.
 ///
 /// Answers the fresh view rather than nothing, so the panel draws what is now

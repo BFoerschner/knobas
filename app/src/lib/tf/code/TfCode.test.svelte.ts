@@ -120,7 +120,7 @@ function ports(over: Partial<CodePorts> = {}): CodePorts {
       if (filter.order === "attention") return page(OPEN, GROUPS);
       return page([...OPEN, ...SETTLED]);
     },
-    entityCheckout: async (id) => checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null),
+    entityCheckouts: async (ids) => ids.map((id) => ({ entity_id: id, checkout: checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null) })),
     codeFacts: async (ids) => FACTS.filter((facts) => ids.includes(facts.entity_id)),
     listSources: async () => [{ ...sourceFacts("gitea"), base_url: "https://git.example.com" }, { ...sourceFacts("jira"), base_url: "" }],
     listContexts: async () => [],
@@ -478,7 +478,14 @@ test("the Pull requests count is the mirror's total while the later pages are he
 test("shown again with no run in between, Code reads only its checkouts, which git changes without a sync (Björn, 2026-11-10)", async () => {
   const shown = $state({ on: true });
   let checkoutReads = 0;
-  const stand = ports({ entityCheckout: async (id) => ((checkoutReads += 1), checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null)) });
+  let checkoutCalls = 0;
+  const stand = ports({
+    entityCheckouts: async (ids) => (
+      (checkoutCalls += 1),
+      (checkoutReads += ids.length),
+      ids.map((id) => ({ entity_id: id, checkout: checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null) }))
+    ),
+  });
   view = mount(TfCode, { target, props: { ready: true, rest: ["repos"], job: null, ports: stand, now: NOW }, context: pageContext(() => shown.on) });
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -495,6 +502,7 @@ test("shown again with no run in between, Code reads only its checkouts, which g
   flushSync();
   expect(reads.length, "no list read again").toBe(listed);
   expect(checkoutReads, "each row's checkout again").toBe(firstCheckouts + REPOS.length);
+  expect(checkoutCalls, "in one call each time (the scale pass, 2026-11-10)").toBe(2);
   expect(target.querySelector(".tf-wait-dim"), "nothing dims").toBeNull();
 });
 

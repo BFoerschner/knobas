@@ -23,6 +23,7 @@ import type {
   CaptureShortcut,
   ChainStepRow,
   CheckoutApplicationDraft,
+  CheckoutOf,
   CheckoutSettings,
   CheckoutView,
   OpenObject,
@@ -121,6 +122,7 @@ export type {
   CheckoutApplication,
   CheckoutApplicationDraft,
   CheckoutFoundBy,
+  CheckoutOf,
   CheckoutSettings,
   CheckoutView,
   OpenObject,
@@ -1292,6 +1294,15 @@ export function setClonesRoot(path: string | null): Promise<void> {
  */
 export function entityCheckout(entityId: string): Promise<CheckoutView> {
   return invoke<CheckoutView>("entity_checkout", { entityId });
+}
+
+/**
+ * {@link entityCheckout} for many repos or branches in one call, in the order asked — `entity_checkouts` (the scale
+ * pass, PR #2479). An id the single read refuses is left out. The clones root is walked once, and a working tree nothing
+ * touched since its last read answers that read without running git.
+ */
+export function entityCheckouts(entityIds: readonly string[]): Promise<CheckoutOf[]> {
+  return invoke<CheckoutOf[]>("entity_checkouts", { entityIds });
 }
 
 /**

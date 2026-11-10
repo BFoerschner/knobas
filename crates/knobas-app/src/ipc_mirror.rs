@@ -197,6 +197,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::clone_all::Skipped::export_all(cfg)?;
     crate::checkout::clone_all::Failed::export_all(cfg)?;
     crate::checkout::clone_all::State::export_all(cfg)?;
+    crate::checkout::CheckoutOf::export_all(cfg)?;
     crate::capture::ShortcutView::export_all(cfg)?;
     crate::capture::Recorded::export_all(cfg)?;
     crate::conversation::ThreadComment::export_all(cfg)?;

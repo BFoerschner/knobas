@@ -27,7 +27,7 @@
 -->
 <script lang="ts" module>
   import type { RoleFrameProps } from "../page-entry";
-  import type { CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
+  import type { CheckoutOf, CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
   import { readAllRows } from "../repo/repo";
   import type { SourceSummary } from "../../ipc/sources";
   import type { SourceFacts } from "../job/job";
@@ -36,7 +36,8 @@
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface CodePorts extends OpenJobPorts {
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
-    entityCheckout: (entityId: string) => Promise<CheckoutView>;
+    /** Many checkouts in one call, in the order asked; an id refused is left out. */
+    entityCheckouts: (entityIds: string[]) => Promise<CheckoutOf[]>;
     codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
     /** The sources, for the host the header names. */
     listSources: () => Promise<(SourceFacts & Pick<SourceSummary, "base_url">)[]>;
@@ -48,7 +49,7 @@
   import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
-  import { codeFacts, entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
+  import { codeFacts, entityCheckouts, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { CODE_HOST } from "../roles.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -95,7 +96,7 @@
     job,
     ports = {
       listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
-      entityCheckout: (entityId) => entityCheckout(entityId),
+      entityCheckouts: (entityIds) => entityCheckouts(entityIds),
       codeFacts: (entityIds) => codeFacts(entityIds),
       listSources: () => listSources(),
       listContexts: () => listContexts(),
@@ -122,8 +123,12 @@
 
   /** How many rows one read asks for; a room of more is read on with `offset`. */
   const LIMIT = 1000;
-  /** How many `entity_checkout` reads run at once: each may run `git status`. */
-  const CHECKOUT_LANES = 4;
+  /**
+   * How many repositories one `entity_checkouts` call asks about. One call is out at a time, and the backend runs at most
+   * eight `git status` at once and none where nothing in the checkout changed (the scale pass, 2026-11-10: 65 calls on
+   * every return to Code).
+   */
+  const CHECKOUT_BATCH = 200;
 
   /**
    * Every read Code makes asks for the code host role, so the mirror answers
@@ -292,31 +297,31 @@
   });
 
   /**
-   * Each repository's checkout, a few at a time; one that fails draws
-   * nothing. The reader it answers takes more ids as each page of
-   * repositories lands, through the same few lanes.
+   * Each repository's checkout, in calls of up to {@link CHECKOUT_BATCH}, one out at a time; one that fails draws
+   * nothing. The reader it answers takes more ids as each page of repositories lands, into the next call.
    */
   function checkoutReader(alive: () => boolean): (ids: string[]) => void {
     const queue: string[] = [];
-    let lanes = 0;
-    const lane = async () => {
-      lanes += 1;
+    let running = false;
+    const run = async () => {
+      running = true;
       try {
-        for (let id = queue.shift(); id !== undefined && alive(); id = queue.shift()) {
+        while (queue.length > 0 && alive()) {
+          const ids = queue.splice(0, CHECKOUT_BATCH);
           try {
-            const view = await ports.entityCheckout(id);
-            if (alive()) checkouts[id] = view;
+            const answers = await ports.entityCheckouts(ids);
+            if (alive()) for (const answer of answers) checkouts[answer.entity_id] = answer.checkout;
           } catch {
             // An unreadable checkout leaves the cell empty rather than claiming one.
           }
         }
       } finally {
-        lanes -= 1;
+        running = false;
       }
     };
     return (ids) => {
       queue.push(...ids);
-      while (lanes < CHECKOUT_LANES && queue.length > 0) void lane();
+      if (!running) void run();
     };
   }
 

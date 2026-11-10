@@ -738,6 +738,9 @@ pub fn run() {
             commands::entity::clone_all_plan,
             commands::entity::clone_all,
             commands::entity::clone_all_state,
+            // The scale pass's checkouts in one call (PR #2479), appended at
+            // the foot: the list is append-only (§10.8).
+            commands::entity::entity_checkouts,
         ])
         .build(context)
         .expect("build the tauri application")

@@ -379,6 +379,21 @@ pull_request_command?: string | null, };
 export type CheckoutFoundBy = "override" | "scan" | "nothing";
 
 /**
+ * One repo's or branch's checkout in [`views`]' answer.
+ *
+ * The scale pass (PR #2479, 2026-11-10).
+ */
+export type CheckoutOf = { 
+/**
+ * The id it was asked for.
+ */
+entity_id: string, 
+/**
+ * What [`view`] answers for it.
+ */
+checkout: CheckoutView, };
+
+/**
  * What Settings › Checkouts draws, and what every *Open in…* menu reads.
  *
  * Issue #844, R-13a.3.

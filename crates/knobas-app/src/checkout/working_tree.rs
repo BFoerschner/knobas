@@ -81,6 +81,63 @@ pub async fn read(path: &Path) -> TreeRead {
     read_with(&search, path).await
 }
 
+/// [`read`], unless nothing in the checkout changed since the last answer
+/// there: then that answer, and no git (the scale pass, 2026-11-10). Each
+/// answer git gave is kept with the checkout's [stamp](super::stamp), taken
+/// before git ran, so a change made while it ran is read next time; a stamp
+/// that differs, or none, runs [`read`]. Only a [`TreeRead::Read`] is kept: a
+/// failure or a missing git is asked again.
+pub async fn read_known(path: &Path) -> TreeRead {
+    read_known_with(path, read).await
+}
+
+/// [`read_known`], with the read it makes when the stamp moved passed in, so
+/// a test can count them.
+async fn read_known_with(path: &Path, read: impl AsyncFnOnce(&Path) -> TreeRead) -> TreeRead {
+    let at = path.to_path_buf();
+    let stamp = tokio::task::spawn_blocking(move || super::stamp::of(&at))
+        .await
+        .ok()
+        .flatten();
+    if let Some(stamp) = stamp
+        && let Some(tree) = known()
+            .get(path)
+            .filter(|(kept, _)| *kept == stamp)
+            .map(|(_, tree)| tree.clone())
+    {
+        return tree;
+    }
+    let tree = read(path).await;
+    let mut known = known();
+    match (stamp, &tree) {
+        (Some(stamp), TreeRead::Read(_)) => {
+            if known.len() >= KNOWN_BOUND {
+                known.clear();
+            }
+            known.insert(path.to_path_buf(), (stamp, tree.clone()));
+        }
+        _ => {
+            known.remove(path);
+        }
+    }
+    tree
+}
+
+/// How many checkouts [`read_known`] keeps an answer for; past it they are
+/// all dropped and read again.
+const KNOWN_BOUND: usize = 4096;
+
+/// [`read_known`]'s answers, by checkout path.
+fn known() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, (u64, TreeRead)>> {
+    static KNOWN: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, (u64, TreeRead)>>,
+    > = std::sync::OnceLock::new();
+    KNOWN
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// [`read`], with the `PATH` to look for `git` on passed in.
 ///
 /// An argument so "git is not installed" is reachable from a test on a machine
@@ -495,5 +552,85 @@ mod tests {
         // `PATH=":"` names the working directory twice in a shell; here it
         // names nothing, so a `git` in the process's cwd is never run.
         assert_eq!(find_on(OsStr::new(":"), "git"), None);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod known_tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args([
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Asked again with nothing changed, the checkout answers what git said
+    /// without git; a commit made in a terminal since is read, and so is an
+    /// edit nobody committed.
+    #[tokio::test]
+    async fn a_checkout_nothing_touched_is_not_read_again_and_a_terminal_commit_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        std::fs::write(p.join("a.txt"), "a\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "one"]);
+        let reads = std::sync::atomic::AtomicU32::new(0);
+        let counted = async |path: &Path| {
+            reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            read(path).await
+        };
+        let head = |tree: &TreeRead| match tree {
+            TreeRead::Read(state) => state.head.clone(),
+            other => panic!("git did not answer: {other:?}"),
+        };
+        let first = read_known_with(p, counted).await;
+        let again = read_known_with(p, counted).await;
+        assert_eq!(again, first, "the same answer");
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "git ran once"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(p.join("a.txt"), "b\n").unwrap();
+        git(p, &["commit", "-q", "-am", "two"]);
+        let after = read_known_with(p, counted).await;
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a commit is read"
+        );
+        assert_ne!(head(&after), head(&first), "the new head");
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(p.join("a.txt"), "c\n").unwrap();
+        let edited = read_known_with(p, counted).await;
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "an edit is read"
+        );
+        assert!(
+            matches!(edited, TreeRead::Read(WorkingTreeState { changed: 1, .. })),
+            "{edited:?}"
+        );
     }
 }

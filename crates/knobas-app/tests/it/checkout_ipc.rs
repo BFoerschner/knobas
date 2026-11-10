@@ -30,7 +30,7 @@ use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
     CheckoutView, FoundBy, clones_root, local_changes, set_applications, set_clones_root,
-    set_override, settings, view,
+    set_override, settings, view, views,
 };
 use knobas_core::checkout::open::{Draft, Object, shipped};
 use sqlx::PgPool;
@@ -1554,4 +1554,65 @@ async fn an_object_the_application_does_not_accept_or_a_refused_value_runs_nothi
     assert!(error.message.contains("--no-index"), "{error:?}");
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert!(!record.exists(), "nothing ran");
+}
+
+/// Many checkouts in one call answer what one call each answers, in the
+/// order asked, an id the single read refuses left out (the scale pass,
+/// 2026-11-10): a clone the scan finds, a branch, an override, a repo with
+/// no clone, and a ticket.
+#[tokio::test]
+async fn many_checkouts_in_one_call_answer_what_one_call_each_answers() {
+    let pool = pool().await;
+    let scanned = repo(&pool).await;
+    let overridden = repo(&pool).await;
+    let uncloned = repo(&pool).await;
+    let root = clones_root_with(&scanned);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    set_override(&pool, &overridden.id, Some("/Users/mara/work/elsewhere"))
+        .await
+        .unwrap();
+    let branch = branch_of(&pool, &scanned, "topic").await;
+    let ticket = item(
+        &pool,
+        &scanned.source,
+        "ticket",
+        &format!("T-{}", unique()),
+        None,
+    )
+    .await;
+    let asked = vec![
+        uncloned.id.clone(),
+        branch.clone(),
+        ticket.clone(),
+        scanned.id.clone(),
+        overridden.id.clone(),
+    ];
+    let mut one_each = Vec::new();
+    for id in &asked {
+        if let Ok(answer) = view(&pool, id).await {
+            one_each.push((id.clone(), answer));
+        }
+    }
+    let together: Vec<(String, CheckoutView)> = views(&pool, &asked)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|of| (of.entity_id, of.checkout))
+        .collect();
+    assert_eq!(together, one_each);
+    assert_eq!(together.len(), 4, "the ticket is left out");
+    let found: Vec<FoundBy> = together.iter().map(|(_, view)| view.found_by).collect();
+    assert_eq!(
+        found,
+        [
+            FoundBy::Nothing,
+            FoundBy::Scan,
+            FoundBy::Scan,
+            FoundBy::Override
+        ],
+        "the uncloned repo, the branch, the clone, the override"
+    );
+    assert_eq!(path_of(&together[2].1), root.path().join(&scanned.name));
 }

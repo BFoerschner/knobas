@@ -55,6 +55,7 @@ pub mod fetch;
 pub mod local;
 pub mod open;
 pub mod range;
+pub mod stamp;
 pub mod uncommitted;
 pub mod working_tree;
 pub mod worktree;
@@ -245,9 +246,82 @@ pub async fn set_override(
 pub async fn view(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
     let mut checkout = resolve(pool, entity_id).await?;
     if let Some(path) = checkout.path.as_deref() {
-        checkout.tree = Some(working_tree::read(Path::new(path)).await);
+        checkout.tree = Some(working_tree::read_known(Path::new(path)).await);
     }
     Ok(checkout)
+}
+
+/// One repo's or branch's checkout in [`views`]' answer.
+///
+/// The scale pass (PR #2479, 2026-11-10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct CheckoutOf {
+    /// The id it was asked for.
+    pub entity_id: String,
+    /// What [`view`] answers for it.
+    pub checkout: CheckoutView,
+}
+
+/// How many working trees [`views`] reads at once.
+const TREES_AT_ONCE: usize = 8;
+
+/// [`view`] for each of `entity_ids`, in their order, in one call: what
+/// Code asks of every repository it lists, each time it is shown, because a
+/// commit or a clone made in a terminal changes a checkout and no sync
+/// brings that (the scale pass, 2026-11-10: 65 calls, each with its own walk
+/// of the clones root). The clones root is read and walked once here, and a
+/// working tree nothing touched since its last read is not read again
+/// ([`working_tree::read_known`]). An id [`view`] refuses is left out, as
+/// the page leaves a cell empty for a read that failed.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the clones root cannot be
+/// read.
+pub async fn views(pool: &PgPool, entity_ids: &[String]) -> Result<Vec<CheckoutOf>, IpcError> {
+    let root = clones_root(pool).await?;
+    let clones = match root.clone() {
+        Some(root) => tokio::task::spawn_blocking(move || checkout::scan(Path::new(&root)))
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let mut answers = Vec::with_capacity(entity_ids.len());
+    for entity_id in entity_ids {
+        if let Ok(checkout) = resolve_in(pool, entity_id, root.clone(), Some(&clones)).await {
+            answers.push(CheckoutOf {
+                entity_id: entity_id.clone(),
+                checkout,
+            });
+        }
+    }
+    let lanes = std::sync::Arc::new(tokio::sync::Semaphore::new(TREES_AT_ONCE));
+    let mut reads = tokio::task::JoinSet::new();
+    for (at, answer) in answers.iter().enumerate() {
+        if let Some(path) = answer.checkout.path.clone() {
+            let lanes = lanes.clone();
+            reads.spawn(async move {
+                let _lane = lanes.acquire_owned().await;
+                (at, working_tree::read_known(Path::new(&path)).await)
+            });
+        }
+    }
+    while let Some(read) = reads.join_next().await {
+        if let Ok((at, tree)) = read {
+            answers[at].checkout.tree = Some(tree);
+        }
+    }
+    // A read that did not finish (the runtime stopping) says so rather than
+    // nothing.
+    for answer in &mut answers {
+        if answer.checkout.path.is_some() && answer.checkout.tree.is_none() {
+            answer.checkout.tree = Some(TreeRead::Failed {
+                reason: "the read did not finish".to_owned(),
+            });
+        }
+    }
+    Ok(answers)
 }
 
 /// The uncommitted changes at a repo's or a branch's checkout (#824,
@@ -829,8 +903,19 @@ pub async fn local_file_bytes(
 /// What [`open`] asks, because an editor needs the path and not two seconds of
 /// `git status` on a large tree before it starts.
 pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
-    let repo = repo_of(pool, entity_id).await?;
     let root = clones_root(pool).await?;
+    resolve_in(pool, entity_id, root, None).await
+}
+
+/// [`resolve`] under the clones root `root`, matching against `clones`, the
+/// root's scan, where it was walked already ([`views`]); `None` walks it.
+async fn resolve_in(
+    pool: &PgPool,
+    entity_id: &str,
+    root: Option<String>,
+    clones: Option<&[checkout::FoundClone]>,
+) -> Result<CheckoutView, IpcError> {
+    let repo = repo_of(pool, entity_id).await?;
 
     let stored: Option<String> = match repo.entity_id.as_deref() {
         Some(id) => {
@@ -845,6 +930,12 @@ pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutVi
 
     let (path, found_by) = match (stored, root.as_deref(), repo.url.as_deref()) {
         (Some(path), _, _) => (Some(path), FoundBy::Override),
+        (None, Some(_), Some(url)) if clones.is_some() => {
+            match matching(clones.unwrap_or_default(), url) {
+                Some(path) => (Some(path.to_string_lossy().into_owned()), FoundBy::Scan),
+                None => (None, FoundBy::Nothing),
+            }
+        }
         (None, Some(root), Some(url)) => match scan_for(root, url).await {
             Some(path) => (Some(path.to_string_lossy().into_owned()), FoundBy::Scan),
             None => (None, FoundBy::Nothing),
@@ -861,6 +952,16 @@ pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutVi
         clones_root: root,
         tree: None,
     })
+}
+
+/// The first of `clones` (a scan, in its order) whose remote names the same
+/// repository as `url`: [`checkout::find`] over a scan already made.
+fn matching(clones: &[checkout::FoundClone], url: &str) -> Option<PathBuf> {
+    let wanted = checkout::remote_key(url)?;
+    clones
+        .iter()
+        .find(|clone| clone.key == wanted)
+        .map(|clone| clone.path.clone())
 }
 
 /// The scan, off the async runtime.

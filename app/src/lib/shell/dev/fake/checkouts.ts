@@ -577,6 +577,14 @@ export function handlers(): Handlers {
     clone_all_plan: () => fakeCloneAllPlan(),
     clone_all: () => fakeStartCloneAll(),
     clone_all_state: () => (fakeCloneAll === null ? null : { ...fakeCloneAll }),
+    entity_checkouts: (args) =>
+      ((args["entityIds"] as string[] | undefined) ?? []).flatMap((entityId) => {
+        try {
+          return [{ entity_id: entityId, checkout: fakeCheckout(entityId) }];
+        } catch {
+          return [];
+        }
+      }),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
