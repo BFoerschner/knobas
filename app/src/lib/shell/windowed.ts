@@ -75,6 +75,25 @@ export class Heights<K = string> {
     return { start, end, before: at[start]!, after: at[n]! - at[end]! };
   }
 
+  /**
+   * Whether rows `start` to `end` still cover a viewport `top` to `top + height` with `margin` pixels to spare each
+   * side (less where the list ends): while they do, the drawn rows need not change.
+   */
+  covers(start: number, end: number, top: number, height: number, margin: number): boolean {
+    const n = this.#keys.length;
+    if (start < 0 || end > n || start >= end) return false;
+    const at = this.#layout();
+    const lo = Math.max(0, top - margin);
+    const hi = Math.min(at[n]!, top + height + margin);
+    return at[start]! <= lo && at[end]! >= hi;
+  }
+
+  /** Rows `start` to `end` as a span, with the room above and below them now. */
+  around(start: number, end: number): Span {
+    const at = this.#layout();
+    return { start, end, before: at[start]!, after: at[this.#keys.length]! - at[end]! };
+  }
+
   /** The viewport top that shows row `index` whole, moving `top` as little as it can. */
   reveal(index: number, top: number, height: number): number {
     const at = this.#layout();

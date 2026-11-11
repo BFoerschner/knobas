@@ -59,6 +59,14 @@ export interface WindowedOptions<K> {
   gap?: number;
   /** How many pixels beyond the viewport to draw each side. */
   overscan?: number;
+  /**
+   * How near the view may come to the edge of the drawn rows before they change (default half the overscan). The
+   * drawn rows hold still while the view moves inside them, then the window moves to the view and overscan again,
+   * so a scroll changes rows a few at a time every `overscan - margin` pixels, not on most frames (PR #2479: a row
+   * change on two frames of three cost WKWebView a third of its frames at 120 Hz, and each a main-thread frame in
+   * Chromium).
+   */
+  margin?: number;
   /** Lists shorter than this draw every row. */
   from?: number;
   /**
@@ -114,20 +122,24 @@ export class Windowed<K = string> {
     return keys;
   });
 
+  /** The rows drawn last, while the view stays inside them with the margin to spare. */
+  #held: { keys: readonly K[]; start: number; end: number } | null = null;
+
   readonly #span = $derived.by((): Span & { on: boolean } => {
     const keys = this.#keys;
-    if (keys.length < this.#options.from)
+    if (keys.length < this.#options.from) {
+      this.#held = null;
       return { ...ALL, end: keys.length, on: false };
+    }
     void this.#remeasured;
     this.#sync(keys);
-    return {
-      ...this.#heights.span(
-        this.#viewTop,
-        this.#viewHeight,
-        this.#options.overscan,
-      ),
-      on: true,
-    };
+    const { overscan, margin } = this.#options;
+    const held = this.#held;
+    if (held !== null && held.keys === keys && this.#heights.covers(held.start, held.end, this.#viewTop, this.#viewHeight, margin))
+      return { ...this.#heights.around(held.start, held.end), on: true };
+    const span = this.#heights.span(this.#viewTop, this.#viewHeight, overscan);
+    this.#held = { keys, start: span.start, end: span.end };
+    return { ...span, on: true };
   });
 
   /** Whether the list is long enough to window. */
@@ -138,12 +150,14 @@ export class Windowed<K = string> {
   readonly after = $derived(this.#span.after);
 
   constructor(options: WindowedOptions<K>) {
+    const overscan = options.overscan ?? 600;
     this.#options = {
       gap: 0,
-      overscan: 600,
       from: 300,
       scrolls: false,
+      margin: overscan / 2,
       ...options,
+      overscan,
     };
     this.#heights = new Heights<K>(this.#options.estimate, this.#options.gap);
     this.#sizes =

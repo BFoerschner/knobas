@@ -80,4 +80,20 @@ describe("Heights", () => {
     // Row 0 is above: scroll to its top.
     expect(h.reveal(0, 100, 100)).toBe(0);
   });
+
+  it("says drawn rows still cover a view only while it stays the margin inside them", () => {
+    const h = ten();
+    h.keys(keys);
+    // Rows 2 to 6 run 100 to 350 px. A view of 150 to 250 with 50 px to spare each side is inside.
+    expect(h.covers(2, 7, 150, 100, 50)).toBe(true);
+    // 20 px further down, the view's bottom margin runs past 350.
+    expect(h.covers(2, 7, 210, 100, 50)).toBe(false);
+    // The list's ends need no margin past them: rows 0 to 3 cover a view at the top.
+    expect(h.covers(0, 3, 0, 100, 50)).toBe(true);
+    expect(h.covers(7, 10, 400, 100, 50)).toBe(true);
+    // A measurement that moves the rows is read: row 2 grown to 120 px pushes row 7's top to 420.
+    h.set("r2", 120);
+    expect(h.covers(2, 7, 210, 100, 50)).toBe(true);
+    expect(h.around(2, 7)).toEqual({ start: 2, end: 7, before: 100, after: 150 });
+  });
 });

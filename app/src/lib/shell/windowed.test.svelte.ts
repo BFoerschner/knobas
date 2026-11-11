@@ -282,3 +282,44 @@ test("a row held on a page keep-alive hid does not scroll the page shown after i
   stop();
   vi.unstubAllGlobals();
 });
+
+test("the drawn rows hold still while the view moves inside them, and move to it once it comes within the margin of their edge (PR #2479)", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  document.body.innerHTML = '<ol style="overflow-y: auto"><li class="before"></li><li class="after"></li></ol>';
+  const list = document.querySelector("ol")!;
+  let scrolled = 0;
+  Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(list, "clientHeight", { value: 300 });
+  // Rows of 20 px, no gap; 200 px of overscan each side, so the margin is 100 px.
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 200, scrolls: true });
+  const stop = $effect.root(() => {
+    win.list(list);
+    win.room("before")(list.querySelector<HTMLElement>(".before")!);
+    win.room("after")(list.querySelector<HTMLElement>(".after")!);
+  });
+  const scrollTo = (px: number) => {
+    scrolled = px;
+    list.dispatchEvent(new Event("scroll"));
+    flushSync();
+    return [win.start, win.end];
+  };
+  flushSync();
+  expect([win.start, win.end]).toEqual([0, 25]);
+  // Every 20 px a row would come and go; the drawn rows (0 to 500 px) still hold the view and 100 px below it.
+  expect(scrollTo(20)).toEqual([0, 25]);
+  expect(scrollTo(100)).toEqual([0, 25]);
+  // 101 px down, the view's bottom (401) is under 100 px from the rows' end: the window moves to it, overscan again.
+  expect(scrollTo(101)).toEqual([0, 31]);
+  expect(scrollTo(150)).toEqual([0, 31]);
+  // Far away, the rows go to the view at once.
+  expect(scrollTo(10_000)).toEqual([490, 525]);
+  // The room above and below follows the drawn rows.
+  expect(list.querySelector<HTMLElement>(".before")!.style.height).toBe(`${490 * 20}px`);
+  // `reveal` brings a row near the window's edge in, and the window around it.
+  win.reveal(530);
+  flushSync();
+  expect(win.start <= 530 && win.end > 530).toBe(true);
+  stop();
+});
