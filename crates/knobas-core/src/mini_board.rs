@@ -363,11 +363,12 @@ const CARDS: &str = concat!(
      ranked as (
        select s.entity_id, s.source_id, s.title, s.item_updated_at, s.at, s.status, s.lane,
               l.n as lane_count, l.place, l.lanes,
-              row_number() over (partition by l.place, array_position(st.statuses, s.status)
+              row_number() over (partition by l.place, array_position(
+                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
                                  order by s.at desc, s.entity_id) as rn,
-              count(*) over (partition by l.place, array_position(st.statuses, s.status)) as total
+              count(*) over (partition by l.place, array_position(
+                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
          from scoped s join lanes l on l.lane = s.lane
-        cross join (select array_agg(distinct s2.status) as statuses from scoped s2) st
         where $7::bigint is null or l.place <= $7
      )
      select r.entity_id, r.source_id, r.title, r.status, r.lane, r.lane_count, r.place,

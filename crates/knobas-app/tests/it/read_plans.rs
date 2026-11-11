@@ -29,9 +29,12 @@ use crate::responsiveness_probe::Synthetic;
 /// `lane_paths`, `label_paths` and `state_paths` the same for a lane's field,
 /// the labels and a build's or pull request's state (#939); `assignee_paths`
 /// the inbox's assignee candidates (#1164), and `pipeline_paths` its failed
-/// build's pipeline candidates (#2364).
+/// build's pipeline candidates (#2364); `card_keys`, one row per declared
+/// source, the key its tickets' stored cards are read under (migration
+/// `0075`).
 const SMALL: &[&str] = &[
     "source_config",
+    "card_keys",
     "grouped",
     "status_paths",
     "lane_paths",

@@ -83,10 +83,6 @@
 -- ticket's row in about 80 µs, 1.8 s of database time for the 23,000
 -- tickets of that mirror, in batches of 500 after the app is up; until a
 -- ticket is filled its board reads walk its payload as they did.
---
--- `entity_tombstone_idx` serves every live read's tombstone set
--- (`knobas_core::live_by_exclusion!`), a scan of all 40,000 entities each
--- time (2 ms); it holds the few hundred tombstoned ids.
 
 create table sync.item_card (
   entity_id     text collate "C" not null references sync.item (entity_id) on delete cascade,
@@ -107,8 +103,6 @@ create table sync.item_card (
   parent_text   text,
   primary key (entity_id, paths_key)
 );
-
-create index entity_tombstone_idx on knobas.entity (id) where deleted_at is not null;
 
 -- One adapter's declarations as one source's entry in a bound
 -- `Declarations`: `{<kind>: <its KindPaths>}`, its first entry per kind.
