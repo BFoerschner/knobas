@@ -3128,7 +3128,6 @@
     align-items: stretch;
     min-width: 0;
     overflow-x: auto;
-    background: var(--under);
     overflow-y: hidden;
     position: relative;
     z-index: 1;
@@ -3366,7 +3365,7 @@
     flex: 1;
     margin: 0;
     padding: 6px;
-    background: var(--under);
+    background: none;
     list-style: none;
     overflow-y: auto;
   }

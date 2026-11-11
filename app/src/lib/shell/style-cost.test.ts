@@ -206,6 +206,10 @@ test("a panel that opens with its heading is marked tf-headed, and only such a p
  */
 const PAINTED_ELSEWHERE: Record<string, string> = {
   ".tf-jobcard": "always drawn with `tf-ticketcard` (the card's yellow) or `tf-ticketcard tf-sheetcard` (`--sheet`)",
+  // The asset tree draws the lines from a row to what it reaches behind its columns, and through them: an opaque
+  // strip or column hid them (the screenshot comparison of PR #2479). They scroll on the main thread.
+  ".cols": "see-through on purpose: the asset tree's reach lines are drawn behind it (`AssetsView.svelte`)",
+  ".col": "see-through on purpose: the asset tree's reach lines are drawn behind it (`AssetsView.svelte`)",
 };
 
 /** A background value that paints an opaque colour: a theme token, `--under`, or a colour literal with no alpha. */
