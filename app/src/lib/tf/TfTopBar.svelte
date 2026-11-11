@@ -76,7 +76,18 @@
   /** Below 1040 px the nav scrolls: the page you are on stays in view when you get there. */
   function keepCurrentInView(nav: HTMLElement) {
     void current;
-    nav.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+    const at = nav.querySelector('[aria-current="page"]');
+    if (at === null) return;
+    const bring = () => at.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+    // Once the page has painted: measured in the press's task, it laid out the page the press had just shown there
+    // (PR #2479: 63 ms of a quarter-speed main thread on a return to Builds), and again in the frame.
+    if (typeof requestAnimationFrame !== "function") return bring();
+    let later = 0;
+    const frame = requestAnimationFrame(() => (later = window.setTimeout(bring, 0)));
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(later);
+    };
   }
 </script>
 
