@@ -1,8 +1,10 @@
 /* Monitors (#864): prototype-6's `.bar`, the roster's columns, the unwatched tab. */
 .tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* 48 half-hours at 2 px and a 1 px gap, whole pixels at any scale. Narrow, 24 hours at 3 px: `barsOf` merges them. */
-.tf-mbar { display: inline-flex; gap: 1px; height: 14px; flex: none; vertical-align: middle; }
-.tf-mbar i { flex: none; width: 2px; border-radius: 1px; background: var(--ok); opacity: .8; }
+/* One element, its bars its background (`stripPaint`, PR #2479: 48 elements a row cost a filter key thousands of
+   restyles). The mask rounds each bar's ends, as `border-radius: 1px` did on a bar of its own. */
+.tf-mbar { display: inline-block; height: 14px; flex: none; vertical-align: middle; mask: url("strip-2.svg") 0 0 / 3px 14px repeat-x; }
+.tf-mbar.tf-mbar-hourly { mask-image: url("strip-3.svg"); mask-size: 4px 14px; }
 .tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: var(--t-2xs); font-weight: 400; color: var(--ink-2); }
 .tf-mon { table-layout: fixed; }
 .tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed, .tf-mon-held):hover > td { background: var(--sheet-2); }
@@ -30,10 +32,6 @@
 }
 .tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed) > td:first-child { overflow: hidden; text-overflow: ellipsis; }
 .tf-mon a.tf-mon-asset { text-decoration: underline; text-underline-offset: 2px; }
-.tf-mbar i.tf-seg-down { background: var(--err); opacity: 1; }
-.tf-mbar i.tf-seg-warn { background: var(--warn); opacity: 1; }
-.tf-mbar i.tf-seg-paused { background: var(--rule); opacity: 1; }
-.tf-mbar i.tf-seg-gap { background: var(--sheet-2); opacity: 1; }
 .tf-mon .tf-mon-type { font-size: var(--t-xs); }
 .tf-mon .tf-mon-asset { font-size: var(--t-xs); color: inherit; }
 .tf-mon-acts { white-space: nowrap; text-align: right; }
@@ -41,7 +39,6 @@
 .tf-mon .tf-mon-type { font-weight: 400; }
 /* The page never scrolls sideways: past what the table needs, the bars narrow, then the figures wait. */
 @media (max-width: 1240px) {
-  .tf-mbar i { width: 3px; }
   .tf-mbar-axis { width: 95px; }
   .tf-monc-state { width: 160px; }
   .tf-monc-bars { width: 122px; }

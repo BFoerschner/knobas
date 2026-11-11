@@ -143,7 +143,8 @@
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
   import { MediaQuery } from "svelte/reactivity";
-  import { barsOf } from "./monitors";
+  import { barsOf, stripPaint, type Bar } from "./monitors";
+  import { on } from "svelte/events";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { listenSynced } from "../builds/pipeline-ports";
@@ -219,7 +220,9 @@
    * monitoring role, so nothing here keeps rows by source (#1297, ADR-0029
    * as amended on 2026-10-19).
    */
-  let roster = $state<MonitorRow[] | null>(null);
+  // Raw: it is replaced whole and never changed in place, and a deep proxy made every row's read on a filter key go
+  // through one (PR #2479).
+  let roster = $state.raw<MonitorRow[] | null>(null);
   let unwatched = $state<UnmonitoredAsset[] | null>(null);
   let sourceNames = $state<Record<string, string>>({});
   /** The sources as last read, `null` until then: whether one can sign in decides the band and the header's *synced*. */
@@ -501,6 +504,28 @@
 
   /** Below 1240 px half-hour bars would be under a pixel wide: one bar an hour, the worse of its two half-hours. */
   const hourlyBars = new MediaQuery("(max-width: 1240px)");
+
+  /**
+   * A row's 24-hour strip, one element (`stripPaint`): its bars painted through the CSSOM (CSP refuses an inline
+   * style), and the bar under the pointer named in its title, as each bar's own title did.
+   */
+  function paintStrip(bars: Bar[], hourly: boolean) {
+    return (node: HTMLElement) => {
+      const paint = stripPaint(bars, hourly);
+      node.style.setProperty("background-image", paint.image);
+      node.style.setProperty("width", `${paint.width}px`);
+      const name = (event: PointerEvent) => {
+        const bar = bars[Math.min(bars.length - 1, Math.max(0, Math.floor(event.offsetX / paint.pitch)))];
+        if (bar && node.title !== bar.title) node.title = bar.title;
+      };
+      const off = on(node, "pointermove", name, { passive: true });
+      return () => {
+        off();
+        node.style.removeProperty("background-image");
+        node.style.removeProperty("width");
+      };
+    };
+  }
 
   /** A source of the roster's that can't sync says so over the page, with its fix, as a pipeline's does. */
   const stale = $derived.by(() => {
@@ -896,9 +921,13 @@
                 </td>
                 <td>
                   <div class="tf-mon-24">
-                    <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
-                      {#each barsOf(segments(row, now.getTime()), hourlyBars.current) as bar (bar.at)}<i class="tf-seg-{bar.state}" title={bar.title}></i>{/each}
-                    </span>
+                    <span
+                      class="tf-mbar"
+                      class:tf-mbar-hourly={hourlyBars.current}
+                      role="img"
+                      aria-label="Last 24 hours of {row.name}"
+                      {@attach paintStrip(barsOf(segments(row, now.getTime()), hourlyBars.current), hourlyBars.current)}
+                    ></span>
                     <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
                     <span class="tf-mon-figs tf-rowval" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
                   </div>

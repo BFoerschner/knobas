@@ -9,6 +9,7 @@ import type { AssetDetail, AssetProperty, MonitorRow, RouteRow, UnmonitoredAsset
 import { jobIndex } from "../job/open-jobs";
 import { stateWord } from "../state-word";
 import {
+  stripPaint,
   stateChip,
   gaps,
   hiddenFoldOpen,
@@ -308,4 +309,22 @@ describe("the state pills read what the chips read", () => {
     expect(visibleMonitors([paused], { scope: "all", job: null, states: ["Paused"], type: "", text: "" }, NO_JOBS).shown).toEqual([paused]);
     expect(stateChip(row({ state: "warn", response_time_ms: null })).label).toBe("slow");
   });
+});
+
+test("the strip paints each bar its state's colour, a pixel apart, as one background (PR #2479)", () => {
+  const bars = [
+    { state: "up" as const, at: 0, title: "" },
+    { state: "down" as const, at: 1, title: "" },
+    { state: "gap" as const, at: 2, title: "" },
+  ];
+  expect(stripPaint(bars, false)).toEqual({
+    image:
+      "linear-gradient(to right, color-mix(in srgb, var(--ok) 80%, transparent) 0px 2px, transparent 2px 3px, " +
+      "var(--err) 3px 5px, transparent 5px 6px, var(--sheet-2) 6px 8px, transparent 8px 9px)",
+    width: 8,
+    pitch: 3,
+  });
+  // Narrow, the hourly bars are 3 px.
+  expect(stripPaint(bars.slice(0, 1), true)).toMatchObject({ width: 3, pitch: 4 });
+  expect(stripPaint([], false)).toEqual({ image: "none", width: 0, pitch: 3 });
 });

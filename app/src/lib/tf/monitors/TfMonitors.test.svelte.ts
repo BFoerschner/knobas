@@ -240,7 +240,10 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   const cells = [...up!.querySelectorAll("td")].map(text);
   // The third is the figures under the bars, which CSS draws only where their columns have gone.
   expect(cells.slice(1, 6)).toEqual(["Up", "payouts Service", "140 ms, 99.98 %", "140 ms", "99.98 %"]);
-  expect(up!.querySelectorAll(".tf-mbar i")).toHaveLength(48);
+  // The strip is one element, its 48 half-hours its background (`stripPaint`): 48 bars of 2 px a pixel apart.
+  const strip = up!.querySelector<HTMLElement>(".tf-mbar")!;
+  expect(strip.children).toHaveLength(0);
+  expect(strip.style.width).toBe("143px");
   expect(up!.querySelector<HTMLAnchorElement>("td a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
 });
 

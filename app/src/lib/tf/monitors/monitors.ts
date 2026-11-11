@@ -124,6 +124,30 @@ export function barsOf(all: readonly Segment[], hourly: boolean): Bar[] {
   return bars;
 }
 
+/** What each state's bar is painted with: `up` as the bars were, `--ok` at 80% over the row. */
+const BAR_PAINT: Record<Segment, string> = {
+  up: "color-mix(in srgb, var(--ok) 80%, transparent)",
+  down: "var(--err)",
+  warn: "var(--warn)",
+  paused: "var(--rule)",
+  gap: "var(--sheet-2)",
+};
+
+/**
+ * The 24-hour strip as one element's background (PR #2479): a bar `width` px wide every `width + 1` px, in its
+ * state's colour, with nothing between. It was one element a bar, 48 a row, and a filter that drew every row
+ * restyled and laid out thousands of them. `strip.svg`'s mask rounds each bar's ends as `border-radius` did.
+ */
+export function stripPaint(bars: readonly Bar[], hourly: boolean): { image: string; width: number; pitch: number } {
+  const width = hourly ? 3 : 2;
+  const pitch = width + 1;
+  const stops = bars.flatMap((bar, i) => {
+    const at = i * pitch;
+    return [`${BAR_PAINT[bar.state]} ${at}px ${at + width}px`, `transparent ${at + width}px ${at + pitch}px`];
+  });
+  return { image: bars.length === 0 ? "none" : `linear-gradient(to right, ${stops.join(", ")})`, width: Math.max(0, bars.length * pitch - 1), pitch };
+}
+
 /**
  * The kind of check in prototype-6's words. The roster carries Uptime Kuma's
  * own `monitor_type`; a word with no entry here is drawn as the source spells
