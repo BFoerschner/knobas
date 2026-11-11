@@ -943,6 +943,24 @@ async fn bring_up_app<R: tauri::Runtime>(
         if let Err(error) = commands::search::searcher(&pool, &registry).await {
             tracing::error!(?error, "the adapters' declarations could not be stored");
         }
+        // Each ticket's card, stored for the board and the search's words
+        // (migration `0075`), filled in the background for the tickets that
+        // have none: after `0075` itself, and after the declarations above
+        // changed. Until a ticket is filled its reads walk its payload, the
+        // same answer; a sync's own writes keep their tickets' cards.
+        // After the declarations, which the cards are read under.
+        let fill_pool = pool.clone();
+        tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            match knobas_core::item_card::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the tickets' cards are filled"
+                ),
+                Err(error) => tracing::warn!(%error, "the tickets' cards could not all be filled"),
+            }
+        });
         // Before `Ready`, and before `AppState` is installed: the sync
         // engine is part of "the database is up" as far as the frontend is
         // concerned, and a window that reacted to `ready` by calling
