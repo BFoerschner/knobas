@@ -560,7 +560,7 @@ mod known_tests {
     use super::*;
 
     fn git(dir: &Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
+        let out = knobas_db::console::command("git")
             .current_dir(dir)
             .args([
                 "-c",

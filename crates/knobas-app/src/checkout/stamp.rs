@@ -249,7 +249,7 @@ mod tests {
 
     /// `git` run in `dir`, quietly, as a person at a terminal would.
     fn git(dir: &Path, args: &[&str]) -> String {
-        let out = std::process::Command::new("git")
+        let out = knobas_db::console::command("git")
             .current_dir(dir)
             .args([
                 "-c",
