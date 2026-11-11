@@ -19,6 +19,10 @@
 
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
+  // How many dialogs are open (PR #2479): a test that left one drawn would keep the toasts lowered for the next.
+  "tf/modals.svelte.ts#modals": async () => {
+    (await import("../tf/modals.svelte")).modals.open = 0;
+  },
   // The detail's session memory (#693): each test is a fresh session, or a
   // test would open on the entity the previous one left drawn.
   "detail/view-read.ts#viewMemory": async () => (await import("../detail/view-read")).viewMemory.clear(),
