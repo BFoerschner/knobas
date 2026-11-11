@@ -69,7 +69,8 @@ jobs:
           if grep -v 'w/lf' eol.txt; then echo "checked out with other line endings"; exit 1; fi
 
       - name: migration checksums and the loopback port
-        run: cargo test -p knobas-db --lib -- migrate:: embedded::tests::the_servers_port embedded::tests::a_start_without --nocapture
+        run: |
+          cargo test -p knobas-db --lib -- migrate:: embedded::tests::the_servers_port embedded::tests::a_start_without --nocapture
 
       - name: a database with CRLF checksums opens, and the server listens on the loopback alone
         shell: bash
