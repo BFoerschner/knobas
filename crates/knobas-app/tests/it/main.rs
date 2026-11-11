@@ -50,6 +50,7 @@ mod favourites_ipc;
 mod file_pipelines;
 mod inbox_ipc;
 mod ipc;
+mod item_card;
 mod item_field;
 mod jira_views_ipc;
 mod job_ipc;
