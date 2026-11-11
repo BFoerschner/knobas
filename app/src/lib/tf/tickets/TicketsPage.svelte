@@ -582,7 +582,6 @@
   });
   const listRows = $derived(heldList.rows);
 
-  /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
   /** How many lanes the board draws: the scroller's `tf-lane-one` or `tf-lanes` (`tickets.css`). */
   let lanesDrawn = $state(0);
   /** On each lane drawn: counts it while it is there. Untracked, or the attachment would run again on its own count. */
@@ -590,6 +589,7 @@
     untrack(() => (lanesDrawn += 1));
     return () => untrack(() => (lanesDrawn -= 1));
   }
+  /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
   const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
