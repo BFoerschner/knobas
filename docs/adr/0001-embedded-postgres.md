@@ -15,3 +15,4 @@ knobas needs one local database for the synced mirror and everything knobas owns
 
 - TCP localhost only. The macOS Unix-socket path limit (103 bytes) breaks sockets under `~/Library/Application Support`.
 - The pin stays exact (`=18.6.0`). A major upgrade is ours to sequence: dump, initdb, restore at startup on version change.
+- **Amended 2026-11-11** (`docs/decisions/2026-11-11-loopback-line-endings-and-120-hz.md`): knobas picks the server's port with a bind on `127.0.0.1` and never hands `postgresql_embedded` port 0, whose own pick binds `0.0.0.0` and raised the Windows firewall prompt. A recorded migration checksum with the other line endings is taken as the same migration and rewritten once, and `.gitattributes` keeps every checkout LF, so a database moves between a Windows build and a Mac or Linux build.
