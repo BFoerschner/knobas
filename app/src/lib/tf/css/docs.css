@@ -7,7 +7,7 @@
   font: 500 var(--t-sm) var(--sans); height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px;
   background: var(--field); color: var(--ink); width: 100%;
 }
-.tf-dl-body { overflow: auto; flex: 1; padding: 6px 8px 12px; }
+.tf-dl-body { overflow: auto; background: var(--sheet); flex: 1; padding: 6px 8px 12px; }
 .tf-dl-note { padding: 12px 14px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-doc .tf-dl-note { padding: 0; font-family: var(--sans); font-size: var(--t-md); }
 .tf-rd-tree a {
@@ -112,7 +112,7 @@
   border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
 }
 /* A table scrolls sideways inside its frame, so a wide one never widens the page (#2436). */
-.tf-doc-tbl { overflow-x: auto; margin: 0 0 18px; }
+.tf-doc-tbl { overflow-x: auto; background: var(--paper); margin: 0 0 18px; }
 .tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: var(--t-md); line-height: 1.45; }
 .tf-doc th, .tf-doc td { border: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
 .tf-doc th { background: var(--sheet-2); font-weight: 600; }
@@ -247,7 +247,7 @@
 */
 .tf-rd-outline {
   position: sticky; top: 60px; padding-top: 30px; font-size: var(--t-sm);
-  max-height: calc(100vh - 156px); overflow-y: auto;
+  max-height: calc(100vh - 156px); overflow-y: auto; background: var(--paper);
 }
 /* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
 .tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 100px; max-height: calc(100vh - 196px); }

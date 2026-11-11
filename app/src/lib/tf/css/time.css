@@ -121,7 +121,7 @@
   border-left: 3px solid var(--warn); border-radius: 4px; background: var(--sheet); margin-bottom: 14px; font-size: var(--t-sm);
 }
 .tf-tm-held .tf-btn { margin-left: 8px; }
-.tf-tm-scroll { overflow-x: auto; }
+.tf-tm-scroll { overflow-x: auto; background: var(--under); }
 /* Today is marked down its column. The names and the week's total stay in view however far the days scroll. */
 .tf-tm-week th.tf-tm-today { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
 .tf-tm-week td.tf-tm-today { background: var(--sheet-2); }

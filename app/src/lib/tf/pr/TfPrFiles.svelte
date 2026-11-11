@@ -270,6 +270,10 @@
     if (section === null) return diff;
     return picked === undefined ? null : { files: picked.files, truncated: picked.truncated, commentable: null, gone: [], range: picked.range };
   });
+  /** Whether the diff draws (and with it its toolbar, which the commit picker sits on: `tf-with-tool`, `code.css`). */
+  const drawsDiff = $derived(
+    pickFailed === null && !(section !== null && picked === null) && shown !== null && (shown.files.length > 0 || shown.gone.length > 0),
+  );
   const context = $derived(shown?.range ? rangeContext(entityView, shown.range, fileBytes, piped) : null);
 
   /** The thread of `answer` an echo is about, by the thread's id. */
@@ -373,7 +377,7 @@
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
 {:else if view !== undefined || predicted !== null}
   {#if view}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={sourceName ?? "the source"} failed={heldFailed} />{/if}
-  <div class="tf-prfiles">
+  <div class="tf-prfiles" class:tf-with-tool={drawsDiff}>
   {#if range !== null}
     <div class="tf-pickbar" {@attach pickRoom}>
       <TfPrPicker {range} {choice} onchoose={(next) => (choice = next)} />

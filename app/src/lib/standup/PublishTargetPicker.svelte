@@ -237,6 +237,7 @@
     gap: 2px;
     max-height: 180px;
     overflow-y: auto;
+    background: var(--under);
     margin: 0;
     padding: 0;
     list-style: none;

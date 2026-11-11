@@ -100,7 +100,7 @@
 {#snippet jobList()}
   {#if job !== null && jobPages.length > 0}
     {@const above = allJobPages.length - jobPages.length}
-    <section class="tf-panel tf-dh-job" aria-label="Pages on {job}">
+    <section class="tf-panel tf-headed tf-dh-job" aria-label="Pages on {job}">
       <header>
         <h3>Pages on <TfKey value={job} /></h3>
         {#if above > 0}
@@ -162,7 +162,7 @@
       {#if jobFirst}{@render jobList()}{/if}
       <div class="tf-dh-two">
         {#if lastShown !== null}
-          <section class="tf-panel" aria-label="Continue reading">
+          <section class="tf-panel tf-headed" aria-label="Continue reading">
             <header><h3>Continue reading</h3></header>
             <div class="tf-dh-rows">
               <a class="tf-dh-row" href={pageHash(lastShown.entity_id)} onclick={() => onresume?.(lastShown.entity_id)}>
@@ -172,7 +172,7 @@
             </div>
           </section>
         {/if}
-        <section class="tf-panel" aria-label="For you">
+        <section class="tf-panel tf-headed" aria-label="For you">
           <header><h3>For you</h3>{#if forYouRows.length > 0}<span class="tf-count">{forYouRows.length}</span>{/if}</header>
           {#if forYou.length === 0}
             <p class="tf-dh-none">No page mentions you right now.</p>
@@ -196,7 +196,7 @@
           {#each tree.spaces as space (spaceId(space))}
             {@const rows = tileRows(space)}
             {@const from = spaceSource(space, tree.spaces)}
-            <article class="tf-panel tf-dh-space">
+            <article class="tf-panel tf-headed tf-dh-space">
               <header>
                 <!-- The tile's one link: its whole head, with the chevron a ticket card's rows have, so it says it opens. -->
                 <a class="tf-dh-spacelink" href={spaceHash(tree.spaces, space)}>

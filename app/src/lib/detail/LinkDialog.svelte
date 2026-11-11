@@ -336,6 +336,7 @@
   .hits {
     max-height: 210px;
     overflow: auto;
+    background: var(--under);
     margin-top: 6px;
     border: 1px solid var(--hair);
     border-radius: 2px;

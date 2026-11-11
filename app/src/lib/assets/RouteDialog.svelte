@@ -546,6 +546,7 @@
   .lvl {
     max-height: 200px;
     overflow: auto;
+    background: var(--under);
     border: 1px solid var(--hair);
     border-radius: 4px;
   }

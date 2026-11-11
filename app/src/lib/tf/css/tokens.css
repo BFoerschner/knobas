@@ -89,6 +89,10 @@ a { color: var(--info); text-decoration: none; }
   position: fixed; inset: 0;
   display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
   background: var(--paper); color: var(--ink);
+  /* The colour a box sits on, for a scroller that is drawn on more than one surface: Chromium scrolls a box on its
+     compositor only when the box's own background is opaque (PR #2479), so such a scroller paints `var(--under)`.
+     A surface that holds one sets it to its own colour. */
+  --under: var(--paper);
   font: 400 var(--t-md)/1.45 var(--sans);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;

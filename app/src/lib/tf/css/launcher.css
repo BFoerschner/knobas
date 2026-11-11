@@ -53,7 +53,7 @@
 .tf-ln-x svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }
 
 /* The results, the board, the `?` card and the palette scroll here; the box and the hints stay. */
-.tf-ln-list { flex: 1; min-height: 0; overflow: auto; }
+.tf-ln-list { flex: 1; min-height: 0; overflow: auto; background: var(--sheet); }
 
 /* Everything (#2431): the dialog grows, and over a search the body splits,
    the results at the left and where the words appear at the right. */
@@ -61,7 +61,7 @@
 .tf-ln-split { flex: 1; min-height: 0; display: flex; }
 .tf-ln-split > .tf-ln-list { min-width: 0; }
 .tf-ln-split.tf-ln-two > .tf-ln-list { flex: 0 0 46%; border-right: 1px solid var(--rule); }
-.tf-ln-preview { flex: 1; min-width: 0; overflow: auto; padding: 8px 0 12px; }
+.tf-ln-preview { flex: 1; min-width: 0; overflow: auto; background: var(--sheet); padding: 8px 0 12px; }
 .tf-ln-pv-h { padding: 8px 18px 6px; font-size: var(--t-md); font-weight: 600; color: var(--ink); }
 .tf-ln-ex {
   display: block; width: 100%; text-align: left; padding: 7px 18px; border-bottom: 1px solid var(--rule-2);

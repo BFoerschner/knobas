@@ -125,7 +125,7 @@
       </p>
     {/if}
     {#if untracked.length > 0}
-      <div class="tf-panel tf-untracked">
+      <div class="tf-panel tf-headed tf-untracked">
         <header><h3>Untracked</h3></header>
         <ul>
           {#each untracked as file (file)}<li class="tf-mono">{file}</li>{/each}

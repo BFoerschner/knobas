@@ -9,6 +9,7 @@
 <script lang="ts">
   import { dismiss, hold, release, toasts, type ToastAction } from "../shell/toasts.svelte";
   import TfKeyed from "./TfKeyed.svelte";
+  import { modals } from "./modals.svelte";
 
   /**
    * What held focus before a toast took it. A pressed toast goes away with the button in it, and a dialog under it
@@ -28,6 +29,7 @@
 
 <div
   class="tf-toasts"
+  class:tf-over-modal={modals.open > 0}
   role="status"
   aria-live="polite"
   bind:this={stack}

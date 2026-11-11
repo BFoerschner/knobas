@@ -773,7 +773,7 @@
 </script>
 
 <div class="tf-su">
-  <section class="tf-panel tf-su-dig" aria-label="Your digest">
+  <section class="tf-panel tf-headed tf-su-dig" aria-label="Your digest">
     <header>
       <h3>Your digest</h3>
       <button class="tf-btn tf-sm tf-ghost" disabled={digest === null} onclick={() => void copyDigest()}>
@@ -819,7 +819,7 @@
     </div>
   </section>
 
-  <section class="tf-panel tf-su-proto" aria-label="Protocol">
+  <section class="tf-panel tf-headed tf-su-proto" aria-label="Protocol">
     <header>
       <h3>Protocol</h3>
       <span class="tf-dim tf-su-day">{protocolDay(day)}</span>

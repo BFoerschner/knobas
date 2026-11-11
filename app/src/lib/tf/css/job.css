@@ -205,14 +205,17 @@
 .tf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
 
 /* ---------- a job section (R-4.6) ---------- */
-.tf-panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
+.tf-panel { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
 /* One placement for a panel's heading: above its box, not in it (design system, Heading steps). A small button's height
-   whether or not it holds one, so panels side by side share their first rule. The box is what follows the heading. */
-.tf-panel:has(> header) { background: none; border: 0; border-radius: 0; }
+   whether or not it holds one, so panels side by side share their first rule. The box is what follows the heading.
+   A panel that opens with its heading says so by `tf-headed`, not by `:has(> header)`: a `:has()` before a subject
+   with no class, tag or id makes Chromium restyle the whole page each time a row enters any list (PR #2479, the
+   smoothness pass; `style-cost.test.ts` refuses the shape). */
+.tf-panel.tf-headed { background: none; border: 0; border-radius: 0; }
 .tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 0 0 6px; min-height: calc(var(--control-h-sm) + 6px); }
-.tf-panel:has(> header) > :not(header) { background: var(--sheet); border: solid var(--rule); border-width: 0 1px; }
-.tf-panel:has(> header) > header + * { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
-.tf-panel:has(> header) > :not(header):last-child { border-bottom-width: 1px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
+.tf-headed > :not(header) { background: var(--sheet); border: solid var(--rule); border-width: 0 1px; }
+.tf-headed > header + * { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
+.tf-headed > :not(header):last-child { border-bottom-width: 1px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
 .tf-panel > header h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-open {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2);

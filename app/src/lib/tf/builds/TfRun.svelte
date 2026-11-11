@@ -630,7 +630,7 @@
           <div class="tf-callout tf-info">{now}</div>
         {/if}
         <div class="tf-grid">
-          <section class="tf-panel" aria-label="Run">
+          <section class="tf-panel tf-headed" aria-label="Run">
             <header><h3>Run</h3></header>
             <dl class="tf-facts tf-runfacts">
               <dt>Branch</dt>
@@ -652,7 +652,7 @@
             </dl>
           </section>
           <TfRunChain {runId} branch={run.branch} {rereads} />
-          <section class="tf-panel" aria-label="Artifacts">
+          <section class="tf-panel tf-headed" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>
               {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All artifacts</a>{/if}

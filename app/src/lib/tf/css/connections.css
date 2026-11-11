@@ -6,7 +6,7 @@
 .tf-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
 /* A comment on its way (#1424): muted until the thread holds it. */
 .tf-msg.tf-queued .tf-msg-body p { color: var(--muted); }
-.tf-msg-body { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; }
+.tf-msg-body { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; }
 .tf-msg-body p { white-space: pre-line; overflow-wrap: anywhere; }
 .tf-who { font-size: var(--t-sm); color: var(--ink-2); margin-bottom: 2px; display: flex; gap: 8px; align-items: center; }
 .tf-who b { color: var(--ink); font-weight: 600; }
@@ -51,7 +51,7 @@
 .tf-dfilter { padding: 0 16px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
 .tf-dfilter .tf-fsearch { flex: none; max-width: none; }
 .tf-dacts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
-.tf-dbody { overflow: auto; padding: 4px 0 20px; flex: 1; }
+.tf-dbody { overflow: auto; background: var(--sheet); padding: 4px 0 20px; flex: 1; }
 .tf-dbody h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 16px 4px; display: flex; gap: 6px; scroll-margin-top: 12px; }
 /* A row is the shape of the ticket card's (`.tf-tktable`): one link holding its words and a chevron. Its action shows on
    hover and focus, in a place its words keep clear, so no word is under it. */
@@ -81,7 +81,7 @@ a.tf-lk-go:hover .tf-lk-name { text-decoration: underline; }
   border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink);
 }
 .tf-field { display: flex; gap: 8px; align-items: center; font-size: var(--t-sm); color: var(--ink-2); }
-.tf-picklist { display: flex; flex-direction: column; max-height: 240px; overflow: auto; border: 0 solid var(--rule); border-radius: 4px; }
+.tf-picklist { display: flex; flex-direction: column; max-height: 240px; overflow: auto; background: var(--under); border: 0 solid var(--rule); border-radius: 4px; }
 .tf-picklist button {
   display: flex; gap: 8px; justify-content: space-between; border: 0; border-top: 1px solid var(--rule-2);
   background: none; padding: 6px 10px; text-align: left; cursor: pointer; color: var(--ink);

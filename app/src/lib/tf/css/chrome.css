@@ -13,7 +13,7 @@
     linear-gradient(to right, var(--sheet) 40%, transparent) left / 28px 100% no-repeat local,
     linear-gradient(to left, var(--sheet) 40%, transparent) right / 28px 100% no-repeat local,
     linear-gradient(to right, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
-    linear-gradient(to left, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
+    linear-gradient(to left, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll; background-color: var(--sheet);
 }
 .tf-nav a {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
@@ -116,14 +116,14 @@
    while there is something to scroll. */
 /* No scroll anchoring: a page mounted above the shown one would move this scroller, and WebKit has none to rely on. */
 .tf-main, .tf-scroller { overflow-anchor: none; }
-.tf-main { overflow: hidden auto; min-height: 0; min-width: 0; }
+.tf-main { overflow: hidden auto; background: var(--paper); min-height: 0; min-width: 0; }
 /* The clip holds what passes under the bar, so it is no overflow to scroll to and nothing can slide the page sideways. */
 .tf-main > .tf-kept:not([hidden]) { display: block; height: 100%; overflow-x: clip; }
 .tf-keptpage { width: 100vw; height: 100%; }
 /* A viewport-high page's inner scroller (`TfScroller.svelte`): the host is measured, the scroller fills it, and the one
    body is the host's width, so a bar appearing moves nothing there either. */
 .tf-shost { container-type: inline-size; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
-.tf-scroller { overflow: hidden auto; min-width: 0; min-height: 0; }
+.tf-scroller { overflow: hidden auto; background: var(--paper); min-width: 0; min-height: 0; }
 .tf-sclip { display: flex; flex-direction: column; min-height: 100%; overflow-x: clip; }
 .tf-sbody { flex: 1 0 auto; width: 100cqw; }
 /* A page keep-alive holds (#2247): a repository's tab lays out as if the wrapper were not there, a hidden one is not

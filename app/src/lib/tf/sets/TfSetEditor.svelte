@@ -567,7 +567,7 @@
       {#each MEMBER_KINDS as kind (kind)}
         {@const members = set.members.filter((member) => member.kind === kind)}
         {@const patterns = set.patterns.map((pattern, at) => ({ ...pattern, at })).filter((pattern) => pattern.kind === kind)}
-        <article class="tf-panel" aria-label={KIND_LABEL[kind]}>
+        <article class="tf-panel tf-headed" aria-label={KIND_LABEL[kind]}>
           <header>
             <h3>{KIND_LABEL[kind]}</h3>
             <span class="tf-count">{itemsOf({ members, patterns }).length}</span>
@@ -621,7 +621,7 @@
       {/each}
     </div>
     <aside class="tf-side">
-      <div class="tf-panel" bind:this={rulesEl}>
+      <div class="tf-panel tf-headed" bind:this={rulesEl}>
         <header><h3>Applies to</h3></header>
         {#each ruleRows as rule (rule.at)}
           {@const count = rule.waiting ? undefined : counts[countKey(rule)]}
@@ -654,7 +654,7 @@
           >
         </div>
       </div>
-      <div class="tf-panel">
+      <div class="tf-panel tf-headed">
         <header><h3>Shows on {counted(shownOn.length, "ticket", "tickets")} now</h3></header>
         {#if shownOn.length > 0}
           <div class="tf-roll">{shownOn.filter((ticket) => ticket.mine).length} of them yours, outlined. New tickets join as soon as they match.</div>

@@ -560,7 +560,7 @@
   </div>
   {#if !same}
   <aside class="tf-side">
-    <div class="tf-panel">
+    <div class="tf-panel tf-headed">
       <header><h3>Commits</h3></header>
       {#if commits.length > 0}
         <div class="tf-rows">

@@ -583,6 +583,13 @@
   const listRows = $derived(heldList.rows);
 
   /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
+  /** How many lanes the board draws: the scroller's `tf-lane-one` or `tf-lanes` (`tickets.css`). */
+  let lanesDrawn = $state(0);
+  /** On each lane drawn: counts it while it is there. Untracked, or the attachment would run again on its own count. */
+  function countLane(): () => void {
+    untrack(() => (lanesDrawn += 1));
+    return () => untrack(() => (lanesDrawn -= 1));
+  }
   const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
@@ -855,7 +862,7 @@
     </div>
   </nav>
 
-  <TfScroller class="tf-board-wrap" {@attach fbarHeight}>
+  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach fbarHeight}>
     {#if subtasksOf !== null || back !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. A launcher jump has a way back to say too (F-047). -->
       <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
@@ -978,7 +985,7 @@
       {/if}
     {:else if showing.layout === "board"}
       {#each reader.bands as { lane } (lane.key ?? "")}
-        <div class="tf-lane" class:tf-laned={reader.laned}>
+        <div class="tf-lane" class:tf-laned={reader.laned} {@attach countLane}>
           {#if lane.key !== null}
             <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
@@ -1030,7 +1037,7 @@
       {/if}
     {:else}
       <div class="tf-list">
-        <table class="tf-tbl">
+        <table class="tf-tbl" class:tf-has-epic={listColumns.some(([column]) => column === "epic")} class:tf-has-labels={listColumns.some(([column]) => column === "labels")}>
           <thead>
             <tr>
               {#each listColumns as [column, label] (column)}

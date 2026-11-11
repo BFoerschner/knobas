@@ -22,7 +22,7 @@
 .tf-md .tf-box.tf-on, .tf-doc .tf-box.tf-on { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
 .tf-md .tf-box.tf-on::after, .tf-doc .tf-box.tf-on::after { content: "✓"; }
 .tf-md del { color: var(--ink-2); }
-.tf-md table { border-collapse: collapse; font-size: var(--t-md); display: block; overflow-x: auto; }
+.tf-md table { border-collapse: collapse; font-size: var(--t-md); display: block; overflow-x: auto; background: var(--under); }
 .tf-md th, .tf-md td { border: 1px solid var(--rule); padding: 5px 12px; text-align: left; }
 .tf-md th { background: var(--sheet-2); font-weight: 600; }
 .tf-md blockquote { border-left: 3px solid var(--rule); padding-left: 12px; color: var(--ink-2); }
@@ -31,7 +31,7 @@
 .tf-md .tf-fence { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); }
 .tf-md .tf-fence > header { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 32px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); background: var(--sheet-2); }
 .tf-md .tf-fence > header .tf-fence-copy { margin-left: auto; }
-.tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; padding: 10px 14px; overflow: auto; margin: 0; }
+.tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; padding: 10px 14px; overflow: auto; background: var(--paper); margin: 0; }
 .tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: none; background: none; border: 0; padding: 0; }
 .tf-md .tf-md-noimg { display: inline-block; font-size: var(--t-sm); color: var(--ink-2); border: 1px dashed var(--rule); border-radius: 3px; padding: 2px 8px; }
 /* A ticket attachment the wiki drew inline (#2406), as the ticket-page mockup's `.tf-tkfig`: at most the panel's width, nothing under it. */

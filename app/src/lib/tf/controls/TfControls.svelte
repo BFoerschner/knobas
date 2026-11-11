@@ -99,7 +99,7 @@
       </div>
     </section>
 
-    <section class="tf-panel" aria-labelledby="tf-ctl-panel">
+    <section class="tf-panel tf-headed" aria-labelledby="tf-ctl-panel">
       <header><h3 id="tf-ctl-panel">A panel's heading, above its box</h3></header>
       <div class="tf-rows">
         <div class="tf-r">

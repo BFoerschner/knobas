@@ -48,6 +48,7 @@
   written out here and tested in `TfDialog.test.svelte.ts`.
 -->
 <script lang="ts">
+  import { modals } from "../modals.svelte";
   import { untrack, type Snippet } from "svelte";
 
   import { isSendKey } from "../inline-editor";
@@ -196,12 +197,20 @@
       first.focus();
     }
   }
+
+  /** While it is drawn, the dialog counts as open (`modals`). */
+  function countOpen(): () => void {
+    // Untracked, or the attachment would run again on the count it changes.
+    untrack(() => (modals.open += 1));
+    return () => untrack(() => (modals.open -= 1));
+  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="tf-modal"
+  {@attach countOpen}
   onclickcapture={notePress}
   onkeydowncapture={notePress}
   onmousedown={(event) => {

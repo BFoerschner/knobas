@@ -669,6 +669,7 @@
     gap: 14px;
     max-height: 58vh;
     overflow-y: auto;
+    background: var(--under);
   }
 
   /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
@@ -832,6 +833,7 @@
   .pick {
     max-height: 22vh;
     overflow-y: auto;
+    background: var(--under);
   }
 
   .dl {

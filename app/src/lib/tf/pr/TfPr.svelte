@@ -993,13 +993,13 @@
           {#if standing.lines.length === 0}
             <!-- The question makes no sense on a finished pull request: the panel says how it ended, or is not drawn. -->
             {#if merge === null && outcome !== null}
-              <div class="tf-panel">
+              <div class="tf-panel tf-headed">
                 <header><h3>Outcome</h3></header>
                 <div class="tf-prready"><div class="tf-prverdict tf-{outcome.tone}">{outcome.text}</div></div>
               </div>
             {/if}
           {:else}
-          <div class="tf-panel">
+          <div class="tf-panel tf-headed">
             <header><h3>Ready to merge?</h3></header>
             <div class="tf-prready">
               {#if standing.verdict !== null}
@@ -1017,7 +1017,7 @@
           </div>
           {/if}
           {#if view}
-            <div class="tf-panel tf-prreviewers" tabindex="-1" bind:this={reviewersPanel}>
+            <div class="tf-panel tf-headed tf-prreviewers" tabindex="-1" bind:this={reviewersPanel}>
               <header
                 ><h3>Reviewers</h3>
                 {#if request !== null && askable.length > 0}
@@ -1072,7 +1072,7 @@
             </div>
             <!-- Overview's own list has these in full: the rail keeps them in reach on the other tabs. -->
             {#if rail.length > 0 && tab !== "overview"}
-              <div class="tf-panel tf-prrail-checks">
+              <div class="tf-panel tf-headed tf-prrail-checks">
                 <header><h3>Checks</h3></header>
                 <div class="tf-prlist">
                   {#each rail as check, n (n)}
@@ -1088,7 +1088,7 @@
               </div>
             {/if}
             {#if buildsBeyondChecks.length > 0}
-              <div class="tf-panel tf-prbuilds">
+              <div class="tf-panel tf-headed tf-prbuilds">
                 <header><h3>Builds of the head</h3><span class="tf-dim">from the mirror</span></header>
                 <div class="tf-prlist">
                   {#each buildsBeyondChecks as build (build.entity_id)}
@@ -1103,7 +1103,7 @@
             {/if}
             <!-- With none, Ready to merge says so: a panel to say it again adds nothing. -->
             {#if conflicts !== null && conflicts.conflicts}
-              <div class="tf-panel tf-prconflicts">
+              <div class="tf-panel tf-headed tf-prconflicts">
                 <header><h3>Conflicts</h3></header>
                 <p class="tf-prnote" class:tf-prconflict={conflicts.conflicts}>
                   {conflicts.text}.{#if conflicts.conflicts}{" "}Resolve them in a checkout and push; they cannot be resolved here.{/if}
@@ -1112,7 +1112,7 @@
             {/if}
           {/if}
           {#if local !== null && repo !== null}
-            <div class="tf-panel">
+            <div class="tf-panel tf-headed">
               <header><h3>Local checkout</h3></header>
               <div class="tf-prlocal">
                 <span class="tf-mono">{local.path}</span>

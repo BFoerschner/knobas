@@ -1955,7 +1955,7 @@
   {/if}
   {#if alerts.count > 0}{@render openAlerts()}{/if}
 
-  <div class="tree" bind:this={tree}>
+  <div class="tree" class:alone={!!failure || emptyEstate} bind:this={tree}>
     <div class="cols" bind:this={stripEl}>
       {#if failure === NOT_HELD}
         <div class="none gone"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
@@ -3128,17 +3128,18 @@
     align-items: stretch;
     min-width: 0;
     overflow-x: auto;
+    background: var(--under);
     overflow-y: hidden;
     position: relative;
     z-index: 1;
   }
 
   /* An address that names no asset, an estate with nothing in it and a failed read have nothing for the pane to say. */
-  .tree:has(.gone, .solo) {
+  .tree.alone {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .tree:has(.gone, .solo) .pane {
+  .tree.alone .pane {
     display: none;
   }
 
@@ -3225,6 +3226,7 @@
        not push the columns off the screen. */
     max-height: 132px;
     overflow-y: auto;
+    background: var(--sheet);
   }
 
   .alerts li {
@@ -3364,7 +3366,7 @@
     flex: 1;
     margin: 0;
     padding: 6px;
-    background: none;
+    background: var(--under);
     list-style: none;
     overflow-y: auto;
   }

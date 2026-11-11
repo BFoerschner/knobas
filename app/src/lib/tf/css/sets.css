@@ -57,7 +57,7 @@
 .tf-set-note { margin: 0; font-size: var(--t-xs); }
 .tf-fsearch.tf-wide { max-width: none; flex: none; }
 /* It keeps its height in a short window, and the dialog's body scrolls: you can always see what you are saving. */
-.tf-picks { display: flex; flex-direction: column; flex: none; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
+.tf-picks { display: flex; flex-direction: column; flex: none; max-height: 46vh; overflow: auto; background: var(--under); border: 1px solid var(--rule); border-radius: 4px; }
 .tf-picks label, .tf-picks .tf-pickrow { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-picks > :last-child { border-bottom: 0; }
 .tf-pick-name { min-width: 0; }

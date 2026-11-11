@@ -15,6 +15,7 @@
 .tf-toast.tf-err .tf-x { opacity: 1; }
 /* A toast never sits on a dialog's footer: while one is open the newest toast stands in the band a dialog leaves under it
    (`dialogs.css`), and the older ones wait. They come back when it closes, if their time has not run out. */
-body:has(.tf-modal) .tf-toasts { bottom: 6px; }
-body:has(.tf-modal) .tf-toast:not(:last-child) { display: none; }
+/* Under a dialog (`modals.svelte.ts`). */
+.tf-toasts.tf-over-modal { bottom: 6px; }
+.tf-toasts.tf-over-modal .tf-toast:not(:last-child) { display: none; }
 
