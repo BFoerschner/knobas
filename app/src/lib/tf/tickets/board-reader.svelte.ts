@@ -170,6 +170,8 @@ export interface BoardReader {
   readonly description: Prose | null;
   /** What the previewed ticket reaches, by section, or `null` until it answers. */
   readonly around: CardTable | null;
+  /** Moves each time a read the person caused lands: what the drawn cards sort again on. A sync's refresh leaves it. */
+  readonly asked: number;
   /** Opens a scope: the board starts fresh, and an answer for the last one is dropped. */
   open(scope: BoardScope, filter: BoardFilter): void;
   /** A change in the filter bar: read once the keys pause. */
@@ -182,7 +184,7 @@ export interface BoardReader {
   moreLanes(): void;
   chooseLayout(layout: "board" | "list"): void;
   chooseLanes(lanes: LaneField): void;
-  /** Reads now, with no pause. */
+  /** Reads now, with no pause: a sync's re-read, which keeps the drawn cards where they are (`asked` stays). */
   refresh(): void;
   /** Reads `id`'s preview once, or drops the one out for the last when `null`. */
   preview(id: string | null): void;
@@ -239,6 +241,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     filter: { query: "", words: false } as BoardFilter,
     description: null as Prose | null,
     around: null as CardTable | null,
+    asked: 0,
   });
   /** Bumped by every read and every key, so only the last read's answer lands. */
   let reading = 0;
@@ -319,7 +322,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * large one a short prefix is the broadest of them; it sends fifty cards a
    * column at most (R-3.4, #1024).
    */
-  function read(quick = false) {
+  function read(quick = false, byPerson = true) {
     clearTimeout(pausing);
     const { base, savedView, without } = state.scope;
     if (base === null) return;
@@ -343,6 +346,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         const drawn = kept(answer);
         board = drawn;
         state.failed = null;
+        // A read the person caused (a filter, *Show more*, lanes) sorts the cards again; a sync's does not (`held-order`).
+        if (byPerson) state.asked += 1;
         if (query === base) state.total = sum(drawn);
       })
       .catch((error: unknown) => {
@@ -402,6 +407,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     },
     get around() {
       return state.around;
+    },
+    get asked() {
+      return state.asked;
     },
     open(scope, filter) {
       board = null;
@@ -474,7 +482,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       // Each field is its own read of lanes (#939).
       if (wasLaned || laned) read();
     },
-    refresh: read,
+    refresh: () => read(false, false),
     preview(id) {
       if (id === previewing) return;
       previewing = id;

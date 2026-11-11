@@ -44,6 +44,7 @@
     onchange = () => {},
     extra,
     after,
+    held,
   }: {
     config: FilterConfig;
     /** The view's filter state, usually `sessionFilter(config.id)`. */
@@ -57,6 +58,11 @@
     extra?: Snippet;
     /** What follows the count at the end of the bar (Monitors' hidden count). */
     after?: Snippet | undefined;
+    /**
+     * A list that holds its rows where they first drew (`held-order.svelte.ts`): what its later reads brought that
+     * would move them. The bar keeps the room for *Show N new* whether or not it is drawn, so it never wraps the bar.
+     */
+    held?: { waiting: number; stale: boolean; show: () => void } | undefined;
   } = $props();
 
   let field: HTMLInputElement | undefined = $state();
@@ -97,6 +103,7 @@
   /** With no select to go with it, the last pills keep the count company when the row wraps. */
   const tailChips = $derived(hasSelects ? null : (shownChips.at(-1) ?? null));
   const leadChips = $derived(tailChips === null ? shownChips : shownChips.slice(0, -1));
+  const heldWords = $derived(held === undefined ? "" : held.waiting > 0 ? `Show ${held.waiting} new` : held.stale ? "Sort again" : "");
 </script>
 
 <div class="tf-fbar" data-fid={config.id}>
@@ -155,8 +162,22 @@
     {/each}
     {@render extra?.()}
     <span class="tf-fend">
-      <span class="tf-fcount" aria-live="polite" data-room={total === null ? "" : countLine(Math.max(0, total - 1), total, config.noun, config.one)}
-        >{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
+      <!-- *Show N new* stands in the count's own room while rows wait (the still-rows pass), so it appearing moves nothing. -->
+      <span
+        class="tf-fcount"
+        class:tf-fcount-held={heldWords !== ""}
+        aria-live="polite"
+        data-room={total === null ? "" : countLine(Math.max(0, total - 1), total, config.noun, config.one)}
+        data-held={held === undefined ? undefined : "Show 99 new"}
+        ><span class="tf-fcount-n">{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
+        >{#if held !== undefined && heldWords !== ""}<button
+            type="button"
+            class="tf-fheld"
+            title={held.waiting > 0
+              ? `${held.waiting === 1 ? "A row" : `${held.waiting} rows`} came in since the list drew. They wait here so nothing moves under the pointer.`
+              : "The list reads in another order now. It keeps its rows where they drew until you ask."}
+            onclick={held.show}>{heldWords}</button
+          >{/if}</span
       >
       {@render after?.()}
     </span>

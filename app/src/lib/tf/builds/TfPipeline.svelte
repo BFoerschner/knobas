@@ -37,6 +37,7 @@
   import { stateWord } from "../state-word";
   import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
+  import { HeldOrder } from "../held-order.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { secondsLabel, timeLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
@@ -467,12 +468,24 @@
           jobBranches,
         ),
   );
-  const days = $derived(byDay(kept));
+  /**
+   * The runs stay where they first drew (the still-rows pass, 2026-11-11): a run a sync brings, a build that just
+   * finished, waits behind *Show N new* rather than pushing the list down under the pointer. A run you started is your
+   * own press: its echo sorts the list again, so it shows at once.
+   */
+  const runHold = new HeldOrder<RunRow>((run) => run.entity_id);
+  const heldRuns = $derived(
+    all === null
+      ? { rows: [] as RunRow[], waiting: 0, stale: false }
+      : runHold.place(kept, JSON.stringify([id, filter.text, filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)])),
+  );
+  const heldBar = $derived({ waiting: heldRuns.waiting, stale: heldRuns.stale, show: () => runHold.release() });
+  const days = $derived(byDay(heldRuns.rows));
   /**
    * A history read back by scrolling holds thousands of runs (2026-11-10: 35,000 nodes and 133 ms frames at 1,400 of
    * them), so past thirty days only the days on screen and near it are drawn, a day at a time.
    */
-  const dayWin = new Windowed({ count: () => days.length, key: (i) => days[i]!.label, estimate: 260, from: 30 });
+  const dayWin = new Windowed({ count: () => days.length, key: (i) => days[i]!.key, estimate: 260, from: 30 });
 
   /**
    * A click anywhere on a run row opens the run (R-9.6, prototype-6's
@@ -661,7 +674,7 @@
 
 {#if tab === "runs"}
   <div class="tf-runbar">
-    <FilterBar {config} {filter} shown={all === null ? null : kept.length} total={all?.length ?? null} />
+    <FilterBar {config} {filter} shown={all === null ? null : heldRuns.rows.length} total={all?.length ?? null} held={heldBar} />
   </div>
   <div class="tf-runs">
     {#if all === null && failed === null}
@@ -676,7 +689,7 @@
       </TfNoMatch>
     {/if}
     <div class="tf-days" {@attach dayWin.list}>
-    {#each dayWin.slice(days) as day, at (day.label)}
+    {#each dayWin.slice(days) as day, at (day.key)}
       <div class="tf-day" class:tf-day-first={dayWin.start + at === 0} {@attach dayWin.row(day.label)}>
       <h3 class="tf-dayh">{day.label}</h3>
       <table class="tf-tbl tf-runtbl" aria-label={`Runs, ${day.label}`}>

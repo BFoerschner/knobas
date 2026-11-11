@@ -4,8 +4,8 @@
   the header with *New pull request*, the two tabs with their counts, the
   tab's own filter bar, then its rows.
 
-  - **Repositories**: every mirrored repository, yours first (one of your pull
-    requests or one asking your review is in it), then by last push. Each row:
+  - **Repositories**: every mirrored repository, yours first (an open pull
+    request of yours or one asking your review is in it), then by last push. Each row:
     the name with the job's key when the job reaches it, its open pull
     requests, the local checkout (`entity_checkout`: branch and where it
     stands, or *not on this machine*) and the last push.
@@ -14,7 +14,15 @@
     *Yours* and *Open, others*; the recency read adds *Merged or closed*.
     Each row: the number, the title over its repository and author, the state
     chip, the job it belongs to (`job/open-jobs.ts`) and when it last moved.
-    A merged or closed pull request of yours is under *Yours*.
+    A merged or closed pull request is under *Merged or closed*, yours too.
+
+  **Rows stay where they first drew** (the still-rows pass, 2026-11-11): each
+  list waits for the reads that decide its order (the repositories and the
+  open pull requests), draws, and then holds its rows' places
+  (`held-order.svelte.ts`). The team, language, author, checkout and later
+  pages fill rows in or join the end; a row a later read would put above a
+  drawn one waits behind *Show N new* in the filter bar, and a changed filter
+  sorts again.
 
   A repository's team and language and a pull request's author are
   `code_facts` (#966), read once for every row the two lists hold. The other
@@ -60,6 +68,7 @@
   import { clones } from "../openin/clones.svelte";
   import TfCloneAll from "../openin/TfCloneAll.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { HeldOrder, type Placed } from "../held-order.svelte";
   import { untrack } from "svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { onShownAgain } from "../while-shown.svelte";
@@ -173,6 +182,10 @@
   // Replaced whole on each read, never changed in place: raw, so 10,000 rows are not proxied row by row (#2210).
   let repos = $state.raw<EntityPage | null>(null);
   let attention = $state.raw<EntityPage | null>(null);
+  /** The open pull requests are read whole: what makes a repository yours, so its place, is known. */
+  let attentionRead = $state(false);
+  /** The sources are read: a twin row's *on <source>* and the header's host are their names, not ids that grow into them. */
+  let sourcesRead = $state(false);
   let everyPr = $state.raw<EntityPage | null>(null);
   let branches = $state<EntityRow[]>([]);
   let sources = $state<Pick<SourceSummary, "id" | "base_url" | "display_name">[]>([]);
@@ -216,8 +229,12 @@
     const read = (filter: EntityFilter, set: (page: EntityPage) => void) =>
       again ? whole(filter).then(set, fail) : whole(filter, set).then(undefined, fail);
     const repoRead = read(filterOf(["repo"], "updated_desc"), repoPage);
+    const attentionWhole = read(filterOf(["pr"], "attention"), whileLive((page) => (attention = page)));
+    void attentionWhole.finally(() => {
+      if (live) attentionRead = true;
+    });
     const prReads = [
-      read(filterOf(["pr"], "attention"), whileLive((page) => (attention = page))),
+      attentionWhole,
       read(filterOf(["pr"], "updated_desc"), whileLive((page) => (everyPr = page))),
     ];
     void repoRead.finally(() => {
@@ -231,7 +248,9 @@
         if (live) sources = rows;
       },
       () => {},
-    );
+    ).finally(() => {
+      if (live) sourcesRead = true;
+    });
     return () => {
       live = false;
     };
@@ -329,9 +348,11 @@
   const held = $derived((entityId: string) => job !== null && index.holds(job, { entity_id: entityId }));
   const known = $derived(factsById(facts));
   const lines = $derived(attention && everyPr ? prLines(attention, everyPr, now, known) : null);
+  /** The open pull requests alone: what orders the repositories and counts their open ones, before the recency read lands. */
+  const openLines = $derived(attention ? prLines(attention, { ...attention, rows: [] }, now, known) : null);
   const teamsByRepo = $derived(repoTeams(repos?.rows ?? [], known));
   const choices = $derived(repoChoices(repos?.rows ?? [], known));
-  const openCounts = $derived(openPrsOf(lines ?? []));
+  const openCounts = $derived(openPrsOf(openLines ?? []));
   const compare = $derived(compareHash(branches, repos?.rows ?? []));
   /** The job's open pull request: the loudest button goes there, as *New pull request* would only land on saying one is open (F-243). */
   const jobPr = $derived(job === null ? null : ((lines ?? []).find((line) => line.row.state?.text.toLowerCase() === "open" && index.jobOf({ entity_id: line.row.entity_id, kind: line.row.kind }) === job) ?? null));
@@ -399,7 +420,7 @@
   const shownRepos = $derived(
     repos === null
       ? []
-      : visibleRepos(repos.rows, lines ?? [], checkouts, known, {
+      : visibleRepos(repos.rows, openLines ?? [], checkouts, known, {
           scope: scopeOf(repoFilter.scope),
           held,
           flags: repoFilter.chips["flag"] ?? [],
@@ -426,20 +447,38 @@
         ),
   );
 
-  /** The pull requests by group, in draw order; open ones with no group come first, unheaded. */
+  // -- rows stay where they first drew ---------------------------------------
+
+  /** Each list draws once its order is decided: the repositories once the open pull requests are read whole too. */
+  const reposOrdered = $derived(repos !== null && attentionRead && sourcesRead);
+  const prsOrdered = $derived(lines !== null && attentionRead && sourcesRead);
+  /** What the person chose: a change sorts the list again (`HeldOrder`). */
+  const basisOf = (chosen: typeof repoFilter) => JSON.stringify([chosen.scope, chosen.text, chosen.chips, chosen.dropdowns, job]);
+  const repoHold = new HeldOrder<EntityRow>((row) => row.entity_id);
+  const prHold = new HeldOrder<PrLine>((line) => line.row.entity_id, (line) => line.group ?? "open");
+  const none = <T,>(): Placed<T> => ({ rows: [], waiting: 0, stale: false });
+  const placedRepos = $derived(reposOrdered ? repoHold.place(shownRepos, basisOf(repoFilter)) : none<EntityRow>());
+  /** The groups' rows as one list in draw order, so a later read's row joins the end of the last group, never above one. */
+  const flatPrs = $derived(
+    [null, ...GROUP_ORDER].flatMap((group) => shownPrs.filter((line) => line.group === group)),
+  );
+  const placedPrs = $derived(prsOrdered ? prHold.place(flatPrs, basisOf(prFilter)) : none<PrLine>());
+
+  /** The pull requests by group, in draw order, each in the group it drew in; open ones with no group come first, unheaded. */
   const groups = $derived.by(() => {
     const out: { group: PrGroup | null; lines: PrLine[] }[] = [];
-    const ungrouped = shownPrs.filter((line) => line.group === null);
-    if (ungrouped.length > 0) out.push({ group: null, lines: ungrouped });
-    for (const group of GROUP_ORDER) {
-      const kept = shownPrs.filter((line) => line.group === group);
+    const tagged = placedPrs.rows.map((line) => ({ line, tag: prHold.tagOf(line) }));
+    for (const group of [null, ...GROUP_ORDER] as (PrGroup | null)[]) {
+      const kept = tagged.filter(({ tag }) => tag === (group ?? "open")).map(({ line }) => line);
       if (kept.length > 0) out.push({ group, lines: kept });
     }
     return out;
   });
+  const heldRepos = $derived({ waiting: placedRepos.waiting, stale: placedRepos.stale, show: () => repoHold.release() });
+  const heldPrs = $derived({ waiting: placedPrs.waiting, stale: placedPrs.stale, show: () => prHold.release() });
 
   /** Thousands of rows draw only those near the viewport (#2210); a repository row is 42 px, a pull request's 51. */
-  const repoWin = new Windowed({ count: () => shownRepos.length, key: (i) => shownRepos[i]!.entity_id, estimate: 42 });
+  const repoWin = new Windowed({ count: () => placedRepos.rows.length, key: (i) => placedRepos.rows[i]!.entity_id, estimate: 42 });
   const linesOf = (name: PrGroup | "open") => groups.find((kept) => (kept.group ?? "open") === name)?.lines ?? [];
   const prWins = new Map(
     (["open", ...GROUP_ORDER] as const).map((name) => [
@@ -468,7 +507,7 @@
   <div>
     <h1>Code</h1>
     <div class="tf-sub">
-      {repos === null ? "Repositories and pull requests, yours first." : headerLine(repos.total, repos.rows, sources)}
+      {repos === null || !reposOrdered ? "Repositories and pull requests, yours first." : headerLine(repos.total, repos.rows, sources)}
     </div>
   </div>
   <div class="tf-acts">
@@ -496,16 +535,17 @@
   <FilterBar
     config={repoConfig}
     filter={repoFilter}
-    shown={repos === null ? null : shownRepos.length}
+    shown={reposOrdered ? placedRepos.rows.length : null}
     total={repos?.total ?? null}
+    held={heldRepos}
   />
 {:else}
-  <FilterBar config={prConfig} filter={prFilter} shown={lines === null ? null : shownPrs.length} total={prTotal} />
+  <FilterBar config={prConfig} filter={prFilter} shown={prsOrdered ? placedPrs.rows.length : null} total={prTotal} held={heldPrs} />
 {/if}
 <div class="tf-cbody">
   {#if tab === "repos"}
-    <TfWaiting phase={waitPhase({ drawn: repos !== null, reading: repoReading, failed: failed !== null })} error={failed} columns={7}>
-    {#if shownRepos.length > 0}
+    <TfWaiting phase={waitPhase({ drawn: reposOrdered, reading: repoReading, failed: failed !== null })} error={failed} columns={7}>
+    {#if placedRepos.rows.length > 0}
       <table class="tf-tbl">
         <thead>
           <tr
@@ -516,7 +556,7 @@
         </thead>
         <tbody {@attach repoWin.list}>
           {#if repoWin.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("before")}></td></tr>{/if}
-          {#each repoWin.slice(shownRepos) as row (row.entity_id)}
+          {#each repoWin.slice(placedRepos.rows) as row (row.entity_id)}
             {@const count = openCount(openCounts, row)}
             {@const local = checkoutLine(checkouts[row.entity_id])}
             {@const fact = known.get(row.entity_id)}
@@ -543,7 +583,7 @@
     {/if}
     </TfWaiting>
   {:else}
-    <TfWaiting phase={waitPhase({ drawn: lines !== null, reading: prReading, failed: failed !== null })} error={failed} columns={5}>
+    <TfWaiting phase={waitPhase({ drawn: prsOrdered, reading: prReading, failed: failed !== null })} error={failed} columns={5}>
     {#each groups as { group, lines: kept } (group ?? "open")}
       {#if group !== null}
         <h2 class="tf-cgroup-h">{GROUP_LABEL[group]} <span class="tf-count">{kept.length}</span></h2>

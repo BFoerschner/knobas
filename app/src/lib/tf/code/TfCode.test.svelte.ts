@@ -161,13 +161,14 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
 
   const rows = [...target.querySelectorAll("tbody tr")];
   expect(rows.map(cells)).toEqual([
-    // A repository holding a merged pull request of yours is yours too (#966).
-    ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
+    // Yours by open work (2026-11-11): an open pull request of yours is in it. A merged one of yours lifts nothing,
+    // since only `code_facts` knows it, after the rows drew.
     ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "Thu 12:00", "Open in…"],
     // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
     ["tidewater/fx-rates", "Platform", "Go", "0", "not on this machine", "today 11:00", "Clone"],
+    ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
   ]);
-  expect(rows[1]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
+  expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
   expect([...target.querySelectorAll("thead th")].map(text).slice(0, 3)).toEqual(["Repository", "Team", "Language"]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
     "Filter repositories",
@@ -195,19 +196,20 @@ test("Repositories: the Team and Language dropdowns keep what the repositories d
 test("Pull requests are grouped in the attention read's order, then merged or closed, each with its job", async () => {
   await draw(["prs"]);
 
-  // Your merged pull request is under *Yours* (#966), so nothing is left
-  // under *Merged or closed*.
+  // Yours is open work (2026-11-11): your merged pull request stays under
+  // *Merged or closed*, and says *you*.
   expect([...target.querySelectorAll(".tf-cgroup-h")].map(text)).toEqual([
     "Asking for your review 1",
-    "Yours 2",
+    "Yours 1",
     "Open, others 1",
+    "Merged or closed 1",
   ]);
   const rows = [...target.querySelectorAll("tbody tr")].map(cells);
   expect(rows).toEqual([
     ["#144", `Add payout CSV export${PAYOUT}, tom`, "Open", "", "today 10:20"],
     ["#142", `SEPA retry with exponential backoff${PAYOUT}, you`, "Open", "PAY-231", "today 10:20"],
-    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, you", "Merged", "", "today 10:20"],
     ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "10 Aug"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, you", "Merged", "", "today 10:20"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
     "Filter PRs",

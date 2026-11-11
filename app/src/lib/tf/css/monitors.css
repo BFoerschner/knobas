@@ -14,10 +14,14 @@
    actions stand in place of its figures on hover (Motion), or of its bars where the figures have left their columns.
    Where nothing hovers it is wider, under `not (hover: hover)` below. */
 .tf-monc-acts { width: 72px; }
-/* The chip holds the word and the time is plain text, on its own line at every width. A pause's or resume's echo stands
-   beside the state chip, so the row holds its height as the echo comes and goes (F-337, F-349). */
-.tf-mon-state { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; }
-.tf-mon-since { flex-basis: 100%; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* The chip holds the word and the time is plain text beside it, on the chip's line: a monitor that goes down while the
+   roster is on screen keeps its row's height, as every other row's is one line (the still-rows pass, PR #2479; it stood
+   on its own line before, and the row grew 19 px under the pointer). A time that has no room ends in an ellipsis, whole
+   in its title. A pause's or resume's echo stands beside the state chip, so the row holds its height as the echo comes
+   and goes (F-337, F-349). */
+/* As tall as a small button in every row, so a row that goes down and gains *Ack* keeps its height too. */
+.tf-mon-state { display: flex; flex-wrap: nowrap; gap: 2px 6px; align-items: center; min-width: 0; min-height: var(--control-h-sm); }
+.tf-mon-since { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-mon-figs { display: none; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The heads stay under the filter bar on a long list. At 900 px and below `.tf-cbody` scrolls sideways, so it would be their scrollport and they stay put. */
 @media (min-width: 901px) {

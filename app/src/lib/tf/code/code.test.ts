@@ -65,7 +65,7 @@ function facts(entityId: string, over: Partial<CodeFacts>): CodeFacts {
   return { entity_id: entityId, author: null, mine: false, language: null, teams: [], ...over };
 }
 
-test("a pull request carries its author, and a settled one of yours is under Yours (#966)", () => {
+test("a pull request carries its author, and a settled one of yours stays under Merged or closed (2026-11-11)", () => {
   const id = (n: string) => `gitea:tidewater/payout-service#${n}`;
   const known = factsById([
     facts(id("142"), { author: "mara", mine: true }),
@@ -80,9 +80,11 @@ test("a pull request carries its author, and a settled one of yours is under You
   );
   expect(lines.map((line) => [line.number, line.group, line.author])).toEqual([
     ["#142", "yours", "mara"],
-    ["#139", "yours", "mara"],
+    // Yours is open work: only `code_facts` knows #139 is mine, and it lands after the rows drew.
+    ["#139", "settled", "mara"],
     ["#57", "settled", "tom"],
   ]);
+  expect(lines.find((line) => line.number === "#139")?.mine).toBe(true);
 });
 
 test("a pull request's opener is named by the profile where the source keeps one, else by the account (F-107)", () => {

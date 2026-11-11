@@ -70,6 +70,7 @@
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push, tally } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { HeldOrder } from "../held-order.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { isFiltering, type FilterConfig } from "../filter/filter";
@@ -171,7 +172,15 @@
     holding.filter((hold) => hold.list === which && !list.some((row) => row.item.key === hold.entry.item.key));
   const streamHolds = $derived(standing("stream", rows));
   const shelfHolds = $derived(standing("shelf", shelf));
-  const drawn = $derived(withHolds(rows, streamHolds));
+  /**
+   * The rows stay where they first drew (the still-rows pass, 2026-11-11): an item a sync brings waits behind *Show N new*
+   * rather than pushing every row down under the pointer. A row a press takes away goes as before (`keepLeft: false`), and
+   * keeps its place, so *Undo* brings it back where it stood.
+   */
+  const streamHold = new HeldOrder<InboxEntry>((entry) => entry.item.key, () => "", { keepLeft: false });
+  const placed = $derived(inbox.answered ? streamHold.place(rows, JSON.stringify([scope, job, filter.chips["kind"] ?? []])) : { rows: [] as InboxEntry[], waiting: 0, stale: false });
+  const heldBar = $derived({ waiting: placed.waiting, stale: placed.stale, show: () => streamHold.release() });
+  const drawn = $derived(withHolds(placed.rows, streamHolds));
   const shelfDrawn = $derived(withHolds(shelf, shelfHolds));
   const anyHeld = $derived(streamHolds.length + shelfHolds.length > 0);
   /** A key's hold, for as long as it stands. */
@@ -192,7 +201,7 @@
    * `detail` 0: the list closes at once, and focus goes to the same action on the next row, or that row where it has none.
    */
   function leaves(entry: InboxEntry, list: "stream" | "shelf", action: string, event?: MouseEvent) {
-    const among = list === "stream" ? rows : shelf;
+    const among = list === "stream" ? placed.rows : shelf;
     const key = entry.item.key;
     // The Snooze float stands in the float host, so a pick has no row around it and finds the row it was opened on.
     const row = heldByPointer(event) ? ((event?.currentTarget as Element | null)?.closest(".tf-ib") ?? document.querySelector(`.tf-ib[data-row="${CSS.escape(key)}"]`)) : null;
@@ -272,14 +281,14 @@
 
   /** `j`/`k` and the arrows (F-143): to the next or previous row's link, as Tickets walks its cards. With no row focused, from what is in view (F-075). */
   function walk(by: 1 | -1) {
-    const keys = [...rows, ...(shelfEl?.open ? shelf : [])].map((row) => row.item.key);
+    const keys = [...placed.rows, ...(shelfEl?.open ? shelf : [])].map((row) => row.item.key);
     if (keys.length === 0) return;
     const on = document.activeElement?.closest<HTMLElement>(".tf-ib[data-row]")?.dataset["row"];
     const at = on === undefined ? -1 : keys.indexOf(on);
     const seen = at < 0 ? (rowInView(document.querySelectorAll(".tf-ib[data-row]"), by) as HTMLElement | null)?.dataset["row"] : undefined;
     const from = seen === undefined ? -1 : keys.indexOf(seen);
     const to = at >= 0 ? Math.min(keys.length - 1, Math.max(0, at + by)) : from >= 0 ? from : by === 1 ? 0 : keys.length - 1;
-    if (to < rows.length && from < 0) win.reveal(to);
+    if (to < placed.rows.length && from < 0) win.reveal(to);
     flushSync();
     const row = document.querySelector<HTMLElement>(`.tf-ib[data-row="${CSS.escape(keys[to]!)}"]`);
     row?.querySelector<HTMLElement>("a, button")?.focus();
@@ -430,6 +439,8 @@
   /** Back in the stream: a snooze until now, which clears a snooze and a *Done* alike. */
   function bringBack(entry: InboxEntry) {
     const what = named(entry.item);
+    // The person's press: the row stands where it sorts, not behind *Show N new*.
+    streamHold.admit(entry.item.key);
     void inbox.snooze(entry.item.key, new Date(), saysFailure(what, "bring back", () => bringBack(entry)));
   }
 
@@ -534,6 +545,7 @@
   function wake(entry: InboxEntry, event?: MouseEvent) {
     leaves(entry, "shelf", "wake", event);
     wakeToast(entry);
+    streamHold.admit(entry.item.key);
     void inbox.snooze(entry.item.key, new Date(), saysFailure(named(entry.item), "wake", () => wake(entry))).then(async () => {
       // A key's landing has to be seen, and the woken row has just taken room above the shelf and carried it down (F-148).
       if (heldByPointer(event)) return;
@@ -578,7 +590,7 @@
     <div class="tf-sub">What asks for you, newest first. Each row says which job it belongs to.</div>
   </div>
 </header>
-<FilterBar {config} {filter} shown={inbox.answered ? rows.length : null} total={inbox.answered ? inbox.stream.length : null} />
+<FilterBar {config} {filter} shown={inbox.answered ? placed.rows.length : null} total={inbox.answered ? inbox.stream.length : null} held={heldBar} />
 <div class="tf-ibody">
   {#if inbox.error !== null && inbox.error !== toasted}
     <p class="tf-ifail">Could not read the inbox: {inbox.error}</p>

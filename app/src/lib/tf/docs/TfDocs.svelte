@@ -1640,8 +1640,9 @@
       {:else if back !== null}
         <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs" }]} {back} /></div>
       {/if}
+      <!-- With a job, the home waits for the pages it reaches, which it lists above the rest: drawn before them, every row moved down when they landed (the still-rows pass, 2026-11-11). -->
       <TfDocsHome
-        {tree}
+        tree={job !== null && reach === null ? null : tree}
         failed={treeError}
         {job}
         groups={jobGroups}

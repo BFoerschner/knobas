@@ -500,6 +500,11 @@ test("of two reads again, the later one's answer stands even when the earlier on
   await settle();
   answerFirst(RUNNING);
   await settle();
+  // A run a sync brings waits behind *Show N new* (the still-rows pass, 2026-11-11); shown, it is the later answer.
+  const show = [...target.querySelectorAll<HTMLButtonElement>(".tf-fheld")].find((button) => /^Show \d+ new$/.test(button.textContent!.trim()));
+  expect(show, "the new run waits behind Show N new").toBeDefined();
+  show!.click();
+  await settle();
   expect(firstRow().textContent).toContain("#1188");
   expect(firstRow().textContent).not.toContain("running");
 });

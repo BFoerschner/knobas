@@ -104,6 +104,7 @@
   import { clockLabel } from "../../time/format";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import { stamped, stampOf } from "../opener";
+  import { HeldOrder } from "../held-order.svelte";
   import { rowInView } from "../return-place";
   import { parseTfHash } from "../route";
   import type { RoleFrameProps } from "../page-entry";
@@ -531,8 +532,58 @@
       statusOrder(boardColumns),
     ),
   );
+  // -- cards and rows stay where they first drew (the still-rows pass, 2026-11-11) --
+  /** What the person chose, and each read they caused: a change sorts the cards again. A sync's read holds them. */
+  const heldBasis = $derived(JSON.stringify([filterId, filter.text, filter.chips, filter.dropdowns, filter.scope, showing, reader.lanesShown, reader.asked]));
+  type HeldCard = { tag: string; card: MiniBoardCard };
+  /** Every drawn card in reading order, each in the lane and column it drew in. */
+  const boardHold = new HeldOrder<HeldCard>(({ card }) => card.entity_id, ({ tag }) => tag);
+  const placeAt = (lane: { key: string | null }, column: MiniBoardColumn) => `${lane.key ?? ""}\u0001${columnKey(column)}`;
+  const heldBoard = $derived(
+    showing.layout === "board" && reader.board !== null
+      ? boardHold.place(
+          reader.bands.flatMap(({ lane, drawn }) => drawn.flatMap(({ column, cards }) => cards.map((card) => ({ tag: placeAt(lane, column), card })))),
+          heldBasis,
+        )
+      : { rows: [] as HeldCard[], waiting: 0, stale: false },
+  );
+  /** The columns too: a status a sync brings is a column that would land left of the drawn ones and slide them all. */
+  type Drawn = (typeof reader.bands)[number]["drawn"][number];
+  type HeldColumn = { lane: string; entry: Drawn };
+  const columnHold = new HeldOrder<HeldColumn>(({ lane, entry }) => `${lane}\u0001${columnKey(entry.column)}`, ({ lane }) => lane);
+  const heldColumns = $derived(
+    showing.layout === "board" && reader.board !== null
+      ? columnHold.place(reader.bands.flatMap(({ lane, drawn }) => drawn.map((entry) => ({ lane: lane.key ?? "", entry }))), heldBasis)
+      : { rows: [] as HeldColumn[], waiting: 0, stale: false },
+  );
+  const columnsOf = (lane: { key: string | null }) => heldColumns.rows.filter((held) => columnHold.tagOf(held) === (lane.key ?? "")).map(({ entry }) => entry);
+  const heldCards = $derived.by(() => {
+    const by = new Map<string, MiniBoardCard[]>();
+    for (const entry of heldBoard.rows) {
+      const at = boardHold.tagOf(entry);
+      by.set(at, [...(by.get(at) ?? []), entry.card]);
+    }
+    return by;
+  });
+  const listHold = new HeldOrder<{ card: MiniBoardCard }>(({ card }) => card.entity_id);
+  const heldList = $derived(
+    showing.layout === "list" && reader.board !== null ? listHold.place(rows, heldBasis) : { rows: [] as { card: MiniBoardCard }[], waiting: 0, stale: false },
+  );
+  const held = $derived(showing.layout === "board" ? heldBoard : heldList);
+  const heldBar = $derived({
+    waiting: held.waiting,
+    stale: held.stale || (showing.layout === "board" && heldColumns.stale),
+    show: () => {
+      if (showing.layout === "board") {
+        boardHold.release();
+        columnHold.release();
+      } else listHold.release();
+    },
+  });
+  const listRows = $derived(heldList.rows);
+
   /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
-  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.card.entity_id, estimate: 52 });
+  const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
   /** A card's source name when its key is shared, else `null`. */
@@ -552,10 +603,10 @@
   /** What is on screen, in reading order: the first is selected when the selection is not. */
   const visible = $derived(
     showing.layout === "board"
-      ? reader.bands.flatMap(({ drawn }) =>
-          drawn.flatMap(({ cards }) => cards.map((card) => ({ card }))),
+      ? reader.bands.flatMap(({ lane }) =>
+          columnsOf(lane).flatMap(({ column }) => (heldCards.get(placeAt(lane, column)) ?? []).map((card) => ({ card }))),
         )
-      : rows,
+      : listRows,
   );
   const current = $derived(visible.find((entry) => entry.card.entity_id === session.selected) ?? visible[0] ?? null);
 
@@ -586,16 +637,29 @@
     untrack(() => reader.refresh());
   });
 
+  /**
+   * Whether the filter bar has its chips: they wrap the bar onto a second line, so cards drawn before them moved down
+   * 32 px when they landed (the still-rows pass, 2026-11-11). The board waits for them, or {@link FRAME_WAIT_MS} at most.
+   */
+  let framed = $state(false);
+  const FRAME_WAIT_MS = 1500;
+
   // Once the database answers: the views and the suggestions.
   $effect(() => {
     if (!ready) return;
+    const most = setTimeout(() => (framed = true), FRAME_WAIT_MS);
     untrack(() => {
       loadViews();
       ports
         .suggestions()
         .then((answer) => (suggested = answer))
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          clearTimeout(most);
+          framed = true;
+        });
     });
+    return () => clearTimeout(most);
   });
 
   /** The sticky table head sits under the filter bar, however many rows the bar wrapped to. */
@@ -871,6 +935,7 @@
         total={reader.total}
         onchange={() => reader.setFilter(filterNow())}
         extra={lanesSwitch}
+        held={heldBar}
       />
     {/if}
 
@@ -887,7 +952,7 @@
       </div>
     {:else if reader.failed !== null}
       <div class="tf-empty"><p>The tickets could not be read: {reader.failed}</p></div>
-    {:else if reader.board === null}
+    {:else if reader.board === null || !framed}
       <div class="tf-empty" aria-busy="true"></div>
     {:else if reader.shown === 0 && isFiltering(filter)}
       <div class="tf-empty">
@@ -912,13 +977,13 @@
         </div>
       {/if}
     {:else if showing.layout === "board"}
-      {#each reader.bands as { lane, drawn } (lane.key ?? "")}
+      {#each reader.bands as { lane } (lane.key ?? "")}
         <div class="tf-lane" class:tf-laned={reader.laned}>
           {#if lane.key !== null}
             <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
-            {#each drawn as { column, cards, done, listed } (columnKey(column))}
+            {#each columnsOf(lane) as { column, cards, done, listed } (columnKey(column))}
               {@const more = moreLine(column, cards.length, done)}
               {@const pointer = listPointer(column, cards.length)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
@@ -933,7 +998,7 @@
                   >
                 </h3>
                 <div class="tf-stack">
-                  {#each cards as card (card.entity_id)}
+                  {#each heldCards.get(placeAt(lane, column)) ?? [] as card (card.entity_id)}
                     <TicketCard
                       {card}
                       fields={view?.card_fields ?? null}
@@ -983,7 +1048,7 @@
             {#if win.before > 0}
               <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} {@attach win.room("before")}></td></tr>
             {/if}
-            {#each win.slice(rows) as { card } (card.entity_id)}
+            {#each win.slice(listRows) as { card } (card.entity_id)}
               <tr
                 {@attach win.row(card.entity_id)}
                 class="tf-row"

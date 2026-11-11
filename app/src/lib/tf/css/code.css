@@ -491,3 +491,8 @@
 .tf-fmore-m > a:hover, .tf-fmore-m > a:focus-visible { background: var(--sheet-2); }
 .tf-fmore-m > span[aria-disabled="true"] { color: var(--ink-2); cursor: default; }
 .tf-fmore-m small { font-size: var(--t-xs); max-width: 260px; }
+/* The line under a pull request's title holds one line whatever lands in it: its author comes with `code_facts`, after
+   the row drew, and a line that wrapped then grew the row under the pointer (the still-rows pass, PR #2479). */
+.tf-cprs .tf-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A line that fills in after its row drew holds one line from the start (the still-rows pass). */
+.tf-tbl .tf-sub.tf-oneline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

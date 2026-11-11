@@ -138,6 +138,7 @@
   import { ago } from "../../shell/time";
   import { dismiss, push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { HeldOrder } from "../held-order.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
@@ -464,7 +465,19 @@
   );
   /** The marked monitor, whatever the filter and the fold say: the reader came for it. */
   const markedRow = $derived(markedId === null ? null : (roster?.find((row) => row.entity_id === markedId) ?? null));
-  const rows = $derived(markedRow !== null && !kept.shown.includes(markedRow) ? [markedRow, ...kept.shown] : kept.shown);
+  /**
+   * The roster stays where it first drew (the still-rows pass, 2026-11-11): a check that goes down sorts first, and a
+   * sync bringing it jumped every row under the pointer. It waits behind *Sort again*; a monitor a sync adds above
+   * waits behind *Show N new*. A row a press takes away (*Hide*) goes, and keeps its place for an *Undo*.
+   */
+  const rosterHold = new HeldOrder<(typeof kept.shown)[number]>((row) => row.entity_id, () => "", { keepLeft: false });
+  const heldRoster = $derived(
+    roster === null
+      ? { rows: [] as typeof kept.shown, waiting: 0, stale: false }
+      : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text])),
+  );
+  const heldBar = $derived({ waiting: heldRoster.waiting, stale: heldRoster.stale, show: () => rosterHold.release() });
+  const rows = $derived(markedRow !== null && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
   const hiddenRows = $derived(markedRow === null ? kept.hidden : kept.hidden.filter((row) => row !== markedRow));
   const foldOpen = $derived(hiddenFoldOpen(hiddenFold.open, kept));
   /** The roster's own size, for the count: a hidden monitor is counted apart, unless it is marked and so a row of the list. */
@@ -777,7 +790,7 @@
   >
 </nav>
 {#if tab === "all"}
-  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal}>
+  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal} held={heldBar}>
     {#snippet after()}<span class="tf-mon-hidn">{#if hiddenRows.length > 0}, {hiddenRows.length} hidden{/if}</span>{/snippet}
   </FilterBar>
 {:else}
@@ -839,7 +852,7 @@
                   {@const was = holding.row}
                   {@const chip = stateChip(was, now)}
                   <td>{was.name}{#if was.monitor_type}{" "}<span class="tf-mon-type">{kindWord(was.monitor_type)}</span>{/if}</td>
-                  <td><div class="tf-mon-state"><TfStateChip text={chip.label} />{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
+                  <td><div class="tf-mon-state"><TfStateChip text={chip.label} />{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
                   <td>{#each was.assets as asset (asset.id)}<div><span class="tf-mon-asset">{asset.name}</span>{" "}<span class="tf-mon-type">{asset.type_label}</span></div>{/each}</td>
                   <td><div class="tf-mon-24"><span class="tf-mon-figs">{responseText(was.response_time_ms)}, {uptimeText(was)}</span></div></td>
                   <td class="tf-num"><span>{responseText(was.response_time_ms)}</span></td>
@@ -872,7 +885,7 @@
               {@const refresher = refreshers.get(row.entity_id)}
               <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
+                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
                 <!-- Before the bars and figures, not after them: the row's actions stand in the last column's place on hover, and this column's links have to stay in reach. -->
                 <td>
                   {#each row.assets as asset (asset.id)}

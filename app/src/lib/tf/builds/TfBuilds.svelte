@@ -88,6 +88,7 @@
   import { RUN_BRIDGE } from "./pipeline-ports";
   import {
     CHIPS,
+    foldHolds,
     foldOpen,
     groupsOf,
     isFailing,
@@ -214,11 +215,26 @@
     if (head !== "builds") return list.find((p) => p.entity_id === rest[0]) ?? null;
     // A bare `#/builds` is the pipeline you were on: going back to Builds never changes the page under you.
     const had = rest.length === 0 && lastPipeline.value !== null && list.find((p) => p.entity_id === lastPipeline.value);
-    return had || pipelineOf(list, rest, jobsOwn);
+    // The pipeline a bare `#/builds` drew stays while it is listed: picked as the first failing, it stopped failing
+    // when a sync brought a passing run, and the page swapped to another under the pointer (the still-rows pass).
+    const drew = rest.length === 0 && bareDrew !== null && list.find((p) => p.entity_id === bareDrew);
+    return had || drew || pipelineOf(list, rest, jobsOwn);
   }
-  const selected = $derived(all === null ? null : selectedOf(all));
+  /** What a bare `#/builds` drew, for as long as the page lives. */
+  let bareDrew = $state<string | null>(null);
+  /**
+   * A bare `#/builds` with a job and nothing remembered opens the job's first pipeline, which only its reasons know: until
+   * they are read the page draws no pipeline, so it never draws one pipeline's runs and swaps to another's under the
+   * pointer (the still-rows pass, 2026-11-11).
+   */
+  const deciding = $derived(
+    all !== null && head === "builds" && rest.length === 0 && job !== null && reasons === null &&
+      !(lastPipeline.value !== null && all.some((p) => p.entity_id === lastPipeline.value)),
+  );
+  const selected = $derived(all === null || deciding ? null : selectedOf(all));
   $effect(() => {
     if (selected !== null && (rest.length > 0 || head !== "builds")) lastPipeline.value = selected.entity_id;
+    if (selected !== null && rest.length === 0 && head === "builds" && bareDrew !== selected.entity_id) bareDrew = selected.entity_id;
   });
   /** The page you are on where the rail's filter leaves it out; `null` while the job's reasons are still being read. */
   const outside = $derived(
@@ -253,15 +269,28 @@
   const trees = $derived(treeOf(kept));
   /** Whether anything narrows the list, which opens every fold. */
   const narrowed = $derived(chips.length > 0 || scope === "job");
+  /**
+   * A fold the reader has not opened or shut keeps the state it first drew in (the still-rows pass, 2026-11-11): one
+   * opens by itself while a pipeline in it fails, and a sync bringing a pass shut it, or a failure opened it, and the
+   * rail's rows moved under the pointer. A changed filter decides again; the open pipeline's fold still opens.
+   */
+  let foldsDrew = new Map<string, boolean>();
+  let foldsBasis = "";
   /** What the list draws, flattened: the windowed list's rows. */
-  const rows = $derived(
-    listRows(
-      pinned,
-      trees,
-      scope,
-      (f) => foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed),
-    ),
-  );
+  const rows = $derived.by(() => {
+    const basis = JSON.stringify([narrowed, scope, chips]);
+    if (basis !== foldsBasis) {
+      foldsDrew = new Map();
+      foldsBasis = basis;
+    }
+    const at = selected?.entity_id ?? null;
+    return listRows(pinned, trees, scope, (f) => {
+      const own = remembered.get(f.key);
+      if (own !== undefined) return own;
+      if (!foldsDrew.has(f.key)) foldsDrew.set(f.key, foldOpen(undefined, f, at, narrowed));
+      return foldsDrew.get(f.key)! || foldHolds(f, at);
+    });
+  });
   // A pipeline with its strip is about 36 px; headings and summaries are measured once drawn.
   const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 36 });
 
@@ -446,6 +475,9 @@
       {#if all !== null && (rest.length !== 1 || lost === rest[0])}
         <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href="#/builds" action="All pipelines" />
       {/if}
+    {:else if deciding}
+      {@render crumbs([{ name: "Builds" }])}
+      {@render bare()}
     {:else if selected !== null}
       <!-- One crumb at both of a pipeline's addresses: `#/builds` draws this page already, so nothing above it links. -->
       {@render crumbs([{ name: "Builds" }, ...(selected.group !== null ? [{ name: selected.group }] : []), { name: selected.name }])}

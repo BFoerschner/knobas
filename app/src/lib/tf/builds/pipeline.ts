@@ -345,6 +345,8 @@ export function branchesOf(runs: readonly RunRow[]): string[] {
 /** One day's runs, under its heading. */
 export interface DayGroup {
   label: string;
+  /** The label, or the label and its count where the day comes twice. */
+  key: string;
   runs: RunRow[];
 }
 
@@ -360,7 +362,11 @@ export function byDay(runs: readonly RunRow[], now: Date = new Date()): DayGroup
     const label = at === null ? (groups.at(-1)?.label ?? "Today") : dayHeadingLabel(new Date(at), now);
     const last = groups.at(-1);
     if (last && last.label === label) last.runs.push(run);
-    else groups.push({ label, runs: [run] });
+    else {
+      // A day can come twice where the runs are held in the order they drew (`held-order`): each group keys apart.
+      const again = groups.filter((group) => group.label === label).length;
+      groups.push({ label, key: again === 0 ? label : `${label} ${again + 1}`, runs: [run] });
+    }
   }
   return groups;
 }

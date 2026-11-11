@@ -68,7 +68,7 @@
   $effect(() => untrack(() => watchEchoes(REPO_PRS, () => reread(), { listen: ports.listen })));
 
   let jobs = $state<OpenJob[]>([]);
-  /** Each pull request's author, once `code_facts` answered, as Code's rows say it: *you* for the reader's own. A failed read leaves the line off. */
+  /** Each pull request's author, once `code_facts` answered, as Code's rows say it: *you* for the reader's own. A failed read leaves the line blank, its room kept. */
   let authors = $state.raw<ReadonlyMap<string, string>>(new Map());
 
   $effect(() => {
@@ -149,7 +149,7 @@
         <tr class="tf-row" data-place onclick={(event) => open(event, itemHash(row))}>
           <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td
-            ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a>{#if author}<span class="tf-sub"><Marked text={author} typed={filter.text} /></span>{/if}</td
+            ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a><!-- The author's line is held while `code_facts` reads, so a row is as tall from its first draw (the still-rows pass, 2026-11-11). --><span class="tf-sub tf-oneline">{#if author}<Marked text={author} typed={filter.text} />{:else}&nbsp;{/if}</span></td
           >
           <td>{#if row.state}<TfStateChip text={row.state.text} tone={row.state.tone} />{/if}</td>
           <td class="tf-mono tf-dim">{#if belongs !== null && belongs === job}<TfKey chip value={belongs} class="tf-chip-job" />{:else}{belongs ?? ""}{/if}</td>
