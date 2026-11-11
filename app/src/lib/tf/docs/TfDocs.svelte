@@ -286,7 +286,9 @@
    */
   let tree = $state.raw<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
-  let page = $state<DocPage | null>(null);
+  // Raw, as the tree is: the page is replaced whole on each read and never changed in place, and a deep proxy made
+  // drawing a long page read its every block through one (PR #2479).
+  let page = $state.raw<DocPage | null>(null);
   // Whether the open page's source runs its embeds, for every embed drawn below (#2440).
   provideEmbeds(() => page?.run_embeds ?? true);
   // What *Back to <name>* calls Docs once it is left: the page's title, the space's name or the search, as the crumb
@@ -944,7 +946,7 @@
         const all = matches();
         at = Math.min(at, all.length - 1);
         markCurrent(all);
-        follow();
+        afterPaint(follow);
         return;
       }
       at = -1;
@@ -955,9 +957,18 @@
         if (samePage && findTyped) findFromLine();
         else jump(1);
       } else marks = 0;
-      follow();
+      afterPaint(follow);
     });
   });
+
+  /**
+   * `run` once the page has painted: what reads where things landed (the outline's section, the reading place) reads a
+   * laid-out page then, instead of laying a newly drawn one out inside the task that drew it (PR #2479).
+   */
+  function afterPaint(run: () => void): void {
+    if (typeof requestAnimationFrame !== "function") return run();
+    requestAnimationFrame(() => setTimeout(run, 0));
+  }
 
   function onfindkey(event: KeyboardEvent): void {
     if (event.key !== "Enter") return;
@@ -1058,13 +1069,14 @@
     syncInMore = fit.syncInMore;
   }
 
-  // The width and what the row holds both decide. The observer answers before the page paints.
+  // The width and what the row holds both decide. The observer answers before the page paints, once on being made: a
+  // measure here as well would lay a new page out inside the task that draws it (PR #2479: 55 ms of a quarter-speed
+  // main thread on the largest Confluence page), and again in the frame.
   $effect(() => {
     if (sheet === null || headActs === null) return;
     void page;
     void detail;
-    untrack(fitHeader);
-    if (typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === "undefined") return untrack(fitHeader);
     const seen = new ResizeObserver(() => fitHeader());
     seen.observe(sheet);
     seen.observe(headActs);

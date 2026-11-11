@@ -1261,9 +1261,16 @@ function sheetWidth(width: number): void {
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      #told = false;
       constructor(private readonly heard: () => void) {}
+      // A browser's observer reports each box once on being observed, before the next paint.
       observe() {
         observers.add(this.heard);
+        if (this.#told) return;
+        this.#told = true;
+        queueMicrotask(() => {
+          if (observers.has(this.heard)) this.heard();
+        });
       }
       unobserve() {}
       disconnect() {

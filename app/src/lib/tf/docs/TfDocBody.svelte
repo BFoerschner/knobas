@@ -67,11 +67,11 @@
   } = $props();
 
   // A long page draws in pieces (PR #2479: the largest Confluence page's 216 KB body was one 94 ms task, 264 ms on a
-  // main thread a quarter as fast): the sections that fit `FIRST` characters of body, then `MORE` each task after,
+  // main thread a quarter as fast): the sections that fit `FIRST` characters of body (more than a screenful), then `MORE` each task after,
   // each its own task, so the page paints and answers between them. `drawAll` draws the rest at once, for whatever
   // needs the whole body on the page: a section's address, a find, the place a reader left.
-  const FIRST = 40_000;
-  const MORE = 24_000;
+  const FIRST = 24_000;
+  const MORE = 16_000;
   const all = $derived(sectionsOf(blocks));
   const weights = $derived(all.map((section) => JSON.stringify(section.blocks).length + 64));
   /** How much of this page's body to draw now; a page drawn whole stays whole when it is read again. */
