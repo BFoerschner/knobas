@@ -2,6 +2,9 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { capturePlace, placeRestoring, resetScrolls, restorePlace } from "./return-place";
 
+/** A box the test scrolled: a browser's scroll raises `scroll`, which is how the place finds the boxes that moved. */
+const scrolled = (...boxes: Element[]) => boxes.forEach((box) => box.dispatchEvent(new Event("scroll")));
+
 /** jsdom lays nothing out, so a scroller's offset is just a number it holds. */
 function draw(html: string): { main: HTMLElement; page: HTMLElement } {
   document.body.innerHTML = `<main class="tf-main"><div class="tf-kept">${html}</div></main>`;
@@ -33,6 +36,7 @@ test("a scroller redrawn while away is found again by its classes", () => {
   const wrap = page.querySelector(".tf-board-wrap")!;
   wrap.scrollTop = 120;
   wrap.scrollLeft = 200;
+  scrolled(wrap);
   const place = capturePlace(main, page, null, "#/ticket/x");
   wrap.remove();
   page.insertAdjacentHTML("beforeend", `<div class="tf-board-wrap"></div>`);

@@ -15,6 +15,8 @@
  * stay or until the reader moves, whichever is first.
  */
 
+import { scrolledWithin } from "./scrolled";
+
 /** One scroller's offset, and how to find it again if its element was redrawn. */
 interface Scroll {
   el: Element;
@@ -48,7 +50,7 @@ const classesOf = (el: Element): string => [...el.classList].map((name) => `.${n
 /** The page's scrollers: its page scroller and its inner ones even at 0, and anything else that has moved. */
 function scrollersOf(main: Element, page: Element): Element[] {
   const inner = [...page.querySelectorAll(".tf-scroller")];
-  const moved = [...page.querySelectorAll("*")].filter((el) => (el.scrollTop !== 0 || el.scrollLeft !== 0) && !inner.includes(el));
+  const moved = scrolledWithin(page).filter((el) => !inner.includes(el));
   return [main, ...inner, ...moved];
 }
 
@@ -230,7 +232,8 @@ export function restorePlace(place: Place, page: Element, withFocus = true): () 
     for (const type of READER_MOVES) window.removeEventListener(type, end, true);
   };
   if (withFocus) restoring += 1;
-  for (const type of READER_MOVES) window.addEventListener(type, end, true);
+  // Passive: it only notes that the reader moved, and a wheel listener that is not holds each scroll for the main thread.
+  for (const type of READER_MOVES) window.addEventListener(type, end, { capture: true, passive: true });
   const step = () => {
     if (over) return;
     if (!page.isConnected || performance.now() - started > HOLD_FOR) return end();

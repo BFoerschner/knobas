@@ -86,6 +86,7 @@
   import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { tick, untrack } from "svelte";
+  import { on } from "svelte/events";
   import type { RoleFrameProps } from "../page-entry";
   import { MediaQuery } from "svelte/reactivity";
   import { sourceRoles, WIKI } from "../roles.svelte";
@@ -188,6 +189,7 @@
     spaceOfPage,
     stemsOf,
     provideEmbeds,
+    keepDrawn,
   } from "./docs";
   import { replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
@@ -425,7 +427,7 @@
       (answer) => {
         if (mine !== pageAsked) return false;
         const opens = !quiet || page?.entity_id !== id;
-        page = answer;
+        page = keepDrawn(page, answer);
         me = answer.me;
         pageError = null;
         if (opens) visited = io.visitEntity(id).catch(() => {});
@@ -825,12 +827,15 @@
   // ---- the find bar (R-10.12) ----
   const stems = $derived(stemsOf(find));
   let article = $state<HTMLElement | null>(null);
+  /** The page's body, which draws a long page in pieces: whatever needs all of it draws the rest first. */
+  let body = $state<{ drawAll(): void } | null>(null);
   let main = $state<HTMLElement | null>(null);
   let marks = $state(0);
   let at = $state(-1);
 
   /** The page's matches as drawn, counted for the find bar. */
   function matches(): HTMLElement[] {
+    body?.drawAll();
     const all = article ? [...article.querySelectorAll("mark")] : [];
     marks = all.length;
     return all;
@@ -897,6 +902,7 @@
 
   /** A page opened at its mention: the newest comment that names the reader, else the first mention in its body. */
   function toMention(): void {
+    body?.drawAll();
     const comments = article?.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
     const at = comments?.[comments.length - 1] ?? article?.querySelector<HTMLElement>(".tf-ment.tf-me");
     at?.scrollIntoView?.({ block: "center" });
@@ -923,6 +929,7 @@
     if (started !== null && !samePage && untrack(() => find) === "") findTyped = false;
     started = { id: p.entity_id, stems: query };
     void tick().then(() => {
+      if (resuming?.id === p.entity_id || again || (place.kind === "page" && place.section !== null && !samePage) || stems.length > 0) body?.drawAll();
       if (resuming?.id === p.entity_id) {
         const { top } = resuming;
         resuming = null;
@@ -1089,6 +1096,12 @@
     active = now;
   }
 
+  /**
+   * A wheel over the page releases the outline's pick. Passive, as every other wheel listener in the app is: an
+   * `onwheel` attribute is not, and Chromium then holds each scroll for the main thread (PR #2479).
+   */
+  const releaseOnWheel = (node: HTMLElement) => on(node, "wheel", () => (pickedSection = null), { passive: true });
+
   /** The outline's entry the reader clicked: it stays marked until they scroll by hand. */
   let pickedSection = $state<number | null>(null);
   $effect(() => {
@@ -1098,7 +1111,10 @@
 
   /** Scroll to section `number`, where the page is drawn. */
   function toSection(number: number): void {
-    void tick().then(() => article?.querySelector(`#s-${number}`)?.scrollIntoView?.());
+    void tick().then(() => {
+      body?.drawAll();
+      article?.querySelector(`#s-${number}`)?.scrollIntoView?.();
+    });
   }
 
   // An outline entry changes the address on the page already open: nothing is read again, so the scroll is here.
@@ -1604,7 +1620,7 @@
     <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
   {/if}
 
-  <TfScroller class="tf-rd-main" bind:ref={main} onscroll={follow} onwheel={() => (pickedSection = null)} onpointerdown={(event) => { if (event.target === event.currentTarget) pickedSection = null; }} onkeydown={releaseSection}>
+  <TfScroller class="tf-rd-main" bind:ref={main} onscroll={follow} {@attach releaseOnWheel} onpointerdown={(event) => { if (event.target === event.currentTarget) pickedSection = null; }} onkeydown={releaseSection}>
     <!-- The one fold bar below 900 px. The tree it opens is a drawer, because the page does not reflow under it. -->
     {#if drawerBand.current}
       <TfRailBar
@@ -1771,6 +1787,7 @@
           <div class="tf-doc">
             {#if p.readable}
               <TfDocBody
+                bind:this={body}
                 blocks={p.blocks}
                 entityId={p.entity_id}
                 sourceName={p.source_name}

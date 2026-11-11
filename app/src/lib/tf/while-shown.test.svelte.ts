@@ -66,12 +66,13 @@ test("a timer stops while hidden and runs once when shown again", () => {
   expect(ticks).toBe(4);
 });
 
-/** An element whose scroll a test can set and read: jsdom keeps none. */
+/** An element whose scroll a test can set and read: jsdom keeps none. A scroll raises `scroll`, as a browser's does. */
 function scroller(el: HTMLElement): HTMLElement {
   let top = 0;
   let left = 0;
-  Object.defineProperty(el, "scrollTop", { get: () => top, set: (n: number) => (top = n), configurable: true });
-  Object.defineProperty(el, "scrollLeft", { get: () => left, set: (n: number) => (left = n), configurable: true });
+  const moved = () => el.dispatchEvent(new Event("scroll"));
+  Object.defineProperty(el, "scrollTop", { get: () => top, set: (n: number) => ((top = n), moved()), configurable: true });
+  Object.defineProperty(el, "scrollLeft", { get: () => left, set: (n: number) => ((left = n), moved()), configurable: true });
   return el;
 }
 

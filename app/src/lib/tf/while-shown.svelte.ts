@@ -9,6 +9,8 @@
  */
 import { untrack } from "svelte";
 
+import { scrolledWithin } from "./scrolled";
+
 /** Run `run` (untracked) each time `shown()` turns from false to true; never on the first. */
 export function onShownAgain(shown: () => boolean, run: () => void): void {
   let was = untrack(shown);
@@ -70,9 +72,7 @@ export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => b
       const scrolled: [Element, number, number][] = [];
       const main = at.closest(".tf-main");
       if (main !== null) scrolled.push([main, main.scrollTop, main.scrollLeft]);
-      for (const el of at.querySelectorAll("*")) {
-        if (el.scrollTop !== 0 || el.scrollLeft !== 0) scrolled.push([el, el.scrollTop, el.scrollLeft]);
-      }
+      for (const el of scrolledWithin(at)) scrolled.push([el, el.scrollTop, el.scrollLeft]);
       saved = scrolled;
       leftAt = untrack(address);
     };

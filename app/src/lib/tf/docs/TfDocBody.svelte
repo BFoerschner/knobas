@@ -31,6 +31,7 @@
   import { refusedAttrs } from "../../shell/refused-writes";
   import { echoOn, takeAgain } from "../queued.svelte";
   import { inlineWords, refusalReason, sectionKind, sectionsOf } from "./docs";
+  import { flushSync } from "svelte";
 
   let {
     blocks,
@@ -64,6 +65,38 @@
     /** Queue the edit; `true` once it is queued. */
     onsave: (section: number, text: string) => Promise<boolean>;
   } = $props();
+
+  // A long page draws in pieces (PR #2479: the largest Confluence page's 216 KB body was one 94 ms task, 264 ms on a
+  // main thread a quarter as fast): the sections that fit `FIRST` characters of body, then `MORE` each task after,
+  // each its own task, so the page paints and answers between them. `drawAll` draws the rest at once, for whatever
+  // needs the whole body on the page: a section's address, a find, the place a reader left.
+  const FIRST = 40_000;
+  const MORE = 24_000;
+  const all = $derived(sectionsOf(blocks));
+  const weights = $derived(all.map((section) => JSON.stringify(section.blocks).length + 64));
+  /** How much of this page's body to draw now; a page drawn whole stays whole when it is read again. */
+  let grown = $state<{ id: string; budget: number }>({ id: "", budget: FIRST });
+  const budget = $derived(grown.id === entityId ? grown.budget : FIRST);
+  const shown = $derived.by(() => {
+    let used = 0;
+    let n = 0;
+    while (n < all.length && (n === 0 || used + weights[n]! <= budget)) used += weights[n++]!;
+    return n === all.length ? all : all.slice(0, n);
+  });
+  $effect(() => {
+    const id = entityId;
+    const more = budget + MORE;
+    if (shown.length >= all.length) return;
+    const later = setTimeout(() => (grown = { id, budget: more }), 0);
+    return () => clearTimeout(later);
+  });
+
+  /** Draws the rest of the page's body now, before what needs all of it on the page. */
+  export function drawAll(): void {
+    if (shown.length >= all.length) return;
+    grown = { id: entityId, budget: Infinity };
+    flushSync();
+  }
 
   let editing = $state<number | null>(null);
   let draft = $state("");
@@ -148,7 +181,7 @@
   }
 </script>
 
-{#each sectionsOf(blocks) as section (section.number)}
+{#each shown as section (section.number)}
   {#if section.heading === null}
     <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} />
   {:else}

@@ -842,3 +842,20 @@ export function jobPageGroups(
   }
   return [...groups].map(([reason, pages]) => ({ reason, pages }));
 }
+
+/**
+ * `next`, a page read again, with what `drawn` already draws where it reads the same: its body's blocks and each
+ * comment's, so a return to a kept page, or a sync's re-read, rebuilds none of it (PR #2479: the largest Confluence
+ * page drew its 216 KB body again on every return, 75 to 94 ms in one task).
+ */
+export function keepDrawn(drawn: DocPage | null, next: DocPage): DocPage {
+  if (drawn === null || drawn.entity_id !== next.entity_id) return next;
+  const same = <T>(a: T, b: T) => a === b || JSON.stringify(a) === JSON.stringify(b);
+  const blocks = same(drawn.blocks, next.blocks) ? drawn.blocks : next.blocks;
+  const comments = next.comments.map((c, i) => {
+    const was = drawn.comments[i];
+    return was !== undefined && same(was, c) ? was : c;
+  });
+  const sections = same(drawn.sections, next.sections) ? drawn.sections : next.sections;
+  return { ...next, blocks, comments, sections };
+}
