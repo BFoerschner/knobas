@@ -2875,6 +2875,26 @@ It writes `trips.json` and `trips.md` to the out folder and exits 1 if a trip fa
 Chromes (2), and `--strict` adds the trips marked strict, which is how the loop ran it. `KNOBAS_CHROME` names another
 Chrome. `with-built.sh` serves the folder on 127.0.0.1 for the length of the command and refuses a port already taken.
 
+**Rows that hold still** (`rows-still` in `trips.mjs`, PR #2479, 2026-11-11): a recorder of every visible row's box, each
+frame, from a list's first draw to settled, that fails if a drawn row moves, grows, leaves, or has one come in above it. It
+runs a page five ways: the first visit, a return, a return after a sync, a sync while shown, and arriving by the launcher.
+Three fixture switches feed it: `?fake-late=<command>:<ms>,…` (`*:<ms>` for every command) answers each read that late, so
+it lands after the first draw; `?fake-hooks` puts `window.__fake` in the page (`corpus`, `endRuns`, `inboxNew`, `runNew`,
+`monitorDown`), so a trip adds rows and ends a run that changed something; and `?fake-real=<port>` sends every command to
+the app's own backend running with no window (`crates/knobas-app/examples/headless_ipc.rs`), so the built front end draws
+a real database in headless Chrome:
+
+```sh
+cp -cR <saved home> "$TMPDIR/home"                       # an APFS clone, never the original
+HOME="$TMPDIR/home" cargo run -p knobas-app --features test-util --example headless_ipc -- \
+  --data-dir "$TMPDIR/home/Library/Application Support/dev.knobas.desktop" --port 5399
+# then open the built app at ?fake-ipc&fake-real=5399
+curl -X POST http://127.0.0.1:5399/quit                 # stops its scheduler and its PostgreSQL, as a quit does
+```
+
+It opens the demo profile under the directory named and nothing else, shows no notification and opens no window. Killed
+rather than quit, it leaves the profile's PostgreSQL running: `pg_ctl stop -D <profile>/db/data` stops it.
+
 **The screenshot comparison** (`pixel-same.py`): given two folders of screenshots taken of the same screens on two
 heads, and the manifest that named them, it lists the screens whose pixels changed that nobody meant to change, most
 changed first. "Meant to" is a screen with `arrows` in the manifest, or one named as a whole word in a text passed with

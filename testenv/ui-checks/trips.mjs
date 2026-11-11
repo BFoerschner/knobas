@@ -40,6 +40,7 @@
 //   enter-walks   Enter, wait 600 ms, Enter. Fails if the second writes nothing: a person must still be able to walk down a list.
 //                 Can't run unless the row left and focus took the next row's same words.
 //   pointer-twice real mouse presses at 15% of a button's width, 120, 300 and 600 ms apart, a page each. Fails if a dialog opens, and with `once` if the second press writes.
+//                 With `rows`, a first press that writes nothing acts by changing them, and the second fails if it changes them again or the address.
 //                 `reveal`: the button is in a row's fading group, so the pointer rests on it first, which brings the group up.
 //   undo-stale    make `changes` to one setting, press Undo, and read `value`. Fails unless it is the value from before the changes, if a
 //                 toast still offers an Undo afterwards, or if the changes leave two toasts up. With two Undos up it tries each, newest first,
@@ -110,6 +111,15 @@
 //   scroller-tab  Round 17. `scroller` at `at`, a real press in its words, then Tab. Fails if the scroller moves, or if focus lands on nothing.
 //   pane-esc      Round 17. A real press in the pane's words, then Esc. Fails unless the address moved, focus left the pane, and the next ↓ walks.
 //
+//   rows-still    The still-rows pass (PR #2479, 2026-11-11; Björn: "another repo just pops in where my cursor was"). Records the box of every
+//                 `rows` element in view, each frame, from the first draw (3 rows, or all there are) until the page has settled, and fails if
+//                 one of those rows moves or changes height, leaves, or a row comes in above one of them in its column. `query` holds `fake-late`, so each
+//                 late read lands after the first draw. `ways` (all five if absent): first (from `via`), return (to `via` and back), sync (to `via`,
+//                 `grow` adds rows to the fixture and every run ends having changed something, then back), shown (the same while on the page;
+//                 `held` also needs *Show N new* up afterwards, and pressing it must bring the rows in), launcher (from `via` by ⌘K and `words`),
+//                 palette (⌘K on the page: the launcher's own rows). `prep` runs on the page first, for every way but first and launcher.
+//                 `tail` is how long past quiet it still records (600 ms): longer for a page that reads again a while after a run ends.
+//
 // A first Enter that changes nothing can't run: the trip would pass without having pressed anything.
 // Writes are counted by wrapping window.__TAURI_INTERNALS__.invoke, which @tauri-apps/api looks up on every call (shell/dev/fake-tauri.ts).
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -121,8 +131,73 @@ const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 const MONITOR_ROWS = ".tf-mon tbody tr:not(.tf-mon-foldrow)";
 const RUN = "build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187";
 
+// The still-rows trips' fixture: Björn's scale, each read landing late, and `window.__fake` to grow the corpus and end a run.
+const STILL_Q = "&fake-scale&fake-sources-healthy&fake-hooks&fake-late=list_entities:250,code_facts:700,entity_checkouts:900,list_sources:150,filter_suggestions:400,mini_board:200,inbox_items:250";
+// A repository pushed after everything else, with an open pull request asking the reader's review, as a sync brings them: both
+// sort to the top, where the reader is.
+const GROW_FORGE = `window.__fake.corpus.push(
+  { entity_id: "mock:tidewater/still-new-service", kind: "repo", title: "tidewater/still-new-service", updated_at: "2026-12-01T00:00:00Z", body_text: "", author: "mara", web_url: null, deleted_at: null, payload: { full_name: "tidewater/still-new-service", default_branch: "main", teams: ["Payments"], language: "Rust" } },
+  { entity_id: "mock:still-new-service#1", kind: "pr", title: "A pull request the sync brought", updated_at: "2026-12-01T00:00:00Z", body_text: "", author: "jonas", web_url: null, deleted_at: null, payload: { num: 1, repo: "still-new-service", state: "open", chip: { text: "open", tone: "info" }, path: "tidewater/still-new-service", requested_reviewers: ["mara"] } },
+), 1`;
+
+// A ticket updated after every other, in the first status, as a sync brings one.
+const GROW_TICKET = `window.__fake.corpus.push({ entity_id: "mock:PAY-9001", kind: "ticket", title: "A ticket the sync brought", updated_at: "2026-12-01T00:00:00Z", body_text: "", author: "mara", web_url: null, deleted_at: null, payload: { key: "PAY-9001", fields: { project: { key: "PAY", name: "Payments Platform" } }, status: "To do", priority: "High", assignee: "mara", type: "Story", labels: [] } }), 1`;
+
 // By page. `press` finds the first visible control with those words; `prep` runs first: { click, text | starts }, { fill, text }, { eval } or { wait }.
 const PAGES = [
+  // The still-rows pass (PR #2479, 2026-11-11): each late read lands after the first draw, and nothing drawn may move.
+  { page: "Code, Repositories", route: "code", trips: [
+    // *Show N new* itself: a sync brings a repository above the drawn rows, then the press, twice by key and twice by a still pointer.
+    { id: "show-new-key", kind: "enter-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: GROW_FORGE }, { eval: "window.__fake.endRuns(), 1" }, { wait: 2500 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: "tbody tr.tf-row" },
+    { id: "show-new-pointer", kind: "pointer-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: GROW_FORGE }, { eval: "window.__fake.endRuns(), 1" }, { wait: 2500 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: "tbody tr.tf-row" },
+    { id: "code-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "code", rows: "tbody tr.tf-row", held: true, query: STILL_Q, grow: GROW_FORGE },
+  ] },
+  { page: "Code, Pull requests", route: "code/prs", trips: [
+    { id: "code-prs-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: "tbody tr.tf-row", held: true, query: STILL_Q, grow: GROW_FORGE },
+  ] },
+  { page: "Tickets, board", route: "tickets", trips: [
+    { id: "board-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "tickets", rows: ".tf-tcard", held: true, query: STILL_Q, grow: GROW_TICKET },
+  ] },
+  { page: "Tickets, List", route: "tickets", trips: [
+    { id: "list-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["return", "sync", "shown"], prep: [{ click: "button, a, [role=tab]", text: "List" }, { wait: 500 }], rows: ".tf-main tbody tr", held: true, query: STILL_Q, grow: GROW_TICKET },
+  ] },
+  { page: "Inbox", route: "inbox", trips: [
+    { id: "inbox-show-new-key", kind: "enter-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: "window.__fake.inboxNew(), window.__fake.endRuns(), 1" }, { wait: 2000 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: ".tf-ib" },
+    { id: "inbox-show-new-pointer", kind: "pointer-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: "window.__fake.inboxNew(), window.__fake.endRuns(), 1" }, { wait: 2000 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: ".tf-ib" },
+    { id: "inbox-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "code", words: "inbox", rows: ".tf-ib", held: true, query: STILL_Q, grow: "window.__fake.inboxNew(), 1" },
+    { id: "launcher-rows-still", kind: "rows-still", strict: true, finding: "still-rows", ways: ["palette"], rows: "[role=option]", query: STILL_Q },
+  ] },
+  { page: "Builds", route: "builds", trips: [
+    { id: "builds-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "builds", rows: ".tf-main tr.tf-row, .tf-main .tf-rail a", held: true, query: STILL_Q, grow: "window.__fake.runNew(), 1" },
+  ] },
+  // The seeded roster, not the scale's bulk one: `monitorDown` takes a seeded monitor down.
+  { page: "Monitors", route: "monitors", trips: [
+    { id: "monitors-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "monitors", rows: ".tf-mon tbody tr", query: STILL_Q.replace("&fake-scale", ""), grow: "window.__fake.monitorDown(), 1", tail: 3000 },
+  ] },
+  { page: "Docs", route: "docs", trips: [
+    { id: "docs-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "docs", rows: "a.tf-dh-row, [role=treeitem]", query: STILL_Q },
+  ] },
+  { page: "Docs, a space", route: "docs/space/ENG", trips: [
+    { id: "space-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: "a.tf-dh-row, [role=treeitem]", query: STILL_Q },
+  ] },
+  { page: "A repository, branches", route: `${REPO}/branches`, trips: [
+    { id: "branches-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: ".tf-main tbody tr", query: STILL_Q },
+  ] },
+  { page: "A repository, pull requests", route: `${REPO}/prs`, trips: [
+    { id: "repo-prs-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: ".tf-main tbody tr", query: STILL_Q },
+  ] },
+  { page: "A repository, commits", route: `${REPO}/commits`, trips: [
+    { id: "commits-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: ".tf-main tbody tr, .tf-main [data-place]", query: STILL_Q },
+  ] },
+  { page: "Standup", route: "time/standup", trips: [
+    { id: "standup-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: ".tf-main li, .tf-main tbody tr", query: STILL_Q },
+  ] },
+  { page: "Time, week", route: "time/week", trips: [
+    { id: "week-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: ".tf-main tbody tr", query: STILL_Q },
+  ] },
+  { page: "Time, today", route: "time", trips: [
+    { id: "day-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "time", rows: ".tf-tm-row", query: STILL_Q },
+  ] },
   { page: "Settings, Applications", route: "settings/checkouts", trips: [
     { id: "make-default", kind: "enter-twice", finding: "F-646", press: { sel: ".tf-main button", text: "Make default" } },
     { id: "default-undo", kind: "undo-stale", strict: true, finding: "F-648", changes: [{ sel: ".tf-stg-apps button", text: "Make default", row: "Terminal" }, { sel: ".tf-stg-apps button", text: "Make default", row: "Fork" }], value: "[...document.querySelectorAll('.tf-stg-apps tbody tr')].find((r) => [...r.querySelectorAll('.tf-chip')].some((c) => c.textContent.trim() === 'Default'))?.querySelector('b')?.textContent.trim() ?? null" },
@@ -712,6 +787,50 @@ const LIB = String.raw`(() => {
   };
 })()`;
 
+// The rows-still recorder, put in the page when a trip arms it. Rows are matched across frames by element, else by `data-key`, the row's link or its words.
+const STILL = String.raw`(() => {
+  if (window.__still) return;
+  const w = (window.__still = { frames: null, sel: "" });
+  const keyOf = (el) => el.getAttribute("data-key") || (el.matches("a[href]") ? el.getAttribute("href") : el.querySelector("a[href]")?.getAttribute("href")) || (el.textContent || "").trim().slice(0, 60);
+  const snapshot = () => {
+    if (w.frames) {
+      const rows = [...document.querySelectorAll(w.sel)].filter((el) => !el.closest(".tf-skel")).map((el) => { const b = el.getBoundingClientRect(); return { el, key: keyOf(el), top: Math.round(b.top), h: Math.round(b.height), left: Math.round(b.left), w: Math.round(b.width) }; }).filter((r) => r.h > 0 && r.key !== "" && r.top < innerHeight);
+      const sig = rows.map((r) => r.key + "@" + r.left + "," + r.top + "/" + r.h).join("|");
+      if (w.frames.at(-1)?.sig !== sig) w.frames.push({ t: Math.round(performance.now() - w.t0), sig, rows });
+    }
+  };
+  const tick = () => {
+    snapshot();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  // On the page already, the first frame is taken as it arms, so a read landing before the next paint still shows as a change.
+  w.arm = (sel, now) => { w.sel = sel; w.t0 = performance.now(); w.frames = []; if (now) snapshot(); return 1; };
+  w.verdict = () => {
+    const frames = w.frames ?? [];
+    w.frames = null;
+    const most = Math.max(0, ...frames.map((f) => f.rows.length));
+    const at = frames.findIndex((f) => f.rows.length > 0 && f.rows.length >= Math.min(3, most));
+    if (at < 0) return JSON.stringify({ drew: false, frames: frames.length });
+    const first = frames[at].rows.filter((r) => r.top + r.h > 0);
+    // A row that comes in above a drawn row in the same column pushes it; one filling an empty pane beside them does not.
+    const over = (a, b) => a.left < b.left + b.w && b.left < a.left + a.w;
+    const say = (r) => JSON.stringify(r.key.slice(-42));
+    for (const f of frames.slice(at + 1)) {
+      const used = new Set();
+      for (const r of first) {
+        const now = f.rows.find((x) => x.el === r.el && !used.has(x)) ?? f.rows.find((x) => x.key === r.key && !used.has(x));
+        if (!now) return JSON.stringify({ drew: true, firstAt: frames[at].t, problem: "at " + f.t + " ms the row " + say(r) + " (drawn at " + r.top + " px) left the list" });
+        used.add(now);
+        if (now.top !== r.top || now.h !== r.h || now.left !== r.left) return JSON.stringify({ drew: true, firstAt: frames[at].t, problem: "at " + f.t + " ms the row " + say(r) + " moved from " + r.left + "," + r.top + " px, " + r.h + " high, to " + now.left + "," + now.top + " px, " + now.h + " high" });
+      }
+      const came = f.rows.find((x) => !used.has(x) && first.some((r) => over(x, r) && x.top <= r.top));
+      if (came) return JSON.stringify({ drew: true, firstAt: frames[at].t, problem: "at " + f.t + " ms the row " + say(came) + " came in at " + came.top + " px, among rows drawn at " + frames[at].t + " ms" });
+    }
+    return JSON.stringify({ drew: true, firstAt: frames[at].t, rows: first.length, frames: frames.length - at, last: frames.at(-1).t });
+  };
+})()`;
+
 const argv = process.argv.slice(2);
 const outDir = argv[0];
 const flag = (n, d) => {
@@ -862,17 +981,21 @@ async function worker(queue, results) {
       if (!p.under) throw new Error(`something else is at 15% of "${p.words}"`);
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
       await sleep(120);
-      const before = await snap();
+      const before = await snap(t.rows);
       await press(p, 1);
       await sleep(gap);
-      const first = await snap();
+      const first = await snap(t.rows);
       if (first.dialogs > before.dialogs) throw new Error(`the first press on "${p.words}" opened "${first.dialog}"`);
-      if (!added(first, before).length && first.toasts.join() === before.toasts.join()) throw new Error(`the first press on "${p.words}" changed nothing`);
+      // With `rows`, a press that writes nothing (*Show N new*) acts by changing them.
+      const moved = (a, b) => !!t.rows && (a.rows.length !== b.rows.length || a.rows.join() !== b.rows.join());
+      if (!added(first, before).length && first.toasts.join() === before.toasts.join() && !moved(first, before)) throw new Error(`the first press on "${p.words}" changed nothing`);
       const under = await evaluate(`window.__trip.under(${p.x}, ${p.y})`);
       await press(p, gap < 500 ? 2 : 1); // The second of a double-click counts 2; at 600 ms most systems count a new click.
       await sleep(t.after ?? 400);
-      const second = await snap();
+      const second = await snap(t.rows);
       if (second.dialogs > first.dialogs) reasons.push(`at ${gap} ms, a second press at 15% of "${p.words}" lands on "${under}" and opens "${second.dialog}"`);
+      if (moved(second, first)) reasons.push(`at ${gap} ms, a second press at 15% of "${p.words}" lands on "${under}" and changes the rows again`);
+      if (second.hash !== first.hash) reasons.push(`at ${gap} ms, a second press at 15% of "${p.words}" lands on "${under}" and goes to ${second.hash}`);
       if (t.once && added(second, first).length) reasons.push(`at ${gap} ms, a second press on "${p.words}" sent ${added(second, first).join(", ")}`);
       notes.push(`${gap} ms: point holds "${under || "no control"}", ${second.dialogs > first.dialogs ? "dialog" : "no dialog"}`);
     }
@@ -2561,7 +2684,77 @@ async function worker(queue, results) {
     }
   }
 
-  const KINDS = { "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  async function rowsStill(t) {
+    const reasons = [];
+    const notes = [];
+    const ways = t.ways ?? ["first", "return", "sync", "shown", "launcher"];
+    const prep = async () => {
+      for (const s of t.prep ?? []) {
+        if (s.wait) await sleep(s.wait);
+        if (s.click && !(await evaluate(`window.__trip.click(${JSON.stringify({ sel: s.click, text: s.text, starts: s.starts })})`))) throw new Error(`prep can't find ${s.click} "${s.text ?? s.starts ?? ""}"`);
+      }
+      if (t.prep) await opener.settleAfterChange();
+    };
+    // On the page already (shown, palette), the first frame is taken as it arms; arriving, it is the destination's first paint.
+    const arm = (now = false) => evaluate(`(${STILL}, window.__still.arm(${JSON.stringify(t.rows)}, ${now}))`);
+    // Settled: quiet, and longer than the latest late read the query holds back.
+    const settled = async () => { await opener.settleAfterChange(); await sleep(t.tail ?? 600); await opener.settleAfterChange(); };
+    const grow = async () => {
+      if (!(await evaluate(`!!window.__fake`))) throw new Error("no window.__fake: the query needs fake-hooks");
+      if (t.grow) await evaluate(t.grow);
+      await evaluate(`window.__fake.endRuns(), 1`);
+    };
+    for (const way of ways) {
+      await opener.openScreen({ name: t.id, route: way === "first" || way === "launcher" ? t.via : t.route, query: t.query });
+      if (way !== "first" && way !== "launcher") await prep();
+      await evaluate(`(${STILL}, 1)`);
+      if (way === "first") { await arm(); await evaluate(`location.hash = ${JSON.stringify(`#/${t.route}`)}`); }
+      if (way === "return") { await go(t.via); await arm(); await evaluate(`location.hash = ${JSON.stringify(`#/${t.route}`)}`); }
+      if (way === "sync") { await go(t.via); await sleep(1000); await grow(); await sleep(300); await arm(); await evaluate(`location.hash = ${JSON.stringify(`#/${t.route}`)}`); }
+      // A sync lands a while after the page drew, once the run states have been read (`role-sync`'s `ran` counts from then).
+      if (way === "shown") { await sleep(1000); await arm(true); await grow(); }
+      if (way === "palette") {
+        // The launcher's own list, opened on the page: its home, then whatever reads land after.
+        await arm();
+        await key("Meta+k");
+      }
+      if (way === "launcher") {
+        await arm();
+        await key("Meta+k");
+        await sleep(400);
+        await typeWord(t.words);
+        await sleep(600);
+        await key("Enter");
+      }
+      // After a sync, the page reads again when its run ends: wait for a frame that differs, or `tail`, before settling.
+      if (way === "shown" || way === "sync") {
+        const until = Date.now() + (t.tail ?? 600) + 1500;
+        while (Date.now() < until && (await evaluate(`(window.__still.frames?.length ?? 0) < 2`))) await sleep(50);
+      }
+      await settled();
+      const hash = await evaluate(`location.hash`);
+      const v = JSON.parse(await evaluate(`window.__still.verdict()`));
+      if (way === "palette") await key("Escape");
+      if (hash !== `#/${t.route}`) { reasons.push(`${way}: ended at ${hash}, not #/${t.route}`); continue; }
+      if (!v.drew) { reasons.push(`${way}: no ${t.rows} drew in view`); continue; }
+      if (v.problem) reasons.push(`${way}: ${v.problem}`);
+      else notes.push(`${way} drew at ${v.firstAt} ms, ${v.rows} rows still through ${v.frames} frames to ${v.last} ms`);
+      if (way === "shown" && t.held && !v.problem) {
+        const words = await evaluate(`[...document.querySelectorAll(".tf-fheld")].find((b) => b.getClientRects().length)?.textContent.trim() ?? ""`);
+        if (!/^Show \d+ new$/.test(words)) { reasons.push(`shown: the rows the sync brought wait behind no *Show N new* (the bar's end reads "${words}")`); continue; }
+        const before = await evaluate(`document.querySelectorAll(${JSON.stringify(t.rows)}).length`);
+        await evaluate(`[...document.querySelectorAll(".tf-fheld")].find((b) => b.getClientRects().length).click(), 1`);
+        await opener.settleAfterChange();
+        const after = await evaluate(`document.querySelectorAll(${JSON.stringify(t.rows)}).length`);
+        const left = await evaluate(`[...document.querySelectorAll(".tf-fheld")].find((b) => b.getClientRects().length)?.textContent.trim() ?? ""`);
+        if (left !== "") reasons.push(`shown: after "${words}" the bar still offers "${left}"`);
+        notes.push(`"${words}" brought ${after - before >= 0 ? after - before : 0} more in view (windowed lists draw what fits)`);
+      }
+    }
+    return { reasons, note: notes.join("; ") };
+  }
+
+  const KINDS = { "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };

@@ -328,6 +328,21 @@ const FIXTURE_PORT_CHECKS = new Set(["teamcity", "jira", "confluence"]);
  * would make the tab look right while hiding the one thing that could be
  * wrong.
  */
+/** Monitors a still-rows trip took down, by index: a sync that saw a check fail. */
+const FORCED_DOWN = new Set<number>();
+
+/**
+ * `?fake-hooks`' `monitorDown` (the still-rows trips, 2026-11-11): the monitor that is up and first by name goes down, so
+ * it sorts to the roster's top, where the reader is.
+ */
+export function downFakeMonitor(): void {
+  const up = SEEDED_MONITORS.map((monitor, index) => ({ name: monitor.name, index })).filter(
+    ({ index }) => !FORCED_DOWN.has(index) && (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up") === "up" && SEEDED_MONITORS[index]!.name !== FIXTURE_PAUSED,
+  );
+  const first = up.sort((a, b) => a.name.localeCompare(b.name))[0];
+  if (first) FORCED_DOWN.add(first.index);
+}
+
 export function fakeMonitorRoster() {
   const now = Date.now();
   const named = SEEDED_MONITORS.map(({ name, type }) => ({
@@ -336,7 +351,7 @@ export function fakeMonitorRoster() {
     watching: FIXTURE_ESTATE.filter((asset) => asset.monitors.includes(name)),
   }));
   return named.map((entry, index) => {
-    const state = FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up";
+    const state = FORCED_DOWN.has(index) ? "down" : (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up");
     const samples = fakeSamples(state, index, now);
     // The last one, for the reason above.
     const last = samples.at(-1);
@@ -438,4 +453,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN);
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN, FORCED_DOWN);

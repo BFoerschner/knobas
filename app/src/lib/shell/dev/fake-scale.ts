@@ -293,5 +293,8 @@ export function scalePages(n: number): ScalePage[] {
  */
 export function seedScale(params: URLSearchParams): void {
   if (!params.has("fake-scale")) return;
-  CORPUS.push(...scaleTickets(20_000), ...scaleForge(10_000));
+  // The demo's own rows win: `tidewater/payout-service` is both, and a second row under one id broke Code's keyed list
+  // (the still-rows pass, 2026-11-11).
+  const held = new Set(CORPUS.map((row) => row.entity_id));
+  CORPUS.push(...[...scaleTickets(20_000), ...scaleForge(10_000)].filter((row) => !held.has(row.entity_id)));
 }

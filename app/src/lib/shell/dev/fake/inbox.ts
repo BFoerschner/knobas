@@ -195,9 +195,21 @@ function bulkItems(n: number): InboxEntry[] {
   return made;
 }
 
+/**
+ * `?fake-hooks`' `inboxNew` (the still-rows trips, 2026-11-11): an item newer than every other comes in, as a sync
+ * brings one, so the inbox reads it on the next `sync:state`.
+ */
+export let addInboxItem: () => void = () => {};
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   let live = [...stream(), ...bulkItems(Number(params.get("fake-inbox-items") ?? 0) || 0)];
+  addInboxItem = () => {
+    const like = live[0];
+    if (!like) return;
+    const key = `still-new-${live.length}`;
+    live = [{ ...like, item: { ...like.item, key, occurred_at: "2026-12-01T00:00:00Z", title: "An item the sync brought" } }, ...live];
+  };
   let later = snoozed();
   /** Items *Done* answered: a snooze brings one back, since the backend's upsert clears `done_at`. */
   let done: InboxEntry[] = [];

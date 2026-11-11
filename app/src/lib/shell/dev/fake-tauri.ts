@@ -55,6 +55,11 @@
  */
 import type { Answers } from "./fake-answers";
 import { expandScale, seedScale } from "./fake-scale";
+import { CORPUS } from "./fake/corpus";
+import { addFakeRuns } from "./fake/builds";
+import { addInboxItem } from "./fake/inbox";
+import { downFakeMonitor } from "./fake/monitors";
+import { endRunsChanged } from "./fake/sources";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
@@ -193,8 +198,36 @@ export function installIfRequested(): void {
   if (!params.has("fake-ipc")) return;
   seedScale(params);
   for (const [, feature] of FEATURES) feature.seed?.(params);
-  const bridge = installFakeTauri(holdBack(demoHandlers(params), params));
+  const real = params.get("fake-real");
+  const handlers = real ? realBackend(Number(real), demoHandlers(params)) : demoHandlers(params);
+  // The real backend's latency is its own: nothing is held back over it.
+  const bridge = installFakeTauri(real ? handlers : holdBack(handlers, params));
   for (const [, feature] of FEATURES) feature.attach?.(bridge);
+  // `?fake-hooks` (the still-rows trips, 2026-11-11): a trip adds rows to the corpus and ends a run that changed
+  // something, so a page reads again with rows it did not draw.
+  if (params.has("fake-hooks")) Object.assign(window, { __fake: { corpus: CORPUS, endRuns: endRunsChanged, inboxNew: () => addInboxItem(), runNew: () => addFakeRuns(), monitorDown: () => downFakeMonitor() } });
+}
+
+/**
+ * `?fake-ipc&fake-real=<port>` (the still-rows pass, 2026-11-11): every command goes to the app's own backend running
+ * with no window on that port (`crates/knobas-app/examples/headless_ipc.rs`), over a real database, so headless Chrome
+ * draws a built front end on real data. A plugin's command stays the fixture's; nothing emits events.
+ */
+function realBackend(port: number, fixture: Record<string, Handler>): Record<string, Handler> {
+  const forward = (cmd: string) => async (args: Record<string, unknown>) => {
+    const response = await fetch(`http://127.0.0.1:${port}/invoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cmd, args }),
+    });
+    const answer = (await response.json()) as { ok?: unknown; err?: unknown };
+    if ("err" in answer) throw answer.err;
+    return answer.ok;
+  };
+  return new Proxy(fixture, {
+    get: (target, cmd) => (typeof cmd === "string" && !cmd.startsWith("plugin:") ? forward(cmd) : target[cmd as string]),
+    ownKeys: (target) => Reflect.ownKeys(target),
+  });
 }
 
 /** A read that never answers. */
@@ -214,6 +247,27 @@ export function holdBack(handlers: Record<string, Handler>, params: URLSearchPar
   const view = handlers["entity_view"];
   const prefix = params.get("fake-hold-view");
   if (prefix && view) out["entity_view"] = (args) => (String(args["section"] ?? "").startsWith(prefix) ? never() : view(args));
+  const late = lateReads(params.get("fake-late"));
+  for (const name of Object.keys(out)) {
+    const ms = late.get(name) ?? late.get("*");
+    const inner = out[name]!;
+    if (ms !== undefined) out[name] = (args) => new Promise((resolve) => setTimeout(resolve, ms)).then(() => inner(args));
+  }
+  return out;
+}
+
+/**
+ * `?fake-late=code_facts:600,entity_checkouts:900` (the still-rows pass, 2026-11-11): each named command answers that
+ * many ms late, as the real backend's reads land one by one after a page first draws; `*:<ms>` is every other command.
+ * The rows-still trips use it to land each late read after the first draw.
+ */
+export function lateReads(value: string | null): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const part of (value ?? "").split(",")) {
+    const [command, ms] = part.split(":");
+    const n = Number(ms);
+    if (command && ms !== undefined && Number.isFinite(n) && n >= 0) out.set(command, n);
+  }
   return out;
 }
 

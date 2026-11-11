@@ -587,6 +587,20 @@ onFakeReset(() => {
   bridge = null;
 });
 
+let changedRun = 900;
+
+/**
+ * Every enabled source's run ends having changed something, as a scheduled run that brought new rows does
+ * (`?fake-hooks`' `endRuns`, for the still-rows trips, 2026-11-11): a role view shown reads again, a hidden one on its
+ * return.
+ */
+export function endRunsChanged(): void {
+  for (const source of FIXTURE_SOURCES.filter((row) => row.enabled)) {
+    changedRun += 1;
+    bridge?.emit("sync:state", { ...fakeStatus(source), run_id: changedRun, last_changed: true });
+  }
+}
+
 /**
  * `sync_role` (#2106): one run per enabled fixture source that fills `role`
  * (claims it and missed none of its paths), id order, as the mirror answers.

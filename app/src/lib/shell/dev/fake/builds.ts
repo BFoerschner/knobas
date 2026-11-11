@@ -280,6 +280,20 @@ let built: { day: string; runs: Map<string, RunRow[]> } | null = null;
 /** How many times {@link history} has built a history: a test's witness that reads reuse it. */
 export let historyBuilds = 0;
 
+/**
+ * `?fake-hooks`' `runNew` (the still-rows trips, 2026-11-11): every configuration gets a run newer than its last, as a sync
+ * that saw builds finish brings them.
+ */
+export function addFakeRuns(now: Date = new Date()): void {
+  history(now);
+  if (built === null) return;
+  for (const [config, runs] of built.runs) {
+    if (runs.length === 0) continue;
+    const no = Math.max(...runs.map((run) => Number(run.number ?? 0))) + 1;
+    runs.unshift(runRow(config, no, "success", "main", new Date(now.getTime() - 60_000), 120));
+  }
+}
+
 onFakeReset(() => {
   built = null;
 });
