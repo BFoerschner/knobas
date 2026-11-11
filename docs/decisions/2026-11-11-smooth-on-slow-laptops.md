@@ -20,9 +20,10 @@
 7. **A monitor's 24-hour strip is one element**, its bars a background painted through the CSSOM with a mask for the
    rounded ends, and its title names the bar under the pointer. 48 elements a row made a filter key that drew every
    row restyle thousands.
-8. **A board's card off the screen is not laid out** (`content-visibility: auto`, at about a two-line card's height
-   until it has drawn): with *Show more* pressed a board holds over a thousand cards, and each filter key laid them all
-   out again.
+8. **A board's card past its column's first twelve is not laid out while off the screen** (`content-visibility:
+   auto`, at about a two-line card's height until it has drawn): with *Show more* pressed a board holds over a thousand
+   cards, and each filter key laid them all out again. The first page is left alone: with every card skipped, a card on
+   screen at the first draw changed height, which `board-rows-still` caught.
 9. **Big read results are held raw** (`$state.raw`) where they are replaced whole: the Docs page and Monitors' roster,
    as Code's pages and the Docs tree already were. A deep proxy made drawing them read every field through one.
 10. **The frame budget is measured, not remembered**: `just frame-budget` (`testenv/perf/README.md`), on a build whose
