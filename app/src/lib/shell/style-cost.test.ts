@@ -28,7 +28,7 @@ function walk(dir: string, pattern: RegExp, found: string[] = []): string[] {
 }
 
 // The parser's tree, as much of it as these rules read.
-type Node = { type: string; name?: string; args?: Node | null; children?: Node[]; selectors?: Node[]; prelude?: Node | string; block?: Node | null; start?: number };
+type Node = { type: string; name?: string; args?: Node | null; children?: Node[]; selectors?: Node[]; prelude?: Node | string; block?: Node | null; start: number; end: number };
 
 /** Every selector list in a stylesheet, at-rules' blocks included. */
 function selectorLists(sheet: Node): Node[] {
@@ -98,8 +98,8 @@ function sheets(): { file: string; source: string; sheet: Node }[] {
 function offenders(file: string, source: string, sheet: Node): string[] {
   return selectorLists(sheet).flatMap((list) =>
     costly(list).map((complex) => {
-      const start = (complex as { start: number; end: number }).start;
-      const end = (complex as { start: number; end: number }).end;
+      const start = complex.start;
+      const end = complex.end;
       return `${file.slice(ROOT.length + 1)}:${source.slice(0, start).split("\n").length}  ${source.slice(start, end)}`;
     }),
   );
@@ -155,8 +155,8 @@ function bigAnchors(file: string, source: string, sheet: Node): string[] {
         const parts = rel.selectors ?? [];
         if (!holdsHas(parts)) continue;
         const head = parts.slice(0, Math.max(1, parts.findIndex((s) => s.type === "PseudoClassSelector" && ((s.name !== "is" && s.name !== "where") || holdsHas([s])))));
-        const text = source.slice((head[0] as { start: number }).start, (head[head.length - 1] as { end: number }).end);
-        if (!(text in HAS_ANCHORS)) found.push(`${file.slice(ROOT.length + 1)}:${source.slice(0, (complex as { start: number }).start).split("\n").length}  ${text}`);
+        const text = source.slice(head[0]!.start, head[head.length - 1]!.end);
+        if (!(text in HAS_ANCHORS)) found.push(`${file.slice(ROOT.length + 1)}:${source.slice(0, complex.start).split("\n").length}  ${text}`);
       }
     }
   }
@@ -227,7 +227,7 @@ function seeThroughScrollers(file: string, source: string, sheet: Node): string[
       const decls = ((node.block?.children ?? []) as unknown as Decl[]).filter((d) => d.type === "Declaration");
       const scrolls = decls.some((d) => /^overflow(-x|-y)?$/.test(d.property) && /\b(auto|scroll)\b/.test(d.value));
       const painted = decls.some((d) => /^background(-color)?$/.test(d.property) && opaque(d.value));
-      const prelude = node.prelude as { start: number; end: number };
+      const prelude = node.prelude as Node;
       const selector = source.slice(prelude.start, prelude.end).replace(/\s+/g, " ");
       if (scrolls && !painted && !(selector in PAINTED_ELSEWHERE)) found.push(`${file.slice(ROOT.length + 1)}:${source.slice(0, node.start).split("\n").length}  ${selector}`);
     }
