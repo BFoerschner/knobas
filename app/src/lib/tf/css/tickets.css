@@ -54,6 +54,10 @@
 .tf-list .tf-tbl th { position: sticky; top: var(--tf-fbar-h, 47px); z-index: 3; }
 /* Focus on the chosen job's card keeps a second ring where the card's ink would melt into the dark page. */
 .tf-tcard.tf-card:focus-visible { box-shadow: 0 0 0 4px var(--sel-halo); }
+/* A card off the screen is not laid out (PR #2479): with *Show more* pressed a board holds over a thousand cards, and a
+   filter key laid them all out again, 152 ms of a quarter-speed main thread. A card draws before it reaches the
+   screen, and keeps the height it drew at; until then it stands at about a two-line card's. */
+.tf-stack > .tf-tcard { content-visibility: auto; contain-intrinsic-size: auto 112px; }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
 .tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px; background: var(--sheet-2); border-radius: 6px; }
 .tf-nothing { font-size: var(--t-sm); padding: 6px; }
