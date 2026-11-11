@@ -400,6 +400,16 @@ fn ids_body(
     let mut sql = String::from("with\n");
     sql.push_str(&field_paths(&bound));
     sql.push_str(&reaches(&bound));
+    if let Some(declarations) = &word_declarations {
+        // The key each source's stored cards are read under (migration
+        // `0075`, `knobas_core::card_keys!`), for the words' `crd`.
+        let _ = writeln!(
+            sql,
+            "card_keys as materialized (select d.source_id, sync.card_key({declarations}::jsonb -> d.source_id) as k \
+               from jsonb_object_keys(case when jsonb_typeof({declarations}::jsonb) = 'object' \
+                                           then {declarations}::jsonb else '{{}}'::jsonb end) as d(source_id)),"
+        );
+    }
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
     // The live mirror as the base table and two hashed exclusion sets, not
@@ -418,10 +428,12 @@ fn ids_body(
     predicates.extend(corpus_predicates(corpus, None, &bound));
     if let Some(declarations) = &word_declarations {
         // `o.eid`: the row's id, for the walks' primary-key probes
-        // (`WALKED_ASSIGNEE`), which rebind `i`.
+        // (`WALKED_ASSIGNEE`), which rebind `i`. `crd`: the row's stored
+        // card under these declarations, null where it has none.
         let _ = write!(
             sql,
-            " cross join (select {declarations}::jsonb as d) pd cross join lateral (select i.entity_id as eid) o"
+            " cross join (select {declarations}::jsonb as d) pd cross join lateral (select i.entity_id as eid) o{}",
+            knobas_core::card_join!("crd", "i")
         );
         predicates.push(words_predicate(builder, alternatives));
     }
@@ -496,6 +508,23 @@ fn parents_hold(word: &str) -> String {
     )
 }
 
+/// Whether the row's stored card (`crd`, migration `0075`) holds `word`, a
+/// lowered text expression: in its assignee, or in the names
+/// `sync.item_parent` holds for the row, which the card keeps lowered and
+/// joined by U+001F (`parent_text`). A word without that character matches
+/// the joined names exactly where it matches one of them; one with it is
+/// held to the names one by one ([`parents_hold`]). So the answer is
+/// [`row_holds_word`]'s for the assignee and the parents, read once a row
+/// from the card rather than from two tables (the scale pass, 2026-11-11).
+fn card_holds(word: &str) -> String {
+    format!(
+        "(strpos(lower(coalesce(crd.assignee, '')), {word}) > 0 \
+          or (coalesce(strpos(crd.parent_text, {word}), 0) > 0 \
+              and (strpos({word}, chr(31)) = 0 or {})))",
+        parents_hold(word)
+    )
+}
+
 /// Whether the row holds `word`, a lowered text expression: in its key, its
 /// title, its declared assignee or the names of its declared parents. The key
 /// and the title first, each on its own, so a word either holds reads nothing
@@ -509,8 +538,10 @@ fn row_holds_word(word: &str) -> String {
     format!(
         "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 then true \
               when strpos(lower(i.title), {word}) > 0 then true \
+              when crd.entity_id is not null then {} \
               when strpos(lower(coalesce({}, '')), {word}) > 0 then true \
               else {} end",
+        card_holds(word),
         knobas_core::stored_string!(
             "pd.d",
             "assignee",
@@ -536,6 +567,7 @@ fn row_holds_first_word(word: &str) -> String {
     format!(
         "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 then true \
               when strpos(lower(i.title), {word}) > 0 then true \
+              when crd.entity_id is not null then {card} \
               when {} then ((i.entity_id, {paths}) in (select f.entity_id, f.paths from sync.item_field f \
                     where f.field = 'assignee' and strpos(lower(coalesce(f.value, '')), {word}) > 0) \
                 or {parents}) \
@@ -545,7 +577,8 @@ fn row_holds_first_word(word: &str) -> String {
             "assignee",
             "(pd.d::jsonb #> array[i.source_id, i.kind, 'assignee'])"
         ),
-        parents = parents_hold(word)
+        parents = parents_hold(word),
+        card = card_holds(word)
     )
 }
 
