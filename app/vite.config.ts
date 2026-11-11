@@ -1,4 +1,5 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/lib/shell/test-budget";
@@ -7,9 +8,24 @@ import { pdfjsAssets } from "./vite-pdfjs-assets";
 // Tauri owns this dev server: `tauri.conf.json`'s `devUrl` points at the port
 // below, so it is fixed and `strictPort` makes a clash a hard error rather
 // than a silent move to 1421 that the window would then fail to load.
+// `KNOBAS_PERF=1` (`testenv/perf`, PR #2479): a development build, so `?fake-ipc` is there, whose Svelte is compiled
+// and resolved as the release's. Svelte's development mode records a stack trace on every state write, which made a
+// filter key in the measured app cost several times what it costs in the shipped one.
+const perf = process.env.KNOBAS_PERF === "1";
+
+/** Svelte's runtime asks `esm-env/development` whether it runs in development; in a measured build it does not. */
+function releaseRuntime(): Plugin {
+  return {
+    name: "knobas-perf-release-runtime",
+    enforce: "pre",
+    resolveId: (id) => (id === "esm-env/development" ? "\0knobas-perf-dev" : null),
+    load: (id) => (id === "\0knobas-perf-dev" ? "export default false;" : null),
+  };
+}
+
 export default defineConfig(({ mode }) => ({
   // `pdfjsAssets`: pdf.js's decoders, fonts and CMaps under `/pdfjs/` (#2313).
-  plugins: [svelte(), pdfjsAssets()],
+  plugins: [svelte(perf ? { compilerOptions: { dev: false } } : {}), pdfjsAssets(), ...(perf ? [releaseRuntime()] : [])],
   // Tauri's CLI prints the Rust build output into the same terminal; letting
   // Vite clear the screen would eat compiler errors.
   clearScreen: false,

@@ -2895,6 +2895,15 @@ curl -X POST http://127.0.0.1:5399/quit                 # stops its scheduler an
 It opens the demo profile under the directory named and nothing else, shows no notification and opens no window. Killed
 rather than quit, it leaves the profile's PostgreSQL running: `pg_ctl stop -D <profile>/db/data` stops it.
 
+**The frame budget** (`testenv/perf/`, `just frame-budget`, PR #2479, 2026-11-11): how smooth the app is, measured.
+It builds the app as the probes measure it (`KNOBAS_PERF=1`: `?fake-ipc` with Svelte's runtime as released), drives it
+in a headless Chrome with the main thread slowed 1x and 4x, and fails when a list scrolls, a filter key paints or a page
+switches slower than its line in `testenv/perf/budget.json`, or when a box that scrolls has no opaque background. On the
+fixture at scale by default, or `--real <port>` on the windowless backend over a saved database. The same scripts drive
+Edge or WebView2 on Windows over the DevTools protocol (`--attach`), which is where a scroll on the compositor shows,
+and `testenv/perf/wk/` holds the WKWebView instruments (a bare WKWebView host, real HID wheel input, a recording of what
+the window showed). `testenv/perf/README.md` has each tool, what its numbers mean, and how to run it on each machine.
+
 **The screenshot comparison** (`pixel-same.py`): given two folders of screenshots taken of the same screens on two
 heads, and the manifest that named them, it lists the screens whose pixels changed that nobody meant to change, most
 changed first. "Meant to" is a screen with `arrows` in the manifest, or one named as a whole word in a text passed with

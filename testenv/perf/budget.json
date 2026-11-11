@@ -1,0 +1,273 @@
+{
+ "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend.",
+ "real": {
+  "scroll": {
+   "tickets-board": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "tickets-list": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "inbox": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-prs": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "docs-space": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "docs-page": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "builds-main": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "builds-pipeline-list": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "pipeline-history": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "monitors": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700,
+     "workP50": 7,
+     "workP99": 10
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   }
+  },
+  "wheel": {
+   "tickets-list": {
+    "4": {
+     "longestTask": 50
+    }
+   }
+  },
+  "type": {
+   "tickets-board-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   },
+   "tickets-board-expanded-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   },
+   "tickets-list-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   },
+   "code-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   },
+   "monitors-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   }
+  },
+  "nav": {
+   "#/tickets": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/inbox": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/code": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/builds": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/docs": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/monitors": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/time": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/page/live-confluence%3A362334": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/docs/space/SCLENG": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/settings": {
+    "4": {
+     "switchMs": 200
+    }
+   }
+  }
+ },
+ "fake": {
+  "scroll": {
+   "tickets-list": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "inbox": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-prs": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "monitors": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700,
+     "workP50": 7,
+     "workP99": 10
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   }
+  },
+  "type": {
+   "code-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   },
+   "monitors-filter": {
+    "4": {
+     "maxKeyMs": 100
+    }
+   }
+  },
+  "nav": {
+   "#/inbox": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/docs": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/monitors": {
+    "4": {
+     "switchMs": 200
+    }
+   },
+   "#/settings": {
+    "4": {
+     "switchMs": 200
+    }
+   }
+  }
+ }
+}

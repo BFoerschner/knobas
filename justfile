@@ -1331,6 +1331,14 @@ responsiveness-probe:
     fi
     exit "$status"
 
+# The frame budget (PR #2479, `testenv/perf/README.md`): builds the app as the probes measure it (`KNOBAS_PERF=1`: a
+# development build for `?fake-ipc`, with Svelte's runtime as released), drives it in a headless Chrome with the main
+# thread slowed 1x and 4x, and fails when a list scrolls, a filter key paints or a page switches slower than its line in
+# `testenv/perf/budget.json`, or when a box that scrolls has no opaque background. On the fixture at scale by default;
+# `--real <port>` runs it on the windowless backend over a saved database (`examples/headless_ipc.rs`).
+frame-budget *args:
+    testenv/perf/frame-budget.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
