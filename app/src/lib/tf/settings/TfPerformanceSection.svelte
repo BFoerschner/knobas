@@ -130,6 +130,7 @@
         class="tf-stg-sw"
         role="switch"
         aria-checked={smoothOn}
+        aria-label="Smooth scrolling on 120 Hz displays"
         disabled={smoothBusy}
         onclick={flipSmooth}><i></i></button
       >
