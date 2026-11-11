@@ -39,6 +39,7 @@ pub mod docs;
 pub mod downloads;
 mod error;
 pub mod file_pipeline;
+pub mod frame_rate;
 pub mod inbox;
 #[cfg(test)]
 mod ipc_mirror;
@@ -785,6 +786,10 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The scale pass's checkouts in one call (PR #2479), appended at
         // the foot: the list is append-only (§10.8).
         commands::entity::entity_checkouts,
+        // Smooth scrolling on 120 Hz displays (PR #2479), appended at the
+        // foot for the same reason.
+        commands::app::smooth_scrolling,
+        commands::app::set_smooth_scrolling,
     ]
 }
 
@@ -1025,6 +1030,15 @@ async fn bring_up_app<R: tauri::Runtime>(
         .await
         {
             tracing::error!(%error, "the capture shortcut could not be read");
+        }
+        // Smooth scrolling on 120 Hz displays (macOS): the window is built
+        // before there is a pool to read the setting from, so it is set here.
+        // A failed read keeps WebKit's 60, which is no reason not to start.
+        if frame_rate::offered() {
+            match frame_rate::stored(&pool).await {
+                Ok(on) => frame_rate::apply(handle, on),
+                Err(error) => tracing::debug!(%error, "smooth scrolling could not be read"),
+            }
         }
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>((pool, watch, generation))
     }

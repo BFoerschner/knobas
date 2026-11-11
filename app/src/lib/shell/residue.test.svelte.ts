@@ -276,6 +276,8 @@ vi.mock("../ipc/app", () => ({
   ping: () => deferred("pong"),
   pagesKeptOpen: () => deferred(5),
   setPagesKeptOpen: (count: number) => deferred(count),
+  smoothScrolling: () => deferred(true),
+  setSmoothScrolling: (on: boolean) => deferred(on),
   diffPipelines: () => deferred(true),
   setDiffPipelines: (on: boolean) => deferred(on),
   userRenderers: () => deferred([]),
@@ -550,6 +552,8 @@ function sectionPorts() {
   return {
     pagesKeptOpen: () => deferred(5),
     setPagesKeptOpen: (count: number) => deferred(count),
+    smoothScrolling: () => deferred(true),
+    setSmoothScrolling: (on: boolean) => deferred(on),
     passiveAttribution: () => deferred(true),
     setPassiveAttribution: (on: boolean) => deferred(on),
     notify: () => deferred(undefined),

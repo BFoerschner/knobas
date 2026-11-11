@@ -99,6 +99,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   if (params.has("fake-tone-override")) toneOverrides.set("ticket\u0000Blocked", "warn");
   // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
   const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
+  /** *Smooth scrolling on 120 Hz displays*: offered here as on the Mac, on until set. */
+  let smooth = true;
   let keptOpen = keptAsked === null ? 5 : Math.min(15, Math.max(0, Math.round(Number(keptAsked)) || 0));
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
@@ -196,6 +198,11 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     set_pages_kept_open: (args) => {
       keptOpen = Math.min(15, Math.max(0, Math.round(Number(args["count"]))));
       return keptOpen;
+    },
+    smooth_scrolling: () => smooth,
+    set_smooth_scrolling: (args) => {
+      smooth = args["on"] === true;
+      return smooth;
     },
     passive_attribution: () => passive,
     set_passive_attribution: (args) => {

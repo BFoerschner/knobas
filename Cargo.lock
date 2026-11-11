@@ -3221,6 +3221,8 @@ dependencies = [
  "knobas-wasm-host",
  "lzma-rs",
  "notify-rust",
+ "objc2",
+ "objc2-foundation",
  "percent-encoding",
  "reqwest",
  "rustix",

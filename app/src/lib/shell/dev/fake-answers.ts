@@ -3,7 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { appStatus, commandSteps, completeFirstRun, diffPipelines, frontendReady, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setUserRenderers, userRenderers } from "../../ipc/app";
+import type { appStatus, commandSteps, completeFirstRun, diffPipelines, frontendReady, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
 import type { acceptSuggestion, actionItemTicket, artifactBytes, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneAll, cloneAllPlan, cloneAllState, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCheckouts, entityCommitDiff, entityFileBytes, entityFilePiped, entityLocalFile, entityLocalTree, entityRangeDiff, entitySourceRangeDiff, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, publishStandupProtocolAgain, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
@@ -154,6 +154,7 @@ export interface Answers {
   order_dep_layers: Answer<typeof orderDepLayers>;
   owed_tickets: Answer<typeof owedTickets>;
   pages_kept_open: Answer<typeof pagesKeptOpen>;
+  smooth_scrolling: Answer<typeof smoothScrolling>;
   parent_links: Answer<typeof parentLinks>;
   passive_attribution: Answer<typeof passiveAttribution>;
   pending_writes: Answer<typeof pendingWrites>;
@@ -213,6 +214,7 @@ export interface Answers {
   set_notes_shown: Answer<typeof setNotesShown>;
   set_notification_kinds: Answer<typeof setNotificationKinds>;
   set_pages_kept_open: Answer<typeof setPagesKeptOpen>;
+  set_smooth_scrolling: Answer<typeof setSmoothScrolling>;
   set_tone_override: Answer<typeof setToneOverride>;
   state_colours: Answer<typeof stateColours>;
   clear_tone_overrides: Answer<typeof clearToneOverrides>;

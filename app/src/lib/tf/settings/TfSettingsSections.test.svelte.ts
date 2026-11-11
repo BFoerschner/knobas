@@ -95,6 +95,8 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
     pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
     setPagesKeptOpen: vi.fn((count: number) => Promise.resolve(Math.min(15, count))),
+    smoothScrolling: vi.fn((): Promise<boolean | null> => Promise.resolve(true)),
+    setSmoothScrolling: vi.fn((on: boolean): Promise<boolean | null> => Promise.resolve(on)),
     passiveAttribution: vi.fn(() => Promise.resolve(true)),
     setPassiveAttribution: vi.fn((on: boolean) => Promise.resolve(on)),
     notify: vi.fn(() => Promise.resolve()),
@@ -281,6 +283,25 @@ test("Performance: Pages kept open writes set_pages_kept_open and hands the page
   expect(p.setPagesKeptOpen).toHaveBeenLastCalledWith(15);
   expect(field.value).toBe("15");
   expect(keptPages.value).toBe(15);
+});
+
+test("Performance: Smooth scrolling writes set_smooth_scrolling and draws what came back", async () => {
+  const p = await open("performance");
+  const smooth = body().querySelector<HTMLButtonElement>("#tf-perf-smooth")!;
+  expect(smooth.getAttribute("role")).toBe("switch");
+  expect(body().querySelector('label[for="tf-perf-smooth"]')?.textContent).toContain("Smooth scrolling on 120 Hz displays");
+  expect(smooth.getAttribute("aria-checked")).toBe("true");
+  smooth.click();
+  await settle();
+  expect(p.setSmoothScrolling).toHaveBeenCalledWith(false);
+  expect(smooth.getAttribute("aria-checked")).toBe("false");
+});
+
+test("Performance: no Smooth scrolling switch where the platform has no frame-rate cap", async () => {
+  await open("performance", sectionPorts({ smoothScrolling: vi.fn(() => Promise.resolve(null)) }));
+  await settle();
+  expect(body().querySelector("#tf-perf-kept")).not.toBeNull();
+  expect(body().querySelector("#tf-perf-smooth")).toBeNull();
 });
 
 test("Desktop notifications: a switch per inbox kind over the notifier's store, and a test notification", async () => {

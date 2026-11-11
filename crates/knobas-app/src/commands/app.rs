@@ -468,6 +468,47 @@ pub async fn set_pages_kept_open<R: tauri::Runtime>(
     crate::settings::set_pages_kept_open(&pool, count).await
 }
 
+/// *Smooth scrolling on 120 Hz displays* (`crate::frame_rate`): whether the
+/// main window draws at the display's rate rather than WebKit's 60, on until
+/// set. `None` where the platform has no such cap, so Settings draws no switch.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn smooth_scrolling<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<bool>, IpcError> {
+    if !crate::frame_rate::offered() {
+        return Ok(None);
+    }
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::frame_rate::stored(&pool).await.map(Some)
+}
+
+/// Store *Smooth scrolling on 120 Hz displays*, set the main window to it at
+/// once, and answer what is now stored. `None`, and nothing stored, where the
+/// platform has no such cap.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_smooth_scrolling<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    on: bool,
+) -> Result<Option<bool>, IpcError> {
+    if !crate::frame_rate::offered() {
+        return Ok(None);
+    }
+    let pool = app.state::<Lifecycle>().pool()?;
+    let stored = crate::frame_rate::store(&pool, on).await?;
+    crate::frame_rate::apply(&app, stored);
+    Ok(Some(stored))
+}
+
 /// The command renderers saved in Settings › Renderers (#2262), in order.
 ///
 /// # Errors
@@ -740,6 +781,17 @@ mod tests {
         assert!(
             crate::commands::mirror::keys(invocation).contains(&"on"),
             "the mirror calls set_diff_pipelines without passing on: {invocation}"
+        );
+    }
+
+    /// The mirror sends `on` to `set_smooth_scrolling`, the argument's name.
+    #[test]
+    fn the_mirror_sends_whether_scrolling_is_smooth() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        let invocation = crate::commands::mirror::invocation(mirror, "set_smooth_scrolling");
+        assert!(
+            crate::commands::mirror::keys(invocation).contains(&"on"),
+            "the mirror calls set_smooth_scrolling without passing on: {invocation}"
         );
     }
 

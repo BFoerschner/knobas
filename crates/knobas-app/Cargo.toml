@@ -159,6 +159,12 @@ lzma-rs = "=0.3.0"
 serde_norway = "=0.9.42"
 toml = { version = "=0.9.12", features = ["preserve_order"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# *Smooth scrolling on 120 Hz displays* (`frame_rate.rs`): the WebKit SPI that
+# lifts WKWebView's 60 fps cap. The copies already in the lockfile through wry.
+objc2 = "=0.6.4"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString"] }
+
 [target.'cfg(unix)'.dependencies]
 # A user renderer (#2262, ADR-0033) runs in a process group of its own, and
 # the whole group is killed at its timeout: a wrapper script's children go

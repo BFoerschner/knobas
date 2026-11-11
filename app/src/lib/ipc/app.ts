@@ -106,6 +106,20 @@ export function setPagesKeptOpen(count: number): Promise<number> {
   return invoke<number>("set_pages_kept_open", { count });
 }
 
+/**
+ * *Smooth scrolling on 120 Hz displays*, Settings › Performance: whether the
+ * window draws at the display's rate rather than WebKit's 60. On until set.
+ * `null` where the platform has no such cap (Windows, Linux), so no switch is drawn.
+ */
+export function smoothScrolling(): Promise<boolean | null> {
+  return invoke<boolean | null>("smooth_scrolling");
+}
+
+/** Store *Smooth scrolling on 120 Hz displays*, applied to the window at once; answers what is now stored. */
+export function setSmoothScrolling(on: boolean): Promise<boolean | null> {
+  return invoke<boolean | null>("set_smooth_scrolling", { on });
+}
+
 /** *Run pipelines on diffs* (#2270): on until set in Settings › Renderers. */
 export function diffPipelines(): Promise<boolean> {
   return invoke<boolean>("diff_pipelines");

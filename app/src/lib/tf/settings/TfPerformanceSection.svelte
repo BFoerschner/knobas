@@ -5,6 +5,10 @@
   (`saved-field.svelte.ts`). What the backend stored goes to the page host at once
   (`kept-pages.svelte.ts`), so a lower number drops the surplus hidden pages
   with no restart.
+
+  *Smooth scrolling on 120 Hz displays* (2026-11-11, `crates/knobas-app/src/frame_rate.rs`): a switch over
+  `smooth_scrolling` and `set_smooth_scrolling`, drawn only where the backend offers it (macOS; it answers
+  `null` elsewhere). The window changes at once.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -18,10 +22,34 @@
     ports,
     kept = keptPages,
   }: {
-    ports: Pick<SectionPorts, "pagesKeptOpen" | "setPagesKeptOpen">;
+    ports: Pick<SectionPorts, "pagesKeptOpen" | "setPagesKeptOpen" | "smoothScrolling" | "setSmoothScrolling">;
     /** The page host's setting; the window's when omitted. */
     kept?: Pick<KeptPagesSetting, "set">;
   } = $props();
+
+  /** `null` until the read answers, and for good where the platform has no switch. */
+  let smoothOn = $state<boolean | null>(null);
+  let smoothBusy = $state(false);
+
+  $effect(() => {
+    void ports
+      .smoothScrolling()
+      .then((on) => (smoothOn = on))
+      .catch((cause) => push({ text: `Could not read Smooth scrolling: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  });
+
+  async function flipSmooth() {
+    if (smoothOn === null || smoothBusy) return;
+    smoothBusy = true;
+    try {
+      // What the backend stored, not what the click asked for.
+      smoothOn = await ports.setSmoothScrolling(!smoothOn);
+    } catch (cause) {
+      push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      smoothBusy = false;
+    }
+  }
 
   /** `null` until the read answers. */
   let stored = $state<number | null>(null);
@@ -60,7 +88,7 @@
   }
 </script>
 
-<header class="tf-stg-h"><h1>Performance</h1><p>How much knobas keeps ready, against the memory it uses.</p></header>
+<header class="tf-stg-h"><h1>Performance</h1><p>How much knobas keeps ready and how smoothly it moves, against the memory and power they use.</p></header>
 {#if stored !== null}
   <div class="tf-stg-row">
     <label class="tf-stg-l" for="tf-perf-kept"
@@ -84,6 +112,27 @@
       <span>pages</span>
       <small class="tf-stg-saved" role="status">{said.shown ? "Saved" : ""}</small>
       {#if why !== null}<small class="tf-stg-why" id="tf-perf-kept-why" role="alert">{why}</small>{/if}
+    </div>
+  </div>
+{/if}
+{#if smoothOn !== null}
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-perf-smooth"
+      >Smooth scrolling on 120 Hz displays<small
+        >Lists and pages move at your display's full rate, up to 120 frames a second, instead of 60. It uses more power
+        while something on screen moves.</small
+      ></label
+    >
+    <div class="tf-stg-c tf-stg-inl">
+      <button
+        id="tf-perf-smooth"
+        type="button"
+        class="tf-stg-sw"
+        role="switch"
+        aria-checked={smoothOn}
+        disabled={smoothBusy}
+        onclick={flipSmooth}><i></i></button
+      >
     </div>
   </div>
 {/if}

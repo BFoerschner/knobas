@@ -8,7 +8,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { appStatus, pagesKeptOpen, setPagesKeptOpen, type AppStatus } from "../../ipc/app";
+import { appStatus, pagesKeptOpen, setPagesKeptOpen, setSmoothScrolling, smoothScrolling, type AppStatus } from "../../ipc/app";
 import { monitoringSettings, setMonitoringSettings, type MonitoringSettings } from "../../ipc/assets";
 import {
   backupNow,
@@ -197,6 +197,9 @@ export interface SectionPorts {
   /** *Pages kept open* (#2247), Settings › Performance. */
   pagesKeptOpen: () => Promise<number>;
   setPagesKeptOpen: (count: number) => Promise<number>;
+  /** *Smooth scrolling on 120 Hz displays*, Settings › Performance: `null` where the platform has no switch. */
+  smoothScrolling: () => Promise<boolean | null>;
+  setSmoothScrolling: (on: boolean) => Promise<boolean | null>;
   passiveAttribution: () => Promise<boolean>;
   setPassiveAttribution: (enabled: boolean) => Promise<boolean>;
   notify: (draft: { title: string; body: string; address: string }) => Promise<void>;
@@ -253,6 +256,8 @@ export interface SectionPorts {
 export const realSectionPorts: SectionPorts = {
   pagesKeptOpen: () => pagesKeptOpen(),
   setPagesKeptOpen: (count) => setPagesKeptOpen(count),
+  smoothScrolling: () => smoothScrolling(),
+  setSmoothScrolling: (on) => setSmoothScrolling(on),
   passiveAttribution: () => passiveAttribution(),
   setPassiveAttribution: (enabled) => setPassiveAttribution(enabled),
   notify: (draft) => notify(draft),
