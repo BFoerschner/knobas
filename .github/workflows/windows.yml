@@ -5,14 +5,26 @@
 # git the Code view ran a window of its own, and the windows took the focus
 # that started the next read.
 #
-# Narrow on purpose, unlike `check.yml`: one crate's unit tests filtered to the
-# module, on a pull request that changes the builder or this file, or by hand.
+# And since 2026-11-11, what a Windows checkout does to the database: the
+# runner's git converted line endings, so a Windows build's migrations hashed
+# as CRLF and its databases opened under no other build. `.gitattributes` keeps
+# them LF; the job checks the checkout, the pinned checksums, that a database
+# with CRLF checksums opens, and that the server's port is picked on the
+# loopback (a wildcard bind is what raised the firewall prompt on first start).
+#
+# Narrow on purpose, unlike `check.yml`: one crate's tests filtered to these,
+# on a pull request that changes what they cover or this file, or by hand.
 name: windows
 
 on:
   pull_request:
     paths:
       - crates/knobas-db/src/console.rs
+      - crates/knobas-db/src/embedded.rs
+      - crates/knobas-db/src/migrate.rs
+      - crates/knobas-db/migrations/**
+      - crates/knobas-db/migrations.sha384
+      - .gitattributes
       - .github/workflows/windows.yml
   workflow_dispatch:
 
@@ -22,9 +34,10 @@ permissions:
 jobs:
   console:
     runs-on: windows-latest
-    # A cold build of knobas-db and its dependencies is minutes; what this
-    # bounds is a probe that never exits.
-    timeout-minutes: 30
+    # A cold build of knobas-db and its dependencies is minutes, and the
+    # database tests download PostgreSQL once; what this bounds is a probe
+    # that never exits.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -45,3 +58,21 @@ jobs:
 
       - name: console tests
         run: cargo test -p knobas-db --lib 'console::' -- --nocapture
+
+      # Every migration LF in the working tree, whatever the runner's
+      # `core.autocrlf`: what the build embeds and hashes.
+      - name: migrations are checked out LF
+        shell: bash
+        run: |
+          git ls-files --eol crates/knobas-db/migrations crates/knobas-db/migrations.sha384 > eol.txt
+          test -s eol.txt
+          if grep -v 'w/lf' eol.txt; then echo "checked out with other line endings"; exit 1; fi
+
+      - name: migration checksums and the loopback port
+        run: cargo test -p knobas-db --lib -- migrate:: embedded::tests::the_servers_port embedded::tests::a_start_without --nocapture
+
+      - name: a database with CRLF checksums opens, and the server listens on the loopback alone
+        shell: bash
+        run: |
+          cargo test -p knobas-db --test schema -- line_endings --nocapture
+          cargo test -p knobas-db --test embedded -- a_started_server_listens_on_the_ipv4_loopback_alone --nocapture
