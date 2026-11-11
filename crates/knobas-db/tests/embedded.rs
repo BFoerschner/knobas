@@ -357,9 +357,25 @@ async fn a_started_server_listens_on_the_ipv4_loopback_alone() {
     };
     let on_v4 = answers(std::net::Ipv4Addr::LOCALHOST.into());
     let on_v6 = answers(std::net::Ipv6Addr::LOCALHOST.into());
+    // What the server was told, not only what answered: no wildcard (`*`,
+    // `0.0.0.0`, `::`) and no other interface on any platform.
+    let (listen,): (String,) = sqlx::query_as("show listen_addresses")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let connector = db.connector();
     db.stop().await.unwrap();
     assert!(on_v4, "the server answers on 127.0.0.1");
     assert!(!on_v6, "the server must not listen on ::1 as well");
+    assert_eq!(
+        listen, "127.0.0.1",
+        "the server listens on the loopback alone"
+    );
+    assert!(
+        connector.url().contains("@127.0.0.1:"),
+        "every client dials the loopback: {}",
+        connector.url().split('@').nth(1).unwrap_or_default()
+    );
 }
 
 /// #1779: a postmaster that dies under its handle is seen gone by the
