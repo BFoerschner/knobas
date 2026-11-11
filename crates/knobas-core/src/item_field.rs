@@ -167,3 +167,55 @@ macro_rules! stored_or {
         )
     };
 }
+
+/// The CTE `card_keys (source_id, k)`: for each source the declarations
+/// `$decl` name, the key a ticket's stored card (`sync.item_card`, migration
+/// `0075`) is read under for those declarations (`sync.card_key`), computed
+/// once a statement.
+#[macro_export]
+macro_rules! card_keys {
+    ($decl:literal) => {
+        concat!(
+            "card_keys as materialized (select d.source_id, sync.card_key(",
+            $decl,
+            "::jsonb -> d.source_id) as k from jsonb_object_keys(case when jsonb_typeof(",
+            $decl,
+            "::jsonb) = 'object' then ",
+            $decl,
+            "::jsonb else '{}'::jsonb end) as d(source_id))"
+        )
+    };
+}
+
+/// After a relation `$row` that carries `entity_id` and `source_id`: the
+/// ticket's stored card as `$alias` (migration `0075`), its row read under
+/// the key [`card_keys!`] gives its source, so a joined row holds every card
+/// field as the payload macros read it under the bound declarations. Null
+/// columns where there is no such row: a ticket not filled yet, a source whose
+/// declarations the database did not store, anything that is not a ticket.
+/// Read a field through `case when $alias.entity_id is null then <the walk>
+/// else $alias.<field> end`.
+#[macro_export]
+macro_rules! card_join {
+    ($alias:literal, $row:literal) => {
+        concat!(
+            " left join card_keys ",
+            $alias,
+            "_k on ",
+            $alias,
+            "_k.source_id = ",
+            $row,
+            ".source_id left join sync.item_card ",
+            $alias,
+            " on ",
+            $alias,
+            ".entity_id = ",
+            $row,
+            ".entity_id and ",
+            $alias,
+            ".paths_key = ",
+            $alias,
+            "_k.k "
+        )
+    };
+}

@@ -208,7 +208,9 @@ async fn a_stored_field_is_the_walks_answer() {
 
 /// The board's statuses and a view's count read the stored value, not the
 /// payload, and walk the payload where nothing is stored. Shown by a stored
-/// status nothing but this test would write.
+/// status nothing but this test would write, on a ticket with no stored card
+/// (`sync.item_card`, migration `0075`), which the board and a typed word
+/// take before these (`tests/it/item_card.rs`).
 #[tokio::test]
 async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     let pool = pool().await;
@@ -227,6 +229,11 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     )
     .await;
     let id = format!("{source}:T-1");
+    sqlx::query("delete from sync.item_card where entity_id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let registry = Registry::for_process();
     let declarations = knobas_app::sources::paths::declared_paths(&pool, &registry)
         .await

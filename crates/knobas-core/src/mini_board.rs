@@ -88,14 +88,6 @@ macro_rules! status_paths {
     };
 }
 
-/// After `from sync.item i`: the ticket's stored status row as `sst`, which
-/// [`status_of_ticket!`] reads ([`crate::stored_join!`], #2184).
-macro_rules! status_join {
-    ($decl:literal) => {
-        $crate::stored_join!("sst", $decl, "status_name")
-    };
-}
-
 /// The lane a ticket stands in (#939), read once a row like its status:
 /// the field `$lane` names (`epic`, `assignee`, `priority`, `issuetype`,
 /// `label`), and `''` where the ticket has none of it or `$lane` is `null`.
@@ -106,7 +98,8 @@ macro_rules! status_join {
 /// label through `label_paths`, in the order [`crate::declared_list!`]
 /// yields the card's labels; the epic through [`crate::path_line_read!`].
 /// The assignee is read off `sync.item_field` where the database stored it
-/// ([`crate::stored_string!`], #2184), as the status is.
+/// ([`crate::stored_string!`], #2184), as the status is. Only where the
+/// ticket has no stored card ([`lane_of_ticket_probed!`]).
 macro_rules! lane_of_ticket {
     ($decl:literal, $lane:literal) => {
         concat!(
@@ -184,12 +177,14 @@ macro_rules! lane_paths {
     };
 }
 
-/// A ticket's status, at the path its own source declares (#277), through
-/// `status_paths` ([`status_paths!`]): [`crate::declared_string!`]'s rule,
-/// [`crate::first_string_of!`] being the one spelling both share. Read off
-/// `sync.item_field` where the database stored it for the declarations the
-/// statement binds, joined as `sst` ([`status_join!`], #2184): on 2,500 Jira
-/// tickets the walk cost about 20 µs a ticket.
+/// A ticket's status, at the path its own source declares (#277): its stored
+/// card's (`sync.item_card`, migration `0075`, joined as `crd` by
+/// [`crate::card_join!`]), and where it has none, the stored status of
+/// `sync.item_field` (#2184) or the walk through `status_paths`
+/// ([`status_paths!`]), [`crate::declared_string!`]'s rule,
+/// [`crate::first_string_of!`] being the one spelling both share. All three
+/// are the same answer: a card or a field is read only under the
+/// declarations the statement binds.
 ///
 /// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
 /// miss is visible, never a guess.** A ticket whose source declares no status
@@ -202,34 +197,47 @@ macro_rules! lane_paths {
 /// **Read with no payload in the statement's own scan** (the scale pass,
 /// 2026-11-10): the walk goes through the ticket's primary key, a probe that
 /// rebinds `i` to the same row, which is what the payload macros read, and
-/// runs only where no stored status answers. `k.eid` is the row's id, from
+/// runs only where nothing stored answers. `k.eid` is the row's id, from
 /// `cross join lateral (select i.entity_id as eid) k` beside the scan. So the
 /// scan can be an index-only scan of `item_ticket_brief_idx` (migration
-/// `0074`): on 20,000 Jira tickets the heap it read was 113 MB, about 20 ms a
-/// statement. The cards' time falls back to `synced_at` the same way, through
+/// `0074`). The cards' time falls back to `synced_at` the same way, through
 /// the key, since no index may hold that column (#2189's heap-only stamp).
 macro_rules! status_of_ticket {
-    () => {
-        $crate::stored_or!(
-            "sst",
-            "(select ",
-            $crate::first_string_of!(
-                "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+    ($decl:literal) => {
+        concat!(
+            "(case when crd.entity_id is not null then crd.status else ",
+            $crate::stored_string!(
+                $decl,
+                "status_name",
+                "(select ",
+                $crate::first_string_of!(
+                    "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+                ),
+                " from sync.item i where i.entity_id = k.eid)"
             ),
-            " from sync.item i where i.entity_id = k.eid)"
+            " end)"
         )
     };
 }
 
-/// [`lane_of_ticket!`] behind the same probe as [`status_of_ticket!`],
-/// and `''` without reading the row when the board is not laned (`$lane`
-/// `null`), which is what the walk answers then.
+/// The lane a ticket stands in, off its stored card (`crd`, migration
+/// `0075`) where it has one, the same fields [`lane_of_ticket!`] walks; and
+/// [`lane_of_ticket!`] behind the same probe as [`status_of_ticket!`] where
+/// it has none. `''` without reading anything when the board is not laned
+/// (`$lane` `null`), which is what the walk answers then.
 macro_rules! lane_of_ticket_probed {
     ($decl:literal, $lane:literal) => {
         concat!(
             "(case when ",
             $lane,
-            "::text is null then '' else (select ",
+            "::text is null then '' when crd.entity_id is not null then (case ",
+            $lane,
+            "::text when 'epic' then coalesce(crd.path, '') \
+               when 'label' then coalesce(crd.first_label, '') \
+               when 'assignee' then coalesce(crd.assignee, '') \
+               when 'priority' then coalesce(crd.priority, '') \
+               when 'issuetype' then coalesce(crd.issue_type, '') else '' end) \
+             else (select ",
             lane_of_ticket!($decl, $lane),
             " from sync.item i where i.entity_id = k.eid) end)"
         )
@@ -287,11 +295,27 @@ macro_rules! priority_read {
 /// the signals (#813, #815) only for the rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
 /// bridge and a card per ticket in the webview.
 ///
+/// **Every field off the ticket's stored card** (`sync.item_card`, migration
+/// `0075`, the scale pass of 2026-11-11): the status and the lane in the
+/// scan, through [`crate::card_join!`], and the kept cards' fields through
+/// their key. A kept card with no stored row (not filled yet, or read under
+/// declarations the database did not store) walks its payload as before, in
+/// the lateral `i`, which reads nothing for a card that has one. On 20,000
+/// Jira tickets the walk of 300 kept cards was about 25 ms of a typed word's
+/// 65.
+///
+/// The column's cap partitions by two integers, the lane's place and the
+/// status's position among the scope's statuses (`array_position`, which
+/// finds a null as `is not distinct from` does), where it partitioned by the
+/// two texts: the same groups, and a sort of 6,600 rows that took 7 ms with
+/// a text first takes 3.
+///
 /// The parent's title (#894) is one primary-key probe per kept card. The
-/// payload macros all read the alias `i`, so the probe rebinds `i` to the
-/// candidate parent item, and the lateral `par` carries the card's own
-/// `source_id` out beside the parent's kind and name, where the probe can
-/// still see it.
+/// parent answers to the name by its own stored card (`answers_to`) where it
+/// has one, and by its payload's declared names where not: the payload macros
+/// all read the alias `i`, so that probe rebinds `i` to the parent item. The
+/// lateral `par` carries the card's own `source_id` out beside the parent's
+/// kind and name, where the probe can still see it.
 ///
 /// `$6` lanes the board (#939, #1098): the field a lane shares, `null` for
 /// none. Each row's lane is read with its status ([`lane_of_ticket!`]), and
@@ -306,16 +330,19 @@ const CARDS: &str = concat!(
     status_paths!("$4"),
     ", ",
     lane_paths!("$4", "$6"),
+    ", ",
+    crate::card_keys!("$4"),
     ",
      scoped as materialized (
-       select i.entity_id, coalesce(i.item_updated_at,
+       select i.entity_id, i.source_id, i.title, i.item_updated_at,
+              coalesce(i.item_updated_at,
                 (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, ",
-    status_of_ticket!(),
+    status_of_ticket!("$4"),
     " as status, ",
     lane_of_ticket_probed!("$4", "$6"),
     " as lane
        from sync.item i cross join lateral (select i.entity_id as eid) k",
-    status_join!("$4"),
+    crate::card_join!("crd", "i"),
     "
       where i.kind = 'ticket'
         and ",
@@ -334,48 +361,70 @@ const CARDS: &str = concat!(
          from scoped s group by s.lane
      ),
      ranked as (
-       select s.entity_id, s.at, s.status, s.lane, l.n as lane_count, l.place, l.lanes,
-              row_number() over (partition by s.lane, s.status
+       select s.entity_id, s.source_id, s.title, s.item_updated_at, s.at, s.status, s.lane,
+              l.n as lane_count, l.place, l.lanes,
+              row_number() over (partition by l.place, array_position(st.statuses, s.status)
                                  order by s.at desc, s.entity_id) as rn,
-              count(*) over (partition by s.lane, s.status) as total
+              count(*) over (partition by l.place, array_position(st.statuses, s.status)) as total
          from scoped s join lanes l on l.lane = s.lane
+        cross join (select array_agg(distinct s2.status) as statuses from scoped s2) st
         where $7::bigint is null or l.place <= $7
      )
-     select i.entity_id, i.source_id, i.title, r.status, r.lane, r.lane_count, r.place,
+     select r.entity_id, r.source_id, r.title, r.status, r.lane, r.lane_count, r.place,
             r.lanes, case when $6::text is null then null else
               (select jsonb_agg(jsonb_build_array(c.status, c.n))
                  from (select s.status, count(*) as n from scoped s group by s.status) c)
-            end as column_totals, ",
+            end as column_totals,
+            case when crd.entity_id is null then ",
     priority_read!("$4"),
-    " as priority, ",
+    " else crd.priority end as priority,
+            case when crd.entity_id is null then ",
     crate::declared_string!("$4", "issue_type"),
-    " as issue_type, ",
+    " else crd.issue_type end as issue_type,
+            case when crd.entity_id is null then ",
     crate::declared_string!("$4", "assignee"),
-    " as assignee, ",
+    " else crd.assignee end as assignee,
+            case when crd.entity_id is null then ",
     crate::declared_string!("$4", "assignee_name"),
-    " as assignee_name, ",
+    " else crd.assignee_name end as assignee_name,
+            case when crd.entity_id is null then ",
     crate::path_line_read!("$4"),
-    " as path, array(select l.value from ",
+    " else crd.path end as path,
+            case when crd.entity_id is null then array(select l.value from ",
     crate::declared_list!("$4", "labels"),
-    " l) as labels, ",
+    " l) else crd.labels end as labels,
+            case when crd.entity_id is null then ",
     crate::declared_integer!("$4", "comment_count"),
-    " as comment_count, (select i.title from sync.item i
-         where par.name is not null
-           and i.entity_id = par.source_id || ':' || par.name
-           and i.source_id = par.source_id and i.kind = par.kind
-           and ",
-    crate::live_by_exclusion!("i"),
+    " else crd.comment_count end as comment_count,
+            (select pi.title from sync.item pi",
+    crate::card_join!("pc", "pi"),
+    "where par.name is not null
+                and pi.entity_id = par.source_id || ':' || par.name
+                and pi.source_id = par.source_id and pi.kind = par.kind
+                and ",
+    crate::live_by_exclusion!("pi"),
     "
-           and par.name in (select n.name from ",
+                and (case when pc.entity_id is not null then par.name = any(pc.answers_to)
+                          else par.name in (select n.name from sync.item i cross join lateral ",
     crate::declared_names_as_parent!("$4"),
-    " n)) as parent_title, i.item_updated_at as updated_at, r.total
+    " n where i.entity_id = pi.entity_id) end)) as parent_title,
+            r.item_updated_at as updated_at, r.total
        from ranked r
-       cross join lateral (select it.entity_id, it.source_id, it.kind, it.title,
-                                  it.item_updated_at, it.payload #> '{}'::text[] as payload
-                             from sync.item it where it.entity_id = r.entity_id offset 0) i
-       left join lateral (select pn.kind, pn.name, i.source_id from ",
+       left join lateral (select c.* from sync.item_card c
+                           where c.entity_id = r.entity_id
+                             and c.paths_key = (select k.k from card_keys k where k.source_id = r.source_id)
+                          offset 0) crd on true
+       left join lateral (select it.entity_id, it.source_id, it.kind,
+                                 it.payload #> '{}'::text[] as payload
+                            from sync.item it
+                           where it.entity_id = r.entity_id and crd.entity_id is null
+                          offset 0) i on true
+       left join lateral (select crd.parent_kind as kind, crd.parent_name as name, r.source_id
+                           where crd.entity_id is not null
+                          union all
+                          (select pn.kind, pn.name, i.source_id from ",
     crate::declared_parent_names!("$4"),
-    " pn order by pn.pos desc, pn.name_ord limit 1) par on true
+    " pn where i.entity_id is not null order by pn.pos desc, pn.name_ord limit 1)) par on true
       where $5::bigint is null or r.rn <= $5
       order by r.at desc, r.entity_id"
 );
@@ -436,13 +485,15 @@ pub fn planned_observed_statuses() -> &'static str {
 const OBSERVED_STATUSES: &str = concat!(
     "with ",
     status_paths!("$2"),
+    ", ",
+    crate::card_keys!("$2"),
     ",
      observed as materialized (
        select i.source_id, ",
-    status_of_ticket!(),
+    status_of_ticket!("$2"),
     " as status
          from sync.item i cross join lateral (select i.entity_id as eid) k",
-    status_join!("$2"),
+    crate::card_join!("crd", "i"),
     "
         where i.kind = 'ticket'
           and ($1::text[] is null or i.source_id = any($1))
@@ -990,14 +1041,16 @@ const STATUSES: &str = concat!(
     status_paths!("$2"),
     ", ",
     lane_paths!("$2", "$3"),
+    ", ",
+    crate::card_keys!("$2"),
     "
      select i.entity_id, i.source_id, ",
-    status_of_ticket!(),
+    status_of_ticket!("$2"),
     " as status, ",
     lane_of_ticket_probed!("$2", "$3"),
     " as lane, i.item_updated_at
        from sync.item i cross join lateral (select i.entity_id as eid) k",
-    status_join!("$2"),
+    crate::card_join!("crd", "i"),
     "
       where i.kind = 'ticket'
         and ",
