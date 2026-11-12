@@ -175,7 +175,7 @@ const FIELDS: [&str; 15] = [
     "answers_to",
     "parent_text",
     "source_id",
-    "sprint_states",
+    "sprint_active",
 ];
 
 /// Every field of each of `source`'s tickets as the payload macros walk it
@@ -209,9 +209,9 @@ const WALKED: &str = concat!(
     knobas_core::declared_names_as_parent!("$1"),
     " n order by 1), array(select lower(ip.name) from sync.item_parent ip
        where ip.entity_id = i.entity_id order by 1), i.source_id,
-       array(select l.value from ",
+       exists (select 1 from ",
     knobas_core::declared_list!("$1", "sprint_state"),
-    " l))
+    " l where lower(l.value) = 'active'))
        from sync.item i where i.source_id = $2 order by i.entity_id"
 );
 
@@ -223,7 +223,7 @@ const STORED: &str =
        c.first_label, c.comment_count, c.parent_kind, c.parent_name,
        array(select unnest(c.answers_to) order by 1),
        array(select x from unnest(string_to_array(c.parent_text, chr(31))) x order by 1),
-       c.source_id, c.sprint_states) end
+       c.source_id, c.sprint_active) end
        from sync.item i
        left join sync.item_card c
          on c.entity_id = i.entity_id and c.paths_key = sync.card_key($1::jsonb -> i.source_id)
@@ -357,9 +357,20 @@ async fn a_stored_card_is_the_walks_answer_for_every_field_and_adapter() {
                 .unwrap()[..],
             );
             assert!(child[12].as_array().unwrap().contains(&json!("pay-0")));
-            // Every sprint's state that is a string, trimmed, in the record's
-            // order: a blank, an absent and a numeric one are left out.
-            assert_eq!(child[14], json!(["closed", "ACTIVE", "future"]));
+            // One of its sprints is active, however the record spells it,
+            // among a closed one, a future one, a blank, an absent and a
+            // numeric state. A record whose sprints are no list has none.
+            assert_eq!(child[14], json!(true));
+            let no_list = &read
+                .iter()
+                .find(|(id, _, _)| id.ends_with(":PAY-2"))
+                .unwrap()
+                .1;
+            assert_eq!(no_list[14], json!(false));
+            assert_eq!(
+                read.iter().filter(|(_, w, _)| w[14] == json!(true)).count(),
+                1
+            );
             let parent = &read
                 .iter()
                 .find(|(id, _, _)| id.ends_with(":PAY-0"))

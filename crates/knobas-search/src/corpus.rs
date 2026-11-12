@@ -340,7 +340,7 @@ macro_rules! field_paths_ctes {
                from fdecl f cross join jsonb_object_keys(case when jsonb_typeof(f.d) = 'object' \
                                           then f.d else '{}'::jsonb end) as d(source_id)),\n",
             "fcards as materialized (select c.entity_id, c.priority, c.issue_type, c.labels, \
-                    c.sprint_states \
+                    c.sprint_active \
                from sync.item_card c join fcard on fcard.source_id = c.source_id \
                 and fcard.k = c.paths_key)"
         )
@@ -541,14 +541,18 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             FieldKey::Label,
             card_list_has!("labels", "lower(l.value) = any(fd.v)", list_of!("labels")),
         ),
-        // And its sprint states (migration `0082`): the walk of every
-        // ticket's payload this key made was 390 ms on 20,000 Jira tickets.
+        // Whether one of its sprints is active is the card's own answer
+        // (`sprint_active`, migration `0082`), the test below computed when
+        // the ticket was written: the walk of every ticket's payload this
+        // key made was 390 ms on 20,000 Jira tickets.
         (
             FieldKey::Sprint,
-            card_list_has!(
-                "sprint_states",
-                "lower(l.value) = 'active'",
-                list_of!("sprint_state")
+            concat!(
+                "(case when i.entity_id in (select fc.entity_id from fcards fc) \
+                  then i.entity_id in (select fc.entity_id from fcards fc where fc.sprint_active) \
+                  else exists (select 1 from ",
+                list_of!("sprint_state"),
+                " l where lower(l.value) = 'active') end)"
             ),
         ),
         (

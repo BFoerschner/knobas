@@ -258,7 +258,7 @@ async fn a_key_asked_as_a_set_admits_what_its_row_by_row_read_did() {
             priority: Some("Low"),
             assignee: Some("mara.lindqvist"),
             labels: &["Backend"],
-            sprints: &["active"],
+            sprints: &["future", "ACTIVE"],
             age_days: 1,
         },
         Ticket {

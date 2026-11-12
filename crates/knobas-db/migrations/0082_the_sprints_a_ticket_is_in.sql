@@ -1,5 +1,5 @@
--- 0082_the_sprints_a_ticket_is_in.sql -- `sync.item_card.sprint_states`, the
--- state of every sprint a ticket is in, kept on its stored card (the
+-- 0082_the_sprints_a_ticket_is_in.sql -- `sync.item_card.sprint_active`,
+-- whether a ticket is in an active sprint, kept on its stored card (the
 -- stored-reads pass of 2026-11-12 on PR #2479; ADR-0019's pattern).
 --
 -- Single-writer, like every migration. Announced under *Frozen surface* in
@@ -16,12 +16,16 @@
 --
 -- ## What is stored
 --
--- One more column on `0075`'s row: `sprint_states` is every value
--- `knobas_core::declared_list!(…, "sprint_state")` yields, in its order, as
--- `labels` holds the labels: the reader keeps its own test (`sprint:current`
--- asks for one that is `active`, ignoring case). Pasted below as the macro's
--- expansion with `$decl` = `dd.decl`; `knobas-app`'s `tests/it/item_card.rs`
--- holds the function's text to the macros' current expansions.
+-- One more column on `0075`'s row: `sprint_active`, whether one of the
+-- values `knobas_core::declared_list!(…, "sprint_state")` yields is `active`,
+-- ignoring case. That is the one question both readers ask of a ticket's
+-- sprints (`knobas-search`'s `sprint:` key and its suggestion of `current`),
+-- so the answer is stored and not the list: a boolean keeps the card the
+-- width it was, where every sprint's state made it a tenth wider and the
+-- whole board, which reads every card, 3 % slower. The list's read is
+-- pasted below as the macro's expansion with `$decl` = `dd.decl`;
+-- `knobas-app`'s `tests/it/item_card.rs` holds the function's text to the
+-- macros' current expansions and the stored answer to the walk's.
 --
 -- **The card's key covers the new path.** `sync.card_paths` takes the
 -- ticket's declared `sprint_state` in, so `sync.card_key` gives every source
@@ -45,10 +49,10 @@
 -- here. The fill then computes each ticket's card in about 80 µs as before,
 -- the sprints' walk inside it (the payload is decompressed once for every
 -- field): 1.9 s of database time for the 23,176 tickets of that mirror, in
--- 47 batches after the app is up. The column is 0.6 MB there.
+-- 47 batches after the app is up. The column is one byte a ticket.
 
-alter table sync.item_card add column sprint_states text[] not null default '{}';
-alter table sync.item_card alter column sprint_states drop default;
+alter table sync.item_card add column sprint_active boolean not null default false;
+alter table sync.item_card alter column sprint_active drop default;
 
 -- `0075`'s, with the ticket's declared sprint states among what the stored
 -- fields read.
@@ -74,7 +78,7 @@ language sql immutable as $fn$
                        where pp.p->>'kind' = 'ticket'))
 $fn$;
 
--- `0075`'s, with the sprint states as its last column.
+-- `0075`'s, with whether a sprint is active as its last column.
 create or replace function sync.item_card_rows(ids text[]) returns setof sync.item_card
 language sql stable as $fn$
   -- Each payload decompressed once, and each source's declaration built once.
@@ -106,14 +110,14 @@ language sql stable as $fn$
          array(select n.name from (select distinct btrim(i.payload #>> s.segs) as name from (select array(select jsonb_array_elements_text(case when jsonb_typeof(nm.np) = 'array' then nm.np else '[]'::jsonb end)) as segs from jsonb_each(case when jsonb_typeof(dd.decl::jsonb -> i.source_id) = 'object' then dd.decl::jsonb -> i.source_id else '{}'::jsonb end) as k(kind, kp) cross join lateral jsonb_array_elements(case when jsonb_typeof(k.kp->'parent') = 'array' then k.kp->'parent' else '[]'::jsonb end) as pp(p) cross join lateral jsonb_array_elements(case when jsonb_typeof(pp.p->'names') = 'array' then pp.p->'names' else '[]'::jsonb end) as nm(np) where pp.p->>'kind' = i.kind) s where jsonb_typeof(i.payload #> s.segs) = 'string' and nullif(btrim(i.payload #>> s.segs), '') is not null) n),
          (select string_agg(lower(ip.name), chr(31)) from sync.item_parent ip
            where ip.entity_id = i.entity_id),
-         array(select l.value from (select nullif(btrim(e.elem #>> c.entry_segs), '') as value from (select array(select jsonb_array_elements_text(case when jsonb_typeof(cand->'at') = 'array' then cand->'at' else '[]'::jsonb end)) as at_segs, array(select jsonb_array_elements_text(case when jsonb_typeof(cand->'entry') = 'array' then cand->'entry' else '[]'::jsonb end)) as entry_segs from jsonb_array_elements(case when jsonb_typeof(dd.decl::jsonb #> array[i.source_id, i.kind, 'sprint_state']) = 'array' then dd.decl::jsonb #> array[i.source_id, i.kind, 'sprint_state'] else '[]'::jsonb end) as cands(cand)) c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) as e(elem) where jsonb_typeof(e.elem #> c.entry_segs) = 'string' and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) l)
+         exists (select 1 from (select nullif(btrim(e.elem #>> c.entry_segs), '') as value from (select array(select jsonb_array_elements_text(case when jsonb_typeof(cand->'at') = 'array' then cand->'at' else '[]'::jsonb end)) as at_segs, array(select jsonb_array_elements_text(case when jsonb_typeof(cand->'entry') = 'array' then cand->'entry' else '[]'::jsonb end)) as entry_segs from jsonb_array_elements(case when jsonb_typeof(dd.decl::jsonb #> array[i.source_id, i.kind, 'sprint_state']) = 'array' then dd.decl::jsonb #> array[i.source_id, i.kind, 'sprint_state'] else '[]'::jsonb end) as cands(cand)) c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) as e(elem) where jsonb_typeof(e.elem #> c.entry_segs) = 'string' and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) l where lower(l.value) = 'active')
     from i
     join dd on dd.source_id = i.source_id
     left join lateral (select pn.kind, pn.name from (select pr.pos, pr.kind, n.name_ord, btrim(pr.obj #>> n.segs) as name from (select e.pos, w.kind, e.obj, w.names from (select c.kind, c.at_segs, c.names from (select t.p->>'kind' as kind, array(select jsonb_array_elements_text(case when jsonb_typeof(t.p->'at') = 'array' then t.p->'at' else '[]'::jsonb end)) as at_segs, t.p->'names' as names, t.ord from jsonb_array_elements(case when jsonb_typeof(dd.decl::jsonb #> array[i.source_id, i.kind, 'parent']) = 'array' then dd.decl::jsonb #> array[i.source_id, i.kind, 'parent'] else '[]'::jsonb end) with ordinality as t(p, ord)) c where cardinality(c.at_segs) > 0 and jsonb_typeof(i.payload #> c.at_segs) in ('object', 'array') order by c.ord limit 1) w cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> w.at_segs) = 'array' then i.payload #> w.at_segs else jsonb_build_array(i.payload #> w.at_segs) end) with ordinality as e(obj, pos) where jsonb_typeof(e.obj) = 'object') pr cross join lateral (select array(select jsonb_array_elements_text(case when jsonb_typeof(q.np) = 'array' then q.np else '[]'::jsonb end)) as segs, q.name_ord from jsonb_array_elements(case when jsonb_typeof(pr.names) = 'array' then pr.names else '[]'::jsonb end) with ordinality as q(np, name_ord)) n where jsonb_typeof(pr.obj #> n.segs) = 'string' and nullif(btrim(pr.obj #>> n.segs), '') is not null) pn
                         order by pn.pos desc, pn.name_ord limit 1) par on true
 $fn$;
 
--- `0075`'s, writing the sprint states with the rest.
+-- `0075`'s, writing the sprints' answer with the rest.
 create or replace function sync.resolve_item_cards(ids text[]) returns void
 language plpgsql as $fn$
 begin
@@ -128,7 +132,7 @@ begin
          first_label = excluded.first_label, comment_count = excluded.comment_count,
          parent_kind = excluded.parent_kind, parent_name = excluded.parent_name,
          answers_to = excluded.answers_to, parent_text = excluded.parent_text,
-         sprint_states = excluded.sprint_states;
+         sprint_active = excluded.sprint_active;
 end
 $fn$;
 

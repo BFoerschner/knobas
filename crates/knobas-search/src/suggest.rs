@@ -348,10 +348,10 @@ macro_rules! most_used {
 ///   there is `knobas_core::declared_string!`'s answer over those
 ///   candidates, a miss included, and no row means nothing is stored for
 ///   them (`knobas_core::stored_string!`'s rule);
-/// * the type, the priority, the labels and the sprints' states off the
-///   ticket's card (`sync.item_card`, migrations `0075` and `0082`) under
-///   the key of the bound declarations, where each column is the payload
-///   macro's answer (`knobas-app`'s `tests/it/item_card.rs`).
+/// * the type, the priority, the labels and whether a sprint is active off
+///   the ticket's card (`sync.item_card`, migrations `0075` and `0082`)
+///   under the key of the bound declarations, where each column is the
+///   payload macro's answer (`knobas-app`'s `tests/it/item_card.rs`).
 ///
 /// A row is walked only where it declares a field it has no stored value
 /// for (`walks`): a ticket whose card is not filled yet, a pull request's
@@ -400,10 +400,10 @@ pub(crate) const FIELDS_SQL: &str = concat!(
     sampled_field!("assignee"),
     " as asg, \
               c.entity_id is not null as has_card, c.issue_type, c.priority, c.labels, \
-              c.sprint_states \
+              c.sprint_active \
          from sampled r \
          left join lateral (select c.entity_id, c.issue_type, c.priority, c.labels, \
-                                   c.sprint_states \
+                                   c.sprint_active \
                               from sync.item_card c \
                              where c.entity_id = r.entity_id \
                                and c.paths_key = (select fcard.k from fcard \
@@ -444,9 +444,7 @@ pub(crate) const FIELDS_SQL: &str = concat!(
     crate::corpus::list_of!("labels"),
     " l where not i.has_card and 'labels' = any(i.fields) \
        union all select 'sprint', 'current', null from walks i \
-                  where case when i.has_card \
-                             then exists (select 1 from unnest(i.sprint_states) as s(value) \
-                                           where lower(s.value) = 'active') \
+                  where case when i.has_card then i.sprint_active \
                              when 'sprint_state' = any(i.fields) \
                              then exists (select 1 from ",
     crate::corpus::list_of!("sprint_state"),

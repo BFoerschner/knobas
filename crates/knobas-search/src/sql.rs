@@ -1749,6 +1749,13 @@ mod tests {
         "frame",
         "pipeline",
         "group_path",
+        // The key a drawn row's stored list row is read under
+        // (`knobas_core::row_key_of!`, `corpus::stored_row_or!`): the parts
+        // of a kind's declaration `sync.row_paths` names that no fragment
+        // above does.
+        "head",
+        "head_repo",
+        "default_branch",
     ];
 
     fn filters(
