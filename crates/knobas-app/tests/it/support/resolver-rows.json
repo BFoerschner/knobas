@@ -1,0 +1,1178 @@
+[
+ {
+  "adapter": "confluence",
+  "key": "360454",
+  "kind": "page",
+  "payload": {
+   "_expandable": {
+    "container": "/rest/api/space/ENG",
+    "descendants": "/rest/api/content/360454/descendant",
+    "operations": "",
+    "relevantViewRestrictions": "/rest/api/content/360454/restriction/relevantViewRestrictions",
+    "restrictions": "/rest/api/content/360454/restriction/byOperation"
+   },
+   "_links": {
+    "edit": "/pages/resumedraft.action?draftId=360454",
+    "self": "http://127.0.0.1:8090/rest/api/content/360454",
+    "tinyui": "/x/BoAF",
+    "webui": "/spaces/ENG/pages/360454/On-call+handbook"
+   },
+   "ancestors": [
+    {
+     "_expandable": {
+      "ancestors": "",
+      "body": "",
+      "children": "/rest/api/content/360452/child",
+      "container": "/rest/api/space/ENG",
+      "descendants": "/rest/api/content/360452/descendant",
+      "history": "/rest/api/content/360452/history",
+      "metadata": "",
+      "operations": "",
+      "relevantViewRestrictions": "/rest/api/content/360452/restriction/relevantViewRestrictions",
+      "restrictions": "/rest/api/content/360452/restriction/byOperation",
+      "space": "/rest/api/space/ENG",
+      "version": ""
+     },
+     "_links": {
+      "edit": "/pages/resumedraft.action?draftId=360452",
+      "self": "http://127.0.0.1:8090/rest/api/content/360452",
+      "tinyui": "/x/BIAF",
+      "webui": "/spaces/ENG/pages/360452/Engineering+Home"
+     },
+     "extensions": {
+      "position": "none"
+     },
+     "id": "360452",
+     "position": -1,
+     "status": "current",
+     "title": "Engineering Home",
+     "type": "page"
+    }
+   ],
+   "body": {
+    "_expandable": {
+     "anonymous_export_view": "",
+     "editor": "",
+     "export_view": "",
+     "styled_view": "",
+     "view": ""
+    },
+    "storage": {
+     "_expandable": {
+      "content": "/rest/api/content/360454"
+     },
+     "representation": "storage",
+     "value": ""
+    }
+   },
+   "children": {
+    "_expandable": {
+     "attachment": "/rest/api/content/360454/child/attachment",
+     "page": "/rest/api/content/360454/child/page"
+    },
+    "_links": {
+     "self": "http://127.0.0.1:8090/rest/api/content/360454/child"
+    },
+    "comment": {
+     "_links": {
+      "self": "http://127.0.0.1:8090/rest/api/content/360454/child/comment"
+     },
+     "limit": 25,
+     "results": [],
+     "size": 0,
+     "start": 0
+    }
+   },
+   "extensions": {
+    "position": "none"
+   },
+   "history": {
+    "_expandable": {
+     "contributors": "",
+     "lastUpdated": "",
+     "nextVersion": "",
+     "previousVersion": ""
+    },
+    "_links": {
+     "self": "http://127.0.0.1:8090/rest/api/content/360454/history"
+    },
+    "createdBy": {
+     "_expandable": {
+      "status": ""
+     },
+     "_links": {
+      "self": "http://127.0.0.1:8090/rest/api/user?key=2c928087a1c558c801a1c559a61d0000"
+     },
+     "displayName": "knobas seed",
+     "profilePicture": {
+      "height": 48,
+      "isDefault": true,
+      "path": "/images/icons/profilepics/default.svg",
+      "width": 48
+     },
+     "type": "known",
+     "userKey": "2c928087a1c558c801a1c559a61d0000",
+     "username": "knobas"
+    },
+    "createdDate": "2026-11-10T12:06:08.878Z",
+    "latest": true
+   },
+   "id": "360454",
+   "metadata": {
+    "_expandable": {
+     "currentuser": "",
+     "editorHtml": "",
+     "frontend": "",
+     "properties": "",
+     "reactionsCount": ""
+    },
+    "labels": {
+     "_links": {
+      "self": "http://127.0.0.1:8090/rest/api/content/360454/label"
+     },
+     "limit": 200,
+     "results": [],
+     "size": 0,
+     "start": 0
+    }
+   },
+   "position": -1,
+   "space": {
+    "_expandable": {
+     "description": "",
+     "homepage": "/rest/api/content/360452",
+     "icon": "",
+     "metadata": "",
+     "permissions": "",
+     "retentionPolicy": ""
+    },
+    "_links": {
+     "self": "http://127.0.0.1:8090/rest/api/space/ENG",
+     "webui": "/spaces/ENG/overview"
+    },
+    "creationDate": "2026-11-10T12:06:04.412Z",
+    "creator": {
+     "_expandable": {
+      "profilePicture": "",
+      "status": ""
+     },
+     "_links": {
+      "self": "http://127.0.0.1:8090/rest/api/user?key=2c928087a1c558c801a1c559a61d0000"
+     },
+     "displayName": "knobas seed",
+     "type": "known",
+     "userKey": "2c928087a1c558c801a1c559a61d0000",
+     "username": "knobas"
+    },
+    "id": 655361,
+    "key": "ENG",
+    "lastModificationDate": "2026-11-10T12:06:04.412Z",
+    "lastModifier": {
+     "_expandable": {
+      "profilePicture": "",
+      "status": ""
+     },
+     "_links": {
+      "self": "http://127.0.0.1:8090/rest/api/user?key=2c928087a1c558c801a1c559a61d0000"
+     },
+     "displayName": "knobas seed",
+     "type": "known",
+     "userKey": "2c928087a1c558c801a1c559a61d0000",
+     "username": "knobas"
+    },
+    "name": "Engineering",
+    "status": "current",
+    "type": "global"
+   },
+   "status": "current",
+   "title": "On-call handbook",
+   "type": "page",
+   "version": {
+    "_expandable": {
+     "content": "/rest/api/content/360454"
+    },
+    "_links": {
+     "self": "http://127.0.0.1:8090/rest/experimental/content/360454/version/1"
+    },
+    "by": {
+     "_expandable": {
+      "status": ""
+     },
+     "_links": {
+      "self": "http://127.0.0.1:8090/rest/api/user?key=2c928087a1c558c801a1c559a61d0000"
+     },
+     "displayName": "knobas seed",
+     "profilePicture": {
+      "height": 48,
+      "isDefault": true,
+      "path": "/images/icons/profilepics/default.svg",
+      "width": 48
+     },
+     "type": "known",
+     "userKey": "2c928087a1c558c801a1c559a61d0000",
+     "username": "knobas"
+    },
+    "hidden": false,
+    "message": "",
+    "minorEdit": false,
+    "number": 1,
+    "when": "2026-11-10T12:06:08.878Z"
+   }
+  },
+  "title": "On-call handbook"
+ },
+ {
+  "adapter": "gitea",
+  "key": "tidewater/ops-runbooks@refs/heads/main",
+  "kind": "branch",
+  "payload": {
+   "commit": {
+    "added": null,
+    "author": {
+     "email": "knobas@tidewater.test",
+     "name": "knobas",
+     "username": "knobas"
+    },
+    "committer": {
+     "email": "knobas@tidewater.test",
+     "name": "knobas",
+     "username": "knobas"
+    },
+    "id": "491b99976d7e068baa90c0785cee9af32cc30e06",
+    "message": "Initial commit\n",
+    "modified": null,
+    "removed": null,
+    "timestamp": "2026-10-31T17:16:06Z",
+    "url": "http://127.0.0.1:3002/tidewater/ops-runbooks/commit/491b99976d7e068baa90c0785cee9af32cc30e06",
+    "verification": {
+     "payload": "",
+     "reason": "gpg.error.not_signed_commit",
+     "signature": "",
+     "signer": null,
+     "verified": false
+    }
+   },
+   "effective_branch_protection_name": "",
+   "enable_status_check": false,
+   "name": "main",
+   "protected": false,
+   "repository": {
+    "default_branch": "main",
+    "full_name": "tidewater/ops-runbooks",
+    "name": "ops-runbooks"
+   },
+   "required_approvals": 0,
+   "status_check_contexts": [],
+   "user_can_merge": true,
+   "user_can_push": true
+  },
+  "title": "main"
+ },
+ {
+  "adapter": "gitea",
+  "key": "tidewater/ledger-api@d3910a1abce56de8689ec9ad63e6d9b54a74d851",
+  "kind": "commit",
+  "payload": {
+   "author": {
+    "active": false,
+    "avatar_url": "https://127.0.0.1:3443/avatars/42959709e4aa3f53943e0694ce977f51",
+    "created": "2026-10-31T17:09:11Z",
+    "description": "",
+    "email": "1+knobas@noreply.localhost",
+    "followers_count": 0,
+    "following_count": 0,
+    "full_name": "",
+    "html_url": "https://127.0.0.1:3443/knobas",
+    "id": 1,
+    "is_admin": false,
+    "language": "",
+    "last_login": "0001-01-01T00:00:00Z",
+    "location": "",
+    "login": "knobas",
+    "login_name": "",
+    "prohibit_login": false,
+    "restricted": false,
+    "source_id": 0,
+    "starred_repos_count": 0,
+    "username": "knobas",
+    "visibility": "public",
+    "website": ""
+   },
+   "commit": {
+    "author": {
+     "date": "2026-10-31T17:09:13Z",
+     "email": "knobas@tidewater.test",
+     "name": "knobas"
+    },
+    "committer": {
+     "date": "2026-10-31T17:09:13Z",
+     "email": "knobas@tidewater.test",
+     "name": "knobas"
+    },
+    "message": "Initial commit\n",
+    "tree": {
+     "created": "2026-10-31T17:09:13Z",
+     "sha": "d3910a1abce56de8689ec9ad63e6d9b54a74d851",
+     "url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api/git/trees/d3910a1abce56de8689ec9ad63e6d9b54a74d851"
+    },
+    "url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api/git/commits/d3910a1abce56de8689ec9ad63e6d9b54a74d851",
+    "verification": null
+   },
+   "committer": {
+    "active": false,
+    "avatar_url": "https://127.0.0.1:3443/avatars/42959709e4aa3f53943e0694ce977f51",
+    "created": "2026-10-31T17:09:11Z",
+    "description": "",
+    "email": "1+knobas@noreply.localhost",
+    "followers_count": 0,
+    "following_count": 0,
+    "full_name": "",
+    "html_url": "https://127.0.0.1:3443/knobas",
+    "id": 1,
+    "is_admin": false,
+    "language": "",
+    "last_login": "0001-01-01T00:00:00Z",
+    "location": "",
+    "login": "knobas",
+    "login_name": "",
+    "prohibit_login": false,
+    "restricted": false,
+    "source_id": 0,
+    "starred_repos_count": 0,
+    "username": "knobas",
+    "visibility": "public",
+    "website": ""
+   },
+   "created": "2026-10-31T17:09:13Z",
+   "files": null,
+   "html_url": "http://127.0.0.1:3000/tidewater/ledger-api/commit/d3910a1abce56de8689ec9ad63e6d9b54a74d851",
+   "parents": [],
+   "repository": {
+    "default_branch": "main",
+    "full_name": "tidewater/ledger-api",
+    "name": "ledger-api"
+   },
+   "sha": "d3910a1abce56de8689ec9ad63e6d9b54a74d851",
+   "stats": null,
+   "url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api/git/commits/d3910a1abce56de8689ec9ad63e6d9b54a74d851"
+  },
+  "title": "Initial commit"
+ },
+ {
+  "adapter": "gitea",
+  "key": "tidewater/ledger-api#139",
+  "kind": "pr",
+  "payload": {
+   "allow_maintainer_edit": true,
+   "assignee": null,
+   "assignees": null,
+   "base": {
+    "label": "main",
+    "ref": "main",
+    "repo": {
+     "allow_fast_forward_only_merge": true,
+     "allow_manual_merge": false,
+     "allow_merge_commits": true,
+     "allow_merge_update": true,
+     "allow_rebase": true,
+     "allow_rebase_explicit": true,
+     "allow_rebase_update": true,
+     "allow_squash_merge": true,
+     "archived": false,
+     "archived_at": "1970-01-01T00:00:00Z",
+     "autodetect_manual_merge": false,
+     "avatar_url": "",
+     "branch_count": 3,
+     "clone_url": "https://127.0.0.1:3443/tidewater/ledger-api.git",
+     "created_at": "2026-10-31T17:09:13Z",
+     "default_allow_maintainer_edit": true,
+     "default_branch": "main",
+     "default_delete_branch_after_merge": false,
+     "default_merge_style": "merge",
+     "default_update_style": "merge",
+     "description": "Kotlin",
+     "empty": false,
+     "fork": false,
+     "forks_count": 0,
+     "full_name": "tidewater/ledger-api",
+     "has_actions": true,
+     "has_code": true,
+     "has_issues": true,
+     "has_packages": true,
+     "has_projects": true,
+     "has_pull_requests": true,
+     "has_releases": true,
+     "has_wiki": true,
+     "html_url": "https://127.0.0.1:3443/tidewater/ledger-api",
+     "id": 2,
+     "ignore_whitespace_conflicts": false,
+     "internal": false,
+     "internal_tracker": {
+      "allow_only_contributors_to_track_time": true,
+      "enable_issue_dependencies": true,
+      "enable_time_tracker": true
+     },
+     "language": "",
+     "languages_url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api/languages",
+     "licenses": [],
+     "link": "",
+     "mirror": false,
+     "mirror_interval": "",
+     "mirror_last_sync_at": "0001-01-01T00:00:00Z",
+     "mirror_updated": "0001-01-01T00:00:00Z",
+     "name": "ledger-api",
+     "object_format_name": "sha1",
+     "open_issues_count": 2,
+     "open_pr_counter": 0,
+     "original_url": "",
+     "owner": {
+      "active": false,
+      "avatar_url": "https://127.0.0.1:3443/avatars/003526d5965770c3fb3b2c85445714bd",
+      "created": "2026-10-31T17:09:12Z",
+      "description": "",
+      "email": "",
+      "followers_count": 0,
+      "following_count": 0,
+      "full_name": "Tidewater Freight",
+      "html_url": "https://127.0.0.1:3443/tidewater",
+      "id": 7,
+      "is_admin": false,
+      "language": "",
+      "last_login": "0001-01-01T00:00:00Z",
+      "location": "",
+      "login": "tidewater",
+      "login_name": "",
+      "prohibit_login": false,
+      "restricted": false,
+      "source_id": 0,
+      "starred_repos_count": 0,
+      "username": "tidewater",
+      "visibility": "public",
+      "website": ""
+     },
+     "permissions": {
+      "admin": true,
+      "pull": true,
+      "push": true
+     },
+     "private": false,
+     "projects_mode": "all",
+     "release_counter": 0,
+     "size": 28,
+     "ssh_url": "git@127.0.0.1:tidewater/ledger-api.git",
+     "stars_count": 0,
+     "template": false,
+     "topics": [],
+     "updated_at": "2026-11-01T14:41:31Z",
+     "url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api",
+     "watchers_count": 6,
+     "website": ""
+    },
+    "repo_id": 2,
+    "sha": "50dc8d35e65b37fd019413b7a7c4925458a3a6bc"
+   },
+   "body": "Refs PAY-228",
+   "closed_at": "2026-10-31T17:10:21Z",
+   "comments": 0,
+   "content_version": 0,
+   "created_at": "2026-10-31T17:10:20Z",
+   "diff_url": "http://127.0.0.1:3000/tidewater/ledger-api/pulls/139.diff",
+   "draft": false,
+   "due_date": null,
+   "head": {
+    "label": "fix/PAY-228-partial-refund-drift",
+    "ref": "fix/PAY-228-partial-refund-drift",
+    "repo": {
+     "allow_fast_forward_only_merge": true,
+     "allow_manual_merge": false,
+     "allow_merge_commits": true,
+     "allow_merge_update": true,
+     "allow_rebase": true,
+     "allow_rebase_explicit": true,
+     "allow_rebase_update": true,
+     "allow_squash_merge": true,
+     "archived": false,
+     "archived_at": "1970-01-01T00:00:00Z",
+     "autodetect_manual_merge": false,
+     "avatar_url": "",
+     "branch_count": 3,
+     "clone_url": "https://127.0.0.1:3443/tidewater/ledger-api.git",
+     "created_at": "2026-10-31T17:09:13Z",
+     "default_allow_maintainer_edit": true,
+     "default_branch": "main",
+     "default_delete_branch_after_merge": false,
+     "default_merge_style": "merge",
+     "default_update_style": "merge",
+     "description": "Kotlin",
+     "empty": false,
+     "fork": false,
+     "forks_count": 0,
+     "full_name": "tidewater/ledger-api",
+     "has_actions": true,
+     "has_code": true,
+     "has_issues": true,
+     "has_packages": true,
+     "has_projects": true,
+     "has_pull_requests": true,
+     "has_releases": true,
+     "has_wiki": true,
+     "html_url": "https://127.0.0.1:3443/tidewater/ledger-api",
+     "id": 2,
+     "ignore_whitespace_conflicts": false,
+     "internal": false,
+     "internal_tracker": {
+      "allow_only_contributors_to_track_time": true,
+      "enable_issue_dependencies": true,
+      "enable_time_tracker": true
+     },
+     "language": "",
+     "languages_url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api/languages",
+     "licenses": [],
+     "link": "",
+     "mirror": false,
+     "mirror_interval": "",
+     "mirror_last_sync_at": "0001-01-01T00:00:00Z",
+     "mirror_updated": "0001-01-01T00:00:00Z",
+     "name": "ledger-api",
+     "object_format_name": "sha1",
+     "open_issues_count": 2,
+     "open_pr_counter": 0,
+     "original_url": "",
+     "owner": {
+      "active": false,
+      "avatar_url": "https://127.0.0.1:3443/avatars/003526d5965770c3fb3b2c85445714bd",
+      "created": "2026-10-31T17:09:12Z",
+      "description": "",
+      "email": "",
+      "followers_count": 0,
+      "following_count": 0,
+      "full_name": "Tidewater Freight",
+      "html_url": "https://127.0.0.1:3443/tidewater",
+      "id": 7,
+      "is_admin": false,
+      "language": "",
+      "last_login": "0001-01-01T00:00:00Z",
+      "location": "",
+      "login": "tidewater",
+      "login_name": "",
+      "prohibit_login": false,
+      "restricted": false,
+      "source_id": 0,
+      "starred_repos_count": 0,
+      "username": "tidewater",
+      "visibility": "public",
+      "website": ""
+     },
+     "permissions": {
+      "admin": true,
+      "pull": true,
+      "push": true
+     },
+     "private": false,
+     "projects_mode": "all",
+     "release_counter": 0,
+     "size": 28,
+     "ssh_url": "git@127.0.0.1:tidewater/ledger-api.git",
+     "stars_count": 0,
+     "template": false,
+     "topics": [],
+     "updated_at": "2026-11-01T14:41:31Z",
+     "url": "http://127.0.0.1:3000/api/v1/repos/tidewater/ledger-api",
+     "watchers_count": 6,
+     "website": ""
+    },
+    "repo_id": 2,
+    "sha": "816b152a7da91534bb020d4cb5b69be9c2ff2c35"
+   },
+   "html_url": "https://127.0.0.1:3443/tidewater/ledger-api/pulls/139",
+   "id": 3,
+   "is_locked": false,
+   "labels": [],
+   "merge_base": "05e89f68300ab1e10d04839e3575ae3726a35a7d",
+   "merge_commit_sha": "50dc8d35e65b37fd019413b7a7c4925458a3a6bc",
+   "mergeable": true,
+   "merged": true,
+   "merged_at": "2026-10-31T17:10:21Z",
+   "merged_by": null,
+   "milestone": null,
+   "number": 139,
+   "patch_url": "http://127.0.0.1:3000/tidewater/ledger-api/pulls/139.patch",
+   "pin_order": 0,
+   "requested_reviewers": [],
+   "requested_reviewers_teams": null,
+   "review_comments": 0,
+   "state": "closed",
+   "title": "Fix ledger drift on partial refunds",
+   "updated_at": "2026-11-09T08:45:37Z",
+   "url": "https://127.0.0.1:3443/tidewater/ledger-api/pulls/139",
+   "user": {
+    "active": true,
+    "avatar_url": "https://127.0.0.1:3443/avatars/44407cda548918e22b6e3fdcfc4d3033",
+    "created": "2026-10-31T17:09:11Z",
+    "description": "",
+    "email": "mara@tidewater.test",
+    "followers_count": 0,
+    "following_count": 0,
+    "full_name": "Mara Lindqvist",
+    "html_url": "https://127.0.0.1:3443/mara.lindqvist",
+    "id": 2,
+    "is_admin": false,
+    "language": "",
+    "last_login": "1970-01-01T00:00:00Z",
+    "location": "",
+    "login": "mara.lindqvist",
+    "login_name": "",
+    "prohibit_login": false,
+    "restricted": false,
+    "source_id": 0,
+    "starred_repos_count": 0,
+    "username": "mara.lindqvist",
+    "visibility": "public",
+    "website": ""
+   }
+  },
+  "title": "Fix ledger drift on partial refunds"
+ },
+ {
+  "adapter": "gitea",
+  "key": "tidewater/milestone-review",
+  "kind": "repo",
+  "payload": {
+   "allow_fast_forward_only_merge": true,
+   "allow_manual_merge": false,
+   "allow_merge_commits": true,
+   "allow_merge_update": true,
+   "allow_rebase": true,
+   "allow_rebase_explicit": true,
+   "allow_rebase_update": true,
+   "allow_squash_merge": true,
+   "archived": false,
+   "archived_at": "1970-01-01T00:00:00Z",
+   "autodetect_manual_merge": false,
+   "avatar_url": "",
+   "branch_count": 2,
+   "clone_url": "https://127.0.0.1:3443/tidewater/milestone-review.git",
+   "created_at": "2026-11-01T13:57:21Z",
+   "default_allow_maintainer_edit": true,
+   "default_branch": "main",
+   "default_delete_branch_after_merge": false,
+   "default_merge_style": "merge",
+   "default_update_style": "merge",
+   "description": "Fixtures for the bundled-app milestone review (PDF assets, PDF text diff, worker CSP)",
+   "empty": false,
+   "fork": false,
+   "forks_count": 0,
+   "full_name": "tidewater/milestone-review",
+   "has_actions": true,
+   "has_code": true,
+   "has_issues": true,
+   "has_packages": true,
+   "has_projects": true,
+   "has_pull_requests": true,
+   "has_releases": true,
+   "has_wiki": true,
+   "html_url": "https://127.0.0.1:3443/tidewater/milestone-review",
+   "id": 32,
+   "ignore_whitespace_conflicts": false,
+   "internal": false,
+   "internal_tracker": {
+    "allow_only_contributors_to_track_time": true,
+    "enable_issue_dependencies": true,
+    "enable_time_tracker": true
+   },
+   "language": "Rust",
+   "languages_url": "http://127.0.0.1:3000/api/v1/repos/tidewater/milestone-review/languages",
+   "licenses": [],
+   "link": "",
+   "mirror": false,
+   "mirror_interval": "",
+   "mirror_last_sync_at": "0001-01-01T00:00:00Z",
+   "mirror_updated": "0001-01-01T00:00:00Z",
+   "name": "milestone-review",
+   "object_format_name": "sha1",
+   "open_issues_count": 0,
+   "open_pr_counter": 2,
+   "original_url": "",
+   "owner": {
+    "active": false,
+    "avatar_url": "https://127.0.0.1:3443/avatars/003526d5965770c3fb3b2c85445714bd",
+    "created": "2026-10-31T17:09:12Z",
+    "description": "",
+    "email": "",
+    "followers_count": 0,
+    "following_count": 0,
+    "full_name": "Tidewater Freight",
+    "html_url": "https://127.0.0.1:3443/tidewater",
+    "id": 7,
+    "is_admin": false,
+    "language": "",
+    "last_login": "0001-01-01T00:00:00Z",
+    "location": "",
+    "login": "tidewater",
+    "login_name": "",
+    "prohibit_login": false,
+    "restricted": false,
+    "source_id": 0,
+    "starred_repos_count": 0,
+    "username": "tidewater",
+    "visibility": "public",
+    "website": ""
+   },
+   "permissions": {
+    "admin": true,
+    "pull": true,
+    "push": true
+   },
+   "private": false,
+   "projects_mode": "all",
+   "release_counter": 0,
+   "size": 29,
+   "ssh_url": "git@127.0.0.1:tidewater/milestone-review.git",
+   "stars_count": 0,
+   "teams": [],
+   "template": false,
+   "topics": [],
+   "updated_at": "2026-11-01T13:57:34Z",
+   "url": "http://127.0.0.1:3000/api/v1/repos/tidewater/milestone-review",
+   "watchers_count": 6,
+   "website": ""
+  },
+  "title": "tidewater/milestone-review"
+ },
+ {
+  "adapter": "gitea",
+  "key": "tidewater/ledger-api/issues/142",
+  "kind": "ticket",
+  "payload": {
+   "assets": [],
+   "assignee": null,
+   "assignees": null,
+   "body": "Nothing has called it since the v2 migration.",
+   "closed_at": "2026-10-31T17:16:55Z",
+   "comments": 0,
+   "created_at": "2026-10-31T17:16:55Z",
+   "due_date": null,
+   "html_url": "http://127.0.0.1:3002/tidewater/ledger-api/issues/142",
+   "id": 286,
+   "is_locked": false,
+   "knobas": {
+    "issue_type": null,
+    "key": "tidewater/ledger-api/issues/142",
+    "parent": null,
+    "priority": null
+   },
+   "labels": [],
+   "milestone": null,
+   "number": 142,
+   "original_author": "",
+   "original_author_id": 0,
+   "pin_order": 0,
+   "pull_request": null,
+   "ref": "",
+   "repository": {
+    "full_name": "tidewater/ledger-api",
+    "id": 2,
+    "name": "ledger-api",
+    "owner": "tidewater"
+   },
+   "state": "closed",
+   "title": "Drop the v1 balance endpoint",
+   "updated_at": "2026-10-31T17:16:55Z",
+   "url": "http://127.0.0.1:3002/api/v1/repos/tidewater/ledger-api/issues/142",
+   "user": {
+    "active": true,
+    "avatar_url": "http://127.0.0.1:3002/avatars/0b8289f83e4d483f1ca016ab5b7fe577",
+    "created": "2026-10-31T17:16:02Z",
+    "description": "",
+    "email": "jonas@tidewater.test",
+    "followers_count": 0,
+    "following_count": 0,
+    "full_name": "Jonas Becker",
+    "html_url": "http://127.0.0.1:3002/jonas.becker",
+    "id": 3,
+    "is_admin": false,
+    "language": "",
+    "last_login": "1970-01-01T00:00:00Z",
+    "location": "",
+    "login": "jonas.becker",
+    "login_name": "",
+    "prohibit_login": false,
+    "pronouns": "",
+    "restricted": false,
+    "source_id": 0,
+    "starred_repos_count": 0,
+    "username": "jonas.becker",
+    "visibility": "public",
+    "website": ""
+   }
+  },
+  "title": "Drop the v1 balance endpoint"
+ },
+ {
+  "adapter": "jira",
+  "key": "filter-10005",
+  "kind": "jira_view",
+  "payload": {
+   "columns": [],
+   "filter_id": "10005",
+   "id": "10005",
+   "jql": "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
+   "keys": [
+    "PAY-240",
+    "PAY-231",
+    "PAY-219",
+    "PAY-228",
+    "PAY-200",
+    "PAY-236"
+   ],
+   "kind": "filter",
+   "name": "PAY without a fix version",
+   "query": "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
+   "sprint": null,
+   "sub_query": null,
+   "type": null
+  },
+  "title": "PAY without a fix version"
+ },
+ {
+  "adapter": "jira",
+  "key": "SCLPAY-2001",
+  "kind": "ticket",
+  "payload": {
+   "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+   "fields": {
+    "assignee": null,
+    "attachment": [],
+    "comment": {
+     "comments": [],
+     "maxResults": 1000,
+     "startAt": 0,
+     "total": 0
+    },
+    "created": "2025-07-20T13:12:01.000+0000",
+    "customfield_10107": null,
+    "customfield_10108": null,
+    "description": null,
+    "issuelinks": [],
+    "issuetype": {
+     "description": "Created by Jira Software - do not edit or delete. Issue type for a user story.",
+     "iconUrl": "http://127.0.0.1:8080/images/icons/issuetypes/story.svg",
+     "id": "10001",
+     "name": "Story",
+     "self": "http://127.0.0.1:8080/rest/api/2/issuetype/10001",
+     "subtask": false
+    },
+    "labels": [],
+    "priority": {
+     "iconUrl": "http://127.0.0.1:8080/images/icons/priorities/high.svg",
+     "id": "2",
+     "name": "High",
+     "self": "http://127.0.0.1:8080/rest/api/2/priority/2"
+    },
+    "project": {
+     "avatarUrls": {
+      "16x16": "http://127.0.0.1:8080/secure/projectavatar?size=xsmall&avatarId=10324",
+      "24x24": "http://127.0.0.1:8080/secure/projectavatar?size=small&avatarId=10324",
+      "32x32": "http://127.0.0.1:8080/secure/projectavatar?size=medium&avatarId=10324",
+      "48x48": "http://127.0.0.1:8080/secure/projectavatar?avatarId=10324"
+     },
+     "id": "10100",
+     "key": "SCLPAY",
+     "name": "Scale test: Payments Core",
+     "projectTypeKey": "software",
+     "self": "http://127.0.0.1:8080/rest/api/2/project/10100"
+    },
+    "reporter": {
+     "active": true,
+     "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/253501139043ed528def7a49aa7be03c?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/253501139043ed528def7a49aa7be03c?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/253501139043ed528def7a49aa7be03c?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/253501139043ed528def7a49aa7be03c?d=mm&s=48"
+     },
+     "displayName": "knobas seed",
+     "emailAddress": "knobas@example.invalid",
+     "key": "JIRAUSER10000",
+     "name": "knobas",
+     "self": "http://127.0.0.1:8080/rest/api/2/user?username=knobas",
+     "timeZone": "Etc/UTC"
+    },
+    "resolution": null,
+    "status": {
+     "description": "",
+     "iconUrl": "http://127.0.0.1:8080/",
+     "id": "10000",
+     "name": "To Do",
+     "self": "http://127.0.0.1:8080/rest/api/2/status/10000",
+     "statusCategory": {
+      "colorName": "default",
+      "id": 2,
+      "key": "new",
+      "name": "To Do",
+      "self": "http://127.0.0.1:8080/rest/api/2/statuscategory/2"
+     }
+    },
+    "summary": "Throttle the config loader in the CSV import",
+    "timeoriginalestimate": null,
+    "timespent": null,
+    "updated": "2025-07-27T08:55:41.000+0000",
+    "worklog": {
+     "maxResults": 20,
+     "startAt": 0,
+     "total": 0,
+     "worklogs": []
+    }
+   },
+   "id": "19399",
+   "key": "SCLPAY-2001",
+   "renderedFields": null,
+   "self": "http://127.0.0.1:8080/rest/api/2/issue/19399",
+   "sprints": []
+  },
+  "title": "Throttle the config loader in the CSV import"
+ },
+ {
+  "adapter": "jira",
+  "key": "SCLWEB-385",
+  "kind": "ticket",
+  "payload": {
+   "epic": {
+    "key": "SCLWEB-381"
+   },
+   "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+   "fields": {
+    "assignee": null,
+    "attachment": [],
+    "comment": {
+     "comments": [],
+     "maxResults": 1000,
+     "startAt": 0,
+     "total": 0
+    },
+    "created": "2025-01-23T13:40:05.000+0000",
+    "customfield_10107": null,
+    "customfield_10108": "SCLWEB-381",
+    "description": null,
+    "issuelinks": [],
+    "issuetype": {
+     "avatarId": 10318,
+     "description": "A task that needs to be done.",
+     "iconUrl": "http://127.0.0.1:8080/secure/viewavatar?size=xsmall&avatarId=10318&avatarType=issuetype",
+     "id": "10003",
+     "name": "Task",
+     "self": "http://127.0.0.1:8080/rest/api/2/issuetype/10003",
+     "subtask": false
+    },
+    "labels": [],
+    "priority": {
+     "iconUrl": "http://127.0.0.1:8080/images/icons/priorities/low.svg",
+     "id": "4",
+     "name": "Low",
+     "self": "http://127.0.0.1:8080/rest/api/2/priority/4"
+    },
+    "project": {
+     "avatarUrls": {
+      "16x16": "http://127.0.0.1:8080/secure/projectavatar?size=xsmall&avatarId=10324",
+      "24x24": "http://127.0.0.1:8080/secure/projectavatar?size=small&avatarId=10324",
+      "32x32": "http://127.0.0.1:8080/secure/projectavatar?size=medium&avatarId=10324",
+      "48x48": "http://127.0.0.1:8080/secure/projectavatar?avatarId=10324"
+     },
+     "id": "10102",
+     "key": "SCLWEB",
+     "name": "Scale test: Web Storefront",
+     "projectTypeKey": "software",
+     "self": "http://127.0.0.1:8080/rest/api/2/project/10102"
+    },
+    "reporter": {
+     "active": true,
+     "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/a20d55826ff3a5faf6318e119d85707a?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/a20d55826ff3a5faf6318e119d85707a?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/a20d55826ff3a5faf6318e119d85707a?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/a20d55826ff3a5faf6318e119d85707a?d=mm&s=48"
+     },
+     "displayName": "Priya Nair",
+     "emailAddress": "priya@tidewater.test",
+     "key": "JIRAUSER10102",
+     "name": "priya.nair",
+     "self": "http://127.0.0.1:8080/rest/api/2/user?username=priya.nair",
+     "timeZone": "Etc/UTC"
+    },
+    "resolution": null,
+    "status": {
+     "description": "",
+     "iconUrl": "http://127.0.0.1:8080/",
+     "id": "10000",
+     "name": "To Do",
+     "self": "http://127.0.0.1:8080/rest/api/2/status/10000",
+     "statusCategory": {
+      "colorName": "default",
+      "id": 2,
+      "key": "new",
+      "name": "To Do",
+      "self": "http://127.0.0.1:8080/rest/api/2/statuscategory/2"
+     }
+    },
+    "summary": "Investigate cart service error budgets",
+    "timeoriginalestimate": null,
+    "timespent": null,
+    "updated": "2025-01-24T14:04:15.000+0000",
+    "worklog": {
+     "maxResults": 20,
+     "startAt": 0,
+     "total": 0,
+     "worklogs": []
+    }
+   },
+   "id": "14705",
+   "key": "SCLWEB-385",
+   "renderedFields": null,
+   "self": "http://127.0.0.1:8080/rest/api/2/issue/14705",
+   "sprints": []
+  },
+  "title": "Investigate cart service error budgets"
+ },
+ {
+  "adapter": "kuma",
+  "key": "112",
+  "kind": "monitor",
+  "payload": {
+   "cert_days_remaining": null,
+   "hostname": null,
+   "id": "112",
+   "name": "scale-ledger",
+   "port": null,
+   "response_time_ms": null,
+   "state": "down",
+   "state_code": 0.0,
+   "type": "group",
+   "uptime": {
+    "1d": 0.0,
+    "30d": 0.0,
+    "365d": 0.0
+   },
+   "url": null
+  },
+  "title": "scale-ledger"
+ },
+ {
+  "adapter": "teamcity",
+  "key": "build:1387",
+  "kind": "build",
+  "payload": {
+   "agent": {
+    "name": "N/A"
+   },
+   "branchName": "<default>",
+   "buildType": {
+    "id": "Scale_Web_Cms_Build",
+    "name": "Build",
+    "projectId": "Scale_Web_Cms",
+    "projectName": "Scale test / Web / Cms"
+   },
+   "buildTypeId": "Scale_Web_Cms_Build",
+   "finishDate": "20261110T135109+0000",
+   "id": 1387,
+   "number": "N/A",
+   "queuedDate": "20261110T135109+0000",
+   "revisions": {
+    "revision": []
+   },
+   "startDate": "20261110T135109+0000",
+   "state": "finished",
+   "status": "UNKNOWN",
+   "statusText": "Canceled",
+   "triggered": {
+    "type": "user",
+    "user": {
+     "username": "knobas"
+    }
+   }
+  },
+  "title": "Scale test / Web / Cms / Build #N/A"
+ },
+ {
+  "adapter": "teamcity",
+  "key": "build:2",
+  "kind": "build",
+  "payload": {
+   "agent": {
+    "name": "knobas-agent"
+   },
+   "branchName": "main",
+   "buildType": {
+    "id": "Ledger_Deploy_Staging",
+    "name": "Deploy Staging",
+    "projectId": "Ledger",
+    "projectName": "Ledger"
+   },
+   "buildTypeId": "Ledger_Deploy_Staging",
+   "finishDate": "20261101T101901+0000",
+   "id": 2,
+   "number": "412",
+   "queuedDate": "20261101T101835+0000",
+   "revisions": {
+    "revision": [
+     {
+      "version": "50dc8d35e65b37fd019413b7a7c4925458a3a6bc"
+     }
+    ]
+   },
+   "startDate": "20261101T101851+0000",
+   "state": "finished",
+   "status": "SUCCESS",
+   "statusText": "Success",
+   "triggered": {
+    "type": "user",
+    "user": {
+     "username": "knobas"
+    }
+   }
+  },
+  "title": "Ledger / Deploy Staging #412"
+ },
+ {
+  "adapter": "teamcity",
+  "key": "buildType:Payout_Build",
+  "kind": "build_config",
+  "payload": {
+   "id": "Payout_Build",
+   "name": "Build",
+   "projectId": "Payout",
+   "projectName": "Payout",
+   "projectPath": [
+    {
+     "id": "Payout",
+     "name": "Payout"
+    }
+   ]
+  },
+  "title": "Payout / Build"
+ },
+ {
+  "adapter": "teamcity",
+  "key": "buildType:Scale_Web_Cms_Build",
+  "kind": "build_config",
+  "payload": {
+   "id": "Scale_Web_Cms_Build",
+   "name": "Build",
+   "projectId": "Scale_Web_Cms",
+   "projectName": "Scale test / Web / Cms",
+   "projectPath": [
+    {
+     "id": "Scale",
+     "name": "Scale test"
+    },
+    {
+     "id": "Scale_Web",
+     "name": "Web"
+    },
+    {
+     "id": "Scale_Web_Cms",
+     "name": "Cms"
+    }
+   ]
+  },
+  "title": "Scale test / Web / Cms / Build"
+ }
+]

@@ -1407,9 +1407,21 @@ mod tests {
 
     /// An item of about the size of a mirrored ticket, dated, so that a
     /// second run emitting it again emits exactly what is stored.
+    ///
+    /// Every other one is wide: a body of 5 kB in 500 different words, so
+    /// its `fts` is past the 2 kB at which PostgreSQL stores a value
+    /// compressed or out of line. A recomputed vector is not byte-equal to
+    /// such a stored one, so only a wide row shows an update that recomputed
+    /// `fts` (migration `0076`): the narrow rows this fixture had alone
+    /// stayed heap-only while every wide row of a real mirror was rewritten.
     fn sized_item(source_id: &str, n: usize) -> SyncItem {
+        let body_text = if n % 2 == 0 {
+            format!("word{n} ").repeat(150)
+        } else {
+            (0..500).map(|w| format!("row{n}word{w} ")).collect()
+        };
         SyncItem {
-            body_text: format!("word{n} ").repeat(150),
+            body_text,
             updated_at: Some(chrono::DateTime::from_timestamp(1_790_000_000, 0).unwrap()),
             payload: serde_json::json!({"key": format!("U-{n}"), "fields": {"summary": "x".repeat(200)}}),
             ..unit_item(source_id, n)
@@ -1432,7 +1444,8 @@ mod tests {
     /// nothing else (#2189): every row this run saw carries the run's time, as
     /// the sweep reads it, and the stamp is a heap-only update -- no new
     /// index entry -- where a rewrite of the row added one to every index.
-    /// The one item whose title changed is rewritten, as before.
+    /// The one item whose title changed is rewritten, as before. Half the
+    /// rows are wide ([`sized_item`]), the ones a recomputed `fts` rewrote.
     #[tokio::test]
     async fn a_resync_of_an_unchanged_item_only_stamps_it() {
         let pool = knobas_db::test_util::test_pool().await;
