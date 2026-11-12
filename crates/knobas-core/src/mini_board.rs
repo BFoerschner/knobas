@@ -478,12 +478,94 @@ pub fn planned_observed_statuses() -> &'static str {
 /// answers for the tickets on it, and a source nothing in this room came from
 /// is not one the detail here can be asked about.
 ///
-/// Live by [`crate::live_by_exclusion!`] over `sync.item`, as [`CARDS`] is,
-/// rather than through `sync.live_item` (#1149): on tables never analyzed the
-/// view's join probed `knobas.entity` once per ticket of the sources, 15,000
-/// probes and about 90 ms of the 22k probe's narrowed board, against about
-/// 25 ms with the tombstones read once.
+/// **Off the stored cards' index where a source's cards are whole** (the
+/// query audit of 2026-11-12). The statuses a source shows are a handful,
+/// and reading them meant joining every live ticket to its card, 17 ms of
+/// every board read on 20,000 Jira tickets. `item_card_status_idx`
+/// (migration `0078`) holds each card's source, key, status and id, so:
+///
+/// * `card_totals` counts the sources' cards by source and key, and
+///   `card_statuses` holds the statuses of the live ones
+///   ([`crate::live_by_exclusion!`], read off the card's own id and source),
+///   each one scan of that index and of no table;
+/// * `keyed` holds a source's cards whole where the cards under the key the
+///   declarations give it are as many as its tickets, counted off an index
+///   too: a card belongs to one ticket and carries its source;
+/// * `carded` is then the statuses of those sources' live cards;
+/// * `observed` is the read as it was, for the sources whose counts differ:
+///   tickets the fill has not reached, a source whose declarations the
+///   database did not store. It reads no row of a source whose cards are
+///   whole.
+///
+/// The same pairs either way, 11 ms where it took 16, and no subquery run per
+/// row: `knobas-app`'s `tests/it/item_card.rs` reads the board with every
+/// card, half of them and none, and holds this statement to
+/// [`OBSERVED_STATUSES_JOINED`] with a status only a withdrawn ticket holds.
 const OBSERVED_STATUSES: &str = concat!(
+    "with ",
+    status_paths!("$2"),
+    ", ",
+    crate::card_keys!("$2"),
+    ",
+     card_totals as materialized (
+       select c.source_id, c.paths_key, count(*) as n
+         from sync.item_card c
+        where ($1::text[] is null or c.source_id = any($1))
+        group by c.source_id, c.paths_key),
+     card_statuses as materialized (
+       select c.source_id, c.paths_key, c.status
+         from sync.item_card c
+        where ($1::text[] is null or c.source_id = any($1))
+          and c.status is not null
+          and ",
+    crate::live_by_exclusion!("c"),
+    "
+        group by c.source_id, c.paths_key, c.status),
+     ticket_counts as materialized (
+       select i.source_id, count(*) as n
+         from sync.item i
+        where i.kind = 'ticket'
+          and ($1::text[] is null or i.source_id = any($1))
+        group by i.source_id),
+     keyed as materialized (
+       select t.source_id, ck.k, coalesce(ct.n = t.n, false) as complete
+         from ticket_counts t
+         left join card_keys ck on ck.source_id = t.source_id
+         left join card_totals ct on ct.source_id = t.source_id and ct.paths_key = ck.k),
+     carded as materialized (
+       select cs.source_id, cs.status
+         from card_statuses cs
+         join keyed kd on kd.source_id = cs.source_id and kd.k = cs.paths_key
+        where kd.complete),
+     observed as materialized (
+       select i.source_id, ",
+    status_of_ticket!("$2"),
+    " as status
+         from keyed kd
+         join sync.item i on i.kind = 'ticket' and i.source_id = kd.source_id
+        cross join lateral (select i.entity_id as eid) k",
+    crate::card_join!("crd", "i"),
+    "
+        where not kd.complete
+          and ",
+    crate::live_by_exclusion!("i"),
+    "
+     )
+     select source_id, status from carded
+     union
+     select source_id, status from observed where status is not null"
+);
+
+/// [`OBSERVED_STATUSES`] as it read before it took the statuses off the
+/// cards' index: every live ticket of the sources joined to its card. The
+/// reference a test holds the statement to.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_observed_statuses_joined() -> &'static str {
+    OBSERVED_STATUSES_JOINED
+}
+
+const OBSERVED_STATUSES_JOINED: &str = concat!(
     "with ",
     status_paths!("$2"),
     ", ",

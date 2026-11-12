@@ -159,7 +159,8 @@ pub fn search_sql(
     let bound = bind_filters(&mut builder, filters);
     let per_group = builder.param(Bind::I64(i64::from(per_group)));
     let limit = builder.param(Bind::I64(i64::from(limit)));
-    let headline_opts = text.map(|_| builder.param(Bind::Text(crate::snippet::headline_options())));
+    let headline_opts = (text.is_some() && filters.headline)
+        .then(|| builder.param(Bind::Text(crate::snippet::headline_options())));
     // Every row's path line reads the parent its kind declares (#596), so the
     // declarations are bound for every search -- once: an `under:` query has
     // already bound them, and the detail stage reads that same placeholder.
@@ -334,7 +335,8 @@ pub fn search_sql(
             sql,
             "    cross join (select {path_declarations}::jsonb as d) pd"
         );
-        if text.is_some() {
+        // `q` is read here by the headline and by nothing else.
+        if headline_opts.is_some() {
             sql.push_str("    cross join q\n");
         }
         // The discriminator, so two corpora that happen to share an entity id
@@ -376,7 +378,31 @@ pub fn search_sql(
 #[must_use]
 pub fn ids_sql(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> SearchSql {
     let mut builder = Builder::default();
-    let sql = ids_body(&mut builder, alternatives, filters);
+    let sql = ids_body(
+        &mut builder,
+        &crate::corpus::LIVE_ITEM,
+        alternatives,
+        filters,
+    );
+    SearchSql {
+        sql,
+        binds: builder.binds,
+    }
+}
+
+/// [`ids_sql`] with each ticket key read row by row, as the keys read before
+/// they were asked as sets (`corpus::LIVE_ITEM_PROBED`): the reference
+/// `tests/it/ticket_key_sets.rs` compares [`ids_sql`]'s answers to.
+#[cfg(any(test, feature = "test-util"))]
+#[must_use]
+pub fn ids_sql_probed(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> SearchSql {
+    let mut builder = Builder::default();
+    let sql = ids_body(
+        &mut builder,
+        &crate::corpus::LIVE_ITEM_PROBED,
+        alternatives,
+        filters,
+    );
     SearchSql {
         sql,
         binds: builder.binds,
@@ -387,10 +413,10 @@ pub fn ids_sql(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> 
 /// several can share one statement ([`ids_counts_sql`]).
 fn ids_body(
     builder: &mut Builder,
+    corpus: &Corpus,
     alternatives: &[WordAlternative],
     filters: &EffectiveFilters,
 ) -> String {
-    let corpus = &crate::corpus::LIVE_ITEM;
     let bound = bind_filters(builder, filters);
     let word_declarations = (!alternatives.is_empty()).then(|| match &bound.declarations {
         Some(declarations) => declarations.clone(),
@@ -608,7 +634,12 @@ pub fn ids_counts_sql(queries: &[(&[WordAlternative], &EffectiveFilters)]) -> Op
         if position > 0 {
             sql.push_str("union all\n");
         }
-        let body = ids_body(&mut builder, alternatives, filters);
+        let body = ids_body(
+            &mut builder,
+            &crate::corpus::LIVE_ITEM,
+            alternatives,
+            filters,
+        );
         let position = builder.param(Bind::I64(i64::try_from(position).unwrap_or(i64::MAX)));
         let _ = writeln!(
             sql,
@@ -676,9 +707,10 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
         // `has:`'s kinds before its user: its fragment reads them first,
         // to pick the links it walks (#939).
         // The six name keys and `assigned:`'s usernames bind as typed and
-        // are folded by the server (#1843, #1975); `has:` and `sprint:`
-        // read a spelling the parse already folded, which names a signal or
-        // `current`.
+        // are folded by the server (#1843, #1975); `has:` reads a spelling
+        // the parse already folded, which names a signal. `sprint:` binds
+        // nothing: its one value, `current`, is the fragment's own test,
+        // and a bind no fragment reads is one the server cannot type.
         use crate::query::FieldKey;
         let values = match filter.key {
             FieldKey::Project
@@ -688,7 +720,8 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
             | FieldKey::Assignee
             | FieldKey::Label
             | FieldKey::Assigned => bind_lowered(builder, &filter.values),
-            FieldKey::Sprint | FieldKey::Has => builder.param(Bind::Texts(filter.values.clone())),
+            FieldKey::Has => builder.param(Bind::Texts(filter.values.clone())),
+            FieldKey::Sprint => "null::text[]".to_owned(),
         };
         // `has:`'s usernames as configured, folded by the server as the
         // reviewers they meet are.
@@ -802,18 +835,33 @@ fn answered_kind(corpus: &Corpus, bound: &BoundFilters) -> String {
 fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -> Vec<String> {
     let mut predicates: Vec<String> = Vec::new();
     if let Some(fts) = fts {
-        predicates.push(format!("{} @@ {fts}", corpus.fts));
+        // *Titles* (#2430): every corpus indexes what a row shows -- its
+        // title, a ticket's key -- at weight A and its body below, so the
+        // words must match the A lexemes alone. Beside the match of the whole
+        // vector, never in its place: a word the query leaves out must be
+        // absent from the body too.
+        match (bound.titles, corpus.title_fts) {
+            // A stored, indexed title vector (`Corpus::title_fts`): its index
+            // finds the rows the words name, and the whole vector only has to
+            // agree. That half is wrapped so that it is a filter and nothing
+            // an index can answer: as a bare `@@` the planner was free to
+            // read every body match from the whole vector's index and filter
+            // for the titles, which is the cost the stored vector removes.
+            (true, Some(stored)) => {
+                predicates.push(format!("{stored} @@ {fts}"));
+                predicates.push(format!("coalesce({} @@ {fts}, false)", corpus.fts));
+            }
+            // No stored title vector: the GIN index answers the plain match
+            // and the weight filter keeps the rows it found.
+            (true, None) => {
+                predicates.push(format!("{} @@ {fts}", corpus.fts));
+                predicates.push(format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts));
+            }
+            (false, _) => predicates.push(format!("{} @@ {fts}", corpus.fts)),
+        }
         if let Some(unless) = corpus.unless {
             // The row another corpus answers for when it matches (#2431).
             predicates.push(format!("not ({unless} @@ {fts})"));
-        }
-        if bound.titles {
-            // *Titles* (#2430): every corpus indexes what a row shows -- its
-            // title, a ticket's key -- at weight A and its body below, so the
-            // words must match the A lexemes alone. Beside the plain match,
-            // never instead of it: that one is what the GIN index answers,
-            // and this filters the rows it found.
-            predicates.push(format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts));
         }
     }
     if let Some(scope) = corpus.scope {
@@ -879,22 +927,20 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         // `under:`. A fragment that misses yields null, and null is "does not
         // match": `coalesce` makes it false before a `not` can see it.
         let matches = match corpus.fields.iter().find(|(key, _)| *key == field.key) {
-            // `has:` (#815) reads its binds in place rather than from `fd`:
-            // its fragment is a set (`in (select ...)`) that must be read
-            // once per statement, and a reference to `fd` would make it a
-            // subplan run once per row, the whole signal walk each time. The
-            // fragment's only `fd.` references are these two, by
-            // construction (`crate::corpus::LIVE_ITEM_FIELDS`).
-            Some((crate::query::FieldKey::Has, fragment)) => format!(
+            // Every key reads its binds in place (`has:` since #815, the
+            // rest since the query audit of 2026-11-12): a fragment asks
+            // its values as a set (`in (select ...)`) that must be read once
+            // per statement, and a reference to a relation `fd` carrying the
+            // binds made it a subplan run once per row. A fragment's only
+            // `fd.` references are these three, by construction
+            // (`crate::corpus::LIVE_ITEM_FIELDS`); `fd.n` is a key's window
+            // in days where it has one, `null` where it has none.
+            Some((_, fragment)) => format!(
                 "coalesce({}, false)",
                 fragment
                     .replace("fd.v", &field.values)
                     .replace("fd.u", &field.me)
-            ),
-            Some((_, fragment)) => format!(
-                "coalesce((select {fragment} from (select {}::text[] as v, {}::int as n, \
-                 {}::text[] as u) fd), false)",
-                field.values, field.days, field.me
+                    .replace("fd.n", &format!("{}::int", field.days))
             ),
             // A corpus whose rows have no such field matches no value of it.
             None => "false".to_owned(),
@@ -1139,6 +1185,39 @@ where
     query
 }
 
+/// Run a statement [`search_sql`] built **with words** and collect its rows:
+/// [`query_as_with`], in a transaction that plans it with sequential scans
+/// off (`set local enable_seqscan = off`), as the similarity ranking is
+/// planned (`knobas_core::suggest`, #771).
+///
+/// The planner prices `fts @@ q` as one cheap operator a row and does not see
+/// that a stored vector is fetched and decompressed to evaluate it. For a
+/// word half the mirror holds it therefore chose to scan every row, 78 ms
+/// for `retry` over 39,770 items where the index answers in 10 (the query
+/// audit of 2026-11-12). Nothing a search with words reads is better scanned
+/// whole: each corpus matches through its index, and the corpora that have
+/// none (a reader's views, sets and saved lists, tens of rows) are scanned
+/// under either setting.
+///
+/// Not for a browse: with no words there is no match to index, and the
+/// planner's own choice is the one that was measured.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_matched<O>(pool: &sqlx::PgPool, built: SearchSql) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    let mut tx = pool.begin().await?;
+    sqlx::query("set local enable_seqscan = off")
+        .execute(&mut *tx)
+        .await?;
+    let rows = query_as_with::<O>(built).fetch_all(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(rows)
+}
+
 /// What the mirror and the estate say of each typed `under:` value, by its
 /// 1-based position among `values`, for `crate::under::report_unknown`
 /// (#1652, #2495): whether a parent answers to it, and whether the launcher
@@ -1239,6 +1318,23 @@ pub async fn parent_positions(
     Ok(positions)
 }
 
+/// The plan [`fetch_matched`] runs a statement under: [`explain`] with
+/// sequential scans off, in a transaction of its own.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain_matched(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("set local enable_seqscan = off")
+        .execute(&mut *tx)
+        .await?;
+    let plan = explain_on(&mut tx, built).await?;
+    tx.commit().await?;
+    Ok(plan)
+}
+
 /// The plan the launcher's own statement runs under.
 ///
 /// Behind `test-util` and living **here** because this is the module
@@ -1255,6 +1351,16 @@ pub async fn parent_positions(
 /// [`sqlx::Error`] if the statement cannot be planned.
 #[cfg(any(test, feature = "test-util"))]
 pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    explain_on(&mut conn, built).await
+}
+
+/// [`explain`], on a connection the caller holds.
+#[cfg(any(test, feature = "test-util"))]
+async fn explain_on(
+    conn: &mut sqlx::PgConnection,
+    built: SearchSql,
+) -> Result<String, sqlx::Error> {
     let SearchSql { sql, binds } = built;
     let mut query = sqlx::query_as::<Postgres, (String,)>(sqlx::AssertSqlSafe(format!(
         "explain (analyze, buffers, costs off)
@@ -1270,7 +1376,7 @@ pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sq
         };
     }
     Ok(query
-        .fetch_all(pool)
+        .fetch_all(conn)
         .await?
         .into_iter()
         .map(|(line,)| line)
@@ -1796,7 +1902,7 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(built.binds.len(), 9, "{}", built.sql);
+        assert_eq!(built.binds.len(), 8, "{}", built.sql);
         assert_eq!(
             placeholders(&built.sql),
             (1..=built.binds.len()).collect::<Vec<_>>(),
@@ -1814,9 +1920,34 @@ mod tests {
         // The declarations every row's path line reads (#596), last because
         // the detail stage is the last to read anything.
         assert!(
-            matches!(built.binds[8], Bind::Json(_)),
+            matches!(built.binds[7], Bind::Json(_)),
             "{:?}",
-            built.binds[8]
+            built.binds[7]
+        );
+
+        // A statement asked for a headline binds its options ahead of the
+        // declarations, where the detail stage reads them.
+        let headlined = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            true,
+            &EffectiveFilters {
+                headline: true,
+                ..filters(&["jira"], &["ticket"], Some(7), &["mara"])
+            },
+            10,
+            50,
+        );
+        assert_eq!(headlined.binds.len(), 9, "{}", headlined.sql);
+        assert_eq!(
+            placeholders(&headlined.sql),
+            (1..=headlined.binds.len()).collect::<Vec<_>>(),
+            "{}",
+            headlined.sql
+        );
+        assert_eq!(
+            headlined.binds[7],
+            Bind::Text(crate::snippet::headline_options())
         );
     }
 
@@ -1858,8 +1989,8 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(built.binds.len(), 5);
-        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4, 5], "{}", built.sql);
+        assert_eq!(built.binds.len(), 4);
+        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4], "{}", built.sql);
     }
 
     #[test]
@@ -1880,8 +2011,8 @@ mod tests {
         );
         assert_eq!(
             typing.sql.matches("cross join q").count(),
-            2,
-            "and it is read as a FROM item by the match and by the headline: {}",
+            1,
+            "and it is read as a FROM item by the match: {}",
             typing.sql
         );
         assert!(typing.sql.contains("':*'"), "{}", typing.sql);
@@ -1901,7 +2032,7 @@ mod tests {
         // While a word may be a prefix, a row holding the words whole is
         // ranked by them (`RANK_WHOLE`, #611).
         assert!(
-            typing.sql.contains("ts_rank_cd(i.fts, q.whole)"),
+            typing.sql.contains("ts_rank_cd(sx.fts, q.whole)"),
             "{}",
             typing.sql
         );
@@ -2124,10 +2255,28 @@ mod tests {
     }
 
     /// `ts_headline` re-parses the document per row, so it must see the page
-    /// and not the match set.
+    /// and not the match set. Only a statement asked for one computes it.
     #[test]
     fn the_headline_runs_after_the_limit() {
         let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters {
+                headline: true,
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        // By `q`, which the detail stage then reads as well as the match.
+        assert_eq!(
+            built.sql.matches("cross join q").count(),
+            2,
+            "{}",
+            built.sql
+        );
+        let unasked = search_sql(
             &[&LIVE_ITEM],
             Some("sepa"),
             false,
@@ -2135,11 +2284,63 @@ mod tests {
             10,
             50,
         );
+        assert!(!unasked.sql.contains("ts_headline"), "{}", unasked.sql);
+        assert!(
+            unasked.sql.contains("null::text as snippet"),
+            "{}",
+            unasked.sql
+        );
         let limit = built.sql.find("limit $").expect("a limit");
         let headline = built.sql.find("ts_headline").expect("a headline");
         assert!(limit < headline, "{}", built.sql);
         // And it reads the page, not the corpus.
         assert!(built.sql.contains("from picked p"), "{}", built.sql);
+    }
+
+    /// *Titles* matches a row's weight-A lexemes: the mirror's stored and
+    /// indexed copy of them (migration `0077`), and for a corpus that keeps
+    /// none its vector filtered per match. Beside the match of the whole
+    /// vector, never in its place: a word the query leaves out must be
+    /// absent from the body too, as it was while both halves read one
+    /// vector. Over the stored copy that half is a filter no index answers.
+    #[test]
+    fn titles_reads_the_stored_title_vector_where_a_corpus_keeps_one() {
+        let built = search_sql(
+            &[&LIVE_ITEM, &crate::corpus::NOTE],
+            Some("sepa"),
+            true,
+            &EffectiveFilters {
+                titles: true,
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        assert!(
+            built
+                .sql
+                .contains("where sx.fts_a @@ q.tsq\n     and coalesce(sx.fts @@ q.tsq, false)"),
+            "{}",
+            built.sql
+        );
+        assert!(
+            built
+                .sql
+                .contains("where n.fts @@ q.tsq\n     and ts_filter(n.fts, '{a}') @@ q.tsq"),
+            "{}",
+            built.sql
+        );
+        assert!(!built.sql.contains("ts_filter(sx.fts"), "{}", built.sql);
+        // Everything matches the whole vector alone.
+        let everything = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            true,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert!(!everything.sql.contains("fts_a"), "{}", everything.sql);
     }
 
     /// A run log's hits are live pipelines, drawn by the mirror's detail
@@ -2212,15 +2413,18 @@ mod tests {
         // `fts` appears exactly twice, and both occurrences are accounted
         // for: ranked and matched against. Neither is a projection, which is
         // what would panic.
-        assert_eq!(built.sql.matches("i.fts").count(), 2, "{}", built.sql);
+        // The value read is the narrow table's copy (migration `0077`);
+        // the mirror's own column is not named at all.
+        assert_eq!(built.sql.matches("sx.fts").count(), 2, "{}", built.sql);
+        assert_eq!(built.sql.matches("i.fts").count(), 0, "{}", built.sql);
         assert_eq!(
-            built.sql.matches("ts_rank_cd(i.fts, q.tsq)").count(),
+            built.sql.matches("ts_rank_cd(sx.fts, q.tsq)").count(),
             1,
             "{}",
             built.sql
         );
         assert_eq!(
-            built.sql.matches("i.fts @@ q.tsq").count(),
+            built.sql.matches("sx.fts @@ q.tsq").count(),
             1,
             "{}",
             built.sql
@@ -2238,6 +2442,7 @@ mod tests {
             title: "o.title",
             named: None,
             fts: "o.fts",
+            title_fts: None,
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus
             // rather than be quietly dropped for it.
@@ -2265,7 +2470,7 @@ mod tests {
         );
         assert_eq!(built.sql.matches("union all").count(), 2, "{}", built.sql);
         // One bind per filter, shared by both branches -- not one per branch.
-        assert_eq!(built.binds.len(), 7, "{}", built.sql);
+        assert_eq!(built.binds.len(), 6, "{}", built.sql);
         assert_eq!(built.sql.matches("= any($2)").count(), 2, "{}", built.sql);
         // The scope travels with the corpus, into the match *and* the detail.
         assert_eq!(

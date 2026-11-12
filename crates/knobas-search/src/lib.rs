@@ -413,7 +413,7 @@ impl Searcher {
                 PER_GROUP,
                 query.limit,
             );
-            sql::query_as_with(built).fetch_all(&self.pool).await?
+            self.rows_of(built, text.is_some()).await?
         };
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
@@ -439,6 +439,21 @@ impl Searcher {
             coverage,
             took_ms: took_ms(started),
         })
+    }
+
+    /// The rows of a statement [`sql::search_sql`] built: through the indexes
+    /// when it has words to match ([`sql::fetch_matched`]), as the planner
+    /// chooses for a browse.
+    async fn rows_of(
+        &self,
+        built: sql::SearchSql,
+        words: bool,
+    ) -> Result<Vec<RawHit>, sqlx::Error> {
+        if words {
+            sql::fetch_matched(&self.pool, built).await
+        } else {
+            sql::query_as_with(built).fetch_all(&self.pool).await
+        }
     }
 
     /// Every entity id of `kind` the query admits, uncapped (#810): the
@@ -580,7 +595,7 @@ impl Searcher {
             query.limit,
             query.limit,
         );
-        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        let rows = self.rows_of(built, text.is_some()).await?;
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
             .find(|g| g.kind == PAGE);

@@ -1415,7 +1415,7 @@ mod tests {
     /// `fts` (migration `0076`): the narrow rows this fixture had alone
     /// stayed heap-only while every wide row of a real mirror was rewritten.
     fn sized_item(source_id: &str, n: usize) -> SyncItem {
-        let body_text = if n % 2 == 0 {
+        let body_text = if n.is_multiple_of(2) {
             format!("word{n} ").repeat(150)
         } else {
             (0..500).map(|w| format!("row{n}word{w} ")).collect()

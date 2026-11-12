@@ -129,6 +129,17 @@ pub struct Corpus {
     /// The indexed `tsvector`. **Matched against, never selected** -- reading
     /// one into a `FromRow` struct panics at runtime (interfaces §1).
     pub(crate) fts: &'static str,
+    /// The stored `tsvector` of the row's weight-A lexemes, what *Titles*
+    /// matches, or `None` for a corpus that keeps none: its `fts` is then
+    /// filtered per match (`ts_filter(fts, '{a}')`).
+    ///
+    /// The mirror stores one (`sync.item_search.fts_a`, migration `0077`),
+    /// with an index: it is the corpus a common word matches thousands of
+    /// rows of, and filtering every matching vector to keep the rows the
+    /// word names was most of a *Titles* keystroke. It must hold exactly
+    /// `ts_filter(fts, '{a}')`, which the migration's triggers write and
+    /// `tests/it/item_search.rs` pins.
+    pub(crate) title_fts: Option<&'static str>,
     /// The text `ts_headline` quotes the excerpt from.
     ///
     /// Title *and* body: `fts` weights the title into the match, so a query
@@ -318,7 +329,18 @@ macro_rules! field_paths_ctes {
             $crate::corpus::list_paths!("labels"),
             " union all ",
             $crate::corpus::list_paths!("sprint_state"),
-            ")"
+            "),\n",
+            // The stored cards (`sync.item_card`, migration `0075`) read under
+            // the key these declarations give each source, as
+            // `knobas_core::card_keys!` computes it: what `priority:`,
+            // `issuetype:` and `label:` are asked of ([`card_text_in!`]). A
+            // statement whose keys read no card never runs either.
+            "fcard as materialized (select d.source_id, sync.card_key(f.d -> d.source_id) as k \
+               from fdecl f cross join jsonb_object_keys(case when jsonb_typeof(f.d) = 'object' \
+                                          then f.d else '{}'::jsonb end) as d(source_id)),\n",
+            "fcards as materialized (select c.entity_id, c.priority, c.issue_type, c.labels \
+               from sync.item_card c join fcard on fcard.source_id = c.source_id \
+                and fcard.k = c.paths_key)"
         )
     };
 }
@@ -343,13 +365,70 @@ pub(crate) use field_of;
 /// [`field_of!`], read off `sync.item_field` where the database stored the
 /// field for the declarations the statement binds (#2184,
 /// `knobas_core::stored_string!`): a probe by the row's id rather than a
-/// walk of its payload, with the same answer.
+/// walk of its payload, with the same answer. What the keys read before they
+/// were asked as sets ([`stored_field_in!`]), kept for the reference the
+/// tests hold those to ([`LIVE_ITEM_FIELDS_PROBED`]).
+#[cfg(any(test, feature = "test-util"))]
 macro_rules! stored_field_of {
     ($field:literal) => {
         knobas_core::stored_string!(
             "(select fdecl.d from fdecl)",
             $field,
             $crate::corpus::field_of!($field)
+        )
+    };
+}
+
+/// Whether a row's stored string for `$field` is one of the values (`fd.v`),
+/// asked **as a set**: the stored rows that hold a value are read once a
+/// statement, through `item_field_value_idx` (migration `0078`), and each
+/// row is tested against them, where [`stored_field_of!`] probed
+/// `sync.item_field` once per row and key (the query audit of 2026-11-12:
+/// 23,176 probes and 61 ms for `status:` on 20,000 Jira tickets, 242 ms for
+/// `project:`).
+///
+/// **The same answer.** `$paths` is the candidates the statement's
+/// declarations give the row's source and kind for the field, spelled out
+/// because [`knobas_core::stored_under!`] takes a literal. Where the stored
+/// declarations hold those candidates the database keeps a row for the item
+/// under them (`stored_under!` says why), so membership in the set is the
+/// stored value's test. Where they do not, nothing is stored and the row
+/// walks its payload, as [`stored_field_of!`] did.
+macro_rules! stored_field_in {
+    ($field:literal, $paths:literal) => {
+        concat!(
+            "(case when ",
+            knobas_core::stored_under!($field, $paths),
+            " then (i.entity_id, ",
+            $paths,
+            ") in (select f.entity_id, f.paths from sync.item_field f where f.field = '",
+            $field,
+            "' and lower(f.value) = any(fd.v)) else lower(",
+            $crate::corpus::field_of!($field),
+            ") = any(fd.v) end)"
+        )
+    };
+}
+
+/// Whether a ticket's `$column` of its stored card is one of the values
+/// (`fd.v`), asked as a set of the cards [`FIELD_PATHS`]' `fcards` holds, and
+/// `$walk`, the payload read the key made before, for a row with no card
+/// under the bound declarations: not a ticket, not filled yet, or a source
+/// whose declarations the database did not store.
+///
+/// A card's column is the payload macro's answer under those declarations
+/// (`knobas-app`'s `tests/it/item_card.rs`), so the two halves agree. The
+/// walk decompressed every ticket's payload: 988 ms for `priority:` on
+/// 20,000 Jira tickets (2026-11-12).
+macro_rules! card_text_in {
+    ($column:literal, $($walk:tt)+) => {
+        concat!(
+            "(case when i.entity_id in (select fc.entity_id from fcards fc) \
+              then i.entity_id in (select fc.entity_id from fcards fc where lower(fc.",
+            $column,
+            ") = any(fd.v)) else lower(",
+            $($walk)+,
+            ") = any(fd.v) end)"
         )
     };
 }
@@ -383,6 +462,112 @@ pub(crate) use list_of;
 /// folds with the same `lower()` (#1843): Jira's status, type, priority and project names are
 /// case-insensitive in JQL, and so are its usernames.
 pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
+    use crate::query::FieldKey;
+    &[
+        // The chain's rows are read once a statement too: an empty chain,
+        // which every project without a parent has, holds no project.
+        (
+            FieldKey::Project,
+            concat!(
+                "(",
+                stored_field_in!(
+                    "project_key",
+                    "((select fdecl.d from fdecl)::jsonb #> array[i.source_id, i.kind, 'project_key'])"
+                ),
+                " or ",
+                stored_field_in!(
+                    "project_name",
+                    "((select fdecl.d from fdecl)::jsonb #> array[i.source_id, i.kind, 'project_name'])"
+                ),
+                " or i.entity_id in (select ip.entity_id from sync.item_project ip \
+                   join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind \
+                   where ip.path <> '[]'::jsonb and ",
+                knobas_core::project_chain_has!("ip.path", "fd.v"),
+                "))"
+            ),
+        ),
+        (
+            FieldKey::Status,
+            stored_field_in!(
+                "status_name",
+                "((select fdecl.d from fdecl)::jsonb #> array[i.source_id, i.kind, 'status_name'])"
+            ),
+        ),
+        (
+            FieldKey::IssueType,
+            card_text_in!("issue_type", field_of!("issue_type")),
+        ),
+        (
+            FieldKey::Priority,
+            card_text_in!("priority", field_of!("priority")),
+        ),
+        (
+            FieldKey::Assignee,
+            stored_field_in!(
+                "assignee",
+                "((select fdecl.d from fdecl)::jsonb #> array[i.source_id, i.kind, 'assignee'])"
+            ),
+        ),
+        // A card's labels are `declared_list!`'s values (`item_card.rs`).
+        (
+            FieldKey::Label,
+            concat!(
+                "(case when i.entity_id in (select fc.entity_id from fcards fc) \
+                  then i.entity_id in (select fc.entity_id from fcards fc \
+                    where exists (select 1 from unnest(fc.labels) as l(value) \
+                                   where lower(l.value) = any(fd.v))) \
+                  else exists (select 1 from ",
+                list_of!("labels"),
+                " l where lower(l.value) = any(fd.v)) end)"
+            ),
+        ),
+        (
+            FieldKey::Sprint,
+            concat!(
+                "exists (select 1 from ",
+                list_of!("sprint_state"),
+                " l where lower(l.value) = 'active')"
+            ),
+        ),
+        (
+            FieldKey::Assigned,
+            concat!(
+                "(",
+                stored_field_in!(
+                    "assignee",
+                    "((select fdecl.d from fdecl)::jsonb #> array[i.source_id, i.kind, 'assignee'])"
+                ),
+                " and i.item_updated_at >= now() - make_interval(days => fd.n))"
+            ),
+        ),
+        // The cards' own reader (#815), so `has:` admits exactly the tickets
+        // whose cards show the signal: `fd.u` is the user, lowercased, and
+        // `fd.v` the kinds, which also pick the links walked (#939); the user
+        // narrows `review-for-me`'s pull requests before the walk (#1148).
+        (
+            FieldKey::Has,
+            concat!(
+                "i.entity_id in (select sg.tid from ",
+                knobas_core::ticket_signals!(
+                    "(select fdecl.d from fdecl)",
+                    "fd.u",
+                    knobas_core::signal_ends!("(select fdecl.d from fdecl)", "fd.u", "fd.v"),
+                    "fd.v"
+                ),
+                " sg where sg.kind = any(fd.v))"
+            ),
+        ),
+    ]
+};
+
+/// The seven keys [`LIVE_ITEM_FIELDS`] asks as sets, as they read before the
+/// query audit of 2026-11-12: a probe of `sync.item_field` or a walk of the
+/// payload for every row and key, and `sprint:` beside them. No search
+/// reads them.
+/// `tests/it/ticket_key_sets.rs` holds each set-shaped key's answer to its
+/// answer here ([`LIVE_ITEM_PROBED`]).
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) const LIVE_ITEM_FIELDS_PROBED: &[(crate::query::FieldKey, &str)] = {
     use crate::query::FieldKey;
     &[
         (
@@ -423,6 +608,8 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
                 " l where lower(l.value) = any(fd.v))"
             ),
         ),
+        // As it is in [`LIVE_ITEM_FIELDS`]: no stored column holds a
+        // sprint's state, so it walks either way.
         (
             FieldKey::Sprint,
             concat!(
@@ -437,23 +624,6 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
                 "(lower(",
                 stored_field_of!("assignee"),
                 ") = any(fd.v) and i.item_updated_at >= now() - make_interval(days => fd.n))"
-            ),
-        ),
-        // The cards' own reader (#815), so `has:` admits exactly the tickets
-        // whose cards show the signal: `fd.u` is the user, lowercased, and
-        // `fd.v` the kinds, which also pick the links walked (#939); the user
-        // narrows `review-for-me`'s pull requests before the walk (#1148).
-        (
-            FieldKey::Has,
-            concat!(
-                "i.entity_id in (select sg.tid from ",
-                knobas_core::ticket_signals!(
-                    "(select fdecl.d from fdecl)",
-                    "fd.u",
-                    knobas_core::signal_ends!("(select fdecl.d from fdecl)", "fd.u", "fd.v"),
-                    "fd.v"
-                ),
-                " sg where sg.kind = any(fd.v))"
             ),
         ),
     ]
@@ -616,7 +786,7 @@ pub(crate) use mirror_frame;
 /// the same place for the same reason (issue #202), so reading the base table
 /// now also puts back items from a source the user switched off.
 pub const LIVE_ITEM: Corpus = Corpus {
-    relation: "sync.live_item i",
+    relation: "sync.live_item i join sync.item_search sx on sx.entity_id = i.entity_id",
     entity_id: "i.entity_id",
     kind: "i.kind",
     source_id: "i.source_id",
@@ -632,7 +802,12 @@ pub const LIVE_ITEM: Corpus = Corpus {
         "coalesce(i.title_words = q.words or i.title_tail_words = q.words \
          or i.key_words = q.words, false)",
     ),
-    fts: "i.fts",
+    // The row's vector and its weight-A half, from the narrow table that
+    // keeps a copy of each (`sync.item_search`, migration `0077`): the match
+    // and the rank read the value `sync.item.fts` holds, without fetching it
+    // from beside the payload and the body.
+    fts: "sx.fts",
+    title_fts: Some("sx.fts_a"),
     // The words alone: a page's Docs-search marks never reach an excerpt (#860).
     headline_text: concat!(
         "i.title || ' — ' || ",
@@ -658,6 +833,27 @@ pub const LIVE_ITEM: Corpus = Corpus {
           where lower(ip.name) = any(ud.v))",
     ),
     fields: LIVE_ITEM_FIELDS,
+};
+
+/// [`LIVE_ITEM`] as it read the mirror before migration `0077`: the row's
+/// own `sync.item.fts` for the match and the rank, filtered per match under
+/// *Titles*. No search reads it. `tests/it/item_search.rs` holds
+/// [`LIVE_ITEM`]'s answers to its answers.
+#[cfg(any(test, feature = "test-util"))]
+pub const LIVE_ITEM_UNSTORED: Corpus = Corpus {
+    relation: "sync.live_item i",
+    fts: "i.fts",
+    title_fts: None,
+    ..LIVE_ITEM
+};
+
+/// [`LIVE_ITEM`] with its ticket keys read row by row
+/// ([`LIVE_ITEM_FIELDS_PROBED`]), the reference `sql::ids_sql_probed` builds
+/// over. No search reads it.
+#[cfg(any(test, feature = "test-util"))]
+pub const LIVE_ITEM_PROBED: Corpus = Corpus {
+    fields: LIVE_ITEM_FIELDS_PROBED,
+    ..LIVE_ITEM
 };
 
 /// Notes: the corpus of the first kind knobas **owns** rather than mirrors.
@@ -690,6 +886,7 @@ pub const NOTE: Corpus = Corpus {
     title: "n.title",
     named: None,
     fts: "n.fts",
+    title_fts: None,
     headline_text: "n.title || ' — ' || n.body_md",
     // A note is the user's own; there is no author column and no author to
     // filter by, so an author filter must exclude this corpus entirely rather
@@ -760,6 +957,7 @@ pub const ASSET: Corpus = Corpus {
     title: "a.name",
     named: None,
     fts: "a.fts",
+    title_fts: None,
     headline_text: "a.name || ' — ' || a.path_text || ' — ' || a.props_text",
     excerpt: "null::text",
     excerpt_line: "null::bigint",
@@ -848,6 +1046,7 @@ pub const ROUTE: Corpus = Corpus {
     title: "r.name",
     named: None,
     fts: "r.fts",
+    title_fts: None,
     headline_text: "r.name || ' — ' || r.url",
     excerpt: "null::text",
     excerpt_line: "null::bigint",
@@ -890,6 +1089,7 @@ pub const VIEW: Corpus = Corpus {
     title: "v.name",
     named: None,
     fts: "v.fts",
+    title_fts: None,
     headline_text: "v.name || ' — ' || v.view_group || ' — ' || v.query",
     excerpt: "null::text",
     excerpt_line: "null::bigint",
@@ -927,6 +1127,7 @@ pub const SET: Corpus = Corpus {
     title: "s.name",
     named: None,
     fts: "s.fts",
+    title_fts: None,
     headline_text: "s.name || ' — ' || s.description",
     excerpt: "null::text",
     excerpt_line: "null::bigint",
@@ -984,6 +1185,7 @@ pub const SAVED_LIST: Corpus = Corpus {
     title: "l.label",
     named: None,
     fts: "l.fts",
+    title_fts: None,
     headline_text: "l.label || ' — ' || l.query",
     // The reader's own, as a note is.
     excerpt: "null::text",
@@ -1031,6 +1233,7 @@ pub const PIPELINE_LOG: Corpus = Corpus {
     // Its own row did not match (`unless`), so it is not named what was typed.
     named: Some("false"),
     fts: "pl.fts",
+    title_fts: None,
     headline_text: "i.title || ' — ' || pl.body",
     excerpt: "pl.body",
     excerpt_line: "pl.first_line",

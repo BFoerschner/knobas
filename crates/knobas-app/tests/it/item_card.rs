@@ -487,6 +487,22 @@ async fn every_read(pool: &PgPool, sources: &[String], ids: &[String]) -> Vec<St
         "pay -mara",
         "mara or jonas",
         "zzqx",
+        // The keys a stored card answers as a set (`priority:`,
+        // `issuetype:`, `label:`) and the ones `sync.item_field` does,
+        // each also left out, whose answer keeps the tickets that miss.
+        "priority:high",
+        "-priority:high",
+        "issuetype:story issuetype:epic",
+        "-issuetype:story",
+        "label:backend",
+        "label:kind/bug label:payouts",
+        "-label:backend",
+        "status:\"to do\"",
+        "status:open status:\"in progress\"",
+        "-status:open",
+        "assignee:mara",
+        "-assignee:jonas",
+        "priority:high pay",
     ] {
         let mut matched = searcher
             .matching_ids(words, "ticket")
@@ -570,6 +586,111 @@ async fn the_reads_answer_the_same_with_every_card_some_or_none() {
     for (n, (every, filled)) in every.iter().zip(&filled).enumerate() {
         assert_eq!(filled, every, "read {n}: filled");
     }
+}
+
+/// `(source, status)` as `statement` answers for `among`, in one order, on
+/// `conn`.
+async fn statuses(
+    conn: &mut sqlx::PgConnection,
+    statement: &'static str,
+    among: Option<&[String]>,
+    declared: &sqlx::types::Json<Value>,
+) -> Vec<(String, String)> {
+    let mut rows: Vec<(String, String)> = sqlx::query_as(statement)
+        .persistent(false)
+        .bind(among)
+        .bind(declared)
+        .fetch_all(conn)
+        .await
+        .unwrap();
+    rows.sort();
+    rows
+}
+
+/// The statuses a board's sources show, read off the cards' index (migration
+/// `0078`), are the ones the earlier statement read by joining every live
+/// ticket to its card: for the sources asked and for every source, with
+/// every card stored, with a source's cards half gone (it is then read the
+/// earlier way), with a status only a withdrawn ticket holds, and with a
+/// source switched off.
+#[tokio::test]
+async fn the_statuses_off_the_cards_index_are_the_joined_reads() {
+    let pool = pool().await;
+    let jira = source(&pool, "jira").await;
+    let gitea = source(&pool, "gitea").await;
+    let off = source(&pool, "jira").await;
+    upsert(&pool, &jira, &jira_tickets()).await;
+    upsert(&pool, &gitea, &gitea_tickets()).await;
+    upsert(&pool, &off, &jira_tickets()).await;
+    // A status one ticket alone holds.
+    upsert(
+        &pool,
+        &jira,
+        &[(
+            "PAY-9",
+            "Withdrawn",
+            json!({ "key": "PAY-9", "fields": { "status": { "name": "Only Withdrawn" } } }),
+        )],
+    )
+    .await;
+    let declared = declarations(&pool).await.as_param();
+    let asked = vec![jira.clone(), gitea.clone(), off.clone()];
+    let now = knobas_core::mini_board::planned_observed_statuses();
+    let before = knobas_core::mini_board::planned_observed_statuses_joined();
+
+    // One snapshot for both statements: the other tests of this file write
+    // tickets of their own, which the read of every source sees.
+    let both = async |among: Option<&[String]>, when: &str| -> Vec<(String, String)> {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("set transaction isolation level repeatable read")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let read = statuses(&mut tx, now, among, &declared).await;
+        let joined = statuses(&mut tx, before, among, &declared).await;
+        assert_eq!(read, joined, "{when}");
+        read
+    };
+
+    let whole = both(Some(&asked), "every card stored").await;
+    assert!(
+        whole.contains(&(jira.clone(), "Only Withdrawn".to_owned()))
+            && whole.contains(&(gitea.clone(), "open".to_owned())),
+        "{whole:?}"
+    );
+    both(None, "every source").await;
+
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("{jira}:PAY-9"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.source_config set enabled = false where id = $1")
+        .bind(&off)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let live = both(Some(&asked), "a withdrawn ticket and a source switched off").await;
+    assert!(
+        !live.iter().any(|(_, status)| status == "Only Withdrawn")
+            && !live.iter().any(|(source, _)| *source == off),
+        "{live:?}"
+    );
+    both(None, "every source, after").await;
+
+    sqlx::query(
+        "delete from sync.item_card where entity_id in (
+           select entity_id from sync.item where source_id = $1 order by entity_id limit 2)",
+    )
+    .bind(&jira)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        both(Some(&asked), "a source with cards missing").await,
+        live
+    );
+    both(None, "every source, cards missing").await;
 }
 
 /// The reads take a stored card's fields where there is one, and nothing

@@ -18,6 +18,7 @@ mod everything;
 mod help_card;
 mod home;
 mod item_parent;
+mod item_search;
 mod key_cell;
 mod launcher_kinds;
 mod lists;
