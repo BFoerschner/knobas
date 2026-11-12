@@ -196,6 +196,10 @@
 .tf-run-brin { display: flex; align-items: center; gap: 1ch; min-width: 0; }
 .tf-run-brname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-run-brin > .tf-chip { flex: none; }
+/* The job's chip is 4 px taller than the branch's words, and it comes with the job's branches, read after the runs: it
+   takes no more of the line than the words, so a row keeps its height when it arrives (the answer cache drew the runs
+   before the branches, and every row with the chip grew under the pointer). */
+.tf-runs .tf-run-brin > .tf-chip { margin-block: -2px; }
 .tf-runs .tf-run-trig { width: 170px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
