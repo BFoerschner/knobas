@@ -556,3 +556,34 @@ test("Pull requests reads the newest 100 first, the rest once the filter wants t
   expect([...target.querySelectorAll(".tf-cprs .tf-rowt")].map(text)).toEqual(["Old change 249"]);
   filter.text = "";
 });
+
+test("once the page has drawn and the window is idle, the rest of the pull requests is read, and lands in one piece (the frame budget's code-filter, 2026-11-12)", async () => {
+  const { sessionFilter } = await import("../filter/filter-state.svelte");
+  Object.assign(sessionFilter("code-prs"), { text: "", scope: "all", chips: {}, dropdowns: {} });
+  const settled = Array.from({ length: 2400 }, (_, n) => pr(9000 - n, `Old change ${n}`, "merged"));
+  const every = [...OPEN, ...settled];
+  const newest: [number, number][] = [];
+  const drawnRows: number[] = [];
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (wanted, limit, offset) => {
+        if (wanted.kinds.includes("repo")) return page(REPOS);
+        if (wanted.kinds.includes("branch")) return page([]);
+        if (wanted.order === "attention") return page(OPEN, GROUPS);
+        newest.push([limit, offset]);
+        // What the page drew when each later page was asked: the rest lands once, after the last.
+        drawnRows.push(target.querySelectorAll(".tf-cprs tbody tr:not(.tf-wgap)").length);
+        return { rows: every.slice(offset, offset + limit), total: every.length, tally: null, groups: null };
+      },
+    }),
+  );
+  expect(newest).toEqual([[100, 0]]);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  flushSync();
+  expect(newest).toEqual([[100, 0], [1000, 100], [1000, 1100], [1000, 2100]]);
+  expect(new Set(drawnRows.slice(1)).size).toBe(1);
+  expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe(`Pull requests ${every.length}`);
+});

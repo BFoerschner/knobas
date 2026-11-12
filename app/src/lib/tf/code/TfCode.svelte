@@ -25,8 +25,9 @@
   sorts again.
 
   The recency read asks for the newest 100 pull requests first and the rest
-  once they are wanted: the list's end scrolled into view, the filter bar set,
-  or a job's count on the tab (the query audit, 2026-11-12). A repository's
+  once the page has drawn and the window is idle, or sooner when they are
+  wanted: the list's end scrolled into view, the filter bar set, or a job's
+  count on the tab (the query audit, 2026-11-12). A repository's
   team and language and a pull request's author are `code_facts` (#966), asked
   once for each row read, as its read lands. The other
   reads are `list_entities`, `entity_checkout`, `list_sources`,
@@ -139,8 +140,9 @@
   /**
    * How many pull requests the recency read asks for first, newest first: more than a screen of *Merged or closed*
    * (the query audit, 2026-11-12: every one of 1,710 was read in four reads in series, 711 ms and 552 KB, before the
-   * tab could count them). The rest are read when they are wanted: the reader scrolls to the list's end, sets the
-   * filter, or the job's count on the tab needs them (`restWanted`). The open ones are the attention read's, whole.
+   * tab could count them). The rest are read once the page has drawn and the window is idle, or sooner when they are
+   * wanted: the reader scrolls to the list's end, sets the filter, or the job's count on the tab needs them
+   * (`restWanted`). The open ones are the attention read's, whole.
    */
   const FIRST_PRS = 100;
   /**
@@ -312,8 +314,29 @@
     return () => watcher.disconnect();
   });
 
+  /**
+   * The page has drawn and the window has gone idle: the rest is read now, so it is there before anyone types into the
+   * filter. Read on the first key instead, its landing cost that key 265 ms at 4x on the fixture at scale (the frame
+   * budget's `code-filter`, a 100 ms line), where every key over rows already read is under 50.
+   */
+  let idleAfterDraw = $state(false);
+  $effect(() => {
+    if (idleAfterDraw || !(reposOrdered || prsOrdered)) return;
+    let gone = false;
+    const go = () => {
+      if (!gone) idleAfterDraw = true;
+    };
+    if (typeof requestIdleCallback === "function") {
+      const handle = requestIdleCallback(go, { timeout: 2000 });
+      return () => ((gone = true), cancelIdleCallback(handle));
+    }
+    const handle = setTimeout(go, 300);
+    return () => ((gone = true), clearTimeout(handle));
+  });
+
   // The pull requests past the first screen, once wanted: appended behind it, older than every row drawn, so they
-  // join the end of *Merged or closed* and nothing drawn moves.
+  // join the end of *Merged or closed* and nothing drawn moves. They land in one piece, not a page at a time: each
+  // landing sorts and filters the whole list again.
   $effect(() => {
     const first = everyPr;
     if (!restWanted || first === null || restRead || first.rows.length >= first.total) return;
@@ -330,8 +353,8 @@
         if (!alive() || page.rows.length === 0) return;
         offset += page.rows.length;
         for (const row of page.rows) if (!seen.has(row.entity_id)) seen.add(row.entity_id), rows.push(row);
-        everyPr = { ...first, rows: [...rows] };
       }
+      if (alive() && rows.length > first.rows.length) everyPr = { ...first, rows };
     })().catch(() => {});
   });
 
@@ -438,7 +461,7 @@
    * something (it filters what is read, so it must hold them all), or a job's count on the tab counts them.
    */
   const prFilterSet = $derived(isFiltering(prFilter) || prFilter.scope !== "all");
-  const restWanted = $derived(atPrEnd || prFilterSet || (tab === "prs" && job !== null));
+  const restWanted = $derived(idleAfterDraw || atPrEnd || prFilterSet || (tab === "prs" && job !== null));
   // Prototype-6 opens both tabs on *All*.
   if (repoFilter.scope === null) repoFilter.scope = "all";
   if (prFilter.scope === null) prFilter.scope = "all";
