@@ -228,6 +228,8 @@
   let fileFailed = $state<string | null>(null);
   /** The file shown is being read: the one drawn before stays, dimmed, until it answers (#2246). */
   let fileReading = $state(false);
+  /** The commit the source's top directory named when it answered, at the current `at`; `null` before, or where it named none. */
+  let sourceTop: string | null = null;
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
   // Each file the tab drew is kept by the listing's section that opens it (`drawn-files.ts`, the inner-pages pass).
@@ -330,8 +332,13 @@
     if (read === undefined) return;
     read(where).then(
       (tree) => {
-        if (tree === null || mine !== generation || where !== at || listings[""] !== undefined) return;
-        local = { tree, checked: false };
+        if (tree === null || mine !== generation || where !== at) return;
+        // The source's top answered first (the app keeps it, so on a later open it beats `git ls-tree`): where it stands
+        // at the clone's commit, the clone draws the tree after all, and its files are read there, not on the forge (the
+        // inner-pages pass, 2026-11-12). At another commit the branch moved since the sync, and the source's tree stands.
+        const first = listings[""] !== undefined;
+        if (first && sourceTop !== tree.commit) return;
+        local = { tree, checked: first };
         listings = localListings(tree);
         pathsSection = localId(tree.commit, "paths", "");
       },
@@ -420,6 +427,7 @@
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
+        if (dir === "" && block?.type === "tree") sourceTop = block.commit ?? null;
         if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
         listings[dir] = block?.type === "tree" ? block.entries : [];
         if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
@@ -435,6 +443,7 @@
   $effect(() => {
     void at;
     generation += 1;
+    sourceTop = null;
     asked = new Set();
     early = new Map();
     listings = {};

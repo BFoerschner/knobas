@@ -206,3 +206,65 @@ test("with no checkout's copy the tab waits on the source, as before", async () 
   expect(note()).toBe("");
   expect(localReads).toEqual([]);
 });
+
+/**
+ * The source's top answered before the checkout's tree (the inner-pages pass, 2026-11-12): the app keeps the top, so on
+ * a later open it beat `git ls-tree`, and every file was then read on the forge. Where the top stands at the checkout's
+ * commit, the checkout's tree takes over and the file is read there; at another commit the source's tree stands.
+ */
+test("a checkout's tree that lands after the source's top at the same commit draws the tree, and its files are read there", async () => {
+  let release!: (tree: LocalTree) => void;
+  const late = new Promise<LocalTree>((resolve) => (release = resolve));
+  const ports = {
+    entityView: async (_at: string, section: string | null) => {
+      asked.push({ section: section ?? "", release: () => {} });
+      return sourceAnswer(FILES, section ?? "", TIP, "b10b");
+    },
+    localTree: () => late,
+    localFile: async (_at: string, commit: string, path: string) => {
+      localReads.push(`${commit.slice(0, 7)}:${path}`);
+      const text = FILES[path];
+      return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+    },
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+  };
+  view = mount(TfRepoFiles, {
+    target,
+    props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+  });
+  flushSync();
+  await settle();
+  expect(asked.map((a) => a.section)).toContain("files");
+  release(localTree(FILES));
+  await settle();
+  expect(target.querySelector(".tf-local, .tf-fromclone, .tf-heldnote") !== null || text(target).includes("From your clone")).toBe(true);
+  expect(localReads.length, "the README is read at the checkout").toBeGreaterThan(0);
+});
+
+test("a checkout's tree that lands after the source's top at another commit leaves the source's tree", async () => {
+  let release!: (tree: LocalTree) => void;
+  const late = new Promise<LocalTree>((resolve) => (release = resolve));
+  const ports = {
+    entityView: async (_at: string, section: string | null) => sourceAnswer(FILES, section ?? "", MOVED, "b10b"),
+    localTree: () => late,
+    localFile: async (_at: string, commit: string, path: string) => {
+      localReads.push(`${commit.slice(0, 7)}:${path}`);
+      return null;
+    },
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+  };
+  view = mount(TfRepoFiles, {
+    target,
+    props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+  });
+  flushSync();
+  await settle();
+  release(localTree(FILES));
+  await settle();
+  expect(text(target)).not.toContain("From your clone");
+  expect(localReads).toEqual([]);
+});
