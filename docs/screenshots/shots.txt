@@ -22,6 +22,7 @@ file          #/repo/mock%3Atidewater%2Fpayout-service/files/docs/flow.d2 + wait
 build         #/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187 + see:gives_up_after_max_attempts
 docs          #/page/confluence%3Asepa + see:The SEPA batch goes to the PSP
 monitors      #/monitors + see:canary
+link-sets     #/sets + see:Ledger stack
 time          #/time + see:Standup and planning
 standup       #/time/standup + see:Legacy payout reconciliation
 sources       #/settings/sources + see:git.tidewater.example

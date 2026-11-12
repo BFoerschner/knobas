@@ -20,6 +20,25 @@ the repository root, and the bash-guard refuses `cd testenv && …`, inside
 `$(…)` too, so an agent prefixes each one with `env -C testenv`: `env -C
 testenv ./seed`, `eval "$(env -C testenv ./seed --env)"`.
 
+## Find your way
+
+This file is long. These are the sections people come for.
+
+| You want to | Read |
+| --- | --- |
+| Start the products and seed them | The commands above, then [Ports](#ports) and [Credentials](#credentials) |
+| Run a live suite | [The live recipes](#the-live-recipes), then [Live products, on demand](#live-products-on-demand) |
+| Show the app on live data | [Live products as sources](#live-products-as-sources-just-live-sources-2371) |
+| Use the WSL box | [Live products on a remote machine (WSL)](#live-products-on-a-remote-machine-wsl) |
+| Know who may use the environment, and when | [One environment, one owner at a time](#one-environment-one-owner-at-a-time) |
+| Write an assertion against seeded data | [What the seed cannot reproduce](#what-the-seed-cannot-reproduce--read-this-before-writing-assertions) |
+| Start a real TeamCity, Jira or Confluence | [Opt-in profiles](#opt-in-profiles) |
+| Test at Björn's scale | [Björn's scale](#björns-scale-just-seed-scale-just-scale-sync) |
+| Change the estate or the monitors | [The estate file](#the-estate-file), [Monitors](#monitors) |
+| Measure frames or how fast a page opens | [`perf/README.md`](perf/README.md) |
+| Drive the real macOS app | [Signed dev build (macOS)](#signed-dev-build-macos), [The desktop witness (macOS)](#the-desktop-witness-macos) |
+| Find a script | [Scripts](#scripts), [UI checks](#ui-checks) |
+
 Uptime Kuma's monitor list is the real estate (see "Monitors" below), and
 since #634 every value in it is literal: `./seed` needs nothing beyond this
 directory. (From 2026-09-06 it needed a gitignored `hetzner/hosts.env` for

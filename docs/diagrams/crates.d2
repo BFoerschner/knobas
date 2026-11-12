@@ -1,0 +1,63 @@
+# docs/how-it-works.md's crate layers. `just readme-diagrams` renders it in both themes.
+#
+# A crate depends only on crates in rows below its own, never on one beside it or
+# above. The rows are read from each crate's [dependencies] in crates/*/Cargo.toml;
+# dev-dependencies do not count. Three crates are left out because only tests use
+# them: knobas-wasm-fixture, knobas-mockd and knobas-live-cleanup.
+#
+# No arrows on purpose: the rule is the row order, and forty arrows would hide it.
+# Every row has the same width, which stretches its boxes to fill it.
+
+grid-columns: 1
+grid-gap: 12
+
+classes: {
+  row: {
+    width: 1040
+    grid-rows: 1
+    grid-gap: 16
+    label.near: top-left
+    style.font-size: 18
+  }
+}
+
+app: The app {
+  class: row
+  knobas-app: "knobas-app\nthe Tauri shell: the window, the commands, profiles"
+}
+
+engines: Engines {
+  class: row
+  knobas-sync: "knobas-sync\nsync runs, the scheduler,\nthe write queue"
+  knobas-search: "knobas-search\nfull-text search\nover the mirror"
+  knobas-wasm-host: "knobas-wasm-host\nruns an external adapter\nin its sandbox"
+}
+
+adapters: "Built-in adapters, each a crate named knobas-source-…" {
+  class: row
+  jira: jira
+  confluence: confluence
+  gitea: gitea
+  teamcity: teamcity
+  kuma: kuma
+  mock: "mock\nthe reference adapter"
+}
+
+shared: Shared {
+  class: row
+  knobas-http: "knobas-http\none HTTP client, retries,\nrate limits"
+  knobas-secrets: "knobas-secrets\nthe OS keychain\nbehind a trait"
+  knobas-adapter-sdk: "knobas-adapter-sdk\nwhat an external adapter\nis written against"
+}
+
+contracts: "The adapter contract, the domain, the database" {
+  class: row
+  knobas-source: "knobas-source\nthe Source trait every\nadapter implements"
+  knobas-core: "knobas-core\nthe domain: entities, links,\nthe activity stream"
+  knobas-db: "knobas-db\nembedded PostgreSQL\nand the migrations"
+}
+
+base: Types {
+  class: row
+  knobas-spi-types: "knobas-spi-types\nthe types adapters and the core share"
+}
