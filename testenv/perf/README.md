@@ -121,6 +121,10 @@ just open-budget --real 5411 --inner --forge 1000   # every request held 1 s: `f
   each throttle's first open is a read knobas never made. A place's `first` round is the first open in that backend's
   life; to measure an open of a page read in an earlier session, start the backend again and run `--rounds first`.
   `firstUsefulMs` in a line bounds the first round alone, since only the forge answers a read never made.
+- **Six requests at once.** Headless Chrome sends at most six requests to the backend at once, so with the forge
+  slowed a page's local reads queue behind the page before's forge reads, which Tauri's IPC never does: a commit's page
+  measured 14.2 s with a clone, its diff answered by the backend in 80 ms. Read a slow cell against the backend's own
+  `--timings` before blaming the page.
 - **What waits on the forge is named per call**: each IPC call in `open.json` carries its arguments (`what`), and
   `--timings` on the backend each command's time, so a slow open says which section of which entity it waited for.
 

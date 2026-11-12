@@ -8,7 +8,7 @@ Amends [ADR-0032](0032-the-app-keeps-live-reads-in-memory-keyed-by-what-they-sta
 
 **A page that draws a [source view](../../CONTEXT.md#source-view) or a source read answers from what knobas last read whenever it holds one, says from when, and reads the source behind it.** Only a read knobas has never made waits for the source, and then without blocking anything else on the page.
 
-- **Where the answer comes from, in order.** The [read cache](../../CONTEXT.md#read-cache) in memory; then **held reads**, `sync.held_read`, what a page read in an earlier session; then, for a view never read, what the adapter can draw from the mirror's own record of the entity (`Source::mirror_view`, an optional SPI method, `None` by default: Gitea draws a pull request's overview and *Files* count from it); and only then the source, waited for.
+- **Where the answer comes from, in order.** The [read cache](../../CONTEXT.md#read-cache) in memory; then **held reads**, `sync.held_read`, what a page read in an earlier session; then, for a view never read, what the adapter can draw from the mirror's own record of the entity (`Source::mirror_view`, an optional SPI method, `None` by default: Gitea draws a pull request's overview and *Files* count from it); then what it can draw from the records of the entities under it (`Source::mirror_listing`, amended 2026-11-12 below: a repository's branches and its last commit); and only then the source, waited for.
 - **Live views are kept too, for pages.** ADR-0032's *Live* standing meant "never kept". A page's read (`entity_view`) of a live view is now kept and held like a moving one, answered at once and read again behind. Internal reads that need the source's word now (a compare's check, a range diff) still read it.
 - **Fixed reads are held between sessions too**, and never read behind: a view at a whole sha, a finished run's log, tests, artifacts and previews (the mirror's declared `finished` says so), an attachment's bytes by its content address.
 - **Moving reads other than views** take the same path: a pipeline's settings (*Run…*'s parameters, and the commit a shared sha resolves to on Builds, which waited up to 5 s on them).
@@ -36,6 +36,14 @@ Björn, on PR #2479: "it's fast after the first load. but some sites take some t
 - **Warmed.** After start, and after a run dropped answers, the reads the window made last are asked again in the background, one at a time, so a first open finds them.
 - **Not for reads past the mirror.** A checkout's state, a source's view and a search go to the backend every time, as above.
 - **Docs reads what it draws** rather than its whole tree (`docs_outline`, `docs_nodes`), and the backend keeps the tree it computed until a page's row moves (`docs::TreeCache`).
+
+## A repository never opened draws its branches and last commit from the mirror (amended 2026-11-12)
+
+The inner-pages pass of PR #2479 (Björn: "did you check the inner pages as well, when opening a repository itself etc? that took a long time too"), measured against the live Gitea through a proxy (`docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md`). A repository opened for the first time waited on the forge for its branch list, which the header's *Branch*, *New pull request*, Compare and the tabs' bookkeeping all wait for, and for its last commit, which kept the landing waiting under its skeleton: 2.8 s and 3.9 s on the first open after start, with the sync of that start loading the forge.
+
+- **`Source::mirror_listing_kind` and `Source::mirror_listing`**, optional SPI methods, `None` by default (additive; announced under *Frozen surface* in PR #2479). The adapter names the kind of the entities under the entity whose records draw a section; the app reads those records, the live ones of the entity's source whose stored parents name it (the stored parents `EntityFilter.parent` reads), and hands them over with the entity's own record. Drawn as `mirror_view`'s are: kept, said to be as of the newest sync among them, read behind, never held.
+- **Gitea** draws a repository's `branches` with the source's own rows over the branch records, in the source's order, so where nothing moved the source's answer lands on the same list; and its `commits` as the default branch's tip, the source's first row, with no count, the rest joining after it when the source answers. A repository the mirror holds no branch of draws nothing, not an empty list.
+- **The held line keeps its room** once drawn: the words go when the fresh answer lands, the line's place stays, so the list under it does not move up.
 
 ## Rejected
 
