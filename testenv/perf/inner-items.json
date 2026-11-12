@@ -1,0 +1,35 @@
+{
+ "_": "The inner pages open.mjs --set inner presses (the inner-pages pass of PR #2479, 2026-11-12): items of the saved scale database's Gitea estate as the live Gitea on the WSL box holds it, one set per CPU throttle so each throttle's first open is a read knobas has never made. A path is a file of the repository's default branch; `deep` sits as far down as the repository goes (two directories, one in payments-gateway), `large` is the estate's largest file kind (about 30 KB), `binary` a PDF (the estate holds no image); `branch` is the branch with the most changes against main; `pr` and `prLarge` two open pull requests (in cart-service #124 has 8 files and 106 changed lines, #111 2 and 4; in payments-gateway #203 8 and 48, #211 7 and 64). `run` is a finished unit-test run of the TeamCity scale tree, read for its Log, Tests and Artifacts tabs.",
+ "1": {
+  "repo": "live-gitea:scale-commerce/cart-service",
+  "readme": "README.md",
+  "small": "go.mod",
+  "large": "cmd/server/main.go",
+  "deep": "internal/dashboard/dashboard.go",
+  "find": "dashb",
+  "commit": "live-gitea:scale-commerce/cart-service@e6ae361991e4c66b661126ddd716e7feef900cc4",
+  "branch": "fix/ledger-writer-49",
+  "pr": "live-gitea:scale-commerce/cart-service#124",
+  "prLarge": "live-gitea:scale-commerce/cart-service#111",
+  "binaryRepo": "live-gitea:tidewater/milestone-review",
+  "binary": "docs/scan.pdf",
+  "pipeline": "live-teamcity:buildType:Scale_Payments_Refunds_Unittests",
+  "run": "live-teamcity:build:3230"
+ },
+ "4": {
+  "repo": "live-gitea:scale-commerce/payments-gateway",
+  "readme": "README.md",
+  "small": "app/load.py",
+  "large": "app/__init__.py",
+  "deep": "tests/test_load.py",
+  "find": "test_",
+  "commit": "live-gitea:scale-commerce/payments-gateway@3391fe384d5cd90dc3f9e1153be627a8be0e254e",
+  "branch": "fix/data-warehouse-loader-69",
+  "pr": "live-gitea:scale-commerce/payments-gateway#203",
+  "prLarge": "live-gitea:scale-commerce/payments-gateway#211",
+  "binaryRepo": "live-gitea:tidewater/milestone-review",
+  "binary": "docs/notice.pdf",
+  "pipeline": "live-teamcity:buildType:Scale_Commerce_Pricing_Unittests",
+  "run": "live-teamcity:build:3217"
+ }
+}

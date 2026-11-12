@@ -21,7 +21,9 @@
     // Through the app's own `invoke` (`app/src/lib/ipc/invoke.ts`): Tauri's bridge `invoke` is read-only.
     const prev = window.__knobasIpcTap;
     window.__knobasIpcTap = (cmd, args, options, next) => {
-      const call = { cmd, start: now(), end: null };
+      let what = "";
+      try { what = JSON.stringify(args ?? {}).slice(0, 200); } catch {}
+      const call = { cmd, what, start: now(), end: null };
       if (!String(cmd).startsWith("plugin:")) calls.push(call);
       const p = Promise.resolve(prev ? prev(cmd, args, options, next) : next(cmd, args, options));
       p.then(() => { call.end = now(); }, () => { call.end = now(); call.failed = true; });
@@ -43,10 +45,12 @@
      * there, is the page's first useful content; `hash`: the address the press goes to (a prefix), checked too;
      * `titled`: the words of the row pressed, which a match must read, so the page left drawn does not count.
      */
-    arm({ useful, min = 1, hash = null, quietMs = 700, maxMs = 12000, anyKey = false, anywhere = false, titled = null }) {
+    arm({ useful, min = 1, hash = null, quietMs = 700, maxMs = 12000, anyKey = false, anywhere = false, titled = null, marks = {} }) {
       wrap();
       calls.length = 0;
-      run = { useful, min, hash, quietMs, maxMs, anyKey, anywhere, titled, press: null, firstFrame: null, usefulAt: null, lastChange: 0, rects: null, done: false };
+      // `marks`: named lists of [selector, min, counted-unseen], each timed when it first holds, waiting or not (a repository's
+      // branch list, its *New pull request*): what draws later than the page's useful content, and when.
+      run = { useful, min, hash, quietMs, maxMs, anyKey, anywhere, titled, marks, markAt: {}, press: null, firstFrame: null, usefulAt: null, lastChange: 0, rects: null, done: false };
       const r = run;
       const obs = new MutationObserver(() => { r.lastChange = now(); });
       obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -55,11 +59,30 @@
         if (r.done) return;
         if (r.press !== null) {
           if (r.firstFrame === null) r.firstFrame = t;
+          for (const [name, parts] of r.hash === null || location.hash.startsWith(r.hash) ? Object.entries(r.marks) : []) {
+            if (r.markAt[name] !== undefined) continue;
+            const root = r.anywhere ? document.body : shown();
+            if (parts.every(([sel, least = 1, unseen = false]) => [...root.querySelectorAll(sel)].filter((e) => (unseen ? e.isConnected : visible(e))).length >= least)) r.markAt[name] = t;
+          }
           if (r.usefulAt === null && (r.hash === null || location.hash.startsWith(r.hash))) {
             const root = r.anywhere ? document.body : shown();
-            const rows = [...root.querySelectorAll(r.useful)].filter(visible).filter((e) => r.titled === null || (e.textContent || "").trim() === r.titled);
+            // `useful` is one selector with `min`, or a list of [selector, min, counted-unseen] that must all hold (an inner
+            // page: its tree and its file; a select's options, which are never boxes on screen).
+            const parts = Array.isArray(r.useful) ? r.useful : [[r.useful, r.min, false]];
+            let rows = [];
+            let enough = true;
+            for (const [sel, least = 1, unseen = false, notText = null] of parts) {
+              // `notText`: a pattern a match's words must not fit, so a tab's *Reading the log…* is not its log.
+              const skip = notText === null ? null : new RegExp(notText);
+              const found = [...root.querySelectorAll(sel)]
+                .filter((e) => (unseen ? e.isConnected : visible(e)))
+                .filter((e) => r.titled === null || (e.textContent || "").trim() === r.titled)
+                .filter((e) => skip === null || !skip.test((e.textContent || "").trim()));
+              if (found.length < least) enough = false;
+              if (!unseen) rows = rows.concat(found);
+            }
             const waiting = [...root.querySelectorAll(WAITING)].some(visible);
-            if (rows.length >= r.min && !waiting) {
+            if (enough && !waiting) {
               r.usefulAt = t;
               r.rects = rows.slice(0, 40).map((e) => ({ e, top: e.getBoundingClientRect().top, left: e.getBoundingClientRect().left }));
             }
@@ -68,6 +91,12 @@
         requestAnimationFrame(tickFrame);
       };
       requestAnimationFrame(tickFrame);
+      return true;
+    },
+    /** An address set by the page itself, as a link or a key does: the press is now (the inner pages' deep addresses). */
+    go(hash) {
+      if (run && run.press === null) run.press = now();
+      location.hash = hash;
       return true;
     },
     /** Waits until the page has been quiet `quietMs` after its useful content (or `maxMs` from the press). */
@@ -97,7 +126,7 @@
         }
       }
       const settled = Math.max(r.lastChange, r.usefulAt ?? 0);
-      const ipc = calls.filter((c) => c.start >= p - 5).map((c) => ({ cmd: c.cmd, start: ms(c.start), end: ms(c.end ?? now()), open: c.end === null }));
+      const ipc = calls.filter((c) => c.start >= p - 5).map((c) => ({ cmd: c.cmd, what: c.what, start: ms(c.start), end: ms(c.end ?? now()), open: c.end === null }));
       const lt = longs.filter((l) => l.t >= p - 5 && l.t <= settled);
       return {
         hash: location.hash,
@@ -112,6 +141,7 @@
         longTasks: lt.length,
         longestTaskMs: Math.round(Math.max(0, ...lt.map((l) => l.d))),
         nodes: document.getElementsByTagName("*").length,
+        marks: Object.fromEntries(Object.keys(r.marks).map((name) => [name, r.markAt[name] === undefined ? null : ms(r.markAt[name])])),
       };
     },
   };

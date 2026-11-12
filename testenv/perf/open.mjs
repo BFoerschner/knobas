@@ -4,8 +4,12 @@
 // again on its return, at each CPU throttle. `open-probe.js` is the page half.
 //
 //   node testenv/perf/open.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--rounds first,return]
-//                               [--check budget-open.json --lines real]
+//                               [--check budget-open.json --lines real] [--set nav|inner] [--items inner-items.json]
 //
+// --set   `nav` (the default): the nav pages and the detail pages their rows open; `inner` (the inner-pages pass,
+//         2026-11-12): a repository's landing and tabs, files, a commit, Compare, *New pull request*, a pull request's
+//         tabs and a run's tabs, at the items `--items` names for each throttle, so each throttle's first open is a
+//         read knobas has never made
 // --app   a built app, `?fake-ipc&fake-real=<port>` on the saved scale database (examples/headless_ipc.rs), as
 //         `just frame-budget --real` runs it
 // --check fail (exit 1) when a place's useful or settled time, or rows moved after its first useful frame, is over
@@ -32,6 +36,8 @@ const check = opt("--check");
 /** How long the app has been up before a first visit's press: a person starts it and looks a moment later. */
 const firstAfter = Number(opt("--first-after", "6000"));
 const lines = opt("--lines") ?? "real";
+const set = opt("--set") ?? "nav";
+const items = JSON.parse(readFileSync(opt("--items") ?? new URL("./inner-items.json", import.meta.url), "utf8"));
 if (!app) { console.log("open.mjs: --app <url> is required"); process.exit(2); }
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, Number(opt("--max-minutes", "45")) * 60000).unref();
 
@@ -66,6 +72,52 @@ const PLACES = [
   { name: "settings", start: "#/time", press: `a.tf-iconbtn[href="#/settings"]`, hash: "#/settings", useful: ".tf-stg-src", min: 3, back: "Escape" },
   { name: "launcher", start: "#/tickets", key: { key: "k", code: "KeyK", modifiers: 4, windowsVirtualKeyCode: 75 }, hash: "#/", useful: "[role=dialog] [role=option], .tf-launch li, .tf-lr", min: 3, back: "Escape", anywhere: true },
 ];
+/**
+ * The inner pages at one throttle's items. Each starts at an address (`start`, drawn and quiet before the press), and
+ * is opened by a press (`press`), a key and the words typed after it (`key`, `text`), or the address a link inside the
+ * page would set (`go`). `useful` is a list of [selector, min, counted unseen] that must all hold with nothing waiting;
+ * `marks` are timed when they first hold (what draws after the useful content). A return leaves by `away` (a press) or
+ * `awayGo` (an address) and opens the place again the same way.
+ */
+const enc = encodeURIComponent;
+const encPath = (path) => path.split("/").map(enc).join("/");
+const CODE_LINES = [`${shown} pre.tf-code .tf-l`, 5];
+function innerPlaces(i) {
+  const R = `#/repo/${enc(i.repo)}`;
+  const tab = (t) => `${shown} .tf-tabs a[href="${R}/${t}"]`;
+  const files = `${shown} .tf-tabs a[href="${R}/files"], ${shown} .tf-tabs a[href="${R}"]`;
+  const treeTop = [`${shown} .tf-ftree .tf-d0`, 3];
+  const file = (path) => `${R}/files/${encPath(path)}`;
+  const diff = [`${shown} .tf-diff .tf-dbody`, 1];
+  const PR = `#/pr/${enc(i.pr)}`;
+  const prTab = (pr, t) => `${shown} .tf-tabs a[href="#/pr/${enc(pr)}/${t}"]`;
+  const prOverview = `${shown} .tf-tabs a[href="${PR}"]`;
+  const RUN = `#/build/${enc(i.pipeline)}/${enc(i.run)}`;
+  return [
+    { name: "repo-landing", start: "#/code", go: R, hash: R, useful: [treeTop, [`${shown} .tf-fileview .tf-md, ${shown} .tf-fileview .tf-rendered > *`, 1]], marks: { tree: [treeTop], lastCommit: [[`${shown} .tf-lastc-msg`, 1]], branchList: [[`${shown} select[aria-label="Branch"] option`, 2, true]], newPr: [[`${shown} .tf-repohead a.tf-primary`, 1]] }, awayGo: "#/code" },
+    { name: "files-deep", start: R, go: file(i.deep), hash: file(i.deep), useful: [CODE_LINES, [`${shown} .tf-ftree a[href="${file(i.deep)}"]`, 1]], awayGo: R },
+    { name: "files-go-to", start: R, key: { key: "t", code: "KeyT", windowsVirtualKeyCode: 84 }, text: i.find, hash: R, useful: [[`${shown} .tf-gotof`, 1]], awayKey: true },
+    { name: "file-small", start: R, go: file(i.small), hash: file(i.small), useful: [CODE_LINES], awayGo: R },
+    { name: "file-large", start: R, go: file(i.large), hash: file(i.large), useful: [CODE_LINES], awayGo: R },
+    { name: "file-readme", start: file(i.small), press: `${shown} .tf-ftree a[href="${file(i.readme)}"]`, hash: file(i.readme), useful: [[`${shown} .tf-fileview .tf-md > *`, 1]], awayGo: file(i.small) },
+    { name: "file-binary", start: `#/repo/${enc(i.binaryRepo)}`, go: `#/repo/${enc(i.binaryRepo)}/files/${encPath(i.binary)}`, hash: `#/repo/${enc(i.binaryRepo)}/files/`, useful: [[`${shown} .tf-fileview canvas, ${shown} .tf-fileview iframe, ${shown} .tf-fileview embed, ${shown} .tf-fileview .tf-pdf, ${shown} .tf-fileview .tf-dim`, 1]], awayGo: `#/repo/${enc(i.binaryRepo)}` },
+    { name: "repo-branches", start: R, press: tab("branches"), hash: `${R}/branches`, useful: [[`${shown} .tf-rbranches tbody tr`, 5]], away: files },
+    { name: "repo-commits", start: R, press: tab("commits"), hash: `${R}/commits`, useful: [[`${shown} .tf-rcommits tr.tf-row`, 10]], away: files },
+    { name: "repo-commit", start: `${R}/commits`, go: `${R}/commits/${enc(i.commit)}`, hash: `${R}/commits/`, useful: [diff], marks: { head: [[`${shown} h2.tf-cgroup-h .tf-mono`, 1]] }, awayGo: `${R}/commits` },
+    { name: "repo-compare", start: R, press: tab("compare"), hash: `${R}/compare`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff, ${shown} .tf-cdiff .tf-empty`, 1]], away: files },
+    { name: "compare-large", start: R, go: `${R}/compare/${enc(i.branch)}`, hash: `${R}/compare/`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff`, 3]], awayGo: R },
+    { name: "new-pull-request", start: R, press: `${shown} .tf-repohead a.tf-primary`, hash: `${R}/compare/`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff, ${shown} .tf-cdiff .tf-empty`, 1]], awayGo: R },
+    { name: "pr-overview", start: `${R}/prs`, go: PR, hash: PR, useful: [[`${shown} .tf-pr .tf-md, ${shown} .tf-pr .tf-cfail`, 1]], marks: { side: [[`${shown} .tf-pr .tf-side .tf-panel`, 2]], ready: [[`${shown} .tf-prready`, 1]] }, awayGo: `${R}/prs` },
+    { name: "pr-conversation", start: PR, press: prTab(i.pr, "conversation"), hash: `${PR}/conversation`, useful: [[`${shown} .tf-convo article.tf-msg, ${shown} .tf-convo .tf-empty`, 1]], away: prOverview },
+    { name: "pr-files", start: PR, press: prTab(i.pr, "diff"), hash: `${PR}/diff`, useful: [diff], away: prOverview },
+    { name: "pr-commits", start: PR, press: prTab(i.pr, "commits"), hash: `${PR}/commits`, useful: [[`${shown} .tf-pr tr, ${shown} .tf-pr .tf-row`, 1]], away: prOverview },
+    { name: "pr-files-large", start: `#/pr/${enc(i.prLarge)}`, press: prTab(i.prLarge, "diff"), hash: `#/pr/${enc(i.prLarge)}/diff`, useful: [[`${shown} .tf-diff`, 1]], away: `${shown} .tf-tabs a[href="#/pr/${enc(i.prLarge)}"]` },
+    { name: "run-log", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/log"]`, hash: `${RUN}/log`, useful: [[`${shown} .tf-logv .tf-l, ${shown} .tf-runbody p.tf-dim, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
+    { name: "run-tests", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/tests"]`, hash: `${RUN}/tests`, useful: [[`${shown} .tf-trow, ${shown} .tf-bv .tf-empty, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
+    { name: "run-artifacts", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/artifacts"]`, hash: `${RUN}/artifacts`, useful: [[`${shown} .tf-atree, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
+  ].map((p) => ({ ...p, inner: true }));
+}
+const placesAt = (rate) => (set === "inner" ? innerPlaces(items[String(rate)] ?? items["1"]) : PLACES);
 /** Whether the nav is drawn: a full page (a ticket, a run) keeps it in the document but shows none. */
 const NAV_SHOWN = `[...document.querySelectorAll(".tf-nav a")].some((a) => a.getBoundingClientRect().width > 0)`;
 /** Every section the nav and the cog reach, for the `late` round's tour. */
@@ -126,12 +178,29 @@ const ESCAPE = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 };
 
 async function measure(place) {
   // A place that opens what its row names (`titled`) is useful once that name is drawn, not an earlier one.
-  const at = place.key ? null : await find(place.press);
+  const at = place.key || place.go ? null : await find(place.press);
   const titled = place.titled ? at.text : null;
-  await js(`__open.arm(${JSON.stringify({ useful: place.useful, min: place.min, hash: place.hash, anyKey: !!place.key, anywhere: !!place.anywhere, titled })})`);
-  if (place.key) await key(place.key);
-  else await press(place.press, at);
-  return await js("__open.result()", 30000);
+  const maxMs = place.inner ? 30000 : 12000;
+  await js(`__open.arm(${JSON.stringify({ useful: place.useful, min: place.min, hash: place.hash, anyKey: !!place.key, anywhere: !!place.anywhere, titled, marks: place.marks ?? {}, maxMs })})`);
+  if (place.go) await js(`__open.go(${JSON.stringify(place.go)})`);
+  else if (place.key) {
+    await key(place.key);
+    if (place.text) await c.send("Input.insertText", { text: place.text });
+  } else await press(place.press, at);
+  return await js("__open.result()", maxMs + 15000);
+}
+
+/** The page at `hash`, as a link inside it would set it, drawn and quiet. */
+async function goTo(hash) {
+  await js(`location.hash = ${JSON.stringify(hash)}, 1`);
+  await quiet(1200);
+}
+
+/** Leaves an inner place for its return: a press, an address, or `Escape` out of the field a key went to. */
+async function leaveInner(place) {
+  if (place.away) await leave(place.away);
+  else if (place.awayKey) { await leave("Escape"); await js("document.activeElement?.blur?.(), 1"); await quiet(600); }
+  else await goTo(place.awayGo ?? place.start);
 }
 
 /** Leaves a place the way a reader would: `Escape`, or a press. */
@@ -143,11 +212,22 @@ async function leave(how) {
 
 const results = { app, at: new Date().toISOString(), throttles, places: [] };
 const save = () => writeFileSync(out, JSON.stringify(results, null, 1));
-const say = (r) => `useful ${r.usefulMs ?? "never"} ms, settled ${r.settledMs} ms, first frame ${r.firstFrameMs} ms, moved ${r.moved}${r.gone ? `, gone ${r.gone}` : ""}, ${r.ipc.length} calls (${r.ipcBeforeUseful} before useful)${r.longestTaskMs ? `, longest task ${r.longestTaskMs} ms` : ""}`;
+const say = (r) => `useful ${r.usefulMs ?? "never"} ms, settled ${r.settledMs} ms, first frame ${r.firstFrameMs} ms, moved ${r.moved}${r.gone ? `, gone ${r.gone}` : ""}, ${r.ipc.length} calls (${r.ipcBeforeUseful} before useful)${r.longestTaskMs ? `, longest task ${r.longestTaskMs} ms` : ""}${Object.keys(r.marks ?? {}).length ? `, ${Object.entries(r.marks).map(([k, v]) => `${k} ${v ?? "never"}`).join(", ")}` : ""}`;
 
 for (const rate of throttles) {
-  for (const place of PLACES.filter(picked)) {
+  for (const place of placesAt(rate).filter(picked)) {
     const entry = { name: place.name, throttle: rate };
+    if (place.inner) {
+      try {
+        await innerRounds(place, rate, entry);
+      } catch (e) {
+        entry.error = String(e.message || e);
+        console.log(`${rate}x ${place.name}: ERROR ${entry.error}`);
+      }
+      results.places.push(entry);
+      save();
+      continue;
+    }
     try {
       await cpu(1);
       await fresh(place.start);
@@ -194,6 +274,40 @@ for (const rate of throttles) {
     save();
   }
 }
+/** An inner place's rounds: first after start, return, return after every section, return after every source's run. */
+async function innerRounds(place, rate, entry) {
+  await cpu(1);
+  await fresh(place.start);
+  await sleep(firstAfter);
+  await quiet(600);
+  await cpu(rate);
+  if (rounds.includes("first")) {
+    entry.first = await measure(place);
+    console.log(`${rate}x ${place.name} first: ${say(entry.first)}`);
+    await quiet(1000);
+  }
+  if (rounds.includes("return")) {
+    if (!rounds.includes("first")) { await measure(place); await quiet(1000); }
+    await leaveInner(place);
+    entry.return = await measure(place);
+    console.log(`${rate}x ${place.name} return: ${say(entry.return)}`);
+    await quiet(1000);
+  }
+  for (const round of ["late", "synced"]) {
+    if (!rounds.includes(round)) continue;
+    if (place.awayKey) await leaveInner(place);
+    for (let i = 0; i < 3 && !(await js(NAV_SHOWN)); i++) await leave("Escape");
+    if (!(await js(NAV_SHOWN))) await goTo("#/time");
+    const tour = round === "late" ? SECTIONS : ["time"];
+    for (const section of tour) { await press(section === "settings" ? `a.tf-iconbtn[href="#/settings"]` : nav(section)); await quiet(900); }
+    if (round === "synced") { await js(SYNCED); await quiet(1500); }
+    await goTo(place.start);
+    entry[round] = await measure(place);
+    console.log(`${rate}x ${place.name} ${round}: ${say(entry[round])}`);
+    await quiet(1000);
+  }
+}
+
 await cpu(1);
 save();
 console.log("wrote", out);
@@ -208,8 +322,10 @@ if (check) {
       const r = e[round];
       if (!r) continue;
       const over = [];
+      // An inner page's first open may be a read knobas never made, which only the forge answers: its own line.
+      const useful = round === "first" && line.firstUsefulMs !== undefined ? line.firstUsefulMs : line.usefulMs;
       if (r.usefulMs === null) over.push("never useful");
-      else if (line.usefulMs !== undefined && r.usefulMs > line.usefulMs) over.push(`useful ${r.usefulMs} > ${line.usefulMs} ms`);
+      else if (useful !== undefined && r.usefulMs > useful) over.push(`useful ${r.usefulMs} > ${useful} ms`);
       if (line.settledMs !== undefined && r.settledMs > line.settledMs) over.push(`settled ${r.settledMs} > ${line.settledMs} ms`);
       if (r.moved > (line.moved ?? 0)) over.push(`${r.moved} rows moved`);
       if (over.length) { failed++; console.log(`OVER ${e.throttle}x ${e.name} ${round}: ${over.join(", ")}`); }

@@ -1343,7 +1343,9 @@ frame-budget *args:
 # entry or row in a headless Chrome at 1x and 4x, on its first visit, its return, its return after every other section
 # and its return after a sync, and fails when its first useful frame or its settling is over its line in
 # `testenv/perf/budget-open.json`, or a row moved after it drew. On the windowless backend over the saved scale
-# database: `just open-budget --real <port>`.
+# database: `just open-budget --real <port>`. `--inner` presses a repository's tabs, files, a commit, Compare, a pull
+# request's tabs and a run's tabs against the live forge instead, and `--inner --forge <ms>` with every request held
+# that long (the inner-pages pass, 2026-11-12; the README's *The inner pages*).
 open-budget *args:
     testenv/perf/open-budget.sh {{args}}
 

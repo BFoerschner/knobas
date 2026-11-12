@@ -39,7 +39,8 @@ trace on every state write, which made the measured app's filter keys several ti
 | `cdp.mjs` | the DevTools-protocol client: `launch()` a headless Chrome of its own, or `attach(port)` to one listening |
 | `frame-budget.sh` | what `just frame-budget` runs |
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
-| `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs |
+| `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
+| `inner-items.json`, `slow-forge.mjs` | the inner pages' items per throttle, and the proxy that slows the forge (below) |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
 
@@ -92,6 +93,36 @@ left, the backend's time on it, the answer's bytes), which splits an open into w
 page did. The places are the saved scale database's (`SCLENG`, a TeamCity pipeline); there is no fixture run. Two
 things differ from the app: a headless Chrome sends at most six requests to the backend at once, where Tauri's IPC
 has no such limit, and the backend is the example's mock runtime, whose answers are the app's.
+
+## The inner pages: `just open-budget --inner`
+
+A repository's landing and tabs, its files, a commit, Compare, *New pull request*, a pull request's tabs and a run's
+tabs, from the inner-pages pass of PR #2479 (2026-11-12, `docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md`).
+These read past the mirror, so they are measured against the **live** forge: the backend syncs and reads the live Gitea
+on the WSL box (`testenv/README.md`, *Live products on a remote machine*), over the tunnel, through `slow-forge.mjs`.
+
+```sh
+cp -cR <saved home> "$TMPDIR/home"            # the sources as saved, with their credentials (not moved out)
+# once: the Gitea source behind the proxy, so its address, and its held reads, are the same live or slowed
+curl -X POST http://127.0.0.1:5411/invoke -d '{"cmd":"update_source","args":{"id":"live-gitea","patch":{"base_url":"https://127.0.0.1:3900"}}}'
+just open-budget --real 5411 --inner                # the live forge: `inner` lines
+just open-budget --real 5411 --inner --forge 1000   # every request held 1 s: `forge` lines
+```
+
+- **A backend that reads the forge** needs the source's credential. A release build reads it from the keychain only,
+  and a scratch `HOME` has none, so build the example with debug assertions on, which keeps the dev profile's
+  `dev-secrets.json` (`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo build --release ... --target-dir <scratch>`,
+  a target of its own so the shared one keeps its cache).
+- **`slow-forge.mjs`** forwards bytes between knobas and the https front (`127.0.0.1:3443`) and holds the first chunk
+  of each request `--delay` ms, as `crates/knobas-app/tests/slow_proxy` does for the Rust rigs; `--control <port>`
+  takes `POST /delay?ms=` and answers `GET /count`. Over TLS a new connection's handshake is held too, as a far
+  network would.
+- **The items** are `inner-items.json`: one repository, files, a commit, a branch and pull requests per throttle, so
+  each throttle's first open is a read knobas never made. A place's `first` round is the first open in that backend's
+  life; to measure an open of a page read in an earlier session, start the backend again and run `--rounds first`.
+  `firstUsefulMs` in a line bounds the first round alone, since only the forge answers a read never made.
+- **What waits on the forge is named per call**: each IPC call in `open.json` carries its arguments (`what`), and
+  `--timings` on the backend each command's time, so a slow open says which section of which entity it waited for.
 
 ## On a real database
 
