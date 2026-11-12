@@ -514,3 +514,45 @@ test("each pull request group declares its five columns, so a windowed group's s
   expect(tables.length).toBeGreaterThan(0);
   for (const table of tables) expect(table.querySelectorAll(":scope > colgroup > col")).toHaveLength(5);
 });
+
+test("Pull requests reads the newest 100 first, the rest once the filter wants them, and asks code_facts once a row (the query audit, 2026-11-12)", async () => {
+  const { sessionFilter } = await import("../filter/filter-state.svelte");
+  const filter = sessionFilter("code-prs");
+  Object.assign(filter, { text: "", scope: "all", chips: {}, dropdowns: {} });
+  const settled = Array.from({ length: 250 }, (_, n) => pr(5000 - n, `Old change ${n}`, "merged", PAYOUT, `2026-07-${String(1 + (n % 28)).padStart(2, "0")}T10:00:00Z`));
+  const every = [...OPEN, ...settled];
+  const newest: [number, number][] = [];
+  const asked: string[][] = [];
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (wanted, limit, offset) => {
+        if (wanted.kinds.includes("repo")) return page(REPOS);
+        if (wanted.kinds.includes("branch")) return page([]);
+        if (wanted.order === "attention") return page(OPEN, GROUPS);
+        newest.push([limit, offset]);
+        return { rows: every.slice(offset, offset + limit), total: every.length, tally: null, groups: null };
+      },
+      codeFacts: async (ids) => (asked.push(ids), FACTS.filter((facts) => ids.includes(facts.entity_id))),
+    }),
+  );
+  expect(newest).toEqual([[100, 0]]);
+  expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe(`Pull requests ${every.length}`);
+  expect(target.querySelector(".tf-fcount-n")?.textContent).toBe(`${every.length} pull requests`);
+  const first = asked.flat();
+  expect(new Set(first).size).toBe(first.length);
+  expect(first).toHaveLength(REPOS.length + 100);
+
+  filter.text = "Old change 249";
+  flushSync();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(newest).toEqual([[100, 0], [1000, 100]]);
+  const all = asked.flat();
+  expect(new Set(all).size).toBe(all.length);
+  expect(all).toHaveLength(REPOS.length + every.length);
+  expect([...target.querySelectorAll(".tf-cprs .tf-rowt")].map(text)).toEqual(["Old change 249"]);
+  filter.text = "";
+});

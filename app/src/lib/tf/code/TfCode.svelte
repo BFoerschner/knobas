@@ -24,8 +24,11 @@
   drawn one waits behind *Show N new* in the filter bar, and a changed filter
   sorts again.
 
-  A repository's team and language and a pull request's author are
-  `code_facts` (#966), read once for every row the two lists hold. The other
+  The recency read asks for the newest 100 pull requests first and the rest
+  once they are wanted: the list's end scrolled into view, the filter bar set,
+  or a job's count on the tab (the query audit, 2026-11-12). A repository's
+  team and language and a pull request's author are `code_facts` (#966), asked
+  once for each row read, as its read lands. The other
   reads are `list_entities`, `entity_checkout`, `list_sources`,
   `list_contexts`, `get_entity` and `job_reach`. *Clone all…* in the header
   clones every repository not on this machine (`TfCloneAll`, PR #2479). Rows open
@@ -57,12 +60,12 @@
   import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
-  import { codeFacts, entityCheckouts, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
+  import { codeFacts, entityBriefs, entityCheckouts, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { CODE_HOST } from "../roles.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
-  import type { FilterConfig, FilterScope } from "../filter/filter";
+  import { isFiltering, type FilterConfig, type FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -110,6 +113,7 @@
       listSources: () => listSources(),
       listContexts: () => listContexts(),
       getEntity: (entityId) => getEntity(entityId),
+      entityBriefs: (entityIds) => entityBriefs(entityIds),
       jobReach: (entityId) => jobReach(entityId),
     },
     now: fixedNow,
@@ -132,6 +136,13 @@
 
   /** How many rows one read asks for; a room of more is read on with `offset`. */
   const LIMIT = 1000;
+  /**
+   * How many pull requests the recency read asks for first, newest first: more than a screen of *Merged or closed*
+   * (the query audit, 2026-11-12: every one of 1,710 was read in four reads in series, 711 ms and 552 KB, before the
+   * tab could count them). The rest are read when they are wanted: the reader scrolls to the list's end, sets the
+   * filter, or the job's count on the tab needs them (`restWanted`). The open ones are the attention read's, whole.
+   */
+  const FIRST_PRS = 100;
   /**
    * How many repositories one `entity_checkouts` call asks about. One call is out at a time, and the backend runs at most
    * eight `git status` at once and none where nothing in the checkout changed (the scale pass, 2026-11-10: 65 calls on
@@ -233,9 +244,17 @@
     void attentionWhole.finally(() => {
       if (live) attentionRead = true;
     });
+    // Every pull request when the rest was wanted before this read, so a re-read never shrinks the list; else the
+    // first screen's worth, and the rest behind it once wanted (`readRest`).
+    const wholePrs = untrack(() => restWanted) || restRead;
+    readsAt += 1;
+    restRead = wholePrs;
+    const newest = filterOf(["pr"], "updated_desc");
     const prReads = [
       attentionWhole,
-      read(filterOf(["pr"], "updated_desc"), whileLive((page) => (everyPr = page))),
+      wholePrs
+        ? read(newest, whileLive((page) => (everyPr = page)))
+        : ports.listEntities(newest, FIRST_PRS, 0).then(whileLive((page) => (everyPr = page)), fail),
     ];
     void repoRead.finally(() => {
       if (live) repoReading = false;
@@ -276,21 +295,74 @@
     };
   });
 
-  // Team, language and author (#966), once both lists have answered. A failed
-  // read leaves the cells empty rather than failing the page.
+  /** Bumped by each read of the lists: a later page read for an earlier one lands nowhere. */
+  let readsAt = 0;
+  /** Whether the rest of the pull requests is read, or being read, for the lists' current read. */
+  let restRead = false;
+  /** The end of the *Pull requests* list scrolled into view: the reader wants what is past the first screen. */
+  let atPrEnd = $state(false);
+  let prEnd: HTMLElement | null | undefined = $state();
+  $effect(() => {
+    const at = prEnd;
+    if (at == null || typeof IntersectionObserver === "undefined") return;
+    const watcher = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) atPrEnd = true;
+    });
+    watcher.observe(at);
+    return () => watcher.disconnect();
+  });
+
+  // The pull requests past the first screen, once wanted: appended behind it, older than every row drawn, so they
+  // join the end of *Merged or closed* and nothing drawn moves.
+  $effect(() => {
+    const first = everyPr;
+    if (!restWanted || first === null || restRead || first.rows.length >= first.total) return;
+    restRead = true;
+    const at = readsAt;
+    const alive = () => at === readsAt;
+    const filter = filterOf(["pr"], "updated_desc");
+    void (async () => {
+      const rows = [...first.rows];
+      const seen = new Set(rows.map((row) => row.entity_id));
+      let offset = rows.length;
+      while (alive() && offset < first.total) {
+        const page = await ports.listEntities(filter, LIMIT, offset);
+        if (!alive() || page.rows.length === 0) return;
+        offset += page.rows.length;
+        for (const row of page.rows) if (!seen.has(row.entity_id)) seen.add(row.entity_id), rows.push(row);
+        everyPr = { ...first, rows: [...rows] };
+      }
+    })().catch(() => {});
+  });
+
+  /** The ids `code_facts` was asked for in this round of reads, and the round: a run's re-read asks them again. */
+  let factsAsked = new Set<string>();
+  let factsRound = -1;
+  // Team, language and author (#966) for the rows read, each asked once a round: the repositories, the open pull
+  // requests and the recency read's so far, so a later page asks for its own rows alone (the query audit: all 1,775
+  // ids twice on every open, 411 KB). A failed read leaves the cells empty rather than failing the page.
   $effect(() => {
     if (repos === null || everyPr === null) return;
-    const ids = [...repos.rows, ...everyPr.rows].map((row) => row.entity_id);
-    let live = true;
-    ports.codeFacts(ids).then(
+    const round = syncRevision;
+    const ids = [...repos.rows, ...(attention?.rows ?? []), ...everyPr.rows].map((row) => row.entity_id);
+    if (round !== factsRound) {
+      factsRound = round;
+      factsAsked = new Set();
+    }
+    const ask = [...new Set(ids)].filter((id) => !factsAsked.has(id));
+    if (ask.length === 0) return;
+    for (const id of ask) factsAsked.add(id);
+    ports.codeFacts(ask).then(
       (answer) => {
-        if (live) facts = answer;
+        if (round !== factsRound) return;
+        const byId = new Map(untrack(() => facts).map((fact) => [fact.entity_id, fact]));
+        for (const fact of answer) byId.set(fact.entity_id, fact);
+        facts = [...byId.values()];
       },
-      () => {},
+      () => {
+        if (round === factsRound) for (const id of ask) factsAsked.delete(id);
+      },
     );
-    return () => {
-      live = false;
-    };
   });
 
   /**
@@ -361,6 +433,12 @@
 
   const repoFilter = sessionFilter("code-repos");
   const prFilter = sessionFilter("code-prs");
+  /**
+   * Whether every pull request is wanted, not the first screen's: the list's end is in view, the filter bar keeps
+   * something (it filters what is read, so it must hold them all), or a job's count on the tab counts them.
+   */
+  const prFilterSet = $derived(isFiltering(prFilter) || prFilter.scope !== "all");
+  const restWanted = $derived(atPrEnd || prFilterSet || (tab === "prs" && job !== null));
   // Prototype-6 opens both tabs on *All*.
   if (repoFilter.scope === null) repoFilter.scope = "all";
   if (prFilter.scope === null) prFilter.scope = "all";
@@ -540,7 +618,14 @@
     held={heldRepos}
   />
 {:else}
-  <FilterBar config={prConfig} filter={prFilter} shown={prsOrdered ? placedPrs.rows.length : null} total={prTotal} held={heldPrs} />
+  <!-- Unfiltered, the list holds every pull request: those past the first screen are read as the reader scrolls to them. -->
+  <FilterBar
+    config={prConfig}
+    filter={prFilter}
+    shown={prsOrdered ? (prFilterSet ? placedPrs.rows.length : prTotal) : null}
+    total={prTotal}
+    held={heldPrs}
+  />
 {/if}
 <div class="tf-cbody">
   {#if tab === "repos"}
@@ -618,6 +703,10 @@
     {:else}
       {@render nothing()}
     {/each}
+    {#if prsOrdered && everyPr !== null && everyPr.rows.length < everyPr.total}
+      <!-- The list's end: in view, the pull requests past the first screen are read and join the end. -->
+      <div class="tf-cprs-end" aria-hidden="true" bind:this={prEnd}></div>
+    {/if}
     </TfWaiting>
   {/if}
 </div>
