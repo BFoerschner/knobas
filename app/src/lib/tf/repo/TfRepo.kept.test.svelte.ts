@@ -378,11 +378,13 @@ test("Branches draws a held listing under the held line until the source answers
   await raise("view:fresh", { entity_id: REPO, section: "branches", failed: "connection refused" });
   expect(line()).toMatch(/^As knobas read it .+\. Tidewater Gitea did not answer: connection refused$/);
 
-  // The read behind answered: the page reads the fresh listing, and the line goes.
+  // The read behind answered: the page reads the fresh listing, and the line's words go; its room stays, so the
+  // table under it holds still (the inner-pages pass, 2026-11-12).
   held = false;
   forge = ["fix/fresh"];
   await raise("view:fresh", { entity_id: REPO, section: "branches" });
-  expect(target.querySelector(".tf-heldnote")).toBeNull();
+  expect(target.querySelector(".tf-heldnote[role=status]")).toBeNull();
+  expect(line()).toBe("");
   expect(text(target.querySelector("table"))).toContain("fix/fresh");
 });
 
@@ -456,4 +458,48 @@ test("a listing read again behind what is drawn stays live while it reads: nothi
   await settle();
   expect(document.activeElement).toBe(link);
   expect(text(target.querySelector("table"))).toContain("fix/slow");
+});
+
+/** The repository's row as `getEntity` reads it, with the default branch the mirror holds. */
+const withDefault = (stand: RepoPorts): RepoPorts => ({
+  ...stand,
+  getEntity: async (id) => ({ ...(await stand.getEntity(id)), default_branch: "main" }) as EntityDetail,
+});
+
+test("a branch list that fails still draws the tabs, at the mirror's default branch (the inner-pages pass)", async () => {
+  const stand = withDefault(ports());
+  await drawLive([REPO, "commits"], {
+    ...stand,
+    entityView: async (id, section) => {
+      if (id === REPO && section === "branches") {
+        reads.push([id, section]);
+        throw { code: "unreachable", message: "connection refused" };
+      }
+      return stand.entityView(id, section);
+    },
+  });
+  expect(reads.some(([id, section]) => id === REPO && section === "commits"), "the Commits tab read at the default branch").toBe(true);
+  expect(target.querySelector(".tf-rcommits, .tf-empty"), "a tab is drawn").not.toBeNull();
+});
+
+test("the Commits tab says a list drawn from what knobas holds is from then, and keeps the line's room once it is checked", async () => {
+  const old = new Date(NOW.getTime() - 3 * 3600 * 1000).toISOString();
+  let held = true;
+  const stand = ports();
+  await drawLive([REPO, "commits"], {
+    ...stand,
+    entityView: async (id, section) => {
+      if (id === REPO && section === "commits")
+        return { ...one("commits", [{ type: "entities", title: null, rows: [vrow(`${REPO}@1111111`, "the tip", "1111111")] }]), held_at: held ? old : null };
+      return stand.entityView(id, section);
+    },
+  });
+  const line = () => text(target.querySelector(".tf-heldnote"));
+  expect(line()).toMatch(/^As knobas read it .+\. Checking Tidewater Gitea…$/);
+  held = false;
+  await raise("view:fresh", { entity_id: REPO, section: "commits" });
+  expect(target.querySelector(".tf-heldnote[role=status]")).toBeNull();
+  // jsdom lays nothing out: the line's element staying, empty, is what keeps the list under it still in a browser.
+  expect(target.querySelector(".tf-heldnote"), "the line's room stays").not.toBeNull();
+  expect(line()).toBe("");
 });

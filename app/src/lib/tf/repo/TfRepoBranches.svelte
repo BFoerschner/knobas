@@ -306,7 +306,7 @@
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
         <tr data-place>
-          <td
+          <td title={row.name}
             ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
           <td

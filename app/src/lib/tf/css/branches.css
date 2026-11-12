@@ -1,5 +1,16 @@
 /* ---------- Branches, compare and edit (#839, #840, #845, R-8.6, R-8.8, R-8.11) ---------- */
 .tf-rbranches td:first-child { width: 34%; }
+/* Each branch's standing lands seconds after the list, one branch at a time (the inner-pages pass, 2026-11-12): the columns
+   are set by the header, not by what has landed, and a cell holds one line, so a value arriving fills its cell and no row
+   grows or moves under the reader. */
+.tf-rbranches { table-layout: fixed; }
+.tf-rbranches th:nth-child(1) { width: 34%; }
+.tf-rbranches th:nth-child(2) { width: 16%; }
+.tf-rbranches th:nth-child(3) { width: 13%; }
+.tf-rbranches th:nth-child(4) { width: 14%; }
+.tf-rbranches th:nth-child(5) { width: 10%; }
+.tf-rbranches td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-rbranches td.tf-racts { overflow: visible; }
 .tf-rbranches .tf-racts { text-align: right; }
 /* The last value: *Delete…* stands in its place on hover, so it is at least as wide. */
 .tf-rbranches td .tf-rowval { display: inline-block; min-width: 76px; }

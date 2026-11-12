@@ -50,6 +50,11 @@
 .tf-sentlink .tf-chip { text-decoration: underline; text-underline-offset: 2px; }
 /* A repository's title never breaks inside its name. */
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title and the line under it hold their room before the repository's row and its checkout answer, and the line stays
+   one line, a long clone path cut, so neither landing moves the tabs under the header: on a cold first open they came a
+   frame or two after the header and pushed the tab row down 19 px (the inner-pages pass, 2026-11-12). */
+.tf-repohead h1 { min-height: var(--control-h); }
+.tf-repohead .tf-sub { min-height: 1lh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-repo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
 /* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */

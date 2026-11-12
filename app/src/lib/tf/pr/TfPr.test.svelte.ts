@@ -1740,7 +1740,9 @@ test("a view knobas held draws at once under a line saying from when, and the fr
   ear.say({ entity_id: PR, section: null });
   await settle();
   expect(reads).toBe(2);
-  expect(target.querySelector(".tf-heldnote")).toBeNull();
+  // The words go; the line's room stays, so nothing under it moves up (the inner-pages pass, 2026-11-12).
+  expect(target.querySelector(".tf-heldnote[role=status]")).toBeNull();
+  expect(text(".tf-heldnote")).toBe("");
 });
 
 test("a source that does not answer behind a held view is named with its reason, and the view stays", async () => {

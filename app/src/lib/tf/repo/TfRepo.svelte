@@ -307,6 +307,7 @@
     failed = null;
     missing = false;
     branches = null;
+    branchesFailed = false;
     branchRefused = null;
     checkout = undefined;
     local = null;
@@ -366,6 +367,8 @@
   let branchRead = 0;
   /** A read of the branch list is under way: Compare does not say a branch is missing while it is. */
   let branchesReading = $state(false);
+  /** The first read of the branch list failed: the tabs read at the mirror's default branch, as before it answered. */
+  let branchesFailed = $state(false);
   /** When the lists were last asked for, so a window coming back into focus reads them again only after a while. */
   let listsAskedAt = 0;
 
@@ -394,11 +397,15 @@
         settleEchoes(id, (echo) => echo.kind === MADE && next.some((option) => option.name === echo.text));
         if (again) void landInPlace(page, () => (branches = next));
         else branches = next;
+        branchesFailed = false;
         branchesReading = false;
       },
       () => {
         if (!newest()) return;
-        if (!again) branches = [];
+        if (!again) {
+          branches = [];
+          branchesFailed = true;
+        }
         branchesReading = false;
       },
     );
@@ -602,10 +609,14 @@
    * branch knobas made is in the header, Compare and *New pull request* at once. `null` while the list has not answered.
    */
   const known = $derived(branches === null || repoId === null ? branches : withMade(branches, echoesOn(repoId, MADE)));
-  /** The default branch: the live list's, else the mirror's (#2243), `null` while neither has said. */
+  /**
+   * The default branch: the live list's, else the mirror's (#2243), `null` while neither has said. A list that failed, or
+   * one that names no default, falls back to the mirror's too: with the source down the page drew no tab at all (the
+   * inner-pages pass, 2026-11-12).
+   */
   const defaultBranch = $derived<BranchOption | null>(
     branches?.find((option) => option.isDefault) ??
-      (branches === null && mirrorDefault(detail) !== null
+      ((branches === null || branchesFailed) && mirrorDefault(detail) !== null
         ? { name: mirrorDefault(detail)!, entityId: null, isDefault: true }
         : null),
   );
@@ -625,6 +636,15 @@
   const branchName = $derived(selected?.name ?? null);
   const changed = $derived(changedPaths(local));
   const sentence = $derived(checkoutSentence(checkout));
+  /** The line under the title in words, for its tooltip: one line on the page, a long clone path cut. */
+  const subTitle = $derived(
+    [
+      repo === null ? "" : headLine(facts, repo.updated_at, now),
+      sentence === null ? "" : sentence.path !== null ? `Cloned at ${sentence.path}${sentence.state ? `, ${sentence.state}` : ""}.` : "Not on this machine yet.",
+    ]
+      .filter((part) => part !== "")
+      .join(" "),
+  );
   const tab = $derived<RepoTabId>(litTab(route.tab));
   /** The address names a tab the page has; one it does not have is said under the tabs, not drawn as Files. */
   const tabKnown = $derived(knowsRepoTab(rest));
@@ -818,7 +838,7 @@
     <header class="tf-fhead tf-repohead" {@attach watchStack}>
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
-        <div class="tf-sub">
+        <div class="tf-sub" title={subTitle || undefined}>
           {#if repo !== null}{headLine(facts, repo.updated_at, now)}{/if}
           {#if sentence !== null && sentence.path !== null}
             Cloned at <span class="tf-mono">{sentence.path}</span>{#if sentence.state}, {sentence.state}{/if}.
@@ -940,7 +960,7 @@
                   onNewBranch={() => (newBranch = { from: null })}
                 />
               {:else if one === "commits"}
-                <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
+                <TfRepoCommits {ports} {repoId} {at} {source} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
               {:else if one === "prs"}
                 <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
               {/if}

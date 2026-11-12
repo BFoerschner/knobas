@@ -26,7 +26,9 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { ViewRow } from "../../ipc/entity";
+  import type { ShownView, ViewRow } from "../../ipc/entity";
+  import type { WriteSource } from "../../shell/queued-toast";
+  import TfHeldNote from "../TfHeldNote.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -37,7 +39,7 @@
   import { onRefreshed } from "./refreshed.svelte";
   import { onViewFresh } from "./view-fresh.svelte";
   import { commitLine } from "./file-tree";
-  import { commitHash, viewRows, visibleViewRows } from "./repo";
+  import { commitHash, sourceName, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
   import TfWaiting from "../TfWaiting.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
@@ -49,6 +51,7 @@
     at,
     branch,
     defaultBranch,
+    source = null,
     refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "codeFacts" | "listen">;
@@ -57,6 +60,8 @@
     at: string;
     branch: string | null;
     defaultBranch: string | null;
+    /** The repository's source, which the held line names. */
+    source?: WriteSource | null;
     /** The page's refreshes (#2135): each reads the commits again over what the tab drew. */
     refreshed?: number;
   } = $props();
@@ -69,6 +74,12 @@
   let mine = $state<ReadonlySet<string>>(new Set());
   /** How many commits the branch has, where the source counts them: it may hold only the latest of them. */
   let counted = $state<number | null>(null);
+  /**
+   * When the commits drawn were read, where knobas held them (ADR-0042), and why the read behind them failed: a branch
+   * never read draws the tip the last sync stored at once (the inner-pages pass, 2026-11-12), and the rest join after it.
+   */
+  let heldAt = $state<string | null>(null);
+  let heldFailed = $state<string | null>(null);
 
   $effect(() => {
     const where = at;
@@ -89,6 +100,7 @@
       void readCommits(where, () => at === where, true);
     },
     untrack(() => ports.listen),
+    (why) => (heldFailed = why),
   );
 
   // A refresh of the page reads the commits again, over what the tab drew.
@@ -108,6 +120,8 @@
         if (!alive()) return;
         const read = viewRows(view?.sections[0]);
         reading = false;
+        heldAt = (view as ShownView | null)?.held_at ?? null;
+        heldFailed = null;
         rows = read;
         counted = view?.sections[0]?.count == null ? null : Number(view.sections[0].count);
         mine = new Set();
@@ -188,6 +202,7 @@
     title={range === null ? "Pick a commit's box, then shift-click another's for a range" : undefined}
     onclick={diffSelected}>Diff selected{count > 0 ? ` (${count})` : ""}</button>
 </div>
+<TfHeldNote {heldAt} source={sourceName(source)} failed={heldFailed} />
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
 {#if rows !== null && rows.length === 0}
   <div class="tf-empty"><p>{branch !== null && branch !== defaultBranch ? `${branch} has no commits ${defaultBranch ?? "its base"} lacks.` : "This branch has no commits yet."}</p></div>
