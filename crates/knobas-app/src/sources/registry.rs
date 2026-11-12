@@ -37,6 +37,11 @@ struct Adapter {
     build: fn(SourceInstance) -> Result<Box<dyn Source>, SourceError>,
     /// The Docs projection (#859, ADR-0022), for an adapter that emits pages.
     doc: Option<knobas_source::docs::DocProjection>,
+    /// The projection's `editor_name` read on its own, for an adapter that
+    /// gives one: what `Projection::editor_name` answers from without
+    /// drawing the page. `every_editor_read_answers_as_its_projection` holds
+    /// each to its projection.
+    doc_editor: Option<fn(&str, &serde_json::Value) -> Option<String>>,
     /// The Docs writes in the source's markup (#862), for an adapter whose
     /// pages knobas edits and creates.
     doc_writes: Option<knobas_source::docs::DocWrites>,
@@ -58,6 +63,7 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_mock::descriptor_template,
         build: knobas_source_mock::build,
         doc: Some(knobas_source_mock::doc_content),
+        doc_editor: None,
         doc_writes: None,
         tree: None,
     },
@@ -66,6 +72,7 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_jira::descriptor_template,
         build: knobas_source_jira::build,
         doc: None,
+        doc_editor: None,
         doc_writes: None,
         tree: None,
     },
@@ -74,6 +81,7 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_teamcity::descriptor_template,
         build: knobas_source_teamcity::build,
         doc: None,
+        doc_editor: None,
         doc_writes: None,
         tree: None,
     },
@@ -82,6 +90,7 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_gitea::descriptor_template,
         build: knobas_source_gitea::build,
         doc: None,
+        doc_editor: None,
         doc_writes: None,
         tree: Some(knobas_source_gitea::tree_sections),
     },
@@ -90,6 +99,7 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_confluence::descriptor_template,
         build: knobas_source_confluence::build,
         doc: Some(knobas_source_confluence::doc_content),
+        doc_editor: Some(knobas_source_confluence::doc_editor_name),
         doc_writes: Some(knobas_source_confluence::DOC_WRITES),
         tree: None,
     },
@@ -98,6 +108,7 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_kuma::descriptor_template,
         build: knobas_source_kuma::build,
         doc: None,
+        doc_editor: None,
         doc_writes: None,
         tree: None,
     },
@@ -339,7 +350,11 @@ impl Registry {
     #[must_use]
     pub fn doc_projection(&self, kind: &str) -> Option<knobas_sync::scheduler::Projection> {
         if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
-            return row.doc.map(knobas_sync::scheduler::Projection::from);
+            let projection = row.doc.map(knobas_sync::scheduler::Projection::from)?;
+            return Some(match row.doc_editor {
+                Some(editor) => projection.naming_editors_by(editor),
+                None => projection,
+            });
         }
         let adapter = self.docs_component(kind)?;
         Some(knobas_sync::scheduler::Projection::new(
@@ -518,6 +533,54 @@ mod tests {
 
     /// A read holding the registry as the trait object reaches the Docs
     /// projection and writes the concrete table answers (#1321).
+    /// A row's editor read is its projection's `editor_name`, and the
+    /// projection the registry hands out answers with it; a row that gives
+    /// none answers off the drawn page.
+    #[test]
+    fn every_editor_read_answers_as_its_projection() {
+        let body = serde_json::json!({"storage": {"value": "<p>Hello</p>"}});
+        let records = [
+            serde_json::json!({"body": body, "version": {"by": {"displayName": "Tomasz Wójcik"}}}),
+            serde_json::json!({"body": body, "version": {"by": {"displayName": " "}}}),
+            serde_json::json!({"body": body}),
+            serde_json::json!({"version": {"by": {"displayName": "No Body"}}}),
+            serde_json::json!({"title": "A mock page", "body": "Words.", "editor": "ada"}),
+            serde_json::json!({}),
+        ];
+        let registry = Registry::for_process();
+        let mut reads = 0;
+        let mut named = 0;
+        for row in ADAPTERS {
+            let Some(doc) = row.doc else {
+                assert!(
+                    row.doc_editor.is_none(),
+                    "{}: an editor read with no projection to hold it to",
+                    row.kind
+                );
+                continue;
+            };
+            let handed = registry.doc_projection(row.kind).expect("a projection");
+            reads += usize::from(row.doc_editor.is_some());
+            for kind in [knobas_source::docs::PAGE_KIND, "ticket"] {
+                for record in &records {
+                    let whole = doc(kind, record).and_then(|c| c.editor_name);
+                    if let Some(editor) = row.doc_editor {
+                        assert_eq!(editor(kind, record), whole, "{} {kind}: {record}", row.kind);
+                    }
+                    assert_eq!(
+                        handed.editor_name(kind, record),
+                        whole,
+                        "{} {kind}: {record}",
+                        row.kind
+                    );
+                    named += usize::from(whole.is_some());
+                }
+            }
+        }
+        assert!(reads >= 1, "Confluence's row gives an editor read");
+        assert!(named >= 1, "a record named its editor");
+    }
+
     #[test]
     fn the_trait_object_answers_the_docs_projection_and_writes() {
         use knobas_sync::scheduler::AdapterRegistry;

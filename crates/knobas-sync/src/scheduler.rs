@@ -50,11 +50,20 @@ pub use crate::run_log::SourceSyncStatus;
 /// a compiled-in adapter's plain [`DocProjection`](knobas_source::docs::DocProjection),
 /// or an external adapter's call into its component. Cheap to clone.
 #[derive(Clone)]
-pub struct Projection(Arc<ProjectFn>);
+pub struct Projection {
+    project: Arc<ProjectFn>,
+    /// The adapter's own read of a page's editor, where it gives one
+    /// ([`Projection::naming_editors_by`]).
+    editor: Option<EditorFn>,
+}
 
 /// What a [`Projection`] calls.
 type ProjectFn =
     dyn Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent> + Send + Sync;
+
+/// An adapter's read of a page's editor alone: a plain function, as a
+/// compiled-in adapter's projection is.
+type EditorFn = fn(kind: &str, payload: &serde_json::Value) -> Option<String>;
 
 impl Projection {
     /// A projection that calls `project`.
@@ -64,7 +73,19 @@ impl Projection {
         + Sync
         + 'static,
     ) -> Self {
-        Self(Arc::new(project))
+        Self {
+            project: Arc::new(project),
+            editor: None,
+        }
+    }
+
+    /// This projection, with [`Projection::editor_name`] answered by
+    /// `editor`: the adapter's own read of that one field, which must answer
+    /// what its projection's `editor_name` does for every record.
+    #[must_use]
+    pub fn naming_editors_by(mut self, editor: EditorFn) -> Self {
+        self.editor = Some(editor);
+        self
     }
 
     /// The record of entity kind `kind` whose payload is `payload`, drawn:
@@ -76,7 +97,26 @@ impl Projection {
         kind: &str,
         payload: &serde_json::Value,
     ) -> Option<knobas_source::docs::DocContent> {
-        (self.0)(kind, payload)
+        (self.project)(kind, payload)
+    }
+
+    /// The display name of who made the record's revision:
+    /// [`Projection::project`]'s `editor_name`, read without drawing the
+    /// page where the adapter gives a read of its own
+    /// ([`Projection::naming_editors_by`]), and off the drawn page where it
+    /// gives none (an external adapter's component draws the whole page
+    /// either way).
+    ///
+    /// The Docs search names fifty hits' editors a keystroke. Drawn, each
+    /// was a whole page read into blocks for one string: about 400 of a
+    /// keystroke's 470 ms on a mirror of 5,000 Confluence pages
+    /// (2026-11-12, a debug build).
+    #[must_use]
+    pub fn editor_name(&self, kind: &str, payload: &serde_json::Value) -> Option<String> {
+        match self.editor {
+            Some(editor) => editor(kind, payload),
+            None => self.project(kind, payload).and_then(|c| c.editor_name),
+        }
     }
 }
 

@@ -1453,9 +1453,9 @@ pub async fn search(
             let title = &hit.row.title;
             let adapter_kind: String = row.get("adapter_kind");
             let payload: serde_json::Value = row.get("payload");
+            // The editor alone: the page is not drawn to name them.
             let editor_name = project(&adapter_kind)
-                .and_then(|projection| projection.project(PAGE_KIND, &payload))
-                .and_then(|c| c.editor_name);
+                .and_then(|projection| projection.editor_name(PAGE_KIND, &payload));
             Some(DocHit {
                 entity_id: hit.row.entity_id.clone(),
                 title: title.clone(),

@@ -69,6 +69,30 @@ pub(crate) struct Person {
 /// resolves to nobody: the miss, never a guess.
 pub(crate) type People = HashMap<String, Person>;
 
+/// The display name of who made a page's revision, where the record carries
+/// one: [`doc_content`]'s `editor_name`.
+fn editor_name(payload: &Value) -> Option<String> {
+    payload
+        .pointer("/version/by/displayName")
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_owned)
+}
+
+/// [`doc_content`]'s `editor_name` and nothing else of it, for a read that
+/// names a page's editor and draws none of the page (the Docs search: fifty
+/// hits a keystroke, each a body [`doc_content`] would read into blocks).
+/// `None` exactly where [`doc_content`] answers none: another kind, or a
+/// record without a storage body.
+#[must_use]
+pub fn doc_editor_name(kind: &str, payload: &Value) -> Option<String> {
+    if kind != crate::KIND_PAGE {
+        return None;
+    }
+    payload.pointer("/body/storage/value")?.as_str()?;
+    editor_name(payload)
+}
+
 /// The Docs projection for this adapter: `knobas_source::docs::DocProjection`.
 #[must_use]
 pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
@@ -101,14 +125,9 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
                 .collect()
         })
         .unwrap_or_default();
-    let editor_name = payload
-        .pointer("/version/by/displayName")
-        .and_then(Value::as_str)
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_owned);
     Some(DocContent {
         version,
-        editor_name,
+        editor_name: editor_name(payload),
         labels,
         blocks,
         comments,
@@ -1750,6 +1769,46 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         let text = knobas_source::docs::search_text("T", "S", &content);
         assert!(text.contains("deep words"), "{text}");
         assert!(text.contains("html words"), "{text}");
+    }
+
+    /// The editor read on its own is the projection's, record by record:
+    /// named, blank, absent, not a string, with no version, on a record
+    /// without a body, with a body that is not text, and on another kind.
+    #[test]
+    fn the_editor_alone_is_the_projections_editor() {
+        let body = json!({"storage": {"value": "<p>Hello</p>"}});
+        let records = [
+            json!({"body": body, "version": {"number": 3, "by": {"displayName": "Tomasz Wójcik"}}}),
+            json!({"body": body, "version": {"by": {"displayName": "  Mara Lindqvist  "}}}),
+            json!({"body": body, "version": {"by": {"displayName": "   "}}}),
+            json!({"body": body, "version": {"by": {"displayName": ""}}}),
+            json!({"body": body, "version": {"by": {"displayName": 7}}}),
+            json!({"body": body, "version": {"by": {"username": "tomasz"}}}),
+            json!({"body": body, "version": {"by": null}}),
+            json!({"body": body, "version": 4}),
+            json!({"body": body}),
+            json!({"version": {"by": {"displayName": "No Body"}}}),
+            json!({"body": {"storage": {"value": 5}}, "version": {"by": {"displayName": "Not Text"}}}),
+            json!({"body": {"storage": {}}, "version": {"by": {"displayName": "No Value"}}}),
+            json!({"body": "flat", "version": {"by": {"displayName": "Flat"}}}),
+            json!({}),
+            json!(null),
+            json!([1, 2]),
+        ];
+        let mut named = 0;
+        for kind in [crate::KIND_PAGE, "comment", "ticket", ""] {
+            for record in &records {
+                let whole = doc_content(kind, record).and_then(|c| c.editor_name);
+                assert_eq!(doc_editor_name(kind, record), whole, "{kind}: {record}");
+                named += usize::from(whole.is_some());
+            }
+        }
+        assert_eq!(named, 2, "the two page records that name an editor");
+        assert_eq!(
+            doc_editor_name(crate::KIND_PAGE, &records[1]).as_deref(),
+            Some("  Mara Lindqvist  "),
+            "as the record spells it"
+        );
     }
 
     #[test]
