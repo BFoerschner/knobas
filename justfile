@@ -1845,14 +1845,15 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 # against that container (issue #450). ADR-0013: the real container is the
 # witness.
 #
-# TWO SUITES, in two crates, and the second is not the adapter's -- the shape
+# THREE SUITES, in two crates, and the last two are not the adapter's -- the shape
 # `teamcity-live-seeded` established (issue #389) and its reason:
 # `crates/knobas-app/tests/alert_chain_live.rs` asserts what the *inbox* does
 # with an alert, and the inbox is an app-crate read, so a suite in
-# `knobas-source-kuma` could not make the assertion at all. It runs second and
+# `knobas-source-kuma` could not make the assertion at all. It runs last and
 # is strictly additive to the first: it creates no monitor, so it disturbs
-# neither the exact-set assertions of the suite above it nor its litter
-# clearing.
+# neither the exact-set assertions of the adapter's suite nor its litter
+# clearing. Between the two runs `kuma_write_live`, the adapter's pause and
+# resume (#452) through the write queue.
 #
 # WHICH RECIPE CERTIFIES WHAT. `tests/it/contract.rs` runs the contract battery
 # against a *recording* of this server's `/metrics`, so that `just check` stays
@@ -2080,8 +2081,8 @@ teamcity-live-seeded:
 # refuses TeamCity, Jira or Confluence while another of the three is up, and
 # names it. `down` stops TeamCity and Gitea (their volumes hold the seeded
 # corpus) and removes Jira and Confluence with their volumes (3-hour timebomb
-# licences: a kept volume is an expired product). testenv/README.md, "Live
-# products, on demand". A JVM product's `live-up` keeps the JVM lock until its
+# licences, which a start renews by a restart when one is nearly due, #2373).
+# testenv/README.md, "Live products, on demand". A JVM product's `live-up` keeps the JVM lock until its
 # `live-down` (#2121): other worktrees' JVM runs wait until then.
 live-up product:
     testenv/live up {{ quote(product) }}
@@ -2134,9 +2135,11 @@ _atlassian-live-names:
 # as it is and left up.
 #
 # THREE HOURS IS THE WINDOW. The licence is a 10-user timebomb key that expires
-# three hours after it is applied and that a restart does not renew; the
-# product is disposable by design, which is why a run that started it ends in
-# removing it with its volumes. The suites take seconds.
+# three hours after the product's JVM last started: a restart renews it and
+# keeps the data (#2373, testenv/live-lib.sh), which a start does by itself
+# when the licence is nearly due. The product is still disposable by design,
+# which is why a local run that started it ends in removing it with its
+# volumes. The suites take seconds.
 #
 # MEASURED on this machine (12 cores, the 8 GB Docker VM), from empty volumes
 # with the images pulled, 2026-10-12 (#633): 299 s in all, seeded and verified

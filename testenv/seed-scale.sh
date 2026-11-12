@@ -6,7 +6,7 @@
 # (scale-*), so every live suite still finds exactly what the seed made.
 #
 #   testenv/seed-scale.sh <jira|confluence|teamcity|gitea|forgejo> [--count N] [--workers W]
-#   testenv/seed-scale.sh kuma [--count N]          # 200 monitors; ./seed-kuma.sh removes them
+#   testenv/seed-scale.sh kuma [--count N]          # 200 monitors named scale-*; ./seed-kuma.sh leaves them
 #   testenv/seed-scale.sh <product> --plan-only     # the plan's numbers, no server
 #   just seed-scale <product> [--count N]
 #
@@ -20,7 +20,7 @@
 # 2026-11-01. A rerun makes the same estate. --count is the size; the default
 # is Björn's. Each product's phases are idempotent and recorded on the server
 # (a Jira project property, a Confluence space property, a TeamCity project
-# parameter, a Gitea repository topic), so a rerun on a filled product reads
+# parameter, a Gitea Actions variable), so a rerun on a filled product reads
 # a few markers and adds nothing; a run killed mid-phase picks the phase up
 # where it stopped.
 #
