@@ -3,7 +3,7 @@
 
 A link nothing checks goes dead and stays dead. The glossary's `[job](#job)`
 pointed at anchors that never existed, because a term is bold text and
-Markdown makes anchors for headings only: 184 links in `CONTEXT.md` and thirty
+Markdown makes anchors for headings only: 184 links in `CONTEXT.md` and 24
 more from the ADRs. An archived file kept 307 links to a folder that had moved.
 Neither failed anything.
 
