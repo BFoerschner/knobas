@@ -364,7 +364,7 @@ the instant the note is written it equals what the heartbeat would send. Reading
 **and** `captured-from` to its anchor; an ad-hoc stored room with nothing open is born with
 `captured-in` alone. The four tests already on the branch stand — a derived room has no anchor. The
 prose the implementer said was owed either way is ruled and written on this PR: `CONTEXT.md`'s
-**Capture** gains the cross-reference *"the word as [Passive attribution](#passive-attribution)
+**Capture** gains the cross-reference *"the word as [Passive attribution](../../CONTEXT.md#passive-attribution)
 defines it, so a promoted room with nothing open gives its anchor"*; the §10.8 entry's three
 sentences are corrected; `bornWith()`'s doc comment inverts. No new glossary entry, no ADR.
 (2) **Not owed inside #502.** One follow-up ticket, filed by the orchestrator outside v1.5,

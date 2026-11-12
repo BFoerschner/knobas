@@ -1,17 +1,33 @@
 # Development
 
 Working notes for building, testing and releasing knobas. The README has the
-quickstart. `testenv/README.md` covers the live suites against real products.
+quickstart, [how-it-works.md](how-it-works.md) has the architecture and its
+pictures, and `testenv/README.md` covers the live suites against real products.
+
+The commands you will use most:
+
+```bash
+just deps     # the frontend's packages, when they are missing or stale
+just dev      # the app, on your real data directory
+just demo     # the app on fixture data, in a profile of its own
+just front    # the fast loop for frontend work
+just check    # the whole gate
+```
 
 ## Toolchain
 
-- `rust-toolchain.toml` pins Rust 1.99. The `just` recipes run cargo with
-  `RUSTUP_TOOLCHAIN` unset, so an exported override cannot beat the pin. Raw
-  `cargo` commands need `env -u RUSTUP_TOOLCHAIN` for the same effect.
+- `rust-toolchain.toml` pins Rust 1.99. The `just` recipes that call cargo run
+  it with `RUSTUP_TOOLCHAIN` unset, so an exported override cannot beat the
+  pin. `just dev` and `just demo` go through `tauri dev` and inherit the
+  variable. Raw `cargo` commands need `env -u RUSTUP_TOOLCHAIN` for the same
+  effect.
 - Node 20.19+ or 22.12+, which Vite 8 requires. `just deps` runs `npm ci` in
   `app/` when `node_modules` is missing or older than the lockfile.
 - Nothing in the repo installs `just`: `brew install just` or
   `cargo install just`.
+- The gate also needs `python3`, `jq`, and either shellcheck 0.11.0 or Docker
+  to run its pinned image. `just readme-diagrams` needs d2 0.9.0 or newer, and
+  `just shot` needs Chrome.
 
 The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 `~/.theseus/postgresql/<version>` and runs `initdb`. Later runs reuse it.
@@ -20,8 +36,9 @@ The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 
 `just check` is the quality gate. Under the ticket loop the merge-manager runs
 it once, on the head it merges (`just gate`, below). It first
-fails on a table below that lost step with the tree (`scripts/doc-lists.py`), then
-runs three halves side by side:
+fails on a table below that lost step with the tree (`scripts/doc-lists.py`) and on
+a Markdown link that names nothing (`scripts/doc-links.py`), then runs three halves
+side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
 - the scripts: `shell`, `test-layout`, `witness-unit` and `conflict-markers`.
@@ -31,21 +48,29 @@ runs three halves side by side:
   tests against one shared test server, not a Postgres per test.
 
 Each half's output is captured and printed when it finishes. A failing half
-prints its whole log. A passing one prints each recipe's wall time, and the
-cargo half adds `test`'s build and run times and its ten slowest test binaries.
+prints its whole log. A passing scripts or cargo half prints each recipe's
+wall time, and the cargo half adds `test`'s build and run times and its ten
+slowest test binaries. A passing `front` prints the totals of `svelte-check`,
+Vitest and the build.
 
 `just gate` runs `check-front` instead on a frontend-only head: the
-doc-list check, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
-(`just front-changed`) and `vite build`. On a head that changes only scripts
-under `scripts/` or `testenv/` (and prose) it runs `check-scripts`: the
-doc-list check and `check`'s script half (`shell`, `test-layout`,
+doc-list and doc-link checks, the conflict-marker scan, `svelte-check`, the Vitest
+files the change can reach (`just front-changed`) and `vite build`. On a head that
+changes only scripts under `scripts/` or `testenv/` (and prose) it runs
+`check-scripts`: the doc-list and doc-link checks and `check`'s script half (`shell`, `test-layout`,
 `witness-unit`, `conflict-markers`), no cargo. `scripts/gate-scope.sh` says
 which, and why.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
-refreshes the IPC mirror and the contract index, and runs a few quick checks.
-It does not replace the gate. `just docs-check` is the three cheap checks alone
-(contract index, doc lists, conflict markers) for a docs-only change.
+refreshes the IPC mirror and runs a few quick checks. It does not replace the
+gate. `just docs-check` is the three cheap checks alone (doc lists, doc links,
+conflict markers) for a docs-only change.
+
+Timings stay out of the gate, because a wall-clock assertion inside it would
+measure the machine. They have recipes of their own: `just search-perf`,
+`just builds-perf`, `just responsiveness-probe` and `just keep-alive-budget`,
+and `just frame-budget` and `just open-budget`, which `testenv/perf/README.md`
+describes.
 
 `scripts/doc-lists.py` holds four hand-written tables to the tree, both ways:
 *Crates* and *Frontend* below (every directory under `crates/` and
@@ -53,6 +78,16 @@ It does not replace the gate. `just docs-check` is the three cheap checks alone
 live-suite recipes (every `<x>-live` recipe) and the `live-up` products (every
 product `testenv/live-lib.sh`'s `_live_main` knows). A crate added without its
 row fails the gate.
+
+`scripts/doc-links.py` holds every Markdown link in the tree to a target that
+exists: `[text](path)`, an image, a reference definition, and `src`, `href`
+and `srcset` in HTML. A relative path must name a file or a directory git
+lists, and `#anchor` on a Markdown file must be one of its headings, slugged
+as GitHub slugs it, or an `<a id>` in it. A link inside a code span or a fence
+is an example and is not read, and neither is a file under a `fixtures/`
+directory. A glossary term in `CONTEXT.md` is bold text and makes no anchor
+of its own, so each carries `<a id="...">`: a new term without one fails here
+the first time something links to it.
 
 Clippy runs twice on purpose. `clippy` uses `--all-targets`, which pulls in
 every crate's dev-dependencies. Cargo unifies features across one invocation,
@@ -69,17 +104,24 @@ app at a server you manage. It has no effect on the tests.
 
 ## CI
 
-Every workflow in `.github/workflows/` runs on `workflow_dispatch` only.
-Nothing runs on push, pull request or tag, so `gh pr checks` reports no checks.
 The local `just check` is the gate. `docs/agents/working-model.md` says who
-runs it and when.
+runs it and when. No workflow runs it for you: `check.yml`, `testenv.yml` and
+`release.yml` run on `workflow_dispatch` only, so `gh pr checks` reports no
+checks on most pull requests.
 
 - `check.yml` runs the same `just check` on Linux. It does not restate the
   gate, so the two cannot drift.
 - `testenv.yml` lints the test environment's scripts and compose file without
   starting containers.
+- `windows.yml` is the one workflow with a trigger of its own (#2232). A pull
+  request that changes `knobas-db`'s console, embedded-server or migration
+  code, a migration, `migrations.sha384` or `.gitattributes` runs the
+  Windows-only tests on `windows-latest`. A Mac or Linux gate cannot see what
+  they cover: that a console program knobas starts opens no window, that the
+  checkout kept the migrations' line endings, and that the server binds the
+  loopback.
 
-Both are disabled since 2026-10-24 (Björn: the runner is too slow; the
+`check.yml` and `testenv.yml` are disabled since 2026-10-24 (Björn: the runner is too slow; the
 checks run on the Mac; `docs/decisions/2026-10-24-bjorn-rulings.md`, #2035).
 Until he enables them again, a step that says to dispatch one runs this
 instead:
@@ -158,9 +200,11 @@ expect that release to rewrite every picture again.
 `release.yml`'s `readme` job runs the same script on the tag once the bundles
 are built, and `scripts/readme-shots-publish.sh` commits the result to `main`
 with the tag in the README's stamp. It runs before the publish click, so the
-README is right when the release goes out. A release that drew nothing new
-commits nothing. A full set is about 1.5 MB, and only the pictures that changed
-reach the history.
+README is right when the release goes out. It shoots only for the newest tag
+with no suffix: a tag like `v3.2.9-ux7`, or one older than the newest release,
+leaves the README alone. A new tag commits at least the stamp, and the same
+tag published twice commits nothing. A full set is about 1.5 MB, and only the
+pictures that changed reach the history.
 
 To add a picture, add a line to `shots.txt` and an `<img>` to the README, then
 run the recipe. Every line ends on `see:` and words from the fixture only that page
@@ -174,22 +218,44 @@ edit the line and the README's section with it. One that does not fails the next
 release's `readme` job, with the installers already uploaded. Fix the line, run
 `just readme-shots` and commit the pictures.
 
-The diagrams in `docs/how-it-works.md` are `docs/diagrams/*.d2`, laid out by
+### Diagrams
+
+The three diagrams in `docs/how-it-works.md` are `docs/diagrams/*.d2`, laid out by
 TALA, which ships inside d2 since v0.9.0 with no plugin and no key. They follow the
 reader's theme, so `just readme-diagrams` renders each to `<name>-light.svg` and
 `<name>-dark.svg`. Nothing runs it for you: edit the source and render when the code
-a diagram shows changes, and look at the result, because TALA can move a whole
-layout after a small edit. It refuses a d2 without TALA rather than lay them out
-with another engine. They were last checked against the code at `e3938462`.
-`suggestion-pass-*.svg` is the older hand-written kind, and nothing shows it now.
+a diagram shows changes, and look at the result. It refuses a d2 without TALA rather
+than lay them out with another engine.
+
+| Source | Shows | Change it when |
+| --- | --- | --- |
+| `system-map.d2` | Sync and reads coming in, the write path going out | A new path between a source and the database, or a new store |
+| `write-queue.d2` | The states of `knobas.write_queue` and the queue's buttons | A state, or a button in `app/src/lib/shell/WriteQueue.svelte` |
+| `crates.d2` | The crates in rows, each depending only on rows below | A crate is added or removed, or a `[dependencies]` line crosses a row |
+
+`system-map.d2` gives every group a fixed place (`top`, `left`), because TALA left
+to itself folded the groups into a square and moved the whole picture after a small
+edit. A new box there needs a place of its own. All three were last checked against
+the code at `f64718f7`.
 
 ## Profiles
 
-`just dev` runs the default profile: the real data directory, database and
-keychain service. `just demo` runs the same app with `--demo`. The demo profile
-has its own data directory, its own embedded server on its own port and its own
-keychain service, so fixture data never mixes with a real corpus and a demo run
-never sees real credentials. Spec §14a has the reasoning.
+`just dev` runs the default profile: the real data directory and database. Its
+keychain service is not the installed app's. A debug build appends `.dev`
+(`dev.knobas.desktop.dev`), so `just dev` cannot reach the credentials of an
+installed knobas.
+
+`just demo` runs the same app with `--demo`. The demo profile has its own data
+directory and its own embedded server on its own port, so fixture data never
+mixes with a real corpus and a demo run never sees real credentials. Its
+credentials go to the `.demo` keychain service in a release build. Under
+`just demo`, which is a debug build, they go to `demo/dev-secrets.json` in the
+profile's folder, and the keychain is never asked (#2384). Spec §14a has the
+reasoning.
+
+`just live-demo` is `just demo` with every live product of the test
+environment already added as a source (`testenv/README.md`, *Live products as
+sources*).
 
 Only the demo profile can load demo data. The load registers the compiled-in
 `mock` source, syncs the Tidewater Freight fixture
@@ -220,8 +286,9 @@ configuration is edited, or the reader presses *Retry waiting writes*.
 ## Shutting down
 
 Quitting the app (Cmd-Q, or closing the last window) stops a running clone and
-removes its half-made folder, stops the sync scheduler, cancels in-flight runs
-and stops the embedded server, also while the boot screen is still up. Every
+removes its half-made folder, stops the sync scheduler, cancels in-flight runs,
+stops the backup task and stops the embedded server, also while the boot screen
+is still up. Every
 step is bounded, so a quit does not wait out a slow remote call.
 
 A write knobas is sending when you quit gets up to three seconds to finish, so
@@ -265,11 +332,23 @@ The demo profile keeps its server under `dev.knobas.desktop/demo/db/data`.
 
 ## Frozen surfaces
 
-The `Source` trait, the migration baseline and the IPC schema are frozen.
+Five surfaces are frozen:
+
+- every released migration under `crates/knobas-db/migrations/`, comments
+  included, because sqlx checksums the whole file
+- `crates/knobas-source/src/`: the `Source` trait, its types and the contract
+  battery
+- the IPC command and event schema
+- `crates/knobas-http/`
+- `crates/knobas-app/src/error.rs` and `profile.rs`
+
 A change to one is announced in the PR body under **Frozen surface**, as
 `docs/contract.md` §10.8 says; the merge-manager reviews it against the ADRs.
 
 ## Crates
+
+[how-it-works.md](how-it-works.md#how-the-code-is-laid-out) draws these in rows: a
+crate depends only on crates in rows below its own.
 
 | Crate | What it is |
 | --- | --- |
@@ -278,10 +357,10 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-source` | The adapter SPI: the `Source` trait, the contract battery and the serde data adapters exchange. It has no database dependency. |
 | `knobas-spi-types` | The types the adapter SPI shares with the core: payload declarations, entity references, tones and how a write is delivered. No database, no async runtime: it and `knobas-source` build for `wasm32-wasip2`, so an external adapter can depend on them. `knobas-core` re-exports it under the old paths (#1234). |
 | `knobas-http` | The HTTP stack the adapters share: one reqwest client, retry classes, rate limiting and the status to `SourceError` mapping. The write queue in `knobas-sync` also reads its local-quota mark (#1729). |
-| `knobas-source-jira` | Jira Data Center adapter, with status, comment and create writes. |
-| `knobas-source-confluence` | Confluence Data Center adapter, with page writes. |
-| `knobas-source-gitea` | Gitea adapter: repositories, branches, pull requests, commits. |
-| `knobas-source-teamcity` | TeamCity adapter: build configurations and builds, with trigger and re-run. |
+| `knobas-source-jira` | Jira Data Center adapter, with status, comment, create and worklog writes. |
+| `knobas-source-confluence` | Confluence Data Center adapter, with comment, page-edit and new-page writes. |
+| `knobas-source-gitea` | Gitea and Forgejo adapter: repositories, branches, pull requests and commits, and issues as tickets, so it fills two roles, code host and ticket system (ADR-0029). Its writes cover branches, file commits, pull requests, reviews, line threads and merges. |
+| `knobas-source-teamcity` | TeamCity adapter: build configurations and builds, with trigger, re-run, run with parameters and set-parameter writes. |
 | `knobas-source-kuma` | Uptime Kuma adapter: monitors from `/metrics`; pause, resume and create over socket.io with an account. |
 | `knobas-source-mock` | The reference adapter. It serves the Tidewater fixture and talks to nothing. UI and engine tests use it. |
 | `knobas-wasm-host` | The WASM host (ADR-0028): loads an external adapter, a component built against `wit/adapter.wit`, runs it under wasmtime with a deadline and memory cap on every call and `wasi:http` held to its manifest's hosts, and hands it to the rest of knobas as a `dyn Source` (#1198). `docs_contract::check` is the docs contract `knobas adapter check` would run on a component that claims the wiki role (#2444). |
@@ -289,7 +368,7 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-wasm-fixture` | Test only. The fixture external adapter the WASM host is tested with: a fixed corpus with a cursor, built to a component by `just wasm-fixture` (#1198), on `knobas-adapter-sdk`. No external adapter ships with knobas. |
 | `knobas-mockd` | Deprecated and frozen (ADR-0013). An HTTP mock of Jira and TeamCity, kept as a dev-dependency for older tests until the live suites cover them. |
 | `knobas-live-cleanup` | Dev-dependency only. The one runner every live suite's `Drop` guard hands its cleanup to: a thread and runtime of its own, a bound on the whole sequence, and a report that cannot abort a test that is already unwinding (#1913). |
-| `knobas-secrets` | The OS-keychain credential store behind a trait, with an in-memory store for tests. No secret reaches Postgres or crosses the bridge. |
+| `knobas-secrets` | The credential store behind a trait: the OS keychain, an in-memory store for tests and `KNOBAS_SECRET_STORE=memory` runs, and a file store for a debug build's demo profile. No secret reaches Postgres or crosses the bridge. |
 | `knobas-search` | The launcher's read side: full-text search over the mirror in the `SearchQuery` to `SearchResponse` shape. |
 | `knobas-sync` | The sync engine and scheduler: one run per transaction, cursors, backoff, credential health, the run log, and the write queue. |
 | `knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles and the IPC commands. |
@@ -302,28 +381,62 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | Path | What lives there |
 | --- | --- |
 | `app/src/App.svelte` | The root: the boot gate, the first-run wizard, then the shell. |
-| `app/src/lib/tf/tf.css`, `app/src/lib/tf/css/tokens.css` | The global stylesheet and the design tokens (`tf/css/` holds one stylesheet per page). |
+| `app/src/lib/tf/tf.css`, `app/src/lib/tf/css/tokens.css` | The global stylesheet and the design tokens. `tf/css/` holds one stylesheet per area. `app/src/unported.css` is a second global stylesheet, for the components that predate the shell's look. |
 | `app/src/lib/tf/` | The shell since #881: `TfShell.svelte`, and one folder per page. Routes are `tf/route.ts` (`parseTfHash`, old addresses rewritten in `tf/address.ts`), each folder's `page.ts` registers its page, `tf/pages.ts` collects them. |
-| `app/src/lib/shell/` | Lifecycle, keyboard, toasts, the write queue and shared primitives. Its `router.ts` is the pre-#881 parser, still used by the asset tree and notification clicks; new routes go in `tf/route.ts`. |
+| `app/src/lib/shell/` | Lifecycle, keyboard, toasts, the write queue and shared primitives. Its `router.ts` is the pre-#881 parser, still used by the asset tree; new routes go in `tf/route.ts`. `shell/dev/` is the fake backend of *QA without Tauri*. |
 | `app/src/lib/detail/` | Link helpers and dialogs for an item's detail (`LinksPanel`, `LinkDialog`, `links.ts`, `relations.ts`) and the `view/` folder; there is no slide-over component. |
-| `app/src/lib/sources/` | `FirstRun.svelte` (the first-run wizard) and the helpers behind it: account, connection, diagnostics, schema-form and fixtures. There is no sources view. |
+| `app/src/lib/sources/` | `FirstRun.svelte` (the first-run wizard) and the helpers behind it and behind Settings › Sources: account, connection, diagnostics, schema-form and fixtures. There is no sources view. |
 | `app/src/lib/launcher/` | The ⌘K overlay. It binds its own hotkey and handles its own `Esc`. |
-| `app/src/lib/render/` | The renderer registry (`registry.ts`: what each renderer declares, which accept a file or a fence) and the renderer port (`port.ts`) over the engines; Shiki highlights in a worker (`highlight.worker.ts`, `highlight-core.ts`). `markdown.ts` is the Markdown component's engine (markdown-it, DOMPurify, links, fences to the registry; drawn by `tf/markdown/TfMarkdown.svelte`); `image.ts` turns a relative image's bytes into a blob, an SVG sanitized first; `defaults.ts` decides which renderer a file opens with from the default per file pattern (stored backend-side, `defaults.svelte.ts` holds the copy; the switcher is `tf/render/TfRendererSwitch.svelte`). The user's command renderers are `command.ts` (ADR-0033), run on the backend (`crates/knobas-app/src/renderers.rs`) and drawn sanitized in a sandboxed frame (`tf/render/TfCommandOutput.svelte`). Diagrams go through `diagram.ts` into the same frame (`frame.ts`): Mermaid (`mermaid.ts`) on the main thread; Graphviz (`graphviz.ts`, WASM) in `diagram.worker.ts`, because Tauri sends the CSP with `.html` assets only, so WASM runs there without loosening the document's `script-src`; D2 (`d2.ts`), whose Go WASM overflows a WebKit worker's stack, on the main thread of a hidden `sandbox="allow-scripts"` frame of its own (`d2-frame.html`, `d2-frame.ts`, held by `port.ts`'s `frameWorker`), served on the `knobas-render` scheme under `renderers::ENGINE_CSP` (#2381). PDFs are `pdf-core.ts` (pdf.js with scripting and form actions off; links by the Markdown rules) bound to pdf.js's own worker in `pdf.ts`, drawn page by page into canvases in the document by `tf/render/TfPdf.svelte`; a binary image is `tf/render/TfBytesImage.svelte`. |
-| `app/src/lib/ipc/` | Hand-written mirrors of the command surface, one file per Rust command module in `crates/knobas-app/src/commands/`. |
-| `app/src/lib/{assets,capture,inbox,standup,start-work,time}/` | Feature views. Notes and settings are pages under `tf/` (`tf/note/`, `tf/settings/`). |
+| `app/src/lib/render/` | Which renderer a file or a Markdown fence gets, and the engines that draw it. *How a file is drawn*, below, goes through them. |
+| `app/src/lib/ipc/` | The command surface as the window sees it: hand-written `invoke` wrappers, one file per Rust command module in `crates/knobas-app/src/commands/`, over types generated into `ipc/generated/`. The gate's `ipc-mirror` step fails on a stale one. |
+| `app/src/lib/{assets,capture,inbox,standup,start-work,time}/` | Feature views, stores and helpers. `inbox/` and `start-work/` hold no component: their pages are under `tf/`, as notes and settings are (`tf/note/`, `tf/settings/`). |
 
-Three module-level runes hold state several trees read:
-`shell/health.svelte.ts` (live credential health), `shell/kind-registry.svelte.ts`
-(what installed adapters declare about their kinds) and
-`shell/toasts.svelte.ts`. Each exports a `create…` factory so a test can build
-its own without a Tauri bridge.
+State that several trees read lives in module-level runes. Most stores export a
+`create…` factory so a test can build its own without a Tauri bridge:
+`shell/health.svelte.ts` (live credential health) and
+`shell/kind-registry.svelte.ts` (what installed adapters declare about their
+kinds) are two. `shell/toasts.svelte.ts` is one module-level state with a
+`reset()` instead.
+
+### How a file is drawn
+
+Everything here is under `app/src/lib/render/` unless it names another folder.
+
+- **Which renderer.** `registry.ts` holds what each renderer declares and which
+  accept a file or a fence. `defaults.ts` picks one from the default per file
+  pattern. The defaults are stored on the backend, `defaults.svelte.ts` holds
+  the copy, and the switcher is `tf/render/TfRendererSwitch.svelte`. `port.ts`
+  is the port over the engines.
+- **Code.** Shiki highlights in a worker (`highlight.worker.ts`,
+  `highlight-core.ts`).
+- **Markdown.** `markdown.ts` is markdown-it with DOMPurify, links, and fences
+  handed to the registry, drawn by `tf/markdown/TfMarkdown.svelte`. `image.ts`
+  turns a relative image's bytes into a blob, an SVG sanitized first.
+- **Diagrams.** `diagram.ts` draws into a sandboxed frame (`frame.ts`). Each
+  engine runs where it can:
+  - Mermaid (`mermaid.ts`) on the main thread.
+  - Graphviz (`graphviz.ts`, WASM) in `diagram.worker.ts`. Tauri sends the CSP
+    with `.html` assets only, so WASM runs there without loosening the
+    document's `script-src`.
+  - D2 (`d2.ts`) on the main thread of a hidden `sandbox="allow-scripts"` frame
+    of its own (`d2-frame.html`, `d2-frame.ts`, held by `port.ts`'s
+    `frameWorker`), because its Go WASM overflows a WebKit worker's stack. The
+    frame is served on the `knobas-render` scheme under `renderers::ENGINE_CSP`
+    (#2381).
+- **PDFs and images.** `pdf-core.ts` is pdf.js with scripting and form actions
+  off and links by the Markdown rules, bound to pdf.js's own worker in
+  `pdf.ts`. `tf/render/TfPdf.svelte` draws it page by page into canvases in the
+  document. A binary image is `tf/render/TfBytesImage.svelte`.
+- **Your own commands.** `command.ts` (ADR-0033). They run on the backend
+  (`crates/knobas-app/src/renderers.rs`), and `tf/render/TfCommandOutput.svelte`
+  draws their output sanitized in a sandboxed frame.
 
 ### House rules
 
-`lib/shell/house-rules.test.ts` and `lib/shell/a11y.test.ts` enforce these by
-scanning the sources on disk, so they cover code no test mounts. Each one
-breaks only in a bundled build: `tauri dev` loads the Vite server over
-`http://`, which gets no CSP header.
+`lib/shell/house-rules.test.ts` enforces these by scanning the sources on disk,
+so it covers code no test mounts. The first three break only in a bundled
+build: `tauri dev` loads the Vite server over `http://`, which gets no CSP
+header.
 
 - No inline styles: no `style="…"`, no `style:` directive, no
   `setAttribute("style", …)`. `style-src 'self'` blocks them in a bundle. Use a
@@ -345,13 +458,19 @@ breaks only in a bundled build: `tauri dev` loads the Vite server over
   reaches the app.
 - Every `listen()` is cleaned up, including when the component unmounts before
   the promise resolves. `lib/shell/residue.test.svelte.ts` mounts each
-  component with an effect twice and fails on leftovers.
+  component with an effect three times (used then unmounted, unmounted with
+  reads in flight, unmounted between answers) and fails on leftovers.
 - No data call before `db.state === "ready"`. Commands that need `AppState`
   reject with `not_ready` during start-up, and the shell gates on the
   lifecycle.
+- No `invoke` outside the IPC barrel, and the dev harness is reachable only
+  behind `import.meta.env.DEV`.
 - Secrets are never displayed, logged or read back. No command returns one.
 - Contrast is at least 4.5:1 and reduced motion is respected (spec §14).
   `lib/tf/tf-css.test.ts` checks the palette and the motion rules.
+- Every icon-only button, text input, select and textarea has an accessible
+  name, and a decorative icon is hidden from the accessibility tree.
+  `lib/shell/a11y.test.ts` scans for both.
 
 ### QA without Tauri
 
@@ -365,19 +484,35 @@ just shot 3 /tmp/shots '#/tickets'
 
 `?fake-ipc` turns the fake on. It only exists in the dev server: a production
 build drops it, and `vite preview` then sits on "Starting the local database".
-`?fake-db=starting|migrating|failed` holds the boot screen on one state.
-`?fake-sources-healthy` leaves no source that needs the reader, so no err tone
-draws in the status bar. This checks layout and interaction. `just dev` or
-`just demo` checks the bridge.
+The fake lives in `app/src/lib/shell/dev/`. More switches go after `?fake-ipc`:
+
+| Switch | What it does |
+| --- | --- |
+| `&fake-db=starting\|migrating\|failed` | Holds the boot screen on one state. |
+| `&fake-first-run` | Opens the first-run wizard. |
+| `&fake-sources-healthy` | Leaves no source that needs the reader, so no err tone draws in the status bar. |
+| `&fake-timer` | Starts with a timer running. The README's pictures use this and the one above. |
+| `&fake-scale` | The fixture at the size of a real mirror: 20,000 tickets, 5,000 pages. |
+| `&fake-real=<port>` | Sends every command to a real windowless backend on that port (`crates/knobas-app/examples/headless_ipc.rs`). |
+
+This checks layout and interaction. `just dev` or `just demo` checks the
+bridge.
 
 ### Mockups
 
-`mockups/ticket-first/` holds the clickable HTML mockups, `prototype-1.html`
-to `prototype-6.html`, with the brief in `requirements.md`; `mockups/shared/`
-holds the shared notes (`assets.md`, `capabilities.md`, `dataset.md`).
-They are historical since 2026-10-31 (#2238) and decide nothing: UI work is
-held to `docs/specs/2026-10-15-ticket-first-design-system.md` (its Controls
-section for buttons and their placement), the dev-only `#/controls` specimen,
-and before/after screenshots. Prototype-6's CSS became the global stylesheet.
-Its rendering approach (string templates and one `innerHTML` swap per frame)
-did not carry over.
+`mockups/` holds the clickable HTML mockups the app was drawn from.
+`mockups/ticket-first/` has `prototype-1.html` to `prototype-6.html` with the
+brief in `requirements.md`, and the later `ticket-page.html` and
+`docs-reader.html`. `mockups/code-area/` has the Code pages, and
+`mockups/shared/` the shared notes (`assets.md`, `capabilities.md`,
+`dataset.md`).
+
+They are historical and decide nothing new: UI work is held to
+`docs/specs/2026-10-15-ticket-first-design-system.md` (its Controls section for
+buttons and their placement), the dev-only `#/controls` specimen, and
+before/after screenshots (#2238). One file still binds: `lib/tf/tf-css.test.ts`
+holds the app's `--hl-*` highlighting tokens to `mockups/code-area/base.css`,
+so a change there fails the gate.
+
+Prototype-6's CSS became the global stylesheet. Its rendering approach (string
+templates and one `innerHTML` swap per frame) did not carry over.

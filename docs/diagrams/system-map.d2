@@ -1,9 +1,12 @@
 # docs/how-it-works.md's system map. `just readme-diagrams` renders it in both themes.
 #
-# Amber is the only route that changes anything at a source. Each group is a grid
-# column because TALA otherwise stacks the groups into a very tall picture.
-
-direction: right
+# Read down the left for sync and reads, up the right for writes. Amber is the
+# only route that changes anything at a source.
+#
+# Every group has a fixed place (`top`, `left`), which TALA honours and routes
+# around. Left to itself TALA folded the groups into a square with edges looping
+# round the outside, and moved the whole picture after a small edit. The picture
+# is tall rather than wide so its text stays readable in GitHub's column.
 
 classes: {
   write: {
@@ -22,13 +25,12 @@ classes: {
   optional: {
     style.stroke-dash: 4
   }
-  later: {
-    style.stroke-dash: 4
-  }
 }
 
-sources: Sources {
-  grid-columns: 2
+sources: Your sources {
+  top: 0
+  left: 110
+  grid-columns: 3
   jira: Jira Data Center
   confluence: Confluence Data Center
   gitea: Gitea or Forgejo
@@ -39,63 +41,74 @@ sources: Sources {
   }
 }
 
+keychain: OS keychain {
+  top: 440
+  left: 0
+}
+
 adapters: Adapters {
-  grid-columns: 1
+  top: 380
+  left: 260
+  grid-columns: 2
   builtin: "Built-in\none Rust crate per source"
   external: "External\na sandboxed WASM component" {
     class: optional
   }
 }
 
-keychain: OS keychain
-
-background: Background work {
-  grid-columns: 1
-  scheduler: "Sync scheduler\nat most 5 runs at once"
-  suggest: "Suggestion pass\none at a time"
-  flush: "Write-queue flush\nthe only caller of Source::write" {
-    class: write-box
-  }
+scheduler: "Sync scheduler\nat most 5 runs at once" {
+  top: 650
+  left: 190
 }
 
-db: Embedded Postgres 18.6 {
-  grid-columns: 1
-  mirror: "sync: the mirror\nitems, revisions, parents"
-  owned: "knobas: what no source owns\nlinks, notes, time, link sets"
-  queue: "write_queue\nwhat is still to send" {
+flush: "Write-queue flush\nthe only caller of Source::write" {
+  class: write-box
+  top: 650
+  left: 590
+}
+
+db: Embedded PostgreSQL {
+  top: 840
+  left: 60
+  grid-columns: 3
+  mirror: "The mirror\na copy of every source's items"
+  owned: "What only knobas has\nlinks, notes, time, link sets"
+  queue: "The write queue\nwhat is still to send" {
     class: write-box
   }
 }
 
 app: The app {
-  grid-columns: 1
-  search: "Search\nknobas-search"
-  core: "Tauri commands\nknobas-app"
-  window: "Svelte window\nand the capture window"
+  top: 1100
+  left: 200
+  grid-columns: 2
+  window: "The window\nSvelte"
+  commands: "Commands\nRust, knobas-app"
+}
+
+clones: "Your local clones\nread-only git" {
+  top: 1160
+  left: 780
 }
 
 sources -> adapters: sync
-keychain -> adapters: secrets
-adapters -> background.scheduler: items
-background.scheduler -> db.mirror: upsert, tombstone
-background.scheduler -> background.suggest: run ended OK {
-  class: later
-}
-background.suggest -> db.owned: proposes links
+keychain -> adapters: credentials
+adapters -> scheduler: items
+scheduler -> db.mirror: upsert, tombstone
 
-db.mirror -> app.search: reads
-app.search -> app.core
-db.owned <-> app.core: reads, writes
-app.core <-> app.window
-app.core -> adapters: "live reads: files, diffs, logs\nkept in memory"
+db.mirror -> app.commands: lists, search
+db.owned <-> app.commands
+app.window <-> app.commands
+clones -> app.commands: "files, diffs"
+app.commands -> adapters: "live reads\na pull request, a log, a file"
 
-app.core -> db.queue: submit_write {
+app.commands -> db.queue: every change {
   class: write
 }
-db.queue -> background.flush: due rows {
+db.queue -> flush: due rows {
   class: write
 }
-background.flush -> adapters: write(op) {
+flush -> adapters: write {
   class: write
 }
 adapters -> sources: "to the item's own source" {

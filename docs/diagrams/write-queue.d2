@@ -35,8 +35,8 @@ pending -> sent: Source::write {
 }
 pending -> held
 pending -> refused
-held -> pending: Send again
-refused -> pending: Edit
+held -> pending: "Send mine anyway\nor Send again"
+refused -> pending: "Edit…"
 pending -> discarded: Cancel
 held -> discarded: Discard
 refused -> discarded: Discard

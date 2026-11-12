@@ -217,7 +217,7 @@ check_readiness
 step "checking the signing identity"
 security find-identity -v -p codesigning | grep -q "\"$SIGNING_IDENTITY\"" \
     || fail "no code-signing identity called '$SIGNING_IDENTITY' in the keychain." \
-        "The README's *Signed dev build (macOS)* section has the four openssl" \
+        "testenv/desktop-witness/README.md, *Signed dev build (macOS)*, has the" \
         "commands that create it."
 note "$SIGNING_IDENTITY"
 

@@ -33,6 +33,12 @@ knobas-source-kuma/live_kuma  just kuma-live runs it with --test live_kuma
 knobas-source-teamcity/live_teamcity  just teamcity-live runs it with --test live_teamcity
 knobas-source-teamcity/live_teamcity_seeded  just teamcity-live-seeded runs it with --test live_teamcity_seeded
 
+# Measurements a person runs by name with `--test`, as each file's header
+# says: they print one line per read through a slowed source and assert no
+# budget. `#[ignore]`d in the gate like the live suites.
+knobas-app/slow_forge_live  run by hand with --test slow_forge_live against the seeded Gitea; a measurement, no recipe
+knobas-app/slow_sources_live  run by hand with --test slow_sources_live against the seeded products; a measurement, no recipe
+
 # knobas-db, whole: embedded.rs re-runs its own binary with --exact and relies
 # on the shared connector being decided once per process.
 knobas-db/backup  knobas-db stays as it is; merging its three files saves two links

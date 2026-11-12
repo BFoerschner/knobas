@@ -4,9 +4,11 @@
 # marker in prose is red. #1919 adds the doc-list check
 # (`scripts/doc-lists.py`): a crate, an `app/src/lib/` directory, a live-suite
 # recipe or a live product with no row in the hand-written table that lists it
-# is red, and so is a row naming one that is gone. The clean run is the
-# control: a recipe that failed for any other reason would pass the red cases.
-# (The section 10.8 index cases went with the ledger on 2026-10-29.)
+# is red, and so is a row naming one that is gone. The doc-link check
+# (`scripts/doc-links.py`) joins them: a Markdown link to a file that is not
+# there, or to an anchor no heading and no `<a id>` makes, is red. The clean run
+# is the control: a recipe that failed for any other reason would pass the red
+# cases. (The section 10.8 index cases went with the ledger on 2026-10-29.)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
@@ -37,6 +39,24 @@ for f in sys.stdin.read().split("\0"):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.touch()
 ' "$scratch"
+# What the doc-link check reads: every Markdown file as it is, and an empty
+# file for everything else git lists, so each link has its target to land on.
+cp "$here/doc-links.py" "$scratch/scripts/"
+git -C "$repo" ls-files -z --cached --others --exclude-standard | python3 -I -c '
+import shutil
+import sys
+from pathlib import Path
+repo, scratch = Path(sys.argv[1]), Path(sys.argv[2])
+for f in sys.stdin.read().split("\0"):
+    src, dst = repo / f, scratch / f
+    if not f or not src.is_file() or dst.exists():
+        continue
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if f.endswith(".md"):
+        shutil.copyfile(src, dst)
+    else:
+        dst.touch()
+' "$repo" "$scratch"
 g() { git -C "$scratch" -c user.name=t -c user.email=t@t "$@"; }
 g init -q -b main
 g add -A
@@ -135,5 +155,45 @@ expect_named "a live-product row naming a product that is gone" forgejo
 cp "$scratch/live-lib.orig" "$scratch/testenv/live-lib.sh"
 
 expect green "the tree after the doc-list cases are put back"
+
+# The doc-link check. Each red case names the link it refuses, for the reason
+# `expect_named` gives above.
+links_err() { python3 -I "$scratch/scripts/doc-links.py" 2>&1 | cat; }
+expect_link() { # expect_link <label> <text the refusal must name>
+    expect red "$1"
+    case "$(links_err)" in
+        *"$2"*) ;;
+        *) echo "FAIL: $1: the refusal does not name $2" >&2; failures=$((failures + 1)) ;;
+    esac
+}
+linked() { printf '%s\n' "$@" > "$scratch/docs/quaywright.md"; }
+
+linked '# A page' '' 'See [the quay](quaywright-plan.md).'
+expect_link "a link to a file that is not there" "docs/quaywright.md:3: quaywright-plan.md (no such file)"
+
+linked '# A page' '' 'See [the gate](development.md#the-quaywright).'
+expect_link "a link to an anchor no heading makes" "development.md#the-quaywright"
+
+linked '# A page' '' 'See [the term](#quaywright).' '' '**Quaywright**:' 'A term in bold makes no anchor.'
+expect_link "a link to a term that is bold text, not a heading" "#quaywright"
+
+linked '# A page' '' '<img alt="a quay" src="quaywright.webp">'
+expect_link "an image whose file is not there" "quaywright.webp (no such file)"
+
+# What must stay green: a heading by GitHub's slug, a second heading of the
+# same text, a term with its `<a id>`, a directory, a target with a scheme,
+# and a dead link inside a code span or a fence, which is an example. The
+# backticks are Markdown's code marks, single-quoted on purpose.
+# shellcheck disable=SC2016
+linked '# A page' '' \
+    '## The gate — and `its` **halves** (#1)' '## Twice' '## Twice' '' \
+    '<a id="quaywright"></a>**Quaywright**:' 'A term.' '' \
+    '[a](#the-gate--and-its-halves-1) [b](#twice-1) [c](#quaywright) [d](../scripts/) [e](https://example.com/x)' \
+    '[f](development.md#the-gate) [g](../CONTEXT.md#mirror) `[h](gone.md)`' '' \
+    '```' '[i](gone.md)' '```'
+expect green "links that resolve, and dead ones inside code"
+rm "$scratch/docs/quaywright.md"
+
+expect green "the tree after the doc-link cases are removed"
 
 [ "$failures" -eq 0 ] && echo "docs-check-test: ok"

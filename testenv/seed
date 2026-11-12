@@ -4,7 +4,7 @@
 #
 #   ./seed             seed Gitea and Uptime Kuma, then print the adapter env vars
 #   ./seed --env       print the env vars for an already-seeded environment
-#   ./seed --env-kuma  print just Uptime Kuma's two, which need no Gitea seed
+#   ./seed --env-kuma  print just Uptime Kuma's four, which need no Gitea seed
 #   ./seed --env-forgejo  the KNOBAS_GITEA_* variables for the Forgejo container
 #   ./seed --atlassian set up the opt-in real Jira and Confluence containers,
 #                      then seed the Tidewater content into both

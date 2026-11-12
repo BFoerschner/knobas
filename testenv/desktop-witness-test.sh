@@ -189,7 +189,7 @@ screen-locked 0')"
 
 for classification in not-trusted cannot-post-events screen-locked unreadable; do
     check_contains "the $classification message names the README section" \
-        'testenv/README.md, "The desktop witness (macOS)"' \
+        'testenv/desktop-witness/README.md, "The desktop witness (macOS)"' \
         "$(readiness_message "$classification")"
 done
 
@@ -952,7 +952,7 @@ pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Capture"' \
 # against the Rust string. Whether the accessibility API answers `AXTitle` with
 # that string on that window is a question only a run can put, and this file
 # cannot: `just witness-unit` has no window server. The run is `just
-# desktop-witness capture`, and the transcript is in testenv/README.md.
+# desktop-witness capture`.
 pin_label ../crates/knobas-app/src/capture.rs '.title("Capture")' \
     "the capture window is still built under the title the driver waits for"
 pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Open in knobas"' \
