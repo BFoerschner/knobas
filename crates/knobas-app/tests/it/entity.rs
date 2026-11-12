@@ -116,6 +116,7 @@ fn all() -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: None,
+        parent: None,
     }
 }
 
@@ -969,6 +970,7 @@ async fn a_project_narrows_the_include_deleted_statements_too() {
                 include_deleted: true,
                 reach: None,
                 role: None,
+                parent: None,
                 order,
                 ..all()
             },
@@ -4548,4 +4550,275 @@ async fn a_limit_past_the_ceiling_reads_five_hundred_rows() {
 
     assert_eq!(page.rows.len(), 500);
     assert_eq!(page.total, 501);
+}
+
+// -- a plain order's page is cut before its rows are read (#2479's query audit)
+
+/// A plain order's statement as it was before the page was cut first: the
+/// path line and the state chip over every row of the set, then the limit.
+/// What the cut statements must answer, row for row.
+macro_rules! read_whole_then_cut {
+    ($from:literal, $order:literal) => {
+        concat!(
+            "select i.entity_id, ",
+            knobas_core::path_line_read!("$3"),
+            " as path, ",
+            knobas_core::declared_state!("$3"),
+            " as state, count(*) over () as total from ",
+            $from,
+            " where i.source_id = any($4) order by ",
+            $order,
+            " limit $1 offset $2"
+        )
+    };
+}
+
+/// Code's 1,710 pull requests walked 4,710 payloads in four pages, because
+/// each page computed its path line and state chip for every row it skipped
+/// too (711 ms). The four plain statements now cut the page first and read
+/// the two for its rows alone: every page of every order, live or with the
+/// withdrawn, answers what the old shape answered, the same rows in the same
+/// order with the same path, state and total. The rows tie on dates and
+/// titles, one is undated, one is withdrawn and three repositories hold them,
+/// so an order or a join that drifted would show.
+#[tokio::test]
+async fn a_plain_page_is_cut_before_its_rows_are_read_and_answers_as_before() {
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let repos = [
+        "tidewater/payout-service",
+        "tidewater/ledger",
+        "harbor/ledger",
+    ];
+    let mut ids = Vec::new();
+    for n in 0..23u32 {
+        let base = repos[(n % 3) as usize];
+        let (state, merged) = match n % 4 {
+            0 => ("open", false),
+            1 => ("closed", true),
+            2 => ("closed", false),
+            _ => ("open", false),
+        };
+        let key = format!("{base}#{n}");
+        let entity = format!("{gitea}:{key}");
+        mirrored(
+            &pool,
+            &gitea,
+            "pr",
+            &key,
+            serde_json::json!({
+                "state": state,
+                "merged": merged,
+                "base": { "ref": "main", "repo": { "full_name": base, "name": base.rsplit('/').next().unwrap() } },
+            }),
+        )
+        .await;
+        // Five rows a minute, so the dates tie; three titles, so the titles do.
+        sqlx::query("update sync.item set title = $2 where entity_id = $1")
+            .bind(&entity)
+            .bind(format!("Change {}", n % 3))
+            .execute(&pool)
+            .await
+            .unwrap();
+        if n != 7 {
+            dated(&pool, &entity, i32::try_from(n / 5).unwrap()).await;
+        }
+        ids.push(entity);
+    }
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ids[11])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let declarations = builtin_declarations(&pool).await;
+    let sources = vec![gitea.clone()];
+    let cases = [
+        (
+            EntityOrder::UpdatedDesc,
+            false,
+            read_whole_then_cut!(
+                "sync.live_item i",
+                "i.item_updated_at desc nulls last, i.entity_id"
+            ),
+        ),
+        (
+            EntityOrder::TitleAsc,
+            false,
+            read_whole_then_cut!("sync.live_item i", "i.title asc, i.entity_id"),
+        ),
+        (
+            EntityOrder::UpdatedDesc,
+            true,
+            read_whole_then_cut!(
+                "sync.item i join knobas.entity e on e.id = i.entity_id",
+                "i.item_updated_at desc nulls last, i.entity_id"
+            ),
+        ),
+        (
+            EntityOrder::TitleAsc,
+            true,
+            read_whole_then_cut!(
+                "sync.item i join knobas.entity e on e.id = i.entity_id",
+                "i.title asc, i.entity_id"
+            ),
+        ),
+    ];
+    for (order, include_deleted, before) in cases {
+        for limit in [4u32, 500] {
+            let mut offset = 0u32;
+            loop {
+                let page = list_entities_inner(
+                    &pool,
+                    &Registry::for_process(),
+                    &EntityFilter {
+                        sources: sources.clone(),
+                        order,
+                        include_deleted,
+                        ..all()
+                    },
+                    limit,
+                    offset,
+                    &declarations,
+                )
+                .await
+                .unwrap();
+                let old = sqlx::query(before)
+                    .bind(i64::from(limit))
+                    .bind(i64::from(offset))
+                    .bind(declarations.as_param())
+                    .bind(&sources)
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+                let was: Vec<_> = old
+                    .iter()
+                    .map(|row| {
+                        use sqlx::Row as _;
+                        (
+                            row.get::<String, _>("entity_id"),
+                            row.get::<Option<String>, _>("path"),
+                            knobas_core::entity_list::state_of(row).unwrap(),
+                        )
+                    })
+                    .collect();
+                let is: Vec<_> = page
+                    .rows
+                    .iter()
+                    .map(|row| (row.entity_id.clone(), row.path.clone(), row.state.clone()))
+                    .collect();
+                assert_eq!(
+                    is, was,
+                    "{order:?}, withdrawn {include_deleted}, {limit} from {offset}"
+                );
+                let total = old.first().map_or(0, |row| {
+                    use sqlx::Row as _;
+                    row.get::<i64, _>("total")
+                });
+                assert_eq!(
+                    page.total, total,
+                    "{order:?}, withdrawn {include_deleted}: the total"
+                );
+                assert!(
+                    is.iter().all(|(_, path, _)| path.is_some()),
+                    "every row has its path"
+                );
+                if page.rows.is_empty() {
+                    break;
+                }
+                offset += limit;
+            }
+            assert!(offset >= 20, "the walk read every page");
+        }
+    }
+}
+
+/// A repository page asks for its own pull requests by the repository's name
+/// (#2479's query audit: it read every pull request of its source, 700 ms,
+/// to keep a few dozen). The parent filter answers the rows whose path line
+/// is that name and no others, under every order, so a repository whose
+/// bare name another owner shares keeps its own; compared without regard to
+/// case, as the stored parents are indexed.
+#[tokio::test]
+async fn a_parent_narrows_a_room_to_the_rows_that_name_it() {
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    for (n, base) in [
+        "tidewater/ledger",
+        "harbor/ledger",
+        "tidewater/ledger",
+        "tidewater/payout-service",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        mirrored(
+            &pool,
+            &gitea,
+            "pr",
+            &format!("{base}#{n}"),
+            serde_json::json!({
+                "state": "open",
+                "merged": false,
+                "base": { "ref": "main", "repo": { "full_name": base, "name": base.rsplit('/').next().unwrap() } },
+            }),
+        )
+        .await;
+    }
+    let declarations = builtin_declarations(&pool).await;
+    let filter = |parent: Option<&str>, order: EntityOrder| EntityFilter {
+        sources: vec![gitea.clone()],
+        kinds: vec!["pr".to_owned()],
+        order,
+        parent: parent.map(str::to_owned),
+        ..all()
+    };
+    for order in [
+        EntityOrder::UpdatedDesc,
+        EntityOrder::TitleAsc,
+        EntityOrder::Attention,
+    ] {
+        let every = list_entities_inner(
+            &pool,
+            &Registry::for_process(),
+            &filter(None, order),
+            500,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap();
+        for name in ["tidewater/ledger", "harbor/ledger", "TIDEWATER/LEDGER"] {
+            let own = list_entities_inner(
+                &pool,
+                &Registry::for_process(),
+                &filter(Some(name), order),
+                500,
+                0,
+                &declarations,
+            )
+            .await
+            .unwrap();
+            let expected: Vec<_> = every
+                .rows
+                .iter()
+                .filter(|row| {
+                    row.path
+                        .as_deref()
+                        .is_some_and(|path| path.eq_ignore_ascii_case(name))
+                })
+                .map(|row| row.entity_id.clone())
+                .collect();
+            assert!(!expected.is_empty(), "{name} holds pull requests");
+            assert_eq!(
+                own.rows
+                    .iter()
+                    .map(|row| row.entity_id.clone())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{order:?}: {name}"
+            );
+            assert_eq!(own.total, i64::try_from(expected.len()).unwrap());
+        }
+    }
 }

@@ -526,6 +526,9 @@
       project: null,
       include_deleted: false,
       reach: null,
+      // Its own pull requests, not its source's every one (the query audit, 2026-11-12: 1,710 rows in four reads,
+      // 700 ms, for the repository's few dozen); `repoPrs` still keeps the rows whose path line is this repository.
+      parent: found.row.title,
     };
     await readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
       (rows) => {

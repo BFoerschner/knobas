@@ -14,6 +14,7 @@ import type {
   CheckoutView,
   DiffRead,
   EntityDetail,
+  EntityFilter,
   EntityPage,
   EntityRow,
   SourceView,
@@ -1290,4 +1291,21 @@ test("Branches names a tip's author by the name the record gives, else the accou
   const by = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => text(tr.querySelectorAll("td")[3]!));
   expect(by).toEqual(expect.arrayContaining(["Jonas Becker", "you"]));
   expect(by).not.toContain("jonas.becker");
+});
+
+test("the page asks for its own repository's pull requests by name, and keeps those whose path is it (the query audit, 2026-11-12)", async () => {
+  const asked: EntityFilter[] = [];
+  await draw(
+    [REPO],
+    ports({
+      listEntities: async (filter) => {
+        asked.push(filter);
+        // A stored parent answers to a bare name too: the page keeps only its own repository's.
+        return { rows: PRS, total: PRS.length, tally: null, groups: null };
+      },
+    }),
+  );
+  expect(asked.map((filter) => [filter.kinds, filter.parent])).toEqual([[["pr"], "tidewater/payout-service"]]);
+  // The open one of its own; the other repository's open one is not counted.
+  expect([...target.querySelectorAll(".tf-tabs a")].map(text)).toContain("Pull requests 1");
 });
