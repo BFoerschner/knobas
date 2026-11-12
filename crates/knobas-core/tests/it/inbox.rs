@@ -2789,6 +2789,360 @@ async fn failed_builds(
     ids
 }
 
+/// One rule against the statement it replaced, for `who`, under `declared`:
+/// the same rows whole, in the same order. Returns the items they name,
+/// sorted.
+async fn rule_both_ways(
+    pool: &PgPool,
+    category: Category,
+    walked: &str,
+    who: &[String],
+    declared: &knobas_core::payload::Declarations,
+    when: &str,
+) -> Vec<String> {
+    let rule = inbox::planned_statements()
+        .into_iter()
+        .find(|(c, _)| *c == category)
+        .unwrap()
+        .1;
+    let mut answers = Vec::new();
+    for sql in [rule, walked] {
+        let wrapped = format!("select to_jsonb(q) from ({sql}) q");
+        let rows: Vec<serde_json::Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(wrapped))
+            .persistent(false)
+            .bind(who)
+            .bind(now())
+            .bind(false)
+            .bind(declared.as_param())
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        answers.push(rows);
+    }
+    assert_eq!(
+        answers[0], answers[1],
+        "{when}: the rule and the walk it replaced"
+    );
+    let mut ids: Vec<String> = answers[0]
+        .iter()
+        .map(|row| row["entity_id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// What Jira's adapter declares for a ticket, as [`declarations`] binds it.
+fn jira_kinds() -> Vec<knobas_core::payload::KindPaths> {
+    use knobas_core::payload::{KindPaths, PayloadPath};
+    vec![KindPaths {
+        kind: "ticket".to_owned(),
+        assignee: vec![
+            PayloadPath::of(["fields", "assignee", "name"]),
+            PayloadPath::of(["fields", "assignee", "key"]),
+        ],
+        created: vec![PayloadPath::of(["fields", "created"])],
+        ..KindPaths::default()
+    }]
+}
+
+/// **A ticket is mine by the assignee the database stores for it**
+/// (`sync.item_field`; the stored-reads pass of 2026-11-12), and the rule
+/// names the tickets the walk of every window ticket's payload named: the
+/// first candidate naming me, a blank or numeric first candidate skipped, a
+/// first candidate naming somebody else with me second (not mine), a padded
+/// name, both candidates naming me (one row), one I raised, one outside the
+/// window, one with no date of its own, an unassigned one, and a source
+/// that declares one candidate where its record names me at another. With
+/// the declarations stored, with one source's never stored, after a ticket
+/// is rewritten, with the stored candidates moved away from the bound ones,
+/// and with none stored.
+#[tokio::test]
+async fn a_ticket_is_mine_by_the_assignee_the_database_stores() {
+    let pool = &scratch().await;
+    source(pool, "jira", None, true).await;
+    source(pool, "jira-eu", None, true).await;
+    // The declarations first, so each ticket's stored assignee is written
+    // with it. `jira-eu`'s adapter stores none: its tickets are walked. A
+    // second adapter stores a ticket's assignee under `key` alone, so every
+    // ticket also has a row under candidates the read does not bind: PAY-4's
+    // names me there.
+    declare(pool, "jira", &jira_kinds()).await;
+    declare(
+        pool,
+        "forge",
+        &[knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![knobas_core::payload::PayloadPath::of([
+                "fields", "assignee", "key",
+            ])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    )
+    .await;
+    let assigned = |source: &'static str,
+                    key: &'static str,
+                    author: &'static str,
+                    assignee: serde_json::Value,
+                    updated: Option<DateTime<Utc>>| {
+        (
+            source,
+            key,
+            author,
+            serde_json::json!({ "fields": { "assignee": assignee } }),
+            updated,
+        )
+    };
+    let fresh = Some(days_ago(1));
+    let rows = [
+        assigned(
+            "jira",
+            "PAY-1",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-2",
+            THEM,
+            serde_json::json!({ "name": "  ", "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-3",
+            THEM,
+            serde_json::json!({ "name": 42, "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-4",
+            THEM,
+            serde_json::json!({ "name": THEM, "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-5",
+            THEM,
+            serde_json::json!({ "name": format!(" {ME} ") }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-6",
+            THEM,
+            serde_json::json!({ "name": ME, "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-7",
+            ME,
+            serde_json::json!({ "name": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-8",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            Some(days_ago(40)),
+        ),
+        assigned(
+            "jira",
+            "PAY-9",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            None,
+        ),
+        assigned("jira", "PAY-10", THEM, serde_json::Value::Null, fresh),
+        assigned(
+            "jira",
+            "PAY-11",
+            THEM,
+            serde_json::json!({ "name": THEM }),
+            fresh,
+        ),
+        assigned(
+            "jira-eu",
+            "EU-1",
+            THEM,
+            serde_json::json!({ "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira-eu",
+            "EU-2",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            fresh,
+        ),
+    ];
+    let mut ids = Vec::new();
+    for (source, key, author, payload, updated) in rows {
+        let id = EntityRef::new(source, key).to_string();
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
+            .bind(&id)
+            .bind(key)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item
+                 (entity_id, source_id, kind, title, body_text, author, item_updated_at, payload)
+             values ($1, $2, 'ticket', $3, '', $4, $5, $6)",
+        )
+        .bind(&id)
+        .bind(source)
+        .bind(key)
+        .bind(author)
+        .bind(updated)
+        .bind(payload)
+        .execute(pool)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+    let stored: (i64, i64) = sqlx::query_as(
+        "select count(*), count(distinct paths) from sync.item_field
+          where field = 'assignee' and entity_id like 'jira:%'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (22, 2),
+        "each of jira's tickets has its assignee under both stored candidates"
+    );
+    let elsewhere: Option<String> = sqlx::query_scalar(
+        "select value from sync.item_field where field = 'assignee' and entity_id = $1
+            and jsonb_array_length(paths) = 1",
+    )
+    .bind(&ids[3])
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        elsewhere.as_deref(),
+        Some(ME),
+        "PAY-4 names me under the candidates the read does not bind"
+    );
+    // `jira-eu` binds one candidate, `name`, where the stored rows are under
+    // two: nothing is stored under what it binds, so its tickets are walked.
+    let declared = declarations().with(
+        "jira-eu",
+        vec![knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![knobas_core::payload::PayloadPath::of([
+                "fields", "assignee", "name",
+            ])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    );
+    let mine = |when: &'static str| {
+        let declared = declared.clone();
+        async move {
+            rule_both_ways(
+                pool,
+                Category::NewAssignment,
+                inbox::NEW_ASSIGNMENT_WALKED,
+                &me(),
+                &declared,
+                when,
+            )
+            .await
+        }
+    };
+
+    let mut want: Vec<String> = [0, 1, 2, 4, 5, 8, 12]
+        .into_iter()
+        .map(|n: usize| ids[n].clone())
+        .collect();
+    want.sort();
+    assert_eq!(mine("every assignee stored").await, want);
+    let theirs = rule_both_ways(
+        pool,
+        Category::NewAssignment,
+        inbox::NEW_ASSIGNMENT_WALKED,
+        &[THEM.to_owned()],
+        &declared,
+        "somebody else",
+    )
+    .await;
+    assert!(
+        theirs.is_empty(),
+        "every ticket they hold they raised themselves: {theirs:?}"
+    );
+    // Both names one reader's: the tickets either holds that neither raised.
+    let either = rule_both_ways(
+        pool,
+        Category::NewAssignment,
+        inbox::NEW_ASSIGNMENT_WALKED,
+        &[ME.to_owned(), THEM.to_owned()],
+        &declared,
+        "both names",
+    )
+    .await;
+    assert!(
+        either.is_empty(),
+        "each was raised by one of the two: {either:?}"
+    );
+    assert!(
+        rule_both_ways(
+            pool,
+            Category::NewAssignment,
+            inbox::NEW_ASSIGNMENT_WALKED,
+            &[],
+            &declared,
+            "nobody"
+        )
+        .await
+        .is_empty()
+    );
+
+    // A ticket rewritten moves its stored assignee with it.
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&ids[10])
+        .bind(serde_json::json!({ "fields": { "assignee": { "name": ME } } }))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&ids[0])
+        .bind(serde_json::json!({ "fields": { "assignee": { "name": THEM } } }))
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut want: Vec<String> = [1, 2, 4, 5, 8, 10, 12]
+        .into_iter()
+        .map(|n: usize| ids[n].clone())
+        .collect();
+    want.sort();
+    assert_eq!(mine("two tickets rewritten").await, want);
+
+    // The stored candidates move away from the ones the read binds: every
+    // ticket is walked again.
+    let mut moved = jira_kinds();
+    moved[0].assignee.truncate(1);
+    declare(pool, "jira", &moved).await;
+    assert_eq!(mine("stored under other candidates").await, want);
+
+    // No declaration stored at all.
+    sqlx::query("delete from sync.parent_declaration")
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("select count(*) from sync.item_field")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(mine("nothing stored").await, want);
+}
+
 /// **A build is ruled by the rows the database keeps of it** (`sync.item_row`
 /// for its tone, `sync.item_pipeline` for its configuration; the stored-reads
 /// pass of 2026-11-12), and the rule names the builds the walk over every

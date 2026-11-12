@@ -273,6 +273,22 @@ macro_rules! window_days {
     };
 }
 
+/// [`crate::live_by_exclusion!`] for a rule of the stream: the same two
+/// exclusion sets, the withdrawn entities read from `gone`, which
+/// [`shelved!`] reads once for every rule, where each rule scanned
+/// `knobas.entity` for them itself.
+macro_rules! live_once {
+    ($alias:literal) => {
+        concat!(
+            $alias,
+            ".entity_id not in (select g.id from gone g)
+         and ",
+            $alias,
+            ".source_id not in (select c.id from knobas.source_config c where not c.enabled)"
+        )
+    };
+}
+
 /// How many days of window the two unresolving categories get, and how early a
 /// credential expiry is raised. See [`window_days!`].
 pub const WINDOW_DAYS: i64 = 14;
@@ -364,7 +380,7 @@ macro_rules! review_request {
             " as r where r.value = any($1))
                      offset 0) i
               where ",
-            $crate::live_by_exclusion!("i"),
+            live_once!("i"),
             "
                 and coalesce(",
             $crate::resolved_state!(),
@@ -502,7 +518,7 @@ macro_rules! mention {
                               offset 0) named
                         join sync.item i on i.entity_id = named.entity_id
                        where ",
-            $crate::live_by_exclusion!("i"),
+            live_once!("i"),
             r"
                          and i.kind in ('ticket','pr','page','note')
                          and (i.item_updated_at >= $2 - make_interval(days => ",
@@ -751,7 +767,7 @@ macro_rules! failed_build {
                            left join sync.item_pipeline ip
                              on ip.entity_id = i.entity_id and ip.adapter_kind = ps.adapter_kind
                           where ",
-            $crate::live_by_exclusion!("i"),
+            live_once!("i"),
             "
                             and i.kind = 'build'
                          offset 0) scored
@@ -885,6 +901,19 @@ macro_rules! failed_build_walked {
 /// parenthesized because it carries its own `with`. Pinned by
 /// `the_first_declared_assignee_decides_and_only_for_its_own_source`.
 ///
+/// **The assignee is the stored one where the database holds it** (the
+/// stored-reads pass of 2026-11-12). The rule decompressed the payload of
+/// every ticket of the window to read it, 477 of them and 5 of the stream's
+/// 29 ms on a mirror of 23,000 tickets, where `sync.item_field` (migration
+/// `0063`) has kept each ticket's declared assignee since #2184: the first
+/// candidate's non-blank string, which is the value this rule's two tests
+/// come to. For a source whose candidates the stored declarations hold
+/// ([`crate::stored_under!`], `assignee_stored`) a ticket is mine when its
+/// stored row under those candidates names me, one index probe a ticket;
+/// any other source's tickets are walked as above. One row a ticket either
+/// way after [`shelved!`]. [`NEW_ASSIGNMENT_WALKED`] is the rule as it read
+/// before, which `tests/it/inbox.rs` holds this one to.
+///
 /// **The window is spelled so an index answers it** (the query audit of
 /// 2026-11-12): the source's date inside it, or no source date and knobas'
 /// own inside it, which is `coalesce(item_updated_at, synced_at)` inside it
@@ -895,6 +924,67 @@ macro_rules! failed_build_walked {
 /// `assignee_paths`, the planner started from the paths and walked every
 /// ticket of each source to find the window's.
 macro_rules! new_assignment {
+    () => {
+        concat!(
+            "(with assignee_paths as materialized (",
+            $crate::declared_ticket_paths!("$4", "assignee"),
+            "),
+             assignee_stored as materialized (
+               select i.source_id,
+                      $4::jsonb #> array[i.source_id, i.kind, 'assignee'] as paths
+                 from (select d.source_id, 'ticket'::text as kind
+                         from jsonb_object_keys(case when jsonb_typeof($4::jsonb) = 'object'
+                                                     then $4::jsonb else '{}'::jsonb end)
+                              as d(source_id)) i
+                where ",
+            $crate::stored_under!(
+                "assignee",
+                "($4::jsonb #> array[i.source_id, i.kind, 'assignee'])"
+            ),
+            ")
+             select 'new_assignment', w.entity_id, w.source_id, w.entity_id, w.kind, w.title,
+                    'assigned to you',
+                    coalesce(w.item_updated_at, w.synced_at), w.web_url, null::text
+               from (select i.entity_id, i.source_id, i.kind, i.title, i.web_url,
+                            i.item_updated_at, i.synced_at
+                       from sync.item i
+                      where ",
+            live_once!("i"),
+            "
+                        and i.kind = 'ticket'
+                        and coalesce(i.author, '') <> all($1)
+                        and (i.item_updated_at >= $2 - make_interval(days => ",
+            window_days!(),
+            ")
+                             or (i.item_updated_at is null
+                                 and i.synced_at >= $2 - make_interval(days => ",
+            window_days!(),
+            ")))
+                     offset 0) w
+               left join assignee_stored st on st.source_id = w.source_id
+              where case when st.source_id is not null
+                         then exists (select 1 from sync.item_field f
+                                       where f.entity_id = w.entity_id
+                                         and f.field = 'assignee'
+                                         and f.paths = st.paths
+                                         and f.value = any($1))
+                         else exists (select 1
+                                        from sync.item i
+                                        join assignee_paths p on p.source_id = i.source_id
+                                       where i.entity_id = w.entity_id
+                                         and btrim(i.payload #>> p.segs) = any($1)
+                                         and ",
+            $crate::first_string_of!(
+                "(select a.segs, a.ord from assignee_paths a where a.source_id = p.source_id)"
+            ),
+            " = any($1)) end)"
+        )
+    };
+}
+
+/// [`new_assignment!`] as it read before it took the stored assignee: every
+/// ticket of the window's payload, decompressed, and its candidates walked.
+macro_rules! new_assignment_walked {
     () => {
         concat!(
             "(with assignee_paths as materialized (",
@@ -1132,6 +1222,13 @@ macro_rules! alert {
 /// of the stream and take 2. The failed build rule keeps the column: a
 /// build's record is under a kilobyte and stored as it is.
 ///
+/// **The withdrawn entities are read once** (the stored-reads pass of
+/// 2026-11-12). Each of the four rules that read the mirror excluded them
+/// by a scan of `knobas.entity` of its own ([`crate::live_by_exclusion!`]):
+/// four scans of 40,000 rows to find the same 291, 1.5 ms each of a stream
+/// that takes 20. `gone` holds them, and each rule hashes it
+/// ([`live_once!`]).
+///
 /// **De-duplication.** `distinct on (category, subject)` because a rule with a
 /// lateral join can produce a row per match -- a pull request that lists an
 /// account twice is one review request -- and because a category that later
@@ -1140,7 +1237,10 @@ macro_rules! alert {
 macro_rules! shelved {
     ($($candidates:tt)*) => {
         concat!(
-            "with candidate (category, subject, source_id, entity_id, kind,
+            "with gone (id) as materialized (
+               select e.id from knobas.entity e where e.deleted_at is not null
+             ),
+             candidate (category, subject, source_id, entity_id, kind,
                              title, reason, occurred_at, web_url, detail) as (\n",
             $($candidates)*,
             "\n),
@@ -1238,6 +1338,12 @@ pub const REVIEW_REQUEST_WALKED: &str = shelved!(concat!(
 /// the rule to it.
 #[doc(hidden)]
 pub const FAILED_BUILD_WALKED: &str = shelved!(failed_build_walked!());
+
+/// [`new_assignment!`] as it read before it took the stored assignee
+/// (`sync.item_field`): every ticket of the window's payload. Kept for
+/// `tests/it/inbox.rs`, which holds the rule to it.
+#[doc(hidden)]
+pub const NEW_ASSIGNMENT_WALKED: &str = shelved!(new_assignment_walked!());
 
 /// Each rule's statement, shelved, named by its category, for `knobas-app`'s
 /// plan test (`tests/it/read_plans.rs`, #778). Each binds what [`items`]
