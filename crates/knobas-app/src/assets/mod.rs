@@ -7032,7 +7032,7 @@ mod tests {
         let mut word = 'u';
         for _ in 0..1440 {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            if (seed >> 33) % 23 == 0 {
+            if (seed >> 33).is_multiple_of(23) {
                 word = ['u', 'd', 'w', '-'][usize::try_from((seed >> 40) % 4).unwrap()];
             }
             states.push(word);
