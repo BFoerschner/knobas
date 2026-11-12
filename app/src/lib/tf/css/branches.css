@@ -11,6 +11,9 @@
 .tf-rbranches th:nth-child(5) { width: 10%; }
 .tf-rbranches td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-rbranches td.tf-racts { overflow: visible; }
+/* Every row is as tall as a row with its actions from the start: *New pull request* and *Delete…* are small buttons,
+   taller than a line of text, and a branch's land with its standing, seconds after the list drew. */
+.tf-rbranches td.tf-racts .tf-rowend { min-height: var(--control-h-sm); }
 .tf-rbranches .tf-racts { text-align: right; }
 /* The last value: *Delete…* stands in its place on hover, so it is at least as wide. */
 .tf-rbranches td .tf-rowval { display: inline-block; min-width: 76px; }

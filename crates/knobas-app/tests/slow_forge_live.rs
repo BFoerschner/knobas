@@ -622,7 +622,8 @@ async fn a_repository_never_read_draws_its_branches_and_last_commit_from_the_mir
         .expect("the source lists the commits");
 
     rig.proxy.set(slow::HANG);
-    let live = LiveSources::default();
+    // A session as the app makes one: the mirror is read through the store it holds reads in.
+    let live = rig.session();
     for (section, read) in [("branches", &source), ("commits", &commits)] {
         let (took, shown) = time(knobas_app::sources::crud::shown(
             &rig.pool,
