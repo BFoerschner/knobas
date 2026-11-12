@@ -239,7 +239,12 @@
           console.error("knobas: the answer cache did not start; every read goes to the backend", error);
         }
         // A repository's or a pull request's first read past the mirror, started while the pointer rests on its link.
-        stops.push(installHoverReads());
+        // Guarded as the cache is: nothing here may stop the lifecycle below from starting.
+        try {
+          stops.push(installHoverReads());
+        } catch (error) {
+          console.error("knobas: reads ahead of a press did not start; each page reads on its press", error);
+        }
         for (const [event, hear] of [
           [EVENTS.syncState, (payload: unknown) => cacheEvents.syncState(payload as Parameters<typeof cacheEvents.syncState>[0])],
           [EVENTS.itemRefreshed, () => cacheEvents.moved()],

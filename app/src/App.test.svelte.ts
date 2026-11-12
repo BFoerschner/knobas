@@ -125,6 +125,8 @@ vi.mock("./lib/ipc/sources", () => ({
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
+  // A read ahead of a press (`tf/repo/hover-reads.ts`): nothing is pressed here.
+  readViewAhead: () => Promise.resolve(null),
   // What a capture would attach (#503): the main window records its foreground
   // here whenever it changes. Recorded, because this file is the only place
   // the shell's own answer can be read.
