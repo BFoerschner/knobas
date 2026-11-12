@@ -660,7 +660,7 @@ const LIB = String.raw`(() => {
   const FIELD = "input:not([type=hidden], [type=checkbox], [type=radio], [type=file], [type=range], [type=color]), select, textarea";
   window.__trip = {
     wrap() {
-      // Through the app's own `invoke` (`app/src/lib/ipc/invoke.ts`): Tauri's bridge `invoke` is read-only.
+      // Through the app's own invoke (app/src/lib/ipc/invoke.ts): the invoke on Tauri's bridge is read-only.
       const i = window.__TAURI_INTERNALS__;
       if (!i || window.__knobasIpcTap?.__counted) return !!i;
       const prev = window.__knobasIpcTap;
