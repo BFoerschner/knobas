@@ -116,6 +116,7 @@
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
+  import { drawnFile, forgetDrawnFiles, hasDrawnFile, keepDrawnFile } from "./drawn-files";
   import {
     REPO_FILES,
     ancestors,
@@ -229,12 +230,7 @@
   let fileReading = $state(false);
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
-  /**
-   * Each file the tab drew, by the section that opens it, at the current `at` (the inner-pages pass, 2026-11-12): a file
-   * a deep link's guess read by its path, then named by its listing at a commit, was read from the source a second time
-   * when the reader came back to it, a forge's round trip for what the tab had drawn.
-   */
-  let drawnFiles = new Map<string, ViewSection | undefined>();
+  // Each file the tab drew is kept by the listing's section that opens it (`drawn-files.ts`, the inner-pages pass).
   /** The read the file drawn came from, which a listing's section can stand for once it names it. */
   let drawnRead: ViewSection | undefined;
   /**
@@ -245,7 +241,7 @@
     if (section === GUESSED || section.startsWith(LOCAL) || section === MISSING) return;
     // Where the source declares no scheme there is no telling a listing's section from a read by path: none is kept.
     if (treeSections == null || section === `${treeSections.file}${path}`) return;
-    drawnFiles.set(section, read);
+    keepDrawnFile(at, section, read);
   }
   /**
    * Reads a deep link asked before a listing named their section (#2244), by
@@ -395,7 +391,7 @@
     unrest();
     if (section === null || section.startsWith(LOCAL)) return;
     const place = kind === "file" ? fileKey(full) : dirKey(full);
-    if (early.has(place) || (kind === "dir" ? asked.has(full) || listings[full] !== undefined : drawnFiles.has(section) || full === shown)) return;
+    if (early.has(place) || (kind === "dir" ? asked.has(full) || listings[full] !== undefined : hasDrawnFile(at, section) || full === shown)) return;
     resting = setTimeout(() => {
       resting = null;
       if (!early.has(place)) askEarly(section, place);
@@ -440,7 +436,6 @@
     void at;
     generation += 1;
     asked = new Set();
-    drawnFiles = new Map();
     early = new Map();
     listings = {};
     treeFailed = null;
@@ -615,7 +610,7 @@
       return;
     }
     let live = true;
-    const drawnBefore = drawnFiles.get(section);
+    const drawnBefore = drawnFile(where, section);
     if (drawnBefore !== undefined) {
       drawFile(drawnBefore, section);
       return;
@@ -1015,7 +1010,7 @@
     if (section === null || section === MISSING) return Promise.resolve();
     // The file a commit made is at the branch's new tip: the top says which.
     void rereadTop();
-    drawnFiles = new Map();
+    forgetDrawnFiles(where);
     return readSection(section, where).then(
       (read) => {
         if (section !== fileSection || where !== at) return;

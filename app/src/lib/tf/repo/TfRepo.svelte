@@ -125,7 +125,17 @@
   /** Forget every repository's branch: a new session, which is what each test is. */
   export function forgetBranches(): void {
     for (const key of Object.keys(chosen)) delete chosen[key];
+    searched.clear();
   }
+
+  /**
+   * The repositories whose header has looked for a branch to propose this session. The first look waits
+   * {@link FIRST_SEARCH_AFTER_MS}: the branch list now comes from the mirror at once, and the look's branch views (each
+   * a compare on the forge) went out beside the page's own first reads and slowed the tree on a repository with no
+   * clone (the inner-pages pass, 2026-11-12). The button's room is held meanwhile, as while it looks.
+   */
+  const searched = new Set<string>();
+  const FIRST_SEARCH_AFTER_MS = import.meta.env.MODE === "test" ? 0 : 1000;
 </script>
 
 <script lang="ts">
@@ -729,6 +739,15 @@
     // Before the branches are read the page knows no branch to start on: *main* drew for half a second, then went.
     untrack(() => (seeking = asked.length > 0 || (ready && choice === null && branches === null)));
     void (async () => {
+      const id = untrack(() => repoId);
+      if (asked.length > 0 && id !== null && !searched.has(id)) {
+        searched.add(id);
+        if (FIRST_SEARCH_AFTER_MS > 0) await new Promise((resolve) => setTimeout(resolve, FIRST_SEARCH_AFTER_MS));
+        if (!live) {
+          searched.delete(id);
+          return;
+        }
+      }
       let first: BranchStanding["pr"] = null;
       // In order, a batch at a time: the first branch in order that stands free wins, as when they were read one by one.
       for (let at = 0; at < asked.length; at += ASKED_AT_ONCE) {

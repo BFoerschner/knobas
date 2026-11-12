@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import { forgetAllDrawnFiles } from "./drawn-files";
 
 const REPO = "gitea:tidewater/payout-service";
 const SHA = "c0mmit";
@@ -48,6 +49,7 @@ const place = $state<{ path: string | null }>({ path: null });
 
 beforeEach(() => {
   reads.length = 0;
+  forgetAllDrawnFiles();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -103,6 +105,13 @@ test("a file a deep link's guess drew is not read again under its listing's sect
   await settle();
   expect(shownText()).toContain("fn a()");
   expect(reads.filter((id) => id.endsWith(":src/a.rs")), "the source was asked once for the file").toEqual(["file:src/a.rs"]);
+  // Mounted afresh, as a page the kept pages let go: still drawn from what the tab drew.
+  unmount(view!);
+  view = null;
+  draw("src/a.rs");
+  await settle();
+  expect(shownText()).toContain("fn a()");
+  expect(reads.filter((id) => id === `file@${SHA}:src/a.rs`), "the listing's section was never asked of the source").toEqual([]);
 });
 
 test("a pointer resting on a file in the tree reads it, and the press takes that read", async () => {
