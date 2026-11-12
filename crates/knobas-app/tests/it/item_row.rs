@@ -186,6 +186,47 @@ async fn the_stored_rows_are_the_macros_expansions() {
     }
 }
 
+/// `knobas_core::row_key_of!` is `sync.row_key` written out, for the
+/// launcher's statement, which may call no user-defined function and keep
+/// its parallel match stage. Held to the function for every kind every
+/// stored adapter declares, for a kind with nothing declared, and for no
+/// declaration at all.
+#[tokio::test]
+async fn the_key_written_out_is_the_functions_key() {
+    let (pool, _) = mirror("item_row_key_text").await;
+    let (compared, unequal): (i64, i64) = sqlx::query_as(concat!(
+        "select count(*), count(*) filter (where ",
+        knobas_core::row_key_of!("x.declared"),
+        " is distinct from sync.row_key(x.declared))
+           from (select a.declared from sync.row_adapters() a
+                 union all select '{}'::jsonb
+                 union all select '{\"state\": [], \"parent\": null}'::jsonb
+                 union all select null::jsonb) x"
+    ))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        compared > 10,
+        "every declared kind of every adapter: {compared}"
+    );
+    assert_eq!(unequal, 0, "the written-out key is the function's");
+    // And the function is the one the text was written from: its body names
+    // each part the text names, and no other.
+    let paths: String = sqlx::query_scalar(
+        "select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'sync' and p.proname = 'row_paths'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        paths.matches("declared->'").count(),
+        knobas_core::row_key_of!("x").matches("x->'").count(),
+        "sync.row_paths reads as many parts as the written-out key:\n{paths}"
+    );
+}
+
 /// Every item of every kind has its row under the key the lists read by,
 /// and every stored field is the payload walk's answer: the reference
 /// adapter's whole corpus and Gitea's pull requests, branches and

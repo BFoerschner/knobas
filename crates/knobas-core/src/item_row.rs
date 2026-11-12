@@ -37,6 +37,42 @@ macro_rules! row_keys {
     };
 }
 
+/// `sync.row_key($declared)` spelled out, for a statement that must stay
+/// free of user-defined functions: the key of one kind's declaration
+/// (`$declared`, its `KindPaths` as jsonb, or null for a kind the bound
+/// declarations do not name), as the MD5 of `sync.row_paths`' object.
+///
+/// PostgreSQL plans no parallel workers for a statement that calls a
+/// function not marked parallel safe, and `sync.row_key` is not: the
+/// launcher's match stage runs on three processes, and naming the function
+/// in its detail stage took them away, 40 ms of a one-letter keystroke
+/// (2026-11-12). Every other reader computes its keys once a statement
+/// through [`row_keys!`] and has no workers to lose.
+///
+/// `knobas-app`'s `tests/it/item_row.rs` holds this text to the function
+/// for every stored declaration: a migration that restates `sync.row_paths`
+/// fails it until this follows.
+#[macro_export]
+macro_rules! row_key_of {
+    ($declared:literal) => {
+        concat!(
+            "md5(jsonb_build_object('parent', ",
+            $declared,
+            "->'parent', 'state', ",
+            $declared,
+            "->'state', 'head', ",
+            $declared,
+            "->'head', 'head_repo', ",
+            $declared,
+            "->'head_repo', 'default_branch', ",
+            $declared,
+            "->'default_branch', 'reviewers', ",
+            $declared,
+            "->'reviewers')::text)::uuid"
+        )
+    };
+}
+
 /// After a relation `$row` that carries `entity_id`, `source_id` and `kind`:
 /// the item's stored row as `$alias`, read under the key [`row_keys!`] gives
 /// its source and kind, so a joined row holds each field as the payload

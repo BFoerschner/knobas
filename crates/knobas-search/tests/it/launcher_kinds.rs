@@ -434,6 +434,206 @@ async fn hash_b_answers_a_configuration_as_a_pipeline_coloured_by_its_newest_run
     );
 }
 
+/// **A drawn row's path line and state chip are the ones its payload gave.**
+/// The launcher's detail stage reads both off each row's stored list row
+/// (`sync.item_row`, migration `0081`) where it has one, and
+/// `corpus::LIVE_ITEM_UNSTORED` still walks them out of the payload: every
+/// drawn row is compared whole, both ways.
+///
+/// The rows are a pipeline with a chain of groups and a newest failing run
+/// (its state is that run's, read off the run's stored row), a pipeline with
+/// no run, a merged and an open pull request and a branch under their
+/// repository, the repository itself, and two tickets with a status. Asked
+/// with every row stored, with some rows gone and with none, filled again,
+/// and under declarations the database stored nothing for.
+#[tokio::test]
+async fn a_hit_draws_the_path_and_state_its_payload_walk_drew() {
+    use knobas_search::corpus::{LIVE_ITEM, LIVE_ITEM_UNSTORED};
+    use knobas_search::query::EffectiveFilters;
+    use knobas_search::sql::{fetch_matched, search_sql};
+
+    let pool = pool().await;
+    // The declarations first, so each row is written with its stored row.
+    let vocab = searcher(&pool).await.vocabulary().await.unwrap();
+    let t = token();
+    let now = Utc::now();
+    let (config, runs) = pipeline(&pool, &t, now).await;
+    let quiet = item(
+        &pool,
+        "teamcity",
+        "build_config",
+        &format!("{t}_Quiet"),
+        &format!("Quiet {t}"),
+        serde_json::json!({ "id": format!("{t}_Quiet"), "name": format!("Quiet {t}") }),
+        now,
+    )
+    .await;
+    let full = format!("tidewater/{t}");
+    let repository = serde_json::json!({ "full_name": full, "name": t });
+    let mut ids = vec![config.clone(), quiet];
+    for (kind, key, title, payload) in [
+        (
+            "repo",
+            full.clone(),
+            format!("{full} {t}"),
+            serde_json::json!({ "full_name": full, "name": t, "owner": { "login": "tidewater" } }),
+        ),
+        (
+            "branch",
+            format!("{full}@refs/heads/fix"),
+            format!("fix {t}"),
+            serde_json::json!({ "name": "fix", "repository": repository }),
+        ),
+        (
+            "pr",
+            format!("{full}#7"),
+            format!("merged {t}"),
+            serde_json::json!({ "number": 7, "state": "closed", "merged": true,
+                                "base": { "ref": "main", "repo": repository } }),
+        ),
+        (
+            "pr",
+            format!("{full}#8"),
+            format!("open {t}"),
+            serde_json::json!({ "number": 8, "state": "open", "merged": false,
+                                "base": { "ref": "main", "repo": repository } }),
+        ),
+    ] {
+        ids.push(item(&pool, "gitea", kind, &key, &title, payload, now).await);
+    }
+    for (n, status) in [(1, "In Progress"), (2, "Done")] {
+        ids.push(
+            item(
+                &pool,
+                "jira",
+                "ticket",
+                &format!("{t}-{n}"),
+                &format!("ticket {t}"),
+                serde_json::json!({ "key": format!("{t}-{n}"),
+                    "fields": { "status": { "name": status, "statusCategory": { "key": "done" } },
+                                "parent": { "key": format!("{t}-9") } } }),
+                now,
+            )
+            .await,
+        );
+    }
+    let stored = |ids: Vec<String>| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "select count(*) from sync.item_row where entity_id = any($1)",
+            )
+            .bind(ids)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let mut every = ids.clone();
+    every.extend(runs.iter().cloned());
+    assert_eq!(
+        stored(every.clone()).await,
+        10,
+        "each row has its stored row"
+    );
+
+    // Every drawn row, whole, as one corpus draws it.
+    let drawn = |corpus: &'static knobas_search::corpus::Corpus,
+                 declarations: knobas_core::payload::Declarations| {
+        let pool = pool.clone();
+        let t = t.clone();
+        async move {
+            let filters = EffectiveFilters {
+                declarations,
+                ..EffectiveFilters::default()
+            };
+            let built = search_sql(&[corpus], Some(&t), true, &filters, 100, 100);
+            let rows = fetch_matched(&pool, built).await.unwrap();
+            let groups = knobas_search::group::group(rows, &knobas_search::KindCatalog::default());
+            let mut out: Vec<String> = groups
+                .into_iter()
+                .flat_map(|g| g.hits)
+                .map(|h| serde_json::to_string(&h.row).unwrap())
+                .collect();
+            out.sort();
+            out
+        }
+    };
+    let both = |when: &'static str, declarations: knobas_core::payload::Declarations| {
+        let drawn = &drawn;
+        async move {
+            let now = drawn(&LIVE_ITEM, declarations.clone()).await;
+            let walked = drawn(&LIVE_ITEM_UNSTORED, declarations).await;
+            assert_eq!(now, walked, "{when}");
+            now
+        }
+    };
+
+    let rows = both("every row stored", vocab.declarations.clone()).await;
+    assert_eq!(rows.len(), 10, "{rows:?}");
+    // Not by drawing nothing: the paths and the chips are there.
+    let all = rows.join("\n");
+    for want in [
+        "Root › Payouts",
+        full.as_str(),
+        "\"FAILURE\"",
+        "\"merged\"",
+        "\"open\"",
+        "\"In Progress\"",
+    ] {
+        assert!(all.contains(want), "{want} in {all}");
+    }
+
+    // Some rows gone, as items the fill has not reached: the newest run's
+    // among them, whose state its pipeline draws.
+    sqlx::query("delete from sync.item_row where entity_id = any($1)")
+        .bind(vec![
+            runs[1].clone(),
+            ids[3].clone(),
+            ids[4].clone(),
+            ids[6].clone(),
+        ])
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        both("some rows gone", vocab.declarations.clone()).await,
+        rows
+    );
+    sqlx::query("delete from sync.item_row where entity_id = any($1)")
+        .bind(&every)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored(every.clone()).await, 0);
+    assert_eq!(both("no row", vocab.declarations.clone()).await, rows);
+    knobas_core::item_row::fill(&pool).await.unwrap();
+    assert_eq!(stored(every.clone()).await, 10);
+    assert_eq!(
+        both("the rows filled again", vocab.declarations.clone()).await,
+        rows
+    );
+
+    // Declarations the database stored nothing under: Gitea's pull request
+    // with its second state candidate alone, and no parent. The stored rows
+    // are under another key, so each is walked, and the answer is those
+    // declarations' own.
+    let mut gitea = knobas_source_gitea::descriptor_template().payload_paths;
+    for kind in &mut gitea {
+        if kind.kind == "pr" {
+            kind.state.remove(0);
+            kind.parent.clear();
+        }
+    }
+    let other = vocab.declarations.clone().with("gitea", gitea);
+    let unstored = both("declarations the database never stored", other).await;
+    assert_ne!(
+        unstored, rows,
+        "a merged pull request reads closed, with no path"
+    );
+    assert!(!unstored.join("\n").contains("\"merged\""), "{unstored:?}");
+}
+
 #[tokio::test]
 async fn a_pipeline_with_no_run_carries_no_state() {
     let pool = pool().await;

@@ -751,6 +751,86 @@ macro_rules! mirror_state {
         )
     };
 }
+/// A walk of the row `i`'s payload, `$walk`, answered from its stored list
+/// row where it has one (`sync.item_row`, migration `0081`): `$column` of
+/// the row under the key the declarations `$decl` give `i`'s source and
+/// kind (`sync.row_key`, as `knobas_core::row_keys!` computes it a
+/// statement), and `$walk` itself where there is none -- an item not filled
+/// yet, declarations the database never stored. A stored column is the
+/// payload macro's answer under that key (`knobas-app`'s
+/// `tests/it/item_row.rs`), so the two halves agree.
+///
+/// A subquery probed by the row's id, one row always: the detail stage
+/// draws a page of fifty, and each walk was 0.13 ms and 0.18 ms a row for
+/// the path and the state. The key is `knobas_core::row_key_of!`, the
+/// function's text and not a call of it, so the statement keeps its
+/// parallel match stage.
+macro_rules! stored_row_or {
+    ($decl:literal, $column:literal, $($walk:tt)+) => {
+        concat!(
+            "(select case when rw.entity_id is null then ",
+            $($walk)+,
+            " else rw.",
+            $column,
+            " end from (select ",
+            $decl,
+            "::jsonb #> array[i.source_id, i.kind] as declared) rk \
+               left join sync.item_row rw on rw.entity_id = i.entity_id \
+                and rw.paths_key = ",
+            knobas_core::row_key_of!("rk.declared"),
+            ")"
+        )
+    };
+}
+
+/// [`mirror_path!`], with the row's own path line read off its stored list
+/// row where it has one ([`stored_row_or!`]): what the launcher's detail
+/// stage reads. A pipeline's chain of groups is still its payload's, a
+/// handful of rows a page.
+macro_rules! mirror_path_stored {
+    ($decl:literal) => {
+        concat!(
+            "(case when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select string_agg(btrim(e.elem #>> c.entry_segs), \
+             ' \u{203a} ' order by e.ord) from ",
+            knobas_core::declared_list_candidates!($decl, "group_path"),
+            " c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) \
+             = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord) \
+             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
+               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null), ",
+            stored_row_or!($decl, "path", knobas_core::path_line_read!($decl)),
+            ") else ",
+            stored_row_or!($decl, "path", knobas_core::path_line_read!($decl)),
+            " end)"
+        )
+    };
+}
+
+/// [`mirror_state!`], with each declared state read off the stored list row
+/// of the item it is of, the row's own or its pipeline's newest run's,
+/// where that item has one ([`stored_row_or!`]).
+macro_rules! mirror_state_stored {
+    ($decl:literal) => {
+        concat!(
+            "(case when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select st.state from (select i.source_id, ",
+            knobas_core::declared_string!($decl, "pipeline"),
+            " as pkey, (select sc.kind from knobas.source_config sc where sc.id = i.source_id) \
+             as adapter_kind) pl cross join lateral (select ",
+            stored_row_or!($decl, "state", knobas_core::declared_state!($decl)),
+            " as state from ",
+            knobas_core::newest_runs!("pl", "1"),
+            " n join sync.item i on i.entity_id = n.entity_id) st), ",
+            stored_row_or!($decl, "state", knobas_core::declared_state!($decl)),
+            ") else ",
+            stored_row_or!($decl, "state", knobas_core::declared_state!($decl)),
+            " end)"
+        )
+    };
+}
+
 /// A mirrored row's key cell (#2451, #2452, spec #2419 story 19): the text a
 /// person reads beside the title to know where the thing sits, resolved from
 /// the declarations alone.
@@ -844,8 +924,11 @@ pub const LIVE_ITEM: Corpus = Corpus {
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
-    path: mirror_path!("pd.d"),
-    state: mirror_state!("pd.d"),
+    // The page's path lines and state chips, off each row's stored list row
+    // where it has one (`sync.item_row`, migration `0081`): fifty walks of a
+    // payload a keystroke otherwise, about 15 ms of it.
+    path: mirror_path_stored!("pd.d"),
+    state: mirror_state_stored!("pd.d"),
     cell: "i.key_cell",
     scope: None,
     under: Some(
@@ -859,13 +942,17 @@ pub const LIVE_ITEM: Corpus = Corpus {
 
 /// [`LIVE_ITEM`] as it read the mirror before migration `0077`: the row's
 /// own `sync.item.fts` for the match and the rank, filtered per match under
-/// *Titles*. No search reads it. `tests/it/item_search.rs` holds
-/// [`LIVE_ITEM`]'s answers to its answers.
+/// *Titles*, and each drawn row's path line and state walked out of its
+/// payload, as they were before the detail stage took `sync.item_row`. No
+/// search reads it. `tests/it/item_search.rs` holds [`LIVE_ITEM`]'s answers
+/// to its answers, and `tests/it/state_chip.rs` its drawn rows to its.
 #[cfg(any(test, feature = "test-util"))]
 pub const LIVE_ITEM_UNSTORED: Corpus = Corpus {
     relation: "sync.live_item i",
     fts: "i.fts",
     title_fts: None,
+    path: mirror_path!("pd.d"),
+    state: mirror_state!("pd.d"),
     ..LIVE_ITEM
 };
 
