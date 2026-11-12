@@ -612,9 +612,10 @@ pub struct BringUp {
     pub registry: Registry,
     /// The installed adapters' artifact store ([`install::store_dir`]).
     pub store: std::path::PathBuf,
-    /// The process's one suggestion pass, requested after every run that
-    /// ends OK ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync),
-    /// #1485): the one bring-up built, never one of the scheduler's own.
+    /// The process's one suggestion pass, requested after a run that ends
+    /// OK and wrote to the mirror
+    /// ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync), #1485):
+    /// the one bring-up built, never one of the scheduler's own.
     pub suggestions: crate::suggestion_pass::SuggestionPass,
 }
 

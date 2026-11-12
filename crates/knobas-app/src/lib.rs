@@ -1014,9 +1014,10 @@ async fn bring_up_app<R: tauri::Runtime>(
         // `sync_status` must not race the scheduler into existence.
         //
         // The suggestion pass is built here, once, and goes to the
-        // scheduler, which requests a pass after every OK run: two would
-        // mean two passes at once (#745, #1485). Nothing else asks for
-        // one since `detect_suggestions` retired (#1611).
+        // scheduler, which requests a pass after an OK run that wrote to
+        // the mirror: two would mean two passes at once (#745, #1485).
+        // Nothing else asks for one since `detect_suggestions` retired
+        // (#1611).
         let suggestions = suggestion_pass::SuggestionPass::new(
             std::sync::Arc::new(sources::DbConnections(connector.clone())),
             suggestion_pass::PASS_STATEMENT_TIMEOUT,

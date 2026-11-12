@@ -1,8 +1,9 @@
 //! The suggestion detection pass: one at a time, on a connection of its own
 //! (#745).
 //!
-//! **Who asks for one.** The sync scheduler, whenever a run ends OK
-//! ([`SuggestOnSync`], #1485), without waiting for it, through the process's
+//! **Who asks for one.** The sync scheduler, when a run ends OK and there is
+//! something for a pass to read ([`SuggestOnSync`], #1485, and the query
+//! audit of 2026-11-12), without waiting for it, through the process's
 //! one [`SuggestionPass`], built once at start-up and handed to the
 //! scheduler: a second one would run a second pass beside the first, the
 //! thing this module exists to stop. Until #881 the room's tray was the
@@ -62,6 +63,15 @@ use crate::IpcError;
 /// at load 25. Two minutes keeps that an order of magnitude inside the limit
 /// and still bounds a pathological corpus.
 pub const PASS_STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long the scheduler lets a mirror no run writes to go without a pass
+/// ([`SuggestOnSync`]).
+///
+/// A pass reads more than the mirror: an asset's routes (`monitor_url_host`),
+/// which sources are turned on, the links a reader removed. Nothing tells the
+/// scheduler when one of those changes, so a quiet mirror still gets a pass
+/// this often, at the end of a run.
+pub const QUIET_PASS_EVERY: Duration = Duration::from_secs(600);
 
 /// The detection pass, shared by every caller in the process.
 ///
@@ -170,6 +180,14 @@ impl SuggestionPass {
         self.enqueue();
     }
 
+    /// Whether the last pass that finished failed: a statement past its
+    /// limit, a connection that would not open, a panic. Its work is still
+    /// owed, which is what [`SuggestOnSync`] asks here.
+    #[must_use]
+    pub fn failed(&self) -> bool {
+        self.inner.finished.borrow().outcome.is_err()
+    }
+
     /// How many passes have finished since this pass was made, failed ones
     /// included. One that stopped part-way (a panic) is not counted.
     #[must_use]
@@ -229,33 +247,104 @@ impl SuggestionPass {
     }
 }
 
-/// The scheduler's events, and after every run that ends OK a suggestion
-/// pass requested (#1485), the way the scheduler requests an `ANALYZE` pass
-/// (`knobas_sync::analyze`). Wraps the events `sources::bring_up` hands the
-/// scheduler, as `ArrivalLinks` does; every event is passed on unchanged.
+/// The scheduler's events, and a suggestion pass requested when a run ends
+/// OK with something for a pass to read (#1485), the way the scheduler
+/// requests an `ANALYZE` pass (`knobas_sync::analyze`). Wraps the events
+/// `sources::bring_up` hands the scheduler, as `ArrivalLinks` does; every
+/// event is passed on unchanged.
 ///
 /// Keyed on the `sync:state` that ends a run, which `settle` emits once the
 /// run's transaction has committed, and on its own outcome: a failed or
 /// cancelled run changed nothing a rule could match. The emit that *starts*
 /// a run carries the previous run's outcome and requests nothing.
 ///
+/// **A run that wrote nothing asks for no pass** (the query audit of
+/// 2026-11-12). Every rule reads `sync.item`, which only a run or a refresh
+/// writes, and a pass over a mirror nothing wrote to since the last one
+/// proposes nothing: it took 1.3 to 2.2 s on a mirror of 39,770 items to
+/// find that out, after every run of every source, on a connection of its
+/// own and through the server's cache. A run says whether it wrote
+/// (`last_changed`, #759: its `upserted`, `deleted` and `swept` counts, an
+/// over-approximation in the safe direction), so a pass is asked for when
+/// one of these holds:
+///
+/// * the run wrote to the mirror, or cannot say;
+/// * no pass has been asked for since the process started: what an earlier
+///   session left undone, and rules a new build brought;
+/// * a refresh or a write landed since the last request: a refresh rewrites
+///   an item outside any run;
+/// * the last pass failed, so its work is owed;
+/// * [`QUIET_PASS_EVERY`] has passed since the last request, for what a pass
+///   reads that no run writes.
+///
+/// The pass itself is unchanged, so what it proposes for a given mirror is
+/// what it proposed before.
+///
 /// The request does not wait, so the run's ending never waits on a pass.
 pub struct SuggestOnSync<E> {
     inner: E,
     pass: SuggestionPass,
+    quiet_every: Duration,
+    asked: Mutex<Asked>,
+}
+
+/// What [`SuggestOnSync`] remembers between runs.
+#[derive(Default)]
+struct Asked {
+    /// When it last asked for a pass; `None` until the first.
+    at: Option<std::time::Instant>,
+    /// A refresh or a write landed since.
+    owed: bool,
 }
 
 impl<E> SuggestOnSync<E> {
     /// `inner`'s events, and passes requested on `pass`: the process's one
     /// pass, the one bring-up builds.
     pub fn new(inner: E, pass: SuggestionPass) -> SuggestOnSync<E> {
-        SuggestOnSync { inner, pass }
+        SuggestOnSync {
+            inner,
+            pass,
+            quiet_every: QUIET_PASS_EVERY,
+            asked: Mutex::new(Asked::default()),
+        }
+    }
+
+    /// With another wait than [`QUIET_PASS_EVERY`] for a mirror no run
+    /// writes to; the tests' knob.
+    #[must_use]
+    pub fn quiet_every(mut self, wait: Duration) -> SuggestOnSync<E> {
+        self.quiet_every = wait;
+        self
+    }
+
+    /// Whether the run that just ended OK is followed by a pass, noting the
+    /// request if so. `wrote` is false only for a run that says it wrote
+    /// nothing.
+    fn due(&self, wrote: bool) -> bool {
+        let mut asked = self.asked.lock().unwrap_or_else(PoisonError::into_inner);
+        let quiet_too_long = asked.at.is_none_or(|at| at.elapsed() >= self.quiet_every);
+        let due = wrote || asked.owed || quiet_too_long || self.pass.failed();
+        if due {
+            asked.owed = false;
+            asked.at = Some(std::time::Instant::now());
+        }
+        due
+    }
+
+    fn owe(&self) {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .owed = true;
     }
 }
 
 impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
     fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
-        if !status.running && status.last_outcome == Some(knobas_sync::SyncOutcome::Ok) {
+        if !status.running
+            && status.last_outcome == Some(knobas_sync::SyncOutcome::Ok)
+            && self.due(status.last_changed != Some(false))
+        {
             self.pass.request();
         }
         self.inner.sync_state(status);
@@ -267,9 +356,11 @@ impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
         self.inner.activity_new(row);
     }
     fn write_landed(&self, write: &knobas_core::write_queue::QueuedWrite) {
+        self.owe();
         self.inner.write_landed(write);
     }
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        self.owe();
         self.inner.refresh_ended(ended);
     }
 }
