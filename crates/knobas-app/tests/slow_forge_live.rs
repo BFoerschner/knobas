@@ -590,3 +590,77 @@ async fn the_checkout_answers_files_and_the_compare_with_no_request() {
         |d: &[knobas_source::diff::DiffFile]| d.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
     assert_eq!(names(&predicted.files), names(&checked.files));
 }
+
+/// **A repository never read draws its branches and its last commit from the
+/// mirror, with the forge holding every request** (the inner-pages pass of PR
+/// #2479, 2026-11-12, ADR-0042 as amended): the branch records the sync wrote
+/// answer the page's read at once, said to be as of the sync, and the list is
+/// the one the source answers when it can, row for row. The last commit is
+/// the default branch's tip, the source's first row.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the testenv Gitea: eval \"$(testenv/seed --env)\""]
+async fn a_repository_never_read_draws_its_branches_and_last_commit_from_the_mirror() {
+    let rig = rig().await;
+    // The stored parents the app keeps from its adapters' declarations, as its first search writes them.
+    knobas_search::Searcher::declaring(rig.pool.clone(), rig.registry.descriptors())
+        .await
+        .expect("the declarations are stored");
+    sqlx::query("delete from sync.held_read")
+        .execute(&rig.pool)
+        .await
+        .expect("the held reads are cleared");
+    rig.proxy.set(0);
+    let source = rig
+        .view(&LiveSources::default(), &rig.repo, Some("branches"))
+        .await
+        .1
+        .expect("the source lists the branches");
+    let commits = rig
+        .view(&LiveSources::default(), &rig.repo, Some("commits"))
+        .await
+        .1
+        .expect("the source lists the commits");
+
+    rig.proxy.set(slow::HANG);
+    let live = LiveSources::default();
+    for (section, read) in [("branches", &source), ("commits", &commits)] {
+        let (took, shown) = time(knobas_app::sources::crud::shown(
+            &rig.pool,
+            &rig.secrets,
+            &rig.registry,
+            &live,
+            &rig.repo,
+            Some(section),
+        ))
+        .await;
+        let shown = shown
+            .flatten()
+            .unwrap_or_else(|| panic!("the mirror draws {section}: {took}"));
+        assert!(
+            took.0 < Duration::from_secs(2),
+            "{section} waited on the forge: {took}"
+        );
+        assert!(
+            shown.held_at.is_some(),
+            "{section} is said to be as of the sync"
+        );
+        let Block::Entities { rows: drawn, .. } = &shown.view.sections[0].blocks[0] else {
+            panic!("{:#?}", shown.view);
+        };
+        let Block::Entities { rows: theirs, .. } = &read.sections[0].blocks[0] else {
+            panic!("{read:#?}");
+        };
+        if section == "branches" {
+            assert_eq!(drawn, theirs, "the mirror's branch list is the source's");
+        } else {
+            assert_eq!(drawn.len(), 1);
+            assert_eq!(
+                (&drawn[0].entity_id, &drawn[0].chip),
+                (&theirs[0].entity_id, &theirs[0].chip),
+                "the last commit is the source's first row"
+            );
+        }
+    }
+    rig.proxy.set(0);
+    live.settled().await;
+}

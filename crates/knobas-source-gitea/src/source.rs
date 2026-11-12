@@ -663,6 +663,33 @@ impl Source for GiteaSource {
             _ => None,
         }
     }
+
+    /// A repository's branches and its last commit are drawn from the branch
+    /// records the sync wrote (the inner-pages pass, 2026-11-12): see
+    /// [`crate::view::from_branch_records`].
+    fn mirror_listing_kind(&self, entity: &str, section: Option<&str>) -> Option<&'static str> {
+        match self.key_of(entity).ok()? {
+            crate::keys::GiteaKey::Repo { .. } => {
+                crate::view::listed_from_branches(section).then_some(crate::KIND_BRANCH)
+            }
+            _ => None,
+        }
+    }
+
+    fn mirror_listing(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        under: &[serde_json::Value],
+    ) -> Option<knobas_source::view::SourceView> {
+        match self.key_of(entity).ok()? {
+            crate::keys::GiteaKey::Repo { owner, repo } => {
+                crate::view::from_branch_records(self, &owner, &repo, section, payload, under)
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -133,6 +133,64 @@ pub(crate) fn standing(
     }
 }
 
+/// Whether a repository's `section` is drawn from its branch records
+/// ([`from_branch_records`]): its branches, and its latest commits, whose
+/// first is its default branch's tip.
+pub(crate) fn listed_from_branches(section: Option<&str>) -> bool {
+    matches!(section, Some(repo::BRANCHES | repo::COMMITS))
+}
+
+/// A repository's `branches` or `commits` section from the records the sync
+/// wrote (ADR-0042 as amended 2026-11-12, the inner-pages pass of PR #2479):
+/// `payload` the repository's, `under` its branches'. The branches are the
+/// source's own rows over the same records, in the source's order, so a
+/// branch list nothing changed since the sync reads the same as the source's
+/// answer. The commits are the one the mirror knows: the default branch's
+/// tip, the first row the source draws, with no count, since the mirror
+/// holds no count of the branch's history; the source's read behind brings
+/// the rest after it and the count. `None` for a record that is no
+/// repository's, a section drawn otherwise, or a repository with no commit.
+pub(crate) fn from_branch_records(
+    source: &GiteaSource,
+    owner: &str,
+    name: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+    under: &[serde_json::Value],
+) -> Option<SourceView> {
+    let record: rows::RepoRecord = serde_json::from_value(payload.clone()).ok()?;
+    let mut listing = rows::Paged {
+        items: under
+            .iter()
+            .filter_map(|raw| serde_json::from_value::<rows::ListedBranch>(raw.clone()).ok())
+            .collect(),
+        cut: false,
+    };
+    // A repository with a commit has a branch: no record under it is nothing synced yet, not an empty list.
+    if listing.items.is_empty() {
+        return None;
+    }
+    repo::sort_branches(&record, &mut listing.items);
+    let section = match section {
+        Some(repo::BRANCHES) => repo::branches(source, &record, owner, name, &listing),
+        Some(repo::COMMITS) => {
+            if record.repo.empty {
+                return None;
+            }
+            let default = record.default_branch();
+            let tip = listing
+                .items
+                .iter()
+                .find(|branch| branch.name == default)?
+                .commit
+                .as_ref()?;
+            repo::latest_commits(vec![rows::commit_row(&source.id, owner, name, tip)], None)
+        }
+        _ => return None,
+    };
+    Some(SourceView::new(vec![section]))
+}
+
 /// The bytes of the file at `path` in `entity`'s tree (#2256): at `commit`
 /// where the shell hands one back from a file block, else at the entity's own
 /// reference -- a commit's sha, a branch, a repository's default branch.

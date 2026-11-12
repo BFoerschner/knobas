@@ -2163,6 +2163,35 @@ pub trait Source: Send + Sync {
         let _ = (entity, section, payload);
         None
     }
+    /// The kind of the entities under `entity` whose mirror records
+    /// [`mirror_listing`](Source::mirror_listing) draws `section` from, where
+    /// it draws one (the inner-pages pass on PR #2479, 2026-11-12): a
+    /// repository's branches, from the branch records the sync wrote. `None`,
+    /// the default, draws no listing, and the app asks for none. Pure.
+    fn mirror_listing_kind(&self, entity: &str, section: Option<&str>) -> Option<&'static str> {
+        let _ = (entity, section);
+        None
+    }
+    /// The view of `entity` at `section` as far as the mirror's records of
+    /// it and of the entities under it can draw it, reading nothing: what
+    /// [`mirror_view`](Source::mirror_view) is for a section the entity's own
+    /// record cannot fill, such as its list of branches (ADR-0042, as amended
+    /// 2026-11-12). `payload` is the entity's record; `under` the records of
+    /// every entity of [`mirror_listing_kind`](Source::mirror_listing_kind)
+    /// the mirror holds under it, as the sync wrote them, in no order. Drawn
+    /// with the same rows the source's read draws, so where nothing moved
+    /// since the sync the source's answer lands on the same view. `None`, the
+    /// default, is the page waiting for the source, as before. Pure.
+    fn mirror_listing(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        under: &[serde_json::Value],
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload, under);
+        None
+    }
     /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
     /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
     ///

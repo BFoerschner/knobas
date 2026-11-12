@@ -765,3 +765,123 @@ async fn a_repository_of_many_branches_asks_the_newest_ten_and_says_so() {
         .count();
     assert_eq!(asked, 10);
 }
+
+/// The mirror draws a repository's branches as the source's read does (the
+/// inner-pages pass of PR #2479, 2026-11-12): from the same branch records,
+/// given in any order, the same rows in the same order, the default first.
+/// Where nothing moved since the sync, the source's answer lands on the same
+/// list, and nothing drawn changes.
+#[tokio::test]
+async fn the_mirror_draws_a_repositorys_branches_as_the_source_reads_them() {
+    let served = Served::default();
+    let record = served.record.clone();
+    let mut records: Vec<Value> = served.branches.as_array().unwrap().clone();
+    records.reverse();
+    let server = gitea(served).await;
+    let source = source(&server);
+    assert_eq!(
+        source.mirror_listing_kind(ENTITY, Some("branches")),
+        Some("branch")
+    );
+    let read = source
+        .view(ENTITY, Some("branches"))
+        .await
+        .unwrap()
+        .unwrap();
+    let drawn = source
+        .mirror_listing(ENTITY, Some("branches"), &record, &records)
+        .expect("the mirror draws the branches");
+    assert_eq!(drawn, read);
+    let names: Vec<_> = rows(&drawn.sections[0])
+        .iter()
+        .map(|r| r.title.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "main",
+            "fix/PAY-228-partial-refund-drift",
+            "feature/PAY-231-sepa-retry"
+        ]
+    );
+}
+
+/// The mirror's commits are the default branch's tip, the row the source's
+/// read draws first, with no count: the mirror holds none. The source's read
+/// behind it brings the rest after that row, and the count.
+#[tokio::test]
+async fn the_mirror_draws_a_repositorys_last_commit_as_the_sources_first_row() {
+    let served = Served::default();
+    let record = served.record.clone();
+    let records: Vec<Value> = served.branches.as_array().unwrap().clone();
+    let server = gitea(served).await;
+    let source = source(&server);
+    assert_eq!(
+        source.mirror_listing_kind(ENTITY, Some("commits")),
+        Some("branch")
+    );
+    let read = source.view(ENTITY, Some("commits")).await.unwrap().unwrap();
+    let drawn = source
+        .mirror_listing(ENTITY, Some("commits"), &record, &records)
+        .expect("the mirror draws the tip");
+    let (drawn, read) = (&drawn.sections[0], &read.sections[0]);
+    assert_eq!(
+        (drawn.id.as_str(), drawn.title.as_str(), drawn.count),
+        ("commits", "Commits", None)
+    );
+    let first = &rows(read)[0];
+    let tip = &rows(drawn)[0];
+    assert_eq!(rows(drawn).len(), 1);
+    assert_eq!(
+        (&tip.entity_id, &tip.chip, &tip.author, &tip.meta),
+        (&first.entity_id, &first.chip, &first.author, &first.meta)
+    );
+    // The fake's tip message and its commit's differ on purpose; the tip's is the branch record's subject.
+    assert_eq!(tip.title, "tip of main");
+}
+
+/// Nothing is drawn where the mirror cannot: no default branch among the
+/// records, an empty repository, another section, another kind of entity.
+#[test]
+fn the_mirror_draws_no_listing_it_cannot_fill() {
+    let source = knobas_source_gitea::build(instance(
+        "https://gitea.example".to_owned(),
+        TOKEN,
+        json!({}),
+    ))
+    .expect("builds");
+    let record = repo_record(json!({}));
+    let feature = branch(
+        "feature/x",
+        "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192",
+        "2026-08-22T11:42:00Z",
+    );
+    assert_eq!(
+        source.mirror_listing(
+            ENTITY,
+            Some("commits"),
+            &record,
+            std::slice::from_ref(&feature)
+        ),
+        None
+    );
+    assert_eq!(
+        source.mirror_listing(
+            ENTITY,
+            Some("commits"),
+            &repo_record(json!({ "empty": true })),
+            &[]
+        ),
+        None
+    );
+    assert_eq!(source.mirror_listing_kind(ENTITY, Some("overview")), None);
+    assert_eq!(source.mirror_listing_kind(ENTITY, None), None);
+    assert_eq!(
+        source.mirror_listing_kind("gitea:tidewater/payout-service#142", Some("branches")),
+        None
+    );
+    assert_eq!(
+        source.mirror_listing(ENTITY, Some("pulls"), &record, &[feature]),
+        None
+    );
+}

@@ -490,6 +490,22 @@ impl LiveSources {
             self.read_behind(&lent.source, vec![key]);
             return Ok((Some(view), Some(synced_at)));
         }
+        // Never read, and the record alone draws nothing: what the records
+        // under it draw, a repository's branches (the inner-pages pass,
+        // 2026-11-12), as of the newest sync among them; never held.
+        if !fixed
+            && let Some(pool) = store.as_ref()
+            && let Some(kind) = lent.source.mirror_listing_kind(entity, section)
+            && let Some((payload, under, synced_at)) = records_under(pool, entity, kind).await
+            && let Some(view) = lent
+                .source
+                .mirror_listing(entity, section, &payload, &under)
+        {
+            self.reads()
+                .put_at(key.clone(), Answer::View(Some(view.clone())), synced_at);
+            self.read_behind(&lent.source, vec![key]);
+            return Ok((Some(view), Some(synced_at)));
+        }
         let view = lent.source.view(entity, section).await?;
         let read_at = Utc::now();
         self.reads().put(key.clone(), Answer::View(view.clone()));
@@ -1234,6 +1250,50 @@ impl Reads {
             self.remove(&key);
         }
     }
+}
+
+/// `entity`'s record, the records of every live entity of `kind` of its
+/// source whose stored parents name it (the stored parents
+/// `EntityFilter.parent` reads, `sync.item_parent`), and the newest sync
+/// among them: what `Source::mirror_listing` draws from. `None` where the
+/// mirror does not hold `entity` or the read fails, which draws nothing.
+pub(crate) async fn records_under(
+    pool: &PgPool,
+    entity: &str,
+    kind: &str,
+) -> Option<(serde_json::Value, Vec<serde_json::Value>, DateTime<Utc>)> {
+    let (payload, synced_at, source_id, title) =
+        sqlx::query_as::<_, (serde_json::Value, DateTime<Utc>, String, String)>(
+            "select payload, synced_at, source_id, title from sync.item where entity_id = $1",
+        )
+        .bind(entity)
+        .fetch_optional(pool)
+        .await
+        .ok()??;
+    let under: Vec<(serde_json::Value, DateTime<Utc>)> = sqlx::query_as(
+        "select c.payload, c.synced_at
+           from sync.item c
+           join knobas.entity e on e.id = c.entity_id and e.deleted_at is null
+          where c.source_id = $1 and c.kind = $2
+            and c.entity_id in (select ip.entity_id from sync.item_parent ip
+                                  join knobas.source_config s on s.id = $1 and s.kind = ip.adapter_kind
+                                 where lower(ip.name) = lower($3))",
+    )
+    .bind(&source_id)
+    .bind(kind)
+    .bind(&title)
+    .fetch_all(pool)
+    .await
+    .ok()?;
+    let newest = under
+        .iter()
+        .map(|(_, at)| *at)
+        .fold(synced_at, DateTime::max);
+    Some((
+        payload,
+        under.into_iter().map(|(payload, _)| payload).collect(),
+        newest,
+    ))
 }
 
 #[cfg(test)]

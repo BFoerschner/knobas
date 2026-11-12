@@ -313,17 +313,23 @@ async fn read_branches(
     repo: &str,
 ) -> Result<rows::Paged<ListedBranch>, SourceError> {
     let mut listing = rows::all_branches(source, owner, repo).await?;
+    sort_branches(record, &mut listing.items);
+    Ok(listing)
+}
+
+/// The default branch first, then by last commit, newest first, then by
+/// name: the order the source's list and the mirror's draw both take.
+pub(in crate::view) fn sort_branches(record: &RepoRecord, items: &mut [ListedBranch]) {
     let default = record.default_branch();
-    listing.items.sort_by(|a, b| {
+    items.sort_by(|a, b| {
         (b.name == default)
             .cmp(&(a.name == default))
             .then_with(|| tip_time(b).cmp(&tip_time(a)))
             .then_with(|| a.name.cmp(&b.name))
     });
-    Ok(listing)
 }
 
-fn branches(
+pub(in crate::view) fn branches(
     source: &GiteaSource,
     record: &RepoRecord,
     owner: &str,
@@ -474,7 +480,13 @@ async fn commits(
         .iter()
         .map(|c| rows::commit_row(&source.id, owner, repo, &c.record))
         .collect();
-    Ok(ViewSection {
+    Ok(latest_commits(rows, count))
+}
+
+/// The `commits` section over its rows: the source's latest twenty, or the
+/// mirror's one tip (`super::from_branch_records`).
+pub(in crate::view) fn latest_commits(rows: Vec<ViewRow>, count: Option<u64>) -> ViewSection {
+    ViewSection {
         id: COMMITS.to_owned(),
         title: "Commits".to_owned(),
         // Every commit the default branch has (#2311, the last-commit
@@ -482,7 +494,7 @@ async fn commits(
         count,
         deferred: false,
         blocks: vec![Block::Entities { title: None, rows }],
-    })
+    }
 }
 
 /// A list counted by what it holds, with the note saying where the rest is
