@@ -19,6 +19,7 @@ import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
 import { detailOf, pressRefreshKey, refreshProbe } from "../refresh.fixture";
+import { pageContext } from "../kept-pages.svelte";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -172,6 +173,7 @@ function draw(
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
   sync?: Snippet,
+  visible?: () => boolean,
 ): Drawn {
   const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, rowReads: 0, sync: null, next: RUNS, go: () => {}, goPipeline: () => {} };
   const ports: PipelinePorts = {
@@ -223,7 +225,7 @@ function draw(
     props.rest = [next.entity_id];
     flushSync();
   };
-  page = mount(TfPipeline, { target, props });
+  page = mount(TfPipeline, { target, props, ...(visible ? { context: pageContext(visible) } : {}) });
   return drawn;
 }
 
@@ -500,13 +502,77 @@ test("of two reads again, the later one's answer stands even when the earlier on
   await settle();
   answerFirst(RUNNING);
   await settle();
-  // A run a sync brings waits behind *Show N new* (the still-rows pass, 2026-11-11); shown, it is the later answer.
-  const show = [...target.querySelectorAll<HTMLButtonElement>(".tf-fheld")].find((button) => /^Show \d+ new$/.test(button.textContent!.trim()));
-  expect(show, "the new run waits behind Show N new").toBeDefined();
-  show!.click();
-  await settle();
   expect(firstRow().textContent).toContain("#1188");
   expect(firstRow().textContent).not.toContain("running");
+});
+
+/** The run numbers down the Runs tab, as drawn. */
+const drawnNumbers = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no b")].map((b) => b.textContent);
+
+test("runs draw newest first by when they started, whatever order the read answers (Björn on ux6)", async () => {
+  // The mirror answers by the source's last word on each run, its finish: #1190 started first and finished last.
+  const long = run(1190, "ok", today(0, 10), { finished: today(0, 50), updated_at: today(0, 50) });
+  const short = run(1191, "err", today(0, 20), { finished: today(0, 25), updated_at: today(0, 25) });
+  const queued = run(1192, "ok", today(0, 1), { started: null, finished: null, duration_seconds: null, updated_at: today(0, 40), state: { text: "queued", tone: "info" } });
+  const drawn = draw();
+  drawn.next = [long, short, queued, ...RUNS];
+  drawn.go([PIPELINE.entity_id, "runs"]);
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(drawnNumbers().slice(0, 4)).toEqual(["#1192", "#1191", "#1190", "#1187"]);
+  // The chart's newest bar, on the right, is the newest run too.
+  expect(target.querySelectorAll(".tf-bars a")[29]!.getAttribute("href")).toContain("1192");
+});
+
+test("a run a sync brings while the pointer rests on the runs waits over the list's top, and takes it once the pointer leaves", async () => {
+  const drawn = draw();
+  await settle();
+  expect(drawnNumbers()[0]).toBe("#1187");
+  const list = target.querySelector<HTMLElement>(".tf-runs")!;
+  list.dispatchEvent(new PointerEvent("pointerenter"));
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  // Nothing moved under the pointer, and the run is not hidden away: the pill over the list says so.
+  expect(drawnNumbers()[0]).toBe("#1187");
+  const pill = target.querySelector<HTMLButtonElement>(".tf-newruns button");
+  expect(pill?.textContent).toBe("Show 1 new run");
+  list.dispatchEvent(new PointerEvent("pointerleave"));
+  await settle();
+  expect(drawnNumbers()[0]).toBe("#1188");
+  expect(target.querySelector(".tf-newruns")).toBeNull();
+  // It is lit once as it draws, so a glance finds it; the runs that were there are not.
+  expect(firstRow().classList.contains("tf-run-new")).toBe(true);
+  expect(target.querySelectorAll(".tf-run-new")).toHaveLength(1);
+});
+
+test("Show 1 new run puts it on top while the pointer stays on the list", async () => {
+  const drawn = draw();
+  await settle();
+  target.querySelector(".tf-runs")!.dispatchEvent(new PointerEvent("pointerenter"));
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-newruns button")!.click();
+  await settle();
+  expect(drawnNumbers()[0]).toBe("#1188");
+});
+
+test("runs that came while the page was away are on top when it is shown again, whatever the pointer did", async () => {
+  let visible = $state(true);
+  const drawn = draw(undefined, undefined, {}, undefined, undefined, () => visible);
+  await settle();
+  target.querySelector(".tf-runs")!.dispatchEvent(new PointerEvent("pointerenter"));
+  // The page goes away under a resting pointer, which then hears no leave.
+  visible = false;
+  flushSync();
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  visible = true;
+  flushSync();
+  await settle();
+  expect(drawnNumbers()[0]).toBe("#1188");
 });
 
 test("the page stops listening when it goes", async () => {

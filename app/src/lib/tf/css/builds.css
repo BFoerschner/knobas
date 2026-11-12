@@ -48,6 +48,20 @@
 .tf-chip.tf-jobchip-sm { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); }
 .tf-older { padding: 12px 0; display: flex; gap: 8px; align-items: center; }
 .tf-older[hidden] { display: none; }
+/* Runs that came in while the pointer rests on the list (TfPipeline): they wait, and say so over the list's top in no
+   room of their own, under the sticky filter bar (47 px) as the list scrolls. Inverted, as the rail's selection is: the
+   one dark thing on the page is the newest. */
+.tf-newruns { position: sticky; top: 55px; z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
+.tf-newruns button {
+  pointer-events: auto; margin-top: 8px; height: var(--control-h-sm); padding: 0 14px; border: 0; border-radius: 13px;
+  background: var(--ink); color: var(--sheet); font: 600 var(--t-sm)/1 var(--sans); box-shadow: var(--shadow); cursor: pointer;
+}
+.tf-newruns button:hover { background: var(--ink-2); }
+.tf-newruns button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* A run a read brought to the top after the list drew is lit once as it draws, so it is not missed. */
+.tf-runtbl tr.tf-run-new > td { animation: tf-run-arrive 2.4s ease-out 1; }
+@keyframes tf-run-arrive { from { background-color: var(--info-bg); } to { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .tf-runtbl tr.tf-run-new > td { animation: none; } }
 .tf-runs.tf-bsettings { padding-top: 16px; }
 .tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
 .tf-bsettings > .tf-tbl + p { margin: 12px 0 0; }

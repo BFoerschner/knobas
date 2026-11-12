@@ -40,7 +40,7 @@
   import { HeldOrder } from "../held-order.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { secondsLabel, timeLabel } from "../../time/format";
-  import { onDestroy, onMount, untrack, type Snippet } from "svelte";
+  import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { EntityDetail, PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
@@ -58,7 +58,9 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { testsWords, runHash, runTone, shortTime } from "./builds";
+  import { newestFirst, testsWords, runHash, runTone, shortTime } from "./builds";
+  import { counted } from "../counted";
+  import { pageVisible } from "../kept-pages.svelte";
   import { RunHold } from "./run-hold.svelte";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -322,7 +324,8 @@
    * *sent*, until a read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
    */
   const started = $derived(queuedRunRows(echoesOn(id, QUEUED_RUN), defaultBranch(settings)));
-  const all = $derived(held === null ? null : [...started, ...held]);
+  /** The runs newest first by when they started or were queued (`newestFirst`), the ones started here on top. */
+  const all = $derived(held === null ? null : [...started, ...newestFirst(held)]);
 
   async function more() {
     if (held === null || older !== "more" || held.length === 0) return;
@@ -474,12 +477,58 @@
    * own press: its echo sorts the list again, so it shows at once.
    */
   const runHold = new HeldOrder<RunRow>((run) => run.entity_id);
-  const heldRuns = $derived(
-    all === null
-      ? { rows: [] as RunRow[], waiting: 0, stale: false }
-      : runHold.place(kept, JSON.stringify([id, filter.text, filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)])),
-  );
+  /** What the person chose, and the runs they started: a change sorts the list again. */
+  const runBasis = $derived(JSON.stringify([id, filter.text, filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)]));
+  const heldRuns = $derived(all === null ? { rows: [] as RunRow[], waiting: 0, stale: false } : runHold.place(kept, runBasis));
   const heldBar = $derived({ waiting: heldRuns.waiting, stale: heldRuns.stale, show: () => runHold.release() });
+
+  /**
+   * Newest first, always (Björn on ux6: "how am i supposed to find the most recent run which is the most important
+   * anyways?"). The hold above is only for the pointer: while it rests on the runs, a run that arrives waits behind
+   * *Show N new runs* over the list's top, which takes no room; once the pointer is off the list, or the page is
+   * away, every run takes its place at once. So a first draw, a return and a sync all draw newest first.
+   */
+  let pointerOn = $state(false);
+  const shown = pageVisible();
+  $effect(() => {
+    if (!shown()) pointerOn = false;
+  });
+  $effect(() => {
+    if (!pointerOn && (heldRuns.waiting > 0 || heldRuns.stale)) untrack(() => runHold.release());
+  });
+  let runsBox = $state<HTMLElement | null>(null);
+  /** *Show N new runs*: they take the top, and the top comes into view. */
+  function showNew() {
+    runHold.release();
+    void tick().then(() => runsBox?.querySelector(".tf-runtbl tr")?.scrollIntoView?.({ block: "nearest" }));
+  }
+
+  /**
+   * The runs a read brought to the top after the list drew, by id: each is lit once as it draws (`tf-run-new`), so a
+   * run that came in while you looked elsewhere is the first thing you see. Not on a first draw, a filter, or older
+   * runs joining the end.
+   */
+  let arrived = $state.raw<ReadonlySet<string>>(new Set());
+  let drawnRuns: Set<string> | null = null;
+  let drawnFor: string | null = null;
+  $effect(() => {
+    const rows = heldRuns.rows;
+    const basis = runBasis;
+    if (drawnFor !== basis) {
+      drawnFor = basis;
+      drawnRuns = null;
+    }
+    if (rows.length === 0) return;
+    if (drawnRuns === null) {
+      drawnRuns = new Set(rows.map((run) => run.entity_id));
+      return;
+    }
+    const seen = drawnRuns;
+    const top = rows.findIndex((run) => seen.has(run.entity_id));
+    const fresh = rows.slice(0, Math.max(0, top)).filter((run) => !isStartedHere(run));
+    for (const run of rows) seen.add(run.entity_id);
+    if (fresh.length > 0) untrack(() => (arrived = new Set([...arrived, ...fresh.map((run) => run.entity_id)])));
+  });
   const days = $derived(byDay(heldRuns.rows));
   /**
    * A history read back by scrolling holds thousands of runs (2026-11-10: 35,000 nodes and 133 ms frames at 1,400 of
@@ -676,7 +725,12 @@
   <div class="tf-runbar">
     <FilterBar {config} {filter} shown={all === null ? null : heldRuns.rows.length} total={all?.length ?? null} held={heldBar} />
   </div>
-  <div class="tf-runs">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tf-runs" bind:this={runsBox} onpointerenter={() => (pointerOn = true)} onpointerleave={() => (pointerOn = false)}>
+    {#if heldRuns.waiting > 0}
+      <!-- Over the list's top, in no room of its own: it appearing moves no run under the pointer. -->
+      <div class="tf-newruns"><button type="button" title="Started since the list drew. They wait here while the pointer is on the runs, so nothing moves under it." onclick={showNew}>Show {counted(heldRuns.waiting, "new run", "new runs")}</button></div>
+    {/if}
     {#if all === null && failed === null}
       <p class="tf-dim">Reading runs…</p>
     {:else if all !== null && all.length === 0}
@@ -690,7 +744,7 @@
     {/if}
     <div class="tf-days" {@attach dayWin.list}>
     {#each dayWin.slice(days) as day, at (day.key)}
-      <div class="tf-day" class:tf-day-first={dayWin.start + at === 0} {@attach dayWin.row(day.label)}>
+      <div class="tf-day" class:tf-day-first={dayWin.start + at === 0} {@attach dayWin.row(day.key)}>
       <h3 class="tf-dayh">{day.label}</h3>
       <table class="tf-tbl tf-runtbl" aria-label={`Runs, ${day.label}`}>
         <!-- One width per column on every day's table, so they line up down the page (#1452). -->
@@ -702,7 +756,7 @@
         <tbody>
           {#each day.runs as run (run.entity_id)}
             {@const tone = runTone(run)}
-            <tr class:tf-row={!isStartedHere(run) || inQueue(run)} onclick={(event) => openRow(event, run)}>
+            <tr class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
                   <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->

@@ -17,6 +17,34 @@ export const STRIP = 12;
 export const CHIPS = ["Failing", "Running"] as const;
 export type Chip = (typeof CHIPS)[number];
 
+/**
+ * When a run counts as made, for its place in a list: when it started, or, not started yet, the source's own time for
+ * it, which for a queued run is when it was queued. `-Infinity` for a run with neither.
+ */
+export function runMade(run: RunRow): number {
+  const at = run.started ?? run.updated_at;
+  const ms = at === null ? Number.NaN : Date.parse(at);
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+}
+
+/**
+ * Runs newest first by {@link runMade}, the read's order kept between equals (PR #2479, the monitors-builds pass).
+ * The mirror answers runs by the source's last word on each (a TeamCity build's finish), so a long build that finished
+ * after a newer short one sorted above it: every list of runs is by when it started instead, which is what a person
+ * looks for first.
+ */
+export function newestFirst(runs: readonly RunRow[]): RunRow[] {
+  return runs
+    .map((run, at) => ({ run, at, made: runMade(run) }))
+    .sort((a, b) => (a.made === b.made ? a.at - b.at : a.made < b.made ? 1 : -1))
+    .map(({ run }) => run);
+}
+
+/** A pipeline with its recent runs {@link newestFirst}: its strip, its latest run's time and its tone read them. */
+export function recentNewestFirst<P extends Pick<PipelineRow, "recent">>(pipeline: P): P {
+  return { ...pipeline, recent: newestFirst(pipeline.recent) };
+}
+
 /** Whether the pipeline's latest run failed: its name is drawn in err tone. */
 export function isFailing(pipeline: PipelineRow): boolean {
   return pipeline.recent[0]?.state?.tone === "err";

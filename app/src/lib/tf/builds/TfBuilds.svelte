@@ -91,6 +91,7 @@
     foldHolds,
     foldOpen,
     groupsOf,
+    recentNewestFirst,
     isFailing,
     keptPipelines,
     latestTime,
@@ -149,7 +150,7 @@
   $effect(() => {
     if (!ready || all !== null) return;
     ports.pipelines().then(
-      (rows) => (all = rows),
+      (rows) => (all = rows.map(recentNewestFirst)),
       (error: unknown) => (failed = message(error)),
     );
   });
@@ -167,7 +168,7 @@
     try {
       const rows = await ports.pipelines();
       if (at !== listReads) return;
-      all = rows;
+      all = rows.map(recentNewestFirst);
       failed = null;
     } catch (error) {
       if (at === listReads) failed = message(error);

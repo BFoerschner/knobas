@@ -116,7 +116,9 @@
 //                 one of those rows moves or changes height, leaves, or a row comes in above one of them in its column. `query` holds `fake-late`, so each
 //                 late read lands after the first draw. `ways` (all five if absent): first (from `via`), return (to `via` and back), sync (to `via`,
 //                 `grow` adds rows to the fixture and every run ends having changed something, then back), shown (the same while on the page;
-//                 `held` also needs *Show N new* up afterwards, and pressing it must bring the rows in), launcher (from `via` by ⌘K and `words`),
+//                 `held` also needs *Show N new* up afterwards, and pressing it must bring the rows in; `rest`, a selector, rests the
+//                 pointer on the first such element before the sync, and `pill` names the button the rows wait behind in place of the
+//                 bar's *Show N new*: Builds' runs, which hold only under a resting pointer), launcher (from `via` by ⌘K and `words`),
 //                 palette (⌘K on the page: the launcher's own rows). `prep` runs on the page first, for every way but first and launcher.
 //                 `tail` is how long past quiet it still records (600 ms): longer for a page that reads again a while after a run ends.
 //
@@ -168,7 +170,9 @@ const PAGES = [
     { id: "launcher-rows-still", kind: "rows-still", strict: true, finding: "still-rows", ways: ["palette"], rows: "[role=option]", query: STILL_Q },
   ] },
   { page: "Builds", route: "builds", trips: [
-    { id: "builds-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "builds", rows: ".tf-main tr.tf-row, .tf-main .tf-rail a", held: true, query: STILL_Q, grow: "window.__fake.runNew(), 1" },
+    // Runs are newest first always (the monitors-builds pass, Björn on ux6): a run a sync brings waits only while the pointer rests on the
+    // runs, behind the pill over their top; a first draw, a return and a sync away draw it on top.
+    { id: "builds-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "builds", rows: ".tf-main tr.tf-row, .tf-main .tf-rail a", held: true, rest: ".tf-runs tr.tf-row", pill: ".tf-newruns button", query: STILL_Q, grow: "window.__fake.runNew(), 1" },
   ] },
   // The seeded roster, not the scale's bulk one: `monitorDown` takes a seeded monitor down.
   { page: "Monitors", route: "monitors", trips: [
@@ -2712,7 +2716,17 @@ async function worker(queue, results) {
       if (way === "return") { await go(t.via); await arm(); await evaluate(`location.hash = ${JSON.stringify(`#/${t.route}`)}`); }
       if (way === "sync") { await go(t.via); await sleep(1000); await grow(); await sleep(300); await arm(); await evaluate(`location.hash = ${JSON.stringify(`#/${t.route}`)}`); }
       // A sync lands a while after the page drew, once the run states have been read (`role-sync`'s `ran` counts from then).
-      if (way === "shown") { await sleep(1000); await arm(true); await grow(); }
+      if (way === "shown") {
+        await sleep(1000);
+        if (t.rest) {
+          const at = JSON.parse(await evaluate(`JSON.stringify((() => { const b = [...document.querySelectorAll(${JSON.stringify(t.rest)})].find((e) => e.getClientRects().length)?.getBoundingClientRect(); return b ? { x: Math.round(b.left + 20), y: Math.round(b.top + b.height / 2) } : null; })())`));
+          if (at === null) { reasons.push(`shown: no ${t.rest} to rest the pointer on`); continue; }
+          await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+          await sleep(200);
+        }
+        await arm(true);
+        await grow();
+      }
       if (way === "palette") {
         // The launcher's own list, opened on the page: its home, then whatever reads land after.
         await arm();
@@ -2740,14 +2754,15 @@ async function worker(queue, results) {
       if (v.problem) reasons.push(`${way}: ${v.problem}`);
       else notes.push(`${way} drew at ${v.firstAt} ms, ${v.rows} rows still through ${v.frames} frames to ${v.last} ms`);
       if (way === "shown" && t.held && !v.problem) {
-        const words = await evaluate(`[...document.querySelectorAll(".tf-fheld")].find((b) => b.getClientRects().length)?.textContent.trim() ?? ""`);
-        if (!/^Show \d+ new$/.test(words)) { reasons.push(`shown: the rows the sync brought wait behind no *Show N new* (the bar's end reads "${words}")`); continue; }
+        const held = JSON.stringify(t.pill ?? ".tf-fheld");
+        const words = await evaluate(`[...document.querySelectorAll(${held})].find((b) => b.getClientRects().length)?.textContent.trim() ?? ""`);
+        if (!/^Show \d+ new( runs?)?$/.test(words)) { reasons.push(`shown: the rows the sync brought wait behind no *Show N new* (${t.pill ?? "the bar's end"} reads "${words}")`); continue; }
         const before = await evaluate(`document.querySelectorAll(${JSON.stringify(t.rows)}).length`);
-        await evaluate(`[...document.querySelectorAll(".tf-fheld")].find((b) => b.getClientRects().length).click(), 1`);
+        await evaluate(`[...document.querySelectorAll(${held})].find((b) => b.getClientRects().length).click(), 1`);
         await opener.settleAfterChange();
         const after = await evaluate(`document.querySelectorAll(${JSON.stringify(t.rows)}).length`);
-        const left = await evaluate(`[...document.querySelectorAll(".tf-fheld")].find((b) => b.getClientRects().length)?.textContent.trim() ?? ""`);
-        if (left !== "") reasons.push(`shown: after "${words}" the bar still offers "${left}"`);
+        const left = await evaluate(`[...document.querySelectorAll(${held})].find((b) => b.getClientRects().length)?.textContent.trim() ?? ""`);
+        if (left !== "") reasons.push(`shown: after "${words}" ${t.pill ?? "the bar"} still offers "${left}"`);
         notes.push(`"${words}" brought ${after - before >= 0 ? after - before : 0} more in view (windowed lists draw what fits)`);
       }
     }

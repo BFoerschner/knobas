@@ -21,6 +21,8 @@ import {
   runHash,
   runTone,
   stripOf,
+  newestFirst,
+  recentNewestFirst,
 } from "./builds";
 
 function run(extra: Partial<RunRow> = {}): RunRow {
@@ -228,4 +230,22 @@ test("a run's tests read one way, and only TeamCity's own failed-build line is r
   expect(failedBuildLine("Tests failed: 1, passed: 9, ignored: 2")).toBe("1 failed, 9 passed, 2 ignored");
   expect(failedBuildLine("Tests failed: 1, passed: 9, muted: 2"), "a shape it doesn't know stays the source's").toBe("Tests failed: 1, passed: 9, muted: 2");
   expect(failedBuildLine("Compilation error")).toBe("Compilation error");
+});
+
+test("runs sort newest first by when they started, a queued one by its queue time, the read's order between equals", () => {
+  const a = run({ entity_id: "a", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T11:00:00Z", updated_at: "2026-08-22T11:00:00Z" });
+  const b = run({ entity_id: "b", started: "2026-08-22T10:30:00Z", finished: "2026-08-22T10:35:00Z", updated_at: "2026-08-22T10:35:00Z" });
+  const q = run({ entity_id: "q", started: null, finished: null, updated_at: "2026-08-22T10:50:00Z" });
+  const same = run({ entity_id: "same", started: "2026-08-22T10:30:00Z" });
+  const undated = run({ entity_id: "u", started: null, finished: null, updated_at: null });
+  expect(newestFirst([undated, a, b, same, q]).map((r) => r.entity_id)).toEqual(["q", "b", "same", "a", "u"]);
+});
+
+test("the Builds list's strip and latest run read the recent runs newest first", () => {
+  const older = run({ entity_id: "older", started: "2026-08-22T09:00:00Z", finished: "2026-08-22T12:00:00Z", state: { text: "FAILURE", tone: "err" } });
+  const newer = run({ entity_id: "newer", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:05:00Z" });
+  const row = recentNewestFirst(pipeline("Payout", [older, newer]));
+  expect(row.recent.map((r) => r.entity_id)).toEqual(["newer", "older"]);
+  expect(isFailing(row)).toBe(false);
+  expect(stripOf(row).at(-1)?.entity_id).toBe("newer");
 });
