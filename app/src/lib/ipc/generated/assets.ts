@@ -1059,14 +1059,16 @@ actions: Array<string>,
  */
 refreshes: boolean, 
 /**
- * Its samples inside the bar's 24-hour window, **oldest first**.
+ * Its samples inside the bar's 24-hour window, **oldest first**, thinned
+ * to those that change what the bar draws ([`thin_samples`]).
  *
- * Raw and not bucketed, because the bucketing is the tab's and is tested
- * there: the backend would otherwise own a number of segments that only a
- * stylesheet knows. Bounded by the poll interval's own floor -- Uptime
- * Kuma declares 45 s (`SourceDescriptor::min_sync_interval_secs`, #1187),
- * so at most 1 920 per monitor per day -- which is why the window and not
- * a `limit` is what bounds it.
+ * Not bucketed, because the bucketing is the tab's and is tested there:
+ * the backend would otherwise own a number of segments that only a
+ * stylesheet knows. Raw they were up to 1 920 a monitor (one a minute,
+ * more at Uptime Kuma's 45 s floor), 17.8 MB for 218 monitors after a
+ * day, and the nav's badge read them all on every sync's end (PR #2479,
+ * the monitors-builds pass). Thinned, a steady monitor's day is about a
+ * hundred.
  */
 samples: Array<MonitorSample>, };
 
