@@ -1,0 +1,185 @@
+{
+ "_": "Lines for testenv/perf/open.mjs --check (just open-budget --real <port>): per place and CPU throttle, the most ms from the press to the first frame with the place's own rows and nothing waiting, on every round (first visit 6 s after start, return, return after every other section, return after every source ended a run that changed something), and how many rows may move after that frame. From the instant-open pass of PR #2479 (2026-11-12), measured in headless Chrome on an M2 Pro over the saved scale database; docs/decisions/2026-11-12-opening-a-page-draws-what-the-mirror-holds.md. 100 ms at 1x and 200 ms at 4x is the pass's aim; the measured opens sit at 4 to 60 ms at 1x and 7 to 100 ms at 4x.",
+ "real": {
+  "inbox": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "tickets-board": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "ticket-preview": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "ticket": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "code": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pull-request": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs-space": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs-page": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "builds": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pipeline": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "run": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "monitors": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "standup": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "time": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "settings": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "launcher": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  }
+ }
+}

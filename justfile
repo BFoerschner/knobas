@@ -1339,6 +1339,14 @@ responsiveness-probe:
 frame-budget *args:
     testenv/perf/frame-budget.sh {{args}}
 
+# The open budget (the instant-open pass of PR #2479, 2026-11-12, `testenv/perf/README.md`): presses every page's nav
+# entry or row in a headless Chrome at 1x and 4x, on its first visit, its return, its return after every other section
+# and its return after a sync, and fails when its first useful frame or its settling is over its line in
+# `testenv/perf/budget-open.json`, or a row moved after it drew. On the windowless backend over the saved scale
+# database: `just open-budget --real <port>`.
+open-budget *args:
+    testenv/perf/open-budget.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh

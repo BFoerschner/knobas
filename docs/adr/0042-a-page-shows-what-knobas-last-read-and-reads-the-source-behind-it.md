@@ -27,6 +27,16 @@ The third smoothness pass of PR #2479, found in the app's own window: a reposito
 - **Not found is the source's word, and only after every read that could find it.** Compare reads a branch the list lacks by name; a 404 of the source's compare is `not_found`, and the page says the branch is missing only then and while no read of the list is running.
 - **What the reader is on does not move.** A list read again keeps the first row on screen where it was and focus where it was (`landInPlace`).
 
+## A page's reads of the mirror are kept in the window too (amended 2026-11-12)
+
+Björn, on PR #2479: "it's fast after the first load. but some sites take some time to load again. Since everything is inside the mirror it should be instant." A page the kept pages dropped, and the first open of a page, waited for the backend again: Docs 777 ms, Builds 296, Code 247, Tickets 130 at the saved scale database (`docs/decisions/2026-11-12-opening-a-page-draws-what-the-mirror-holds.md`).
+
+- **What this ADR does for a source's views, the window does for the mirror's answers.** The [answer cache](../../CONTEXT.md#answer-cache) (`app/src/lib/ipc/answer-cache.ts`) keeps the last answer to each read that is a function of the mirror and the settings, so a page mounted again draws from memory in the frame after the press, and reads nothing it would read the same.
+- **It never answers what the mirror no longer holds.** A run that changed something drops every answer a source of its roles could change, and a write, a refresh of an item, a held view that moved, a fetch landing, or the database going away drops every answer; a read on its way when answers were dropped is not kept. So the rule above for a kept page holds for a page mounted again: a return to what nothing changed reads nothing, and one after a run reads what the run changed.
+- **Warmed.** After start, and after a run dropped answers, the reads the window made last are asked again in the background, one at a time, so a first open finds them.
+- **Not for reads past the mirror.** A checkout's state, a source's view and a search go to the backend every time, as above.
+- **Docs reads what it draws** rather than its whole tree (`docs_outline`, `docs_nodes`), and the backend keeps the tree it computed until a page's row moves (`docs::TreeCache`).
+
 ## Rejected
 
 - **Keep ADR-0032's memory-only cache and add a skeleton.** Every restart made every page wait again; at a source 5 s away that is 15 s for a pull request or a run, on every first open of the day.
