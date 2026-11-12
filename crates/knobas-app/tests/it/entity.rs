@@ -184,14 +184,30 @@ async fn an_empty_filter_list_means_unfiltered_not_empty() {
 
     assert_eq!(page.rows.len(), 5);
     assert!(page.total > 5, "the whole corpus, not one kind of it");
+    // More rows than the newest row's kind has: the read spans kinds. Counted,
+    // not read off the five newest, which another test of this binary can
+    // fill with one kind (the pull requests `a_plain_page_is_cut_before_its_
+    // rows_are_read_and_answers_as_before` writes, dated now).
+    let one_kind = EntityFilter {
+        kinds: vec![page.rows[0].kind.clone()],
+        ..all()
+    };
+    let of_one_kind = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &one_kind,
+        5,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
     assert!(
-        page.rows
-            .iter()
-            .map(|r| &r.kind)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            > 1,
-        "an unfiltered read spans more than one kind"
+        page.total > of_one_kind.total,
+        "an unfiltered read spans more than one kind: {} rows, {} of them {}",
+        page.total,
+        of_one_kind.total,
+        page.rows[0].kind
     );
 }
 

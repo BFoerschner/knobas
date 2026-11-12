@@ -45,9 +45,15 @@ const BEFORE: [(&str, &str, &str); 5] = [
     ),
 ];
 
-async fn pool() -> PgPool {
-    let pool = knobas_db::test_util::test_pool().await;
-    knobas_db::migrate::run(&pool).await.unwrap();
+/// A migrated database of the test's own: these tests write rows dated now,
+/// which in the binary's shared database were the newest rows every other
+/// test's unfiltered read met first.
+async fn pool(label: &str) -> PgPool {
+    let pool = knobas_db::test_util::scratch_database(label)
+        .await
+        .pool(4)
+        .await
+        .expect("a pool on the scratch database");
     // The declarations' stored copy, written as bring-up writes it (ADR-0019).
     knobas_app::commands::search::searcher(&pool, &Registry::for_process())
         .await
@@ -145,7 +151,7 @@ async fn seed(pool: &PgPool) -> Vec<String> {
 /// gives every table a row, so none of the five is compared empty.
 #[tokio::test]
 async fn a_batch_resolves_to_the_rows_the_earlier_resolvers_wrote() {
-    let pool = pool().await;
+    let pool = pool("resolvers_1").await;
     let ids = seed(&pool).await;
     // The earlier bodies are session-local functions.
     let mut conn = pool.acquire().await.unwrap();
@@ -199,7 +205,7 @@ async fn key_cells(pool: &PgPool, ids: &[String]) -> Vec<(String, Option<String>
 /// none, and a stamp leaves every cell alone.
 #[tokio::test]
 async fn the_key_cell_follows_its_row_under_any_writer() {
-    let pool = pool().await;
+    let pool = pool("resolvers_2").await;
     let ids = seed(&pool).await;
     let all_agree = |cells: &[(String, Option<String>, Option<String>)], when: &str| {
         for (id, stored, resolved) in cells {
@@ -281,7 +287,7 @@ async fn the_key_cell_follows_its_row_under_any_writer() {
 /// stamp included, which is what cost the stamp its heap-only update.
 #[tokio::test]
 async fn no_row_trigger_fires_before_an_update_of_the_mirror() {
-    let pool = pool().await;
+    let pool = pool("resolvers_3").await;
     // `tgtype`: bit 0 row, bit 1 before, bit 4 update.
     let before_update_row: Vec<String> = sqlx::query_scalar(
         "select t.tgname from pg_trigger t
