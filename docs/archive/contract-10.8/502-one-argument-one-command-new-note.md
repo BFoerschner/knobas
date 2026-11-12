@@ -134,7 +134,7 @@
   version 2. The **glossary** gains one cross-reference and no entry: `CONTEXT.md`'s **Capture**
   (added 2026-09-07 by #494) already states this behaviour, including *"The in-app New note
   attaches the same two, by the same mechanism"*, and its *"the foreground entity if there was
-  one"* now says which word that is --- *"the word as [Passive attribution](#passive-attribution)
+  one"* now says which word that is --- *"the word as [Passive attribution](../../../CONTEXT.md#passive-attribution)
   defines it, so a promoted room with nothing open gives its anchor"* --- as the ruling directs.
   Nothing here reaches past `sync.live_item`, so **Live item**'s census of three readers is
   unchanged.

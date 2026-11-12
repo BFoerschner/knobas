@@ -2,7 +2,7 @@
 
 A personal work cockpit: external work systems sync into one local database, and one search box, one link graph and one inbox sit on top of the mirror. This glossary is the canonical vocabulary. Code, plans and reviews use these words with exactly these meanings, and never the words under _Avoid_.
 
-Each term carries an anchor, `<a id="job"></a>` before `**Job**:`, because Markdown makes anchors for headings only and a term is not a heading. A link to a term is `[job](#job)` here and `CONTEXT.md#job` from another file. A new term gets its anchor with it: the term in lower case, spaces as hyphens.
+Each term carries an anchor, `<a id="job"></a>` before `**Job**:`, because Markdown makes anchors for headings only and a term is not a heading. A link to a term is `[job](#job)` here and `CONTEXT.md#job` from another file. A new term gets its anchor with it: the term in lower case, spaces as hyphens. The gate fails on a link to a term that has none (`scripts/doc-links.py`).
 
 ## Entities and kinds
 

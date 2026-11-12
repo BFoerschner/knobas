@@ -63,8 +63,10 @@ check:
     #!/usr/bin/env bash
     set -euo pipefail
     # A hand-written table that lost step with the tree fails the gate before
-    # anything slow runs (#1919).
+    # anything slow runs (#1919), and so does a Markdown link to a file or an
+    # anchor that is not there.
     python3 -I scripts/doc-lists.py
+    python3 -I scripts/doc-links.py
     front_log= scripts_log= cargo_log= front_pid= scripts_pid= cargo_pid=
     # The script checks are a half of their own (#920): none of them runs
     # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
@@ -179,8 +181,8 @@ check:
     fi
     echo "check: ok in ${SECONDS} s"
 
-# The frontend half of `check` alone, with the doc-list check it starts
-# with. Enough for a head `scripts/gate-scope.sh` calls `front`: nothing in
+# The frontend half of `check` alone, with the doc-list and doc-link checks
+# it starts with. Enough for a head `scripts/gate-scope.sh` calls `front`: nothing in
 # `crates/` reads what changed, so the cargo half would run the tree main
 # already passed. Ruling: Björn, 2026-10-15.
 #
@@ -188,6 +190,7 @@ check:
 # (#920): `front-changed` below. `check` still runs every test.
 check-front base="origin/main":
     python3 -I scripts/doc-lists.py
+    python3 -I scripts/doc-links.py
     just conflict-markers
     just front-changed "{{base}}"
     @echo "check-front: ok"
@@ -200,16 +203,19 @@ check-scripts:
     just docs-check {{script_recipes}}
     @echo "check-scripts: ok"
 
-# The two checks that guard a docs-only change, nothing else: the doc-list
+# The three checks that guard a docs-only change, nothing else: the doc-list
 # check (#1919: a crate, `app/src/lib/` directory, live-suite recipe or live
-# product a hand-written table lists, or misses) and the conflict-marker
-# scan. Seconds, no `node_modules`, no cargo. What a
+# product a hand-written table lists, or misses), the doc-link check (a
+# Markdown link to a file or an anchor that is not there,
+# `scripts/doc-links.py`) and the conflict-marker scan. Seconds, no
+# `node_modules`, no cargo. What a
 # docs-only self-merge runs in place of a gate (#1691, ruling D5 in
 # `docs/decisions/2026-10-review-planning-rulings.md`); `scripts/docs-check-test.sh`
 # pins the red cases. Calls the script directly, not `just conflict-markers`,
 # so the test can run it from a scratch tree.
 docs-check:
     python3 -I scripts/doc-lists.py
+    python3 -I scripts/doc-links.py
     scripts/conflict-markers.sh
 
 # `front` with vitest narrowed to what a change since BASE can reach (#920).
@@ -495,8 +501,8 @@ shell:
 # `gh` and a private TMPDIR, about 15 s. And the gate scope's (issue #1543): a
 # head that changes only an app file a testenv script pins answers `full`. And
 # `docs-check` (issue #1691): green on a clean tree, red on a conflict marker
-# in prose, and on a table row the tree lost or a member the table lacks
-# (#1919). And the README screenshots': the shot list and the README agree or
+# in prose, on a table row the tree lost or a member the table lacks
+# (#1919), and on a Markdown link to a file or an anchor that is not there. And the README screenshots': the shot list and the README agree or
 # the run is refused, and a release's commit lands on a branch that moved under it,
 # against a local bare repository, about 6 s. And the README diagrams': a d2 with no
 # bundled TALA, a watermark or a failed render replaces nothing, against a stub `d2`.

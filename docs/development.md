@@ -36,8 +36,9 @@ The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 
 `just check` is the quality gate. Under the ticket loop the merge-manager runs
 it once, on the head it merges (`just gate`, below). It first
-fails on a table below that lost step with the tree (`scripts/doc-lists.py`), then
-runs three halves side by side:
+fails on a table below that lost step with the tree (`scripts/doc-lists.py`) and on
+a Markdown link that names nothing (`scripts/doc-links.py`), then runs three halves
+side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
 - the scripts: `shell`, `test-layout`, `witness-unit` and `conflict-markers`.
@@ -53,17 +54,17 @@ slowest test binaries. A passing `front` prints the totals of `svelte-check`,
 Vitest and the build.
 
 `just gate` runs `check-front` instead on a frontend-only head: the
-doc-list check, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
-(`just front-changed`) and `vite build`. On a head that changes only scripts
-under `scripts/` or `testenv/` (and prose) it runs `check-scripts`: the
-doc-list check and `check`'s script half (`shell`, `test-layout`,
+doc-list and doc-link checks, the conflict-marker scan, `svelte-check`, the Vitest
+files the change can reach (`just front-changed`) and `vite build`. On a head that
+changes only scripts under `scripts/` or `testenv/` (and prose) it runs
+`check-scripts`: the doc-list and doc-link checks and `check`'s script half (`shell`, `test-layout`,
 `witness-unit`, `conflict-markers`), no cargo. `scripts/gate-scope.sh` says
 which, and why.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
 refreshes the IPC mirror and runs a few quick checks. It does not replace the
-gate. `just docs-check` is the two cheap checks alone (doc lists, conflict
-markers) for a docs-only change.
+gate. `just docs-check` is the three cheap checks alone (doc lists, doc links,
+conflict markers) for a docs-only change.
 
 Timings stay out of the gate, because a wall-clock assertion inside it would
 measure the machine. They have recipes of their own: `just search-perf`,
@@ -77,6 +78,16 @@ describes.
 live-suite recipes (every `<x>-live` recipe) and the `live-up` products (every
 product `testenv/live-lib.sh`'s `_live_main` knows). A crate added without its
 row fails the gate.
+
+`scripts/doc-links.py` holds every Markdown link in the tree to a target that
+exists: `[text](path)`, an image, a reference definition, and `src`, `href`
+and `srcset` in HTML. A relative path must name a file or a directory git
+lists, and `#anchor` on a Markdown file must be one of its headings, slugged
+as GitHub slugs it, or an `<a id>` in it. A link inside a code span or a fence
+is an example and is not read, and neither is a file under a `fixtures/`
+directory. A glossary term in `CONTEXT.md` is bold text and makes no anchor
+of its own, so each carries `<a id="...">`: a new term without one fails here
+the first time something links to it.
 
 Clippy runs twice on purpose. `clippy` uses `--all-targets`, which pulls in
 every crate's dev-dependencies. Cargo unifies features across one invocation,
