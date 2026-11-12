@@ -99,6 +99,8 @@
     docsPage as realDocsPage,
     docsSearch as realDocsSearch,
     docsTree as realDocsTree,
+    docsOutline as realDocsOutline,
+    docsNodes as realDocsNodes,
     getEntity as realGetEntity,
     jobReach as realJobReach,
     submitWrite as realSubmitWrite,
@@ -132,6 +134,7 @@
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDocsSpace from "./TfDocsSpace.svelte";
+  import { heldTree, pageCount, readHeld, readParts, spaceWhole, type TreeReads } from "./tree-store";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
@@ -204,6 +207,12 @@
   /** The page's own reads and writes; *Link to…* uses the job's ports. */
   export interface DocsPorts {
     docsTree: typeof realDocsTree;
+    /**
+     * The home's first screen and the parts of the tree a fold, a page or a space needs (the instant-open pass,
+     * 2026-11-12, `tree-store.ts`). Without both, Docs reads the tree whole, as it did.
+     */
+    docsOutline?: typeof realDocsOutline;
+    docsNodes?: typeof realDocsNodes;
     docsPage: typeof realDocsPage;
     docsSearch: typeof realDocsSearch;
     docsExportMarkdown: typeof realDocsExportMarkdown;
@@ -266,6 +275,8 @@
   const io: DocsPorts = $derived(
     ports ?? {
       docsTree: realDocsTree,
+      docsOutline: realDocsOutline,
+      docsNodes: realDocsNodes,
       docsPage: realDocsPage,
       docsSearch: realDocsSearch,
       docsExportMarkdown: realDocsExportMarkdown,
@@ -284,7 +295,14 @@
    * role, so nothing here keeps spaces by source (#1296, ADR-0029 as amended
    * on 2026-10-19). The search is narrowed the same way.
    */
-  let tree = $state.raw<DocsTree | null>(null);
+  let tree = $state.raw<DocsTree | null>(untrack(() => (io.docsOutline !== undefined && io.docsNodes !== undefined ? heldTree.tree : null)));
+  /** Whether the tree is read in parts (`tree-store.ts`), held across every mount of Docs. */
+  const lazy = $derived(io.docsOutline !== undefined && io.docsNodes !== undefined);
+  const treeReads: TreeReads = {
+    outline: () => io.docsOutline!(),
+    nodes: (asked) => io.docsNodes!(asked),
+    whole: () => io.docsTree(),
+  };
   let treeError = $state<string | null>(null);
   // Raw, as the tree is: the page is replaced whole on each read and never changed in place, and a deep proxy made
   // drawing a long page read its every block through one (PR #2479).
@@ -370,7 +388,8 @@
   /** The last visit on its way: a read of the tree that overtook it would name the page before it. */
   let visited: Promise<unknown> = Promise.resolve();
   // *Continue reading* is the tree's: back on the home, it is read again once the visit is in, so it names the page read last.
-  let wasHome = false;
+  // Drawn on the home from what Docs held (`tree-store.ts`), the mount's own read is that read.
+  let wasHome = untrack(() => tree !== null && place.kind === "home");
   $effect(() => {
     const now = place.kind === "home";
     if (now && !wasHome && ready && untrack(() => tree) !== null) untrack(() => void visited.then(() => readTree(true)));
@@ -396,7 +415,7 @@
   async function readTree(quiet: boolean) {
     const mine = ++treeAsked;
     try {
-      const read = await io.docsTree();
+      const read = lazy ? await readHeld(treeReads, untrack(() => wantsWhole)) : await io.docsTree();
       if (mine !== treeAsked) return;
       // A row of the home's that holds focus can move: the page read last goes up into *Continue reading* (F-438).
       const held = document.activeElement?.closest("a.tf-dh-row")?.getAttribute("href") ?? null;
@@ -502,8 +521,42 @@
 
   $effect(() => {
     if (!ready) return;
-    untrack(() => void readTree(false));
+    // What Docs held from an earlier mount is drawn already; the read behind it is quiet, as a sync's is.
+    untrack(() => void readTree(tree !== null));
   });
+
+  /** The new-page dialog's place, `null` while it is shut; declared here because what reads the tree whole reads it. */
+  let newPage = $state<{ space: string | null; parent: string | null; title?: string; text?: string } | null>(null);
+  /**
+   * What reads the tree whole (`tree-store.ts`): the job's pages, which can be anywhere in it, the new-page dialog's
+   * list of parents, and a tree read whole once already, so a fold it drew is not read again in part.
+   */
+  const wantsWhole = $derived(job !== null || newPage !== null || (tree !== null && heldTree.complete));
+  $effect(() => {
+    if (!ready || !lazy || !wantsWhole || heldTree.complete || untrack(() => tree) === null) return;
+    untrack(() => void readTree(true));
+  });
+
+  /** The parts the address draws beyond the outline: an open page's way to it, a space's page every page of it. */
+  $effect(() => {
+    if (!ready || !lazy || tree === null) return;
+    const pages = place.kind === "page" ? [place.id] : [];
+    const spaces = spaceHere !== undefined ? [spaceId(spaceHere)] : [];
+    if (pages.length + spaces.length === 0) return;
+    untrack(() => void needParts({ pages, spaces }));
+  });
+
+  /** Read the parts of the tree `asked` names that Docs lacks, and draw them. */
+  function needParts(asked: { pages?: string[]; folds?: string[]; spaces?: string[] }): Promise<void> {
+    return readParts(treeReads, asked).then(
+      (read) => {
+        if (read !== null) tree = heldTree.tree;
+      },
+      () => {},
+    );
+  }
+  /** A fold drawn open whose pages are not read yet (`TfDocTree`'s `need`). */
+  const needFold = (id: string) => void needParts({ folds: [id] });
 
   $effect(() => {
     const id = target;
@@ -545,7 +598,10 @@
     );
   });
 
-  const pageSpace = $derived(tree && page ? spaceOfPage(tree, page.entity_id) : undefined);
+  /** The space an open page names, which holds it before the way to it is read (`tree-store.ts`). */
+  const pageNamed = (id: string) =>
+    tree !== null && page !== null && page.entity_id === id && page.space ? treeSpace(tree.spaces, page.source_id, page.space.key) : undefined;
+  const pageSpace = $derived(tree && page ? (spaceOfPage(tree, page.entity_id) ?? pageNamed(page.entity_id)) : undefined);
   /**
    * The breadcrumb's space link: the page's own space, named with its source
    * where another source holds its key too (#1455).
@@ -557,10 +613,10 @@
     if (tree === null || picked === "*") return undefined;
     if (picked !== null) return tree.spaces.find((s) => spaceId(s) === picked);
     // The home shows every space, a space's page that space, and a page its own: one the tree does not hold shows them all.
-    return place.kind === "page" ? spaceOfPage(tree, place.id) : spaceHere;
+    return place.kind === "page" ? (spaceOfPage(tree, place.id) ?? pageNamed(place.id)) : spaceHere;
   });
   const pickerValue = $derived(shownSpace ? spaceId(shownSpace) : "*");
-  const total = $derived(tree?.spaces.reduce((n, s) => n + s.pages.length, 0) ?? 0);
+  const total = $derived(tree?.spaces.reduce((n, s) => n + pageCount(s), 0) ?? 0);
   const parent = $derived(page?.ancestors.at(-1));
   const current = $derived(page?.entity_id ?? target);
   const searching = $derived(query.trim() !== "");
@@ -1150,7 +1206,6 @@
 
   // ---- actions ----
   let linking = $state(false);
-  let newPage = $state<{ space: string | null; parent: string | null; title?: string; text?: string } | null>(null);
   /** Each page's composer holds its own words, so a draft never lands on the next page (F-429). */
   const commentKey = (entityId: string) => `comment:${entityId}`;
   const comment = $derived(page === null ? "" : drafts.get(commentKey(page.entity_id)));
@@ -1601,12 +1656,12 @@
                 else if (!holds) openSpaces.add(spaceId(space));
               }}
             >
-              <summary class="tf-spc"><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{space.pages.length}</span></summary>
-              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} /></div>
+              <summary class="tf-spc"><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
+              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} need={lazy ? needFold : undefined} /></div>
             </details>
           {/each}
         {:else if shownSpace}
-          <TfDocTree space={shownSpace} {current} reveal={revealed} opened={foldsOf(spaceId(shownSpace))} />
+          <TfDocTree space={shownSpace} {current} reveal={revealed} opened={foldsOf(spaceId(shownSpace))} need={lazy ? needFold : undefined} />
         {/if}
       {/if}
     </div>
@@ -1682,7 +1737,7 @@
       />
     {:else if spaceHere !== undefined}
       <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: spaceTitle(spaceHere, tree?.spaces ?? []) }]} {back} /></div>
-      <TfDocsSpace space={spaceHere} spaces={tree?.spaces ?? []} {sync} />
+      <TfDocsSpace space={spaceHere} spaces={tree?.spaces ?? []} {sync} whole={!lazy || spaceWhole(spaceHere)} />
     {:else if tree === null}
       {#if treeError !== null}
         <!-- No tree to place the address in: the view's own header, so *Sync now* is still where every view puts it (#2286). -->

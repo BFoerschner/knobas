@@ -1122,7 +1122,17 @@ export type DocNode = { entity_id: string, title: string,
  * The page above it, where its declared parent is a mirrored page of the
  * same space; `None` for a page at the top of what the mirror holds.
  */
-parent: string | null, };
+parent: string | null, 
+/**
+ * How many pages hang directly under it, so a fold is drawn as one
+ * before its pages are read (the instant-open pass, 2026-11-12).
+ */
+children?: number, 
+/**
+ * Where it comes in its space's [`DocSpace::pages`] read whole: what puts
+ * the pages read in parts back in the space's order.
+ */
+ord?: number, };
 
 /**
  * One page, as the reader draws it.
@@ -1271,9 +1281,15 @@ source_name: string, key: string,
 name: string | null, 
 /**
  * Every live page of the space, in the source's sibling order where it
- * gives one, else by title (#953).
+ * gives one, else by title (#953). An outline ([`outline`]) or a branch
+ * ([`nodes`]) holds some of them, and every page above each it holds.
  */
-pages: Array<DocNode>, };
+pages: Array<DocNode>, 
+/**
+ * How many live pages the space has, whether or not [`DocSpace::pages`]
+ * holds them all (the instant-open pass, 2026-11-12).
+ */
+page_count?: number, };
 
 /**
  * A space, named.
@@ -1339,6 +1355,24 @@ unknown_tokens: Array<string>,
  * The best pages, best first.
  */
 hits: Array<DocHit>, };
+
+/**
+ * What [`nodes`] reads: pages by id, each with the path to it drawn open.
+ */
+export type DocsNodesAsked = { 
+/**
+ * Pages whose branch is wanted: each page, every page above it, and the
+ * pages directly under each of those, so a tree draws the way to it open.
+ */
+pages: Array<string>, 
+/**
+ * Folds opened: the pages directly under each.
+ */
+folds: Array<string>, 
+/**
+ * Spaces wanted whole, as `<source>/<key>` (the front end's `spaceId`).
+ */
+spaces: Array<string>, };
 
 /**
  * Every space the mirror holds pages of, and the page read last.

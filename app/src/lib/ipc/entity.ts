@@ -34,7 +34,9 @@ import type {
   DocExport,
   DocPage,
   DocsHits,
+  DocsNodesAsked,
   DocsTree,
+  DocSpace,
   DownloadTarget,
   EntityDetail,
   EntityFilter,
@@ -163,6 +165,7 @@ export type {
   DocWork,
   DocWrite,
   DocsHits,
+  DocsNodesAsked,
   DocsTree,
   DownloadTarget,
   EntityDetail,
@@ -1602,6 +1605,26 @@ export function moveNotesToConfluence(parent: string): Promise<QueuedWrite[]> {
  */
 export function docsTree(): Promise<DocsTree> {
   return invoke<DocsTree>("docs_tree");
+}
+
+/**
+ * The Docs home's first screen — `docs_outline` (the instant-open pass,
+ * 2026-11-12): every space with its count and the top of its tree, the page
+ * read last and *For you*, never every page. A space's `pages` hold some of
+ * its pages and every page above each; a page's `children` says how many are
+ * under it.
+ */
+export function docsOutline(): Promise<DocsTree> {
+  return invoke<DocsTree>("docs_outline");
+}
+
+/**
+ * Part of the Docs tree — `docs_nodes` (the instant-open pass, 2026-11-12):
+ * the way to `pages` drawn open, the pages under `folds`, and whole `spaces`
+ * (`<source>/<key>`), as the spaces holding them.
+ */
+export function docsNodes(asked: DocsNodesAsked): Promise<DocSpace[]> {
+  return invoke<DocSpace[]>("docs_nodes", { asked });
 }
 
 /**

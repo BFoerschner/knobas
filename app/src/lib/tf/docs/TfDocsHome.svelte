@@ -22,7 +22,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { sourceRoles, WIKI } from "../roles.svelte";
-  import { continueReading, forYouHash, forYouWhy, pageHash, pagesByLevel, spaceHash, spaceId, spaceName, spaceSource, type JobPageGroup } from "./docs";
+  import { continueReading, forYouHash, forYouWhy, pageCount, pageHash, pagesByLevel, spaceHash, spaceId, spaceName, spaceSource, type JobPageGroup } from "./docs";
 
   let {
     tree,
@@ -58,7 +58,7 @@
   /** How many of the job's pages the home lists; the rail's *This job* holds the rest. */
   const JOB_PAGES = 5;
 
-  const total = $derived(tree?.spaces.reduce((n, space) => n + space.pages.length, 0) ?? 0);
+  const total = $derived(tree?.spaces.reduce((n, space) => n + pageCount(space), 0) ?? 0);
   const last = $derived(tree === null ? null : continueReading(tree));
   const forYou = $derived(tree?.for_you ?? []);
   /**
@@ -201,12 +201,12 @@
                 <!-- The tile's one link: its whole head, with the chevron a ticket card's rows have, so it says it opens. -->
                 <a class="tf-dh-spacelink" href={spaceHash(tree.spaces, space)}>
                   <h3>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</h3>
-                  <span class="tf-count" title={counted(space.pages.length, "page", "pages")}>{space.pages.length}</span>
+                  <span class="tf-count" title={counted(pageCount(space), "page", "pages")}>{pageCount(space)}</span>
                   <span class="tf-chev" aria-hidden="true">›</span>
                 </a>
               </header>
               {#if rows.length === 0}
-                <p class="tf-dh-none">{space.pages.length === 0 ? "No pages yet." : "Its pages are listed above."}</p>
+                <p class="tf-dh-none">{pageCount(space) === 0 ? "No pages yet." : "Its pages are listed above."}</p>
               {:else}
                 <div class="tf-dh-rows">
                   {#each rows as page (page.entity_id)}

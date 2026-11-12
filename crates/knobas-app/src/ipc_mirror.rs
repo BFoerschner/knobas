@@ -207,6 +207,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::docs::DocForYou::export_all(cfg)?;
     crate::docs::DocSpace::export_all(cfg)?;
     crate::docs::DocNode::export_all(cfg)?;
+    crate::docs::DocsNodesAsked::export_all(cfg)?;
     crate::docs::DocPage::export_all(cfg)?;
     knobas_source::docs::SectionRefusal::export_all(cfg)?;
     knobas_source::docs::DocSection::export_all(cfg)?;

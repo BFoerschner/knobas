@@ -235,7 +235,15 @@ export function treeSpace<Space extends NamedSpace>(spaces: readonly Space[], so
 
 /** The picker's words for a space: *Engineering (12)*, and its source where another's has its name. */
 export function spaceLabel(space: DocSpace, spaces: readonly DocSpace[] = []): string {
-  return `${spaceTitle(space, spaces)} (${space.pages.length})`;
+  return `${spaceTitle(space, spaces)} (${pageCount(space)})`;
+}
+
+/**
+ * How many live pages a space has: the count a part of the tree says (the instant-open pass, 2026-11-12,
+ * `tree-store.ts`), else the pages held, which the tree read whole holds all of.
+ */
+export function pageCount(space: Pick<DocSpace, "pages" | "page_count">): number {
+  return space.page_count ?? space.pages.length;
 }
 
 /**

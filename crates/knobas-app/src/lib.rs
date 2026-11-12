@@ -385,6 +385,9 @@ pub fn manage_app_state<R: tauri::Runtime>(
     handle.manage(backup::FolderOpener::platform());
     handle.manage(sources::SecretStoreKind::from_env());
     handle.manage(Lifecycle::new());
+    // The Docs tree as last read, read again only when the pages moved
+    // (the instant-open pass, 2026-11-12, `docs::TreeCache`).
+    handle.manage(docs::TreeCache::default());
     // The desktop notification sender and its waiter registry (#339),
     // over `backend` and the real event bridge. Managed here
     // for the same reason as `Lifecycle`: the command that reaches for
@@ -793,6 +796,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The nav's Monitors badge as a count (PR #2479, the monitors-builds
         // pass), appended at the foot for the same reason.
         commands::assets::monitors_down,
+        // The instant-open pass (2026-11-12): Docs reads what it draws.
+        commands::entity::docs_outline,
+        commands::entity::docs_nodes,
     ]
 }
 
@@ -1057,6 +1063,7 @@ async fn bring_up_app<R: tauri::Runtime>(
             if let Some(watch) = watch {
                 spawn_watch(handle.clone(), watch, generation);
             }
+            spawn_docs_tree(handle.clone());
             return;
         }
         Err(error) => {
@@ -1075,6 +1082,25 @@ async fn bring_up_app<R: tauri::Runtime>(
         tracing::error!(%error, "stopping the server of a failed bring-up failed");
     }
     set_db_state(handle, DbState::Failed { message });
+}
+
+/// The Docs tree read once in the background after `ready` (the
+/// instant-open pass, 2026-11-12, `docs::TreeCache`): at Björn's size it is
+/// 600 ms of walking page payloads, which the first open of Docs would
+/// otherwise wait for. A moment after `ready`, so the window's own first
+/// reads go first; a failure is the next read's to meet.
+fn spawn_docs_tree<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let lifecycle = handle.state::<Lifecycle>();
+        let Ok(pool) = lifecycle.pool() else { return };
+        let cache = handle.state::<docs::TreeCache>();
+        if let Err(error) =
+            commands::entity::docs_outline_inner(&pool, lifecycle.registry(), Some(&cache)).await
+        {
+            tracing::debug!(%error, "the Docs tree was not read ahead");
+        }
+    });
 }
 
 /// How often a `ready` window looks at its own server (#1779). A read of

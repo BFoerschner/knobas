@@ -1,7 +1,7 @@
 /**
  * `?fake-ipc`: Docs, the reader over declared docs (#859).
  *
- * Answers `docs_tree`, `docs_page`, `docs_search` (#860), and the writes
+ * Answers `docs_tree`, `docs_outline`, `docs_nodes`, `docs_page`, `docs_search` (#860), and the writes
  * `docs_export_markdown` (#861), `docs_edit_section` and `docs_create_page`
  * (#862), and `move_notes_to_confluence` (#941), which answer as queued and
  * change nothing.
@@ -912,6 +912,10 @@ export function handlers(params: URLSearchParams): Handlers {
   const bulk = params.has("fake-scale") ? scalePages(5_000) : bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
+    // The instant-open pass (2026-11-12): the fixture's spaces are small, so its outline and every part asked for are
+    // the tree whole, which is a cut of the tree as the backend's are.
+    docs_outline: () => tree(bulk),
+    docs_nodes: () => tree(bulk).spaces,
     docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
