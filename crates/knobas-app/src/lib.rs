@@ -1095,9 +1095,11 @@ fn spawn_docs_tree<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
         let lifecycle = handle.state::<Lifecycle>();
         let Ok(pool) = lifecycle.pool() else { return };
         let cache = handle.state::<docs::TreeCache>();
-        if let Err(error) =
-            commands::entity::docs_outline_inner(&pool, lifecycle.registry(), Some(&cache)).await
-        {
+        // By its whole path: a line that starts `commands::entity::` is read as a registered command
+        // (`commands::tests::registered`).
+        let read =
+            crate::commands::entity::docs_outline_inner(&pool, lifecycle.registry(), Some(&cache));
+        if let Err(error) = read.await {
             tracing::debug!(%error, "the Docs tree was not read ahead");
         }
     });
