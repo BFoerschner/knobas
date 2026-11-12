@@ -58,6 +58,7 @@ export const READS: ReadonlySet<string> = new Set([
   "run_log",
   "run_chain",
   "monitor_roster",
+  "monitors_down",
   "open_alerts",
   "unmonitored_assets",
   "mini_board",
@@ -124,6 +125,7 @@ export const VISIT_BLIND: ReadonlySet<string> = new Set([
   "run_log",
   "run_chain",
   "monitor_roster",
+  "monitors_down",
   "open_alerts",
   "unmonitored_assets",
   "mini_board",
@@ -156,6 +158,7 @@ const SCOPE: Readonly<Record<string, readonly string[]>> = {
   run_log: ["ci"],
   run_chain: ["ci"],
   monitor_roster: ["monitoring"],
+  monitors_down: ["monitoring"],
   open_alerts: ["monitoring"],
   unmonitored_assets: ["monitoring"],
   code_facts: ["code-host"],
@@ -291,6 +294,14 @@ function saveRecent(): void {
  * holds the answer.
  */
 export function cachedInvoke(cmd: string, args?: unknown, options?: unknown): Promise<unknown> {
+  return ask(cmd, args, options, false);
+}
+
+/**
+ * {@link cachedInvoke}; `warmed` for {@link warm}'s own reads, whose answer nobody holds, so it is kept as it came and
+ * not copied: a copy of the 571 KB pipeline list is a long task of its own on a slow machine.
+ */
+function ask(cmd: string, args: unknown, options: unknown, warmed: boolean): Promise<unknown> {
   if (!enabled) return inner(cmd, args, options);
   why = cmd;
   if (!READS.has(cmd)) {
@@ -327,7 +338,7 @@ export function cachedInvoke(cmd: string, args?: unknown, options?: unknown): Pr
     }
     // Kept as a copy taken before the asker sees it, and only when nothing dropped answers meanwhile.
     if (at === generation && (STATUS_READS[cmd] === undefined || statusAt === statusMoves)) {
-      kept.set(key, { cmd, args, roles: rolesFor(cmd, args), value: copy(value) });
+      kept.set(key, { cmd, args, roles: rolesFor(cmd, args), value: warmed ? value : copy(value) });
       while (kept.size > KEPT_ANSWERS) kept.delete(kept.keys().next().value!);
     }
     return value;
@@ -393,6 +404,7 @@ export function enableAnswerCache(): void {
   }
   if (!saving) {
     saving = true;
+    for (const event of ["wheel", "scroll", "pointerdown", "keydown", "touchstart"]) addEventListener(event, heard, { capture: true, passive: true });
     addEventListener("pagehide", saveRecent);
     setInterval(saveRecent, 60_000);
   }
@@ -437,7 +449,7 @@ export function warm(idle: () => Promise<void> = nextIdle): Promise<void> {
       for (const { cmd, args } of [...recent.values()].reverse()) {
         if (kept.has(keyOf(cmd, args))) continue;
         await idle();
-        await cachedInvoke(cmd, args).catch(() => {});
+        await ask(cmd, args, undefined, true).catch(() => {});
       }
     } finally {
       warming = null;
@@ -446,7 +458,20 @@ export function warm(idle: () => Promise<void> = nextIdle): Promise<void> {
   return warming;
 }
 
-function nextIdle(): Promise<void> {
+/** When the reader last scrolled, pointed or typed: the warm waits {@link WARM_QUIET_MS} past it. */
+let lastInput = 0;
+/** How long after the reader's last input the warm asks its next read, so its work never lands in a scroll or a key. */
+export const WARM_QUIET_MS = 1000;
+function heard(): void {
+  lastInput = performance.now();
+}
+
+async function nextIdle(): Promise<void> {
+  while (performance.now() - lastInput < WARM_QUIET_MS) await new Promise((resolve) => setTimeout(resolve, WARM_QUIET_MS - (performance.now() - lastInput)));
+  return idleCallback();
+}
+
+function idleCallback(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 1000 });
     else setTimeout(resolve, 50);
