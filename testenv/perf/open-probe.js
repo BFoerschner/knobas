@@ -41,12 +41,13 @@
     wrap,
     /**
      * Arm for one press. `useful`: a selector whose `min` visible matches, inside the shown page, with nothing waiting
-     * there, is the page's first useful content; `hash`: the address the press goes to (a prefix), checked too.
+     * there, is the page's first useful content; `hash`: the address the press goes to (a prefix), checked too;
+     * `titled`: the words of the row pressed, which a match must read, so the page left drawn does not count.
      */
-    arm({ useful, min = 1, hash = null, quietMs = 700, maxMs = 12000, anyKey = false, anywhere = false }) {
+    arm({ useful, min = 1, hash = null, quietMs = 700, maxMs = 12000, anyKey = false, anywhere = false, titled = null }) {
       wrap();
       calls.length = 0;
-      run = { useful, min, hash, quietMs, maxMs, anyKey, anywhere, press: null, firstFrame: null, usefulAt: null, lastChange: 0, rects: null, done: false };
+      run = { useful, min, hash, quietMs, maxMs, anyKey, anywhere, titled, press: null, firstFrame: null, usefulAt: null, lastChange: 0, rects: null, done: false };
       const r = run;
       const obs = new MutationObserver(() => { r.lastChange = now(); });
       obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -57,7 +58,7 @@
           if (r.firstFrame === null) r.firstFrame = t;
           if (r.usefulAt === null && (r.hash === null || location.hash.startsWith(r.hash))) {
             const root = r.anywhere ? document.body : shown();
-            const rows = [...root.querySelectorAll(r.useful)].filter(visible);
+            const rows = [...root.querySelectorAll(r.useful)].filter(visible).filter((e) => r.titled === null || (e.textContent || "").trim() === r.titled);
             const waiting = [...root.querySelectorAll(WAITING)].some(visible);
             if (rows.length >= r.min && !waiting) {
               r.usefulAt = t;

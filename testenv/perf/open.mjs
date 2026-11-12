@@ -56,7 +56,7 @@ const PLACES = [
   { name: "pull-request", parent: "code", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", useful: ".tf-pr .tf-side, .tf-pr .tf-md, .tf-pr .tf-cfail", min: 1, back: "Escape" },
   { name: "docs", start: "#/time", press: nav("docs"), hash: "#/docs", useful: ".tf-dh-row", min: 5, away: "time" },
   { name: "docs-space", parent: "docs", start: "#/docs", press: `${shown} a.tf-dh-spacelink[href="#/docs/space/SCLENG"]`, hash: "#/docs/space/", useful: ".tf-dh-row", min: 10, back: "Escape" },
-  { name: "docs-page", parent: "docs", start: "#/docs/space/SCLENG", press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", useful: ".tf-rd-main p, .tf-rd-main li, .tf-rd-main h2", min: 3, back: "Escape" },
+  { name: "docs-page", parent: "docs", start: "#/docs/space/SCLENG", press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", useful: ".tf-rd-main h1", min: 1, titled: true, back: "Escape" },
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
@@ -102,10 +102,16 @@ async function fresh(hash) {
   await js("__open.wrap(), 1");
 }
 
-/** A real mouse press on the first visible match of `selector`. */
-async function press(selector) {
-  const at = await js(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }); if (!e) return null; e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.left + Math.min(r.width / 2, 40), y: r.top + r.height / 2 }; })()`);
+/** Where the first visible match of `selector` is, and its words. */
+async function find(selector) {
+  const at = await js(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }); if (!e) return null; e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.left + Math.min(r.width / 2, 40), y: r.top + r.height / 2, text: (e.textContent || "").trim() }; })()`);
   if (!at) throw new Error(`nothing to press: ${selector}`);
+  return at;
+}
+
+/** A real mouse press on the first visible match of `selector` (or at `at`). */
+async function press(selector, at = null) {
+  at ??= await find(selector);
   await c.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
   await c.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
   await c.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 });
@@ -119,9 +125,12 @@ async function key({ key, code, modifiers = 0, windowsVirtualKeyCode = 0 }) {
 const ESCAPE = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 };
 
 async function measure(place) {
-  await js(`__open.arm(${JSON.stringify({ useful: place.useful, min: place.min, hash: place.hash, anyKey: !!place.key, anywhere: !!place.anywhere })})`);
+  // A place that opens what its row names (`titled`) is useful once that name is drawn, not an earlier one.
+  const at = place.key ? null : await find(place.press);
+  const titled = place.titled ? at.text : null;
+  await js(`__open.arm(${JSON.stringify({ useful: place.useful, min: place.min, hash: place.hash, anyKey: !!place.key, anywhere: !!place.anywhere, titled })})`);
   if (place.key) await key(place.key);
-  else await press(place.press);
+  else await press(place.press, at);
   return await js("__open.result()", 30000);
 }
 
