@@ -191,6 +191,7 @@ vi.mock("./lib/ipc/entity", () => ({
   // arriving.
   inboxItems: (shelf: string) => Promise.resolve(shelf === "stream" ? inboxRows : []),
   inboxCount: () => Promise.resolve(inboxRows.length),
+  inboxShelves: () => Promise.resolve({ stream: inboxRows, snoozed: [], count: inboxRows.length }),
   snoozeInboxItem: () => Promise.reject(new Error("no snooze in this test")),
   completeInboxItem: () => Promise.reject(new Error("no answer in this test")),
   // Which kinds may raise a desktop notification (#290).
@@ -1300,4 +1301,29 @@ test("pull-request-open-in: Settings › Checkouts and Open in… lands on the s
 test("pull-request-open-in: ⌘K lands on the launcher's query box", async () => {
   await pressLauncherKey();
   await landsOn(landing("pull-request-open-in", "cmd-k"));
+});
+
+/**
+ * v3.2.9-ux7 hung on *Starting the local database* in every packaged build. The answer cache assigned to
+ * `window.__TAURI_INTERNALS__.invoke`, which Tauri 2.11 (`scripts/core.js`) defines with `Object.defineProperty` and
+ * `value` only, so the assignment threw inside `onMount`'s start-up block, before `lifecycle.start()`, and nothing
+ * ever asked `app_status`. The tests skip the cache (`MODE === "test"`), and the fake bridge's `invoke` was writable,
+ * so nothing caught it. Here the cache runs, over a bridge shaped as Tauri's, and the window must reach `ready`.
+ */
+test("the window starts over Tauri's read-only invoke, with the answer cache on", async () => {
+  const { disableAnswerCache, readCacheEnabled } = await import("./lib/ipc/answer-cache");
+  const internals = {};
+  Object.defineProperty(internals, "invoke", { value: () => Promise.resolve(null) });
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: internals, configurable: true });
+  vi.stubEnv("MODE", "production");
+  try {
+    dbReady = true;
+    app = mount(App, { target, props: {} });
+    await until(() => lifecycle.ready, "the window never left the database's start: the start-up block was thrown away");
+    expect(readCacheEnabled(), "the cache should start over a read-only invoke").toBe(true);
+  } finally {
+    vi.unstubAllEnvs();
+    disableAnswerCache();
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  }
 });

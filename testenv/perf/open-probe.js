@@ -18,14 +18,13 @@
   let wrapped = false;
   function wrap() {
     if (wrapped) return;
-    const t = window.__TAURI_INTERNALS__;
-    if (!t?.invoke) return;
-    const inner = t.invoke.bind(t);
-    t.invoke = (cmd, args, options) => {
+    // Through the app's own `invoke` (`app/src/lib/ipc/invoke.ts`): Tauri's bridge `invoke` is read-only.
+    const prev = window.__knobasIpcTap;
+    window.__knobasIpcTap = (cmd, args, options, next) => {
       const call = { cmd, start: now(), end: null };
       if (!String(cmd).startsWith("plugin:")) calls.push(call);
-      const p = inner(cmd, args, options);
-      Promise.resolve(p).then(() => { call.end = now(); }, () => { call.end = now(); call.failed = true; });
+      const p = Promise.resolve(prev ? prev(cmd, args, options, next) : next(cmd, args, options));
+      p.then(() => { call.end = now(); }, () => { call.end = now(); call.failed = true; });
       return p;
     };
     wrapped = true;

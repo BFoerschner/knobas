@@ -32,12 +32,16 @@
  * sessions, at most {@link WARM_KEYS}): at start, so a page's first open finds
  * its answer, and after a run drops answers, so a return finds the new one.
  *
- * Off until {@link enableAnswerCache}, which puts it in front of the bridge's
- * own `invoke` (`window.__TAURI_INTERNALS__`), so every command of every
- * module passes through it. A test mounts a page and counts its reads, and
- * every read there goes to the port it set up.
+ * Off until {@link enableAnswerCache}. Every command reaches it through the
+ * app's own `invoke` (`ipc/invoke.ts`), which every module imports instead of
+ * Tauri's; it never touches `window.__TAURI_INTERNALS__.invoke`, which Tauri
+ * defines read-only (assigning to it hung v3.2.9-ux7 at start). A test mounts
+ * a page and counts its reads, and every read there goes to the port it set
+ * up.
  */
-/** The bridge's own `invoke`, as `window.__TAURI_INTERNALS__` holds it. */
+import { invoke as tauriInvoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
+
+/** Tauri's own `invoke`. */
 type Invoke = (cmd: string, args?: unknown, options?: unknown) => Promise<unknown>;
 
 /** The reads kept: a function of the mirror and the settings, and nothing else. */
@@ -211,8 +215,14 @@ interface Kept {
 }
 
 let enabled = false;
-/** The bridge's `invoke` behind the cache. */
-let inner: Invoke = () => Promise.reject(new Error("answer cache: no bridge"));
+/** Tauri's `invoke` behind the cache, looked up at each call so a test's or the fake bridge's port is the one asked. */
+// Only the arguments the caller gave, so a test asserting `toHaveBeenCalledWith(cmd, args)` sees the call it made.
+const inner: Invoke = (cmd, args, options) =>
+  options !== undefined
+    ? tauriInvoke(cmd, args as InvokeArgs | undefined, options as InvokeOptions)
+    : args !== undefined
+      ? tauriInvoke(cmd, args as InvokeArgs)
+      : tauriInvoke(cmd);
 const kept = new Map<string, Kept>();
 const asking = new Map<string, { generation: number; answer: Promise<unknown> }>();
 /** Moves on every drop: an answer asked before a drop is not kept, since the mirror may have moved under it. */
@@ -293,8 +303,8 @@ function saveRecent(): void {
 }
 
 /**
- * The bridge's `invoke`, answering a read of {@link READS} from memory when it
- * holds the answer.
+ * Tauri's `invoke`, answering a read of {@link READS} from memory when it
+ * holds the answer. Reached through `ipc/invoke.ts`.
  */
 export function cachedInvoke(cmd: string, args?: unknown, options?: unknown): Promise<unknown> {
   return ask(cmd, args, options, false);
@@ -385,16 +395,12 @@ export const cacheEvents: CacheEvents = {
 };
 
 /**
- * Put the cache in front of the bridge (`window.__TAURI_INTERNALS__.invoke`), with the reads the last session made
- * remembered for {@link warm}. Once; no bridge, no cache.
+ * Turn the cache on, with the reads the last session made remembered for {@link warm}. Once; no bridge, no cache.
+ * It writes nothing to the bridge: commands reach it through `ipc/invoke.ts`.
  */
 export function enableAnswerCache(): void {
-  const bridge = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: Invoke } }).__TAURI_INTERNALS__;
+  const bridge = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__;
   if (enabled || typeof bridge?.invoke !== "function") return;
-  if (bridge.invoke !== cachedInvoke) {
-    inner = bridge.invoke.bind(bridge);
-    bridge.invoke = cachedInvoke;
-  }
   enabled = true;
   Object.defineProperty(window, "__knobasAnswers", { configurable: true, value: { kept: () => kept.size, drops } });
   // The seeds first, so what the last session read is warmed before them.
@@ -414,7 +420,7 @@ export function enableAnswerCache(): void {
 }
 let saving = false;
 
-/** Off and empty, for a test (the bridge keeps the wrapper, which now only passes through). */
+/** Off and empty, for a test: every command then passes straight through. */
 export function disableAnswerCache(): void {
   enabled = false;
   drop();

@@ -229,8 +229,14 @@
       if (disposed) return;
       // The answer cache (the instant-open pass, 2026-11-12, `ipc/answer-cache.ts`), in front of the bridge before anything
       // reads, and its ears first, so a run's end drops what it changed before a page that hears it reads again.
+      // Guarded: nothing here may stop the lifecycle below from starting. v3.2.9-ux7 assigned to Tauri's read-only
+      // `invoke` here, the throw ended this block, and the window stayed on *Starting the local database*.
       if (import.meta.env.MODE !== "test") {
-        enableAnswerCache();
+        try {
+          enableAnswerCache();
+        } catch (error) {
+          console.error("knobas: the answer cache did not start; every read goes to the backend", error);
+        }
         for (const [event, hear] of [
           [EVENTS.syncState, (payload: unknown) => cacheEvents.syncState(payload as Parameters<typeof cacheEvents.syncState>[0])],
           [EVENTS.itemRefreshed, () => cacheEvents.moved()],
@@ -247,13 +253,22 @@
       }
 
       // Subscribed for the whole session; each is seeded below once the
-      // database can answer.
-      stops.push(health.start());
-      stops.push(startFollowingMerges());
-      stops.push(inbox.start());
-      stops.push(alerts.start());
-      stops.push(timer.begin());
-      stops.push(notifications.start());
+      // database can answer. Each on its own guard, so one that throws costs
+      // its own feature and never the lifecycle below.
+      for (const [name, start] of [
+        ["health", () => health.start()],
+        ["merge follower", () => startFollowingMerges()],
+        ["inbox", () => inbox.start()],
+        ["alerts", () => alerts.start()],
+        ["timer", () => timer.begin()],
+        ["notifications", () => notifications.start()],
+      ] as const) {
+        try {
+          stops.push(start());
+        } catch (error) {
+          console.error(`knobas: the ${name} did not start`, error);
+        }
+      }
       // The capture window's *Open in knobas* (#503). Not awaited: an awaited
       // listen here would push the lifecycle's own subscription past a
       // teardown (measured 2026-09-08, `residue`). The note opens on its own
@@ -266,7 +281,7 @@
         else stops.push(off);
       });
       // Static per build, and answers before the database is up.
-      void kindRegistry.load();
+      void kindRegistry.load().catch((error: unknown) => console.error("knobas: the kind registry did not load", error));
 
       await lifecycle.start();
     })();
