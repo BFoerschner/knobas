@@ -205,7 +205,8 @@ export function installIfRequested(): void {
   for (const [, feature] of FEATURES) feature.attach?.(bridge);
   // `?fake-hooks` (the still-rows trips, 2026-11-11): a trip adds rows to the corpus and ends a run that changed
   // something, so a page reads again with rows it did not draw.
-  if (params.has("fake-hooks")) Object.assign(window, { __fake: { corpus: CORPUS, endRuns: endRunsChanged, inboxNew: () => addInboxItem(), runNew: () => addFakeRuns(), monitorDown: () => downFakeMonitor() } });
+  // `emit` (the monitors-builds pass): any event, so a probe on a real backend, which emits none, can end a run.
+  if (params.has("fake-hooks")) Object.assign(window, { __fake: { corpus: CORPUS, endRuns: endRunsChanged, inboxNew: () => addInboxItem(), runNew: () => addFakeRuns(), monitorDown: () => downFakeMonitor(), emit: (event: string, payload: unknown) => bridge.emit(event, payload) } });
 }
 
 /**

@@ -7,8 +7,8 @@
  *   keeps each configuration's newest build and tallies the set by tone, so
  *   the failing configurations are the `err` lines of that tally. No new
  *   command, and no second definition of *failing*.
- * - **Monitors**: monitors down, off `monitor_roster`, the Monitors tab's own
- *   read. A paused (tombstoned) monitor is not down; it is not watching. A
+ * - **Monitors**: monitors down, `monitors_down`: the Monitors tab's own rows
+ *   and state rule, counted by the backend. A paused (tombstoned) monitor is not down; it is not watching. A
  *   hidden one is left out too: its alerts reach nobody, so the count would be
  *   a state the reader cannot act on.
  *
@@ -23,7 +23,7 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS } from "../ipc";
-import { monitorRoster, type MonitorRow } from "../ipc/assets";
+import { monitorsDown, type MonitorRow } from "../ipc/assets";
 import { listEntities, type EntityPage } from "../ipc/entity";
 import type { SourceSyncStatus } from "../ipc/sources";
 
@@ -70,7 +70,9 @@ const REAL_PORTS: BadgePorts = {
       1,
       0,
     ).then(failingIn),
-  monitorsDown: () => monitorRoster().then(downIn),
+  // A count, not the roster: the roster carries each monitor's day of samples, and this is read on every sync's end,
+  // on every page (PR #2479, the monitors-builds pass: 17.8 MB after a day at 218 monitors).
+  monitorsDown: () => monitorsDown(),
   listen: (event, handler) => tauriListen(event, handler),
 };
 

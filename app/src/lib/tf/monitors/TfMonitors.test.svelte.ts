@@ -998,3 +998,24 @@ test("the page shown again reads the sources again, so a token entered in Settin
   expect(target.querySelector(".tf-stale")).toBeNull();
   expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).toContain("synced");
 });
+
+test("a kept page's bars move with each roster read: a check that went down since the page first drew shows down", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(NOW);
+    let read = [monitor("kuma:1", "payouts /health", { samples: [{ taken_at: "2026-10-16T13:50:00Z", state: "up" }] })];
+    const props = $state({ ready: true, rest: [] as string[], job: null, ports: ports({ monitorRoster: async () => read }), syncRevision: 0 });
+    view = mount(TfMonitors, { target, props });
+    await settle();
+    // Two hours on, a sync brings a sample of the check down; the page reads the roster again.
+    vi.setSystemTime(new Date(NOW.getTime() + 2 * 3_600_000));
+    read = [monitor("kuma:1", "payouts /health", { state: "down", samples: [{ taken_at: "2026-10-16T13:50:00Z", state: "up" }, { taken_at: "2026-10-16T15:55:00Z", state: "down" }] })];
+    props.syncRevision = 1;
+    await settle();
+    const strip = target.querySelector<HTMLElement>(".tf-mbar")!;
+    // The newest half-hour is the strip's right end: down, painted in --err, not a gap.
+    expect(strip.style.getPropertyValue("background-image")).toMatch(/var\(--err\) 141px 143px, transparent 143px 144px\)$/);
+  } finally {
+    vi.useRealTimers();
+  }
+});

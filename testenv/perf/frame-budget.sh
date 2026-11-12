@@ -10,6 +10,9 @@
 #
 # --real <port>  the windowless backend on a real database (examples/headless_ipc.rs) instead of the fixture at
 #                scale (?fake-scale); the budget's "real" lines then apply
+#
+# Then the long-run probe (long.mjs): Monitors left open while every source's run ends every 5 s for 2 minutes, then
+# kept hidden behind the Inbox for 1, against the budget's `long` lines: growth, main-thread time, long tasks, hovers.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
@@ -38,5 +41,9 @@ scrollers=$?
 tail -1 "$out/scrollers.log"
 node "$here/budget.mjs" "$out/run.json" --lines "$lines" --md "$out/budget.md"
 budget=$?
+"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/long.mjs" --app "http://127.0.0.1:$port/?fake-ipc&fake-hooks&$corpus#/inbox" \
+  --out "$out/long.json" --lines "$lines" --minutes 2 --every 5 --then-minutes 1 > "$out/long.log"
+long=$?
+tail -16 "$out/long.log"
 echo "frame-budget: results in $out"
-[ $budget -eq 0 ] && [ $scrollers -eq 0 ]
+[ $budget -eq 0 ] && [ $scrollers -eq 0 ] && [ $long -eq 0 ]

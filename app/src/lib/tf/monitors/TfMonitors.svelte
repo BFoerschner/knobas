@@ -210,7 +210,12 @@
     now?: Date;
   } & RoleFrameProps = $props();
 
-  const now = $derived(fixedNow ?? new Date());
+  /**
+   * The clock the bars, the chips' *since* and the header's *synced* read: the time of the last roster read. It was
+   * read once, as the page first drew, and a kept page's bars stopped at that hour, leaving out every sample since.
+   */
+  let readAt = $state(new Date());
+  const now = $derived(fixedNow ?? readAt);
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");
   /** The monitor the address opens the roster at, marked: an inbox alert's, a set member's. */
   const markedId = $derived(rest[0] === MONITOR_AT ? (rest[1] ?? null) : null);
@@ -264,6 +269,7 @@
       .then((rows) => {
         if (!live) return;
         keepRefreshers(rows);
+        readAt = new Date();
         roster = rows;
         settleRoster(rows);
       }, fail)

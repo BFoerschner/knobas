@@ -893,6 +893,24 @@ pub async fn monitor_roster<R: tauri::Runtime>(
     Ok(rows)
 }
 
+/// How many monitors on the roster read *down*, hidden and paused ones left
+/// out: the nav's Monitors badge (PR #2479, the monitors-builds pass).
+///
+/// Apart from [`monitor_roster`] because the badge is read on every sync's
+/// end, on every page, and the roster with its samples was the whole day of
+/// every monitor; the count is the roster's own rows and state rule
+/// (`assets::monitors_down`), so it cannot disagree with the tab.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn monitors_down(lifecycle: State<'_, Lifecycle>) -> Result<u32, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::monitors_down(&pool, lifecycle.registry()).await
+}
+
 /// The write ops each source in `rows` offers, for `MonitorRow::actions`
 /// (issue #452).
 ///

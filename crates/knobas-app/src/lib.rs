@@ -790,6 +790,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // foot for the same reason.
         commands::app::smooth_scrolling,
         commands::app::set_smooth_scrolling,
+        // The nav's Monitors badge as a count (PR #2479, the monitors-builds
+        // pass), appended at the foot for the same reason.
+        commands::assets::monitors_down,
     ]
 }
 

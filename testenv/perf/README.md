@@ -31,6 +31,7 @@ trace on every state write, which made the measured app's filter keys several ti
 | `probe.js` | the page half: every frame, the time from its callback to the end of its rendering (`frame work`), script by kind, long animation frames, event timings, IPC |
 | `frames.mjs` | the trace readers: what reached the display (the compositor's frame reporters), how many elements each style pass computed, the main thread's time by kind, its longest tasks |
 | `budget.mjs`, `budget.json` | the lines, per corpus (`fake`, `real`), and the check |
+| `long.mjs` | the long-run probe (the monitors-builds pass, 2026-11-12): Monitors left open while every source's run ends every `--every` seconds, then kept hidden behind the Inbox; main-thread time a minute, the longest task, a small read's wait, DOM, listener and heap growth, and a hover's cost at 1x and 4x, against `budget.json`'s `long` lines. `--attach` joins a running app (knobas's own WebView2) and ends runs through Tauri's event bridge |
 | `scrollers.mjs` | every box that scrolls on the app's pages, light and dark, with its own background and the colour under it; `--strict` fails on a transparent one |
 | `invalidations.mjs` | why a scroll restyles what it does, from Chromium's own invalidation records: for a rule that restyles far more than the rows that changed |
 | `profile.mjs` | a CPU profile of one moment (`--setup`, then `--act`), by function, for a slow key or page switch the frame probe names only by its task |

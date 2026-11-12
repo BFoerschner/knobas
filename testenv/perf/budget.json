@@ -1,5 +1,5 @@
 {
- "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend.",
+ "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend. `long` is long.mjs's (the monitors-builds pass, 2026-11-12): Monitors shown while every source's run ends every 5 s, then kept hidden behind the Inbox. A hover is its handlers and the frame that draws it, not the wait for that frame; the 4x line is 33 ms. The real ipcP95 is a debug backend's.",
  "real": {
   "scroll": {
    "tickets-board": {
@@ -189,6 +189,26 @@
      "switchMs": 200
     }
    }
+  },
+  "long": {
+   "shown": {
+    "taskMsPerMin": 1500,
+    "longestTask": 50,
+    "hover1xP95": 16.7,
+    "hover4xP95": 33,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5,
+    "ipcP95": 1500
+   },
+   "hidden": {
+    "taskMsPerMin": 1500,
+    "longestTask": 50,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5,
+    "ipcP95": 1500
+   }
   }
  },
  "fake": {
@@ -267,6 +287,26 @@
     "4": {
      "switchMs": 200
     }
+   }
+  },
+  "long": {
+   "shown": {
+    "taskMsPerMin": 1500,
+    "longestTask": 50,
+    "hover1xP95": 16.7,
+    "hover4xP95": 33,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5,
+    "ipcP95": 50
+   },
+   "hidden": {
+    "taskMsPerMin": 1500,
+    "longestTask": 50,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5,
+    "ipcP95": 50
    }
   }
  }

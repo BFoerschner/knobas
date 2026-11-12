@@ -944,14 +944,16 @@ pub struct MonitorRow {
     /// the source's configured adapter kind, so the roster builds no source.
     /// A turned-off source's monitors are not on the roster at all.
     pub refreshes: bool,
-    /// Its samples inside the bar's 24-hour window, **oldest first**.
+    /// Its samples inside the bar's 24-hour window, **oldest first**, thinned
+    /// to those that change what the bar draws ([`thin_samples`]).
     ///
-    /// Raw and not bucketed, because the bucketing is the tab's and is tested
-    /// there: the backend would otherwise own a number of segments that only a
-    /// stylesheet knows. Bounded by the poll interval's own floor -- Uptime
-    /// Kuma declares 45 s (`SourceDescriptor::min_sync_interval_secs`, #1187),
-    /// so at most 1 920 per monitor per day -- which is why the window and not
-    /// a `limit` is what bounds it.
+    /// Not bucketed, because the bucketing is the tab's and is tested there:
+    /// the backend would otherwise own a number of segments that only a
+    /// stylesheet knows. Raw they were up to 1 920 a monitor (one a minute,
+    /// more at Uptime Kuma's 45 s floor), 17.8 MB for 218 monitors after a
+    /// day, and the nav's badge read them all on every sync's end (PR #2479,
+    /// the monitors-builds pass). Thinned, a steady monitor's day is about a
+    /// hundred.
     pub samples: Vec<MonitorSample>,
 }
 
@@ -2081,6 +2083,52 @@ const ROSTER_SAMPLES: &str = "select entity_id, taken_at, state
    and taken_at >= now() - make_interval(hours => $2::int)
  order by entity_id asc, taken_at asc";
 
+/// The longest a steady run of samples goes without one kept, in
+/// [`thin_samples`]: under half the bar's 30-minute bucket, so every bucket a
+/// run passes through keeps one of its samples.
+const THIN_STEP: chrono::TimeDelta = chrono::TimeDelta::minutes(14);
+
+/// A monitor's samples, oldest first, thinned to those that change what the
+/// Monitors tab draws (PR #2479, the monitors-builds pass): the bar's worst
+/// state in each half-hour, its gaps, and how long a monitor has been down.
+///
+/// The tab buckets by the reader's clock, so no bucket's edges are known here,
+/// and the rule holds for any edges. A sample is kept when it is the first or
+/// the last, when its state differs from the one before or after it (each
+/// run of one state keeps both its ends), when [`THIN_STEP`] has passed since
+/// the last one kept, or when the next one is more than [`THIN_STEP`] away
+/// (the edge of a gap). Then any 30 minutes that held a sample of some state
+/// still hold one: the run's own end lies in them, or the run spans them and
+/// its kept samples are under 28 minutes apart. The trailing run of *down*
+/// keeps its first sample, which is what *since 12:40* reads.
+#[must_use]
+pub fn thin_samples(samples: Vec<MonitorSample>) -> Vec<MonitorSample> {
+    let n = samples.len();
+    if n <= 2 {
+        return samples;
+    }
+    let mut keep = vec![false; n];
+    let mut last_kept: Option<chrono::DateTime<chrono::Utc>> = None;
+    for at in 0..n {
+        let sample = &samples[at];
+        let edge = at == 0
+            || at == n - 1
+            || samples[at - 1].state != sample.state
+            || samples[at + 1].state != sample.state
+            || samples[at + 1].taken_at - sample.taken_at > THIN_STEP;
+        let due = last_kept.is_some_and(|kept| sample.taken_at - kept >= THIN_STEP);
+        if edge || due {
+            keep[at] = true;
+            last_kept = Some(sample.taken_at);
+        }
+    }
+    samples
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(sample, kept)| kept.then_some(sample))
+        .collect()
+}
+
 /// The assets these monitors are attached to, by `monitored-by`.
 ///
 /// **Undirected**, like every other reader of this relation: a link is one row
@@ -2189,13 +2237,12 @@ pub async fn monitor_roster(
             let payload: serde_json::Value = row.try_get("payload")?;
             let declared = declarations.get(&source_id, MONITOR_KIND);
             let reading = reading_of(&payload, declared);
-            let samples = samples.remove(&entity_id).unwrap_or_default();
-            let state = match samples.last() {
-                Some(newest) => newest.state.clone(),
-                None => declared.and_then(|paths| {
-                    knobas_core::payload::resolve_string(&payload, &paths.status_name)
-                }),
-            };
+            let samples = thin_samples(samples.remove(&entity_id).unwrap_or_default());
+            let state = state_of(
+                samples.last().map(|newest| &newest.state),
+                &payload,
+                declared,
+            );
             Ok(MonitorRow {
                 source_id,
                 name: row.try_get("title")?,
@@ -2226,6 +2273,89 @@ pub async fn monitor_roster(
             })
         })
         .collect()
+}
+
+/// A roster row's [`MonitorRow::state`]: the newest sample's in the window
+/// (`newest`, which may itself have read nothing), and the mirror's declared
+/// state only where the window holds no sample. [`monitor_roster`] and
+/// [`monitors_down`] both ask it, so the badge counts what the tab draws.
+fn state_of(
+    newest: Option<&Option<String>>,
+    payload: &serde_json::Value,
+    declared: Option<&knobas_core::payload::KindPaths>,
+) -> Option<String> {
+    match newest {
+        Some(state) => state.clone(),
+        None => declared
+            .and_then(|paths| knobas_core::payload::resolve_string(payload, &paths.status_name)),
+    }
+}
+
+/// The newest sample of each of these monitors inside the bar's window.
+const NEWEST_SAMPLES: &str = "select distinct on (entity_id) entity_id, state
+  from knobas.monitor_sample
+ where entity_id = any($1::text[])
+   and taken_at >= now() - make_interval(hours => $2::int)
+ order by entity_id asc, taken_at desc";
+
+/// How many monitors on the roster read *down*: the nav's badge (PR #2479,
+/// the monitors-builds pass). A tombstoned monitor is paused, not down, and a
+/// hidden one reaches nobody, so neither counts.
+///
+/// The roster's own rows and its own state rule ([`state_of`]), with the
+/// newest sample of each in place of its day: the badge read the whole roster
+/// on every sync's end, 17.8 MB after a day at 218 monitors, and the app went
+/// slow everywhere as the day filled.
+///
+/// # Errors
+///
+/// [`IpcError`] if a read fails.
+pub async fn monitors_down(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<u32, IpcError> {
+    let fillers =
+        crate::sources::crud::fillers(pool, registry, knobas_source::role::MONITORING).await?;
+    let mut rows = Vec::new();
+    for row in sqlx::query(ROSTER)
+        .bind(MONITOR_KIND)
+        .bind(&fillers)
+        .fetch_all(pool)
+        .await?
+    {
+        if row.try_get::<bool, _>("tombstoned")? || row.try_get::<bool, _>("hidden")? {
+            continue;
+        }
+        rows.push(row);
+    }
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let ids: Vec<String> = rows
+        .iter()
+        .map(|row| row.try_get("entity_id"))
+        .collect::<Result<_, _>>()?;
+    let mut newest: HashMap<String, Option<String>> = HashMap::new();
+    for sample in sqlx::query(NEWEST_SAMPLES)
+        .bind(&ids)
+        .bind(BAR_WINDOW_HOURS)
+        .fetch_all(pool)
+        .await?
+    {
+        newest.insert(sample.try_get("entity_id")?, sample.try_get("state")?);
+    }
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let mut down = 0_u32;
+    for row in &rows {
+        let entity_id: String = row.try_get("entity_id")?;
+        let source_id: String = row.try_get("source_id")?;
+        let payload: serde_json::Value = row.try_get("payload")?;
+        let declared = declarations.get(&source_id, MONITOR_KIND);
+        if state_of(newest.get(&entity_id), &payload, declared).as_deref() == Some("down") {
+            down += 1;
+        }
+    }
+    Ok(down)
 }
 
 /// Hide one monitor from the Monitors tab, or show it again; answers whether
@@ -6850,6 +6980,92 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    /// Samples a minute apart from midnight, one state a minute as `states` spells them (`u`p, `d`own, `w`arn, `-` none).
+    fn minutes(states: &str) -> Vec<MonitorSample> {
+        let start = chrono::DateTime::parse_from_rfc3339("2026-11-12T00:00:00Z")
+            .unwrap()
+            .to_utc();
+        states
+            .chars()
+            .enumerate()
+            .map(|(at, word)| MonitorSample {
+                taken_at: start + chrono::TimeDelta::minutes(i64::try_from(at).unwrap()),
+                state: match word {
+                    'u' => Some("up".to_owned()),
+                    'd' => Some("down".to_owned()),
+                    'w' => Some("warn".to_owned()),
+                    _ => None,
+                },
+            })
+            .collect()
+    }
+
+    /// The states each 30 minutes starting at `from` (seconds after midnight) holds: what one bucket of the bar sees.
+    fn bucket(samples: &[MonitorSample], from: i64) -> BTreeSet<Option<String>> {
+        let start = chrono::DateTime::parse_from_rfc3339("2026-11-12T00:00:00Z")
+            .unwrap()
+            .to_utc()
+            + chrono::TimeDelta::seconds(from);
+        let end = start + chrono::TimeDelta::minutes(30);
+        samples
+            .iter()
+            .filter(|s| s.taken_at >= start && s.taken_at < end)
+            .map(|s| s.state.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_steady_day_thins_to_about_a_hundred_samples() {
+        let day = minutes(&"u".repeat(1440));
+        let thinned = thin_samples(day.clone());
+        assert!(thinned.len() <= 110, "{}", thinned.len());
+        assert_eq!(thinned.first(), day.first());
+        assert_eq!(thinned.last(), day.last());
+    }
+
+    #[test]
+    fn every_half_hour_keeps_each_state_it_held_wherever_its_edges_fall() {
+        // A day of runs, flaps, a stretch with no reading and a gap in the polls, from a fixed seed.
+        let mut seed = 0x2479_u64;
+        let mut states = String::new();
+        let mut word = 'u';
+        for _ in 0..1440 {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            if (seed >> 33) % 23 == 0 {
+                word = ['u', 'd', 'w', '-'][usize::try_from((seed >> 40) % 4).unwrap()];
+            }
+            states.push(word);
+        }
+        let mut raw = minutes(&states);
+        // The polls stopped for 40 minutes, then came back.
+        raw.retain(|s| {
+            !(s.taken_at.timestamp() % 86_400 >= 600 * 60
+                && s.taken_at.timestamp() % 86_400 < 640 * 60)
+        });
+        let thinned = thin_samples(raw.clone());
+        assert!(
+            thinned.len() < raw.len() / 4,
+            "{} of {}",
+            thinned.len(),
+            raw.len()
+        );
+        for from in (0..86_400).step_by(37) {
+            assert_eq!(
+                bucket(&thinned, from),
+                bucket(&raw, from),
+                "the half-hour from {from} s"
+            );
+        }
+    }
+
+    #[test]
+    fn a_monitor_down_since_noon_keeps_the_sample_that_says_since_when() {
+        let raw = minutes(&format!("{}{}", "u".repeat(720), "d".repeat(300)));
+        let thinned = thin_samples(raw.clone());
+        assert!(thinned.contains(&raw[720]), "the first down sample");
+        assert!(!thinned.contains(&raw[721]));
+    }
 
     fn store() -> Arc<dyn SecretStore> {
         Arc::new(knobas_secrets::MemoryStore::new())

@@ -412,6 +412,14 @@ export function monitorRoster(): Promise<MonitorRow[]> {
 }
 
 /**
+ * How many monitors on the roster read *down*, hidden and paused ones left out: the nav's badge (PR #2479). The
+ * roster's own rows and state rule, without each monitor's day of samples, which the badge read on every sync's end.
+ */
+export function monitorsDown(): Promise<number> {
+  return invoke<number>("monitors_down");
+}
+
+/**
  * Every open alert in the estate, newest first.
  *
  * **One read for both surfaces.** The top strip's count is this list's length

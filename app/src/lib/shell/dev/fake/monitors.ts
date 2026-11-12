@@ -424,6 +424,11 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
       return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id));
     },
+    // The nav's badge (PR #2479): the roster's down rows, as the server counts them.
+    monitors_down: () => {
+      const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
+      return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id) && row.state === "down" && !row.tombstoned && !row.hidden).length;
+    },
     // The Monitors tab's Pause / Resume (#452). Answers the queued row the
     // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
     // behind it, so the honest fixture is "knobas took the write" and a
