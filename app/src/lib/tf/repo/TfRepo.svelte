@@ -133,13 +133,14 @@
   }
 
   /**
-   * The repositories whose header has looked for a branch to propose this session. The first look waits
-   * {@link FIRST_SEARCH_AFTER_MS}: the branch list now comes from the mirror at once, and the look's branch views (each
-   * a compare on the forge) went out beside the page's own first reads and slowed the tree on a repository with no
-   * clone (the inner-pages pass, 2026-11-12). The button's room is held meanwhile, as while it looks.
+   * The repositories whose header has looked for a branch to propose this session. On a repository's first look, while
+   * Files is shown and has not drawn its tree, the look waits for it, at most {@link FIRST_SEARCH_AFTER_MS}: the branch
+   * list now comes from the mirror at once, and the look's branch views (each a compare on the forge) went out beside
+   * the tree's own first read and slowed it on a repository with no clone (the inner-pages pass, 2026-11-12). The
+   * button's room is held meanwhile, as while it looks.
    */
   const searched = new Set<string>();
-  const FIRST_SEARCH_AFTER_MS = import.meta.env.MODE === "test" ? 0 : 1000;
+  const FIRST_SEARCH_AFTER_MS = 1000;
 </script>
 
 <script lang="ts">
@@ -311,12 +312,26 @@
   /** The open tab's re-reads of a refresh: *Refreshing…* waits for them too, as the job page's does (#2134). */
   const tabRereads = provideTabRereads();
 
+  /** Whether Files has drawn its tree on this repository yet, which the header's first look waits for. */
+  let treeDrew = drewSignal();
+  function drewSignal() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    const signal = { done: false, promise, tell: () => {} };
+    signal.tell = () => {
+      signal.done = true;
+      resolve();
+    };
+    return signal;
+  }
+
   $effect(() => {
     if (!ready || repoId === null) return;
     void attempt;
     const id = repoId;
     let live = true;
     const alive = () => live;
+    treeDrew = drewSignal();
     detail = null;
     failed = null;
     missing = false;
@@ -746,7 +761,7 @@
       const id = untrack(() => repoId);
       if (asked.length > 0 && id !== null && !searched.has(id)) {
         searched.add(id);
-        if (FIRST_SEARCH_AFTER_MS > 0) await new Promise((resolve) => setTimeout(resolve, FIRST_SEARCH_AFTER_MS));
+        if (untrack(() => slot) === "files" && !treeDrew.done) await Promise.race([treeDrew.promise, new Promise((resolve) => setTimeout(resolve, FIRST_SEARCH_AFTER_MS))]);
         if (!live) {
           searched.delete(id);
           return;
@@ -961,6 +976,7 @@
                   {refreshed}
                   refusal={commitRefused}
                   treeSections={detail?.tree ?? null}
+                  ondrew={() => treeDrew.tell()}
                 />
               {:else if one === "commit" && placeOf(one).commit !== null}
                 <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />

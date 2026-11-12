@@ -166,6 +166,7 @@
     pipelines = appPipelines,
     stepCommands = appCommandSteps,
     treeSections = null,
+    ondrew,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped" | "localTree" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -207,7 +208,13 @@
     stepCommands?: CommandSteps;
     /** How the source names the tree's sections by path (#2298, the repository's `EntityDetail.tree`); `null` asks a deep link's sections only once its listings name them. */
     treeSections?: TreeSections | null;
+    /** Told once the tree has drawn, or could not be: the header holds its first look until then (the inner-pages pass). */
+    ondrew?: () => void;
   } = $props();
+
+  $effect(() => {
+    if (listings[""] !== undefined || treeFailed !== null) untrack(() => ondrew?.());
+  });
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
   let listings = $state<Record<string, TreeEntry[]>>({});
