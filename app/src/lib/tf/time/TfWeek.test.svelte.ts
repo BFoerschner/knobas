@@ -104,11 +104,8 @@ async function render(over: { week?: string | null; running?: RunningTimer | nul
           return answer(days);
         },
         pendingWrites: async () => over.writes ?? [],
-        getEntity: async (id: string) => {
-          const kind = KINDS[id];
-          if (kind === undefined) throw { code: "not_found", message: "no", source_id: null };
-          return { row: { entity_id: id, kind } } as never;
-        },
+        entityBriefs: async (ids: string[]) =>
+          ids.flatMap((id) => (KINDS[id] === undefined ? [] : [{ entity_id: id, kind: KINDS[id]!, source_id: "jira", title: id, state: null }])),
       },
     },
   });

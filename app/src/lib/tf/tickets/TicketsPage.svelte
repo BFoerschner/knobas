@@ -110,6 +110,7 @@
   import type { RoleFrameProps } from "../page-entry";
 
   import {
+    cardReads,
     getEntity,
     jobReach,
     listEntities,
@@ -139,7 +140,7 @@
   import Marked from "../filter/Marked.svelte";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
-  import { columnKey, createBoardReader, messageOf, viewSession } from "./board-reader.svelte";
+  import { columnKey, createBoardReader, messageOf, PREVIEW_PAUSE_MS, viewSession } from "./board-reader.svelte";
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import { needles as readNeedles } from "./needles";
   import TicketCard from "./TicketCard.svelte";
@@ -188,6 +189,7 @@
       detail: getEntity,
       listEntities,
       jobReach,
+      cardReads,
       suggestions: () => filterSuggestions(),
       views: ticketViews,
       saveView: saveTicketView,
@@ -198,6 +200,7 @@
     },
     viewId = null,
     typingPause = 90,
+    previewPause = PREVIEW_PAUSE_MS,
     back = null,
     sync,
     syncRevision = 0,
@@ -211,6 +214,8 @@
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
+    /** How long, in ms, a moved selection waits for the next move before its preview is read: the launcher's 120. */
+    previewPause?: number;
     /** Where `Esc` goes, which the sub-tasks bar's hint names. */
     back?: EscTarget | null;
   } & RoleFrameProps = $props();
@@ -365,6 +370,7 @@
   // Read once: the reader owns the typing pause and the generations.
   const reader = createBoardReader(ports, {
     typingPause,
+    previewPause,
     sessions: session,
     view: () => ({ columns: ownColumns, listed: view?.columns ?? [], layout: saved.layout, lanes: saved.lanes }),
   });

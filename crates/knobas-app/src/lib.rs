@@ -799,6 +799,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The instant-open pass (2026-11-12): Docs reads what it draws.
         commands::entity::docs_outline,
         commands::entity::docs_nodes,
+        // The query audit (PR #2479, 2026-11-12): what many ids are, in one read.
+        commands::entity::entity_briefs,
+        commands::entity::card_reads,
     ]
 }
 

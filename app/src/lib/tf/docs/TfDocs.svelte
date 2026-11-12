@@ -240,7 +240,7 @@
     searchPause?: number;
   }
 
-  type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "unlink" | "search" | "launcherHome">;
+  type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "entityBriefs" | "createLink" | "unlink" | "search" | "launcherHome">;
 
   let {
     ready,
@@ -345,7 +345,11 @@
     const rows = ticket === null ? [] : await io.jobReach(ticket);
     const steps = [...new Set(rows.filter((r) => r.step !== r.entity_id).map((r) => r.step))];
     const titles = new Map<string, string>();
-    if (linkPorts && steps.length > 0) {
+    if (linkPorts?.entityBriefs && steps.length > 0) {
+      // Every step's title in one read (the query audit, 2026-11-12: one `get_entity` a step, 19 KB a page).
+      const briefs = await linkPorts.entityBriefs(steps).catch(() => []);
+      for (const brief of briefs) titles.set(brief.entity_id, brief.title);
+    } else if (linkPorts && steps.length > 0) {
       const read = await Promise.allSettled(steps.map((id) => linkPorts!.getEntity(id)));
       read.forEach((answer, i) => {
         if (answer.status === "fulfilled") titles.set(steps[i]!, answer.value.row.title);
@@ -1267,7 +1271,7 @@
   async function jobTicket(key: string): Promise<string | null> {
     if (!linkPorts) return null;
     const sources = await linkPorts.listSources().catch(() => []);
-    const found = await resolveTicket(key, sources, linkPorts.getEntity);
+    const found = await resolveTicket(key, sources, linkPorts.getEntity, linkPorts.entityBriefs);
     return found?.row.entity_id ?? null;
   }
 

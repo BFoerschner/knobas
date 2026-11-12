@@ -197,6 +197,10 @@ vi.mock("../ipc/entity", () => ({
   // No source view (#661): the panel is the mirror's, as before.
   entityView: () => Promise.resolve(null),
   getEntity: () => deferred(DETAIL),
+  // What many ids are in one read (the query audit): deferred like `getEntity`.
+  entityBriefs: () => deferred([]),
+  batchedBrief: () => () => deferred(null),
+  cardReads: () => deferred({ reached: [], sections: [] }),
   getNote: () => deferred(NOTE),
   saveNote: () => deferred(NOTE),
   deleteNote: () => deferred(true),

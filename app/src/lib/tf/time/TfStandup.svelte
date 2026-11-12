@@ -58,7 +58,7 @@
   import {
     actionItemTicket as realActionItemTicket,
     createActionItemTicket as realCreateTicket,
-    getEntity as realGetEntity,
+    entityBriefs as realEntityBriefs,
     getNote as realGetNote,
     listProjects as realListProjects,
     publishStandupProtocol as realPublish,
@@ -118,7 +118,8 @@
     standupPublishTarget: typeof realPublishTarget;
     createActionItemTicket: typeof realCreateTicket;
     actionItemTicket: typeof realActionItemTicket;
-    getEntity: typeof realGetEntity;
+    /** What the linked tickets and the publish target are: their titles and states, in one read for many. */
+    entityBriefs: typeof realEntityBriefs;
     listProjects: typeof realListProjects;
     listSources: typeof realListSources;
     listAdapters: typeof realListAdapters;
@@ -164,7 +165,7 @@
     standupPublishTarget: realPublishTarget,
     createActionItemTicket: realCreateTicket,
     actionItemTicket: realActionItemTicket,
-    getEntity: realGetEntity,
+    entityBriefs: realEntityBriefs,
     listProjects: realListProjects,
     listSources: realListSources,
     listAdapters: realListAdapters,
@@ -263,10 +264,10 @@
       }
       const [sources, page] = await Promise.all([
         io.listSources().catch(() => []),
-        io.getEntity(stored.parent).catch(() => null),
+        io.entityBriefs([stored.parent]).then((briefs) => briefs[0] ?? null, () => null),
       ]);
       const source = sources.find((candidate) => candidate.id === stored.source_id)?.display_name ?? stored.source_id;
-      target = { stored, reading: `${source} › ${page?.row.title ?? keyOf(stored.parent)}` };
+      target = { stored, reading: `${source} › ${page?.title ?? keyOf(stored.parent)}` };
     } catch {
       target = null;
     }
@@ -736,7 +737,10 @@
     settleEchoes(noteEchoes(note), (one) => one.write === writeId);
     let status: string | null = null;
     try {
-      status = (await io.getEntity(ticket)).row.state?.text ?? null;
+      const brief = (await io.entityBriefs([ticket]))[0];
+      // Not mirrored yet: the key is enough to open it; the status comes with the next read.
+      if (brief === undefined) return;
+      status = brief.state?.text ?? null;
     } catch {
       // The key is enough to open it; the status comes with the next read.
       return;
@@ -750,17 +754,16 @@
   async function readLinked(links: LinkEntry[], items: readonly { text: string }[]) {
     const found = itemTickets(links, items);
     linked = found.map((match) => ({ ...match, status: null }));
-    await Promise.all(
-      found.map(async ({ ticket }) => {
-        let status: string | null = null;
-        try {
-          status = (await io.getEntity(ticket)).row.state?.text ?? null;
-        } catch {
-          return;
-        }
-        linked = linked.map((known) => (known.ticket === ticket ? { ...known, status } : known));
-      }),
-    );
+    if (found.length === 0) return;
+    // Every linked ticket's status in one read (the query audit, 2026-11-12: one `get_entity` a ticket).
+    let briefs: Awaited<ReturnType<typeof io.entityBriefs>>;
+    try {
+      briefs = await io.entityBriefs([...new Set(found.map(({ ticket }) => ticket))]);
+    } catch {
+      return;
+    }
+    const status = new Map(briefs.map((brief) => [brief.entity_id, brief.state?.text ?? null]));
+    linked = linked.map((known) => (status.has(known.ticket) ? { ...known, status: status.get(known.ticket)! } : known));
   }
 
   /** This session's newest create for the item's words, on its way or named, else the ticket the protocol links for them. */

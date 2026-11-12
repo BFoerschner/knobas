@@ -8,7 +8,8 @@
 //! holds.
 
 use knobas_app::commands::entity::{
-    create_link_inner, get_entity_inner, list_entities_inner, promote_context_inner,
+    card_reads_inner, create_link_inner, entity_briefs_inner, get_entity_inner,
+    list_entities_inner, promote_context_inner,
 };
 use knobas_app::sources::Registry;
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
@@ -323,6 +324,7 @@ async fn opening_a_job_twice_promotes_its_ticket_once() {
             include_deleted: false,
             reach: None,
             role: None,
+            parent: None,
         },
         200,
         0,
@@ -366,6 +368,7 @@ async fn list_entities_scoped_by_reach_keeps_what_the_ticket_reaches() {
         include_deleted: false,
         reach: Some(ticket.clone()),
         role: None,
+        parent: None,
     };
     let none = knobas_core::payload::Declarations::empty();
     let builds = list_entities_inner(
@@ -394,4 +397,198 @@ async fn list_entities_scoped_by_reach_keeps_what_the_ticket_reaches() {
         everything.total, 2,
         "the PR and the build, never the ticket"
     );
+}
+
+/// **A card's sections in one read** (the query audit of PR #2479): the
+/// Tickets preview asked `job_reach` and four reach-scoped `list_entities`,
+/// each walking the reach again. `card_reads` walks it once and answers, per
+/// section asked, exactly what `list_entities` answers for that section with
+/// `reach` set, and the reach exactly as `job_reach` does.
+#[tokio::test]
+async fn card_reads_answers_what_the_five_reads_answered() {
+    let pool = pool().await;
+    let key = key();
+    let ticket = issue(&pool, &key, serde_json::json!({})).await;
+    let source = format!("gitea-{key}");
+    let pr = format!("{source}:tidewater/payout-service#1");
+    let build = format!("{source}:build-1");
+    let page = format!("{source}:page-1");
+    let stray = format!("{source}:build-2");
+    item(&pool, &pr, &source, "pr", serde_json::json!({})).await;
+    item(&pool, &build, &source, "build", serde_json::json!({})).await;
+    item(&pool, &page, &source, "page", serde_json::json!({})).await;
+    item(&pool, &stray, &source, "build", serde_json::json!({})).await;
+    create_link_inner(&pool, &ticket, &pr, Some("implements"), None)
+        .await
+        .unwrap();
+    create_link_inner(&pool, &pr, &build, Some("built-by"), None)
+        .await
+        .unwrap();
+    create_link_inner(&pool, &ticket, &page, Some("documents"), None)
+        .await
+        .unwrap();
+
+    let section = |kinds: &[&str], order: EntityOrder, role: Option<&str>| EntityFilter {
+        sources: Vec::new(),
+        kinds: kinds.iter().map(|k| (*k).to_owned()).collect(),
+        updated_within_days: None,
+        context: None,
+        project: None,
+        order,
+        include_deleted: false,
+        reach: None,
+        role: role.map(str::to_owned),
+        parent: None,
+    };
+    let sections = [
+        section(
+            &["pr", "branch", "commit", "repo"],
+            EntityOrder::UpdatedDesc,
+            None,
+        ),
+        section(&["build"], EntityOrder::UpdatedDesc, None),
+        section(&["page"], EntityOrder::TitleAsc, None),
+        section(&[], EntityOrder::LatestPerParent, Some("ci")),
+        section(&["monitor"], EntityOrder::UpdatedDesc, None),
+    ];
+    let registry = Registry::for_process();
+    let answer = card_reads_inner(&pool, &registry, &ticket, &sections, 200)
+        .await
+        .unwrap();
+
+    let reach = knobas_core::reach::reach(&pool, &ticket).await.unwrap();
+    let ids = |rows: &[knobas_core::reach::Reached]| {
+        rows.iter().map(|r| r.entity_id.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ids(&answer.reached),
+        ids(&reach),
+        "the reach, as job_reach answers it"
+    );
+    assert_eq!(answer.sections.len(), sections.len());
+    let declarations = knobas_app::sources::paths::declared_paths(&pool, &registry)
+        .await
+        .unwrap();
+    for (asked, rows) in sections.iter().zip(&answer.sections) {
+        let alone = list_entities_inner(
+            &pool,
+            &registry,
+            &EntityFilter {
+                reach: Some(ticket.clone()),
+                ..asked.clone()
+            },
+            200,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap();
+        let of = |rows: &[knobas_core::entity_list::EntityRow]| {
+            rows.iter()
+                .map(|r| (r.entity_id.clone(), r.path.clone(), r.state.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            of(rows),
+            of(&alone.rows),
+            "{:?} {:?}",
+            asked.kinds,
+            asked.order
+        );
+    }
+    assert_eq!(
+        answer.sections[1]
+            .iter()
+            .map(|r| r.entity_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![build.as_str()],
+        "the build via the PR, not the stray one"
+    );
+}
+
+/// **What many ids are, in one read** (the query audit of PR #2479): the
+/// pages that asked `get_entity` once a row for a kind, a title or a state
+/// ask `entity_briefs` once. Each brief says what the detail's row says, in
+/// the order asked; an id the mirror does not hold is left out where
+/// `get_entity` answers `not_found`, and a withdrawn one is answered as the
+/// detail opens it.
+#[tokio::test]
+async fn entity_briefs_say_what_the_detail_says_in_the_order_asked() {
+    let pool = pool().await;
+    let key = key();
+    let ticket = issue(
+        &pool,
+        &key,
+        serde_json::json!({ "summary": "Retry payouts" }),
+    )
+    .await;
+    let other = issue(&pool, &format!("{key}9"), serde_json::json!({})).await;
+    let pr = format!("gitea-{key}:tidewater/payout-service#2");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ($1, 'gitea', 'Gitea', 'http://x', 'Pat', '{}')",
+    )
+    .bind(format!("gitea-{key}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    item(
+        &pool,
+        &pr,
+        &format!("gitea-{key}"),
+        "pr",
+        serde_json::json!({ "state": "closed", "merged": true }),
+    )
+    .await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&other)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let missing = format!("jira:{key}-NOPE");
+    let asked = vec![
+        pr.clone(),
+        missing.clone(),
+        ticket.clone(),
+        other.clone(),
+        ticket.clone(),
+    ];
+
+    let registry = Registry::for_process();
+    let briefs = entity_briefs_inner(&pool, &registry, &asked).await.unwrap();
+    assert_eq!(
+        briefs
+            .iter()
+            .map(|b| b.entity_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![pr.as_str(), ticket.as_str(), other.as_str()],
+        "in the order asked, the missing id left out, the repeat answered once"
+    );
+    for brief in &briefs {
+        let detail = get_entity_inner(&pool, &registry, &brief.entity_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                brief.kind.as_str(),
+                brief.source_id.as_str(),
+                brief.title.as_str(),
+                &brief.state
+            ),
+            (
+                detail.row.kind.as_str(),
+                detail.row.source_id.as_str(),
+                detail.row.title.as_str(),
+                &detail.row.state
+            ),
+            "{}",
+            brief.entity_id
+        );
+    }
+    assert!(
+        briefs[0].state.is_some(),
+        "the pull request's declared state is read: {:?}",
+        briefs[0]
+    );
+    assert!(get_entity_inner(&pool, &registry, &missing).await.is_err());
 }

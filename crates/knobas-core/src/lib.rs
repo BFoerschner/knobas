@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod asset;
+pub mod briefs;
 pub mod builds;
 pub mod checkout;
 pub mod code_facts;

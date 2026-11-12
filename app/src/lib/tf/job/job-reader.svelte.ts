@@ -43,6 +43,7 @@ export type JobReaderPorts = Pick<
   JobPorts,
   | "listSources"
   | "getEntity"
+  | "entityBriefs"
   | "promoteContext"
   | "listEntities"
   | "visitEntity"
@@ -170,7 +171,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const listed = await ports.listSources().catch(() => [] as SourceFacts[]);
       if (mine !== token) return;
       state.sources = listed;
-      const job = await resolveJob(wanted, listed, ports.getEntity);
+      const job = await resolveJob(wanted, listed, ports.getEntity, ports.entityBriefs);
       if (mine !== token) return;
       state.others = job?.others ?? [];
       const found = job?.ticket ?? null;
@@ -181,13 +182,14 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       void readParent(found, mine);
       void readSubtasks(id, mine);
       void readInherited(id, mine);
-      // The reach starts from the ticket's context, so the context first.
-      await ports.promoteContext(id);
-      if (mine !== token) return;
+      // The reach seeds from the ticket's context's adds, and a context promotion makes is born with none, so the
+      // reach, the sections and Code need not wait for it (the query audit, 2026-11-12: three round trips in a row
+      // before anything below the card was asked).
+      const promoted = ports.promoteContext(id);
       void readReach(id, mine);
       void readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
-      await readCode(id, mine);
+      await Promise.all([promoted, readCode(id, mine)]);
     } catch (cause) {
       if (mine === token) state.failure = ipcErrorMessage(cause);
     }
@@ -260,8 +262,11 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     const parent = parentOf(ticket.row);
     if (parent === null) return;
     try {
-      const read = await ports.getEntity(parent);
-      if (mine === token) state.parentTitle = read.row.title;
+      const title = ports.entityBriefs
+        ? (await ports.entityBriefs([parent]))[0]?.title
+        : (await ports.getEntity(parent)).row.title;
+      if (title === undefined) return;
+      if (mine === token) state.parentTitle = title;
     } catch {
       // The chip says the key alone.
     }

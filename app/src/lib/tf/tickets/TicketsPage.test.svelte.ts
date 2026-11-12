@@ -314,7 +314,7 @@ function harness(
 
 /** Opens the page; the filter's typing pause is none unless a test asks for one. */
 async function open(h: Harness, timedTicket: string | null = null, viewId: string | null = null, typingPause = 0) {
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId, typingPause } });
+  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId, typingPause, previewPause: 0 } });
   await settle();
 }
 

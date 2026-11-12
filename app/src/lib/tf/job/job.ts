@@ -8,7 +8,7 @@
  * links the detail already carries.
  */
 import type { AssetStatus } from "../../ipc/assets";
-import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
+import type { EntityBrief, EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
@@ -56,10 +56,14 @@ export async function resolveTicket(
   segment: string,
   sources: readonly { id: string }[],
   read: (entityId: string) => Promise<EntityDetail>,
+  briefs?: Briefs,
 ): Promise<EntityDetail | null> {
   const candidates = isEntityId(segment) ? [segment] : sources.map((source) => `${source.id}:${segment}`);
-  return (await ticketsOf(candidates, read))[0] ?? null;
+  return (await ticketsOf(candidates, read, briefs))[0] ?? null;
 }
+
+/** What many ids are, in one read (`entity_briefs`): how a job address finds its ticket among the sources' candidates. */
+export type Briefs = (entityIds: string[]) => Promise<readonly Pick<EntityBrief, "entity_id" | "kind">[]>;
 
 /** What a job address opens (#1476): its ticket, and the other sources' tickets under the same key. */
 export interface ResolvedJob {
@@ -79,12 +83,13 @@ export async function resolveJob(
   segment: string,
   sources: readonly { id: string }[],
   read: (entityId: string) => Promise<EntityDetail>,
+  briefs?: Briefs,
 ): Promise<ResolvedJob | null> {
   const named = isEntityId(segment);
   const key = segmentKey(segment);
   const candidates = sources.map((source) => `${source.id}:${key}`);
   if (named && !candidates.includes(segment)) candidates.unshift(segment);
-  const tickets = await ticketsOf(candidates, read);
+  const tickets = await ticketsOf(candidates, read, briefs);
   const ticket = named ? tickets.find((each) => each.row.entity_id === segment) : tickets[0];
   if (ticket === undefined) return null;
   return { ticket, others: tickets.filter((each) => each !== ticket) };
@@ -95,8 +100,22 @@ export async function resolveJob(
  * hold the key answers `not_found`, the ordinary miss; anything else (the
  * database down, the bridge gone) is a failure to say as one, never "not in
  * the mirror", when no candidate answered.
+ *
+ * With `briefs`, the candidates are asked what they are in one read first, and only the tickets among them are read
+ * whole (the query audit, 2026-11-12: a job open read one detail a source, five of six for a miss). Where the briefs
+ * name no ticket, or cannot be read, every candidate is read as before, so a miss or a failure says what it said.
  */
-async function ticketsOf(candidates: string[], read: (entityId: string) => Promise<EntityDetail>): Promise<EntityDetail[]> {
+async function ticketsOf(candidates: string[], read: (entityId: string) => Promise<EntityDetail>, briefs?: Briefs): Promise<EntityDetail[]> {
+  if (briefs !== undefined) {
+    const known = await briefs(candidates).catch(() => null);
+    const tickets = new Set(known?.filter((brief) => brief.kind === "ticket").map((brief) => brief.entity_id));
+    const wanted = candidates.filter((id) => tickets.has(id));
+    if (wanted.length > 0) {
+      const whole = await Promise.allSettled(wanted.map((id) => read(id)));
+      const found = whole.flatMap((answer) => (answer.status === "fulfilled" && answer.value.row.kind === "ticket" ? [answer.value] : []));
+      if (found.length > 0) return found;
+    }
+  }
   const answers = await Promise.allSettled(candidates.map((id) => read(id)));
   const tickets = answers.flatMap((answer) =>
     answer.status === "fulfilled" && answer.value.row.kind === "ticket" ? [answer.value] : [],

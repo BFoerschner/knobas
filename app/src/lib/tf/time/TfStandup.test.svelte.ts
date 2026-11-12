@@ -229,9 +229,8 @@ function open(
         standupPublishTarget: async () => (over.stored === undefined ? { source_id: "wiki", parent: "wiki:900" } : over.stored),
         listSources: async () => [{ id: "wiki", display_name: "Confluence", adapter_kind: "confluence", enabled: true }],
         listAdapters: async () => [{ adapter_kind: "confluence", write_ops: ["create_page"] }],
-        getEntity: async (id: string) => ({
-          row: { entity_id: id, title: id === "wiki:900" ? "Standups" : "Runbook", state: { text: "To Do", tone: "neutral" } },
-        }),
+        entityBriefs: async (ids: string[]) =>
+          ids.map((id) => ({ entity_id: id, kind: "page", source_id: "wiki", title: id === "wiki:900" ? "Standups" : "Runbook", state: { text: "To Do", tone: "neutral" } })),
         publishStandupProtocol: async (_day: string, chosen?: PublishTarget) => {
           calls.published.push(chosen);
           return protocol({ write_id: 5, state: "pending", detail: null, page_entity_id: null, linked: false });

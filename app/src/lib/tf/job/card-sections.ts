@@ -19,7 +19,7 @@
  * (F-109): the card reads them piece by piece as its page fills, the preview all at
  * once ({@link readCardReads}), and both draw through `TfCardRows.svelte`.
  */
-import type { CheckoutView, EntityRow, MiniBoard, Reached } from "../../ipc/entity";
+import type { CardRows, CheckoutView, EntityFilter, EntityRow, MiniBoard, Reached } from "../../ipc/entity";
 import type { AssetDetail } from "../../ipc/assets";
 import { sectionHash } from "../route";
 import { columnsWithout, isDone } from "../tickets/tickets";
@@ -38,7 +38,7 @@ import {
   type Signal,
 } from "./job";
 import { scopedTicket, type ScopedSection } from "./scoped.svelte";
-import { ASSET_LIMIT, readSection, SECTION_READS, type ReachPorts, type SectionRead } from "./sections";
+import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type ReachPorts, type SectionRead } from "./sections";
 
 /** One row of the table. */
 export interface CardSection {
@@ -195,6 +195,11 @@ export async function readUnpushed(checkout: (id: string) => Promise<CheckoutVie
 
 /** The reads {@link readCardReads} makes. */
 export interface CardReadPorts extends ReachPorts {
+  /**
+   * The four sections and the reach in one read over one walk (`card_reads`, the query audit of PR #2479); where left
+   * out, each section is its own `list_entities` and the reach its own `job_reach`, each walking it again.
+   */
+  cardReads?: ((entityId: string, sections: EntityFilter[], limit: number) => Promise<CardRows>) | undefined;
   getAsset: (id: string) => Promise<AssetDetail>;
   /** The ticket system's board under a search, for the Sub-tasks row. */
   ticketBoard: (query: string) => Promise<MiniBoard>;
@@ -208,15 +213,29 @@ export interface CardReadPorts extends ReachPorts {
  * fails counts nothing, as its row draws nothing.
  */
 export async function readCardReads(ports: CardReadPorts, id: string): Promise<CardReads> {
+  const subtasks = ports.ticketBoard(`under:${keyOf(id)}`).then((board) => countSubtasks(board, keyOf(id)), () => ({ total: 0, open: 0 }));
+  const [[code, builds, pages, monitors, reached], counted] = await Promise.all([sectionsOf(ports, id), subtasks]);
+  const [assets, unpushed] = await Promise.all([readAssetLines(ports.getAsset, reached), readUnpushed(ports.entityCheckout, code)]);
+  return { entityId: id, subtasks: counted, code, unpushed, builds, pages, monitors, assets };
+}
+
+/** The four sections' rows, Code, Builds, Pages and Monitors, and the reach: in one read where the ports offer it. */
+async function sectionsOf(ports: CardReadPorts, id: string): Promise<[EntityRow[], EntityRow[], EntityRow[], EntityRow[], Reached[]]> {
+  const order = [SECTION_READS.code, SECTION_READS.builds, SECTION_READS.pages, SECTION_READS.monitors];
+  if (ports.cardReads !== undefined) {
+    const answer = await ports
+      .cardReads(id, order.map((read) => reachFilter(id, read.kinds, read.order, read.role)), SECTION_LIMIT)
+      .catch(() => null);
+    const rows = (at: number) => answer?.sections[at] ?? [];
+    return [rows(0), rows(1), rows(2), rows(3), answer?.reached ?? []];
+  }
   const rows = (read: SectionRead) => readSection(ports.listEntities, id, read).catch(() => [] as EntityRow[]);
-  const [code, builds, pages, monitors, reached, subtasks] = await Promise.all([
+  return Promise.all([
     rows(SECTION_READS.code),
     rows(SECTION_READS.builds),
     rows(SECTION_READS.pages),
     rows(SECTION_READS.monitors),
     ports.jobReach(id).catch(() => [] as Reached[]),
-    ports.ticketBoard(`under:${keyOf(id)}`).then((board) => countSubtasks(board, keyOf(id)), () => ({ total: 0, open: 0 })),
   ]);
-  const [assets, unpushed] = await Promise.all([readAssetLines(ports.getAsset, reached), readUnpushed(ports.entityCheckout, code)]);
-  return { entityId: id, subtasks, code, unpushed, builds, pages, monitors, assets };
 }
+

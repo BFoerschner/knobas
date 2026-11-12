@@ -139,3 +139,21 @@ test("a state with no tone sorts with the settled rows, after every row that ask
   ];
   expect(byAttention(rows).map((row) => row.entity_id)).toEqual(["failed", "open", "draft", "merged"]);
 });
+
+test("with briefs, a job address reads whole only the candidates that are tickets, and answers as without them (the query audit, 2026-11-12)", async () => {
+  const asked: string[] = [];
+  const counted = (entityId: string) => (asked.push(entityId), read(entityId));
+  const briefs = async (candidates: string[]) => candidates.filter((id) => HELD.includes(id)).map((entity_id) => ({ entity_id, kind: "ticket" }));
+  for (const segment of ["PAY-231", "jira:PAY-231", "PAY-9"]) {
+    asked.length = 0;
+    const plain = await resolveJob(segment, SOURCES, read);
+    const briefed = await resolveJob(segment, SOURCES, counted, briefs);
+    expect(briefed?.ticket.row.entity_id).toBe(plain?.ticket.row.entity_id);
+    expect(ids(briefed!.others)).toEqual(ids(plain!.others));
+    expect(asked.every((id) => HELD.includes(id))).toBe(true);
+  }
+  // A miss, and briefs that fail, read every candidate as before, so they say what they said.
+  expect(await resolveJob("PAY-404", SOURCES, counted, briefs)).toBeNull();
+  const down = () => Promise.reject({ code: "database", message: "the database is down" });
+  await expect(resolveJob("PAY-231", SOURCES, down, () => Promise.reject(new Error("bridge")))).rejects.toMatchObject({ code: "database" });
+});

@@ -24,7 +24,7 @@ import type { ViewColumn } from "../../ipc/search";
 import type { Prose } from "../../render/prose";
 import { getAsset, type AssetDetail } from "../../ipc/assets";
 import { entityCheckout, type CheckoutView } from "../../ipc/entity";
-import { cardSections, readCardReads, type CardTable } from "../job/card-sections";
+import { cardSections, readCardReads, type CardReadPorts, type CardTable } from "../job/card-sections";
 import { bridgeTicketBoard } from "../job/ports";
 import type { ReachPorts } from "../job/sections";
 import { TICKET_SYSTEM } from "../roles.svelte";
@@ -70,6 +70,8 @@ export interface BoardReaderPorts {
   ticketBoard?: (query: string) => Promise<MiniBoard>;
   /** A branch's checkout on this machine, for Code's *not pushed*; the bridge's when left out. */
   entityCheckout?: (entityId: string) => Promise<CheckoutView>;
+  /** The card's sections in one read over one walk of the reach (`card_reads`); where left out, a read a section. */
+  cardReads?: CardReadPorts["cardReads"];
 }
 
 /** One view's session: the switches over what it was saved with, and the expanded columns. */
@@ -217,7 +219,21 @@ export interface BoardReaderOptions {
   sessions: ViewSessions;
   /** What the view on screen says about drawing it. */
   view: () => BoardView;
+  /**
+   * How long, in ms, a moved selection waits for the next move before its preview is read: {@link PREVIEW_PAUSE_MS} on
+   * the page, none when left out. The first selection, and one that comes back from none, is read at once.
+   */
+  previewPause?: number;
 }
+
+/**
+ * How long a moved selection settles before its preview is read: the launcher's preview's 120 ms (the query audit,
+ * 2026-11-12: holding j sent seven requests a row, and they queued behind each other for the pool's five connections).
+ */
+export const PREVIEW_PAUSE_MS = 120;
+
+/** How many previews the reader holds, so a ticket selected again draws what it showed at once. */
+const PREVIEWS_HELD = 40;
 
 /** How long, in ms, typed words wait for a board read still out before they are read anyway. */
 export const TYPED_WAIT_MOST = 400;
@@ -227,6 +243,7 @@ export const LIST_SETTLE_MS = 600;
 
 export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderOptions): BoardReader {
   const { typingPause, sessions } = options;
+  const previewPause = options.previewPause ?? 0;
   /**
    * The last answer, replaced whole and never changed in place: `$state.raw`,
    * since the list's *Show N more* reads every ticket and a deep proxy over
@@ -260,6 +277,16 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   /** The ticket previewed, and the generation its answers carry. */
   let previewing: string | null = null;
   let previewed = 0;
+  /** A moved selection's pause before its preview is read. */
+  let settlingPreview: ReturnType<typeof setTimeout> | undefined;
+  /** The previews read, newest last: a ticket selected again draws its own at once while it is read again. */
+  const heldPreviews = new Map<string, { description: Prose | null; around: CardTable | null }>();
+  const holdPreview = (id: string, part: Partial<{ description: Prose | null; around: CardTable | null }>) => {
+    const held = { description: null, around: null, ...heldPreviews.get(id), ...part };
+    heldPreviews.delete(id);
+    heldPreviews.set(id, held);
+    if (heldPreviews.size > PREVIEWS_HELD) heldPreviews.delete(heldPreviews.keys().next().value!);
+  };
 
   const view = $derived(options.view());
   const own = $derived(sessions.views[state.scope.key]);
@@ -485,27 +512,41 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     refresh: () => read(false, false),
     preview(id) {
       if (id === previewing) return;
+      const moved = previewing !== null;
       previewing = id;
       const mine = ++previewed;
+      clearTimeout(settlingPreview);
       if (id === null) return;
-      state.description = null;
-      state.around = null;
-      ports
-        .detail(id)
-        .then((detail) => {
-          if (mine === previewed && detail.description !== null) {
-            state.description = { text: detail.description, markup: detail.markup };
-          }
-        })
-        .catch(() => {});
-      // The card's own rows, through the job-reach read: no context is needed, and
-      // none is promoted to draw this (#1030). A run counts under Builds because
-      // the Builds read answered it, as on the card (#1300).
-      void readCardReads({ ...ports, getAsset: ports.getAsset ?? getAsset, ticketBoard: ports.ticketBoard ?? bridgeTicketBoard, entityCheckout: ports.entityCheckout ?? entityCheckout }, id).then((reads) => {
-        if (mine === previewed) state.around = cardSections(reads);
-      });
+      // The selection draws at once, with what is held of its preview; the reads wait until it stops moving.
+      const held = heldPreviews.get(id);
+      state.description = held?.description ?? null;
+      state.around = held?.around ?? null;
+      const read = () => {
+        if (mine !== previewed) return;
+        ports
+          .detail(id)
+          .then((detail) => {
+            if (mine !== previewed) return;
+            const description = detail.description === null ? null : { text: detail.description, markup: detail.markup };
+            holdPreview(id, { description });
+            if (description !== null) state.description = description;
+          })
+          .catch(() => {});
+        // The card's own rows, through the job-reach read: no context is needed, and
+        // none is promoted to draw this (#1030). A run counts under Builds because
+        // the Builds read answered it, as on the card (#1300).
+        void readCardReads({ ...ports, getAsset: ports.getAsset ?? getAsset, ticketBoard: ports.ticketBoard ?? bridgeTicketBoard, entityCheckout: ports.entityCheckout ?? entityCheckout }, id).then((reads) => {
+          if (mine !== previewed) return;
+          const around = cardSections(reads);
+          holdPreview(id, { around });
+          state.around = around;
+        });
+      };
+      if (moved && previewPause > 0) settlingPreview = setTimeout(read, previewPause);
+      else read();
     },
     close() {
+      clearTimeout(settlingPreview);
       clearTimeout(pausing);
       clearTimeout(settling);
       queued = null;

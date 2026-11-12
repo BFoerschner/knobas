@@ -18,7 +18,7 @@
   import { minutesLabel } from "../../time/format";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { getEntity as realGetEntity } from "../../ipc/entity";
+  import { entityBriefs as realEntityBriefs } from "../../ipc/entity";
   import { pendingWrites as realPendingWrites } from "../../ipc/sources";
   import { weekTimesheet as realWeekTimesheet, type Week } from "../../ipc/time";
   import { targetReading } from "../../shell/timer";
@@ -34,8 +34,8 @@
   interface WeekPorts {
     weekTimesheet: typeof realWeekTimesheet;
     pendingWrites: typeof realPendingWrites;
-    /** Reads a target's kind, which the week's rows do not carry. */
-    getEntity: typeof realGetEntity;
+    /** Reads the targets' kinds, which the week's rows do not carry: every new one in one read. */
+    entityBriefs: typeof realEntityBriefs;
   }
 
   let {
@@ -62,7 +62,7 @@
 
   // svelte-ignore state_referenced_locally
   // Read once, as the Day tab's ports are.
-  const io: WeekPorts = { weekTimesheet: realWeekTimesheet, pendingWrites: realPendingWrites, getEntity: realGetEntity, ...ports };
+  const io: WeekPorts = { weekTimesheet: realWeekTimesheet, pendingWrites: realPendingWrites, entityBriefs: realEntityBriefs, ...ports };
 
   /** The clock, moved every thirty seconds so the running timer's minutes move. */
   // svelte-ignore state_referenced_locally
@@ -111,21 +111,31 @@
    * carries an entity id and no kind, and the address is the kind's (a ticket
    * by its entity id, a page at its page). Until the read answers, or when it
    * fails, the key is drawn as plain text rather than as a link that may open
-   * the wrong thing.
+   * the wrong thing. Every id not asked yet goes in one read (the query audit,
+   * 2026-11-12: one `get_entity` a row, 8 KB each); an id the mirror does not
+   * hold is asked again with the next.
    */
   let kinds = $state<Record<string, string>>({});
   const asked = new Set<string>();
   $effect(() => {
+    const ids: string[] = [];
     for (const row of shown?.rows ?? []) {
       if (row.target === null || row.target.kind !== "entity") continue;
       const id = row.target.entity_id;
-      if (asked.has(id)) continue;
-      asked.add(id);
-      io.getEntity(id).then(
-        (detail) => (kinds[id] = detail.row.kind),
-        () => asked.delete(id),
-      );
+      if (asked.has(id) || ids.includes(id)) continue;
+      ids.push(id);
     }
+    if (ids.length === 0) return;
+    for (const id of ids) asked.add(id);
+    io.entityBriefs(ids).then(
+      (briefs) => {
+        for (const brief of briefs) kinds[brief.entity_id] = brief.kind;
+        for (const id of ids) if (!(id in kinds)) asked.delete(id);
+      },
+      () => {
+        for (const id of ids) asked.delete(id);
+      },
+    );
   });
 
   function heading(key: string): string {

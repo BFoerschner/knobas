@@ -31,7 +31,7 @@
 -->
 <script lang="ts">
   import { keyOf, minutesLabel } from "../time/format";
-  import { getEntity } from "../ipc/entity";
+  import { batchedBrief } from "../ipc/entity";
   import type { QueuedWrite } from "../ipc/sources";
   import { clockReading, dayKey, dayLabel } from "../time/day";
   import { minutesOf } from "../time/week";
@@ -61,7 +61,8 @@
     now = new Date(),
     onclose,
     layers = sharedLayers,
-    nameOf = (entityId: string) => getEntity(entityId).then((detail) => detail.row.title || null),
+    // Every row's name in one read (the query audit, 2026-11-12: one `get_entity` a queued write).
+    nameOf = ((brief) => (entityId: string) => brief(entityId).then((found) => found?.title || null))(batchedBrief()),
   }: {
     queue: WriteQueue;
     /** Injectable clock, so "3 minutes ago" is testable rather than waited for. */

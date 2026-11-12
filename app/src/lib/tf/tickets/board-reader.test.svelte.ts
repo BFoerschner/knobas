@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { EntityFilter, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import { createBoardReader, LIST_SETTLE_MS, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
 
 beforeEach(() => vi.useFakeTimers());
@@ -62,7 +62,7 @@ function board(...columns: MiniBoardColumn[]): MiniBoard {
 /** Twelve To Do (eight sent) and five Done (eight sent): the board an uncapped first read answers. */
 const FIRST = board(column("To Do", 12, 8), column("Done", 5));
 
-function fakes() {
+function fakes(previewPause?: number, cardReads?: BoardReaderPorts["cardReads"]) {
   const reads: Read[] = [];
   const details: { id: string; answer: (text: string) => void }[] = [];
   const reaches: string[] = [];
@@ -77,10 +77,11 @@ function fakes() {
     },
     ticketBoard: () => Promise.resolve({ columns: [], more_lanes: 0 } as unknown as MiniBoard),
     entityCheckout: () => Promise.reject(new Error("no checkout")),
+    ...(cardReads ? { cardReads } : {}),
   };
   const sessions: ViewSessions = $state({ views: {} });
   const view: BoardView = $state({ columns: [], layout: "board", lanes: "none" });
-  const reader = createBoardReader(ports, { typingPause: 40, sessions, view: () => view });
+  const reader = createBoardReader(ports, { typingPause: 40, ...(previewPause === undefined ? {} : { previewPause }), sessions, view: () => view });
   /** What each read asked for, without its answer. */
   const asked = () => reads.map(({ perColumn, query, lanes }) => (lanes ? { perColumn, query, lanes } : { perColumn, query }));
   return { reader, reads, details, reaches, sessions, view, asked };
@@ -417,4 +418,39 @@ test("a Jira view's column draws three when every status it lists is done, whate
     [3, true],
     [8, false],
   ]);
+});
+
+test("a moved selection draws at once and reads its preview once it stops moving; one selected again draws what it showed (the query audit, 2026-11-12)", async () => {
+  const sections: string[] = [];
+  const { reader, details, reaches } = fakes(120, async (id: string, asked: EntityFilter[]) => {
+    sections.push(`${id}:${asked.length}`);
+    return { reached: [], sections: asked.map(() => []) };
+  });
+  // The first selection is read at once: there is nothing to settle.
+  reader.preview("jira:PAY-1");
+  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1"]);
+  details[0]!.answer("One.");
+  await flush();
+  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
+  expect(reader.around).toEqual({ rows: [], settled: true });
+
+  // Held j over three rows: each draws at once, nothing is read until the last one has stood still for 120 ms.
+  for (const id of ["jira:PAY-2", "jira:PAY-3", "jira:PAY-4"]) {
+    reader.preview(id);
+    expect(reader.description).toBeNull();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  expect(details).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(70);
+  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1", "jira:PAY-4"]);
+  // The four sections and the reach in one read, never a `job_reach` of its own.
+  expect(sections).toEqual(["jira:PAY-1:4", "jira:PAY-4:4"]);
+  expect(reaches).toEqual([]);
+
+  // Back to the first: what it showed draws in the same frame, and it is read again behind it.
+  reader.preview("jira:PAY-1");
+  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
+  expect(reader.around).toEqual({ rows: [], settled: true });
+  await vi.advanceTimersByTimeAsync(120);
+  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1", "jira:PAY-4", "jira:PAY-1"]);
 });

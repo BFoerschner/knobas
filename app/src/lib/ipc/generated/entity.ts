@@ -282,6 +282,18 @@ note_count: number,
 last_note_at: string | null, };
 
 /**
+ * What [`card_reads`] answers: the ticket's reach, and each section's rows
+ * read through it, in the order the sections were asked.
+ */
+export type CardRows = { reached: Array<Reached>, 
+/**
+ * One list per section asked, in order: its page from offset 0. A
+ * section whose read failed answers no rows, as its row then draws
+ * nothing.
+ */
+sections: Array<Array<EntityRow>>, };
+
+/**
  * One pipeline of a chain (#857).
  */
 export type ChainStep = { 
@@ -1405,6 +1417,23 @@ for_you: Array<DocForYou>, };
 export type DownloadTarget = { "kind": "log" } | { "kind": "file", path: string, } | { "kind": "folder", path: string, } | { "kind": "all" };
 
 /**
+ * One id, as a page draws it beside the id: what kind of thing it is, its
+ * title and its state chip. The same columns, read by the same rules, as
+ * the detail read's row ([`crate::detail`]), so a brief and a detail of
+ * one id agree.
+ */
+export type EntityBrief = { entity_id: string, kind: string, source_id: string, 
+/**
+ * Raw source text. Render it as text, never as markup (gotcha 7).
+ */
+title: string, 
+/**
+ * The state chip, by `crate::declared_state!` as every row reads it;
+ * `None` on the ADR-0007 miss.
+ */
+state: StateChip | null, };
+
+/**
  * Everything the slide-over draws for one entity (interfaces §2.5).
  */
 export type EntityDetail = { row: EntityRow, source: SourceRef, 
@@ -1667,7 +1696,21 @@ reach?: string | null,
  * empty, never an error. `None` is unscoped, and absent on the wire
  * reads as `None`, as [`Self::reach`] does.
  */
-role?: string | null, };
+role?: string | null, 
+/**
+ * Only rows that name a parent by this name (#2479's query audit): a
+ * repository page asks for its own pull requests by the repository's
+ * name, `owner/name`, and not for every pull request of its source.
+ * Read from the stored parents (`sync.item_parent`, ADR-0019), the
+ * child arm, compared case-insensitively as `item_parent_name_idx`
+ * indexes it: every name a parent answers to, so a bare repository name
+ * two owners share matches both owners' rows. It narrows to a superset
+ * of the rows whose path line is that name, and a caller that wants the
+ * path line exactly keeps those (`repoPrs` in the app). `None` is
+ * unscoped, and absent on the wire reads as `None`, as [`Self::reach`]
+ * does.
+ */
+parent?: string | null, };
 
 /**
  * The orderings a room reads in: the two plain ones, and since #680 the two

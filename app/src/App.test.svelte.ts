@@ -178,6 +178,11 @@ vi.mock("./lib/ipc/entity", () => ({
     entityAnswer?.row.entity_id === entityId
       ? Promise.resolve(entityAnswer)
       : Promise.reject({ code: "not_found", message: "no such entity" }),
+  // What many ids are (the query audit): the one entity this test holds, as `getEntity` answers it.
+  entityBriefs: (ids: string[]) =>
+    Promise.resolve(entityAnswer !== null && ids.includes(entityAnswer.row.entity_id) ? [entityAnswer.row] : []),
+  batchedBrief: () => () => Promise.resolve(null),
+  cardReads: () => Promise.reject(new Error("no cardReads in this test")),
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   // The share export's link-set tick, read when Settings › Backup and export draws (#1469).
   linkSets: () => Promise.resolve([]),

@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { viewDate } from "../time/format";
 import type {
   ActionItemTicket,
+  CardRows,
+  EntityBrief,
   CloneAllPlan,
   CloneAllState,
   LocalTree,
@@ -100,6 +102,8 @@ import type { DayWindow } from "./time";
 
 export type {
   CloneAllFailure,
+  CardRows,
+  EntityBrief,
   CloneAllPlan,
   CloneAllSkipped,
   CloneAllSource,
@@ -412,6 +416,51 @@ export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
 /** {@link CodeFacts} for each id the mirror holds live; the others are left out (#966). */
 export function codeFacts(entityIds: string[]): Promise<CodeFacts[]> {
   return invoke<CodeFacts[]>("code_facts", { entityIds });
+}
+
+/**
+ * What each of `entityIds` is, in the order asked (the query audit of PR #2479, 2026-11-12): its kind, source, title
+ * and state chip, read as `get_entity` reads its row, for a page that wants one of them for many ids. An id the mirror
+ * does not hold, withdrawn or not, is left out, where `get_entity` rejects with `not_found`.
+ */
+export function entityBriefs(entityIds: string[]): Promise<EntityBrief[]> {
+  return invoke<EntityBrief[]>("entity_briefs", { entityIds });
+}
+
+/**
+ * One id's brief, asked of {@link entityBriefs} together with every other id asked in the same task: a list that
+ * names its rows one by one sends one read for all of them. `null` for an id the mirror does not hold; a failed read
+ * rejects every id it carried.
+ */
+export function batchedBrief(read: (entityIds: string[]) => Promise<EntityBrief[]> = entityBriefs): (entityId: string) => Promise<EntityBrief | null> {
+  let waiting: { id: string; resolve: (brief: EntityBrief | null) => void; reject: (error: unknown) => void }[] = [];
+  return (id) =>
+    new Promise((resolve, reject) => {
+      waiting.push({ id, resolve, reject });
+      if (waiting.length > 1) return;
+      queueMicrotask(() => {
+        const batch = waiting;
+        waiting = [];
+        read([...new Set(batch.map((one) => one.id))]).then(
+          (briefs) => {
+            const byId = new Map(briefs.map((brief) => [brief.entity_id, brief]));
+            for (const one of batch) one.resolve(byId.get(one.id) ?? null);
+          },
+          (error: unknown) => {
+            for (const one of batch) one.reject(error);
+          },
+        );
+      });
+    });
+}
+
+/**
+ * A ticket's card sections in one read (the query audit of PR #2479): what `entityId` reaches, as `job_reach`
+ * answers it, walked once, and each of `sections` read through it as {@link listEntities} reads the filter with
+ * `reach` set to `entityId`, at most `limit` rows each, in the order asked. A section whose read failed has no rows.
+ */
+export function cardReads(entityId: string, sections: EntityFilter[], limit: number): Promise<CardRows> {
+  return invoke<CardRows>("card_reads", { entityId, sections, limit });
 }
 
 /**

@@ -9,6 +9,7 @@ import type { EchoListen } from "../queued.svelte";
 import type { DetailRefreshPorts } from "../refresh.svelte";
 import {
   createLink,
+  entityBriefs,
   entityThread,
   getEntity,
   hideLinkSetMember,
@@ -26,6 +27,7 @@ import {
   visitEntity,
   type CheckoutView,
   type ContextRow,
+  type EntityBrief,
   type EntityDetail,
   type EntityFilter,
   type EntityPage,
@@ -51,6 +53,8 @@ import { TICKET_SYSTEM } from "../roles.svelte";
 export interface JobPorts {
   listSources: () => Promise<SourceFacts[]>;
   getEntity: (entityId: string) => Promise<EntityDetail>;
+  /** What many ids are, in one read (`entity_briefs`); where left out, each id is read whole with `getEntity`. */
+  entityBriefs?: (entityIds: string[]) => Promise<EntityBrief[]>;
   promoteContext: (entityId: string) => Promise<ContextRow>;
   listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
@@ -115,6 +119,7 @@ export const bridgeSetPorts: JobSetPorts = {
 export const bridgePorts: JobPorts = {
   listSources: () => listSources(),
   getEntity: (entityId) => getEntity(entityId),
+  entityBriefs: (entityIds) => entityBriefs(entityIds),
   promoteContext: (entityId) => promoteContext(entityId),
   listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
   submitWrite: (payload) => submitWrite(payload),

@@ -83,6 +83,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::entity::PipelineReason::export_all(cfg)?;
     crate::commands::entity::JobPipeline::export_all(cfg)?;
     crate::commands::entity::CodeFacts::export_all(cfg)?;
+    crate::commands::entity::EntityBrief::export_all(cfg)?;
+    crate::commands::entity::CardRows::export_all(cfg)?;
     knobas_source::pipeline::PipelineRepository::export_all(cfg)?;
     knobas_source::pipeline::PipelineTrigger::export_all(cfg)?;
     knobas_source::pipeline::PipelineSettings::export_all(cfg)?;

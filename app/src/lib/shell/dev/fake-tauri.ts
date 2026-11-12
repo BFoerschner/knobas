@@ -54,6 +54,7 @@
  * modules answering the same command is an error, not a silent override.
  */
 import type { Answers } from "./fake-answers";
+import type { EntityDetail, EntityFilter, EntityPage, Reached } from "../../ipc/entity";
 import { expandScale, seedScale } from "./fake-scale";
 import { CORPUS } from "./fake/corpus";
 import { addFakeRuns } from "./fake/builds";
@@ -273,6 +274,12 @@ export function lateReads(value: string | null): Map<string, number> {
 }
 
 /**
+ * The commands the fixture answers from its other reads rather than from a feature module (the query audit,
+ * 2026-11-12): what many ids are, and a card's sections over one reach.
+ */
+export const COMPOSED = ["entity_briefs", "card_reads"] as const;
+
+/**
  * The fixture's answers: every feature module's, put together.
  *
  * Grows one handler per task, as each screen learns to call something new, in
@@ -286,5 +293,31 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       all[command] = handler;
     }
   }
+  // The backend's one-call reads ({@link COMPOSED}), answered from the fixture's own reads they stand for,
+  // so the two can never disagree: what each id is, by `get_entity`; a card's sections, by `job_reach` and
+  // `list_entities`.
+  all["entity_briefs"] ??= async (args) => {
+    const ids = [...new Set((args["entityIds"] as string[] | undefined) ?? [])];
+    const read = await Promise.allSettled(ids.map(async (entityId) => (await all["get_entity"]!({ entityId })) as EntityDetail));
+    return read.flatMap((answer) => {
+      if (answer.status !== "fulfilled") return [];
+      const { entity_id, kind, source_id, title, state } = answer.value.row;
+      return [{ entity_id, kind, source_id, title, state }];
+    });
+  };
+  all["card_reads"] ??= async (args) => {
+    const entityId = String(args["entityId"] ?? "");
+    const limit = Number(args["limit"] ?? 200);
+    const reached = (await all["job_reach"]!({ entityId })) as Reached[];
+    const sections = await Promise.all(
+      ((args["sections"] as EntityFilter[] | undefined) ?? []).map((filter) =>
+        Promise.resolve(all["list_entities"]!({ filter: { ...filter, reach: entityId }, limit, offset: 0 })).then(
+          (page) => (page as EntityPage).rows,
+          () => [],
+        ),
+      ),
+    );
+    return { reached, sections };
+  };
   return all;
 }

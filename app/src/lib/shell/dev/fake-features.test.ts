@@ -8,7 +8,7 @@ import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/entity";
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
-import { demoHandlers, holdBack } from "./fake-tauri";
+import { COMPOSED, demoHandlers, holdBack } from "./fake-tauri";
 import { expandScale, scaleForge, scalePages, scaleTickets } from "./fake-scale";
 import { historyBuilds } from "./fake/builds";
 import { CORPUS, corpusListBuilds, fakeRoleScope } from "./fake/corpus";
@@ -32,7 +32,8 @@ test("no two features answer one command, and none answers nothing", () => {
   );
   expect(counts).not.toContain(0);
   const counted = counts.reduce((sum, count) => sum + count, 0);
-  expect(Object.keys(demoHandlers(params))).toHaveLength(counted);
+  // And the reads the fixture answers from its other reads.
+  expect(Object.keys(demoHandlers(params))).toHaveLength(counted + COMPOSED.length);
 });
 
 // -- the TF2-TF6 fixture fill (#921) ----------------------------------------
