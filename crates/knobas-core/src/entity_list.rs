@@ -371,6 +371,14 @@ macro_rules! parent_named {
 /// requests walked 4,710 payloads for 1,710 rows, 711 ms in series. Cut first,
 /// a page walks its own rows and no others.
 ///
+/// **The path and the state come from the item's stored row** where it has
+/// one (`sync.item_row`, migration `0081`, [`crate::row_join!`]), and from
+/// the walk where it has none: a page of 500 pull requests took 87 ms and
+/// takes 29. The row holds the two as these macros read them under the
+/// bound declarations, so it is the same answer; `knobas-app`'s
+/// `a_list_answers_the_same_from_its_stored_rows_and_from_the_payloads`
+/// reads every order with every row, some and none.
+///
 /// `$from` is the filtered set with its alias `i`; `$key` the columns the
 /// order reads, beside `entity_id`; `$order` and `$outer` the same order over
 /// `i` and over the cut page `p`, because a join keeps no order. `count(*)
@@ -379,13 +387,15 @@ macro_rules! parent_named {
 macro_rules! plain_page {
     ($from:expr, $key:expr, $order:expr, $outer:expr) => {
         concat!(
+            "\nwith ",
+            crate::row_keys!("$8"),
             r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-            crate::path_line_read!("$8"),
+            crate::row_or!("rw", "path", crate::path_line_read!("$8")),
             r#" as path,
        "#,
-            crate::declared_state!("$8"),
+            crate::row_or!("rw", "state", crate::declared_state!("$8")),
             r#" as state, i.key_cell as cell,
        p.total
   from (select i.entity_id, "#,
@@ -409,7 +419,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
             $order,
             r#"
          limit $4 offset $5) p
-  join sync.item i on i.entity_id = p.entity_id
+  join sync.item i on i.entity_id = p.entity_id"#,
+            crate::row_join!("rw", "i"),
+            r#"
  order by "#,
             $outer,
             "\n"
@@ -493,8 +505,10 @@ macro_rules! tile_ruled {
     };
     ($rule:expr, $join:expr) => {
         concat!(
-            r#"
-with ruled as materialized (
+            "\nwith ",
+            crate::row_keys!("$8"),
+            r#",
+ruled as materialized (
   select i.entity_id, i.source_id, i.kind, i.item_updated_at"#,
             $rule,
             r#"
@@ -539,7 +553,7 @@ macro_rules! tile_page {
             r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-            crate::path_line_read!("$8"),
+            crate::row_or!("rw", "path", crate::path_line_read!("$8")),
             r#" as path, i.key_cell as cell,
        p.state, p.total, p.tally, p.groups
   from (select d.entity_id, d.item_updated_at, d.state, d.tone, d.grp,
@@ -556,7 +570,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
                   coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
                   d.item_updated_at desc nulls last, d.entity_id
          limit $4 offset $5) p
-  join sync.item i on i.entity_id = p.entity_id
+  join sync.item i on i.entity_id = p.entity_id"#,
+            crate::row_join!("rw", "i"),
+            r#"
  order by p.grp nulls first,
           coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], p.tone), 6),
           p.item_updated_at desc nulls last, p.entity_id
@@ -588,6 +604,16 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// a branch and not its pull request must not call the branch unproposed.
 /// Each is read once, `materialized`, as `ruled` is.
 ///
+/// **Every declared read here takes the item's stored row first**
+/// (`sync.item_row`, migration `0081`; the query audit of 2026-11-12): the
+/// state, the reviewers, a branch's path and its repository's default, and
+/// in `open_head` a pull request's head, head repository and state. The
+/// order cannot cut its page first, because it orders by the state, so it
+/// walked each of them out of every pull request's payload: 196 ms for
+/// Code's 1,710 pull requests, and a cold first open of Code at 245 ms. From
+/// the rows it is 19 ms and 51. An item with no row is walked as before
+/// ([`crate::row_or!`]).
+///
 /// **The repo is matched by the pull request's declared `head_repo`** (#718:
 /// a fork's pull request is opened from the fork, so its base repo's
 /// same-named branch is not the one proposed) against the branch's path
@@ -601,35 +627,51 @@ const LIVE_ATTENTION: &str = concat!(
     tile_ruled!(
         concat!(
             ",\n         ",
-            crate::declared_state!("$8"),
+            crate::row_or!("rw", "state", crate::declared_state!("$8")),
             " as state, i.author, i.title, me.me,
-         i.kind = 'pr' and me.me is not null and coalesce((select true from ",
+         i.kind = 'pr' and me.me is not null
+           and (case when rw.entity_id is null
+                     then coalesce((select true from ",
             crate::declared_list!("$8", "reviewers"),
-            " v where v.value = me.me limit 1), false) as asked,
+            " v where v.value = me.me limit 1), false)
+                     else me.me = any(rw.reviewers) end) as asked,
          case when i.kind = 'branch' then ",
-            crate::path_line_read!("$8"),
+            crate::row_or!("rw", "path", crate::path_line_read!("$8")),
             " end as branch_path,
          i.kind = 'branch' and i.title = ",
-            crate::declared_string!("$8", "default_branch"),
+            crate::row_or!(
+                "rw",
+                "default_branch",
+                crate::declared_string!("$8", "default_branch")
+            ),
             " as is_default"
         ),
-        "
+        concat!(
+            crate::row_join!("rw", "i"),
+            "
     left join lateral (select nullif(btrim(s.config->>'username'), '') as me
                          from knobas.source_config s where s.id = i.source_id) me on true"
+        )
     ),
     r#",
 open_head as materialized (
   select i.source_id, "#,
-    crate::declared_string!("$8", "head"),
+    crate::row_or!("rw", "head", crate::declared_string!("$8", "head")),
     r#" as head,
          "#,
-    crate::declared_string!("$8", "head_repo"),
+    crate::row_or!(
+        "rw",
+        "head_repo",
+        crate::declared_string!("$8", "head_repo")
+    ),
     r#" as head_repo
-    from sync.live_item i
+    from sync.live_item i"#,
+    crate::row_join!("rw", "i"),
+    r#"
    where i.kind = 'pr'
      and i.source_id in (select r.source_id from ruled r where r.kind = 'branch' and r.me is not null)
      and coalesce("#,
-    crate::declared_state!("$8"),
+    crate::row_or!("rw", "state", crate::declared_state!("$8")),
     r#"->>'tone', '') not in ('ok', 'muted')
 ),
 drawn as (
@@ -757,9 +799,11 @@ drawn as (
          null::int as grp
     from (select i.entity_id, i.kind, i.item_updated_at,
                  "#,
-    crate::declared_state!("$8"),
+    crate::row_or!("rw", "state", crate::declared_state!("$8")),
     r#" as state
-            from sync.item i
+            from sync.item i"#,
+    crate::row_join!("rw", "i"),
+    r#"
            where i.entity_id = any(array(select l.entity_id from latest l))) k
 )"#,
     tile_page!(),

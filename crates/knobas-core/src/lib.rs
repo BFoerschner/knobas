@@ -12,6 +12,7 @@ pub mod evidence;
 pub mod inbox;
 pub mod item_card;
 mod item_field;
+pub mod item_row;
 pub mod link;
 pub mod link_set;
 mod live;

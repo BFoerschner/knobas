@@ -1889,6 +1889,122 @@ async fn code_room(
     (gitea, page)
 }
 
+/// **A list answers the same from its stored rows and from the payloads**
+/// (`sync.item_row`, migration `0081`; the query audit of 2026-11-12). The
+/// Code room's pull requests and branches, read under every order: Code's
+/// attention groups, the plain pages newest first and by title, with the
+/// withdrawn and without, and the builds tile's order. Each read is taken
+/// with every item's row stored, with some of them gone, with none, and
+/// after the fill wrote them back, and is the same page each time: the same
+/// rows in the same order with the same path, state, total, tally and
+/// groups.
+#[tokio::test]
+async fn a_list_answers_the_same_from_its_stored_rows_and_from_the_payloads() {
+    let (gitea, _) = code_room(Some("björn"), &["pr", "branch"]).await;
+    let pool = seeded().await;
+    // A repository's default branch, which the attention order leaves out.
+    let main = format!("{gitea}:tidewater/payout-service@refs/heads/main");
+    mirrored(
+        &pool,
+        &gitea,
+        "branch",
+        "tidewater/payout-service@refs/heads/main",
+        serde_json::json!({ "repository": {
+            "full_name": "tidewater/payout-service", "name": "payout-service",
+            "default_branch": "main",
+        } }),
+    )
+    .await;
+    sqlx::query("update sync.item set title = 'main', author = 'björn' where entity_id = $1")
+        .bind(&main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let declarations = builtin_declarations(&pool).await;
+
+    let stored = async || -> i64 {
+        sqlx::query_scalar(
+            "select count(*) from sync.item_row r join sync.item i using (entity_id)
+              where i.source_id = $1",
+        )
+        .bind(&gitea)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let pages = async || -> Vec<serde_json::Value> {
+        let mut pages = Vec::new();
+        for (order, kinds, include_deleted) in [
+            (EntityOrder::Attention, &["pr", "branch"][..], false),
+            (EntityOrder::Attention, &["pr"][..], false),
+            (EntityOrder::LatestPerParent, &[][..], false),
+            (EntityOrder::UpdatedDesc, &[][..], false),
+            (EntityOrder::TitleAsc, &[][..], false),
+            (EntityOrder::UpdatedDesc, &[][..], true),
+            (EntityOrder::TitleAsc, &["branch"][..], true),
+        ] {
+            let page = list_entities_inner(
+                &pool,
+                &Registry::for_process(),
+                &EntityFilter {
+                    sources: vec![gitea.clone()],
+                    kinds: kinds.iter().map(|&k| k.to_owned()).collect(),
+                    order,
+                    include_deleted,
+                    ..all()
+                },
+                50,
+                0,
+                &declarations,
+            )
+            .await
+            .unwrap();
+            pages.push(serde_json::to_value(&page).unwrap());
+        }
+        pages
+    };
+
+    assert_eq!(stored().await, 13, "every item of the room has its row");
+    let from_rows = pages().await;
+    // The fixture is the one the group tests read: its groups, a state on
+    // every pull request and a path on every row that names a repository.
+    assert!(
+        from_rows[0]["groups"]
+            .as_array()
+            .is_some_and(|groups| groups.len() >= 4)
+    );
+    assert!(from_rows[3]["rows"].as_array().unwrap().len() >= 13);
+
+    sqlx::query(
+        "delete from sync.item_row r using sync.item i
+          where i.entity_id = r.entity_id and i.source_id = $1 and i.kind = 'pr'",
+    )
+    .bind(&gitea)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        pages().await,
+        from_rows,
+        "with the pull requests' rows gone"
+    );
+
+    sqlx::query(
+        "delete from sync.item_row r using sync.item i
+          where i.entity_id = r.entity_id and i.source_id = $1",
+    )
+    .bind(&gitea)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored().await, 0);
+    assert_eq!(pages().await, from_rows, "with no row stored");
+
+    knobas_core::item_row::fill(&pool).await.unwrap();
+    assert_eq!(stored().await, 13, "the fill wrote them back");
+    assert_eq!(pages().await, from_rows, "from the filled rows");
+}
+
 /// The Code tile answers "what needs me" first (#712): pull requests asking
 /// for my review, then mine, then the other open ones, then my branches that
 /// no open pull request is opened from, then every other branch -- each run

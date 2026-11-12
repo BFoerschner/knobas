@@ -1007,6 +1007,18 @@ async fn bring_up_app<R: tauri::Runtime>(
                 ),
                 Err(error) => tracing::warn!(%error, "the tickets' cards could not all be filled"),
             }
+            // Then what a list draws of every item (migration `0081`), the
+            // same way and for the same two reasons: after the cards, so the
+            // two fills never run at once.
+            let started = std::time::Instant::now();
+            match knobas_core::item_row::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the lists' rows are filled"
+                ),
+                Err(error) => tracing::warn!(%error, "the lists' rows could not all be filled"),
+            }
         });
         // Before `Ready`, and before `AppState` is installed: the sync
         // engine is part of "the database is up" as far as the frontend is

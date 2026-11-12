@@ -53,6 +53,7 @@ mod ipc;
 mod item_card;
 mod item_field;
 mod item_resolvers;
+mod item_row;
 mod jira_views_ipc;
 mod job_ipc;
 mod job_lifecycle_ipc;
