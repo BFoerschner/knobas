@@ -15,7 +15,7 @@
 
 # The README section every refusal below points at, in one place: a message
 # that names the wrong heading is worse than one that names none.
-readonly WITNESS_README_SECTION='testenv/README.md, "The desktop witness (macOS)"'
+readonly WITNESS_README_SECTION='testenv/desktop-witness/README.md, "The desktop witness (macOS)"'
 
 # normalise_app_path <path>
 #
