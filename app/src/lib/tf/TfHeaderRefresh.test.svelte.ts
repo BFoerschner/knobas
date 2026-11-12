@@ -98,3 +98,23 @@ test("while the source's last sync failed, the toast adds that to what the refre
   expect(await after(new Error("no status"))).toEqual(["Refreshed from Tidewater CI"]);
   toasts.items = [];
 });
+
+test("a press while the source syncs says so at once, reads nothing again, and the button is Refresh again (the query audit, 2026-11-12)", async () => {
+  toasts.items = [];
+  const detail = detailOf("teamcity:build:1");
+  const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "run_in_flight" }) });
+  const refresh = createDetailRefresh(probe.ports);
+  let reread = 0;
+  await refresh.refresh(detail, () => void (reread += 1));
+  expect(refresh.reading).toBe(false);
+  expect(refresh.failed).toBeNull();
+  expect(reread).toBe(0);
+  expect(probe.synced).toEqual([]);
+  expect(toasts.items.map((toast) => [toast.text, toast.tone ?? "plain"])).toEqual([
+    ["Tidewater CI is syncing now. This page updates when that sync ends.", "plain"],
+  ]);
+  // Pressed again during its toast: the one toast, replaced, not two.
+  await refresh.refresh(detail, () => void (reread += 1));
+  expect(toasts.items).toHaveLength(1);
+  expect(probe.refreshed).toEqual(["teamcity:build:1", "teamcity:build:1"]);
+});

@@ -131,6 +131,13 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
         state.failed = `Couldn't refresh: ${answer.reason}`;
         return;
       }
+      // A run of the source holds its lock for the whole run (the query audit, 2026-11-12: 74 to 242 s), so the press
+      // says the sync is running instead of waiting behind it; the run's end reads the page again.
+      if (answer.outcome === "run_in_flight") {
+        state.reading = false;
+        push({ text: `${detail.source.display_name} is syncing now. This page updates when that sync ends.`, subject: `refresh:${detail.row.entity_id}` });
+        return;
+      }
       if (answer.outcome === "not_offered") {
         state.unoffered[detail.source.id] = true;
         state.reading = false;

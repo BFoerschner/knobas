@@ -8,7 +8,7 @@ After a write landed, knobas caught the mirror up with an incremental run of the
 
 - **Optional.** An adapter that cannot read one item, or an external one built against an older WIT minor version, falls back to a run: its detail draws *Sync now* where others draw *Refresh*. In the WIT world (ADR-0028) it is an additive minor version and a §10.8 entry.
 - **After every landed write, from every send path.** The item the write made (by the receipt's `remote_id`) or wrote to is refreshed first, then a run of the source follows, waited for as `sync_after_write` waits, for what the write changed elsewhere.
-- **Serialized, not versioned.** A refresh waits for an in-flight run of its source and reads after it commits, because item writes overwrite unconditionally (`ITEM_UPSERT`) and a run fetches inside its transaction.
+- **Serialized, not versioned.** A refresh waits for an in-flight run of its source and reads after it commits, because item writes overwrite unconditionally (`ITEM_UPSERT`) and a run fetches inside its transaction. *Amended 2026-11-12 (`docs/decisions/2026-11-12-a-page-asks-for-what-it-draws.md`): a run holds the lock for the whole run, minutes for a large one, so the reader's* Refresh *takes it only if it is free and otherwise reads nothing and says the sync is running; a landed write's refresh still waits. Serialized either way.*
 - **A run's per-item work, for one item.** Links on arrival, a monitor's samples and alerts, the context follow and the saved-view projection, plus an event the shell re-reads on. No "synced" activity line. An id the source no longer answers for is tombstoned.
 - **A failed refresh is only a failed read.** The write stays `sent`, its [echo](../../CONTEXT.md#echo) says *sent*, and the next run settles it.
 

@@ -11,7 +11,11 @@
 //!
 //! **Serialized, not versioned.** The read happens inside the lock, so a
 //! refresh that arrives while a run of its source is in flight waits for that
-//! run to commit and reads after it. A run fetches inside its transaction and
+//! run to commit and reads after it ([`Lock::Wait`], a landed write's read
+//! back), or reads nothing and says so ([`Lock::Try`], the reader's
+//! *Refresh*: a run holds the lock for the whole run, network included, 74 to
+//! 242 s in the scale database's log, and the button said *Refreshing…* all
+//! that while; the query audit of PR #2479, 2026-11-12). A run fetches inside its transaction and
 //! item writes overwrite unconditionally, so a run that began before a write
 //! could otherwise commit its older payload over what the refresh read.
 //!
@@ -36,6 +40,20 @@ pub enum RefreshOutcome {
     /// The adapter does not read this item by id. Nothing was written; the
     /// caller runs the source instead.
     NotOffered,
+    /// Under [`Lock::Try`], a run of the source held its lock: nothing was
+    /// read or written. That run writes the item as the source holds it when
+    /// it ends, or, where the run started before what changed it, the next.
+    RunInFlight,
+}
+
+/// Whether a refresh waits for the source's run lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lock {
+    /// Wait for a run in flight to commit, then read after it.
+    Wait,
+    /// Take the lock only if no run holds it, else answer
+    /// [`RefreshOutcome::RunInFlight`] at once.
+    Try,
 }
 
 /// Why a refresh did not happen, or failed.
@@ -71,6 +89,7 @@ pub enum RefreshError {
 pub async fn of_entity(
     deps: &SchedulerDeps,
     entity_id: &str,
+    lock: Lock,
 ) -> Result<RefreshOutcome, RefreshError> {
     let entity =
         EntityRef::parse(entity_id).map_err(|_| RefreshError::NotAnEntity(entity_id.to_owned()))?;
@@ -88,7 +107,7 @@ pub async fn of_entity(
         return Ok(RefreshOutcome::NotOffered);
     }
     let mut conn = deps.connections.open().await.map_err(SyncError::Db)?;
-    let outcome = refresh_item(&mut conn, source.as_ref(), entity_id).await;
+    let outcome = refresh_item_under(&mut conn, source.as_ref(), entity_id, lock).await;
     if let Err(error) = Connection::close(conn).await {
         tracing::debug!(entity_id, %error, "closing the refresh's connection failed");
     }
@@ -117,6 +136,20 @@ pub async fn refresh_item(
     source: &dyn Source,
     entity: &str,
 ) -> Result<RefreshOutcome, SyncError> {
+    refresh_item_under(conn, source, entity, Lock::Wait).await
+}
+
+/// [`refresh_item`], waiting for the run lock or not as `lock` says.
+///
+/// # Errors
+///
+/// As [`refresh_item`].
+pub async fn refresh_item_under(
+    conn: &mut PgConnection,
+    source: &dyn Source,
+    entity: &str,
+    lock: Lock,
+) -> Result<RefreshOutcome, SyncError> {
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
     let (source_id, declared) = Declared::of(descriptor);
@@ -129,7 +162,7 @@ pub async fn refresh_item(
     let mut tx = conn.begin().await?;
     // The explicit rollback, for the reason `run_inner` gives: on a
     // connection of its own, a dropped transaction keeps the lock.
-    match refresh_locked(&mut tx, source, &source_id, declared, entity).await {
+    match refresh_locked(&mut tx, source, &source_id, declared, entity, lock).await {
         Ok(outcome) => {
             tx.commit().await?;
             Ok(outcome)
@@ -153,6 +186,7 @@ async fn refresh_locked(
     source_id: &str,
     declared: Declared,
     entity: &str,
+    lock: Lock,
 ) -> Result<RefreshOutcome, SyncError> {
     let Declared {
         kinds,
@@ -162,12 +196,27 @@ async fn refresh_locked(
         role_check,
         payload_paths,
     } = declared;
-    // The run's lock: waits for a run in flight to commit, and holds off the
-    // next one until this commits.
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(source_id)
-        .execute(&mut **tx)
-        .await?;
+    // The run's lock: waits for a run in flight to commit, or under
+    // `Lock::Try` reads nothing while one holds it; either way holds off the
+    // next run until this commits.
+    match lock {
+        Lock::Wait => {
+            sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+                .bind(source_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        Lock::Try => {
+            let taken: bool =
+                sqlx::query_scalar("select pg_try_advisory_xact_lock(hashtext($1::text))")
+                    .bind(source_id)
+                    .fetch_one(&mut **tx)
+                    .await?;
+            if !taken {
+                return Ok(RefreshOutcome::RunInFlight);
+            }
+        }
+    }
 
     let outcome = match source.refresh(entity).await? {
         RefreshAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),

@@ -284,7 +284,7 @@ export type DbStats = { db_bytes: number, entity_count: number, item_count: numb
  * carrying the source's reason, which the detail draws as *Couldn't
  * refresh: <reason>*.
  */
-export type EntityRefresh = { "outcome": "refreshed" } | { "outcome": "gone" } | { "outcome": "not_offered" } | { "outcome": "turned_off" } | { "outcome": "failed", 
+export type EntityRefresh = { "outcome": "refreshed" } | { "outcome": "gone" } | { "outcome": "not_offered" } | { "outcome": "turned_off" } | { "outcome": "run_in_flight" } | { "outcome": "failed", 
 /**
  * The source's own reason.
  */

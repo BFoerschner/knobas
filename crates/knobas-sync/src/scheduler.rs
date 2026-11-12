@@ -2013,17 +2013,20 @@ impl Scheduler {
 
     /// Refresh one item from its source (ADR-0031): [`crate::refresh::of_entity`]
     /// over this scheduler's deps. Waits behind a run of the source in
-    /// flight, and holds off the next until it commits. Tells no one: the
-    /// caller tells [`SyncEvents::refresh_ended`] once what follows the
-    /// refresh is written.
+    /// flight under [`crate::refresh::Lock::Wait`], or answers
+    /// [`crate::refresh::RefreshOutcome::RunInFlight`] at once under
+    /// [`crate::refresh::Lock::Try`]; holds off the next run until it
+    /// commits. Tells no one: the caller tells [`SyncEvents::refresh_ended`]
+    /// once what follows the refresh is written.
     ///
     /// # Errors
     /// [`crate::refresh::RefreshError`].
     pub async fn refresh(
         &self,
         entity_id: &str,
+        lock: crate::refresh::Lock,
     ) -> Result<crate::refresh::RefreshOutcome, crate::refresh::RefreshError> {
-        crate::refresh::of_entity(self.deps(), entity_id).await
+        crate::refresh::of_entity(self.deps(), entity_id, lock).await
     }
 
     /// Ask for a manual sync, wait for its ending, and say whether the run was
