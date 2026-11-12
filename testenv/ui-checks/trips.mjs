@@ -660,15 +660,17 @@ const LIB = String.raw`(() => {
   const FIELD = "input:not([type=hidden], [type=checkbox], [type=radio], [type=file], [type=range], [type=color]), select, textarea";
   window.__trip = {
     wrap() {
+      // Through the app's own `invoke` (`app/src/lib/ipc/invoke.ts`): Tauri's bridge `invoke` is read-only.
       const i = window.__TAURI_INTERNALS__;
-      if (!i || i.__counted) return !!i;
-      const real = i.invoke;
+      if (!i || window.__knobasIpcTap?.__counted) return !!i;
+      const prev = window.__knobasIpcTap;
       window.__writes = [];
-      i.invoke = function (cmd, args, options) {
+      const tap = function (cmd, args, options, next) {
         if (WRITE.test(cmd)) window.__writes.push(cmd === "submit_write" ? Object.keys(args?.payload ?? {})[0] ?? cmd : cmd);
-        return real.call(this, cmd, args, options);
+        return prev ? prev(cmd, args, options, next) : next(cmd, args, options);
       };
-      i.__counted = true;
+      tap.__counted = true;
+      window.__knobasIpcTap = tap;
       return true;
     },
     find(p) {

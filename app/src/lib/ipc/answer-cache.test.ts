@@ -3,14 +3,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cacheEvents, disableAnswerCache, enableAnswerCache, warm } from "./answer-cache";
+import { invoke } from "./invoke";
 
 type Bridge = { invoke: (cmd: string, args?: unknown) => Promise<unknown> };
 let calls: { cmd: string; args: unknown }[];
 let answers: Record<string, () => unknown>;
 let bridge: Bridge;
 
-function ask(cmd: string, args: unknown = {}): Promise<unknown> {
-  return (window as unknown as { __TAURI_INTERNALS__: Bridge }).__TAURI_INTERNALS__.invoke(cmd, args);
+/** A read as the app makes it: through `ipc/invoke.ts`, never the bridge itself. */
+function ask(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  return invoke(cmd, args);
+}
+
+/**
+ * Install `window.__TAURI_INTERNALS__` the way Tauri 2.11's `scripts/core.js` does: `invoke` by `defineProperty` with
+ * `value` only, so it can't be assigned. v3.2.9-ux7's cache assigned to it, which threw in the packaged app and left
+ * the window on *Starting the local database*. The read-only `invoke` hands each call to `bridge`, which a test swaps.
+ */
+function installBridge(): void {
+  const internals = {};
+  Object.defineProperty(internals, "invoke", { value: (cmd: string, args?: unknown) => bridge.invoke(cmd, args) });
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: internals, configurable: true });
 }
 
 beforeEach(() => {
@@ -30,7 +43,7 @@ beforeEach(() => {
       return answers[cmd]?.() ?? null;
     }),
   };
-  Object.assign(window, { __TAURI_INTERNALS__: bridge });
+  installBridge();
   enableAnswerCache();
 });
 
@@ -42,6 +55,21 @@ afterEach(() => {
 const asked = (cmd: string) => calls.filter((c) => c.cmd === cmd).length;
 
 describe("the answer cache", () => {
+  it("starts over Tauri's read-only invoke, and never writes to the bridge", () => {
+    disableAnswerCache();
+    const internals = (window as unknown as { __TAURI_INTERNALS__: object }).__TAURI_INTERNALS__;
+    const before = Object.getOwnPropertyDescriptor(internals, "invoke");
+    expect(before?.writable, "the test bridge must be read-only, as Tauri's is").toBe(false);
+    expect(() => enableAnswerCache()).not.toThrow();
+    expect(Object.getOwnPropertyDescriptor(internals, "invoke")?.value).toBe(before?.value);
+  });
+
+  it("answers through the app's own invoke over the read-only bridge", async () => {
+    await ask("docs_outline");
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(1);
+  });
+
   it("answers a read again from memory, with an answer the caller may change", async () => {
     const first = (await ask("list_entities", { filter: { kinds: ["pr"] } })) as { rows: unknown[] };
     first.rows.reverse();
@@ -152,7 +180,6 @@ describe("the answer cache", () => {
       return cmd === "docs_outline" && asked("docs_outline") === 1 ? new Promise((resolve) => (release = resolve)) : Promise.resolve(answers[cmd]?.() ?? null);
     });
     disableAnswerCache();
-    Object.assign(window, { __TAURI_INTERNALS__: bridge });
     enableAnswerCache();
     const pending = ask("docs_outline");
     cacheEvents.moved();

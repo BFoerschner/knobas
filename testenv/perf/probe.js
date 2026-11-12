@@ -62,12 +62,13 @@
   const ipc = [];
   let ipcSizes = false;
   const wrapInvoke = () => {
-    const t = window.__TAURI_INTERNALS__;
-    if (!t || typeof t.invoke !== "function" || t.invoke.__fr) return !!(t && t.invoke && t.invoke.__fr);
-    const orig = t.invoke;
-    const wrapped = function (cmd, args, options) {
+    // The app's own `invoke` (`app/src/lib/ipc/invoke.ts`) calls `window.__knobasIpcTap`: Tauri's bridge `invoke` is
+    // read-only, in the packaged app and in the fake bridge alike, so a probe taps the app's calls instead.
+    if (window.__knobasIpcTap?.__fr) return true;
+    const prev = window.__knobasIpcTap;
+    const tap = function (cmd, args, options, next) {
       const at = now();
-      const p = orig.call(this, cmd, args, options);
+      const p = Promise.resolve(prev ? prev(cmd, args, options, next) : next(cmd, args, options));
       if (recording || ipcSizes) {
         const rec = { cmd, at, ms: null, bytes: null };
         ipc.push(rec);
@@ -75,9 +76,9 @@
       }
       return p;
     };
-    wrapped.__fr = true;
-    try { t.invoke = wrapped; } catch { /* frozen: no IPC record */ }
-    return t.invoke === wrapped;
+    tap.__fr = true;
+    window.__knobasIpcTap = tap;
+    return true;
   };
   wrapInvoke();
   document.addEventListener("DOMContentLoaded", wrapInvoke);

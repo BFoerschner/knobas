@@ -123,7 +123,6 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
   };
 
   const internals = {
-    invoke,
     transformCallback(callback: (payload: unknown) => void) {
       const id = ++nextCallbackId;
       callbacks.set(id, callback);
@@ -134,6 +133,11 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
     },
     convertFileSrc: (path: string) => path,
   };
+
+  // `invoke` read-only, as Tauri's own `scripts/core.js` defines it (`Object.defineProperty` with `value` only): a
+  // module that assigns to it throws here as it does in the packaged app, which is how v3.2.9-ux7 hung at start
+  // while every probe and fixture run passed. A probe taps commands through `window.__knobasIpcTap` instead.
+  Object.defineProperty(internals, "invoke", { value: invoke });
 
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     value: internals,

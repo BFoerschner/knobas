@@ -6,7 +6,7 @@
  * Rust doc comment and nowhere else. The `invoke` functions and
  * {@link noFilters} stay hand-written.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type { EntityRow } from "./generated/entity";
 import type {
   FavouriteTarget,

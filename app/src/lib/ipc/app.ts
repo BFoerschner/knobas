@@ -6,7 +6,7 @@
  * nowhere else. The `invoke` functions stay hand-written, pinned to the Rust
  * by a test in that module which `include_str!`s this file.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type {
   AppStatus,
   CommandStep,

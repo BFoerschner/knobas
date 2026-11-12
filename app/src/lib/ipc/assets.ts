@@ -19,7 +19,7 @@
  * (`EVENTS.activityNew`, read by `shell/latest-change.svelte.ts`). A channel
  * of the estate's own would be a second thing to keep in step with the first.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type {
   AssetDetail,
   AssetEdit,

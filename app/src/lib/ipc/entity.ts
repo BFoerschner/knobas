@@ -8,7 +8,7 @@
  * `include_str!`s this file, and so do {@link LanesAsked} and {@link OpenAt},
  * which bundle a function's arguments rather than mirror a Rust type.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import { viewDate } from "../time/format";
 import type {
   ActionItemTicket,
