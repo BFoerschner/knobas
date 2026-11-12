@@ -462,6 +462,8 @@ const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
 const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
+const TfDocTree = (await import("../tf/docs/TfDocTree.svelte")).default;
+const TfDocsSpace = (await import("../tf/docs/TfDocsSpace.svelte")).default;
 const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
@@ -774,6 +776,32 @@ const CASES: Case[] = [
     source: "lib/tf/docs/TfDocMore.svelte",
     open: (target) => ({ app: mount(TfDocMore, { target, props: { oncopy: () => {}, onexport: () => {} } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
+    /** Docs' rail (the instant-open pass, 2026-11-12): a fold drawn open whose pages are not read yet asks for them. */
+    name: "TfDocTree",
+    source: "lib/tf/docs/TfDocTree.svelte",
+    open: (target) => ({
+      app: mount(TfDocTree, {
+        target,
+        props: {
+          space: { source_id: "c", source_name: "C", key: "OPS", name: null, page_count: 3, pages: [{ entity_id: "c:1", title: "Home", parent: null, children: 2, ord: 0 }] },
+          current: "c:1",
+          need: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** A space's page drawn before its every page is read: its list's skeleton waits on a timer. */
+    name: "TfDocsSpace",
+    source: "lib/tf/docs/TfDocsSpace.svelte",
+    open: (target) => ({
+      app: mount(TfDocsSpace, {
+        target,
+        props: { space: { source_id: "c", source_name: "C", key: "OPS", name: null, page_count: 3, pages: [] }, whole: false },
+      }),
+    }),
   },
   {
     /** The file header's More menu (#2311): its outside-click listener lives while it is open. */

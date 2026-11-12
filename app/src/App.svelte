@@ -22,6 +22,7 @@
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
+  import { cacheEvents, enableAnswerCache, warm } from "./lib/ipc/answer-cache";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { getEntity, recordCaptureContext } from "./lib/ipc/entity";
   import { chosenJob } from "./lib/tf/job/chosen.svelte";
@@ -226,6 +227,24 @@
       }
       bridgeReady = true;
       if (disposed) return;
+      // The answer cache (the instant-open pass, 2026-11-12, `ipc/answer-cache.ts`), in front of the bridge before anything
+      // reads, and its ears first, so a run's end drops what it changed before a page that hears it reads again.
+      if (import.meta.env.MODE !== "test") {
+        enableAnswerCache();
+        for (const [event, hear] of [
+          [EVENTS.syncState, (payload: unknown) => cacheEvents.syncState(payload as Parameters<typeof cacheEvents.syncState>[0])],
+          [EVENTS.itemRefreshed, () => cacheEvents.moved()],
+          [EVENTS.viewFresh, () => cacheEvents.moved()],
+          [EVENTS.checkoutFetched, () => cacheEvents.moved()],
+          [EVENTS.dbState, () => cacheEvents.moved()],
+          [EVENTS.sourceHealth, () => cacheEvents.health()],
+        ] as const) {
+          void listen(event, ({ payload }) => hear(payload)).then((off) => {
+            if (disposed) off();
+            else stops.push(off);
+          });
+        }
+      }
 
       // Subscribed for the whole session; each is seeded below once the
       // database can answer.
@@ -265,6 +284,13 @@
   // happens to read never re-runs another.
   $effect(() => {
     if (lifecycle.ready) void health.reseed();
+  });
+  // Once the first page has drawn, the reads the last session made are asked again in the background, so each page's
+  // first open draws from memory (the instant-open pass, 2026-11-12).
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const later = setTimeout(() => void warm(), 2500);
+    return () => clearTimeout(later);
   });
   $effect(() => {
     if (lifecycle.ready) void inbox.refresh();
