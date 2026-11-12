@@ -781,6 +781,22 @@ impl Searcher {
         suggest::whole_parents(&self.pool, under).await
     }
 
+    /// The ticket keys' values [`Searcher::filter_suggestions`] offers, as
+    /// `(key, value, detail)` rows, read from what the database stores and
+    /// then by the walk of every sampled payload the statement made before:
+    /// the two a test holds equal.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if a read fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn field_suggestion_rows_both_ways(
+        &self,
+    ) -> Result<(Vec<suggest::FieldRow>, Vec<suggest::FieldRow>), SearchError> {
+        let vocab = self.vocabulary().await?;
+        suggest::field_rows_both_ways(&self.pool, &vocab).await
+    }
+
     /// The plan the board's recency read runs under.
     ///
     /// # Errors

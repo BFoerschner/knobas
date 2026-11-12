@@ -15,6 +15,7 @@ mod corpus_seam;
 mod coverage_plans;
 mod declaring;
 mod everything;
+mod field_suggestions;
 mod help_card;
 mod home;
 mod item_parent;

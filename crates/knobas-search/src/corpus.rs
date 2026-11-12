@@ -333,12 +333,14 @@ macro_rules! field_paths_ctes {
             // The stored cards (`sync.item_card`, migration `0075`) read under
             // the key these declarations give each source, as
             // `knobas_core::card_keys!` computes it: what `priority:`,
-            // `issuetype:` and `label:` are asked of ([`card_text_in!`]). A
-            // statement whose keys read no card never runs either.
+            // `issuetype:`, `label:` and `sprint:` are asked of
+            // ([`card_text_in!`], [`card_list_has!`]). A statement whose keys
+            // read no card never runs either.
             "fcard as materialized (select d.source_id, sync.card_key(f.d -> d.source_id) as k \
                from fdecl f cross join jsonb_object_keys(case when jsonb_typeof(f.d) = 'object' \
                                           then f.d else '{}'::jsonb end) as d(source_id)),\n",
-            "fcards as materialized (select c.entity_id, c.priority, c.issue_type, c.labels \
+            "fcards as materialized (select c.entity_id, c.priority, c.issue_type, c.labels, \
+                    c.sprint_states \
                from sync.item_card c join fcard on fcard.source_id = c.source_id \
                 and fcard.k = c.paths_key)"
         )
@@ -433,6 +435,32 @@ macro_rules! card_text_in {
     };
 }
 
+/// Whether one of a ticket's `$column`, a list of its stored card, passes
+/// `$test` (a predicate over `l.value`), asked as a set of the cards
+/// [`FIELD_PATHS`]' `fcards` holds, and the same test over `$walk`, the
+/// payload's list the key read before, for a row with no card under the
+/// bound declarations ([`card_text_in!`] says which rows those are).
+///
+/// A card's list is every value `knobas_core::declared_list!` yields, in its
+/// order (`knobas-app`'s `tests/it/item_card.rs`), so the two halves agree.
+macro_rules! card_list_has {
+    ($column:literal, $test:literal, $($walk:tt)+) => {
+        concat!(
+            "(case when i.entity_id in (select fc.entity_id from fcards fc) \
+              then i.entity_id in (select fc.entity_id from fcards fc \
+                where exists (select 1 from unnest(fc.",
+            $column,
+            ") as l(value) where ",
+            $test,
+            ")) else exists (select 1 from ",
+            $($walk)+,
+            " l where ",
+            $test,
+            ") end)"
+        )
+    };
+}
+
 /// A row's declared list values for one field, through `lp`.
 macro_rules! list_of {
     ($field:literal) => {
@@ -511,22 +539,16 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
         // A card's labels are `declared_list!`'s values (`item_card.rs`).
         (
             FieldKey::Label,
-            concat!(
-                "(case when i.entity_id in (select fc.entity_id from fcards fc) \
-                  then i.entity_id in (select fc.entity_id from fcards fc \
-                    where exists (select 1 from unnest(fc.labels) as l(value) \
-                                   where lower(l.value) = any(fd.v))) \
-                  else exists (select 1 from ",
-                list_of!("labels"),
-                " l where lower(l.value) = any(fd.v)) end)"
-            ),
+            card_list_has!("labels", "lower(l.value) = any(fd.v)", list_of!("labels")),
         ),
+        // And its sprint states (migration `0082`): the walk of every
+        // ticket's payload this key made was 390 ms on 20,000 Jira tickets.
         (
             FieldKey::Sprint,
-            concat!(
-                "exists (select 1 from ",
-                list_of!("sprint_state"),
-                " l where lower(l.value) = 'active')"
+            card_list_has!(
+                "sprint_states",
+                "lower(l.value) = 'active'",
+                list_of!("sprint_state")
             ),
         ),
         (
@@ -560,10 +582,10 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
     ]
 };
 
-/// The seven keys [`LIVE_ITEM_FIELDS`] asks as sets, as they read before the
-/// query audit of 2026-11-12: a probe of `sync.item_field` or a walk of the
-/// payload for every row and key, and `sprint:` beside them. No search
-/// reads them.
+/// The eight keys [`LIVE_ITEM_FIELDS`] asks as sets, as they read before the
+/// query audit of 2026-11-12 and, for `sprint:`, before migration `0082`: a
+/// probe of `sync.item_field` or a walk of the payload for every row and
+/// key. No search reads them.
 /// `tests/it/ticket_key_sets.rs` holds each set-shaped key's answer to its
 /// answer here ([`LIVE_ITEM_PROBED`]).
 #[cfg(any(test, feature = "test-util"))]
@@ -608,8 +630,8 @@ pub(crate) const LIVE_ITEM_FIELDS_PROBED: &[(crate::query::FieldKey, &str)] = {
                 " l where lower(l.value) = any(fd.v))"
             ),
         ),
-        // As it is in [`LIVE_ITEM_FIELDS`]: no stored column holds a
-        // sprint's state, so it walks either way.
+        // The walk `sprint:` made of every ticket before its card held
+        // the sprints' states.
         (
             FieldKey::Sprint,
             concat!(

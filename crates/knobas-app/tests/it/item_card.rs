@@ -100,7 +100,10 @@ fn jira_tickets() -> Vec<(&'static str, &'static str, Value)> {
                 "issuetype": { "name": "Story" },
                 "labels": ["backend", "  ", "", "payouts"],
                 "comment": { "total": 3 },
-                "parent": { "key": "PAY-0" } } }),
+                "parent": { "key": "PAY-0" } },
+                "sprints": [{ "id": 1, "state": "closed" }, { "id": 2, "state": " ACTIVE " },
+                            { "id": 3, "state": "" }, { "id": 4 }, { "id": 5, "state": 7 },
+                            { "id": 6, "state": "future" }] }),
         ),
         (
             "PAY-2",
@@ -110,7 +113,8 @@ fn jira_tickets() -> Vec<(&'static str, &'static str, Value)> {
                 "assignee": { "key": "jon" },
                 "priority": { "name": 3 },
                 "labels": "not a list",
-                "comment": { "total": "4" } } }),
+                "comment": { "total": "4" } },
+                "sprints": { "state": "active" } }),
         ),
         ("PAY-3", "Nothing declared here", json!({})),
     ]
@@ -156,7 +160,7 @@ fn mock_tickets() -> Vec<(&'static str, &'static str, Value)> {
 }
 
 /// What each stored field is, in [`both`]'s arrays.
-const FIELDS: [&str; 14] = [
+const FIELDS: [&str; 15] = [
     "status",
     "assignee",
     "assignee_name",
@@ -171,6 +175,7 @@ const FIELDS: [&str; 14] = [
     "answers_to",
     "parent_text",
     "source_id",
+    "sprint_states",
 ];
 
 /// Every field of each of `source`'s tickets as the payload macros walk it
@@ -203,7 +208,10 @@ const WALKED: &str = concat!(
     " pn order by pn.pos desc, pn.name_ord limit 1), array(select n.name from ",
     knobas_core::declared_names_as_parent!("$1"),
     " n order by 1), array(select lower(ip.name) from sync.item_parent ip
-       where ip.entity_id = i.entity_id order by 1), i.source_id)
+       where ip.entity_id = i.entity_id order by 1), i.source_id,
+       array(select l.value from ",
+    knobas_core::declared_list!("$1", "sprint_state"),
+    " l))
        from sync.item i where i.source_id = $2 order by i.entity_id"
 );
 
@@ -215,7 +223,7 @@ const STORED: &str =
        c.first_label, c.comment_count, c.parent_kind, c.parent_name,
        array(select unnest(c.answers_to) order by 1),
        array(select x from unnest(string_to_array(c.parent_text, chr(31))) x order by 1),
-       c.source_id) end
+       c.source_id, c.sprint_states) end
        from sync.item i
        left join sync.item_card c
          on c.entity_id = i.entity_id and c.paths_key = sync.card_key($1::jsonb -> i.source_id)
@@ -290,6 +298,7 @@ async fn the_stored_rows_are_the_macros_expansions() {
         knobas_core::declared_string!("dd.decl", "issue_type"),
         knobas_core::path_line_read!("dd.decl"),
         knobas_core::declared_list!("dd.decl", "labels"),
+        knobas_core::declared_list!("dd.decl", "sprint_state"),
         knobas_core::declared_integer!("dd.decl", "comment_count"),
         knobas_core::declared_parent_names!("dd.decl"),
         knobas_core::declared_names_as_parent!("dd.decl"),
@@ -348,6 +357,9 @@ async fn a_stored_card_is_the_walks_answer_for_every_field_and_adapter() {
                 .unwrap()[..],
             );
             assert!(child[12].as_array().unwrap().contains(&json!("pay-0")));
+            // Every sprint's state that is a string, trimmed, in the record's
+            // order: a blank, an absent and a numeric one are left out.
+            assert_eq!(child[14], json!(["closed", "ACTIVE", "future"]));
             let parent = &read
                 .iter()
                 .find(|(id, _, _)| id.ends_with(":PAY-0"))
