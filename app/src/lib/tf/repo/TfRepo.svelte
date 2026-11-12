@@ -125,6 +125,10 @@
   /** Forget every repository's branch: a new session, which is what each test is. */
   export function forgetBranches(): void {
     for (const key of Object.keys(chosen)) delete chosen[key];
+  }
+
+  /** Forget which repositories' headers have looked for a branch to propose: a new session. */
+  export function forgetHeaderSearches(): void {
     searched.clear();
   }
 
