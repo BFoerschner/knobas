@@ -107,6 +107,11 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // A page's session memory, held in its component's `<script module>` (#1983).
   "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),
   "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
+  // Which repositories' headers have looked for a branch to propose (the inner-pages pass): `forgetBranches` clears it too.
+  "tf/repo/TfRepo.svelte#searched": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
+  // In plain `.ts` files ({@link UNSCANNED}): the files Files drew, and the views read ahead of a press.
+  "tf/repo/drawn-files.ts#kept": async () => (await import("../tf/repo/drawn-files")).forgetAllDrawnFiles(),
+  "ipc/entity.ts#readsAhead": async () => (await import("../ipc/entity")).forgetReadsAhead(),
   "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
   "tf/docs/TfDocs.svelte#openSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
@@ -135,7 +140,8 @@ export const NOT_YET_RESET: readonly string[] = [];
 export const UNSCANNED: readonly string[] = [
   // Made by a generic factory and held in a plain `.ts`: the scan reads neither.
   "tf/drafts.svelte.ts#typed",
-  "tf/docs/docs.ts#reading","shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens"];
+  "tf/docs/docs.ts#reading","shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens",
+  "tf/repo/drawn-files.ts#kept", "ipc/entity.ts#readsAhead"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

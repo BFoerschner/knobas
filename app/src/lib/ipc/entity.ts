@@ -852,6 +852,11 @@ export function entityView(entityId: string, section: string | null = null): Pro
 const readsAhead = new Map<string, Promise<ShownView | null>>();
 const viewKey = (entityId: string, section: string | null) => `${entityId}\u0000${section ?? ""}`;
 
+/** Every read ahead forgotten: a test's fresh window. */
+export function forgetReadsAhead(): void {
+  readsAhead.clear();
+}
+
 /** Reads `entityId`'s view at `section` ahead of a press, for {@link entityView} to join while it is out. */
 export function readViewAhead(entityId: string, section: string | null = null): Promise<ShownView | null> {
   const key = viewKey(entityId, section);
