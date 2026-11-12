@@ -552,6 +552,34 @@ pub async fn last_finished(
     Ok(row.map(Into::into))
 }
 
+/// [`last_finished`] for each of `source_ids`, in one statement: the rows of
+/// the sources that have a finished run, in no order.
+///
+/// The sources list asked [`last_finished`] once per source, a round trip
+/// each on every read of the list (the query audit of 2026-11-12). The
+/// statement is that read's, run per id inside one, so each row is the row
+/// the single read answers: `tests/it/run_log.rs` holds the two together.
+///
+/// # Errors
+/// [`sqlx::Error`] if the query fails.
+pub async fn last_finished_of(
+    pool: &sqlx::PgPool,
+    source_ids: &[String],
+) -> Result<Vec<SyncRunRow>, sqlx::Error> {
+    let sql = format!(
+        "select r.* from unnest($1::text[]) as s(id)
+          cross join lateral (
+            select {RUN_COLUMNS} from knobas.sync_run
+             where source_id = s.id and finished_at is not null
+             order by started_at desc, id desc limit 1) r"
+    );
+    let rows: Vec<RawRun> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(source_ids)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 /// How many **finished** runs there have been since the last successful one --
 /// the rung of P7's backoff ladder, derived rather than stored.
 ///

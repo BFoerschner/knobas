@@ -380,6 +380,14 @@ pub async fn list(
     let mut misses = knobas_sync::role_check::misses(pool).await?;
     // Once, not once per row: `descriptors()` builds every template.
     let templates = registry.descriptors();
+    // Every source's last finished run in one read, not one per row.
+    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    let mut last_runs: std::collections::HashMap<String, _> =
+        knobas_sync::run_log::last_finished_of(pool, &ids)
+            .await?
+            .into_iter()
+            .map(|run| (run.source_id.clone(), run))
+            .collect();
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
@@ -403,7 +411,7 @@ pub async fn list(
                 .iter()
                 .find(|s| s.source_id == id)
                 .and_then(|s| s.next_run_at),
-            last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
+            last_run: last_runs.remove(&id),
             kinds: template.map(|t| t.entity_kinds).unwrap_or_default(),
             auth_kind: row.auth_kind.method(),
             id: row.id,

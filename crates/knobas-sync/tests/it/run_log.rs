@@ -390,6 +390,81 @@ async fn the_last_finished_run_ignores_one_still_in_flight() {
     assert_eq!(last.outcome, Some(SyncOutcome::Unreachable));
 }
 
+/// `last_finished_of` is `last_finished` asked for several sources at once:
+/// a source with runs, one whose newest run is still open, one with two
+/// finished runs started in the same instant, one that never ran and one
+/// with only an open run.
+#[tokio::test]
+async fn the_last_finished_runs_of_several_sources_are_each_sources_own() {
+    let pool = pool().await;
+    let plain = unique("run");
+    let shadowed = unique("run");
+    let tied = unique("run");
+    let never = unique("run");
+    let open_only = unique("run");
+
+    let r = run_log::start(&pool, &plain, SyncTrigger::FirstRun)
+        .await
+        .unwrap();
+    finish_ok(&pool, r, 5).await;
+    let r = run_log::start(&pool, &shadowed, SyncTrigger::Schedule)
+        .await
+        .unwrap();
+    finish_failed(&pool, r, SyncOutcome::Unreachable, "dns").await;
+    run_log::start(&pool, &shadowed, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    for upserted in [1, 2] {
+        let r = run_log::start(&pool, &tied, SyncTrigger::Schedule)
+            .await
+            .unwrap();
+        finish_ok(&pool, r, upserted).await;
+    }
+    sqlx::query(
+        "update knobas.sync_run set started_at = '2026-01-01T00:00:00Z' where source_id = $1",
+    )
+    .bind(&tied)
+    .execute(&pool)
+    .await
+    .unwrap();
+    run_log::start(&pool, &open_only, SyncTrigger::Manual)
+        .await
+        .unwrap();
+
+    let ids = [
+        plain.clone(),
+        shadowed.clone(),
+        tied.clone(),
+        never.clone(),
+        open_only.clone(),
+    ];
+    let mut together = run_log::last_finished_of(&pool, &ids).await.unwrap();
+    together.sort_by(|a, b| a.source_id.cmp(&b.source_id));
+    let mut one_by_one = Vec::new();
+    for id in &ids {
+        one_by_one.extend(run_log::last_finished(&pool, id).await.unwrap());
+    }
+    one_by_one.sort_by(|a, b| a.source_id.cmp(&b.source_id));
+    let whole = |runs: &[knobas_sync::run_log::SyncRunRow]| {
+        runs.iter()
+            .map(|r| format!("{r:?}"))
+            .collect::<Vec<String>>()
+    };
+    assert_eq!(whole(&together), whole(&one_by_one));
+    assert_eq!(together.len(), 3, "the three sources with a finished run");
+    let tied_run = together.iter().find(|r| r.source_id == tied).unwrap();
+    assert_eq!(
+        tied_run.upserted, 2,
+        "a tie on the start goes to the later id"
+    );
+    assert!(
+        run_log::last_finished_of(&pool, &[])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// Every trigger and outcome this code writes must survive the round trip
 /// through a `text` column -- a spelling that only one direction knows is a
 /// diagnostics view showing blanks. Driven by `ALL` on both axes, so a new

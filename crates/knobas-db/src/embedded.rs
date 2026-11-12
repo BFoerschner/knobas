@@ -58,6 +58,18 @@ const DURABLE_SETTINGS: [(&str, &str); 3] = [
     ("full_page_writes", "on"),
 ];
 
+/// How much of the database the server keeps in its own memory, passed as
+/// `-c shared_buffers` every time it starts (the query audit of 2026-11-12).
+///
+/// PostgreSQL's default is 128 MB, and a mirror of 39,770 items is 820 MB on
+/// disk: a search that ranks a common word reads more pages than fit, so each
+/// keystroke fetched thousands of them from the operating system's cache
+/// again. Twice the default holds what those reads touch: the launcher's
+/// widest searches went from 194 to 181 ms and from 166 to 151 on that
+/// mirror, and 512 MB bought 4 ms more. The memory is mapped at start and
+/// used as pages are read, so a small mirror costs what it did.
+const SHARED_BUFFERS: &str = "256MB";
+
 /// Pool size. The desktop app is a single user with a handful of concurrent
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
@@ -1610,6 +1622,11 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
             .configuration
             .insert(name.to_owned(), value.to_owned());
     }
+    // As `-c`, like the rest: a data directory an older build made, whose
+    // `postgresql.conf` says 128 MB, gets it at its next start.
+    settings
+        .configuration
+        .insert("shared_buffers".to_owned(), SHARED_BUFFERS.to_owned());
     settings.timeout = Some(COMMAND_TIMEOUT);
 
     // The password `Settings::new()` invented is left in place here. Reading
@@ -2677,6 +2694,27 @@ mod tests {
         assert_eq!(settings.password_file, dir.path().join(".pgpass"));
         // No `?host=` query -- a Unix-socket URL would carry one.
         assert!(settings.url(DATABASE_NAME).contains("@127.0.0.1:0/knobas"));
+    }
+
+    /// Every start passes the server's own cache size, beside the durable
+    /// settings.
+    #[test]
+    fn build_settings_gives_the_server_twice_the_default_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = build_settings(dir.path()).unwrap();
+        assert_eq!(
+            settings
+                .configuration
+                .get("shared_buffers")
+                .map(String::as_str),
+            Some("256MB")
+        );
+        for (name, value) in DURABLE_SETTINGS {
+            assert_eq!(
+                settings.configuration.get(name).map(String::as_str),
+                Some(value)
+            );
+        }
     }
 
     /// The port a fresh start hands the server comes from a bind on

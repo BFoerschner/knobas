@@ -432,14 +432,28 @@ async fn the_apps_server_runs_with_fsync_on_after_a_restart_too() {
     .await
     .unwrap();
     let started = durability(db.pool()).await;
+    let cache = shared_buffers(db.pool()).await;
 
     knobas_db::test_util::kill_server(dir.path());
     db.restart().await.expect("the dead server starts again");
     let restarted = durability(db.pool()).await;
+    let cache_restarted = shared_buffers(db.pool()).await;
     db.stop().await.unwrap();
 
     assert_eq!(started, DURABLE_SETTINGS, "the started server");
     assert_eq!(restarted, DURABLE_SETTINGS, "the restarted server");
+    // And with the cache every start passes it (the query audit of
+    // 2026-11-12), not the 128 MB its `postgresql.conf` says.
+    assert_eq!(cache, "256MB", "the started server");
+    assert_eq!(cache_restarted, "256MB", "the restarted server");
+}
+
+/// What the server behind `pool` runs `shared_buffers` at.
+async fn shared_buffers(pool: &sqlx::PgPool) -> String {
+    sqlx::query_scalar("select current_setting('shared_buffers')")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 /// #1896: an orphan this build left is adopted, and the adopting handle's
