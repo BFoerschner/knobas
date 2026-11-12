@@ -10,8 +10,11 @@
 //           through examples/headless_ipc.rs, which emits no events, so this probe ends the runs itself)
 // --every   seconds between the ends of a run of every enabled source (`sync:state`, `last_changed`), as a busy day's
 //           syncs: 5 s for 2 minutes is 24 runs, about what a minute's Kuma interval brings in half an hour
-// --attach  join a running app instead (knobas's own WebView2 on Windows with --remote-debugging-port): its own syncs
-//           end its runs too, and the probe's ends go through Tauri's own event bridge (`plugin:event|emit`)
+// --attach  join a running page instead: Edge on a build over the windowless backend, where the probe ends the runs
+//           as above, or knobas's own WebView2 (--remote-debugging-port), whose own syncs end its runs: there the probe
+//           emits nothing. Not through `plugin:event|emit` either: an emit off the main
+//           thread holds Tauri's webview lock while it waits for the main thread, which an IPC request is holding, and
+//           the window froze for good on Björn's PC (2026-11-12; `crate::events::emit` in knobas-app says why it hops)
 //
 // Each sample: main-thread time since the last (`Performance.getMetrics`), the longest task, DOM nodes, listeners, and a
 // hover sweep over the rows on screen at 1x and 4x CPU slowdown, from the mouse event to the end of the frame that draws
@@ -60,11 +63,12 @@ await js(`(() => {
   window.__long = s;
 })()`);
 /** The sources whose run ends this probe emits: every enabled one, as a scheduler's would end. */
-const sources = await js(`window.__TAURI_INTERNALS__.invoke("list_sources").then((rows) => rows.filter((r) => r.enabled).map((r) => r.id))`);
+// Only through the fixture's bridge (`?fake-hooks`), which a page over the windowless backend has, attached or not.
+const sources = (await js(`!!window.__fake?.emit`)) ? await js(`window.__TAURI_INTERNALS__.invoke("list_sources").then((rows) => rows.filter((r) => r.enabled).map((r) => r.id))`) : [];
 let runId = 1_000_000;
 const endRuns = () => js(`(${JSON.stringify(sources)}).forEach((id, i) => { const payload = { source_id: id, running: false, run_id: ${runId++} + i * 1000, started_at: null,
   last_finished_at: new Date().toISOString(), last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: true };
-  if (window.__fake) window.__fake.emit("sync:state", payload); else void window.__TAURI_INTERNALS__.invoke("plugin:event|emit", { event: "sync:state", payload }); })`);
+  window.__fake.emit("sync:state", payload); })`);
 
 const metrics = async () => Object.fromEntries((await c.send("Performance.getMetrics")).metrics.map((m) => [m.name, m.value]));
 const ROWS = `.tf-kept:not([hidden]) tbody tr:not(.tf-wgap)`;

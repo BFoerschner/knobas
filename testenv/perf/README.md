@@ -31,13 +31,15 @@ trace on every state write, which made the measured app's filter keys several ti
 | `probe.js` | the page half: every frame, the time from its callback to the end of its rendering (`frame work`), script by kind, long animation frames, event timings, IPC |
 | `frames.mjs` | the trace readers: what reached the display (the compositor's frame reporters), how many elements each style pass computed, the main thread's time by kind, its longest tasks |
 | `budget.mjs`, `budget.json` | the lines, per corpus (`fake`, `real`), and the check |
-| `long.mjs` | the long-run probe (the monitors-builds pass, 2026-11-12): Monitors left open while every source's run ends every `--every` seconds, then kept hidden behind the Inbox; main-thread time a minute, the longest task, a small read's wait, DOM, listener and heap growth, and a hover's cost at 1x and 4x, against `budget.json`'s `long` lines. `--attach` joins a running app (knobas's own WebView2) and ends runs through Tauri's event bridge |
+| `long.mjs` | the long-run probe (the monitors-builds pass, 2026-11-12): Monitors left open while every source's run ends every `--every` seconds, then kept hidden behind the Inbox; main-thread time a minute, the longest task, a small read's wait, DOM, listener and heap growth, and a hover's cost at 1x and 4x, against `budget.json`'s `long` lines. `--attach` joins a running app (knobas's own WebView2), whose own syncs end its runs: an emit from the page (`plugin:event|emit`) froze the app's window for good |
 | `scrollers.mjs` | every box that scrolls on the app's pages, light and dark, with its own background and the colour under it; `--strict` fails on a transparent one |
 | `invalidations.mjs` | why a scroll restyles what it does, from Chromium's own invalidation records: for a rule that restyles far more than the rows that changed |
 | `profile.mjs` | a CPU profile of one moment (`--setup`, then `--act`), by function, for a slow key or page switch the frame probe names only by its task |
 | `serve.mjs` | serves a built app on 127.0.0.1 where there is no Python (Windows) |
 | `cdp.mjs` | the DevTools-protocol client: `launch()` a headless Chrome of its own, or `attach(port)` to one listening |
 | `frame-budget.sh` | what `just frame-budget` runs |
+| `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
+| `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
 
@@ -57,6 +59,39 @@ trace on every state write, which made the measured app's filter keys several ti
 - **keys to paint**: from each synthetic input event to the frame that draws it.
 - **switch ms**: a page switch's first frame or its longest frame after, whichever is longer.
 - **throttle Nx**: `Emulation.setCPUThrottlingRate`, the page's main thread only; not the compositor, raster or GPU.
+
+## Opening a page: `just open-budget`
+
+How long a press takes to show a page's content, from the instant-open pass of PR #2479 (2026-11-12, rulings in
+`docs/decisions/2026-11-12-opening-a-page-draws-what-the-mirror-holds.md`). `open.mjs` presses each place's nav
+entry or row with real input over the DevTools protocol, at each throttle, in four rounds:
+
+| Round | What it is |
+|---|---|
+| `first` | the first press after the app started and was up 6 s (`--first-after`) |
+| `return` | left for one other page, pressed again |
+| `late` | left for every other section first, so the kept pages have turned over |
+| `synced` | left, every source ends a run that changed something (`?fake-hooks`'s `__fake.emit`), pressed again |
+
+For each it records, in the page (`open-probe.js`): the first frame after the press, the first frame in which the
+place's own rows are drawn and nothing in the shown page waits (no skeleton, nothing `aria-busy`), the page's DOM
+quiet 700 ms after that, the rows that moved or went after that first useful frame, every IPC call between the press
+and settled with when it started and ended, and the long tasks. `--check budget-open.json --lines real` fails a place
+whose useful time or settling is over its line, or whose rows moved.
+
+```sh
+cp -cR <saved home> "$TMPDIR/home"            # as *On a real database* above, the secrets moved out
+HOME="$TMPDIR/home" cargo run --release -p knobas-app --features test-util --example headless_ipc -- \
+  --data-dir "$TMPDIR/home/Library/Application Support/dev.knobas.desktop" --port 5411 --timings "$TMPDIR/ipc.jsonl"
+just open-budget --real 5411
+curl -X POST http://127.0.0.1:5411/quit
+```
+
+`--timings` makes the windowless backend append one line a command (its name, its arguments, when it arrived and
+left, the backend's time on it, the answer's bytes), which splits an open into what the backend spent and what the
+page did. The places are the saved scale database's (`SCLENG`, a TeamCity pipeline); there is no fixture run. Two
+things differ from the app: a headless Chrome sends at most six requests to the backend at once, where Tauri's IPC
+has no such limit, and the backend is the example's mock runtime, whose answers are the app's.
 
 ## On a real database
 
