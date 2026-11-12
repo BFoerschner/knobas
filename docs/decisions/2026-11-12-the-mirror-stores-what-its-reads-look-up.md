@@ -33,14 +33,54 @@
 
 **What it costs.** Six migrations, 2.7 s together at the first start on the scale database: `0077` 1.9 s, `0078` 0.4 s, `0079` 0.4 s, `0080` 0.15 s, `0076` and `0081` nothing. After the app is up, `0081`'s fill runs in the background: 4.7 s of database time in 80 batches, and a list walks an item's payload until its batch has run. 112 MB more on disk, 71 of it the search copy. A first sync now also writes each item's search copy and the names of its mentions and reviewers, inside the times above. A change made in knobas that only a suggestion rule reads, an asset's route, reaches the tray at the next run that writes, or within ten minutes.
 
-**Left, with what it would take.**
+**Left, with what it would take.** The first four were taken later the same day, under *The stored-reads pass* below.
 
-- `sprint:current`, 452 ms. It reads each ticket's sprint state from the payload. Storing it changes the card's key.
-- The failed build rule, 19 of the Inbox's 40 ms. It reads every build's state and pipeline to find the latest green run of a configuration. A stored state per run is its own table. The brief's target for the statement was 20 ms.
-- `filter_suggestions`, 77 ms on the first open of Tickets. Seven declared fields walked over 1,494 sampled payloads; reading them from the stored fields and cards needs the stored-or-walk fallback for each key.
-- Docs search projects each hit's page to name its editor, about 400 ms in a debug build.
+- ~~`sprint:current`, 452 ms.~~ Taken: migration `0082`.
+- ~~The failed build rule, 19 of the Inbox's 40 ms.~~ Taken, with nothing new stored: `0081` and `0062` already held what it reads.
+- ~~`filter_suggestions`, 77 ms on the first open of Tickets.~~ Taken as far as stored values go: 39 ms.
+- ~~Docs search projects each hit's page to name its editor.~~ Taken, with nothing stored.
 - `item_body_trgm_idx` no longer serves the mention rule and `item_fts_idx` no longer serves the launcher. The detection pass and the run-log corpus still read them, and dropping an index is not additive.
 
 **Same answers.** Each changed read is pinned to the one it replaces: the launcher's statement against the one reading `sync.item` alone, over the scale data's vocabulary, scopes, typing and limits; each key asked as a set against its row-by-row read; the board's statuses against the joined read; the review request rule against the walk over every pull request, with declarations stored, never stored and changed under the read; the mention rule against the names a body stores; the two shelves of one run against the two reads; the resolvers against the bodies they replace, over real rows of every kind; every list order with every stored row, some and none, and each stored field against its walk for every kind and adapter. On the scale clone, re-resolving every row through the new functions left every stored field, parent, project, pipeline, revision and key cell identical. 33 cards hold the same parent names in another order, in a column whose order `0075` never fixed.
 
 **Reversing it.** A migration is never edited: each stored table can be left unread by putting the earlier statement back, and most earlier statements are still in the tree as the reference a test compares against. `SuggestOnSync::due` returning true asks for a pass after every run again. `SHARED_BUFFERS` back to `128MB` is the old cache.
+
+## The stored-reads pass (the same day, later)
+
+**Asked (Björn, on PR #2479):** "just store more data, what does it take? the constraint is speed and feel, don't just save 'data' for savings sake." So a stored copy had to remove a wait a person feels, be the smallest thing that does, and be measured before and after.
+
+**Found.** Of the four reads left above, one needed something stored. The other three read values the database already kept, and two more turned up beside them. Times are the windowless backend on clones of the saved scale database, the head before against this one, calls alternated, median of seven. The first number pair is the debug build the earlier tables used. The second is a release build, which is what the app runs.
+
+- **`sprint:current` on the board: 447 ms to 70, and 431 to 61 in a release build.** The one thing stored. Migration `0082` adds `sync.item_card.sprint_active`, whether one of a ticket's sprints is active, and takes the declared `sprint_state` into the card's key. The key walked 20,007 payloads a keystroke.
+- **The Inbox's statement: 39 ms to 20. `inbox_shelves`: 52 ms to 36, and 44 to 28.** Nothing stored. The failed build rule takes a build's tone from `sync.item_row` and its configuration from `sync.item_pipeline`, where it opened 2,620 payloads. The new assignment rule takes a ticket's assignee from `sync.item_field`, where it opened the 477 tickets of the window. The four rules that read the mirror shared nothing: each scanned `knobas.entity` for the withdrawn entities, and now one read serves all four.
+- **The filter box's values on the first open of Tickets: 96 ms to 39, and 80 to 32.** Stored values only where they exist: the project, status and assignee from `sync.item_field`, the type, priority, labels and the sprint answer from the card. A pull request's labels are in no stored table, so 203 of the 1,494 sampled rows are still walked.
+- **Docs search: 496 ms to 281 for `retry`, and 125 to 74.** Nothing stored. The search drew each of its fifty hits as a whole page to read one string, the editor's display name. `Projection::editor_name` reads that field alone where the adapter gives a read for it, and Confluence's does.
+- **Search under Everything: `p` 184 ms to 138, `retry` 156 to 113, `deploy` 144 to 107. In a release build 150 to 106, 120 to 77 and 108 to 71. Titles: `p` 89 to 65, `retry` 39 to 29.** Nothing stored. Two things. The statement sorted every match to keep ten rows a kind, and now reads each kind through an ordered limit. And the page's path lines and state chips come from `sync.item_row`, where each of fifty rows walked its payload.
+
+**Ruled along the way.**
+
+- **The card stores the answer, not the list.** `0082` first held every sprint's state as text, as `labels` holds the labels. No reader used the list, and it made the card a tenth wider, which the whole board pays because it reads every card: 3 % on a broad filter. One boolean keeps the table at 768 pages. The test `lower(state) = 'active'` now stands in the migration as well as in the search, and `item_card.rs` holds the two to one answer.
+- **A statement that must run on several processes calls no function of ours.** PostgreSQL plans no parallel workers for a statement that calls a function not marked parallel safe. The launcher's match stage runs on three processes, and one call of `sync.row_key` in its detail stage took them away: 40 ms on a one-letter keystroke. The key is written out there (`knobas_core::row_key_of!`) and a test holds the text to the function. Marking the functions parallel safe would have let every statement that calls them change its plan, which nobody measured.
+- **The search's ordered limit rescans the match set once a kind.** That is a scan per row of `totals`, the shape `read_plans.rs` refuses elsewhere. Here the outer side is the kinds a query matched, about fifteen at most.
+- **A sample's ties are taken in no stated order.** The filter box reads the newest 200 rows of each source and kind. Where several rows share the instant at the cut, the old statement and the new take different ones, so their answers differ on the scale data. Over the whole mirror they agree.
+
+**Not stored, and why.**
+
+- **An editor's name, a build's state, a ticket's assignee, a hit's path and chip.** Each was already in a stored table or in a record the read already had.
+- **An index for the filter box's sample**, `(source_id, kind, item_updated_at)`. The planner does not pick it on these statistics, and the 8 ms it could save is on a read made once a session.
+- **The match stage's own columns in `sync.item_search`**: the kind, the date and the title's words, so a keystroke would not probe `sync.item` once a match. About 15 ms of a common word. It would rewrite an item's search copy, and its two GIN entries, whenever its date moves.
+- **Anything for the board's broad filters.** See below.
+
+**What it costs.** One migration, `0082`: 19 ms at the first start on the scale database. It empties `sync.item_card`, because every row was written under the old key, and bring-up fills it again in the background: 47 batches, 1.9 s of database time, done about four seconds after start. Until a ticket's batch has run its board reads walk its payload, as they did before `0075`. One byte a ticket on disk. No write costs more: the card is written where it was.
+
+**Left, with what it would take.**
+
+- **A filter that keeps most of the board**: `-project:PAY` 145 ms and 136 in a release build, `-priority:High` 121 and 96, a single letter 117 and 87. Two statements, the ids and the board. The board sorts every ticket it kept to cut each column to eight, 35 of its 75 ms. Cutting each column by an ordered read is the per-row scan `read_plans.rs` refuses for the board, and a laned board has too many columns for it. No stored copy helps a board filtered by ids.
+- **The filter box's values**, 39 ms against the 15 asked for. What is left reads every row id of each source and kind to find its newest 200, and probes the stored values.
+- **One letter under Everything**, 138 ms and 106 in a release build: `p` matches 28,955 rows, and each is ranked.
+- **Docs search in a debug build**, 281 ms: the best sentence and the match count, text work a release build does in 20 ms.
+
+**Same answers.** Each changed read keeps the statement it replaced as its reference, and a test asks both: `FAILED_BUILD_WALKED` and `NEW_ASSIGNMENT_WALKED` in `inbox.rs`, `FIELDS_SQL_WALKED` in `field_suggestions.rs`, `search_sql_windowed` in `item_search.rs`, `LIVE_ITEM_UNSTORED` in `launcher_kinds.rs`, the sprint key's row-by-row read in `ticket_keys.rs`, and Confluence's editor read against its projection. Each is asked with every row stored, some gone, none, filled again, and under declarations the database never stored. Five mutants of the stored reads each failed its test, one of them only after the test gained a second adapter's stored candidates. On the scale clones every answer in the table is byte-equal before and after, except the filter box's for the ties above.
+
+**Reversing it.** `0082` stays. Each read goes back by putting the reference statement in its place.
+
