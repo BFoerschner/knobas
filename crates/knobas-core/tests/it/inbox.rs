@@ -2437,6 +2437,82 @@ const FAILED_BUILD_BEFORE_785: &str = "
 #[tokio::test]
 async fn every_build_mine_names_what_the_per_build_statement_named() {
     let pool = &scratch().await;
+    let mirror = builds_mirror(pool).await;
+    let BuildsMirror {
+        ids,
+        running,
+        older,
+        elsewhere,
+        tombstoned,
+        off,
+        unconfigured,
+        linked,
+    } = &mirror;
+    let (running, older, elsewhere, tombstoned, off, unconfigured, linked) = (
+        *running,
+        *older,
+        *elsewhere,
+        *tombstoned,
+        *off,
+        *unconfigured,
+        *linked,
+    );
+
+    let before: Vec<String> = sqlx::query_scalar(FAILED_BUILD_BEFORE_785)
+        .bind(me())
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let rule = inbox::rule(Category::FailedBuild).unwrap();
+    let mut after: Vec<String> =
+        inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|i| i.entity_id.unwrap())
+            .collect();
+    after.sort();
+    assert_eq!(after, before);
+    // Worked by hand from the mirror above, so the comparison cannot pass by
+    // both statements naming nothing.
+    for (what, i, wanted) in [
+        ("the newest red of H, never green again", 55, true),
+        ("a red of A that A's next green resolved", 0, false),
+        ("a red whose re-run is still running", running, true),
+        ("a red with only an older green", older, true),
+        ("a red whose green is in another source", elsewhere, true),
+        ("a red whose green is tombstoned", tombstoned, true),
+        ("a red of a turned-off source", off, false),
+        ("a red with no configuration", unconfigured, true),
+        ("a red linked from me", linked, true),
+        ("a red linked to me", linked + 1, true),
+        ("a red only proposed to me", linked + 2, false),
+        (
+            "a red linked to itself and somebody else",
+            linked + 3,
+            false,
+        ),
+    ] {
+        assert_eq!(after.contains(&ids[i]), wanted, "{what}: {after:?}");
+    }
+}
+
+/// [`builds_mirror`]'s builds, and where each case of it sits among them.
+struct BuildsMirror {
+    ids: Vec<String>,
+    running: usize,
+    older: usize,
+    elsewhere: usize,
+    tombstoned: usize,
+    off: usize,
+    unconfigured: usize,
+    linked: usize,
+}
+
+/// A mirror of builds holding each way a red one is resolved or not, every
+/// one the reader's or linked to their work: what
+/// [`every_build_mine_names_what_the_per_build_statement_named`] describes.
+async fn builds_mirror(pool: &PgPool) -> BuildsMirror {
     source(pool, "teamcity", None, true).await;
     source(pool, "teamcity2", None, true).await;
     source(pool, "offci", None, false).await;
@@ -2644,44 +2720,219 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
     link(pool, &ids[linked + 2], &mine, false).await;
     link(pool, &ids[linked + 3], &ids[linked + 3], true).await;
     link(pool, &ids[linked + 3], &theirs, true).await;
+    BuildsMirror {
+        ids,
+        running,
+        older,
+        elsewhere,
+        tombstoned,
+        off,
+        unconfigured,
+        linked,
+    }
+}
 
-    let before: Vec<String> = sqlx::query_scalar(FAILED_BUILD_BEFORE_785)
-        .bind(me())
-        .fetch_all(pool)
+/// TeamCity's build as [`teamcity_build`] declares it, framed a run as its
+/// descriptor frames it: what makes the database keep each build's pipeline
+/// (`sync.item_pipeline`, migration `0062`).
+fn teamcity_run() -> knobas_core::payload::KindPaths {
+    knobas_core::payload::KindPaths {
+        frame: Some(knobas_core::payload::Frame::Run),
+        ..teamcity_build()
+    }
+}
+
+/// [`declarations`] with the two TeamCity sources' builds framed as runs.
+fn run_declarations() -> knobas_core::payload::Declarations {
+    declarations()
+        .with("teamcity", vec![teamcity_run()])
+        .with("teamcity2", vec![teamcity_run()])
+}
+
+/// The failed-build rule against the walk it replaced, for `who`, under
+/// `declared`: the same rows whole, in the same order. Returns the builds
+/// they name, sorted.
+async fn failed_builds(
+    pool: &PgPool,
+    who: &[String],
+    declared: &knobas_core::payload::Declarations,
+    when: &str,
+) -> Vec<String> {
+    let rule = inbox::planned_statements()
+        .into_iter()
+        .find(|(category, _)| *category == Category::FailedBuild)
+        .unwrap()
+        .1;
+    let mut answers = Vec::new();
+    for sql in [rule, inbox::FAILED_BUILD_WALKED] {
+        let wrapped = format!("select to_jsonb(q) from ({sql}) q");
+        let rows: Vec<serde_json::Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(wrapped))
+            .persistent(false)
+            .bind(who)
+            .bind(now())
+            .bind(false)
+            .bind(declared.as_param())
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        answers.push(rows);
+    }
+    assert_eq!(
+        answers[0], answers[1],
+        "{when}: the rule and the walk over every build's payload"
+    );
+    let mut ids: Vec<String> = answers[0]
+        .iter()
+        .map(|row| row["entity_id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// **A build is ruled by the rows the database keeps of it** (`sync.item_row`
+/// for its tone, `sync.item_pipeline` for its configuration; the stored-reads
+/// pass of 2026-11-12), and the rule names the builds the walk over every
+/// build's payload named: with every row stored, with some builds' rows
+/// gone and with none, with the pipelines stored for one source alone, with
+/// stored declarations that are not the ones the read binds, and with none
+/// stored at all. On the mirror
+/// [`every_build_mine_names_what_the_per_build_statement_named`] reads, so
+/// every way a red build is resolved or not is asked each time.
+#[tokio::test]
+async fn a_failed_build_is_ruled_by_the_rows_the_database_keeps_of_it() {
+    let pool = &scratch().await;
+    // The declarations before the builds, so each build is written with its
+    // rows, as a sync writes it after bring-up.
+    declare(pool, "teamcity", &[teamcity_run()]).await;
+    declare(pool, "teamcity2", &[teamcity_run()]).await;
+    let mirror = builds_mirror(pool).await;
+    let declared = run_declarations();
+    let builds: i64 = sqlx::query_scalar("select count(*) from sync.item where kind = 'build'")
+        .fetch_one(pool)
         .await
         .unwrap();
-    let rule = inbox::rule(Category::FailedBuild).unwrap();
-    let mut after: Vec<String> =
-        inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|i| i.entity_id.unwrap())
-            .collect();
-    after.sort();
-    assert_eq!(after, before);
-    // Worked by hand from the mirror above, so the comparison cannot pass by
-    // both statements naming nothing.
+    let stored = |table: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "select count(distinct t.entity_id) from {table} t join sync.item i using (entity_id)
+              where i.kind = 'build' and i.source_id like 'teamcity%'"
+        )))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    // Every build of the two sources has its row, and its pipeline unless
+    // it names no configuration, as two do. The turned-off source's two
+    // builds are not counted.
+    assert_eq!(stored("sync.item_row").await, builds - 2);
+    assert_eq!(stored("sync.item_pipeline").await, builds - 4);
+
+    let mine = failed_builds(pool, &me(), &declared, "every row stored").await;
     for (what, i, wanted) in [
         ("the newest red of H, never green again", 55, true),
         ("a red of A that A's next green resolved", 0, false),
-        ("a red whose re-run is still running", running, true),
-        ("a red with only an older green", older, true),
-        ("a red whose green is in another source", elsewhere, true),
-        ("a red whose green is tombstoned", tombstoned, true),
-        ("a red of a turned-off source", off, false),
-        ("a red with no configuration", unconfigured, true),
-        ("a red linked from me", linked, true),
-        ("a red linked to me", linked + 1, true),
-        ("a red only proposed to me", linked + 2, false),
+        ("a red whose re-run is still running", mirror.running, true),
+        ("a red with only an older green", mirror.older, true),
         (
-            "a red linked to itself and somebody else",
-            linked + 3,
-            false,
+            "a red whose green is in another source",
+            mirror.elsewhere,
+            true,
         ),
+        ("a red whose green is tombstoned", mirror.tombstoned, true),
+        ("a red of a turned-off source", mirror.off, false),
+        ("a red with no configuration", mirror.unconfigured, true),
+        ("a red linked from me", mirror.linked, true),
+        ("a red linked to me", mirror.linked + 1, true),
+        ("a red only proposed to me", mirror.linked + 2, false),
     ] {
-        assert_eq!(after.contains(&ids[i]), wanted, "{what}: {after:?}");
+        assert_eq!(mine.contains(&mirror.ids[i]), wanted, "{what}: {mine:?}");
     }
+    let theirs = failed_builds(pool, &[THEM.to_owned()], &declared, "somebody else's").await;
+    assert_eq!(theirs.len(), 4, "the four builds they triggered");
+    assert!(
+        failed_builds(pool, &[], &declared, "nobody")
+            .await
+            .is_empty()
+    );
+    // The declarations every other test binds frame no run: the stored
+    // pipelines are still the ones their candidates give, and the tones too.
+    assert_eq!(
+        failed_builds(pool, &me(), &declarations(), "bound without the frame").await,
+        mine
+    );
+
+    // Some builds' rows gone, as builds the fill has not reached.
+    sqlx::query(
+        "delete from sync.item_row where entity_id in (
+           select entity_id from sync.item where kind = 'build' order by entity_id offset 3 limit 40)",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "some rows gone").await,
+        mine
+    );
+    sqlx::query("delete from sync.item_row")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(failed_builds(pool, &me(), &declared, "no row").await, mine);
+    knobas_core::item_row::fill(pool).await.unwrap();
+    assert_eq!(stored("sync.item_row").await, builds - 2);
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "the rows filled again").await,
+        mine
+    );
+
+    // One source's stored declaration names another pipeline: its builds'
+    // stored pipelines are not the bound candidates', so they are walked,
+    // and the other source's are still read.
+    let mut moved = teamcity_run();
+    moved.pipeline = vec![knobas_core::payload::PayloadPath::of(["status"])];
+    declare(pool, "teamcity", &[moved]).await;
+    let elsewhere: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_pipeline where source_id = 'teamcity' and pkey = 'FAILURE'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        elsewhere > 0,
+        "the stored pipelines moved with the declaration"
+    );
+    assert_eq!(
+        failed_builds(
+            pool,
+            &me(),
+            &declared,
+            "a pipeline stored under other candidates"
+        )
+        .await,
+        mine
+    );
+
+    // And another state: the stored rows are under a key the read does not
+    // bind, so every tone is walked.
+    let mut restated = teamcity_run();
+    restated.state.truncate(1);
+    declare(pool, "teamcity", &[restated]).await;
+    knobas_core::item_row::fill(pool).await.unwrap();
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "a state stored under another key").await,
+        mine
+    );
+
+    // No declaration stored at all.
+    sqlx::query("delete from sync.parent_declaration")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(stored("sync.item_row").await, 0);
+    assert_eq!(stored("sync.item_pipeline").await, 0);
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "nothing stored").await,
+        mine
+    );
 }
 
 /// **The stream, the shelf and the count are planned for their values every

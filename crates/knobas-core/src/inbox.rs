@@ -680,7 +680,110 @@ macro_rules! mention_of {
 /// subquery into its reader, resolved the state once per mention: three
 /// times a build, 44 ms for 2,531. The `offset 0` keeps `scored` a subquery
 /// of its own.
+///
+/// **No build's payload is opened to rule it** (the stored-reads pass of
+/// 2026-11-12). The rule read every live build's state and pipeline out of
+/// its payload to find each configuration's latest green: 19 of the
+/// stream's 40 ms on a mirror of 2,620 builds. The database already keeps
+/// both, written with the build:
+///
+/// * the tone is the stored row's (`sync.item_row`, migration `0081`), read
+///   under the key of the bound declarations ([`crate::row_join!`]), and the
+///   payload's for a build with no row under it ([`crate::row_or!`]);
+/// * the configuration is the stored pipeline (`sync.item_pipeline`,
+///   migration `0062`), for a source whose adapter's stored declaration
+///   gives a build the candidates the bound one does and frames it a run,
+///   which is when the database keeps a row for every build that names one
+///   (`pipeline_stored`); the payload's for any other source.
+///
+/// The status text is read for the builds the rule keeps. [`FAILED_BUILD_WALKED`]
+/// is the rule as it read before, which `tests/it/inbox.rs` holds this one
+/// to.
 macro_rules! failed_build {
+    () => {
+        concat!(
+            "(with state_paths as materialized (",
+            $crate::state_paths!("$4"),
+            "),
+             pipeline_paths as materialized (
+               select i.source_id, c.segs, c.ord
+                 from (select d.source_id, 'build'::text as kind
+                         from jsonb_object_keys(case when jsonb_typeof($4::jsonb) = 'object'
+                                                     then $4::jsonb else '{}'::jsonb end)
+                              as d(source_id)) i
+                cross join lateral ",
+            $crate::declared_candidates!("$4", "pipeline"),
+            " c),
+             ",
+            $crate::row_keys!("$4"),
+            ",
+             pipeline_stored as materialized (
+               select sc.id as source_id, a.adapter_kind
+                 from knobas.source_config sc
+                 join (select * from sync.pipeline_adapters() offset 0) a
+                   on a.adapter_kind = sc.kind
+                where 'build' = any(a.reached)
+                  and a.kinds #> '{build,pipeline}'
+                      = ($4::jsonb #> array[sc.id, 'build', 'pipeline']))
+         select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
+                format('%s failed', i.title),
+                i.at, i.web_url,
+                (select nullif(x.payload->>'statusText', '') from sync.item x
+                  where x.entity_id = i.entity_id)
+           from (select scored.*,
+                        max(scored.at) filter (where scored.tone = 'ok')
+                          over (partition by scored.source_id collate \"C\", scored.config collate \"C\")
+                          as latest_green
+                   from (select i.entity_id, i.source_id, i.kind, i.title, i.author, i.web_url,
+                                coalesce(i.item_updated_at, i.synced_at) as at,
+                                ",
+            $crate::row_or!("rw", "tone", $crate::resolved_state!(), "->>'tone'"),
+            " as tone,
+                                case when ps.source_id is null then ",
+            $crate::first_string_of!(
+                "(select p.segs, p.ord from pipeline_paths p where p.source_id = i.source_id)"
+            ),
+            " else ip.pkey end as config
+                           from sync.item i",
+            $crate::row_join!("rw", "i"),
+            "
+                           left join pipeline_stored ps on ps.source_id = i.source_id
+                           left join sync.item_pipeline ip
+                             on ip.entity_id = i.entity_id and ip.adapter_kind = ps.adapter_kind
+                          where ",
+            $crate::live_by_exclusion!("i"),
+            "
+                            and i.kind = 'build'
+                         offset 0) scored
+                  where scored.tone in ('err', 'ok')) i
+          where i.tone = 'err'
+            and (   i.author = any($1)
+                 or exists (
+                       select 1
+                         from knobas.confirmed_link l
+                         join sync.item mine on mine.entity_id = l.to_id
+                        where l.from_id = i.entity_id
+                          and mine.author = any($1)
+                          and ",
+            $crate::live_by_key!("mine"),
+            ")
+                 or exists (
+                       select 1
+                         from knobas.confirmed_link l
+                         join sync.item mine on mine.entity_id = l.from_id
+                        where l.to_id = i.entity_id
+                          and mine.author = any($1)
+                          and ",
+            $crate::live_by_key!("mine"),
+            "))
+            and (i.config is null or i.latest_green is null or i.latest_green <= i.at))"
+        )
+    };
+}
+
+/// [`failed_build!`] as it read before it took the stored rows: every live
+/// build's state, pipeline and status text out of its payload.
+macro_rules! failed_build_walked {
     () => {
         concat!(
             "(with state_paths as materialized (",
@@ -1128,6 +1231,13 @@ pub const REVIEW_REQUEST_WALKED: &str = shelved!(concat!(
     "->>'text', 'open') = 'open'
                  else false end)"
 ));
+
+/// [`failed_build!`] as it read before it took the stored rows
+/// (`sync.item_row`, `sync.item_pipeline`): every live build's state and
+/// pipeline, out of its payload. Kept for `tests/it/inbox.rs`, which holds
+/// the rule to it.
+#[doc(hidden)]
+pub const FAILED_BUILD_WALKED: &str = shelved!(failed_build_walked!());
 
 /// Each rule's statement, shelved, named by its category, for `knobas-app`'s
 /// plan test (`tests/it/read_plans.rs`, #778). Each binds what [`items`]
