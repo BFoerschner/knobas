@@ -291,6 +291,38 @@ pub const WINDOW_DAYS: i64 = 14;
 /// start-work reads compare to. A state no map names, or a kind that declares
 /// none, counts as open: the request stays rather than vanishing on a word
 /// knobas cannot read.
+///
+/// **The pull requests that ask me are found through the names the database
+/// stores** (`sync.item_reviewer`, migration `0080`; the query audit of
+/// 2026-11-12). The rule read the declared reviewers of every live pull
+/// request out of its payload and kept the ones naming me: 1,710 payloads
+/// opened for 5 requests, 46 of the inbox's 89 ms. It now has two halves,
+/// and a source is in exactly one:
+///
+/// * a source whose declared `reviewers` a stored declaration of the kind
+///   gives: the pull requests storing one of my names under those same
+///   candidates, a probe of the table's key per name. The stored names are
+///   [`crate::declared_list!`]'s over those candidates, written as the item
+///   is, so they are the walk's answer;
+/// * any other source that declares reviewers (declarations the database
+///   never stored: a test's, an adapter not yet written down): the walk, as
+///   before, over that source's pull requests alone.
+///
+/// The first half reaches a pull request by its id and by nothing else: its
+/// kind is tested inside a `coalesce`, which no index answers, because on
+/// analyzed tables the planner otherwise read every pull request by kind
+/// once per stored name (`knobas-app`'s `tests/it/read_plans.rs`).
+///
+/// A pull request that lists me twice was two rows and is one, which
+/// [`shelved!`]'s `distinct on` made one item either way. `knobas-core`'s
+/// `tests/it/inbox.rs` holds the two halves to the walk over every pull
+/// request, [`REVIEW_REQUEST_WALKED`].
+///
+/// **The state is read for a pull request that asks me, and no other.**
+/// Written beside the reviewer test it named the pull request alone, so the
+/// planner ran it on every pull request before it looked at one reviewer:
+/// 1,710 states for 144 requests. Both halves are fenced (`offset 0`), so it
+/// runs on their rows.
 macro_rules! review_request {
     () => {
         concat!(
@@ -308,19 +340,64 @@ macro_rules! review_request {
                     coalesce(i.item_updated_at, i.synced_at)           as occurred_at,
                     i.web_url                            as web_url,
                     null::text                           as detail
-               from sync.item i
-               cross join lateral ",
+               from (select i.entity_id, i.source_id, i.kind, i.title, i.author,
+                            i.item_updated_at, i.synced_at, i.web_url,
+                            i.payload #> '{}'::text[] as payload
+                       from (select distinct rv.entity_id, rv.paths
+                               from sync.item_reviewer rv
+                              where rv.reviewer = any($1)
+                             offset 0) named
+                       join sync.item i on i.entity_id = named.entity_id
+                      where coalesce(i.kind = 'pr', false)
+                        and named.paths = $4::jsonb #> array[i.source_id, i.kind, 'reviewers']
+                     union all
+                     select i.entity_id, i.source_id, i.kind, i.title, i.author,
+                            i.item_updated_at, i.synced_at, i.web_url,
+                            i.payload #> '{}'::text[] as payload
+                       from sync.item i
+                      where i.kind = 'pr'
+                        and i.source_id = any (array(",
+            reviewers_not_stored!(),
+            "))
+                        and exists (select 1 from ",
             $crate::declared_list!("$4", "reviewers"),
-            " as r
+            " as r where r.value = any($1))
+                     offset 0) i
               where ",
             $crate::live_by_exclusion!("i"),
             "
-                and i.kind = 'pr'
-                and r.value = any($1)
                 and coalesce(",
             $crate::resolved_state!(),
             "->>'text', 'open') = 'open')"
         )
+    };
+}
+
+/// The sources whose declared `reviewers` of a pull request no stored
+/// declaration of the kind gives, so `sync.item_reviewer` holds no row under
+/// them and [`review_request!`] walks their payloads. The test is the one
+/// `sync.resolve_item_reviewers` (migration `0080`) writes by: it stores
+/// under every non-empty `reviewers` a stored declaration gives the item's
+/// kind. A source that declares none has nobody to ask, so it is in neither
+/// half. The stored candidates are read once, as an array, and the sources
+/// are an array too: the walk is one pass over those sources' pull requests,
+/// and no pass at all where there is none.
+macro_rules! reviewers_not_stored {
+    () => {
+        "select s.key
+           from jsonb_each(case when jsonb_typeof($4::jsonb) = 'object'
+                                then $4::jsonb else '{}'::jsonb end) as s(key, kinds)
+          where jsonb_typeof(s.kinds #> '{pr,reviewers}') = 'array'
+            and jsonb_array_length(s.kinds #> '{pr,reviewers}') > 0
+            and s.kinds #> '{pr,reviewers}' <> all (array(
+                  select kp.p->'reviewers'
+                    from sync.parent_declaration spd
+                   cross join lateral jsonb_array_elements(
+                           case when jsonb_typeof(spd.payload_paths) = 'array'
+                                then spd.payload_paths else '[]'::jsonb end) as kp(p)
+                   where kp.p->>'kind' = 'pr'
+                     and jsonb_typeof(kp.p->'reviewers') = 'array'
+                     and jsonb_array_length(kp.p->'reviewers') > 0))"
     };
 }
 
@@ -353,7 +430,33 @@ macro_rules! review_request {
 /// older one -- and lets it come back when somebody names you again, not
 /// whenever the item moves.
 ///
-/// **The names are looked for through an index** (#1170). Read item by item
+/// **The rule reads the items that write the name and moved inside the
+/// window** (the query audit of 2026-11-12), found through two stored facts
+/// and no body:
+///
+/// * `sync.item_mention` (migration `0079`) holds, for each `@` and `[~` of a
+///   prose item's body, the run of name characters after it. An item that
+///   writes a name `N` at somebody stores `N`'s own leading run of name
+///   characters, which is `N` for a name made of them, so the items storing
+///   that text are a superset of the rule's matches (the migration says why)
+///   and the expressions below decide on them alone.
+/// * The item's own date is inside the window. The window is on the
+///   mention's date, and a mention is dated by a comment, by the item's
+///   `created` or by the item itself, none of them later than the item's own
+///   date: both sources whose records carry a thread (Jira, the mock) move an
+///   item's `updated` with every comment.
+///
+/// Before, the names were looked for through the bodies' trigram index
+/// (#1170, below), which answers with every body holding a name's letters:
+/// 4,465 bodies for a username that is also a word, each fetched and matched
+/// again, and every match then had its thread read to date it, 115 ms of
+/// every stream on a mirror of 39,770 items. **Which way the date test fails,
+/// stated** (ADR-0007): a comment dated after its item's own date, which no
+/// adapter produces, is not looked for until the item next moves. Pinned by
+/// `a_mention_is_looked_for_in_the_items_that_moved_inside_the_window`; the
+/// stored names by `a_mention_is_found_through_the_names_its_body_stores`.
+///
+/// **The names were looked for through an index** (#1170). Read item by item
 /// (#785's `strpos` ahead of the expression, per name in an `exists`), the
 /// rule read all 18,500 of the probe's prose bodies: 12 ms of the stream for
 /// every reader. Now the first test is **one expression for every name at
@@ -367,35 +470,62 @@ macro_rules! review_request {
 /// each name's own expression, #785's without its `strpos` -- decides. Both
 /// are spelled by `mention_of!`. `cardinality`
 /// keeps an empty `$1` empty: the alternation of no names matches any `@`.
-/// Pinned by `a_name_with_pattern_characters_is_matched_literally` and, for
-/// the index in both statistics states, `knobas-app`'s `read_plans.rs`. The
-/// index keeps a short pending list (`0057`, #1864): at the default 4 MB a
-/// load could leave enough of it unmerged that the planner, charging a
-/// random read per pending page, priced the index above a scan of every body.
+/// Pinned by `a_name_with_pattern_characters_is_matched_literally`. Both
+/// tests stay, on the items the stored names and the window kept. Neither is
+/// what finds them any more, so both are written over the body joined to an
+/// empty text the names' subquery carries (`named.pad`): no index answers
+/// that, so the planner is not offered the trigram index's estimate of a
+/// handful of rows for what turns out to be thousands, and it names both
+/// relations, so it is tested after their join and never on a body the
+/// names did not lead to.
+///
+/// **When the comment was written is read last**, on the items every test
+/// above kept. That join is fenced (`offset 0`), because `mentioned_at!`
+/// walks an item's comments and the planner, offered its test beside the
+/// others, ran it on each of the 1,227 items of the window before it joined
+/// them to the 1,163 storing the name: 50 of the rule's 55 ms for 59
+/// mentions.
 macro_rules! mention {
     () => {
         concat!(
             r"select 'mention', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                      'you are mentioned here',
                      m.at, i.web_url, null::text
-                from sync.item i
+                from (select i.entity_id, i.source_id, i.kind, i.title, i.web_url,
+                             i.payload #> '{}'::text[] as payload,
+                             i.item_updated_at, i.synced_at
+                        from (select distinct mt.entity_id, ''::text as pad
+                                from sync.item_mention mt
+                               where mt.token = any (array(
+                                       select substring(u from '^[A-Za-z0-9_.-]*')
+                                         from unnest($1::text[]) as u))
+                              offset 0) named
+                        join sync.item i on i.entity_id = named.entity_id
+                       where ",
+            $crate::live_by_exclusion!("i"),
+            r"
+                         and i.kind in ('ticket','pr','page','note')
+                         and (i.item_updated_at >= $2 - make_interval(days => ",
+            window_days!(),
+            r")
+                              or (i.item_updated_at is null
+                                  and i.synced_at >= $2 - make_interval(days => ",
+            window_days!(),
+            r")))
+                         and cardinality($1::text[]) > 0
+                         and (i.body_text || named.pad) ~ replace(",
+            mention_of!("array_to_string($1::text[], chr(1))"),
+            r", chr(1), '|')
+                         and (i.body_text || named.pad) ~ any (array(select ",
+            mention_of!("u"),
+            r" from unnest($1::text[]) as u))
+                      offset 0) i
                cross join lateral ",
             mentioned_at!(),
             r" m
-               where ",
-            $crate::live_by_exclusion!("i"),
-            r"
-                 and i.kind in ('ticket','pr','page','note')
-                 and m.at >= $2 - make_interval(days => ",
+               where m.at >= $2 - make_interval(days => ",
             window_days!(),
-            r")
-                 and cardinality($1::text[]) > 0
-                 and i.body_text ~ replace(",
-            mention_of!("array_to_string($1::text[], chr(1))"),
-            r", chr(1), '|')
-                 and i.body_text ~ any (array(select ",
-            mention_of!("u"),
-            r" from unnest($1::text[]) as u))"
+            r")"
         )
     };
 }
@@ -543,6 +673,13 @@ macro_rules! mention_of {
 ///   all-but-everyone case. A red build has a few links, and only the red
 ///   builds still unresolved reach the probe (7 ms in either statistics
 ///   state).
+///
+/// **Each build's state is read once** (the query audit of 2026-11-12).
+/// `scored` names a build's tone three times above it, to keep the verdicts,
+/// to find the greens and to keep the reds, and the planner, folding the
+/// subquery into its reader, resolved the state once per mention: three
+/// times a build, 44 ms for 2,531. The `offset 0` keeps `scored` a subquery
+/// of its own.
 macro_rules! failed_build {
     () => {
         concat!(
@@ -580,7 +717,8 @@ macro_rules! failed_build {
                           where ",
             $crate::live_by_exclusion!("i"),
             "
-                            and i.kind = 'build') scored
+                            and i.kind = 'build'
+                         offset 0) scored
                   where scored.tone in ('err', 'ok')) i
           where i.tone = 'err'
             and (   i.author = any($1)
@@ -643,6 +781,16 @@ macro_rules! failed_build {
 /// rows here and one item after `shelved!`'s `distinct on`. The arm is
 /// parenthesized because it carries its own `with`. Pinned by
 /// `the_first_declared_assignee_decides_and_only_for_its_own_source`.
+///
+/// **The window is spelled so an index answers it** (the query audit of
+/// 2026-11-12): the source's date inside it, or no source date and knobas'
+/// own inside it, which is `coalesce(item_updated_at, synced_at)` inside it
+/// and nothing else. Written as the `coalesce`, no index held the
+/// expression and the rule scanned every item for the fortnight's tickets,
+/// 26 ms on 39,770. `item_kind_updated_idx` reads both halves. The tickets
+/// of the window are a subquery of their own (`offset 0`): joined flat to
+/// `assignee_paths`, the planner started from the paths and walked every
+/// ticket of each source to find the window's.
 macro_rules! new_assignment {
     () => {
         concat!(
@@ -653,17 +801,24 @@ macro_rules! new_assignment {
                     'assigned to you',
                     coalesce(i.item_updated_at, i.synced_at), i.web_url, null::text
                from assignee_paths p
-               join sync.item i on i.source_id = p.source_id
-              where ",
+               join (select i.entity_id, i.source_id, i.kind, i.title, i.web_url,
+                            i.payload #> '{}'::text[] as payload,
+                            i.item_updated_at, i.synced_at
+                       from sync.item i
+                      where ",
             $crate::live_by_exclusion!("i"),
             "
-                and i.kind = 'ticket'
-                and coalesce(i.author, '') <> all($1)
-                and coalesce(i.item_updated_at, i.synced_at)
-                      >= $2 - make_interval(days => ",
+                        and i.kind = 'ticket'
+                        and coalesce(i.author, '') <> all($1)
+                        and (i.item_updated_at >= $2 - make_interval(days => ",
             window_days!(),
             ")
-                and btrim(i.payload #>> p.segs) = any($1)
+                             or (i.item_updated_at is null
+                                 and i.synced_at >= $2 - make_interval(days => ",
+            window_days!(),
+            ")))
+                     offset 0) i on i.source_id = p.source_id
+              where btrim(i.payload #>> p.segs) = any($1)
                 and ",
             $crate::first_string_of!(
                 "(select a.segs, a.ord from assignee_paths a where a.source_id = p.source_id)"
@@ -857,11 +1012,22 @@ macro_rules! alert {
 /// and they are complementary by construction: one boolean compared against
 /// one expression, so an item is on exactly one of them and *the count
 /// excludes snoozed items* (stories 15, 19) is one clause rather than a rule
-/// two readers have to remember.
+/// two readers have to remember. `$3` null is **both shelves from one run**
+/// ([`shelves`]): every row either read would return, a snoozed one carrying
+/// its date and a stream one none, which is how the reader tells them apart.
+/// The same expression decides, so the two halves are the two reads.
 ///
 /// **Done.** Hidden while `done_at >= occurred_at`, so an item whose subject
 /// has moved since it was answered comes back. See migration `0009` for why
 /// that is a timestamp and not a boolean.
+///
+/// **A payload is opened once.** The review request, mention and new
+/// assignment rules each fence the items they kept and hand on
+/// `payload #> '{}'`, the record expanded, where the column itself is a
+/// compressed value every later read expands again (`0076`'s fence): a
+/// pull request's state reads it four times, and 182 of them took 12.6 ms
+/// of the stream and take 2. The failed build rule keeps the column: a
+/// build's record is under a kilobyte and stored as it is.
 ///
 /// **De-duplication.** `distinct on (category, subject)` because a rule with a
 /// lateral join can produce a row per match -- a pull request that lists an
@@ -886,10 +1052,12 @@ macro_rules! shelved {
                select distinct on (category, subject)
                       key, category, source_id, entity_id, kind, title, reason,
                       occurred_at, web_url, detail,
-                      case when $3 then snoozed_until end as snoozed_until
+                      case when coalesce($3::boolean, snoozed_until > $2)
+                           then snoozed_until end as snoozed_until
                  from answered
                 where (done_at is null or done_at < occurred_at)
-                  and $3 = (snoozed_until is not null and snoozed_until > $2)
+                  and ($3::boolean is null
+                       or $3 = (snoozed_until is not null and snoozed_until > $2))
                 order by category, subject, occurred_at desc
              )
              select key, category, source_id, entity_id, kind, title, reason,
@@ -934,6 +1102,32 @@ const ALL_RULES: &str = all_rules!();
 /// that no test comparing the inbox against itself can catch, so there is no
 /// second `where` to get wrong.
 const COUNT_ALL: &str = concat!("select count(*) as n from (", all_rules!(), ") counted");
+
+/// [`review_request!`] as it read before `sync.item_reviewer`: every live
+/// pull request's declared reviewers, out of its payload. Kept for
+/// `tests/it/inbox.rs`, which holds the rule to it.
+#[doc(hidden)]
+pub const REVIEW_REQUEST_WALKED: &str = shelved!(concat!(
+    "(with state_paths as materialized (",
+    crate::state_paths!("$4"),
+    ")
+     select 'review_request', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
+            format('%s asked for your review', coalesce(nullif(i.author, ''), 'somebody')),
+            coalesce(i.item_updated_at, i.synced_at), i.web_url, null::text
+       from sync.item i
+       cross join lateral ",
+    crate::declared_list!("$4", "reviewers"),
+    " as r
+      where ",
+    crate::live_by_exclusion!("i"),
+    "
+        and i.kind = 'pr'
+        and case when r.value = any($1)
+                 then coalesce(",
+    crate::resolved_state!(),
+    "->>'text', 'open') = 'open'
+                 else false end)"
+));
 
 /// Each rule's statement, shelved, named by its category, for `knobas-app`'s
 /// plan test (`tests/it/read_plans.rs`, #778). Each binds what [`items`]
@@ -1063,6 +1257,49 @@ pub async fn items(
         .bind(declarations.as_param())
         .fetch_all(pool)
         .await?)
+}
+
+/// The stream and the snoozed shelf, read together.
+#[derive(Debug, Clone, Default)]
+pub struct Shelves {
+    /// What needs you now, newest first: [`items`] of [`Shelf::Stream`].
+    pub stream: Vec<InboxItem>,
+    /// What you deferred, newest first: [`items`] of [`Shelf::Snoozed`].
+    pub snoozed: Vec<InboxItem>,
+}
+
+/// Both shelves from **one run** of the derivation (the query audit of
+/// 2026-11-12). The window asked for the stream, the snoozed shelf and the
+/// count as three reads, and the stream and its count each ran every rule:
+/// 330 ms twice on a mirror of 39,770 items, on two of the pool's five
+/// connections, at every sync's end. The count is the stream's length.
+///
+/// The statement is [`items`]' with no shelf named (`shelved!`, `$3` null),
+/// so each half is what that read answers: `the_two_shelves_from_one_run_
+/// are_the_two_reads` in `tests/it/inbox.rs` holds them together. Planned for
+/// its values, as [`items`] is.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn shelves(
+    pool: &PgPool,
+    identity: &[String],
+    now: DateTime<Utc>,
+    declarations: &crate::payload::Declarations,
+) -> Result<Shelves, CoreError> {
+    let rows = sqlx::query_as::<_, InboxItem>(ALL_RULES)
+        .persistent(false)
+        .bind(identity)
+        .bind(now)
+        .bind(None::<bool>)
+        .bind(declarations.as_param())
+        .fetch_all(pool)
+        .await?;
+    let (snoozed, stream) = rows
+        .into_iter()
+        .partition(|item| item.snoozed_until.is_some());
+    Ok(Shelves { stream, snoozed })
 }
 
 /// One rule's items, for a test that wants to know what *that* rule sees.

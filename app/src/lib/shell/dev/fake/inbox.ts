@@ -231,6 +231,12 @@ export function handlers(params: URLSearchParams): Handlers {
       const acked = ackedNow();
       return live.filter((candidate) => !acked(candidate)).length;
     },
+    // Both shelves and the count from one read, as the store asks them.
+    inbox_shelves: () => {
+      const acked = ackedNow();
+      const stream = live.filter((candidate) => !acked(candidate));
+      return { stream, snoozed: later.slice(), count: stream.length };
+    },
     snooze_inbox_item: (args) => {
       const key = args["itemKey"];
       const moved = later.find((candidate) => candidate.item.key === key) ?? done.find((candidate) => candidate.item.key === key) ?? take(key);

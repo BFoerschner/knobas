@@ -2121,6 +2121,28 @@ snoozed_until: string | null, };
 export type InboxShelf = "stream" | "snoozed";
 
 /**
+ * The stream and the snoozed shelf together, and how many need you now:
+ * what the window's inbox holds, from one run of the derivation.
+ *
+ * `count` is the stream's length, the number [`inbox_count`] answers
+ * (`crate::commands::entity::inbox_count`): one statement decides both
+ * shelves, so the badge cannot disagree with the list under it.
+ */
+export type InboxShelves = { 
+/**
+ * What needs you now, newest first: `inbox_items` of the stream.
+ */
+stream: Array<InboxEntry>, 
+/**
+ * What you deferred, newest first: `inbox_items` of the snoozed shelf.
+ */
+snoozed: Array<InboxEntry>, 
+/**
+ * How many items are on the stream.
+ */
+count: number, };
+
+/**
  * One of a parent ticket's own links: the far end.
  */
 export type JobLink = { entity_id: string, kind: string, title: string | null, 

@@ -34,10 +34,13 @@ import {
   completeInboxItem as realComplete,
   inboxCount as realCount,
   inboxItems as realItems,
+  inboxShelves as realShelves,
   snoozeInboxItem as realSnooze,
   type InboxEntry,
   type InboxShelf,
+  type InboxShelves,
 } from "../ipc/entity";
+import type { SourceSyncStatus } from "../ipc/sources";
 import { coalesce } from "../shell/coalesce";
 import { keyOf } from "../time/format";
 
@@ -50,6 +53,13 @@ export function leftTheInbox(name: string): string {
 export interface InboxPorts {
   inboxItems: (shelf: InboxShelf) => Promise<InboxEntry[]>;
   inboxCount: () => Promise<number>;
+  /**
+   * Both shelves and the count from one run of the derivation
+   * (`inbox_shelves`, the query audit of 2026-11-12). The window's own ports
+   * have it. Without it a read is the three it replaced, which is what a
+   * test's ports that predate it give.
+   */
+  inboxShelves?: () => Promise<InboxShelves>;
   snoozeInboxItem: (itemKey: string, until: string) => Promise<void>;
   completeInboxItem: (itemKey: string) => Promise<void>;
   /**
@@ -65,7 +75,8 @@ export interface InboxPorts {
   ackAlert: (monitorId: string) => Promise<void>;
   /** *Undo* on an ack: the alert asks again, so the re-read brings the row back. */
   unackAlert: (monitorId: string) => Promise<void>;
-  listen: (event: string, handler: () => void) => Promise<() => void>;
+  /** `handler` is handed the event's payload, where the bridge has one. */
+  listen: (event: string, handler: (payload?: unknown) => void) => Promise<() => void>;
 }
 
 /** Why an answer failed. `gone`: the item left the inbox at its source while the list was on screen. */
@@ -156,6 +167,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
   const io: InboxPorts = ports ?? {
     inboxItems: (shelf) => realItems(shelf),
     inboxCount: () => realCount(),
+    inboxShelves: () => realShelves(),
     snoozeInboxItem: (itemKey, until) => realSnooze(itemKey, until),
     completeInboxItem: (itemKey) => realComplete(itemKey),
     ackAlert: async (monitorId) => {
@@ -164,7 +176,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
     unackAlert: async (monitorId) => {
       await realUnack(monitorId);
     },
-    listen: (event, handler) => tauriListen(event, () => handler()),
+    listen: (event, handler) => tauriListen(event, (heard) => handler(heard.payload)),
   };
 
   // The shelves are raw (the perf audit after #2200): every answer replaces
@@ -194,16 +206,26 @@ export function createInbox(ports?: InboxPorts): Inbox {
     }
   }
 
+  /** Both shelves and the count, as one moment's answer. */
+  async function read(): Promise<InboxShelves> {
+    // One run of the derivation decides all three (the query audit of
+    // 2026-11-12). As three reads, the stream and its count each ran every
+    // rule, on two of the backend's five connections, at every sync's end.
+    if (io.inboxShelves) return io.inboxShelves();
+    // All three together: a badge reading 4 over a list of three rows is the
+    // two reads having been taken at different moments.
+    const [stream, snoozed, count] = await Promise.all([
+      io.inboxItems("stream"),
+      io.inboxItems("snoozed"),
+      io.inboxCount(),
+    ]);
+    return { stream, snoozed, count };
+  }
+
   async function refresh(): Promise<void> {
     const seen = answers;
     try {
-      // All three together: a badge reading 4 over a list of three rows is the
-      // two reads having been taken at different moments.
-      const [stream, snoozed, count] = await Promise.all([
-        io.inboxItems("stream"),
-        io.inboxItems("snoozed"),
-        io.inboxCount(),
-      ]);
+      const { stream, snoozed, count } = await read();
       // An answer made while this read was out is drawn already, and the
       // read after the last one in flight is the one that replaces it (#775).
       // A read that started before an answer was drawn or landed is older
@@ -333,7 +355,10 @@ export function createInbox(ports?: InboxPorts): Inbox {
       const reread = coalesce(refresh);
       for (const event of [EVENTS.activityNew, EVENTS.syncState, EVENTS.sourceHealth]) {
         void io
-          .listen(event, () => {
+          .listen(event, (payload) => {
+            // A run that is starting has moved nothing yet: its end says so
+            // again, and that is the event the mirror has changed under.
+            if (event === EVENTS.syncState && (payload as SourceSyncStatus | undefined)?.running === true) return;
             if (live) void reread();
           })
           .then((unlisten) => {

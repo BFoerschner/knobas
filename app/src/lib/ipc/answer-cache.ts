@@ -54,6 +54,7 @@ export const READS: ReadonlySet<string> = new Set([
   "docs_page",
   "inbox_items",
   "inbox_count",
+  "inbox_shelves",
   "code_facts",
   "entity_briefs",
   "card_reads",
@@ -203,7 +204,7 @@ const SEED: readonly { cmd: string; args: unknown }[] = [
   { cmd: "monitor_roster", args: {} },
   { cmd: "open_alerts", args: {} },
   { cmd: "ticket_views", args: {} },
-  { cmd: "inbox_items", args: { shelf: "stream" } },
+  { cmd: "inbox_shelves", args: {} },
 ];
 
 interface Kept {

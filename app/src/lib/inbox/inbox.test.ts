@@ -55,6 +55,8 @@ vi.mock("../ipc/entity", () => ({
   inboxItems: (shelf: InboxShelf) =>
     record(`items ${shelf}`, shelf === "stream" ? stream : snoozed),
   inboxCount: () => record("count", count),
+  // The window's own read (the query audit of 2026-11-12): one answer for all three.
+  inboxShelves: () => record("shelves", { stream, snoozed, count }),
   snoozeInboxItem: (itemKey: string, until: string) =>
     record(`snooze ${itemKey} ${until}`, undefined),
   completeInboxItem: (itemKey: string) => record(`complete ${itemKey}`, undefined),
@@ -295,6 +297,80 @@ test("the subject of a key is everything after the first colon", () => {
   expect(subjectOf("alert:kuma:7")).toBe("kuma:7");
   expect(subjectOf("review_request:gitea:acme/payouts#144")).toBe("gitea:acme/payouts#144");
   expect(subjectOf("credential_expiry:jira")).toBe("jira");
+});
+
+/**
+ * The window reads both shelves and the count as **one** command
+ * (`inbox_shelves`, the query audit of 2026-11-12): the stream and its count
+ * each ran every rule of the derivation, 330 ms twice on the scale mirror, at
+ * every sync's end. Ports that predate it are asked the three reads, which is
+ * the same answer in three parts.
+ */
+test("a read is one command where the bridge has it, and the three it replaced where not", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  expect(calls).toEqual(["shelves"]);
+  expect([inbox.stream.length, inbox.snoozed.length, inbox.count]).toEqual([1, 0, 1]);
+
+  const asked: string[] = [];
+  const older = createInbox({
+    inboxItems: (shelf) => {
+      asked.push(`items ${shelf}`);
+      return Promise.resolve(shelf === "stream" ? stream : []);
+    },
+    inboxCount: () => {
+      asked.push("count");
+      return Promise.resolve(1);
+    },
+    snoozeInboxItem: () => Promise.resolve(),
+    completeInboxItem: () => Promise.resolve(),
+    ackAlert: () => Promise.resolve(),
+    unackAlert: () => Promise.resolve(),
+    listen: () => Promise.resolve(() => {}),
+  });
+  await older.refresh();
+  expect(asked.sort()).toEqual(["count", "items snoozed", "items stream"]);
+  expect([older.stream.length, older.snoozed.length, older.count]).toEqual([1, 0, 1]);
+});
+
+/**
+ * A run that is starting has moved nothing: the store re-read on both of a
+ * run's `sync:state` events, so six sources on a five-minute interval cost
+ * twelve derivations where six say everything. The run's end still re-reads.
+ */
+test("a sync that is starting re-reads nothing, and its end does", async () => {
+  const handlers = new Map<string, (payload?: unknown) => void>();
+  let reads = 0;
+  const store = createInbox({
+    inboxItems: () => Promise.resolve([]),
+    inboxCount: () => Promise.resolve(0),
+    inboxShelves: () => {
+      reads += 1;
+      return Promise.resolve({ stream: [], snoozed: [], count: 0 });
+    },
+    snoozeInboxItem: () => Promise.resolve(),
+    completeInboxItem: () => Promise.resolve(),
+    ackAlert: () => Promise.resolve(),
+    unackAlert: () => Promise.resolve(),
+    listen: (event, handler) => {
+      handlers.set(event, handler);
+      return Promise.resolve(() => {});
+    },
+  });
+  const stop = store.start();
+  await waitFor(() => expect(handlers.has("sync:state")).toBe(true));
+  handlers.get("sync:state")!({ source_id: "jira", running: true });
+  handlers.get("sync:state")!({ source_id: "jira", running: true });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(reads).toBe(0);
+  handlers.get("sync:state")!({ source_id: "jira", running: false });
+  await waitFor(() => expect(reads).toBe(1));
+  // An event with no payload, as a port that hands none over sends it, re-reads.
+  handlers.get("sync:state")!();
+  await waitFor(() => expect(reads).toBe(2));
+  stop();
 });
 
 /**

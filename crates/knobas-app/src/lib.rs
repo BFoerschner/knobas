@@ -802,6 +802,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The query audit (PR #2479, 2026-11-12): what many ids are, in one read.
         commands::entity::entity_briefs,
         commands::entity::card_reads,
+        // The query audit: the inbox's two shelves and its count from one run.
+        commands::entity::inbox_shelves,
     ]
 }
 

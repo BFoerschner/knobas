@@ -1678,6 +1678,276 @@ async fn a_mention_in_the_description_is_dated_by_the_ticket_and_not_by_its_last
     );
 }
 
+/// **A mention is looked for in the items that moved inside the window** (the
+/// query audit of 2026-11-12). The rule reads the prose items whose own date
+/// is inside the fortnight, by the source's date or, where the source gave
+/// none, by knobas' own, and matches the names in those: the bodies of the
+/// rest are never fetched.
+///
+/// The same mentions for every record a source writes, since a comment is
+/// never dated after its item. **The direction it fails in, pinned**: a
+/// comment dated ahead of its item's own date is not found until the item
+/// next moves, and is then dated by the comment as before.
+#[tokio::test]
+async fn a_mention_is_looked_for_in_the_items_that_moved_inside_the_window() {
+    let pool = &scratch().await;
+    let moved = discussed_ticket(
+        pool,
+        "PAY-1",
+        "Retry failed payouts",
+        days_ago(60),
+        &[("[~mara.lindqvist] can you look?", days_ago(2))],
+        days_ago(2),
+    )
+    .await;
+    // No date from the source: knobas' own clock dates the item.
+    let undated = ticket(
+        pool,
+        "PAY-2",
+        Some(THEM),
+        None,
+        "ping @mara.lindqvist please",
+        days_ago(0),
+    )
+    .await;
+    let stale = ticket(
+        pool,
+        "PAY-3",
+        Some(THEM),
+        None,
+        "ping @mara.lindqvist please",
+        days_ago(0),
+    )
+    .await;
+    for (id, synced) in [(&undated, days_ago(1)), (&stale, days_ago(30))] {
+        sqlx::query(
+            "update sync.item set item_updated_at = null, synced_at = $2 where entity_id = $1",
+        )
+        .bind(id)
+        .bind(synced)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let ahead = discussed_ticket(
+        pool,
+        "PAY-4",
+        "Retry failed payouts",
+        days_ago(60),
+        &[("[~mara.lindqvist] can you look?", days_ago(1))],
+        days_ago(20),
+    )
+    .await;
+
+    let found = keys(&stream(pool).await);
+    assert!(
+        found.contains(&format!("mention:{moved}"))
+            && found.contains(&format!("mention:{undated}")),
+        "an item dated inside the window, by its source or by knobas: {found:?}"
+    );
+    assert!(
+        !found.contains(&format!("mention:{stale}")),
+        "an undated item knobas last saw a month ago: {found:?}"
+    );
+    assert!(
+        !found.contains(&format!("mention:{ahead}")),
+        "a comment dated after its item's own date waits for the item to move: {found:?}"
+    );
+
+    touch(pool, &ahead, days_ago(0)).await;
+    let items = stream(pool).await;
+    let item = items
+        .iter()
+        .find(|i| i.key == format!("mention:{ahead}"))
+        .unwrap_or_else(|| panic!("the item moved, so its mention is read: {:?}", keys(&items)));
+    assert_eq!(item.occurred_at, days_ago(1), "dated by the comment");
+}
+
+/// **A mention is found through the names its body stores**
+/// (`sync.item_mention`, migration `0079`): the run of name characters after
+/// each `@` and `[~`, kept by the database as the body is written. The rule
+/// reads the items storing a reader's name and no other body, and its own
+/// expressions still decide, so a name it could not store whole is found
+/// too: one with a letter outside the name characters stores its leading
+/// run, and one that starts with such a letter stores the empty run.
+#[tokio::test]
+async fn a_mention_is_found_through_the_names_its_body_stores() {
+    let pool = &scratch().await;
+    let stream_of = async |who: &str| -> Vec<String> {
+        keys(
+            &inbox::items(
+                pool,
+                &[who.to_owned()],
+                now(),
+                Shelf::Stream,
+                &declarations(),
+            )
+            .await
+            .unwrap(),
+        )
+    };
+    let said = async |key: &str, body: &str| -> String {
+        ticket(pool, key, Some(THEM), None, body, days_ago(1)).await
+    };
+    let at = said("PAY-1", "ping @mara.lindqvist, please").await;
+    let bracketed = said("PAY-2", "[~mara.lindqvist] look").await;
+    let longer = said("PAY-3", "ping @mara.lindqvist2").await;
+    let umlaut = said("PAY-4", "ping @j\u{f6}rg now").await;
+    let plain = said("PAY-5", "ping @jorg now").await;
+    let leading = said("PAY-6", "ping @\u{f6}mer now").await;
+    // A kind the rule does not read stores nothing.
+    let commit = item(
+        pool,
+        Mirrored {
+            source: "gitea",
+            kind: "commit",
+            key: "acme/payouts@abc",
+            author: Some(THEM),
+            body: "thanks @mara.lindqvist",
+            payload: serde_json::json!({}),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let stored: Vec<(String, String)> =
+        sqlx::query_as("select entity_id, token from sync.item_mention order by entity_id, token")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let token = |id: &String, token: &str| (id.clone(), token.to_owned());
+    assert_eq!(
+        stored,
+        [
+            token(&at, "mara.lindqvist"),
+            token(&bracketed, "mara.lindqvist"),
+            token(&longer, "mara.lindqvist2"),
+            token(&umlaut, "j"),
+            token(&plain, "jorg"),
+            token(&leading, ""),
+        ],
+        "one row a name written at somebody, none for {commit}"
+    );
+
+    let mut mine = stream_of(ME).await;
+    mine.sort();
+    assert_eq!(
+        mine,
+        [format!("mention:{at}"), format!("mention:{bracketed}")],
+        "the name whole, in either spelling, and not a longer one"
+    );
+    assert_eq!(stream_of("j\u{f6}rg").await, [format!("mention:{umlaut}")]);
+    assert_eq!(stream_of("\u{f6}mer").await, [format!("mention:{leading}")]);
+    assert_eq!(stream_of("jorg").await, [format!("mention:{plain}")]);
+
+    // A body rewritten moves its names with it: the mention arrives with the
+    // new text and leaves with it.
+    sqlx::query("update sync.item set body_text = 'and @mara.lindqvist too' where entity_id = $1")
+        .bind(&longer)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set body_text = 'nobody is named here' where entity_id = $1")
+        .bind(&at)
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut mine = stream_of(ME).await;
+    mine.sort();
+    assert_eq!(
+        mine,
+        [format!("mention:{bracketed}"), format!("mention:{longer}")]
+    );
+    // And a deleted item's names go with it.
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(&bracketed)
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("select count(*) from sync.item_mention where entity_id = $1")
+            .bind(&bracketed)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+}
+
+/// **Both shelves from one run are the two reads** (the query audit of
+/// 2026-11-12). The window asked for the stream, the snoozed shelf and the
+/// count as three reads, two of which ran every rule;
+/// [`inbox::shelves`] runs the derivation once. Its stream is
+/// [`Shelf::Stream`]'s rows in their order, its snoozed half
+/// [`Shelf::Snoozed`]'s, and the count is the stream's length: with an item
+/// on the stream, one snoozed, one done, and one whose snooze has passed and
+/// which is therefore back on the stream with no date.
+#[tokio::test]
+async fn the_two_shelves_from_one_run_are_the_two_reads() {
+    let pool = &scratch().await;
+    let waiting = pull_request(pool, "acme/payouts#1", &[ME], "open").await;
+    let later = pull_request(pool, "acme/payouts#2", &[ME], "open").await;
+    let handled = pull_request(pool, "acme/payouts#3", &[ME], "open").await;
+    let back = ticket(pool, "PAY-9", Some(THEM), Some(ME), "", days_ago(1)).await;
+    ticket(
+        pool,
+        "PAY-10",
+        Some(THEM),
+        None,
+        "ping @mara.lindqvist please",
+        days_ago(3),
+    )
+    .await;
+    inbox::snooze(
+        pool,
+        &format!("review_request:{later}"),
+        now() + Duration::days(2),
+    )
+    .await
+    .unwrap();
+    inbox::complete(pool, &format!("review_request:{handled}"), now())
+        .await
+        .unwrap();
+    inbox::snooze(
+        pool,
+        &format!("new_assignment:{back}"),
+        now() - Duration::hours(1),
+    )
+    .await
+    .unwrap();
+
+    let both = inbox::shelves(pool, &me(), now(), &declarations())
+        .await
+        .unwrap();
+    let stream = stream(pool).await;
+    let snoozed = inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
+        .await
+        .unwrap();
+    let json = |items: &[inbox::InboxItem]| serde_json::to_value(items).unwrap();
+    assert_eq!(json(&both.stream), json(&stream), "the stream half");
+    assert_eq!(json(&both.snoozed), json(&snoozed), "the snoozed half");
+    assert_eq!(
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap(),
+        i64::try_from(both.stream.len()).unwrap(),
+        "the count is the stream's length"
+    );
+
+    assert_eq!(keys(&both.snoozed), [format!("review_request:{later}")]);
+    assert!(both.snoozed[0].snoozed_until.is_some());
+    let on_stream = keys(&both.stream);
+    assert_eq!(on_stream.len(), 3, "{on_stream:?}");
+    assert!(
+        on_stream.contains(&format!("review_request:{waiting}"))
+            && on_stream.contains(&format!("new_assignment:{back}")),
+        "{on_stream:?}"
+    );
+    assert!(
+        both.stream.iter().all(|i| i.snoozed_until.is_none()),
+        "a stream row carries no snooze date, a passed one included"
+    );
+}
+
 /// Story 17 in its plainest form: the entity is withdrawn upstream and the
 /// item leaves on the next read, with nobody acting.
 #[tokio::test]
@@ -2596,5 +2866,271 @@ async fn a_failed_sign_in_leaves_when_the_sign_in_works_again() {
             .await
             .unwrap(),
         0
+    );
+}
+
+/// What the adapter of `gitea` declares for a pull request, as
+/// [`declarations`] binds it: what a test writes to
+/// `sync.parent_declaration`, so the database stores the reviewers under the
+/// candidates the reads bind.
+fn gitea_kinds() -> Vec<knobas_core::payload::KindPaths> {
+    use knobas_core::payload::{KindPaths, ListPath, PayloadPath};
+    vec![KindPaths {
+        kind: "pr".to_owned(),
+        reviewers: vec![ListPath {
+            at: PayloadPath::of(["requested_reviewers"]),
+            entry: PayloadPath::of(["login"]),
+        }],
+        state: gitea_pr_state(),
+        ..KindPaths::default()
+    }]
+}
+
+/// Writes an adapter's declarations to `sync.parent_declaration`, as bring-up
+/// does, replacing what it held.
+async fn declare(pool: &PgPool, adapter: &str, kinds: &[knobas_core::payload::KindPaths]) {
+    sqlx::query(
+        "insert into sync.parent_declaration (adapter_kind, payload_paths) values ($1, $2)
+         on conflict (adapter_kind) do update set payload_paths = excluded.payload_paths",
+    )
+    .bind(adapter)
+    .bind(sqlx::types::Json(kinds))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A `forge` pull request: its reviewers are plain names under `asked`.
+async fn forge_pull_request(pool: &PgPool, key: &str, asked: &[&str], phase: &str) -> String {
+    item(
+        pool,
+        Mirrored {
+            source: "forge",
+            kind: "pr",
+            key,
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({ "asked": asked, "phase": phase }),
+            updated: days_ago(1),
+        },
+    )
+    .await
+}
+
+/// One rule's rows as [`inbox::items`] binds them, each row whole.
+async fn rule_rows(pool: &PgPool, sql: &str, who: &[String]) -> Vec<serde_json::Value> {
+    let wrapped = format!("select to_jsonb(q) from ({sql}) q");
+    sqlx::query_scalar(sqlx::AssertSqlSafe(wrapped))
+        .persistent(false)
+        .bind(who)
+        .bind(now())
+        .bind(false)
+        .bind(declarations().as_param())
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// The review request rule against the walk it replaced, for `who`: the same
+/// rows whole, in the same order. Returns the pull requests they name.
+async fn review_requests(pool: &PgPool, who: &[String]) -> Vec<String> {
+    let rule = inbox::planned_statements()
+        .into_iter()
+        .find(|(category, _)| *category == Category::ReviewRequest)
+        .unwrap()
+        .1;
+    let read = rule_rows(pool, rule, who).await;
+    let walked = rule_rows(pool, inbox::REVIEW_REQUEST_WALKED, who).await;
+    assert_eq!(
+        read, walked,
+        "the rule and the walk over every pull request"
+    );
+    let mut ids: Vec<String> = read
+        .iter()
+        .map(|row| row["entity_id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// **The pull requests that ask me are found through the names the database
+/// stores** (`sync.item_reviewer`, migration `0080`), and they are the ones
+/// the walk over every pull request's payload found: with the source's
+/// declarations stored, with another source's never stored, after a pull
+/// request is rewritten, and after the stored declarations change under the
+/// read.
+#[tokio::test]
+async fn a_review_request_is_found_through_the_names_the_database_stores() {
+    let pool = &scratch().await;
+    declare(pool, "gitea", &gitea_kinds()).await;
+    let asks = pull_request(pool, "acme/payouts#1", &[THEM, ME], "open").await;
+    let twice = pull_request(pool, "acme/payouts#2", &[ME, ME], "open").await;
+    let closed = pull_request(pool, "acme/payouts#3", &[ME], "closed").await;
+    let others = pull_request(pool, "acme/payouts#4", &[THEM], "open").await;
+    let nobody = pull_request(pool, "acme/payouts#5", &[], "open").await;
+    let withdrawn = pull_request(pool, "acme/payouts#6", &[ME], "open").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&withdrawn)
+        .execute(pool)
+        .await
+        .unwrap();
+    // A source whose declarations the database never stored: walked.
+    let walked = forge_pull_request(pool, "forge/app#1", &[ME], "active").await;
+    forge_pull_request(pool, "forge/app#2", &[THEM], "active").await;
+    forge_pull_request(pool, "forge/app#3", &[ME], "done").await;
+    // A ticket shaped like a pull request that asks me: not a kind the rule
+    // reads, and not one a stored declaration gives reviewers.
+    item(
+        pool,
+        Mirrored {
+            source: "gitea",
+            kind: "ticket",
+            key: "acme/payouts#7",
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({
+                "state": "open",
+                "requested_reviewers": [{ "login": ME }],
+            }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let stored: Vec<(String, String)> =
+        sqlx::query_as("select entity_id, reviewer from sync.item_reviewer order by 1, 2")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let named = |id: &String, who: &str| (id.clone(), who.to_owned());
+    assert_eq!(
+        stored,
+        [
+            named(&asks, THEM),
+            named(&asks, ME),
+            named(&twice, ME),
+            named(&closed, ME),
+            named(&others, THEM),
+            named(&withdrawn, ME),
+        ],
+        "a row a name a stored declaration reaches, none for {nobody} or the forge's"
+    );
+
+    let mut mine = vec![asks.clone(), twice.clone(), walked.clone()];
+    mine.sort();
+    assert_eq!(review_requests(pool, &me()).await, mine);
+    assert_eq!(
+        review_requests(pool, &[THEM.to_owned()]).await.len(),
+        3,
+        "the three that ask somebody else"
+    );
+    assert!(review_requests(pool, &[]).await.is_empty());
+    assert!(
+        review_requests(pool, &["nobody".to_owned()])
+            .await
+            .is_empty()
+    );
+    // Two names of one reader, both on one pull request: one request.
+    assert_eq!(
+        review_requests(pool, &[ME.to_owned(), THEM.to_owned()])
+            .await
+            .len(),
+        5
+    );
+
+    // A pull request rewritten moves its names with it.
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&others)
+        .bind(serde_json::json!({
+            "state": "open",
+            "requested_reviewers": [{ "login": ME }],
+        }))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&asks)
+        .bind(serde_json::json!({ "state": "open", "requested_reviewers": [] }))
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut mine = vec![others.clone(), twice.clone(), walked.clone()];
+    mine.sort();
+    assert_eq!(review_requests(pool, &me()).await, mine);
+
+    // The forge's declarations arrive: its pull requests are stored and read
+    // from the table, and answer as the walk did.
+    declare(pool, "forge", &forge_kinds()).await;
+    let forge_rows: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_reviewer where entity_id like 'forge:%'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        forge_rows, 3,
+        "the forge's three pull requests, one name each"
+    );
+    assert_eq!(review_requests(pool, &me()).await, mine);
+
+    // The stored declarations move away from the ones the read binds: the
+    // names are stored under other candidates, so the read walks again.
+    let mut moved = gitea_kinds();
+    moved[0].reviewers[0].at = knobas_core::payload::PayloadPath::of(["assignees"]);
+    declare(pool, "gitea", &moved).await;
+    let under_bound: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_reviewer where entity_id like 'gitea:%'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(under_bound, 0, "no gitea payload has `assignees`");
+    assert_eq!(review_requests(pool, &me()).await, mine);
+
+    // No declaration stored at all, and a deleted pull request's names gone.
+    sqlx::query("truncate sync.parent_declaration")
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("select count(*) from sync.item_reviewer")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(review_requests(pool, &me()).await, mine);
+    declare(pool, "gitea", &gitea_kinds()).await;
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(&twice)
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("select count(*) from sync.item_reviewer where entity_id = $1")
+            .bind(&twice)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+    let mut mine = vec![others, walked];
+    mine.sort();
+    assert_eq!(review_requests(pool, &me()).await, mine);
+}
+
+/// `sync.resolve_item_reviewers` (migration `0080`) carries
+/// [`knobas_core::declared_list!`]'s expansion: the names it stores are the
+/// ones the walk reads, by the same expression.
+#[tokio::test]
+async fn the_stored_reviewers_are_read_by_the_walks_own_expression() {
+    let pool = &scratch().await;
+    let stored: String =
+        sqlx::query_scalar("select pg_get_functiondef('sync.resolve_item_reviewers'::regproc)")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let expansion = knobas_core::declared_list!("dd.decl", "reviewers");
+    assert!(
+        stored.contains(expansion),
+        "sync.resolve_item_reviewers no longer carries declared_list!'s expansion; \
+         a migration restates it:\n{expansion}"
     );
 }

@@ -146,6 +146,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::inbox::Shelf::export_all(cfg)?;
     knobas_core::inbox::InboxItem::export_all(cfg)?;
     crate::inbox::InboxEntry::export_all(cfg)?;
+    crate::inbox::InboxShelves::export_all(cfg)?;
     knobas_core::context::ContextKind::export_all(cfg)?;
     knobas_core::context::ContextRow::export_all(cfg)?;
     knobas_core::reach::Origin::export_all(cfg)?;

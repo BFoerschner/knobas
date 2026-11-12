@@ -46,6 +46,7 @@ import type {
   InboxCategory,
   InboxEntry,
   InboxShelf,
+  InboxShelves,
   JobLinkSets,
   JobPipeline,
   LaneField,
@@ -190,6 +191,7 @@ export type {
   InboxEntry,
   InboxItem,
   InboxShelf,
+  InboxShelves,
   JobLink,
   JobLinkSets,
   JobMember,
@@ -1019,6 +1021,20 @@ export function followMerges(): Promise<number> {
  */
 export function inboxItems(shelf: InboxShelf): Promise<InboxEntry[]> {
   return invoke<InboxEntry[]>("inbox_items", { shelf });
+}
+
+/**
+ * Both shelves and the count — `inbox_shelves`, one run of the derivation
+ * (the query audit of 2026-11-12). What the inbox store asks: `stream` is
+ * {@link inboxItems} of the stream, `snoozed` of the snoozed shelf, and
+ * `count` what {@link inboxCount} answers, all decided by one statement, where
+ * the three reads ran every rule twice.
+ *
+ * Rejects with `not_ready` while the database or the sync engine is still
+ * coming up.
+ */
+export function inboxShelves(): Promise<InboxShelves> {
+  return invoke<InboxShelves>("inbox_shelves");
 }
 
 /**

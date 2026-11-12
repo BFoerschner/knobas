@@ -354,6 +354,9 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                     .bind(None::<Vec<String>>)
                     .bind(project.map(str::to_owned))
                     .bind(declared.clone())
+                    // No parent named: the statement's ninth bind since the
+                    // list read learnt `parent` (the query audit, item 2).
+                    .bind(None::<String>)
             },
         )
         .await;
@@ -386,10 +389,10 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                 );
             }
             if category == knobas_core::inbox::Category::Mention
-                && !reads_body_index(&plan[0]["Plan"])
+                && !reads_stored_names(&plan[0]["Plan"])
             {
                 wrong.push(format!(
-                    "{name}: reads every item's body, not {BODY_INDEX} (#1170)"
+                    "{name}: reads every item's body, not {NAMES_INDEX} (#1170)"
                 ));
             }
             if category == knobas_core::inbox::Category::NewAssignment {
@@ -995,21 +998,53 @@ fn item_scans_filtered_per_row(node: &serde_json::Value) -> Vec<String> {
     found
 }
 
-/// The trigram index over the prose kinds' bodies (migration `0049`).
-const BODY_INDEX: &str = "item_body_trgm_idx";
+/// The key of `sync.item_mention` (migration `0079`): the names each prose
+/// body writes at somebody, by name.
+const NAMES_INDEX: &str = "item_mention_pkey";
 
-/// Whether the plan finds its items through [`BODY_INDEX`] (#1170). The
-/// mention rule read every prose item's body for the reader's name: 12 ms of
-/// the stream on the probe's 18,500, for every reader, the one rule left that
-/// cost the same whoever reads it. Through the index it reads the bodies that
-/// hold the name's trigrams, which for a name nobody wrote is none.
-fn reads_body_index(node: &serde_json::Value) -> bool {
-    node["Node Type"] == "Bitmap Index Scan" && node["Index Name"] == BODY_INDEX
+/// Whether the plan finds its items through `sync.item_mention`, by
+/// [`NAMES_INDEX`] or, on a table of a few pages, by reading it whole, and
+/// matches no body the names did not lead to. The mention
+/// rule read every prose item's body for the reader's name (12 ms of the
+/// stream on the probe's 18,500, #1170), then the bodies holding the name's
+/// trigrams (`0049`), which for a username that is also a word was thousands
+/// of them (the query audit of 2026-11-12). Through the stored names it
+/// reads the items that write the name at somebody, which for a name nobody
+/// wrote is none.
+fn reads_stored_names(node: &serde_json::Value) -> bool {
+    scans_names(node) && !matches_bodies_in_a_scan(node)
+}
+
+/// Whether the plan reads `sync.item_mention` at all.
+fn scans_names(node: &serde_json::Value) -> bool {
+    node["Relation Name"] == "item_mention"
+        || node["Index Name"] == NAMES_INDEX
         || node["Plans"]
             .as_array()
             .into_iter()
             .flatten()
-            .any(reads_body_index)
+            .any(scans_names)
+}
+
+/// Whether a scan of `sync.item` matches bodies on rows the stored names did
+/// not lead it to: any scan testing `body_text` but a probe of the primary
+/// key by an id, which reads one row for each item storing the name.
+fn matches_bodies_in_a_scan(node: &serde_json::Value) -> bool {
+    let tests_bodies = ["Filter", "Recheck Cond", "Index Cond"].iter().any(|at| {
+        node[*at]
+            .as_str()
+            .is_some_and(|text| text.contains("body_text"))
+    });
+    let probed_by_id = node["Index Name"] == "item_pkey"
+        && node["Index Cond"]
+            .as_str()
+            .is_some_and(|cond| cond.contains("entity_id = "));
+    (node["Relation Name"] == "item" && tests_bodies && !probed_by_id)
+        || node["Plans"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(matches_bodies_in_a_scan)
 }
 
 /// Every node type in a plan, subplans included.
