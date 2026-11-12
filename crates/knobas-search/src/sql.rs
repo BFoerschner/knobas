@@ -31,7 +31,7 @@
 //! with q as (...),                 -- the tsquery, computed once
 //!      m as materialized (...),    -- one narrow row per *match*
 //!      totals as (...),            -- per-kind counts, over every match
-//!      top as (...),               -- rank within kind
+//!      top as (...),               -- each kind's best rows
 //!      picked as (...),            -- the page
 //!      detail as (...)             -- titles and excerpts, page only
 //! select ... from totals left join detail ...
@@ -45,6 +45,10 @@
 //!   bodies through it is what turns a 20 ms search into a 200 ms one.
 //! * **Exactly one match scan.** `m` is `materialized` because both `totals`
 //!   and `top` read it, and the alternative is scanning the index twice.
+//! * **No sort of every match.** `top` reads each kind's matches through a
+//!   bounded heap (`order by ... limit`, once a kind `totals` counted), where
+//!   a `row_number()` over the whole set sorted it all to keep ten a kind
+//!   (`KindCut`).
 //! * **`totals` LEFT JOIN `detail`**, so every matching kind comes back even
 //!   when the global `limit` left it no row: `ResultGroup.total` is then a true
 //!   count and not a page size. A kind with `total > 0` and no hit is a
@@ -149,6 +153,71 @@ pub fn search_sql(
     filters: &EffectiveFilters,
     per_group: u32,
     limit: u32,
+) -> SearchSql {
+    build_search_sql(
+        corpora,
+        text,
+        prefix_last,
+        filters,
+        per_group,
+        limit,
+        KindCut::Limit,
+    )
+}
+
+/// [`search_sql`] with each kind cut to its best rows by a window over every
+/// match, as the statement cut them before the stored-reads pass of
+/// 2026-11-12 ([`KindCut::Window`]): the reference
+/// `tests/it/item_search.rs` holds [`search_sql`]'s answers to.
+#[cfg(any(test, feature = "test-util"))]
+#[must_use]
+pub fn search_sql_windowed(
+    corpora: &[&Corpus],
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+) -> SearchSql {
+    build_search_sql(
+        corpora,
+        text,
+        prefix_last,
+        filters,
+        per_group,
+        limit,
+        KindCut::Window,
+    )
+}
+
+/// How the statement keeps each kind's best `per_group` rows (`top`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KindCut {
+    /// An ordered read of each kind's matches that stops at its last row:
+    /// for each kind `totals` counted, `order by ... limit per_group`, which
+    /// the server answers with a bounded heap over that kind's matches.
+    ///
+    /// The same rows as [`KindCut::Window`] keeps: a kind's first
+    /// `per_group` under one total order, which ends in the row's id.
+    Limit,
+    /// `row_number() over (partition by kind order by ...)` over every match
+    /// and `rn <= per_group`: one sort of the whole match set by kind and
+    /// rank to keep ten rows a kind. 34 ms of a common word's 106 on a
+    /// mirror of 39,770 items, where the word matched 22,394 (2026-11-12);
+    /// the bounded heaps take 5.
+    #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
+    Window,
+}
+
+/// [`search_sql`], cutting each kind as `cut` says.
+fn build_search_sql(
+    corpora: &[&Corpus],
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+    cut: KindCut,
 ) -> SearchSql {
     let mut builder = Builder::default();
 
@@ -275,17 +344,32 @@ pub fn search_sql(
     let ranked = text.is_some();
     let ordering = order_by("", ranked, false);
 
-    let _ = writeln!(
-        sql,
-        "top as (\n  select m.*, row_number() over (partition by m.kind order by {}) as rn\n    from m\n),",
-        order_by("m.", ranked, false)
-    );
-    // One kind cannot flood the box (rn), and the whole answer is bounded
+    // One kind cannot flood the box (`top`), and the whole answer is bounded
     // (limit) before anything expensive touches it.
-    let _ = writeln!(
-        sql,
-        "picked as (\n  select * from top where rn <= {per_group}\n   order by {ordering}\n   limit {limit}\n),"
-    );
+    match cut {
+        KindCut::Limit => {
+            let within = order_by("m.", ranked, false);
+            let _ = writeln!(
+                sql,
+                "top as (\n  select t.* from totals k\n   cross join lateral (select m.* from m where m.kind = k.kind\n                        order by {within}\n                        limit {per_group}) t\n),"
+            );
+            let _ = writeln!(
+                sql,
+                "picked as (\n  select * from top\n   order by {ordering}\n   limit {limit}\n),"
+            );
+        }
+        KindCut::Window => {
+            let _ = writeln!(
+                sql,
+                "top as (\n  select m.*, row_number() over (partition by m.kind order by {}) as rn\n    from m\n),",
+                order_by("m.", ranked, false)
+            );
+            let _ = writeln!(
+                sql,
+                "picked as (\n  select * from top where rn <= {per_group}\n   order by {ordering}\n   limit {limit}\n),"
+            );
+        }
+    }
 
     // Titles and excerpts, on the rows that survived and no others.
     sql.push_str("detail as (\n");
@@ -2227,8 +2311,14 @@ mod tests {
             "the per-kind total is back on a window partition:\n{}",
             built.sql
         );
-        // One window function only: `row_number`, which is the per-kind cap.
-        assert_eq!(built.sql.matches(" over (").count(), 1, "{}", built.sql);
+        // No window function at all: the per-kind cap is an ordered limit
+        // a kind (`KindCut::Limit`), not a `row_number` over every match.
+        assert_eq!(built.sql.matches(" over (").count(), 0, "{}", built.sql);
+        assert!(
+            built.sql.contains("from m where m.kind = k.kind"),
+            "{}",
+            built.sql
+        );
         // And the match set is scanned once, for both readers of it.
         assert!(built.sql.contains("m as materialized ("), "{}", built.sql);
     }

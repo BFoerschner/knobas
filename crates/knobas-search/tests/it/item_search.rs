@@ -353,6 +353,93 @@ async fn the_launcher_answers_as_it_did_reading_the_mirror_alone() {
     );
 }
 
+/// **Each kind's best rows are the ones the window kept.** The statement
+/// cuts a kind to its best rows with an ordered limit a kind
+/// (`sql::KindCut::Limit`), where it numbered every match in a window over
+/// the whole set; `sql::search_sql_windowed` still builds that statement,
+/// and every probe is asked both ways: under both scopes, whole and typed,
+/// with one row a kind, three, the launcher's ten and every match, cut to a
+/// page shorter than the kinds fill and to one that holds them all, and
+/// browsed with no words at all.
+#[tokio::test]
+async fn a_kind_is_cut_to_the_rows_the_window_kept() {
+    use knobas_search::sql::search_sql_windowed;
+
+    let pool = pool().await;
+    let source = seed_scale_words(&pool, 600).await;
+    let kinds: i64 =
+        sqlx::query_scalar("select count(distinct kind) from sync.item where source_id = $1")
+            .bind(&source)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(kinds >= 2, "more than one kind to cut: {kinds}");
+
+    let probes: [Option<&str>; 12] = [
+        Some("r"),
+        Some("p"),
+        Some("pay"),
+        Some("retry"),
+        Some("deploy"),
+        Some("fx quotes"),
+        Some("\"retry queue\""),
+        Some("retry -queue"),
+        Some("payout or ledger"),
+        Some("PAY-12"),
+        Some("the"),
+        // Browse mode: no words, ordered by recency.
+        None,
+    ];
+    let mut compared = 0;
+    let mut cut = 0;
+    for probe in probes {
+        for titles in [false, true] {
+            for prefix_last in [false, true] {
+                for (per_group, limit) in [(1, 50), (3, 5), (10, 50), (100_000, 100_000)] {
+                    let filters = EffectiveFilters {
+                        sources: vec![source.clone()],
+                        titles,
+                        ..EffectiveFilters::default()
+                    };
+                    let now = search_sql(
+                        &[&LIVE_ITEM],
+                        probe,
+                        prefix_last,
+                        &filters,
+                        per_group,
+                        limit,
+                    );
+                    let windowed = search_sql_windowed(
+                        &[&LIVE_ITEM],
+                        probe,
+                        prefix_last,
+                        &filters,
+                        per_group,
+                        limit,
+                    );
+                    let now = answer(fetch_matched(&pool, now).await.unwrap());
+                    let windowed = answer(fetch_matched(&pool, windowed).await.unwrap());
+                    assert_eq!(
+                        now, windowed,
+                        "{probe:?}, titles {titles}, typing {prefix_last}, {per_group} a kind, {limit} in all"
+                    );
+                    compared += 1;
+                    // A kind that matched more rows than it was let draw.
+                    cut += usize::from(
+                        now.iter()
+                            .any(|(_, total, hits)| (*total as usize) > hits.len()),
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(compared, probes.len() * 16);
+    assert!(
+        cut * 2 >= compared,
+        "{cut} of {compared} answers cut a kind short"
+    );
+}
+
 /// The copy is the mirror's vector after every kind of write: an insert, a
 /// retitle, a new body, a payload that leaves the vector alone, a stamp and
 /// a delete. And at any instant no row of the whole mirror is out of step
