@@ -275,6 +275,11 @@ const TREES_AT_ONCE: usize = 8;
 /// ([`working_tree::read_known`]). An id [`view`] refuses is left out, as
 /// the page leaves a cell empty for a read that failed.
 ///
+/// Every id's repository and override are read in one statement
+/// ([`REPOS_OF`], the query audit of PR #2479: two or three statements a
+/// repository, 262 for Code's 65), by the rules [`repo_of`] and
+/// [`resolve_in`] read one by.
+///
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the clones root cannot be
@@ -287,14 +292,43 @@ pub async fn views(pool: &PgPool, entity_ids: &[String]) -> Result<Vec<CheckoutO
             .unwrap_or_default(),
         None => Vec::new(),
     };
-    let mut answers = Vec::with_capacity(entity_ids.len());
-    for entity_id in entity_ids {
-        if let Ok(checkout) = resolve_in(pool, entity_id, root.clone(), Some(&clones)).await {
-            answers.push(CheckoutOf {
-                entity_id: entity_id.clone(),
-                checkout,
-            });
-        }
+    // The ids `repo_of` would read, as it spells them; one that is not an
+    // entity id is refused there, and left out here.
+    let asked: Vec<(&String, String)> = entity_ids
+        .iter()
+        .filter_map(|asked| Some((asked, EntityRef::parse(asked).ok()?.to_string())))
+        .collect();
+    let ids: Vec<&str> = asked.iter().map(|(_, id)| id.as_str()).collect();
+    let rows = sqlx::query(REPOS_OF)
+        .bind(&ids)
+        .fetch_all(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let found: std::collections::HashMap<String, (RepoOf, Option<String>)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("id"),
+                (
+                    RepoOf {
+                        entity_id: row.get("repo_id"),
+                        url: row.get("url"),
+                    },
+                    row.get("override_path"),
+                ),
+            )
+        })
+        .collect();
+    let mut answers = Vec::with_capacity(asked.len());
+    for (entity_id, id) in asked {
+        // An id asked twice answers twice, as one call per id did.
+        let Some((repo, stored)) = found.get(&id).cloned() else {
+            continue;
+        };
+        answers.push(CheckoutOf {
+            entity_id: entity_id.clone(),
+            checkout: view_of(repo, stored, root.clone(), Some(&clones)).await,
+        });
     }
     let lanes = std::sync::Arc::new(tokio::sync::Semaphore::new(TREES_AT_ONCE));
     let mut reads = tokio::task::JoinSet::new();
@@ -927,7 +961,17 @@ async fn resolve_in(
         }
         None => None,
     };
+    Ok(view_of(repo, stored, root, clones).await)
+}
 
+/// What [`resolve_in`] answers for `repo`, its stored override `stored`, the
+/// clones root `root` and its scan `clones` where it was walked already.
+async fn view_of(
+    repo: RepoOf,
+    stored: Option<String>,
+    root: Option<String>,
+    clones: Option<&[checkout::FoundClone]>,
+) -> CheckoutView {
     let (path, found_by) = match (stored, root.as_deref(), repo.url.as_deref()) {
         (Some(path), _, _) => (Some(path), FoundBy::Override),
         (None, Some(_), Some(url)) if clones.is_some() => {
@@ -943,7 +987,7 @@ async fn resolve_in(
         _ => (None, FoundBy::Nothing),
     };
 
-    Ok(CheckoutView {
+    CheckoutView {
         repo_entity_id: repo.entity_id,
         clone_command: repo.url.as_deref().map(checkout::clone_command),
         repo_url: repo.url,
@@ -951,8 +995,32 @@ async fn resolve_in(
         found_by,
         clones_root: root,
         tree: None,
-    })
+    }
 }
+
+/// [`repo_of`] and the override [`resolve_in`] reads, for each id of `$1` at
+/// once ([`views`]): an id the mirror holds as a repo or a branch, with its
+/// repository's id and address (a branch's the longest repo id of its source
+/// it starts with, `null` where none is held) and that repository's stored
+/// override. An id not held, or of another kind, has no row.
+const REPOS_OF: &str = "
+select a.id,
+       case when i.kind = 'repo' then i.entity_id else r.entity_id end as repo_id,
+       case when i.kind = 'repo' then i.web_url else r.web_url end as url,
+       o.path as override_path
+  from unnest($1::text[]) as a(id)
+  join sync.item i on i.entity_id = a.id
+  left join lateral (
+         select x.entity_id, x.web_url
+           from sync.item x
+          where i.kind = 'branch' and x.kind = 'repo' and x.source_id = i.source_id
+            and starts_with(a.id, x.entity_id)
+          order by length(x.entity_id) desc
+          limit 1) r on true
+  left join knobas.checkout_override o
+         on o.entity_id = case when i.kind = 'repo' then i.entity_id else r.entity_id end
+ where i.kind in ('repo', 'branch')
+";
 
 /// The first of `clones` (a scan, in its order) whose remote names the same
 /// repository as `url`: [`checkout::find`] over a scan already made.
@@ -981,6 +1049,7 @@ async fn scan_for(root: &str, url: &str) -> Option<PathBuf> {
 }
 
 /// The repository a checkout question is about.
+#[derive(Clone)]
 struct RepoOf {
     /// `None` only for a branch whose repository the mirror does not hold.
     entity_id: Option<String>,

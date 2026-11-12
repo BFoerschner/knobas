@@ -23,6 +23,7 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS } from "../ipc";
+import { coalesce } from "../shell/coalesce";
 import { monitorsDown, type MonitorRow } from "../ipc/assets";
 import { listEntities, type EntityPage } from "../ipc/entity";
 import type { SourceSyncStatus } from "../ipc/sources";
@@ -92,12 +93,15 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
     }
   }
 
-  async function refresh() {
+  // Coalesced (the query audit, 2026-11-12): a sync wave's run ends and activity lines asked both reads six times in
+  // 150 ms. While a read is out, any number of events make one more read after it, so the last word still follows the
+  // last event (`coalesce`, as the inbox and the alerts read).
+  const refresh = coalesce(async () => {
     await Promise.all([
       read("builds", ports.failingBuilds),
       read("monitors", ports.monitorsDown),
     ]);
-  }
+  });
 
   return {
     get builds() {

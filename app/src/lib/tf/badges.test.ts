@@ -80,3 +80,26 @@ test("a finished sync run re-reads the counts; a run still going does not", asyn
   expect(badges.builds).toBe(3);
   stop();
 });
+
+test("a sync wave's burst of events reads each count twice at most, the last after the last event (the query audit, 2026-11-12)", async () => {
+  let builds = 0;
+  let monitors = 0;
+  let land: () => void = () => {};
+  const probe = ports({
+    failingBuilds: () => ((builds += 1), new Promise<number>((resolve) => (land = () => resolve(builds)))),
+    monitorsDown: () => ((monitors += 1), Promise.resolve(monitors)),
+  });
+  const badges = createBadges(probe);
+  badges.start();
+  await Promise.resolve();
+  const ended = { source_id: "jira", running: false };
+  for (let i = 0; i < 6; i += 1) probe.fire("sync:state", ended);
+  probe.fire("activity:new", {});
+  expect([builds, monitors]).toEqual([1, 1]);
+  land();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect([builds, monitors]).toEqual([2, 2]);
+  land();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect([badges.builds, badges.monitors, builds, monitors]).toEqual([2, 2, 2, 2]);
+});
