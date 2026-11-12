@@ -23,6 +23,7 @@
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { cacheEvents, enableAnswerCache, warm } from "./lib/ipc/answer-cache";
+  import { installHoverReads } from "./lib/tf/repo/hover-reads";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { getEntity, recordCaptureContext } from "./lib/ipc/entity";
   import { chosenJob } from "./lib/tf/job/chosen.svelte";
@@ -237,6 +238,8 @@
         } catch (error) {
           console.error("knobas: the answer cache did not start; every read goes to the backend", error);
         }
+        // A repository's or a pull request's first read past the mirror, started while the pointer rests on its link.
+        stops.push(installHoverReads());
         for (const [event, hear] of [
           [EVENTS.syncState, (payload: unknown) => cacheEvents.syncState(payload as Parameters<typeof cacheEvents.syncState>[0])],
           [EVENTS.itemRefreshed, () => cacheEvents.moved()],

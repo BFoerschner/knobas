@@ -839,7 +839,31 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  * `unreachable` or `internal` as {@link reachableTransitions} does.
  */
 export function entityView(entityId: string, section: string | null = null): Promise<ShownView | null> {
+  const ahead = readsAhead.get(viewKey(entityId, section));
+  if (ahead !== undefined) return ahead.then(withDateWords);
   return invoke<ShownView | null>("entity_view", { entityId, section }).then(withDateWords);
+}
+
+/**
+ * Views read ahead of a press (`tf/repo/hover-reads.ts`, the inner-pages pass of 2026-11-12), by entity and section,
+ * while they are out: the page's own ask after the press joins the read under way rather than asking the source a
+ * second time. Only a read started ahead is joined, so an ask made after a refresh never gets an answer from before it.
+ */
+const readsAhead = new Map<string, Promise<ShownView | null>>();
+const viewKey = (entityId: string, section: string | null) => `${entityId}\u0000${section ?? ""}`;
+
+/** Reads `entityId`'s view at `section` ahead of a press, for {@link entityView} to join while it is out. */
+export function readViewAhead(entityId: string, section: string | null = null): Promise<ShownView | null> {
+  const key = viewKey(entityId, section);
+  const held = readsAhead.get(key);
+  if (held !== undefined) return held;
+  const read = invoke<ShownView | null>("entity_view", { entityId, section });
+  readsAhead.set(key, read);
+  const done = () => {
+    if (readsAhead.get(key) === read) readsAhead.delete(key);
+  };
+  read.then(done, done);
+  return read;
 }
 
 /** A view's rows with their meta in the one date form, read here so every list and its filter say the same (`viewDate`). */

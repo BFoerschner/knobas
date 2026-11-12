@@ -230,6 +230,24 @@
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
   /**
+   * Each file the tab drew, by the section that opens it, at the current `at` (the inner-pages pass, 2026-11-12): a file
+   * a deep link's guess read by its path, then named by its listing at a commit, was read from the source a second time
+   * when the reader came back to it, a forge's round trip for what the tab had drawn.
+   */
+  let drawnFiles = new Map<string, ViewSection | undefined>();
+  /** The read the file drawn came from, which a listing's section can stand for once it names it. */
+  let drawnRead: ViewSection | undefined;
+  /**
+   * Keeps the file `read` drew under `section`, where the section names where the file stands: a listing's, at a commit.
+   * A file read by its path alone may have changed by the next look, so that is read again, as before.
+   */
+  function keepFile(section: string, read: ViewSection | undefined, path: string) {
+    if (section === GUESSED || section.startsWith(LOCAL) || section === MISSING) return;
+    // Where the source declares no scheme there is no telling a listing's section from a read by path: none is kept.
+    if (treeSections == null || section === `${treeSections.file}${path}`) return;
+    drawnFiles.set(section, read);
+  }
+  /**
    * Reads a deep link asked before a listing named their section (#2244), by
    * section, at the current `at`: the listing that names one takes it.
    */
@@ -365,6 +383,30 @@
     return read.catch(() => readSection(section, where));
   }
 
+  /**
+   * The pointer resting on a row of the tree reads what a press on it opens, so the source's round trip runs while the
+   * hand is on its way to the press (the inner-pages pass, 2026-11-12): a file or a directory a press would read from
+   * the source, asked once, after the pointer has stood on it a moment, so one swept across the tree asks nothing. The
+   * press takes the read under way (`take`). The checkout's copy needs none.
+   */
+  const REST_MS = 80;
+  let resting: ReturnType<typeof setTimeout> | null = null;
+  function restOn(full: string, section: string | null, kind: "file" | "dir") {
+    unrest();
+    if (section === null || section.startsWith(LOCAL)) return;
+    const place = kind === "file" ? fileKey(full) : dirKey(full);
+    if (early.has(place) || (kind === "dir" ? asked.has(full) || listings[full] !== undefined : drawnFiles.has(section) || full === shown)) return;
+    resting = setTimeout(() => {
+      resting = null;
+      if (!early.has(place)) askEarly(section, place);
+    }, REST_MS);
+  }
+  function unrest() {
+    if (resting !== null) clearTimeout(resting);
+    resting = null;
+  }
+  $effect(() => unrest);
+
   /** Asks for `section` now, for the listing that names `place` later. */
   function askEarly(section: string, place: string): Promise<ViewSection | undefined> {
     const read = readSection(section);
@@ -398,6 +440,7 @@
     void at;
     generation += 1;
     asked = new Set();
+    drawnFiles = new Map();
     early = new Map();
     listings = {};
     treeFailed = null;
@@ -523,6 +566,8 @@
         ? `${branch ?? "This branch"} moved on ${sourceName(source)} since the last sync, and this file changed with it: the newest is shown.`
         : null;
     drawnSection = section;
+    drawnRead = read;
+    if (file !== null) keepFile(section, read, file.path);
     fileReading = false;
     fileFailed = null;
     draft = null;
@@ -548,6 +593,7 @@
       untrack(() => file)?.path === untrack(() => shown)
     ) {
       drawnSection = section;
+      keepFile(section, drawnRead, untrack(() => shown) ?? "");
       fileReading = false;
       fileFailed = null;
       return;
@@ -569,6 +615,11 @@
       return;
     }
     let live = true;
+    const drawnBefore = drawnFiles.get(section);
+    if (drawnBefore !== undefined) {
+      drawFile(drawnBefore, section);
+      return;
+    }
     take(section, fileKey(untrack(() => shown) ?? ""), where).then(
       (read) => {
         if (live && !(file !== null && drawnSection === section)) drawFile(read, section);
@@ -964,11 +1015,13 @@
     if (section === null || section === MISSING) return Promise.resolve();
     // The file a commit made is at the branch's new tip: the top says which.
     void rereadTop();
+    drawnFiles = new Map();
     return readSection(section, where).then(
       (read) => {
         if (section !== fileSection || where !== at) return;
         const block = read?.blocks[0];
         if (block?.type !== "file") return;
+        keepFile(section, read, block.path);
         file = block;
         settleCommit(block);
       },
@@ -1205,6 +1258,8 @@
         class="tf-fdir tf-d{Math.min(depth, 8)}"
         data-path={full}
         aria-expanded={open.has(full)}
+        onpointerenter={() => restOn(full, entry.section, "dir")}
+        onpointerleave={unrest}
         onclick={() => toggle(full)}>{@render icon(open.has(full) ? "open" : "dir")}{entry.name}</button
       >
       {#if open.has(full)}
@@ -1217,6 +1272,8 @@
         class="tf-d{Math.min(depth, 8)}"
         class:tf-changed={changed.has(full)}
         aria-current={full === shown ? "true" : undefined}
+        onpointerenter={() => restOn(full, entry.section, "file")}
+        onpointerleave={unrest}
         title={changed.has(full) ? "Changed in your checkout" : undefined}>{@render icon("file")}{entry.name}</a
       >
     {:else}
