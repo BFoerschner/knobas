@@ -491,6 +491,78 @@
     "moved": 0
    }
   },
+  "compare-300": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "compare-3000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "compare-10000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "forge-compare-300": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 1000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 1000,
+    "moved": 0
+   }
+  },
+  "forge-compare-3000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 1500,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 1500,
+    "moved": 0
+   }
+  },
+  "forge-compare-10000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 2500,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 2500,
+    "moved": 0
+   }
+  },
   "forge-folder-3000": {
    "1": {
     "usefulMs": 100,

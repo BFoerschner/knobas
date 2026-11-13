@@ -372,6 +372,10 @@ pub async fn stat_between(
     if !whole(base_tip) || !whole(head_tip) {
         return None;
     }
+    let key = listed_key(path, &format!("{base_tip}..."), head_tip, ignore_whitespace);
+    if let Some(kept) = kept_lists().get(&key) {
+        return Some(kept);
+    }
     let all = async {
         let git = git_at_checkout(path).await?;
         let (a, b) = (base_tip.to_ascii_lowercase(), head_tip.to_ascii_lowercase());
@@ -390,10 +394,52 @@ pub async fn stat_between(
             head: b,
         })
     };
-    tokio::time::timeout(super::range::TIMEOUT, all)
+    let read = tokio::time::timeout(super::range::TIMEOUT, all)
         .await
         .ok()
-        .flatten()
+        .flatten()?;
+    kept_lists().put(key, &read);
+    Some(read)
+}
+
+/// The last few lists the checkouts answered, by checkout, ends and
+/// whitespace: each between two whole shas, so it cannot go stale, and a
+/// branch picked again or *Into* picked back answers without git (the
+/// compare pass: 10,000 files took 107 ms of `--numstat` a read).
+struct Listed(Mutex<VecDeque<(String, LocalStat)>>);
+
+const LISTED: usize = 4;
+
+fn kept_lists() -> &'static Listed {
+    static LISTED_ONES: OnceLock<Listed> = OnceLock::new();
+    LISTED_ONES.get_or_init(|| Listed(Mutex::new(VecDeque::new())))
+}
+
+fn listed_key(path: &Path, base: &str, head: &str, ignore_whitespace: bool) -> String {
+    format!(
+        "{}\n{}\n{}\n{ignore_whitespace}",
+        path.display(),
+        base.to_ascii_lowercase(),
+        head.to_ascii_lowercase()
+    )
+}
+
+impl Listed {
+    fn get(&self, key: &str) -> Option<LocalStat> {
+        let mut all = self.0.lock().expect("the kept lists");
+        let at = all.iter().position(|(k, _)| k == key)?;
+        let found = all.remove(at)?;
+        let stat = found.1.clone();
+        all.push_front(found);
+        Some(stat)
+    }
+
+    fn put(&self, key: String, stat: &LocalStat) {
+        let mut all = self.0.lock().expect("the kept lists");
+        all.retain(|(k, _)| *k != key);
+        all.push_front((key, stat.clone()));
+        all.truncate(LISTED);
+    }
 }
 
 /// The files `base`..`head` changes at the checkout `path`, without their
@@ -405,6 +451,10 @@ pub async fn stat(
     head: &str,
     ignore_whitespace: bool,
 ) -> Option<LocalStat> {
+    let key = (whole(base) && whole(head)).then(|| listed_key(path, base, head, ignore_whitespace));
+    if let Some(kept) = key.as_deref().and_then(|key| kept_lists().get(key)) {
+        return Some(kept);
+    }
     let all = async {
         let Ends {
             git,
@@ -426,10 +476,14 @@ pub async fn stat(
             head,
         })
     };
-    tokio::time::timeout(super::range::TIMEOUT, all)
+    let read = tokio::time::timeout(super::range::TIMEOUT, all)
         .await
         .ok()
-        .flatten()
+        .flatten()?;
+    if let Some(key) = key {
+        kept_lists().put(key, &read);
+    }
+    Some(read)
 }
 
 /// The most commits [`stat`] lists.
@@ -1065,6 +1119,22 @@ mod tests {
         let (files, dropped) = parse_stat(whole, false);
         assert!(!dropped);
         assert_eq!((files[0].additions, files[0].deletions), (1, 2));
+    }
+
+    #[tokio::test]
+    async fn a_list_read_again_is_the_list_kept_and_needs_no_checkout() {
+        let (dir, base, head) = repo();
+        let p = dir.path().to_path_buf();
+        let first = stat(&p, &base, &head, false)
+            .await
+            .expect("the checkout answers");
+        // The checkout gone: the same two shas answer from what was kept, and other ends do not.
+        std::fs::remove_dir_all(p.join(".git")).unwrap();
+        assert_eq!(stat(&p, &base, &head, false).await, Some(first));
+        assert!(
+            stat(&p, &base, &head, true).await.is_none(),
+            "whitespace ignored is another list"
+        );
     }
 
     #[test]

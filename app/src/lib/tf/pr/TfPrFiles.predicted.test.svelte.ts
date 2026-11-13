@@ -114,3 +114,39 @@ test("a diff the clone cannot read is not drawn as one", async () => {
   expect(target.querySelector(".tf-heldnote")).toBeNull();
   expect(paths()).toEqual([]);
 });
+
+test("the clone's diff is read a file at a time where the page can: its list first, each file's lines as it is reached", async () => {
+  const pages: string[] = [];
+  const cancelled: string[] = [];
+  view = mount(TfPrFiles, {
+    target,
+    props: {
+      prId: PR,
+      entityView: () => new Promise<SourceView>(() => {}),
+      rangeDiff: () => Promise.reject(new Error("the whole diff is never read")),
+      rangeFiles: async () => ({ ...LOCAL, files: LOCAL.files.map((f) => ({ ...f, hunks: [] })) }),
+      rangeFile: async (_repo: string, _base: string, _head: string, path: string, _old: string | null, _ws: boolean, from: number) => {
+        pages.push(path);
+        return { file: file(path), from, continues: false, next: null };
+      },
+      cancelRead: async (read: string) => {
+        cancelled.push(read);
+        return true;
+      },
+      viewedFiles: async () => [],
+      setViewed: async () => [],
+      pending: createPendingComments(() => null),
+      sourceName: "Tidewater Git",
+      predict: PREDICT,
+      listen: async () => () => {},
+      follower: { follow: () => () => {} },
+    },
+  });
+  await settle();
+  expect(paths()).toEqual(["docs/backoff.md"]);
+  expect(pages).toEqual(["docs/backoff.md"]);
+  expect(squash(target.querySelector('.tf-diff[data-file="docs/backoff.md"] .tf-dbody'))).toContain("# Backoff");
+  unmount(view);
+  view = null;
+  expect(cancelled.length).toBeGreaterThan(0);
+});

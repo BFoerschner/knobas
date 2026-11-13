@@ -177,7 +177,7 @@ export async function down() {
 /**
  * The places, at one throttle: each branch's compare opened in the cloned repository (`compare-*`, read at the clone)
  * and in the forge's (`forge-compare-*`), the 4x run its own twins, so each first open is a read knobas never made. The
- * page is useful once its changed files are listed and the first file's lines drawn.
+ * page is useful once the branch's changed files are listed and its commits drawn; its first file's lines are a mark.
  */
 export function places(rate, shown) {
   const enc = encodeURIComponent;
@@ -188,8 +188,9 @@ export function places(rate, shown) {
     start: R(repo),
     go: `${R(repo)}/compare/${enc(branch)}`,
     hash: `${R(repo)}/compare/`,
-    useful: [[`${shown} .tf-cdiff .tf-flist button[title="A-${branch}.md"]`, 1], [`${shown} .tf-cdiff .tf-diff[data-file="A-${branch}.md"] .tf-dbody`, 1]],
-    marks: { files: [[`${shown} .tf-cdiff .tf-flist button[title="A-${branch}.md"]`, 1]] },
+    // The line Björn set (2026-11-13): the branch's files and its commits; the first file's lines follow as a mark.
+    useful: [[`${shown} .tf-cdiff .tf-flist button[title="A-${branch}.md"]`, 1], [`${shown} .tf-side .tf-r`, 1]],
+    marks: { lines: [[`${shown} .tf-cdiff .tf-diff[data-file="A-${branch}.md"] .tf-dbody`, 1]] },
     awayGo: R(repo),
     inner: true,
   });
