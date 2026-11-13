@@ -85,6 +85,8 @@
   import { onRefreshed } from "./refreshed.svelte";
   import { onViewFresh } from "./view-fresh.svelte";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { takeCompareEarly } from "./compare-early";
   import { waitPhase } from "../waiting";
   import { shortEnd } from "../diff/sha";
   import {
@@ -184,6 +186,12 @@
     const listed = diff.range?.commits ?? [];
     if (listed.length > 0 || compareCommits?.section !== asked) compareCommits = listed.length > 0 ? { section: asked, commits: listed } : null;
   }
+  /**
+   * The drawn list is what knobas last read of the source's compare between these two names (`held_at`, the forge-waits
+   * pass, 2026-11-13): drawn at once under the held line while the source's list is read behind it, and replaced in place,
+   * quietly, where it moved. `done` once that read answered; `failed` where it did not.
+   */
+  let held = $state<{ section: string; at: string; done: boolean; failed: string | null } | null>(null);
   /** The source's compare differed from the predicted diff: a branch moved since the sync, and its diff now stands. */
   let moved = $state<string | null>(null);
   /** The check of the drawn predicted diff, by its section: whether the source's compare differed. */
@@ -384,8 +392,14 @@
     // Local-first, as every diff (ADR-0036, Spec 6 of the review of spec #2234): branch names are the source's, and
     // its compare names the two commits (`range`) that *Open as diff* takes to a checkout.
     const listing = ports.rangeFiles;
+    // The list the repository page asked early (`compare-early.ts`), answered or on its way; one that failed is read anew.
+    const early = listing === undefined || again ? null : takeCompareEarly(repoId, from, to);
     const answer: Promise<RangeDiff> =
-      listing !== undefined ? listing(repoId, from, to, false, read) : (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false);
+      early !== null
+        ? early.catch(() => listing!(repoId, from, to, false, read))
+        : listing !== undefined
+          ? listing(repoId, from, to, false, read)
+          : (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false);
     return answer.then((diff) => {
       if (!alive()) return;
       reading = false;
@@ -399,8 +413,13 @@
       keepCommits(asked, diff);
       moved = null;
       predicted = null;
+      held = null;
       checking = null;
-      if (diff.predicted_at !== undefined && (ports.sourceRangeFiles ?? ports.sourceRangeDiff) !== undefined) checkPredicted(asked, from, to, diff, alive, `${read}-check`);
+      const checkable = (ports.sourceRangeFiles ?? ports.sourceRangeDiff) !== undefined;
+      // A list knobas held (`RangeFiles.held_at`); the whole diff the older ports answer never is one.
+      const heldAt = (diff as { held_at?: string }).held_at;
+      if (diff.predicted_at !== undefined && checkable) checkPredicted(asked, from, to, diff, alive, `${read}-check`);
+      else if (heldAt !== undefined && checkable) checkPredicted(asked, from, to, diff, alive, `${read}-check`, heldAt);
     }, (error) => {
       if (!alive()) return;
       reading = false;
@@ -422,30 +441,37 @@
    * The source's compare, asked behind a predicted diff: the same checks it; another replaces it in place, and says so.
    * Its list of files where the page reads a file at a time (`sourceRangeFiles`), never its every line.
    */
-  function checkPredicted(asked: string, from: string, to: string, shown: RangeDiff, alive: () => boolean, read: string) {
+  function checkPredicted(asked: string, from: string, to: string, shown: RangeDiff, alive: () => boolean, read: string, heldAt?: string) {
     const listing = ports.sourceRangeFiles;
     const ask = listing !== undefined && fillAt !== null ? (a: string, b: string, c: string) => listing(a, b, c, read) : ports.sourceRangeDiff;
     if (ask === undefined) return;
-    predicted = { section: asked, checked: false };
+    if (heldAt === undefined) predicted = { section: asked, checked: false };
+    else held = { section: asked, at: heldAt, done: false, failed: null };
     const differs = ask(repoId, from, to).then(
       (fresh) => {
         const same = sameDiff(shown, fresh);
         if (alive() && filesFor === asked) {
           keepCommits(asked, fresh);
-          if (same) predicted = { section: asked, checked: true };
-          else {
+          if (heldAt !== undefined) held = { section: asked, at: heldAt, done: true, failed: null };
+          if (same) {
+            if (heldAt === undefined) predicted = { section: asked, checked: true };
+          } else {
             files = fresh.files;
             if (fillAt !== null) fillAt = fillEnds(fresh, from, to);
             cut = fresh.truncated;
             range = fresh.range;
             predicted = null;
-            moved = `${to} or ${from} moved on ${sourceName(source)} since the last sync: this is the change as it stands there now.`;
+            // A list knobas held said from when it was: the source's replaces it quietly.
+            if (heldAt === undefined) moved = `${to} or ${from} moved on ${sourceName(source)} since the last sync: this is the change as it stands there now.`;
           }
         }
         return !same;
       },
-      // The source could not answer: the prediction stands, unchecked.
-      () => false,
+      // The source could not answer: the prediction stands, unchecked; a held list says why.
+      (error) => {
+        if (heldAt !== undefined && alive() && filesFor === asked) held = { section: asked, at: heldAt, done: false, failed: ipcErrorMessage(error) };
+        return false;
+      },
     );
     checking = { section: asked, differs };
   }
@@ -756,6 +782,9 @@
         {:else if files !== null}
           {#if moved !== null}
             <p class="tf-cnote" role="status">{moved}</p>
+          {:else if held !== null && held.section === filesFor}
+            <!-- The held line (ADR-0042): its words go when the source's list lands, its room stays, so the list holds still. -->
+            <TfHeldNote heldAt={held.done ? null : held.at} source={sourceName(source)} failed={held.failed} />
           {:else if predicted !== null && predicted.section === filesFor}
             <p class="tf-cnote">
               {predicted.checked ? `Read from your clone: the same as on ${sourceName(source)}.` : `Read from your clone as of the last sync; checking ${sourceName(source)}…`}

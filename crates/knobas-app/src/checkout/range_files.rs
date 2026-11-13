@@ -65,6 +65,14 @@ pub struct RangeFiles {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub predicted_at: Option<String>,
+    /// The list is what knobas last read of the source's compare between
+    /// these two branch names, held between visits and sessions (RFC 3339,
+    /// when it was read; the forge-waits pass of PR #2479, 2026-11-13): the
+    /// page draws it at once under the held line and asks the source's list
+    /// behind it ([`source_range_files`]). Absent on every other answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub held_at: Option<String>,
 }
 
 /// One page of one file's lines.
@@ -123,9 +131,18 @@ pub async fn range_files(
         return Ok(predicted);
     }
     super::fetch_missing_tip(pool, registry.as_ref(), entity_id, base, head).await;
+    if let Some(held) = held_list(pool, secrets, registry, live, entity_id, base, head).await {
+        return Ok(held);
+    }
     let diff =
         super::source_range_diff(pool, secrets, registry, live, entity_id, base, head).await?;
-    Ok(keep(entity_id, base, head, diff))
+    let (answer, whole_diff) = keep(entity_id, base, head, diff);
+    hold_list(
+        pool, secrets, registry, live, entity_id, base, head, &answer,
+    )
+    .await;
+    hold_diff(pool, secrets, registry, live, entity_id, &whole_diff).await;
+    Ok(answer)
 }
 
 /// The files of `base`...`head` as the source's compare answers them now,
@@ -148,24 +165,217 @@ pub async fn source_range_files(
 ) -> Result<RangeFiles, IpcError> {
     let diff =
         super::source_range_diff(pool, secrets, registry, live, entity_id, base, head).await?;
-    Ok(keep(entity_id, base, head, diff))
+    let (answer, whole_diff) = keep(entity_id, base, head, diff);
+    hold_list(
+        pool, secrets, registry, live, entity_id, base, head, &answer,
+    )
+    .await;
+    hold_diff(pool, secrets, registry, live, entity_id, &whole_diff).await;
+    Ok(answer)
+}
+
+// -- what the source answered, held between sessions -------------------------
+
+/// A compare's list as it is held (the forge-waits pass of PR #2479,
+/// 2026-11-13): what the source's compare between two branch names listed,
+/// without lines, under `range_files:<base>...<head>` of the repository in
+/// `sync.held_read` (ADR-0042), so a later visit or session draws it at once
+/// and checks it behind; the next answer replaces it. A list over the store's
+/// row cap (about 13,000 files) is not held.
+#[derive(Serialize, serde::Deserialize)]
+struct HeldList {
+    files: Vec<DiffFile>,
+    truncated: bool,
+    range: Option<knobas_source::view::DiffRange>,
+}
+
+fn held_ask(base: &str, head: &str) -> String {
+    format!("range_files:{base}...{head}")
+}
+
+/// The list knobas last read of `base`...`head` from the source, where it
+/// holds one: answered with `held_at`, so the page checks it behind.
+async fn held_list(
+    pool: &PgPool,
+    secrets: &Arc<dyn knobas_secrets::SecretStore>,
+    registry: &Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) -> Option<RangeFiles> {
+    let lent = live.source(pool, secrets, registry, entity_id).await.ok()?;
+    let (read_at, answer) = live
+        .held_answer(&lent, entity_id, &held_ask(base, head))
+        .await?;
+    let held: HeldList = serde_json::from_value(answer).ok()?;
+    Some(RangeFiles {
+        files: held.files,
+        truncated: held.truncated,
+        range: held.range,
+        read_at: DiffReadAt::Source,
+        predicted_at: None,
+        held_at: Some(read_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+    })
+}
+
+/// Hold the source's list of `base`...`head` for the next visit and session.
+/// Only a compare of two names: one between two shas is the source's fixed
+/// view, which the view cache keeps already.
+#[allow(clippy::too_many_arguments)]
+async fn hold_list(
+    pool: &PgPool,
+    secrets: &Arc<dyn knobas_secrets::SecretStore>,
+    registry: &Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+    answer: &RangeFiles,
+) {
+    if whole(base.trim_end_matches('^')) && whole(head) {
+        return;
+    }
+    let Ok(lent) = live.source(pool, secrets, registry, entity_id).await else {
+        return;
+    };
+    let held = HeldList {
+        files: answer.files.clone(),
+        truncated: answer.truncated,
+        range: answer.range.clone(),
+    };
+    let Ok(value) = serde_json::to_value(&held) else {
+        return;
+    };
+    live.hold_answer(
+        &lent,
+        entity_id,
+        &held_ask(base, head),
+        chrono::Utc::now(),
+        &value,
+    )
+    .await;
+}
+
+/// A compare's whole diff, lines and all, as it is held under its two shas:
+/// `range_diff:<base sha>...<head sha>`, which never changes, so a held list's
+/// files draw their lines at once in a later session too. Only where the whole
+/// fits the store's row cap (a few hundred ordinary files); a bigger one's
+/// lines are read from the source when the page reaches them, as before.
+#[derive(Serialize, serde::Deserialize)]
+struct HeldDiff {
+    files: Vec<DiffFile>,
+    truncated: bool,
+}
+
+fn diff_ask(base: &str, head: &str) -> String {
+    format!("range_diff:{base}...{head}")
+}
+
+/// The diff between two whole shas knobas holds, kept for the session's reads.
+async fn held_diff(
+    pool: &PgPool,
+    secrets: &Arc<dyn knobas_secrets::SecretStore>,
+    registry: &Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) -> Option<Arc<RangeDiff>> {
+    if !(whole(base) && whole(head)) {
+        return None;
+    }
+    let lent = live.source(pool, secrets, registry, entity_id).await.ok()?;
+    let (_, answer) = live
+        .held_answer(&lent, entity_id, &diff_ask(base, head))
+        .await?;
+    let held: HeldDiff = serde_json::from_value(answer).ok()?;
+    Some(Arc::new(RangeDiff {
+        files: held.files,
+        truncated: held.truncated,
+        range: None,
+        read_at: DiffReadAt::Source,
+        predicted_at: None,
+    }))
+}
+
+/// Hold the source's whole diff under the two shas it settled, where it fits.
+async fn hold_diff(
+    pool: &PgPool,
+    secrets: &Arc<dyn knobas_secrets::SecretStore>,
+    registry: &Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    diff: &RangeDiff,
+) {
+    let Some(range) = &diff.range else {
+        return;
+    };
+    if !(whole(&range.base) && whole(&range.head)) {
+        return;
+    }
+    let Ok(lent) = live.source(pool, secrets, registry, entity_id).await else {
+        return;
+    };
+    let held = HeldDiff {
+        files: diff.files.clone(),
+        truncated: diff.truncated,
+    };
+    let Ok(value) = serde_json::to_value(&held) else {
+        return;
+    };
+    live.hold_answer(
+        &lent,
+        entity_id,
+        &diff_ask(&range.base, &range.head),
+        chrono::Utc::now(),
+        &value,
+    )
+    .await;
+}
+
+/// One lock per compare whose files are being read from the source: the
+/// diff's four reads at once wait for the first one's answer instead of each
+/// asking the source for the whole compare.
+fn one_read(entity_id: &str, base: &str, head: &str) -> Arc<tokio::sync::Mutex<()>> {
+    type Reads = Mutex<
+        std::collections::HashMap<
+            (String, String, String),
+            std::sync::Weak<tokio::sync::Mutex<()>>,
+        >,
+    >;
+    static READS: OnceLock<Reads> = OnceLock::new();
+    let mut all = READS
+        .get_or_init(Mutex::default)
+        .lock()
+        .expect("the compares being read");
+    all.retain(|_, lock| lock.strong_count() > 0);
+    let key = (entity_id.to_owned(), base.to_owned(), head.to_owned());
+    if let Some(lock) = all.get(&key).and_then(std::sync::Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    all.insert(key, Arc::downgrade(&lock));
+    lock
 }
 
 /// The source's whole answer, kept under the ends it was asked by and the two
-/// shas it settled, and answered without its lines.
-fn keep(entity_id: &str, base: &str, head: &str, diff: RangeDiff) -> RangeFiles {
+/// shas it settled, and answered without its lines; the whole answer beside it.
+fn keep(entity_id: &str, base: &str, head: &str, diff: RangeDiff) -> (RangeFiles, Arc<RangeDiff>) {
     let diff = Arc::new(diff);
     kept().put(entity_id, base, head, &diff);
     if let Some(range) = &diff.range {
         kept().put(entity_id, &range.base, &range.head, &diff);
     }
-    RangeFiles {
+    let answer = RangeFiles {
         files: diff.files.iter().map(listed).collect(),
         truncated: diff.truncated,
         range: diff.range.clone(),
         read_at: diff.read_at,
         predicted_at: diff.predicted_at.clone(),
-    }
+        held_at: None,
+    };
+    (answer, diff)
 }
 
 /// A file as the list carries it: everything but its lines.
@@ -244,6 +454,7 @@ impl LocalStat {
             }),
             read_at: DiffReadAt::Checkout,
             predicted_at,
+            held_at: None,
         }
     }
 }
@@ -710,12 +921,30 @@ pub async fn range_file(
     let diff = match kept().get(entity_id, base, head) {
         Some(diff) => diff,
         None => {
-            let diff = Arc::new(
-                super::source_range_diff(pool, secrets, registry, live, entity_id, base, head)
-                    .await?,
-            );
-            kept().put(entity_id, base, head, &diff);
-            diff
+            // The diff's pages are read four files at once: one read of the source between them (the forge-waits pass).
+            let one = one_read(entity_id, base, head);
+            let _reading = one.lock().await;
+            match kept().get(entity_id, base, head) {
+                Some(diff) => diff,
+                None => {
+                    let diff = match held_diff(pool, secrets, registry, live, entity_id, base, head)
+                        .await
+                    {
+                        Some(diff) => diff,
+                        None => {
+                            let diff = super::source_range_diff(
+                                pool, secrets, registry, live, entity_id, base, head,
+                            )
+                            .await?;
+                            let diff = Arc::new(diff);
+                            hold_diff(pool, secrets, registry, live, entity_id, &diff).await;
+                            diff
+                        }
+                    };
+                    kept().put(entity_id, base, head, &diff);
+                    diff
+                }
+            }
         }
     };
     diff.files

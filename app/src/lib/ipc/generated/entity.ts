@@ -3817,7 +3817,15 @@ read_at: DiffReadAt,
 /**
  * As [`RangeDiff::predicted_at`].
  */
-predicted_at?: string, };
+predicted_at?: string, 
+/**
+ * The list is what knobas last read of the source's compare between
+ * these two branch names, held between visits and sessions (RFC 3339,
+ * when it was read; the forge-waits pass of PR #2479, 2026-11-13): the
+ * page draws it at once under the held line and asks the source's list
+ * behind it ([`source_range_files`]). Absent on every other answer.
+ */
+held_at?: string, };
 
 /**
  * Where a reached entity's path came from.

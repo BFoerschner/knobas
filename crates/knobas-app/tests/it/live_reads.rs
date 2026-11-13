@@ -215,6 +215,32 @@ impl Source for Fake {
             .and_then(|rest| rest.split(':').next())
             .and_then(|n| n.parse().ok())
             .unwrap_or(0);
+        // A compare of a head `held-feature` changes one file between two
+        // whole shas, as Gitea's settles them (the forge-waits pass).
+        if let Some(asked) = section.filter(|s| s.ends_with("...held-feature")) {
+            let (files, truncated) = knobas_source::diff::parse_view(
+                "diff --git a/pay.py b/pay.py\n--- a/pay.py\n+++ b/pay.py\n@@ -1 +1 @@\n-a = 1\n+a = 2\n",
+            );
+            return Ok(Some(SourceView::new(vec![ViewSection {
+                id: asked.to_owned(),
+                title: "Diff".to_owned(),
+                count: None,
+                deferred: false,
+                blocks: vec![Block::Diff {
+                    files,
+                    truncated,
+                    commentable: None,
+                    gone: Vec::new(),
+                    range: Some(knobas_source::view::DiffRange {
+                        repository: entity.to_owned(),
+                        base: "a".repeat(40),
+                        head: "b".repeat(40),
+                        commits: Vec::new(),
+                        reviewed: None,
+                    }),
+                }],
+            }])));
+        }
         // A compare is a diff block, as Gitea's (#2271); one whose head is
         // `text` draws none, as a source that cannot compare would. A
         // commit's `diff` section is one too (#2319).
@@ -1486,4 +1512,142 @@ async fn a_held_read_is_in_held_read_alone() {
             assert_eq!(found, 0, "{schema}.{table} holds a page's read");
         }
     }
+}
+
+/// The forge-waits pass of PR #2479 (2026-11-13): a compare of two branch
+/// names with no checkout waited 0.65 to 2.7 s on Gitea's compare at every
+/// first open of a session. Its list is held between sessions: the next
+/// session's first open answers it at once, saying when it was read, and asks
+/// the source nothing until the page checks it behind (`source_range_files`),
+/// whose answer is held in its place.
+#[tokio::test]
+async fn a_compare_list_read_from_the_source_is_answered_held_in_the_next_session() {
+    let f = fixture().await;
+    f.live.hold_in(f.pool.clone());
+    let id = f.entity(&format!("moving/repo-{}", uuid::Uuid::new_v4().simple()));
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'repo','repo')")
+        .bind(&id)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, web_url)
+         values ($1,$2,'repo','repo','','{}'::jsonb,null)",
+    )
+    .bind(&id)
+    .bind(&f.id)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let list = |live: &LiveSources| {
+        let (pool, secrets, registry, id) = (
+            f.pool.clone(),
+            f.secrets.clone(),
+            f.registry.clone(),
+            id.clone(),
+        );
+        let live = live.clone();
+        async move {
+            knobas_app::checkout::range_files::range_files(
+                &pool,
+                &secrets,
+                &registry,
+                &live,
+                &id,
+                "main",
+                "held-feature",
+                false,
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    let first = list(&f.live).await;
+    assert_eq!(
+        first.held_at, None,
+        "a list never read is the source's, read now"
+    );
+    assert_eq!(f.seen.reads(), 1);
+
+    // The next session: a new set of live sources over the same store.
+    let next = LiveSources::default();
+    next.hold_in(f.pool.clone());
+    let held = list(&next).await;
+    assert!(
+        held.held_at.is_some(),
+        "the list knobas held, said to be so"
+    );
+    assert_eq!(held.files, first.files);
+    assert_eq!(held.files.len(), 1);
+    assert_eq!(
+        f.seen.reads(),
+        1,
+        "the source was not asked for a held list"
+    );
+    // Its file's lines, between the two shas the list names, are held too: read past the few compares the session
+    // keeps in memory, which other repositories' compares push out.
+    for other in 0..3 {
+        let elsewhere = f.entity(&format!(
+            "moving/other-{other}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'repo','repo')")
+            .bind(&elsewhere)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        knobas_app::checkout::range_files::source_range_files(
+            &f.pool,
+            &f.secrets,
+            &f.registry,
+            &next,
+            &elsewhere,
+            "main",
+            "held-feature",
+        )
+        .await
+        .unwrap();
+    }
+    let reads = f.seen.reads();
+    let range = held.range.clone().expect("the two shas the source settled");
+    let page = knobas_app::checkout::range_files::range_file(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &next,
+        &id,
+        &range.base,
+        &range.head,
+        "pay.py",
+        None,
+        false,
+        0,
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.file.hunks.len(), 1);
+    assert_eq!(
+        f.seen.reads(),
+        reads,
+        "the lines came from what knobas held"
+    );
+
+    let checked = knobas_app::checkout::range_files::source_range_files(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &next,
+        &id,
+        "main",
+        "held-feature",
+    )
+    .await
+    .unwrap();
+    assert_eq!(checked.held_at, None);
+    assert_eq!(
+        f.seen.reads(),
+        reads + 1,
+        "the check behind is the source's"
+    );
 }

@@ -256,6 +256,7 @@
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { landInPlace } from "../land-in-place";
   import { HELD_AFTER_MS } from "./view-fresh.svelte";
+  import { askCompareEarly } from "./compare-early";
   import type { SourceSyncStatus } from "../../ipc/sources";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
@@ -949,6 +950,68 @@
   /** A repository holding one branch has nothing to propose from. */
   const oneBranch = $derived(known !== null && known.length === 1);
 
+  // ---- A compare asked early (the forge-waits pass, 2026-11-13, `compare-early.ts`) ----
+
+  /**
+   * *New pull request*'s compare, asked once the landing has drawn (or a moment after the page opened on another tab),
+   * where the repository has no clone: Gitea's compare took 0.65 to 2.7 s, which a clone answers in a tenth of that. Once
+   * a session; Compare takes the answer.
+   */
+  const COMPARE_EARLY_AFTER_MS = 1500;
+  $effect(() => {
+    const id = repoId;
+    const head = seeking ? null : starting;
+    const base = defaultBranch?.name ?? null;
+    const noClone = sentence !== null && sentence.path === null;
+    if (!ready || !visible || id === null || head === null || base === null || head === base || !noClone || oneBranch || tab === "compare") return;
+    let live = true;
+    const drew = treeDrew;
+    void Promise.race([drew.promise, new Promise((resolve) => setTimeout(resolve, COMPARE_EARLY_AFTER_MS))]).then(() => {
+      if (live) askCompareEarly(untrack(() => ports.rangeFiles), id, base, head);
+    });
+    return () => {
+      live = false;
+    };
+  });
+
+  /**
+   * The pointer resting on a link to a compare (*New pull request*, the Compare tab, a branch's row) asks its list, so the
+   * source's round trip runs while the hand is on its way to the press, as a file's in the tree does (`REST_MS`).
+   */
+  const COMPARE_REST_MS = 80;
+  let comparing: ReturnType<typeof setTimeout> | null = null;
+  function restOnCompare(event: PointerEvent) {
+    if (comparing !== null) clearTimeout(comparing);
+    comparing = null;
+    const id = repoId;
+    const base = defaultBranch?.name ?? null;
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (link === null || id === null || base === null) return;
+    const href = link.getAttribute("href") ?? "";
+    const stem = repoHash(id, "compare");
+    if (href !== stem && !href.startsWith(`${stem}/`)) return;
+    let tail: string;
+    try {
+      tail = href === stem ? (compareProposed ?? "") : decodeURIComponent(href.slice(stem.length + 1));
+    } catch {
+      return;
+    }
+    const cut = tail.indexOf("...");
+    const [from, to] = cut < 0 ? [base, tail] : [tail.slice(0, cut), tail.slice(cut + 3)];
+    comparing = setTimeout(() => {
+      comparing = null;
+      askCompareEarly(ports.rangeFiles, id, from, to);
+    }, COMPARE_REST_MS);
+  }
+  /** Heard on the page, not on each link: the links are drawn by the header, the tabs and a tab's rows. */
+  function watchCompareLinks(element: HTMLElement) {
+    element.addEventListener("pointerover", restOnCompare, { passive: true });
+    return () => {
+      element.removeEventListener("pointerover", restOnCompare);
+      if (comparing !== null) clearTimeout(comparing);
+    };
+  }
+
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
 
   // Its last part is what *Back to <name>* calls this page once it is left (spec #2227).
@@ -984,7 +1047,7 @@
   }
 </script>
 
-<div class="tf-full" bind:this={page}>
+<div class="tf-full" bind:this={page} {@attach watchCompareLinks}>
   <TfCrumbs parts={crumbs} {back} />
 
   {#if repoId === null || failed !== null}

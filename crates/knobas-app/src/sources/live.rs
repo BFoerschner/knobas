@@ -538,6 +538,40 @@ impl LiveSources {
         .await;
     }
 
+    /// What knobas last read of `ask` about `entity` through the source
+    /// `lent` names, held between sessions (ADR-0042), and when it was read;
+    /// `None` where nothing is held, it was read through another recipe, or
+    /// the app holds reads nowhere. A compare's list of files by two branch
+    /// names (the forge-waits pass of PR #2479, 2026-11-13), which the page
+    /// draws at once and checks behind.
+    pub(crate) async fn held_answer(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        ask: &str,
+    ) -> Option<(DateTime<Utc>, serde_json::Value)> {
+        let (pool, (id, recipe)) = (self.store()?, self.recipe_of(lent.generation)?);
+        super::held::get(&pool, &id, entity, ask, &recipe).await
+    }
+
+    /// Hold `answer` to `ask` about `entity`, read at `read_at` through the
+    /// source `lent` names, for the next visit and session
+    /// ([`Self::held_answer`]). Best effort, as every hold.
+    pub(crate) async fn hold_answer(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        ask: &str,
+        read_at: DateTime<Utc>,
+        answer: &serde_json::Value,
+    ) {
+        let (Some(pool), Some((id, recipe))) = (self.store(), self.recipe_of(lent.generation))
+        else {
+            return;
+        };
+        super::held::put(&pool, &id, entity, ask, &recipe, read_at, answer).await;
+    }
+
     /// A source read other than a view, named `ask` (`run:log`, an
     /// attachment's id), that cannot change once `fixed` says so -- a finished
     /// run's log -- answered from what knobas kept or held when it has it, with

@@ -29,6 +29,7 @@ import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { echoFollower } from "../echo-events.fixture";
 import { forgetEchoes, type EchoListen } from "../queued.svelte";
 import TfRepo, { forgetBranches, type RepoPorts } from "./TfRepo.svelte";
+import { forgetEarlyCompares } from "./compare-early";
 
 const NOW = new Date(2026, 10, 9, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -502,4 +503,46 @@ test("the Commits tab says a list drawn from what knobas holds is from then, and
   // jsdom lays nothing out: the line's element staying, empty, is what keeps the list under it still in a browser.
   expect(target.querySelector(".tf-heldnote"), "the line's room stays").not.toBeNull();
   expect(line()).toBe("");
+});
+
+// -- A compare asked early (the forge-waits pass, 2026-11-13) ----------------------------------------------------------
+
+/** A stand-in for the list read, counting what it was asked. */
+function listing() {
+  const asked: { base: string; head: string; read: string }[] = [];
+  const rangeFiles: RepoPorts["rangeFiles"] = async (_repo, base, head, _ws, read) => {
+    asked.push({ base, head, read });
+    return { files: [{ path: `${head}.txt`, old_path: null, change: "added", additions: 1, deletions: 0, hunks: [], truncated: false, threads: [] }], truncated: false, range: null, read_at: "source" } as never;
+  };
+  return { asked, rangeFiles };
+}
+
+test("with no clone, New pull request's compare is asked once the landing drew, and Compare takes it instead of asking again", async () => {
+  forgetEarlyCompares();
+  const { asked, rangeFiles } = listing();
+  await drawLive([REPO], ports({ rangeFiles }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  expect(asked.map((a) => [a.base, a.head])).toEqual([["main", "feature/PAY-231-sepa-retry"]]);
+  expect(asked[0]!.read).toMatch(/^compare-early-/);
+
+  await go(COMPARE("feature/PAY-231-sepa-retry"));
+  expect(asked, "Compare took the answer").toHaveLength(1);
+  expect(text(target.querySelector(".tf-cdiff"))).toContain("feature/PAY-231-sepa-retry.txt");
+});
+
+test("with a clone nothing is asked early at the landing; the pointer resting on New pull request asks it", async () => {
+  forgetEarlyCompares();
+  const { asked, rangeFiles } = listing();
+  const cloned = async () => ({ repo_entity_id: REPO, repo_url: null, path: "/Users/me/code/payout-service", found_by: "clones_root", clones_root: null, clone_command: null, tree: null }) as never;
+  await drawLive([REPO], ports({ rangeFiles, entityCheckout: cloned }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  expect(asked).toEqual([]);
+
+  const link = target.querySelector<HTMLAnchorElement>(".tf-repohead a.tf-primary")!;
+  expect(text(link)).toBe("New pull request");
+  link.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  expect(asked.map((a) => [a.base, a.head])).toEqual([["main", "feature/PAY-231-sepa-retry"]]);
 });
