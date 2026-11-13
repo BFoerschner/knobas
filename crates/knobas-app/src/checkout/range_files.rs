@@ -664,7 +664,7 @@ fn file_of(raw: Raw, added: Option<u32>, deleted: Option<u32>) -> DiffFile {
         // The patch names a similarity for a rename or a copy only.
         similarity: if moved { raw.score } else { None },
         old_mode: modes.then_some(raw.old_mode),
-        new_mode: modes.then(|| raw.new_mode),
+        new_mode: modes.then_some(raw.new_mode),
         threads: Vec::new(),
         blob,
     }
@@ -836,7 +836,10 @@ pub fn page(file: &DiffFile, from: u32) -> RangeFilePage {
 /// reads one compare at a time, and the view cache keeps a compare between
 /// two shas for the session anyway (ADR-0032), so one let go costs a read of
 /// that cache, not of the source.
-struct Kept(Mutex<VecDeque<((String, String, String), Arc<RangeDiff>)>>);
+/// A kept compare: its repository and two ends, and the source's answer.
+type KeptCompare = ((String, String, String), Arc<RangeDiff>);
+
+struct Kept(Mutex<VecDeque<KeptCompare>>);
 
 const KEPT: usize = 4;
 
@@ -1143,7 +1146,7 @@ mod tests {
         let diff = |n: usize| {
             Arc::new(RangeDiff {
                 files: Vec::new(),
-                truncated: n % 2 == 0,
+                truncated: n.is_multiple_of(2),
                 range: None,
                 read_at: DiffReadAt::Source,
                 predicted_at: None,
