@@ -80,6 +80,15 @@
 //   nav-return    Round 16. At each of `sizes` (1440 x 560 and 1100 x 560 if absent): open by address, or with `enter` by a nav press, then `prep`. Scroll each of `scroll`, take `steps` ({ go }, { press },
 //                 { scroll } or { eval }), press `via`'s nav entry (Docs if absent) and `section`'s by real pointer. Fails if a scroller differs from what it was scrolled to, if focus left the entry,
 //                 or if Esc then moves the address or the scroll. `wheel`: a wheel 120 ms into the hold must stay, added to the place. `same`: a press on the section you're on, with no `via`.
+//                 `deeper`: `steps` went deeper in the section (a run, a ticket, a pull request), so the entry first comes back there (2026-11-13), and the
+//                 checks are of a second press, once the press's hold has let go: the section's own page as it was left.
+//   nav-place     2026-11-13 (Björn: "when i select a page in docs, then go somewhere else and then return to docs my selected page isn't shown").
+//                 At `route`, a place deeper than the section's own page, `scroller` at `at` if named: by pointer, `via`'s entry (Inbox if absent),
+//                 then `section`'s pressed twice with a still pointer; by key, Enter twice on the focused entry. Fails unless that lands on `route` on one
+//                 history entry, as the same kept page (not drawn anew), `scroller` where it was left, focus on the entry (the heading by key). Once the press's hold has
+//                 let go, a press must go to `top` (a prefix of the address). `toast`: { press, rows }, pressed before the leave, whose toast must
+//                 still stand on the return with the rows as they were after the press. `section: "Settings"` is the gear. `far`: entries pressed
+//                 first, enough to push the page out of keep-alive, so it is drawn anew and must still come back at its scroll.
 //   hold-to-undo  Round 16. At each of `sizes`, by real pointer: press `press` in a row, glide to the toast's Undo in 300 ms, rest, press it. Fails if any of `rows` moves on the way, or before the press has landed.
 //                 After it the rows must stand as they stood, with no row held. `aim`: glide to that instead, press it and require `opens` (a selector) to appear, with the hold closed once it has landed.
 //   hold-gutter   Round 16. Press `press` by real pointer, drift right of `list` and down a row, wait for the toast to go (`wait` ms), and come back to the next row's control. Fails if a row moved or the pointer lands on another row's.
@@ -99,10 +108,13 @@
 //
 //   nav-reopen    Round 17. At each of `sizes`, by pointer and by key: open `route`, go to the item at `left`, scroll `scroller` to `at`, press `via` (Docs if absent, `via: null` for none) and `section`, which must land on
 //                 `route`. Press `row` twice with a still pointer, or Enter twice. Fails unless that opens `left` at `at` on one history entry. Esc must go to `route`, and `row` again must open `bare` at 0, as it is used once.
+//                 From another section the entry first comes back to `left` at `at` (2026-11-13), and a second press, once the press's hold has let go, is `route`.
 //                 `far`: more entries on the way, which push the page out of keep-alive. `then: "other"`: `other`'s row first, which opens `otherBare` at 0 and ends the memory. `then: "launcher"`: ⌘K `words` from `via`, which opens `bare` at 0.
 //                 `then: "tab"`: `tab`'s link, which opens `tabTo`, not `left`. `then: "back"`: ⌘[ from `via` to `left`, then the entry and `row`, which opens `bare` at 0. `keeps` is { sel, value } that must read `value` after the reopen.
-//   nav-docs      Round 17. `then: "search"`: a search, Inbox, the entry, each pressed by pointer: it must stand with its *Clear*. A hit, the entry, Clear, Inbox, the entry goes to #/docs. `then: "folds"`: folds opened and closed on the home and on a space hold through Inbox and the entry.
-//   gear-return   Round 17. Settings' section scrolled, Inbox, the gear by pointer and ⌘,: address and scroll as left, Esc back to Inbox. On the section, the gear pressed twice and Enter twice move nothing. A source's page goes to Sources; the status bar's *Sources* goes to #/settings.
+//   nav-docs      Round 17. `then: "search"`: a search, Inbox, the entry, each pressed by pointer: it must stand with its *Clear*. A hit, the entry, Clear, Inbox, the entry goes to #/docs. `then: "folds"`: folds opened and closed on the home and on a space hold through Inbox and the entry
+//                 (which comes back to the space it was left on, and pressed again goes to the home, 2026-11-13).
+//   gear-return   Round 17. Settings' section scrolled, Inbox, the gear by pointer and ⌘,: address and scroll as left, Esc back to Inbox. On the section, the gear pressed twice and Enter twice move nothing. On a source's page
+//                 the gear goes to Sources, and from another section back to the source's page (2026-11-13); the status bar's *Sources* goes to #/settings.
 //   walk-place    Round 17. `scroller` at `at`, `via` and `section`, then `j`: scroll stays, focus on a row in view. With no row focused `k` likewise. From scroll 0, `j` then `j` then `k` walk from the first row.
 //
 //   field-in-view Round 17. Press `open`, then type a line and Enter `times` times with real keys. Fails if `field` lost focus or ends under the status bar after any Enter. `size` is a [w, h].
@@ -507,6 +519,37 @@ const PAGES = [
   { page: "Way back, a repository", route: "code/repos", trips: [
     { id: "nav-reopen-repo", kind: "nav-reopen", strict: true, finding: "F-274", left: `${REPO}/files/README.md`, bare: REPO, section: "Code", scroller: ".tf-main", at: 600, row: { sel: `.tf-main tr a[href='#/${REPO}']` } },
   ] },
+  // Coming back by the entry to a place deeper than the section's own page (2026-11-13).
+  { page: "Way back, a Docs page", route: "page/confluence%3Asepa", trips: [
+    { id: "nav-place-docs-page", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300 },
+    { id: "nav-place-docs-far", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300, how: ["pointer"], far: ["Tickets", "Code", "Builds", "Monitors", "Link sets", "Time"] },
+    { id: "nav-place-docs-comment", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300, how: ["pointer"], toast: { prep: [{ fill: "textarea[aria-label='Comment on this page']", text: "Looks right to me." }, { wait: 150 }], press: { sel: ".tf-compose .tf-primary", text: "Comment" }, rows: ".tf-kept:not([hidden]) .tf-msg" } },
+  ] },
+  { page: "Way back, a Docs space", route: "docs/space/ENG", trips: [
+    { id: "nav-place-docs-space", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs" },
+  ] },
+  { page: "Way back, a ticket", route: "ticket/mock%3APAY-231", trips: [
+    { id: "nav-place-ticket", kind: "nav-place", strict: true, finding: "docs-return", section: "Tickets", top: "tickets" },
+  ] },
+  { page: "Way back, a pull request's tab", route: "pr/mock%3Apayout-service%23142/diff", trips: [
+    { id: "nav-place-pr", kind: "nav-place", strict: true, finding: "docs-return", section: "Code", top: "code", scroller: ".tf-main", at: 600 },
+  ] },
+  { page: "Way back, a repository's file", route: `${REPO}/files/README.md`, trips: [
+    { id: "nav-place-repo", kind: "nav-place", strict: true, finding: "docs-return", section: "Code", top: "code", scroller: ".tf-main", at: 600 },
+  ] },
+  { page: "Way back, a run's log", route: `${RUN}/log`, trips: [
+    { id: "nav-place-run", kind: "nav-place", strict: true, finding: "docs-return", section: "Builds", top: "builds", scroller: ".tf-bmain", at: 500 },
+  ] },
+  { page: "Way back, a marked monitor", route: "monitors/at/kuma%3A3", trips: [
+    { id: "nav-place-monitor", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors" },
+    { id: "nav-place-monitor-hide", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors", how: ["pointer"], toast: { press: { sel: ".tf-mon tbody tr:not(.tf-mon-at) button", text: "Hide" }, rows: MONITOR_ROWS, hides: true } },
+  ] },
+  { page: "Way back, a link set", route: "sets/payout-stack", trips: [
+    { id: "nav-place-set", kind: "nav-place", strict: true, finding: "docs-return", section: "Link sets", top: "sets" },
+  ] },
+  { page: "Way back, a source's page", route: "settings/source/jira", trips: [
+    { id: "nav-place-source", kind: "nav-place", strict: true, finding: "docs-return", section: "Settings", top: "settings/sources" },
+  ] },
   { page: "Way back, Docs", route: "docs", trips: [
     { id: "nav-return-docs-folds", kind: "nav-docs", strict: true, finding: "F-464", then: "folds" },
   ] },
@@ -533,14 +576,14 @@ const PAGES = [
   // Round 16's way back: every row of the plan's table, by address and by a nav press. A launcher jump, a link and Esc stay with the kept-* trips above.
   { page: "Nav return, a pipeline", route: "builds/teamcity%3AbuildType%3ADataPipeline_Build", trips: [
     { id: "nav-return-pipeline", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 } },
-    { id: "nav-return-run", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 }, steps: [{ press: { sel: ".tf-bmain a[href^='#/build/']:not(svg a)" } }, { scroll: { ".tf-pl-list": 415 } }] },
+    { id: "nav-return-run", kind: "nav-return", strict: true, deeper: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 }, steps: [{ press: { sel: ".tf-bmain a[href^='#/build/']:not(svg a)" } }, { scroll: { ".tf-pl-list": 415 } }] },
     { id: "nav-return-same", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", same: true, scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 } },
     { id: "nav-return-card", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300 }, steps: [{ go: "ticket/mock%3APAY-231" }, { eval: "[...document.querySelectorAll('.tf-tksecs a')].find((a) => a.textContent.trim().startsWith('Builds')).click()" }] },
   ] },
   { page: "Nav return, Builds", route: "builds", trips: [
     { id: "nav-return-builds", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 } },
     // The entry from a run goes to the pipeline's own address, and bare #/builds is that same page (reconcile, round 16).
-    { id: "nav-return-builds-run", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 }, steps: [{ press: { sel: ".tf-bmain a[href^='#/build/']:not(svg a)" } }] },
+    { id: "nav-return-builds-run", kind: "nav-return", strict: true, deeper: true, finding: "F-370", section: "Builds", scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 }, steps: [{ press: { sel: ".tf-bmain a[href^='#/build/']:not(svg a)" } }] },
     { id: "nav-return-builds-run-same", kind: "nav-return", strict: true, finding: "F-370", section: "Builds", same: true, scroll: { ".tf-bmain": 300, ".tf-pl-list": 115 }, steps: [{ press: { sel: ".tf-bmain a[href^='#/build/']:not(svg a)" } }] },
   ] },
   { page: "Nav return, entered by a nav press", route: "inbox", trips: [
@@ -553,14 +596,14 @@ const PAGES = [
   { page: "Nav return, Tickets", route: "tickets", trips: [
     { id: "nav-return-board", kind: "nav-return", strict: true, finding: "F-071", section: "Tickets", scroll: { ".tf-cols": 200 } },
     { id: "nav-return-list", kind: "nav-return", strict: true, finding: "F-071", section: "Tickets", prep: [{ click: "button, a, [role=tab]", text: "List" }, { wait: 500 }], scroll: { ".tf-board-wrap": 300 } },
-    { id: "nav-return-ticket", kind: "nav-return", strict: true, finding: "F-071", section: "Tickets", scroll: { ".tf-cols": 200 }, steps: [{ go: "ticket/mock%3APAY-231" }] },
+    { id: "nav-return-ticket", kind: "nav-return", strict: true, deeper: true, finding: "F-071", section: "Tickets", scroll: { ".tf-cols": 200 }, steps: [{ go: "ticket/mock%3APAY-231" }] },
   ] },
   { page: "Nav return, Code", route: "code", trips: [
     { id: "nav-return-code", kind: "nav-return", strict: true, finding: "F-071", section: "Code", scroll: { ".tf-main": 150 } },
   ] },
   { page: "Nav return, Pull requests", route: "code/prs", trips: [
     { id: "nav-return-prs", kind: "nav-return", strict: true, finding: "F-071", section: "Code", scroll: { ".tf-main": 300 } },
-    { id: "nav-return-pr", kind: "nav-return", strict: true, finding: "F-071", section: "Code", scroll: { ".tf-main": 300 }, steps: [{ press: { sel: ".tf-main a[href^='#/pr/']" } }] },
+    { id: "nav-return-pr", kind: "nav-return", strict: true, deeper: true, finding: "F-071", section: "Code", scroll: { ".tf-main": 300 }, steps: [{ press: { sel: ".tf-main a[href^='#/pr/']" } }] },
   ] },
   { page: "Nav return, Monitors", route: "monitors", trips: [
     { id: "nav-return-monitors", kind: "nav-return", strict: true, finding: "F-071", section: "Monitors", sizes: [[1440, 400]], scroll: { ".tf-main": 100 } },
@@ -1760,8 +1803,17 @@ async function worker(queue, results) {
           }
           if (s.scroll) { for (const [sel, top] of Object.entries(s.scroll)) await setScroll(sel, top); await sleep(150); }
         }
+        const deeper = t.deeper ? await evaluate(`location.hash`) : null;
         if (!t.same) { await pressEntry(t.via ?? "Docs"); await opener.settleAfterChange(); await sleep(100); }
         await pressEntry(t.section);
+        if (deeper !== null) {
+          await opener.settleAfterChange();
+          await sleep(300);
+          const back = await evaluate(`location.hash`);
+          if (back !== deeper) reasons.push(`at ${w} x ${h}, the entry from another section went to ${back}, not back to ${deeper}`);
+          await sleep(2200);
+          await pressEntry(t.section);
+        }
         if (t.wheel) {
           await sleep(120);
           await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: w / 2, y: h / 2, deltaX: 0, deltaY: t.wheel, button: "none" });
@@ -2184,6 +2236,13 @@ async function worker(queue, results) {
             notes.push(`${w} back`);
             continue;
           }
+          if (t.via !== null || t.far?.length) {
+            await toEntry(t.section);
+            await sleep(300);
+            if ((await hashNow()) !== left) reasons.push(`${where}, the entry from another section went to ${await hashNow()}, not back to ${left}`);
+            else if (Math.abs((await scrollTop(t.scroller)) - want) > 2) reasons.push(`${where}, the entry came back to ${left} at ${await scrollTop(t.scroller)}, left at ${want}`);
+            await sleep(2100);
+          }
           await toEntry(t.section);
           const landed = await hashNow();
           if (landed !== list) reasons.push(`${where}, the entry landed on ${landed}, not ${list}`);
@@ -2322,6 +2381,11 @@ async function worker(queue, results) {
           await toEntry("Inbox");
           await toEntry("Docs");
           await sleep(300);
+          // The entry comes back to the space it was left on (2026-11-13); pressed again, once its hold has let go, the home.
+          if ((await hashNow()) !== "#/docs/space/ENG") reasons.push(`at ${w}, the entry from Inbox went to ${await hashNow()}, not back to the space`);
+          await sleep(2100);
+          await toEntry("Docs");
+          await sleep(300);
           const shut = await open_();
           if (shut.some((f) => f.startsWith("Payments"))) reasons.push(`at ${w}, a fold closed by the reader came back open: ${shut}`);
           if (!shut.some((f) => f.startsWith("Engineering"))) reasons.push(`at ${w}, Engineering closed on its own: ${shut}`);
@@ -2335,6 +2399,91 @@ async function worker(queue, results) {
       }
     } finally {
       await fit(1440, 900);
+    }
+    return { reasons, note: notes.join("; ") };
+  }
+
+  async function navPlace(t) {
+    const reasons = [];
+    const notes = [];
+    const here = `#/${t.route}`;
+    const top = `#/${t.top}`;
+    const gearSel = ".tf-top a[aria-label='Settings']";
+    const entryOf = (name) => (name === "Settings" ? `document.querySelector(${JSON.stringify(gearSel)})` : `[...document.querySelectorAll('.tf-nav a')].find((e) => e.textContent.trim().startsWith(${JSON.stringify(name)}))`);
+    const at = async (name) => JSON.parse(await evaluate(`(() => { const r = ${entryOf(name)}.getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()`));
+    const mark = `document.querySelector('.tf-kept:not([hidden])')`;
+    for (const how of t.how ?? ["pointer", "key"]) {
+      await open(t);
+      await sleep(500);
+      let want = null;
+      if (t.scroller) {
+        want = await setScroll(t.scroller, t.at ?? 300);
+        if (!want || want < 50) throw new Error(`${t.scroller} has nowhere to scroll (${want})`);
+      }
+      let pressed = null;
+      if (t.toast) {
+        for (const s of t.toast.prep ?? []) {
+          if (s.wait) await sleep(s.wait);
+          if (s.fill && !(await evaluate(`window.__trip.fill(${JSON.stringify(s.fill)}, ${JSON.stringify(s.text)})`))) throw new Error(`can't find ${s.fill}`);
+        }
+        const before = await snap(t.toast.rows);
+        // By key, as the leave-back trips press: a row's buttons fade in under a resting pointer.
+        await focusPress(t.toast);
+        await key("Enter");
+        await sleep(500);
+        pressed = await snap(t.toast.rows);
+        if (!pressed.toasts.length) throw new Error(`"${t.toast.press.text}" raised no toast`);
+        if (t.toast.hides && pressed.rows.length >= before.rows.length) throw new Error(`"${t.toast.press.text}" hid no row`);
+        if (t.scroller) want = await scrollTop(t.scroller);
+      }
+      await evaluate(`${mark}.dataset.tripKept = "1"`);
+      for (const via of t.far ?? []) await toEntry(via);
+      await toEntry(t.via ?? "Inbox");
+      const steps = await evaluate(`history.length`);
+      if (how === "pointer") {
+        const p = await at(t.section);
+        await mouseTo(p.x, p.y);
+        await sleep(60);
+        await pressAt(p.x, p.y);
+        await sleep(120);
+        await pressAt(p.x, p.y);
+      } else {
+        await sleep(500); // The press guard's wait on a key press on another control after the pointer's press on `via`.
+        await evaluate(`${entryOf(t.section)}.focus()`);
+        await key("Enter");
+        await sleep(120);
+        await key("Enter");
+      }
+      await opener.settleAfterChange();
+      await sleep(700);
+      const hash = await hashNow();
+      const pushed = (await evaluate(`history.length`)) - steps;
+      const kept = await evaluate(`${mark}?.dataset.tripKept === "1"`);
+      const reads = t.scroller ? await scrollTop(t.scroller) : null;
+      const focus = await evaluate(`(document.activeElement?.closest('.tf-nav a')?.textContent.trim() ?? document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName) || 'nothing'`);
+      if (hash !== here) reasons.push(`by ${how}, the entry twice from ${t.via ?? "Inbox"} went to ${hash}, not back to ${here}`);
+      if (steps < 50 && pushed !== 1) reasons.push(`by ${how}, the entry twice made ${pushed} history entries, not 1`);
+      if (!kept && !t.far) reasons.push(`by ${how}, the page came back drawn anew, not as it was kept`);
+      if (want !== null && (reads === null || Math.abs(reads - want) > 2)) reasons.push(`by ${how}, ${t.scroller} was left at ${want} and reads ${reads}`);
+      // Focus stays with the press: on the entry after a pointer's, on the page's heading after a key's (F-370, F-071).
+      if (how === "pointer" ? !focus.startsWith(t.section) : focus !== "H1" && !focus.startsWith(t.section)) reasons.push(`by ${how}, focus went to ${focus}, not the ${t.section} entry or the page's heading`);
+      if (t.toast) {
+        const back = await snap(t.toast.rows);
+        const toast = pressed.toasts.at(-1);
+        if (!back.toasts.includes(toast)) throw new Error(`the toast "${toast}" had gone by the return, so nothing was proved`);
+        const same = (r) => r.replace(/\d+/g, "#");
+        if (back.rows.map(same).join("\n") !== pressed.rows.map(same).join("\n")) reasons.push(`by ${how}, the rows came back as ${back.rows.length}, ${pressed.rows.length} after the press, under the toast "${toast.slice(0, 50)}"`);
+      }
+      await sleep(2100);
+      const p = await at(t.section);
+      await mouseTo(p.x, p.y);
+      await sleep(60);
+      await pressAt(p.x, p.y);
+      await opener.settleAfterChange();
+      await sleep(400);
+      const again = await hashNow();
+      if (!again.startsWith(top)) reasons.push(`by ${how}, a press once the hold let go went to ${again}, not ${top}`);
+      notes.push(`${how}: ${hash}${reads === null ? "" : ` at ${reads} of ${want}`}, ${pushed} entry, kept ${kept}, focus ${focus}, then ${again}`);
     }
     return { reasons, note: notes.join("; ") };
   }
@@ -2385,15 +2534,14 @@ async function worker(queue, results) {
         await opener.settleAfterChange();
         await sleep(300);
         if ((await hashNow()) !== "#/inbox") reasons.push(`at ${w}, Esc after the gear on its own section went to ${await hashNow()}`);
-        // A source's page goes to Sources, from the page and after leaving it.
+        // A source's page: from another section the gear comes back to it (2026-11-13), and on it the gear goes to Sources.
         await go(t.source);
         await sleep(300);
         await toEntry("Inbox");
         await press1(gear);
         await sleep(300);
-        if ((await hashNow()) !== "#/settings/sources") reasons.push(`at ${w}, the gear after a source's page went to ${await hashNow()}`);
-        await go(t.source);
-        await sleep(300);
+        if ((await hashNow()) !== `#/${t.source}`) reasons.push(`at ${w}, the gear after a source's page went to ${await hashNow()}, not back to it`);
+        await sleep(2100);
         await press1(gear);
         await sleep(300);
         if ((await hashNow()) !== "#/settings/sources") reasons.push(`at ${w}, the gear on a source's page went to ${await hashNow()}`);
@@ -2850,7 +2998,7 @@ async function worker(queue, results) {
     return { reasons, note: `${from} → ${at}, tried on ${picked}, saved, back at ${back}, menu ${items.length} items` };
   }
 
-  const KINDS = { "app-page": appPage, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "app-page": appPage, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };

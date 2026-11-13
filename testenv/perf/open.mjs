@@ -67,8 +67,13 @@ const withBig = set === "inner" && !args.includes("--no-big-folders");
 const withCompares = set === "inner" && !args.includes("--no-big-compares");
 
 const base = app.replace(/#.*$/, "");
-/** A section's nav entry, which names the place last shown in it (`#/builds/<pipeline>`). */
-const nav = (section) => `.tf-nav a[href="#/${section}"], .tf-nav a[href^="#/${section}/"]`;
+/**
+ * A section's nav entry, by its section: its link names the place last shown in it, which from another section is any
+ * page of it (`#/page/<id>`, `#/build/<pipeline>/<run>`, 2026-11-13). A build from before that has no `data-section`.
+ */
+const nav = (section) => `.tf-nav a[data-section="${section}"], .tf-nav a[href="#/${section}"], .tf-nav a[href^="#/${section}/"]`;
+/** The cog, by its name: its link too names the place last shown in Settings. */
+const GEAR = `a.tf-iconbtn[aria-label="Settings"]`;
 const shown = ".tf-kept:not([hidden])";
 
 /**
@@ -88,13 +93,15 @@ const PLACES = [
   { name: "docs", start: "#/time", press: nav("docs"), hash: "#/docs", useful: ".tf-dh-row", min: 5, away: "time" },
   { name: "docs-space", parent: "docs", start: "#/docs", press: `${shown} a.tf-dh-spacelink[href="#/docs/space/SCLENG"]`, hash: "#/docs/space/", useful: ".tf-dh-row", min: 10, back: "Escape" },
   { name: "docs-page", parent: "docs", start: "#/docs/space/SCLENG", press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", useful: ".tf-rd-main h1", min: 1, titled: true, back: "Escape" },
+  // A page come back to by Docs' entry from another section (2026-11-13): `before` opens it once, and it has no first visit.
+  { name: "docs-page-back", start: "#/docs/space/SCLENG", before: `${shown} a.tf-dh-rowt[href^="#/page/"]`, returnsOnly: true, press: nav("docs"), hash: "#/page/", useful: ".tf-rd-main h1", min: 1, away: "time" },
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   { name: "monitors", start: "#/time", press: nav("monitors"), hash: "#/monitors", useful: ".tf-mon-state", min: 5, away: "time" },
   { name: "standup", parent: "time", start: "#/time", press: `${shown} a[href="#/time/standup"]`, hash: "#/time/standup", useful: ".tf-su-h, .tf-su-body", min: 2, back: `${shown} a[href="#/time"]` },
   { name: "time", start: "#/docs", press: nav("time"), hash: "#/time", useful: ".tf-tm-wrap", min: 1, away: "docs" },
-  { name: "settings", start: "#/time", press: `a.tf-iconbtn[href="#/settings"]`, hash: "#/settings", useful: ".tf-stg-src", min: 3, back: "Escape" },
+  { name: "settings", start: "#/time", press: GEAR, hash: "#/settings", useful: ".tf-stg-src", min: 3, back: "Escape" },
   { name: "launcher", start: "#/tickets", key: { key: "k", code: "KeyK", modifiers: 4, windowsVirtualKeyCode: 75 }, hash: "#/", useful: "[role=dialog] [role=option], .tf-launch li, .tf-lr", min: 3, back: "Escape", anywhere: true },
 ];
 /**
@@ -301,16 +308,17 @@ for (const rate of throttles) {
       await cpu(1);
       await fresh(place.start);
       if (place.setup) { await press(place.setup); await quiet(1200); }
+      if (place.before) { await press(place.before); await quiet(1200); }
       await sleep(firstAfter);
       await quiet(600);
       await cpu(rate);
-      if (rounds.includes("first")) {
+      if (rounds.includes("first") && !place.returnsOnly) {
         entry.first = await measure(place);
         console.log(`${rate}x ${place.name} first: ${say(entry.first)}`);
         await quiet(1000);
       }
       if (rounds.includes("return")) {
-        if (!rounds.includes("first")) { await measure(place); await quiet(1000); }
+        if (!rounds.includes("first") && !place.returnsOnly) { await measure(place); await quiet(1000); }
         if (place.back) await leave(place.back);
         else await leave(nav(place.away));
         if (place.setup) await leave(place.setup);
@@ -326,9 +334,19 @@ for (const rate of throttles) {
         // A full page (a ticket, a pull request, a run) has no nav: back out of it first.
         for (let i = 0; i < 3 && !(await js(NAV_SHOWN)); i++) await leave("Escape");
         if (place.key) { await leave("Escape"); }
-        for (const section of tour) { await press(section === "settings" ? `a.tf-iconbtn[href="#/settings"]` : nav(section)); await quiet(900); }
+        for (const section of tour) { await press(section === "settings" ? GEAR : nav(section)); await quiet(900); }
         if (round === "synced") { await js(SYNCED); await quiet(1500); }
-        if (place.parent) { await press(nav(place.parent)); await quiet(1200); }
+        if (place.parent) {
+          await press(nav(place.parent));
+          await quiet(1200);
+          // From another section the entry comes back to where the section was left, which is this place's own page
+          // (2026-11-13); a second press, once the press's hold has let go, is the section's page the row is on.
+          if ((await js("location.hash")).startsWith(place.hash)) {
+            await sleep(2100);
+            await press(nav(place.parent));
+            await quiet(1200);
+          }
+        }
         else if (!place.away && place.back) { /* a place pressed from anywhere */ }
         if (place.setup) { await press(place.setup); await quiet(1200); }
         entry[round] = await measure(place);
@@ -368,7 +386,7 @@ async function innerRounds(place, rate, entry) {
     for (let i = 0; i < 3 && !(await js(NAV_SHOWN)); i++) await leave("Escape");
     if (!(await js(NAV_SHOWN))) await goTo("#/time");
     const tour = round === "late" ? SECTIONS : ["time"];
-    for (const section of tour) { await press(section === "settings" ? `a.tf-iconbtn[href="#/settings"]` : nav(section)); await quiet(900); }
+    for (const section of tour) { await press(section === "settings" ? GEAR : nav(section)); await quiet(900); }
     if (round === "synced") { await js(SYNCED); await quiet(1500); }
     await goTo(place.start);
     entry[round] = await measure(place);
