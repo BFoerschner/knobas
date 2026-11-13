@@ -1,6 +1,7 @@
 // Big folders for `open.mjs --set inner` (the big-folder pass of PR #2479, 2026-11-13; README, *Big folders*): two
 // scratch repositories on the live Gitea, one cloned by knobas and one read from the forge only, each with folders of
-// 300, 3,000 and 12,000 entries and one ten directories down, read through the profile's Gitea source on the windowless
+// 300, 3,000 and 12,000 entries and one ten directories down (about 31,400 entries in all, so the clone's folders past
+// the 20,000th are pressed too), read through the profile's Gitea source on the windowless
 // backend.
 // `up` makes them for the run and `down` takes every piece away again, so the live products are left as they were.
 //
@@ -22,6 +23,7 @@ const FOLDERS = [
   ["thousands", 3000, "fixture", "json"],
   ["thousands-2", 3000, "fixture", "json"],
   ["huge", 12000, "snapshot", "json"],
+  ["huge-2", 12000, "snapshot", "json"],
   [`${DEEP}/leaf`, 800, "leaf", "txt"],
 ];
 
@@ -141,8 +143,8 @@ export async function down() {
 
 /**
  * The places, at one throttle: each folder pressed in the cloned repository (`folder-*`: no read at all, the rows in
- * the next frame or two), and the 300 and 3,000 ones in the forge's (`forge-folder-*`, the 4x run its own twins, so its
- * first press is a read knobas never made). A return folds the folder and presses it again; a round that comes back
+ * the next frame or two), and the 300, 3,000 and 12,000 ones in the forge's (`forge-folder-*`, the 4x run its own
+ * twins, so its first press is a read knobas never made). A return folds the folder and presses it again; a round that comes back
  * to the tab with the folder still open folds it first (`undo`).
  */
 export function places(rate, shown) {
@@ -168,5 +170,6 @@ export function places(rate, shown) {
     place("folder-deep", cloned(), `${DEEP}/leaf`, notes),
     place("forge-folder-300", forge(), `hundreds${twin}`),
     place("forge-folder-3000", forge(), `thousands${twin}`),
+    place("forge-folder-12000", forge(), `huge${twin}`),
   ];
 }

@@ -478,32 +478,48 @@
   "forge-folder-300": {
    "1": {
     "usefulMs": 100,
-    "firstUsefulMs": 5000,
+    "firstUsefulMs": 2000,
     "drawnMs": 100,
-    "firstDrawnMs": 5000,
+    "firstDrawnMs": 2000,
     "moved": 0
    },
    "4": {
     "usefulMs": 200,
-    "firstUsefulMs": 5000,
+    "firstUsefulMs": 2000,
     "drawnMs": 200,
-    "firstDrawnMs": 5000,
+    "firstDrawnMs": 2000,
     "moved": 0
    }
   },
   "forge-folder-3000": {
    "1": {
     "usefulMs": 100,
-    "firstUsefulMs": 20000,
+    "firstUsefulMs": 3000,
     "drawnMs": 100,
-    "firstDrawnMs": 20000,
+    "firstDrawnMs": 3000,
     "moved": 0
    },
    "4": {
     "usefulMs": 200,
-    "firstUsefulMs": 20000,
+    "firstUsefulMs": 3000,
     "drawnMs": 200,
-    "firstDrawnMs": 20000,
+    "firstDrawnMs": 3000,
+    "moved": 0
+   }
+  },
+  "forge-folder-12000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "drawnMs": 100,
+    "firstDrawnMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "drawnMs": 200,
+    "firstDrawnMs": 5000,
     "moved": 0
    }
   }
@@ -738,7 +754,7 @@
    }
   }
  },
- "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; in a repository with no clone the first press of the 300 and 3,000 ones is Gitea's `contents` route, which works out each entry's last commit (about 0.6 s and 9 s on the WSL box), and the 12,000 one is left out: that route did not answer it within 45 s.",
+ "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; the repository holds about 31,400 entries, so the clone's folders past the 20,000th are pressed too. In a repository with no clone the first press of the 300, 3,000 and 12,000 ones reads the folder's own level of Gitea's tree (about 0.1, 0.2 and 0.6 s on the WSL box in round two, where `contents` took 0.7 s, 9 s and never): 2, 3 and 5 s, room for a loaded box; every round after is held to the aim.",
  "syncing": {
   "file-readme": {
    "1": {

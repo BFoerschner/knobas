@@ -146,13 +146,13 @@ back. `--no-big-folders` on `open.mjs` leaves them out.
 | Place | Press | Line |
 |---|---|---|
 | `folder-300`, `folder-3000`, `folder-12000`, `folder-deep` | the folder's row in the cloned repository (`deep` opens at a file beside it) | the aim on every round, the first too: no IPC, the rows in the next frame or two |
-| `forge-folder-300`, `forge-folder-3000` | the same in the repository with no clone; the 4x run presses twins of its own (`hundreds-2`), so its first press is a read knobas never made | the first press is Gitea's `contents` route (0.6 s and 9 s on the WSL box); the rounds after it are held to the aim |
+| `forge-folder-300`, `forge-folder-3000`, `forge-folder-12000` | the same in the repository with no clone; the 4x run presses twins of its own (`hundreds-2`), so its first press is a read knobas never made | the first press reads the folder's own level of Gitea's tree (about 0.1, 0.2 and 0.6 s on the WSL box; `contents` took 0.7 s, 9 s and never), within 2, 3 and 5 s; the rounds after it are held to the aim |
 
 A place's line holds `drawnMs` too: the probe's frame after the one that found the rows, by which time that frame has
 drawn. `usefulMs` alone is taken at the start of the frame the rows are in, so it read 12 ms for a folder whose 12,006
 rows then took 2.7 s to lay out and paint at 4x. A return folds the folder and presses it again; a round that comes
-back to the tab with it still open folds it first (`undo`). The 12,000-entry folder has no forge place: Gitea's
-`contents` route did not answer it within the backend's 45 s.
+back to the tab with it still open folds it first (`undo`). The repositories hold about 31,400 entries, so the
+clone's folders past the 20,000th are pressed too (round two of the pass).
 
 `folders.mjs` is the same press broken down, for a pass on one repository: the main thread's script, style, layout and
 paint from a trace, the IPC calls, and how many rows are in the DOM, unfolded, folded and unfolded again.
