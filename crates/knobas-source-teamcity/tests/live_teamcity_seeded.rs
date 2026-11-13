@@ -431,6 +431,31 @@ impl Seeded {
         }
     }
 
+    /// Every configuration the seed recorded, the chain's included: a source
+    /// scoped to these asks per configuration (#1626), so its incremental
+    /// query carries the seed's builds alone. A source scoped to the seed's
+    /// *projects* asks the whole server since its position, and on a server
+    /// holding another estate (`just seed-scale teamcity`'s 3,800 builds, all
+    /// newer than the seed's) that query passes `MAX_BUILDS_PER_QUERY` and the
+    /// run is refused, as the adapter must.
+    fn seed_configurations(&self) -> Vec<String> {
+        let mut configs: std::collections::BTreeSet<String> = self
+            .seed
+            .builds
+            .iter()
+            .map(|b| b.build_type.clone())
+            .collect();
+        configs.extend(self.seed.settings.iter().map(|s| s.build_type.clone()));
+        configs.extend(self.seed.changes.iter().map(|c| c.build_type.clone()));
+        configs.extend(
+            self.seed
+                .chain
+                .iter()
+                .flat_map(|c| c.build_types.iter().cloned()),
+        );
+        configs.into_iter().collect()
+    }
+
     fn scoped_to(&self, build_type_ids: &[&str]) -> Box<dyn Source> {
         self.source(serde_json::json!({ "build_type_ids": build_type_ids }))
     }
@@ -2284,15 +2309,21 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
     );
     // Above the newest build **on the server**, which is the seed's newest on
     // a server holding the seed alone and another estate's beside it: every
-    // build above the seed's newest, read in one page.
+    // build above the seed's newest, read in one page, for the id walk below.
     let above = seeded
         .build_ids(&format!(
             "sinceBuild:(id:{newest}),defaultFilter:false,count:100000"
         ))
         .await;
     let top = above.iter().copied().fold(newest, i64::max);
+    // The probe pages from here on are the seed's projects', as the one above
+    // is. Another estate's builds are not held to "nothing older" by the
+    // server: a scale build its agent never finished, canceled when the
+    // server came back (*Agent unauthorized*), is on the whole server's page
+    // from above every id it lists, though its own id is lower (measured
+    // 2026-11-13: `sinceBuild:(id:3271)` answered 3241, 3240 and 3234).
     assert_eq!(
-        seeded.build_ids(&probe(top + 1)).await,
+        seeded.owned_build_ids(&probe(top + 1)).await,
         Vec::<i64>::new(),
         "above the newest build the probe page is empty"
     );
@@ -2321,7 +2352,7 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
     // `sinceBuild:(id:nothing)`: an id that names no build, read as a
     // number rather than refused.
     assert_eq!(
-        seeded.build_ids(&probe(nothing + 1)).await,
+        seeded.owned_build_ids(&probe(nothing + 1)).await,
         Vec::<i64>::new(),
         "a predecessor that names no build is read as a number"
     );
@@ -4890,7 +4921,13 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 async fn a_run_reports_its_walk_over_the_real_configurations_and_listed_builds() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
-    let source = seeded.source(serde_json::json!({}));
+    // Scoped to the seed's configurations, not its projects: the incremental
+    // run of a project-scoped source asks the whole server, and beside the
+    // scale estate that is over 1000 builds and refused, as it must be
+    // ([`Seeded::seed_configurations`]).
+    let source = seeded.source(serde_json::json!({
+        "build_type_ids": seeded.seed_configurations()
+    }));
 
     let mut first = Walking::default();
     let cursor = source.sync(None, &mut first).await.expect("full sync");
