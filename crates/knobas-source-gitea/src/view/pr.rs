@@ -47,7 +47,6 @@ pub(super) async fn draw(
     let mut actions = Vec::new();
     let sections = match section {
         None => {
-            let pull = at.pull().await?;
             // Each tab is its own reads over the one record, so they are read
             // side by side (#703); the first to fail fails the view. Who the
             // token is goes beside them: the review actions are not offered
@@ -58,15 +57,26 @@ pub(super) async fn draw(
             // label…* offers (#1194, #1235).
             // And who a review can be requested from (#2303), for
             // *Request…*.
-            let (reviews, commits, comments, viewer, landing, statuses, labels, candidates) = tokio::try_join!(
+            //
+            // In two rounds, not three (the priority lane, 2026-11-13): the
+            // reads that need nothing of the record go beside it, and those
+            // that need the record or the reviews, the reviews' line
+            // comments among them, beside each other. A round is a forge's
+            // answer, and a forge a sync is loading takes hundreds of
+            // milliseconds over each.
+            let (pull, reviews, comments, viewer, labels) = tokio::try_join!(
+                at.pull(),
                 at.reviews(),
-                at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
+                at.labels(),
+            )?;
+            let (commits, landing, statuses, candidates, said) = tokio::try_join!(
+                at.commits(Some(&pull)),
                 at.landing(&pull),
                 at.statuses(&pull),
-                at.labels(),
                 at.candidates(&pull),
+                async { Ok(at.line_comments(&reviews).await) },
             )?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
@@ -88,13 +98,12 @@ pub(super) async fn draw(
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
-                conversation(&reviews, &comments, &at.line_comments(&reviews).await),
+                conversation(&reviews, &comments, &said),
             ]
         }
         Some(OVERVIEW) => {
-            let pull = at.pull().await?;
-            let (reviews, landing, statuses) =
-                tokio::try_join!(at.reviews(), at.landing(&pull), at.statuses(&pull))?;
+            let (pull, reviews) = tokio::try_join!(at.pull(), at.reviews())?;
+            let (landing, statuses) = tokio::try_join!(at.landing(&pull), at.statuses(&pull))?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
             vec![overview(&pull, &reviews, &landing, checks)]

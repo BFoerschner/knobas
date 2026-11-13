@@ -2169,13 +2169,17 @@ async fn a_section_read_carries_no_toolbar() {
     assert!(view.actions.is_empty(), "{view:#?}");
 }
 
-/// A pull request's tabs are read side by side over its one record (#703):
-/// once the record is in, the reviews, the commits, the comments, who the
-/// token is (#705), landing's three -- the base branch, the head branch,
-/// whether the head is behind (#708) -- the head commit's statuses (#710) and
-/// the repository's labels (#1194) and its organisation's (#1235), and who a
-/// review can be requested from (#2303) are in flight together. Read in
-/// turn, one is.
+/// A pull request's tabs are read side by side (#703), in two rounds of
+/// the forge's answers (the priority lane, 2026-11-13). Beside the record go
+/// the reads that need nothing of it: the reviews, the comments, who the
+/// token is (#705) and the repository's labels (#1194) and its
+/// organisation's (#1235). Then, beside each other, those that need the
+/// record or the reviews: the commits, landing's three -- the base branch,
+/// the head branch, whether the head is behind (#708) -- the head commit's
+/// statuses (#710), who a review can be requested from (#2303), and the
+/// reviews' line comments (#2277). Each read held 300 ms, the view takes two
+/// of them: three, the record and then the rest and then the line comments,
+/// was 900 ms; read in turn, a read at a time is in flight.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -2183,13 +2187,19 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     const FRESH: &str = "a-token-read-beside-the-tabs";
     let flight = InFlight::new(Duration::from_millis(300));
     let server = slow_gitea(open_pull(), reviews(), Some(&flight), FRESH).await;
+    let started = std::time::Instant::now();
     let view = built(&server, FRESH)
         .view(PR, None)
         .await
         .expect("reads")
         .expect("a pull request draws a view");
+    let took = started.elapsed();
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 11, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 6, "each round's reads in flight at once");
+    assert!(
+        took >= Duration::from_millis(600) && took < Duration::from_millis(890),
+        "two rounds of 300 ms, not {took:?}"
+    );
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
