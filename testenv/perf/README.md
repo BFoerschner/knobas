@@ -41,6 +41,8 @@ trace on every state write, which made the measured app's filter keys several ti
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
 | `inner-items.json`, `slow-forge.mjs` | the inner pages' items per throttle, and the proxy that slows the forge (below) |
+| `syncing.mjs`, `lane-probe.mjs` | one source kept syncing for a run's length, and the felt waits a sync can hold timed at the backend per adapter (*With a sync running*, below) |
+| `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
 
@@ -127,6 +129,49 @@ just open-budget --real 5411 --inner --forge 1000   # every request held 1 s: `f
   `--timings` before blaming the page.
 - **What waits on the forge is named per call**: each IPC call in `open.json` carries its arguments (`what`), and
   `--timings` on the backend each command's time, so a slow open says which section of which entity it waited for.
+
+## A broad key: `just keys-budget`
+
+How long one key takes to show the rows it asks for, from the broad-filters pass of PR #2479 (2026-11-13, rulings in
+`docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md`). The keys are the dear ones, those that keep most
+of a page: the first letter typed into Tickets' filter, a `-project:` and a `-priority:` that leave one value out, and a
+single letter under Everything in the launcher. `keys.mjs` presses each as real input over the DevTools protocol, each
+press a key the session never asked before so the answer cache cannot answer it, and records in the page, from the
+key's own event time:
+
+| Measure | What it is |
+|---|---|
+| `rows` | the first frame after the last read the key caused has answered and its rows are in the DOM: the answer, seen |
+| `answered` | when that read answered, so `rows - answered` is the page's own work and `answered` the wait for the backend |
+| `moved` | the frames after `rows` in which a row drawn on screen in it moved or went; a row drawn later below them is none |
+| `late` | what changed after `rows`, by element, for a `moved` to be read against |
+
+```sh
+just keys-budget --real 5411                  # the windowless backend on the saved scale database, as below
+just keys-budget --real 5411 --only tickets   # the cases whose name holds a word
+```
+
+`--check budget-keys.json --lines real` fails a case whose median `rows` is over its line or whose rows moved. The
+backend's own `--timings` splits `answered` into what it spent and what the IPC took. A release build of the backend is
+what the app runs, and its number, not a debug build's, is the one the lines hold.
+
+### With a sync running: `just open-budget --inner --syncing <source>`
+
+The case a person's read used to queue behind (the priority lane, 2026-11-13, `docs/decisions/2026-11-13-a-persons-read-goes-ahead-of-the-sync.md`):
+a sync keeps the server's quota full, and the forge is loaded by it. `--syncing live-gitea` keeps a backfill of that
+source running for the length of the run (`syncing.mjs` asks for another each time one ends) and presses the inner
+pages once it is into its reads, checked against the `syncing` lines. A regression in the lane (a person's read
+waiting behind the sync's requests again) shows as first opens of seconds where the lines allow one.
+
+`lane-probe.mjs` times the same thing for every adapter at the backend, without a browser: a probes file names each
+page's or press's live reads (`entity_view`, `reachable_transitions`, `test_source`, `refresh_entity`, and
+`submit_write` with `"until": "sent"`, timed until the write leaves the queue), sent together as the page sends
+them, while `--source` is kept syncing. A view answered from what knobas held is followed until its read behind lands
+(its `held_at` moves past the send). Start each measured backend on a fresh clone, so every probe is a first open.
+
+```sh
+node testenv/perf/lane-probe.mjs --port 5411 --probes jira.json --source live-jira --out jira-after.json
+```
 
 ## On a real database
 

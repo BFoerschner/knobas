@@ -1,0 +1,47 @@
+{
+ "_": "Lines for testenv/perf/keys.mjs (just keys-budget --real <port>): from a key pressed as real input to the first frame that draws the rows it asks for (rowsMs, the median of the presses), and how many frames after that moved or took away a row drawn on screen (moved). From the broad-filters pass of PR #2479 (2026-11-13), measured in headless Chrome on an M2 Pro over the saved scale database through a release build of examples/headless_ipc.rs. Björn's line is 100 ms at 1x and 200 ms at 4x. Every key is inside 200 at 4x; at 1x the branch measured 103 to 127 ms, the backend's own read being 80 to 105 of it, so the 1x lines are what it measured with margin, and docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md says what is left and what it would take.",
+ "real": {
+  "keys": {
+   "tickets-letter": {
+    "1": {
+     "rowsMs": 130,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 200,
+     "moved": 0
+    }
+   },
+   "tickets-not-project": {
+    "1": {
+     "rowsMs": 145,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 200,
+     "moved": 0
+    }
+   },
+   "tickets-not-priority": {
+    "1": {
+     "rowsMs": 145,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 200,
+     "moved": 0
+    }
+   },
+   "everything-letter": {
+    "1": {
+     "rowsMs": 160,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 200,
+     "moved": 0
+    }
+   }
+  }
+ }
+}

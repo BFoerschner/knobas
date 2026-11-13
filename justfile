@@ -1349,6 +1349,13 @@ frame-budget *args:
 open-budget *args:
     testenv/perf/open-budget.sh {{args}}
 
+# The keys budget (the broad-filters pass of PR #2479, 2026-11-13, `testenv/perf/README.md`): presses the keys that keep
+# most of a page, Tickets' first letter, a `-project:` and a `-priority:`, and a single letter under Everything, as real
+# input in a headless Chrome at 1x and 4x, and fails when the rows a key asks for draw later than their line in
+# `testenv/perf/budget-keys.json` or anything drawn moves. On the saved scale database: `just keys-budget --real <port>`.
+keys-budget *args:
+    testenv/perf/keys-budget.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
