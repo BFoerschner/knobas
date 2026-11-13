@@ -138,7 +138,7 @@ No row of the file list moved after it drew in any step, before or after. After,
 - **The first file's lines** follow the list by 80 to 250 ms: one git per file, four at a time, on a busy Mac 30 to 90
   ms each.
 - **Without a clone, the list is Gitea's whole compare**, read and parsed on the backend (0.18 to 0.87 s for 300 to
-  10,000 files on the WSL box); the page's side of it is not yet measured, the box having gone back to Björn.
+  10,000 files on the WSL box); the page's side of it is not yet measured, the box having gone back to Björn. The same day's forge-waits pass holds every such list and asks *New pull request*'s early, so only a compare never read and opened by an address still waits for it (`2026-11-13-a-file-after-a-sync-and-a-first-compare-wait-on-nothing.md`).
 - **A pull request's own *Files***, with its review threads per file, still comes from the source whole.
 - **Not measured:** the open budget's big compares against the live forge, and the slowed forge through
   `slow-forge.mjs` (owed on the WSL box); the app's own window; Windows.

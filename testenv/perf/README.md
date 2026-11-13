@@ -166,6 +166,33 @@ node testenv/perf/folders.mjs --app "http://127.0.0.1:5362/?fake-ipc&fake-hooks&
   --repo live-gitea:knobas-perf-big-folders/cloned --folders hundreds,thousands,huge --throttle 1,4
 ```
 
+### A file after a sync, and Compare with no clone: `synced-file.mjs`, `compare-open.mjs`
+
+From the forge-waits pass (2026-11-13, `docs/decisions/2026-11-13-a-file-after-a-sync-and-a-first-compare-wait-on-nothing.md`),
+measured on the Mac while the live products were in use. A scratch copy of a saved home has every source turned off
+but Gitea, pointed at `standin-forge.mjs` (`base_url` `http://127.0.0.1:3911`): Gitea's compare for any two refs after
+`--delay`, and with `--git <repo>` the routes *Files* reads, served from that local repository. Turn the sources off in
+the copy's database before the backend first starts: a saved home's sources point at the WSL box's tunnels, and the
+scheduler syncs at start.
+
+```sh
+node testenv/perf/standin-forge.mjs --listen 3911 --delay 1000 --git <repo> --control 3912 &
+node testenv/perf/synced-file.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-hooks&fake-real=<port>#/time" \
+  --db <the copy's database url> --git <repo> --clone <its clone, or ''> --repo <entity id> --path <file>
+node testenv/perf/compare-open.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-hooks&fake-real=<port>#/time" \
+  --items <items.json> --rounds press,address --dwell 3000
+```
+
+- **`synced-file.mjs`** draws a file, moves its branch as a sync does (a commit on the stand-in's repository, fetched
+  into the clone, the mirror's tip and `synced_at` moved), and times the return to the kept page and a page loaded
+  afresh to the frame showing the new commit's text. The windowless backend emits no events, so the probe raises
+  `view:fresh` once the stand-in has answered the new commit's tree (`--control`'s `/tree`); asking the backend
+  instead would start reads behind of its own. Leave seconds between syncs: a read behind still out across a sync
+  is kept as read after it.
+- **`compare-open.mjs`** presses *New pull request* after looking at the landing for `--dwell` ms, and loads a
+  branch's compare by address; run it again on a restarted backend for a second session. The address rows include
+  the app's own start.
+
 ### The extremes: `just open-budget --real <port> --extremes`
 
 The worst shapes a real team's data has (the extremes pass, 2026-11-13,
