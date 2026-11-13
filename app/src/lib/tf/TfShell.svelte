@@ -88,6 +88,7 @@
   import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { installFindKey } from "./filter-keys";
   import { installPlainTyping } from "./plain-typing";
+  import { installExternalLinks } from "../shell/external-links";
   import { installPressGuard } from "./press-guard";
   import { isTopPage, itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
@@ -754,6 +755,8 @@
   onMount(() => installFindKey(() => onsearch(sectionFilter(route))));
   onMount(() => installRowRoom());
   onMount(() => installPlainTyping());
+  // A link to a web page opens in the browser, never in this window (Björn, 2026-11-13).
+  onMount(() => installExternalLinks());
   onMount(() => installFocusKeep());
   onMount(() => installKeysHere());
   onMount(() => {

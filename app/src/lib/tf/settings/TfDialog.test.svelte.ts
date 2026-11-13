@@ -490,3 +490,31 @@ test("draws as the ticket-first dialog, with the canonical footer", () => {
   unmount(app);
   target.remove();
 });
+
+/**
+ * A dialog opened from a row's fading action group (*Add an application* on a Repositories row, PR #2479, 2026-11-13):
+ * the group's `transform` made it the box the `position: fixed` scrim filled, so the dialog stood beside the row as a
+ * 95 px box and faded with the group. It goes up to its page instead, and goes with it when it closes.
+ */
+test("under an ancestor with a transform it fills the window from its page, and leaves nothing there when it closes", () => {
+  const page = host();
+  page.className = "tf-keptpage";
+  const row = document.createElement("span");
+  row.style.transform = "translateY(-50%)";
+  page.append(row);
+  const app = mount(Modal, { target: row, props: { onclose: () => {} } });
+  flushSync();
+  const scrim = document.querySelector(".tf-modal")!;
+  expect(scrim.parentElement).toBe(page);
+  unmount(app);
+  expect(document.querySelector(".tf-modal")).toBeNull();
+
+  // Anywhere else it stays where it was drawn.
+  const plain = document.createElement("span");
+  page.append(plain);
+  const again = mount(Modal, { target: plain, props: { onclose: () => {} } });
+  flushSync();
+  expect(document.querySelector(".tf-modal")!.parentElement).toBe(plain);
+  unmount(again);
+  page.remove();
+});

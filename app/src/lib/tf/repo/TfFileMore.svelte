@@ -1,8 +1,9 @@
 <!--
   The file header's *More* (⋯) (#2311, mockups/code-area `file.html`): the
   last icon button of the header, beside *Render as* and *Open in…*, holding
-  what the mockup draws no button for: *Edit*, the file's *History* (the
-  Commits tab) and its page on the source.
+  what the mockup draws no button for: *Edit* and the file's *History* (the
+  Commits tab). Its page on the source is *Open in… › Browser* beside it
+  (Björn, 2026-11-13: a link here took the app's window to Gitea).
 
   `TfMenu` draws it. *Edit* the file cannot take is drawn, disabled, saying why.
 -->
@@ -13,8 +14,6 @@
     edit,
     notEditable = null,
     history,
-    page = null,
-    sourceName,
   }: {
     /** The file's edit address. */
     edit: string;
@@ -22,10 +21,6 @@
     notEditable?: string | null;
     /** The repository's Commits tab. */
     history: string;
-    /** The file's page on the source, `null` where it named none. */
-    page?: string | null;
-    /** The source, as *Open on <source>* names it. */
-    sourceName: string;
   } = $props();
 
   let open = $state(false);
@@ -52,8 +47,5 @@
         <span role="menuitem" tabindex="-1" aria-disabled="true" title={notEditable}>Edit<small>{notEditable}</small></span>
       {/if}
       <a role="menuitem" href={history} onclick={() => (open = false)}>History</a>
-      {#if page !== null}
-        <a role="menuitem" href={page} onclick={() => (open = false)}>Open on {sourceName}</a>
-      {/if}
   </TfMenu>
 </span>

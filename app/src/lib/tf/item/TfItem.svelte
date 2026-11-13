@@ -29,6 +29,7 @@
     type ViewSection,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import { openLink } from "../../shell/external-links";
   import { DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
 
   /** The page's two reads, the write queue its actions queue through, and its *Refresh* (#2107). */
@@ -264,7 +265,7 @@
         <div class="tf-acts">
           {@render buttonsOf(headerActions, false)}
           {#if detail.web_url !== null}
-            <a class="tf-btn tf-ghost" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
+            <a class="tf-btn tf-ghost" href={detail.web_url} onclick={openLink}>Open in {detail.source.display_name}</a>
           {/if}
           <TfDetailRefresh {detail} {refresh} {reread} page />
         </div>

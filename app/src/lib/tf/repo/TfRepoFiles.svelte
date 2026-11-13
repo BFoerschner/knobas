@@ -84,6 +84,7 @@
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
+  import { openLink } from "../../shell/external-links";
   import type { CheckoutView, Fetched, LocalDir, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
@@ -1453,7 +1454,7 @@
       {#each Object.entries(cutDirs).filter(([dir]) => dir === "" || open.has(dir)) as [dir, cut] (dir)}
         <p class="tf-gonote">
           <span class="tf-mono">{dir || title || "The top folder"}</span> shows its first {cut.shown.toLocaleString("en-US")} entries; the rest are
-          {#if cut.url}<a href={cut.url}>on {sourceName(source)}</a>{:else}on {sourceName(source)}{/if}.
+          {#if cut.url}<a href={cut.url} onclick={openLink}>on {sourceName(source)}</a>{:else}on {sourceName(source)}{/if}.
         </p>
       {/each}
     {/if}
@@ -1512,8 +1513,8 @@
             {@const at = file.path}
             <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
-          <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
-          <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />
+          <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} />
+          <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
         </span>
       </header>
       {#if queued !== null}
@@ -1533,7 +1534,7 @@
       {#if shownFile?.truncated}
         <div class="tf-banner tf-info">
           The file is longer than knobas shows.
-          {#if file.url}<span class="tf-trail"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
+          {#if file.url}<span class="tf-trail"><a class="tf-btn tf-sm" href={file.url} onclick={openLink}>The rest on the source</a></span>{/if}
         </div>
       {/if}
       {#if suggested !== null}

@@ -7,21 +7,28 @@
   - **Cloned here**: one button, "Open in… ▾", and the whole of it opens the
     menu: every application with its command filled in for this checkout, the
     default first, marked *(default)* and focused, so `Enter` runs it; then
-    *Add an application…* and *Manage applications…*. `TfMenu` draws it. At a file, an application's file command is used.
+    *Browser*, the repository's or the file's page at its source, handed to
+    the browser (`openInBrowser`: never the app's window, Björn 2026-11-13);
+    then *Add an application* and *Manage applications*, links to Settings ›
+    Checkouts and Open in (the application page, PR #2479, 2026-11-13: the
+    dialog drawn here was caught in a row's fading group, so on a Repositories
+    row it stood beside the row and faded out). `TfMenu` draws it. At a file,
+    an application's file command is used.
   - **Not on this machine**: *Clone*, its tooltip naming the folder; while it
     runs, "Cloning… 52 %" and *Stop*; a failure said in place with *Try
     again*. With no clones root set it first asks where clones go.
   - Nothing while the checkout has not been read.
 -->
 <script lang="ts">
-  import { setClonesRoot, type CheckoutView } from "../../ipc/entity";
+  import { objectPage, setClonesRoot, type CheckoutView } from "../../ipc/entity";
+  import { openInBrowser } from "../../shell/external-links";
+  import { openExternal } from "../../shell/open-external";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
   import { clones as sharedClones, type Clones } from "./clones.svelte";
-  import { cloneTip, commandFor, fill, menuOrder, repoName, type Sample } from "./openin";
-  import TfAppDialog from "./TfAppDialog.svelte";
-  import TfAppsManage from "./TfAppsManage.svelte";
+  import { appPageHash } from "./app-page";
+  import { cloneTip, commandFor, fill, joinInside, menuOrder, repoName } from "./openin";
   import TfCloneRoot from "./TfCloneRoot.svelte";
 
   let {
@@ -35,6 +42,9 @@
     apps = sharedApps,
     clones = sharedClones,
     saveRoot = (path: string) => setClonesRoot(path),
+    page = undefined,
+    readPage = (id: string) => objectPage(id, { kind: "repository" }),
+    browse = openExternal,
     layers = sharedLayers,
   }: {
     /** The repo or branch the checkout was read for: what opens. */
@@ -52,13 +62,19 @@
     apps?: Apps | undefined;
     clones?: Clones | undefined;
     saveRoot?: (path: string) => Promise<void>;
+    /** The page *Browser* opens: given by the file view, which knows the file's; read for the repository when the menu opens if not given. */
+    page?: string | null | undefined;
+    readPage?: (entityId: string) => Promise<string | null>;
+    browse?: (url: string) => Promise<void>;
     layers?: Layers | undefined;
   } = $props();
 
   let open = $state(false);
   /** The root *Set and clone* just saved: the `checkout` prop is re-read later (#1442). */
   let savedRoot = $state<string | null>(null);
-  let dialog = $state<"add" | "manage" | "root" | null>(null);
+  let dialog = $state<"root" | null>(null);
+  /** The repository's page, read when the menu first opens; `undefined` until then. */
+  let readUrl = $state<string | null | undefined>(undefined);
   let face = $state<HTMLButtonElement | null>(null);
 
   const cls = $derived(
@@ -72,12 +88,29 @@
   const mark = $derived(clones.marks[repoId]);
   const path = $derived(checkout?.path ?? null);
   const entries = $derived(apps.settings === null ? [] : menuOrder(apps.settings));
-  const sample = $derived<Sample | null>(path === null ? null : { entityId, name, path, file });
-  const fileAt = $derived(path !== null && file !== null ? `${path}/${file}` : null);
+  const fileAt = $derived(path !== null && file !== null ? joinInside(path, file) : null);
+  /** A file's page is only the one the file view gives: the repository's would be the wrong page. */
+  const browserUrl = $derived(page !== undefined ? page : file !== null ? null : (readUrl ?? null));
+  /** The application page, to try the new one on this repository and this file. */
+  const addHash = $derived(appPageHash({ repo: repoId, kind: file !== null ? "file" : null, value: file }));
 
   $effect(() => {
     void apps.ensure();
   });
+
+  $effect(() => {
+    if (!open || page !== undefined || file !== null || readUrl !== undefined) return;
+    // Called through a promise: a test's mock of the bridge may not carry `object_page`.
+    Promise.resolve(entityId).then(readPage).then(
+      (url) => (readUrl = url),
+      () => (readUrl = null),
+    );
+  });
+
+  function toBrowser(url: string) {
+    open = false;
+    openInBrowser(url, browse);
+  }
 
   function run(id: string, appName: string) {
     open = false;
@@ -123,9 +156,13 @@
               ></button
             >
           {/each}
-          {#if entries.length > 0}<hr />{/if}
-          <button role="menuitem" onclick={() => ((open = false), (dialog = "add"))}>Add an application…</button>
-          <button role="menuitem" onclick={() => ((open = false), (dialog = "manage"))}>Manage applications…</button>
+          {#if browserUrl !== null}
+            {#if entries.length > 0}<hr />{/if}
+            <button role="menuitem" onclick={() => toBrowser(browserUrl)}><b>Browser</b><span class="tf-mono" title={browserUrl}>{browserUrl}</span></button>
+          {/if}
+          {#if entries.length > 0 || browserUrl !== null}<hr />{/if}
+          <a role="menuitem" href={addHash} onclick={() => (open = false)}>Add an application</a>
+          <a role="menuitem" href="#/settings/checkouts" onclick={() => (open = false)}>Manage applications</a>
       </TfMenu>
     </span>
   {:else if mark?.kind === "running"}
@@ -145,11 +182,7 @@
   {/if}
 {/if}
 
-{#if dialog === "add"}
-  <TfAppDialog {apps} {sample} {layers} onclose={() => (dialog = null)} />
-{:else if dialog === "manage"}
-  <TfAppsManage {apps} {sample} {layers} onclose={() => (dialog = null)} />
-{:else if dialog === "root"}
+{#if dialog === "root"}
   <TfCloneRoot
     save={setRoot}
     {layers}

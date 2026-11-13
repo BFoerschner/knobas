@@ -18,6 +18,9 @@
     from the source's typed base URL), handed to the opener. Offered on every
     platform whenever the source declares its pages.
   - With neither, one line says why nothing opens it here.
+  - Last, as on every *Open in…*: *Add an application*, the application page
+    with this repository and this object to try it on, and *Manage
+    applications*, Settings › Checkouts and Open in (PR #2479, 2026-11-13).
 -->
 <script module lang="ts">
   import { diffTool, entityCheckout, objectPage, openDiffTool, type CheckoutView, type OpenObject } from "../../ipc/entity";
@@ -56,6 +59,7 @@
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
+  import { appPageHash } from "./app-page";
   import { argvText, fillObject, objectCommand, objectMenu, worktreeOf } from "./openin";
 
   let {
@@ -95,6 +99,18 @@
   /** The Diff tool's ends and argv, when it is offered. */
   let tool = $state<{ ends: DiffEnds; argv: string[] } | null>(null);
   let face = $state<HTMLButtonElement | null>(null);
+  /** The repository the checkout read named: a branch's address opens on its repository. */
+  let repoId = $state<string | null>(null);
+
+  /** The application page, to try the new one on this object. */
+  const addHash = $derived(
+    appPageHash({
+      repo: repoId ?? entityId,
+      kind: object.kind,
+      value:
+        object.kind === "file" ? object.path : object.kind === "commit" ? object.sha : object.kind === "pull_request" ? String(object.number) : null,
+    }),
+  );
 
   const entries = $derived(
     path === null || apps.settings === null ? [] : objectMenu(apps.settings, object.kind),
@@ -114,6 +130,7 @@
     // A row redrawn with another object while this read ran: that object's menu reads its own.
     if (key !== JSON.stringify([entityId, object])) return;
     path = view?.path ?? null;
+    repoId = view?.repo_entity_id ?? null;
     worktree =
       asked.kind === "pull_request" && view !== null ? worktreeOf(view.clones_root, view.repo_entity_id, asked.number) : null;
     page = url;
@@ -198,9 +215,12 @@
           <span class="tf-dim tf-appmenu-note"
             >{path === null
               ? "The repository is not on this machine, and its source has no web page for this."
-              : `No application opens ${WHAT[object.kind]}: add one in Settings › Checkouts.`}</span
+              : `No application opens ${WHAT[object.kind]} yet.`}</span
           >
         {/if}
+        <hr />
+        <a role="menuitem" href={addHash} onclick={() => (open = false)}>Add an application</a>
+        <a role="menuitem" href="#/settings/checkouts" onclick={() => (open = false)}>Manage applications</a>
       {/if}
   </TfMenu>
 </span>

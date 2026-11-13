@@ -42,6 +42,13 @@
   a tick sends nothing: it is one more thing to decide. **⌘Enter presses it too, from anywhere in
   the dialog**, so every composer in a dialog sends the same way (the key table).
 
+  **It fills the window wherever it was opened** (PR #2479, 2026-11-13). Its scrim is `position: fixed`,
+  which an ancestor with a `transform`, a `filter`, containment or the like takes as its box instead of the
+  window: a row's fading action group (`.tf-rowacts`, moved up by `translateY(-50%)`) made *Add an application*
+  on a Repositories row a 95 px box beside the row, which faded out with the group once the pointer left it.
+  So a dialog opened under such an ancestor moves its scrim up to its page (`.tf-keptpage`), which hides with
+  the page as the dialog must; anywhere else it stays where it was drawn.
+
   Deliberately not a native `<dialog>`: `showModal()` puts the element in the
   top layer, where `::backdrop`, not `.tf-modal`, draws the dim. What a native
   dialog gives is focus trapping, Escape and focus restore, so those three are
@@ -198,6 +205,31 @@
     }
   }
 
+  /** Whether `element` makes itself the box a `position: fixed` inside it is placed in, as the window would be. */
+  function holdsFixed(element: Element): boolean {
+    const style = getComputedStyle(element);
+    return (
+      (style.transform !== "" && style.transform !== "none") ||
+      (style.filter !== "" && style.filter !== "none") ||
+      (style.perspective !== "" && style.perspective !== "none") ||
+      /\b(transform|filter|perspective)\b/.test(style.willChange) ||
+      /\b(layout|paint|strict|content)\b/.test(style.contain) ||
+      (style.containerType !== "" && style.containerType !== "normal")
+    );
+  }
+
+  /** Out of an ancestor that would hold the scrim, up to the page: the attachment on the one root node, as `inFloatHost`. */
+  function fillWindow(node: HTMLElement): (() => void) | void {
+    const page = node.parentElement?.closest(".tf-keptpage");
+    if (!page) return;
+    for (let at = node.parentElement; at !== null && at !== page; at = at.parentElement) {
+      if (holdsFixed(at)) {
+        page.append(node);
+        return () => node.remove();
+      }
+    }
+  }
+
   /** While it is drawn, the dialog counts as open (`modals`). */
   function countOpen(): () => void {
     // Untracked, or the attachment would run again on the count it changes.
@@ -211,6 +243,7 @@
 <div
   class="tf-modal"
   {@attach countOpen}
+  {@attach fillWindow}
   onclickcapture={notePress}
   onkeydowncapture={notePress}
   onmousedown={(event) => {

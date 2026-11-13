@@ -812,7 +812,7 @@ const CASES: Case[] = [
     name: "TfFileMore",
     source: "lib/tf/repo/TfFileMore.svelte",
     open: (target) => ({
-      app: mount(TfFileMore, { target, props: { edit: "#/e", history: "#/h", page: null, sourceName: "Gitea" } }),
+      app: mount(TfFileMore, { target, props: { edit: "#/e", history: "#/h" } }),
     }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
