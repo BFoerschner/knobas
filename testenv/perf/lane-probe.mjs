@@ -13,6 +13,13 @@
 // (`pending_writes` no longer lists it open), which is when the page's toast says so. A probe is a
 // first open only on a backend that has not read it before: start each measured backend on a fresh clone of the
 // database, so its kept reads are its own.
+//
+// **It leaves the live products as it found them.** Each comment a press posts (`{"Comment": ...}`) carries a marker
+// of this run, `[lane-probe <run>]`, and once the probes are done every comment carrying it is deleted through the
+// product's own API: a Gitea pull request's or issue's (`live-gitea:`, KNOBAS_GITEA_URL and KNOBAS_GITEA_TOKEN) and
+// a Jira ticket's (`live-jira:`, KNOBAS_JIRA_URL, KNOBAS_JIRA_USER and KNOBAS_JIRA_PASSWORD), the variables
+// `eval "$(testenv/seed --env)"` sets. A press still in the queue is discarded first. A comment it cannot delete (no
+// variables, another source, a refused delete) is named, and the run exits 1.
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -41,10 +48,24 @@ const ask = (cmd, args) =>
 /** When `answer` says it was read, if it was answered from what knobas held. */
 const heldAt = (answer) => (typeof answer?.ok?.held_at === "string" ? Date.parse(answer.ok.held_at) : null);
 
+/** This run's mark on every comment it posts, and what it posted them on. */
+const marker = `[lane-probe ${Date.now().toString(36)}]`;
+const commented = new Set();
+const pressed = [];
+
+/** A press's args with this run's marker on its comment, noting where the comment goes. */
+function marked(args) {
+  const comment = args?.payload?.Comment;
+  if (comment === undefined) return args;
+  commented.add(comment.entity);
+  return { ...args, payload: { ...args.payload, Comment: { ...comment, body: `${comment.body} ${marker}` } } };
+}
+
 /** Whether the write `id` is still open in the queue. */
 const open = async (id) => ((await ask("pending_writes", {})).ok ?? []).some((w) => w.id === id);
 
-async function call({ cmd, args, until }) {
+async function call({ cmd, args: asked, until }) {
+  const args = cmd === "submit_write" ? marked(asked) : asked;
   const sent = performance.now();
   const sentWall = Date.now();
   let ok = false;
@@ -57,6 +78,7 @@ async function call({ cmd, args, until }) {
     ok = "ok" in answer;
     holds = ok && answer.ok !== null && JSON.stringify(answer.ok).length > 2;
     if (!ok) error = JSON.stringify(answer.err).slice(0, 200);
+    if (ok && cmd === "submit_write") pressed.push(answer.ok.id);
     const at = heldAt(answer);
     held = at !== null && at < sentWall;
     const firstMs = performance.now() - sent;
@@ -118,3 +140,55 @@ try {
   load?.kill("SIGTERM");
 }
 if (out) writeFileSync(out, JSON.stringify({ port, source: source ?? null, mode, results }, null, 1));
+
+/** Delete every comment carrying this run's marker; answers what could not be deleted. */
+async function cleanUp() {
+  for (const id of pressed) if (await open(id)) await ask("discard_write", { id });
+  const env = process.env;
+  const left = [];
+  let removed = 0;
+  const forge = async (url, init) => {
+    const response = await fetch(url, init);
+    if (!response.ok) throw new Error(`${init?.method ?? "GET"} ${url}: ${response.status}`);
+    return init?.method === "DELETE" ? null : response.json();
+  };
+  for (const entity of commented) {
+    try {
+      const gitea = /^live-gitea:([^/]+)\/([^#@]+)#(\d+)$/.exec(entity);
+      const jira = /^live-jira:([A-Z][A-Z0-9_]*-\d+)$/.exec(entity);
+      if (gitea && env.KNOBAS_GITEA_URL && env.KNOBAS_GITEA_TOKEN) {
+        const api = `${env.KNOBAS_GITEA_URL.replace(/\/$/, "")}/api/v1/repos/${gitea[1]}/${gitea[2]}/issues`;
+        const headers = { Authorization: `token ${env.KNOBAS_GITEA_TOKEN}` };
+        for (const c of await forge(`${api}/${gitea[3]}/comments`, { headers })) {
+          if (!c.body.includes(marker)) continue;
+          await forge(`${api}/comments/${c.id}`, { method: "DELETE", headers });
+          removed += 1;
+        }
+      } else if (jira && env.KNOBAS_JIRA_URL && env.KNOBAS_JIRA_USER && env.KNOBAS_JIRA_PASSWORD) {
+        const api = `${env.KNOBAS_JIRA_URL.replace(/\/$/, "")}/rest/api/2/issue/${jira[1]}/comment`;
+        const basic = Buffer.from(`${env.KNOBAS_JIRA_USER}:${env.KNOBAS_JIRA_PASSWORD}`).toString("base64");
+        const headers = { Authorization: `Basic ${basic}`, Accept: "application/json" };
+        for (const c of (await forge(`${api}?maxResults=1000`, { headers })).comments) {
+          if (!String(c.body).includes(marker)) continue;
+          await forge(`${api}/${c.id}`, { method: "DELETE", headers });
+          removed += 1;
+        }
+      } else {
+        left.push(`${entity} (no way to delete it here)`);
+        continue;
+      }
+    } catch (error) {
+      left.push(`${entity} (${error.message})`);
+    }
+  }
+  console.log(`lane-probe: deleted ${removed} comment(s) marked ${marker}`);
+  return left;
+}
+
+if (commented.size > 0) {
+  const left = await cleanUp();
+  if (left.length > 0) {
+    console.error(`lane-probe: comments marked ${marker} may be left on: ${left.join(", ")}`);
+    process.exit(1);
+  }
+}
