@@ -16,6 +16,8 @@ import type {
   EntityBrief,
   CloneAllPlan,
   CloneAllState,
+  LocalDir,
+  LocalPaths,
   LocalTree,
   ViewBlock,
   ArtifactEntry,
@@ -110,7 +112,9 @@ export type {
   CloneAllSource,
   CloneAllState,
   Fetched,
+  LocalDir,
   LocalEntry,
+  LocalPaths,
   LocalTree,
   MirrorTip,
   ActionField,
@@ -1534,6 +1538,25 @@ export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer
  */
 export function entityLocalTree(entityId: string): Promise<LocalTree | null> {
   return invoke<LocalTree | null>("entity_local_tree", { entityId });
+}
+
+/**
+ * One directory of `entityId`'s tree read at its checkout — `entity_local_dir` (the big-folder pass of PR #2479,
+ * 2026-11-13): with `commit` `null` at the tip the mirror holds for its branch (the tab's top; a checkout that lacks
+ * it fetches it behind, told on `EVENTS.checkoutFetched`), else at that commit. What *Files* reads for each folder it
+ * opens, so the page holds what it draws and a folder past twenty thousand entries is drawn whole. `null` where the
+ * checkout cannot answer; `complete: false` where a tree past two million entries was cut in it.
+ */
+export function entityLocalDir(entityId: string, commit: string | null, dir: string): Promise<LocalDir | null> {
+  return invoke<LocalDir | null>("entity_local_dir", { entityId, commit, dir });
+}
+
+/**
+ * Every file of `entityId`'s tree at `commit` (a sha {@link entityLocalDir} answered), read at its checkout —
+ * `entity_local_paths` (the big-folder pass): what *Go to file* filters. `null` where the checkout cannot answer.
+ */
+export function entityLocalPaths(entityId: string, commit: string): Promise<LocalPaths | null> {
+  return invoke<LocalPaths | null>("entity_local_paths", { entityId, commit });
 }
 
 /**

@@ -3,7 +3,7 @@
  * every path at the commit, which row the arrow keys go to, and what the file
  * header and the last-commit strip say.
  */
-import type { TreeEntry, ViewRow } from "../../ipc/entity";
+import type { LocalEntry, TreeEntry, ViewRow } from "../../ipc/entity";
 import { sized } from "../../render/pipeline";
 
 export { initials } from "../tickets/tickets";
@@ -35,6 +35,30 @@ export function goToFile(paths: readonly string[], typed: string, limit = GO_TO_
     .sort((a, b) => a.tier - b.tier || a.path.length - b.path.length || a.path.localeCompare(b.path))
     .slice(0, limit)
     .map(({ path }) => path);
+}
+
+/**
+ * One directory of a checkout's tree as the listing the tab draws (the big-folder pass, 2026-11-13): each entry by its
+ * name, opened by the section `sectionOf` makes for it (none for a submodule), directories first and then by name,
+ * case aside, as the source sorts them.
+ */
+export function checkoutListing(
+  entries: readonly LocalEntry[],
+  sectionOf: (kind: "dir" | "file", path: string) => string,
+): TreeEntry[] {
+  return entries
+    .map((entry) => ({
+      name: baseName(entry.path),
+      kind: entry.kind,
+      size: entry.size,
+      section: entry.kind === "submodule" ? null : sectionOf(entry.kind === "dir" ? "dir" : "file", entry.path),
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.kind === "dir") - Number(a.kind === "dir") ||
+        a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    );
 }
 
 /** One row of the tree as drawn: a directory (folded or not), a file, or what opens nothing (a submodule). */

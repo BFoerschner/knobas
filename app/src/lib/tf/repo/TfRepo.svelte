@@ -64,6 +64,8 @@
     EntityDetail,
     EntityFilter,
     EntityPage,
+    LocalDir,
+    LocalPaths,
     LocalTree,
     PipeRun,
     PipeStep,
@@ -109,6 +111,10 @@
     commitDiff?: (entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
     /** The whole tree at the checkout, at the mirror's tip (ADR-0041): what *Files* draws first; the source alone when left out. */
     localTree?: (entityId: string) => Promise<LocalTree | null>;
+    /** One directory of the checkout's tree (the big-folder pass): `commit` `null` reads at the mirror's tip. */
+    localDir?: (entityId: string, commit: string | null, dir: string) => Promise<LocalDir | null>;
+    /** Every file of the checkout's tree at `commit`, for *Go to file*. */
+    localPaths?: (entityId: string, commit: string) => Promise<LocalPaths | null>;
     /** A file of that tree, read at the checkout (ADR-0041). */
     localFile?: (entityId: string, commit: string, path: string) => Promise<ViewBlock | null>;
     /** The source's compare now, never local (ADR-0041): what Compare checks a predicted diff against; no check when left out. */
@@ -156,6 +162,8 @@
     entityCommitDiff,
     entityLocalFile,
     entityLocalTree,
+    entityLocalDir,
+    entityLocalPaths,
     entitySourceRangeDiff,
     entityView,
     getEntity,
@@ -248,6 +256,8 @@
       rangeDiff: (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
       commitDiff: (entityId, commitId, sha, ignoreWhitespace) => entityCommitDiff(entityId, commitId, sha, ignoreWhitespace),
       localTree: (entityId) => entityLocalTree(entityId),
+      localDir: (entityId, commit, dir) => entityLocalDir(entityId, commit, dir),
+      localPaths: (entityId, commit) => entityLocalPaths(entityId, commit),
       localFile: (entityId, commit, path) => entityLocalFile(entityId, commit, path),
       sourceRangeDiff: (entityId, base, head) => entitySourceRangeDiff(entityId, base, head),
     },

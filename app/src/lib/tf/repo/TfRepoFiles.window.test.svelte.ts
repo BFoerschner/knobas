@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { LocalTree, SourceView, ViewBlock } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import { treeRows } from "./file-tree";
+import { checkoutPorts } from "./checkout-ports.test-support";
 import { createRendererDefaults } from "../../render/defaults.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
@@ -51,6 +52,8 @@ async function settle() {
   }
 }
 
+const held = tree();
+
 async function draw() {
   const block = { type: "tree", trail: [], entries: [], truncated: false, url: null, commit: TIP };
   view = mount(TfRepoFiles, {
@@ -62,7 +65,7 @@ async function draw() {
         submitWrite: async () => {
           throw { code: "invalid", message: "no write here" };
         },
-        localTree: async () => tree(),
+        ...checkoutPorts(() => held),
         localFile: async (_at: string, commit: string, path: string) =>
           ({ type: "file", trail: [], path, text: "x\n", language: null, size: 2, truncated: false, binary: false, url: null, sha: "b10b", commit }) as ViewBlock,
       },
@@ -100,7 +103,7 @@ test("a folder of two thousand files draws the rows near the view, in the listin
   await draw();
   expect(drawnPaths()).toEqual(["big", "src", "README.md"]);
   row("big")!.click();
-  flushSync();
+  await settle();
   const drawn = drawnPaths();
   expect(row("big")!.getAttribute("aria-expanded")).toBe("true");
   // Far fewer than the folder holds, and the first of them as the tree lays them out.
@@ -112,14 +115,14 @@ test("a folder of two thousand files draws the rows near the view, in the listin
   expect(parseFloat(rows.style.paddingBottom)).toBe((BIG + 3 - drawn.length) * 24);
   // Folded, it is the three rows again.
   row("big")!.click();
-  flushSync();
+  await settle();
   expect(drawnPaths()).toEqual(["big", "src", "README.md"]);
 });
 
 test("the arrow keys walk past the window: the row they reach is drawn and has focus", async () => {
   await draw();
   row("big")!.click();
-  flushSync();
+  await settle();
   row("big")!.focus();
   for (let i = 0; i < 300; i += 1) press("ArrowDown");
   expect(document.activeElement).toBe(row(`big/${name(300)}`));
@@ -133,7 +136,7 @@ test("the arrow keys walk past the window: the row they reach is drawn and has f
 test("a row the window takes out while it has focus leaves focus on the tree, and the keys go on from it", async () => {
   await draw();
   row("big")!.click();
-  flushSync();
+  await settle();
   row(`big/${name(3)}`)!.focus();
   expect(document.activeElement).toBe(row(`big/${name(3)}`));
   // The reader scrolls the tree far down (jsdom has no layout: the rows' box is moved up and a scroll told).

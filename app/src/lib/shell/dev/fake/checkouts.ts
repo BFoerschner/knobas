@@ -570,6 +570,8 @@ export function handlers(): Handlers {
     clone_repo: (args) => fakeClone(args),
     // The demo has no checkout on disk to read a tree at (ADR-0041): Files reads the fake source, as before.
     entity_local_tree: () => null,
+    entity_local_dir: () => null,
+    entity_local_paths: () => null,
     entity_local_file: () => null,
     entity_source_range_diff: (args) =>
       fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),

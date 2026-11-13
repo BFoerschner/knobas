@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { LocalTree, SourceView, TreeEntry, ViewBlock } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import { checkoutPorts } from "./checkout-ports.test-support";
 
 const REPO = "gitea:tidewater/payout-service";
 const TIP = "c0ffee0000000000000000000000000000000000";
@@ -90,7 +91,7 @@ function draw(local: LocalTree | null, files: Files = FILES) {
       new Promise<SourceView>((resolve) => {
         asked.push({ section: section ?? "", release: (f, commit, sha) => resolve(sourceAnswer(f, section ?? "", commit, sha)) });
       }),
-    localTree: async () => local,
+    ...checkoutPorts(() => local),
     localFile: async (_at: string, commit: string, path: string) => {
       localReads.push(`${commit.slice(0, 7)}:${path}`);
       const text = files[path];
@@ -220,7 +221,7 @@ test("a checkout's tree that lands after the source's top at the same commit dra
       asked.push({ section: section ?? "", release: () => {} });
       return sourceAnswer(FILES, section ?? "", TIP, "b10b");
     },
-    localTree: () => late,
+    ...checkoutPorts(() => late),
     localFile: async (_at: string, commit: string, path: string) => {
       localReads.push(`${commit.slice(0, 7)}:${path}`);
       const text = FILES[path];
@@ -254,7 +255,7 @@ test("a fetch that lands after the source drew at the same commit hands the tree
       return sourceAnswer(FILES, section ?? "", TIP, "b10b");
     },
     // Behind at first: the checkout lacks the mirror's commit until the fetch behind the read lands.
-    localTree: async () => held,
+    ...checkoutPorts(() => held),
     localFile: async (_at: string, commit: string, path: string) => {
       localReads.push(`${commit.slice(0, 7)}:${path}`);
       const text = FILES[path];
@@ -294,7 +295,7 @@ test("a checkout's tree that lands after the source's top at another commit leav
   const late = new Promise<LocalTree>((resolve) => (release = resolve));
   const ports = {
     entityView: async (_at: string, section: string | null) => sourceAnswer(FILES, section ?? "", MOVED, "b10b"),
-    localTree: () => late,
+    ...checkoutPorts(() => late),
     localFile: async (_at: string, commit: string, path: string) => {
       localReads.push(`${commit.slice(0, 7)}:${path}`);
       return null;
@@ -329,7 +330,7 @@ for (const order of ["the source's re-read, then the fetch", "the fetch, then th
         asked.push({ section: section ?? "", release: () => {} });
         return sourceAnswer(FILES, section ?? "", top, "b10b");
       },
-      localTree: async () => held,
+      ...checkoutPorts(() => held),
       localFile: async (_at: string, commit: string, path: string) => {
         localReads.push(`${commit.slice(0, 7)}:${path}`);
         const text = FILES[path];
@@ -374,3 +375,130 @@ for (const order of ["the source's re-read, then the fetch", "the fetch, then th
     expect(tree()).toEqual(["src", "lib.rs", "README.md"]);
     expect(sourceReads().length, "the folder came from the clone").toBe(reads);
   });
+
+/**
+ * The big-folder pass (2026-11-13): the tab reads the checkout's tree a folder at a time, so a folder past the twenty
+ * thousandth entry is drawn with every entry (the whole tree's read stopped at twenty thousand, and the tab drew what
+ * it held as the whole), and the page holds what it draws: the top at the tab's open, each folder when it opens.
+ */
+test("a folder past twenty thousand entries of a clone is drawn whole, read when it opens", async () => {
+  const files: Files = { "README.md": "# big\n" };
+  for (let n = 0; n < 20_500; n += 1) files[`a/f${String(n).padStart(5, "0")}.txt`] = "x\n";
+  for (let n = 0; n < 300; n += 1) files[`z/g${String(n).padStart(3, "0")}.txt`] = "x\n";
+  const ports = checkoutPorts(() => localTree(files));
+  view = mount(TfRepoFiles, {
+    target,
+    props: {
+      ports: {
+        entityView: () => new Promise<SourceView>(() => {}),
+        ...ports,
+        localFile: async (_at: string, commit: string, path: string) => fileBlock(path, files[path] ?? "", "b10b", commit),
+        submitWrite: async () => {
+          throw { code: "invalid", message: "no write in this suite" };
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: null,
+      changed: new Set<string>(),
+      treeSections: { dir: "files:", file: "file:" },
+    },
+  });
+  await settle();
+  expect(tree()).toEqual(["a", "z", "README.md"]);
+  expect(ports.dirReads, "the tab's open reads the top alone").toEqual(["tip:"]);
+  (target.querySelector('.tf-ftree [data-path="z"]') as HTMLElement).click();
+  await settle();
+  expect(ports.dirReads).toEqual(["tip:", `${TIP}:z`]);
+  // Every entry of `z`, all 300 past the twenty thousandth of the tree, in the window's rows and room.
+  const rows = [...target.querySelectorAll<HTMLElement>(".tf-ftree [data-path^='z/']")].map((el) => el.dataset["path"]);
+  expect(rows[0]).toBe("z/g000.txt");
+  expect(rows.length).toBeGreaterThan(20);
+  const room = target.querySelector<HTMLElement>(".tf-ftrows")!;
+  const drawn = target.querySelectorAll(".tf-ftree [data-path]").length;
+  expect(parseFloat(room.style.paddingBottom || "0") / 24 + drawn, "every row drawn or room for it").toBe(303);
+});
+
+/** The clone taking over from the source's tree reads every folder it drew first, so an open folder's rows stay. */
+test("a clone that takes over with a folder open keeps its rows where they are", async () => {
+  const many: Files = { "README.md": "# r\n" };
+  for (let n = 0; n < 5; n += 1) many[`src/m${n}.rs`] = "x\n";
+  let fetched: ((event: { payload: unknown }) => void) | null = null;
+  let held: LocalTree | null = null;
+  const ports = checkoutPorts(() => held);
+  view = mount(TfRepoFiles, {
+    target,
+    props: {
+      ports: {
+        entityView: async (_at: string, section: string | null) => {
+          asked.push({ section: section ?? "", release: () => {} });
+          return sourceAnswer(many, section ?? "", TIP, "b10b");
+        },
+        ...ports,
+        localFile: async (_at: string, commit: string, path: string) => fileBlock(path, many[path] ?? "", "b10b-local", commit),
+        submitWrite: async () => {
+          throw { code: "invalid", message: "no write in this suite" };
+        },
+        listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+          if (event === "checkout:fetched") fetched = handler;
+          return () => {};
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: null,
+      changed: new Set<string>(),
+      treeSections: { dir: "files:", file: "file:" },
+    },
+  });
+  await settle();
+  (target.querySelector('.tf-ftree [data-path="src"]') as HTMLElement).click();
+  await settle();
+  const before = tree();
+  expect(before).toEqual(["src", "m0.rs", "m1.rs", "m2.rs", "m3.rs", "m4.rs", "README.md"]);
+  held = localTree(many);
+  fetched!({ payload: { entity_id: REPO, commit: TIP } });
+  // Mid-read, the rows stand as drawn.
+  expect(tree()).toEqual(before);
+  await settle();
+  expect(text(target)).toContain("From your clone at c0ffee0");
+  expect(tree()).toEqual(before);
+  expect(ports.dirReads).toContain(`${TIP}:src`);
+});
+
+/** A folder the source listed past its whole tree, or cut at its cap, says so under the tree, never among its rows. */
+test("a folder the source listed on its own, or cut, says so under the tree", async () => {
+  const ports = {
+    entityView: async (_at: string, section: string | null) => {
+      const id = section ?? "";
+      const one = (block: unknown) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks: [block] }], actions: [] }) as unknown as SourceView;
+      if (id === "files")
+        return one({ type: "tree", trail: [], truncated: false, url: null, commit: TIP, entries: [
+          { name: "far", kind: "dir", size: null, section: "files:far" },
+          { name: "wide", kind: "dir", size: null, section: "files:wide" },
+        ] });
+      if (id === "files:far") return one({ type: "tree", trail: [], truncated: false, url: null, commit: TIP, read_alone: true, entries: [{ name: "x", kind: "file", size: 1, section: "file:far/x" }] });
+      return one({ type: "tree", trail: [], truncated: true, url: "https://gitea.example/o/r/src/branch/main/wide", commit: TIP, entries: [{ name: "y", kind: "file", size: 1, section: "file:wide/y" }] });
+    },
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+  };
+  view = mount(TfRepoFiles, {
+    target,
+    props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" }, title: "o/r" },
+  });
+  await settle();
+  const notes = () => [...target.querySelectorAll(".tf-gonote")].map(text);
+  expect(notes()).toEqual([]);
+  (target.querySelector('.tf-ftree [data-path="far"]') as HTMLElement).click();
+  (target.querySelector('.tf-ftree [data-path="wide"]') as HTMLElement).click();
+  await settle();
+  expect(notes()).toEqual([
+    "Folders past this repository's first 20,000 entries are read one at a time.",
+    "wide shows its first 1 entries; the rest are on the code host.",
+  ]);
+  expect(target.querySelector<HTMLAnchorElement>(".tf-gonote a")?.href).toBe("https://gitea.example/o/r/src/branch/main/wide");
+});

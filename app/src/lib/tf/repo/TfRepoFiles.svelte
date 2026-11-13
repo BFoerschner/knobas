@@ -84,7 +84,7 @@
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, Fetched, LocalTree, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
+  import type { CheckoutView, Fetched, LocalDir, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -138,7 +138,7 @@
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
   import { layers } from "../layers.svelte";
-  import { fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
+  import { checkoutListing, fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
   import TfFindBar from "../TfFindBar.svelte";
 
@@ -168,7 +168,7 @@
     treeSections = null,
     ondrew,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped" | "localTree" | "localFile">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -223,10 +223,14 @@
    */
   let listings = $state.raw<Record<string, TreeEntry[]>>({});
   /**
-   * The tree as the checkout holds it at the mirror's tip (ADR-0041), while the
-   * listings are its; `checked` once the source's top stood at the same commit.
+   * The checkout's tree at the mirror's tip (ADR-0041), while the listings are its: the commit it was read at, each
+   * folder read when it opens (the big-folder pass, 2026-11-13); `checked` once the source's top stood at the same commit.
    */
-  let local = $state<{ tree: LocalTree; checked: boolean } | null>(null);
+  let local = $state<{ commit: string; checked: boolean } | null>(null);
+  /** A folder the source listed past the whole tree it reads at once, one at a time (`read_alone`): the tree says so. */
+  let readAlone = $state(false);
+  /** Folders the source cut at its cap, by path: how many entries it shows, and its page there. */
+  let cutDirs = $state.raw<Record<string, { shown: number; url: string | null }>>({});
   /** The branch moved past the checkout's copy, and the file the reader had open changed with it. */
   let movedNote = $state<string | null>(null);
   /** The file drawn from the checkout when the source's newer tree replaced it: its path and blob. */
@@ -295,33 +299,16 @@
     return commit === undefined || kind === undefined || full === undefined ? null : { commit, kind, full };
   }
 
-  /** The checkout's tree as the listings the tab draws: each directory's entries, directories first, as the source sorts them. */
-  function localListings(tree: LocalTree): Record<string, TreeEntry[]> {
-    const out: Record<string, TreeEntry[]> = { "": [] };
-    for (const entry of tree.entries) {
-      if (entry.kind === "dir") out[entry.path] ??= [];
-      const parent = parentOf(entry.path);
-      (out[parent] ??= []).push({
-        name: nameOf(entry.path),
-        kind: entry.kind,
-        size: entry.size,
-        section: entry.kind === "submodule" ? null : localId(tree.commit, entry.kind === "dir" ? "dir" : "file", entry.path),
-      });
-    }
-    for (const entries of Object.values(out))
-      entries.sort(
-        (a, b) =>
-          Number(b.kind === "dir") - Number(a.kind === "dir") ||
-          a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
-          (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
-      );
-    return out;
-  }
+  /** One folder of the checkout's tree as the listing the tab draws, its entries opened by sections the tab makes. */
+  const localListing = (commit: string, entries: LocalDir["entries"]) => checkoutListing(entries, (kind, full) => localId(commit, kind, full));
 
-  /** A section the tab made for the checkout's tree: a directory from the tree read, a file read at the checkout, every path. */
+  /**
+   * A section the tab made for the checkout's tree: a folder or every path, read from the tree the backend keeps (the
+   * big-folder pass, 2026-11-13: the page holds what it draws, not the whole tree), or a file read at the checkout. A
+   * folder the checkout's read could not hold whole (a tree past two million entries) is the source's listing.
+   */
   async function readLocalSection(section: string, where: string): Promise<ViewSection | undefined> {
     const named = parseLocal(section);
-    const held = local?.tree;
     if (named === null) return undefined;
     const wrap = (block: ViewBlock): ViewSection => ({ id: section, title: "Files", count: null, deferred: false, blocks: [block] });
     if (named.kind === "file") {
@@ -330,38 +317,60 @@
       if (block === null) throw new Error(`Your checkout could not read ${named.full}.`);
       return wrap(block);
     }
-    if (held === undefined || held.commit !== named.commit) throw new Error("The checkout's tree was replaced by the source's.");
     if (named.kind === "paths") {
-      const entries = held.entries
-        .filter((entry) => entry.kind === "file" || entry.kind === "symlink")
-        .map((entry) => ({ name: entry.path, kind: entry.kind, size: entry.size, section: localId(held.commit, "file", entry.path) }));
-      return wrap({ type: "tree", trail: [], entries, truncated: held.truncated, url: null });
+      const read = ports.localPaths;
+      const answer = read === undefined ? null : await read(where, named.commit);
+      if (answer === null) throw new Error("Your checkout could not list its files.");
+      const entries = answer.entries.map((entry) => ({ name: entry.path, kind: entry.kind, size: entry.size, section: localId(named.commit, "file", entry.path) }));
+      return wrap({ type: "tree", trail: [], entries, truncated: answer.truncated, url: null });
     }
-    return wrap({ type: "tree", trail: [], entries: localListings(held)[named.full] ?? [], truncated: false, url: null });
+    const read = ports.localDir;
+    const answer = read === undefined ? null : await read(where, named.commit, named.full);
+    if (answer === null) throw new Error(`Your checkout could not read ${named.full || "its top folder"}.`);
+    if (!answer.complete) {
+      // Past what the checkout's read holds: the source's listing of the folder, by the scheme it declares.
+      if (treeSections == null) throw new Error(`${named.full} is past what knobas reads of your checkout at once.`);
+      return readSection(`${treeSections.dir}${named.full}`, where);
+    }
+    return wrap({ type: "tree", trail: [], entries: localListing(named.commit, answer.entries), truncated: false, url: null });
   }
 
-  /** The checkout's tree at `where`, drawn where the source has not answered yet. */
+  /**
+   * The checkout's tree at `where` (its top, at the mirror's tip), drawn where the source has not answered yet, or
+   * taking over from the source's where it stands at the same commit.
+   */
   function readLocal(where: string, mine: number) {
-    const read = ports.localTree;
+    const read = ports.localDir;
     if (read === undefined) return;
-    read(where).then(
-      (tree) => {
-        if (tree === null || mine !== generation || where !== at) return;
+    read(where, null, "").then(
+      async (top) => {
+        if (top === null || !top.complete || mine !== generation || where !== at) return;
         // The source's top answered first (the app keeps it, so on a later open it beats `git ls-tree`): where it stands
         // at the clone's commit, the clone draws the tree after all, and its files are read there, not on the forge (the
         // inner-pages pass, 2026-11-12). At another commit the branch moved since the sync, and the source's tree stands.
         const first = listings[""] !== undefined;
-        if (first && sourceTop !== tree.commit) return;
-        // Taking over from the source's tree: its directory reads still under way would write the source's sections
-        // over the clone's.
+        if (first && sourceTop !== top.commit) return;
+        const drawn: Record<string, TreeEntry[]> = { "": localListing(top.commit, top.entries) };
         if (first) {
+          // Every folder the source's tree has drawn is read from the clone first and swapped in with the top, so no row
+          // moves (the big-folder pass); one the clone cannot answer whole leaves the source's tree standing.
+          const dirs = Object.keys(listings).filter((dir) => dir !== "");
+          const more = await Promise.all(dirs.map((dir) => read(where, top.commit, dir).catch(() => null)));
+          if (mine !== generation || where !== at || sourceTop !== top.commit) return;
+          for (const [i, dir] of dirs.entries()) {
+            const answer = more[i];
+            if (answer == null || !answer.complete) return;
+            drawn[dir] = localListing(top.commit, answer.entries);
+          }
+          // Taking over from the source's tree: its directory reads still under way would write the source's sections
+          // over the clone's.
           generation += 1;
-          asked = new Set([""]);
+          asked = new Set(Object.keys(drawn));
           early = new Map();
         }
-        local = { tree, checked: first };
-        listings = localListings(tree);
-        pathsSection = localId(tree.commit, "paths", "");
+        local = { commit: top.commit, checked: first };
+        listings = drawn;
+        pathsSection = localId(top.commit, "paths", "");
       },
       // No checkout's copy: the source's reads draw the tree, as before.
       () => {},
@@ -376,7 +385,7 @@
   function settleLocal(block: Extract<ViewBlock, { type: "tree" }>): boolean {
     const held = local;
     if (held === null) return false;
-    if (block.commit === undefined || block.commit === held.tree.commit) {
+    if (block.commit === undefined || block.commit === held.commit) {
       local = { ...held, checked: block.commit !== undefined };
       return true;
     }
@@ -396,11 +405,14 @@
    */
   const dirKey = (dir: string) => `dir\u0000${dir}`;
   const fileKey = (full: string) => `file\u0000${full}`;
+  /** A read of the checkout's asked early, apart from the source's guesses at the same place. */
+  const localKey = (place: string) => `local\u0000${place}`;
 
   /** The read of `place` asked early, once, else -- or where that guess was refused -- a new one of `section`. */
   function take(section: string, place: string, where = at): Promise<ViewSection | undefined> {
-    // The checkout answers at once; a deep link's early guess at the source would only be slower.
-    if (section.startsWith(LOCAL)) return readSection(section, where);
+    // A deep link's early guess at the source would only be slower than the checkout; the checkout's own read of a folder
+    // the pointer rested on is taken (the big-folder pass).
+    if (section.startsWith(LOCAL)) place = localKey(place);
     const read = early.get(place);
     if (read === undefined) return readSection(section, where);
     early.delete(place);
@@ -411,14 +423,15 @@
    * The pointer resting on a row of the tree reads what a press on it opens, so the source's round trip runs while the
    * hand is on its way to the press (the inner-pages pass, 2026-11-12): a file or a directory a press would read from
    * the source, asked once, after the pointer has stood on it a moment, so one swept across the tree asks nothing. The
-   * press takes the read under way (`take`). The checkout's copy needs none.
+   * press takes the read under way (`take`). A folder of the checkout's copy is read early too (the big-folder pass:
+   * the tab reads a folder when it opens, not the whole tree at once); its files need none.
    */
   const REST_MS = 80;
   let resting: ReturnType<typeof setTimeout> | null = null;
   function restOn(full: string, section: string | null, kind: "file" | "dir") {
     unrest();
-    if (section === null || section.startsWith(LOCAL)) return;
-    const place = kind === "file" ? fileKey(full) : dirKey(full);
+    if (section === null || (section.startsWith(LOCAL) && kind === "file")) return;
+    const place = section.startsWith(LOCAL) ? localKey(dirKey(full)) : kind === "file" ? fileKey(full) : dirKey(full);
     if (early.has(place) || (kind === "dir" ? asked.has(full) || listings[full] !== undefined : hasDrawnFile(at, section) || full === shown)) return;
     resting = setTimeout(() => {
       resting = null;
@@ -451,6 +464,8 @@
         if (dir === "" && block?.type === "tree") sourceTop = block.commit ?? null;
         if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
         listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
+        if (block?.type === "tree" && block.read_alone) readAlone = true;
+        if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
         if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
       },
       (error) => {
@@ -471,6 +486,8 @@
     treeFailed = null;
     pathsSection = null;
     local = null;
+    readAlone = false;
+    cutDirs = {};
     movedNote = null;
     movedFrom = null;
     untrack(() => {
@@ -1425,8 +1442,20 @@
     </nav>
     {#if local !== null && !going}
       <p class="tf-gonote">
-        From your clone at <span class="tf-mono">{local.tree.commit.slice(0, 7)}</span>{local.checked ? `, the same as on ${sourceName(source)}` : ", as of the last sync"}.
+        From your clone at <span class="tf-mono">{local.commit.slice(0, 7)}</span>{local.checked ? `, the same as on ${sourceName(source)}` : ", as of the last sync"}.
       </p>
+    {/if}
+    <!-- What the source could not list at once says so under the tree, never among its rows (the big-folder pass, 2026-11-13). -->
+    {#if readAlone && local === null && !going}
+      <p class="tf-gonote">Folders past this repository's first 20,000 entries are read one at a time.</p>
+    {/if}
+    {#if !going}
+      {#each Object.entries(cutDirs).filter(([dir]) => dir === "" || open.has(dir)) as [dir, cut] (dir)}
+        <p class="tf-gonote">
+          <span class="tf-mono">{dir || title || "The top folder"}</span> shows its first {cut.shown.toLocaleString("en-US")} entries; the rest are
+          {#if cut.url}<a href={cut.url}>on {sourceName(source)}</a>{:else}on {sourceName(source)}{/if}.
+        </p>
+      {/each}
     {/if}
     {#if listings[""] !== undefined}
       <footer class="tf-ftree-keys"><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
