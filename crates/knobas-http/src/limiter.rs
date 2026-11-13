@@ -22,7 +22,7 @@
 //! next limiter for the origin is built: one already held keeps waiting on
 //! what governed when the last one was.
 //!
-//! A changed quota is a new governor limiter, which every holder waits on
+//! A changed quota is a new limiter, which every holder waits on
 //! from its next request. Two sources at different quotas on one server,
 //! syncing one after the other, would be handed a fresh burst on every
 //! alternation if either kind of change started full. Both count the
@@ -67,15 +67,19 @@
 //! quota is not all a busy server spends: measured on the scale estate, a
 //! Gitea that answers a pull request in 50 ms took 2.2 s with a backfill's
 //! eight repositories in flight, so a sync that only gave up its turn at the
-//! quota still loaded the server under the person's read. The lane
-//! only decides **who takes the next request the quota lets through**: every
-//! request of either lane passes the same governor limiter, so the origin
-//! sees no more requests a second, and no bigger burst, than before.
+//! quota still loaded the server under the person's read. And the sync
+//! **leaves half the burst** ([`Paced`]): a background request goes only
+//! while half the burst could still go at once after it, so a page's first
+//! requests go at once even while a sync keeps the quota full, rather than
+//! one a refill apart. The lane only decides **who takes which request the
+//! quota lets through**: every request of either lane passes the same
+//! limiter, so the origin sees no more requests a second, and no bigger
+//! burst, than before.
 //!
 //! **The sync is not starved** ([`BACKGROUND_FLOOR`]): once an origin's
 //! background requests have stood aside for a second without one let
-//! through, the next one stops yielding and takes the next request the quota
-//! lets through, as any request did before the lane. A person's requests
+//! through, the next one stops yielding and keeps no reserve: it takes the
+//! next request the quota lets through, as any request did before the lane. A person's requests
 //! that trickle below the quota leave the sync the rest of it; ones that
 //! fill it for longer than a second still leave the sync about one request
 //! a second.
@@ -88,53 +92,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
-use governor::clock::{Clock, Reference};
-use governor::middleware::NoOpMiddleware;
-use governor::nanos::Nanos;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
 use tokio::time::Instant;
-
-type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, TokioClock, NoOpMiddleware<Tick>>;
-
-/// Governor's clock, read from tokio's ([`tokio::time::Instant`]): the
-/// monotonic clock, unless a test paused tokio's (#1925).
-#[derive(Debug, Clone, Copy, Default)]
-struct TokioClock;
-
-impl Clock for TokioClock {
-    type Instant = Tick;
-
-    fn now(&self) -> Tick {
-        Tick(Instant::now())
-    }
-}
-
-/// One reading of [`TokioClock`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Tick(Instant);
-
-impl std::ops::Add<Nanos> for Tick {
-    type Output = Self;
-
-    fn add(self, other: Nanos) -> Self {
-        Self(self.0 + Duration::from(other))
-    }
-}
-
-impl Reference for Tick {
-    fn duration_since(&self, earlier: Self) -> Nanos {
-        self.0.saturating_duration_since(earlier.0).into()
-    }
-
-    /// `duration` before this reading, or this reading itself where that
-    /// would fall before the clock's start: what governor's trait asks for,
-    /// and what its own clocks do.
-    fn saturating_sub(&self, duration: Nanos) -> Self {
-        Self(self.0.checked_sub(duration.into()).unwrap_or(self.0))
-    }
-}
 
 /// One instance origin's share of the process-wide rate limit.
 ///
@@ -400,6 +359,12 @@ impl Rate {
         }
     }
 
+    /// How many of the burst a background request leaves for a person's
+    /// ([`Paced`]): half, rounded down, so a burst of one keeps none.
+    fn reserve(self) -> u32 {
+        self.burst.get() / 2
+    }
+
     /// How many requests this rate refills in `idle`, rounded down and not
     /// capped at the burst.
     fn refilled_in(self, idle: Duration) -> u128 {
@@ -517,15 +482,26 @@ impl Slot {
             Lane::Interactive => paced.until_ready().await,
             Lane::Background => {
                 let mut stood_aside = None;
+                let began = Instant::now();
                 loop {
                     self.yield_to_interactive(&mut stood_aside).await;
-                    match paced.limiter.check() {
+                    // The reserve is kept until the floor: past it, the sync
+                    // takes what any request would.
+                    let floor = began.max(self.last_background()) + BACKGROUND_FLOOR;
+                    let reserve = if Instant::now() >= floor {
+                        0
+                    } else {
+                        paced.rate.reserve()
+                    };
+                    match paced.take(1, reserve) {
                         Ok(()) => {
                             self.background_granted();
                             return;
                         }
-                        Err(not_until) => {
-                            tokio::time::sleep(not_until.wait_time_from(TokioClock.now())).await;
+                        // Woken at the floor at the latest, where the reserve
+                        // is no longer kept from it.
+                        Err(at) => {
+                            tokio::time::sleep_until(at.min(floor.max(Instant::now()))).await
                         }
                     }
                 }
@@ -581,8 +557,8 @@ impl Slot {
     /// Count `asked` until the returned registration is dropped, and set the
     /// quota to the stricter of every live holder's.
     ///
-    /// A changed quota is a new governor limiter -- governor cannot change
-    /// the quota of one it has built -- and every holder waits on it from its
+    /// A changed quota is a new limiter ([`Paced`] keeps the quota it was
+    /// built with), and every holder waits on it from its
     /// next request. One looser in either field starts with what its rate
     /// refilled since the origin's last request ([`Paced::loosened`]), so a
     /// loosening hands out what the quiet earned and nothing the limiter it
@@ -639,10 +615,30 @@ impl Slot {
     }
 }
 
-/// A governor limiter and the quota it was built with.
+/// One quota's limiter: the generic cell rate algorithm (GCRA) on tokio's
+/// clock, the arithmetic governor did before it (2026-11-13), with a
+/// tolerance a caller may take smaller.
+///
+/// It keeps one instant, the **theoretical arrival time**: when the next
+/// request would be on time if every request so far had gone exactly one
+/// [interval](Self::interval) apart. A request goes when that is at most
+/// `burst - 1` intervals ahead of now, and moves it one interval on: so a
+/// full limiter lets `burst` through at once and then one an interval. A
+/// caller that keeps a **reserve** of `r` asks for it to be at most
+/// `burst - 1 - r` intervals ahead: it goes only while `r` more could still
+/// go at once after it, which no other caller is held to. The background
+/// lane keeps half the burst that way ([`Rate::reserve`]), so a person's
+/// first requests go at once even while a sync keeps the quota full; the
+/// server sees no more at once, nor more a second, than the burst and rate
+/// allow whoever sends them.
 struct Paced {
     rate: Rate,
-    limiter: DirectLimiter,
+    /// One request's share of a second: a second over the rate, rounded
+    /// down to the nanosecond as governor's did.
+    interval: Duration,
+    /// The theoretical arrival time; `None` for a limiter nothing has gone
+    /// through, which has its whole burst.
+    tat: Mutex<Option<Instant>>,
 }
 
 impl Paced {
@@ -650,19 +646,51 @@ impl Paced {
     fn new(rate: Rate) -> Self {
         Self {
             rate,
-            limiter: RateLimiter::direct_with_clock(
-                Quota::per_second(rate.per_second).allow_burst(rate.burst),
-                TokioClock,
-            ),
+            interval: Duration::from_secs(1) / rate.per_second.get(),
+            tat: Mutex::new(None),
         }
     }
 
-    /// Wait until the limiter lets one request through: governor's
-    /// `until_ready`, sleeping on tokio's timer rather than its own, so the
-    /// wait keeps the clock the limiter reads (#1925).
+    /// Let `n` requests through at once if they fit with `reserve` more
+    /// still able to go after them, or say when they would.
+    ///
+    /// # Errors
+    ///
+    /// The instant they would fit, if no one else went before; `None`-like
+    /// far future where `n` can never fit (more than the burst).
+    fn take(&self, n: u32, reserve: u32) -> Result<(), Instant> {
+        let now = Instant::now();
+        let mut tat = self.tat.lock().unwrap_or_else(PoisonError::into_inner);
+        let burst = self.rate.burst.get();
+        let tolerance = self.interval * burst.saturating_sub(1).saturating_sub(reserve);
+        let from = tat.unwrap_or(now).max(now);
+        // The last of the `n` is on time when its own arrival time is within
+        // the tolerance of now.
+        let last = from + self.interval * n.saturating_sub(1);
+        let ahead = last.saturating_duration_since(now);
+        if n <= burst && ahead <= tolerance {
+            *tat = Some(from + self.interval * n);
+            Ok(())
+        } else {
+            Err(now + ahead.saturating_sub(tolerance))
+        }
+    }
+
+    /// How many requests could go at once right now.
+    fn left(&self) -> u32 {
+        let now = Instant::now();
+        let tat = *self.tat.lock().unwrap_or_else(PoisonError::into_inner);
+        let ahead = tat.unwrap_or(now).saturating_duration_since(now);
+        let tolerance = self.interval * self.rate.burst.get();
+        let room = tolerance.saturating_sub(ahead);
+        u32::try_from(room.as_nanos() / self.interval.as_nanos().max(1)).unwrap_or(u32::MAX)
+    }
+
+    /// Wait until the limiter lets one request through, on tokio's timer, so
+    /// the wait keeps the clock the limiter reads (#1925).
     async fn until_ready(&self) {
-        while let Err(not_until) = self.limiter.check() {
-            tokio::time::sleep(not_until.wait_time_from(TokioClock.now())).await;
+        while let Err(at) = self.take(1, 0) {
+            tokio::time::sleep_until(at).await;
         }
     }
 
@@ -694,7 +722,7 @@ impl Paced {
     /// Send `n` requests' worth through the limiter at once if it has them,
     /// and say whether it did. Nothing waits; zero always fits.
     fn spend(&self, n: u32) -> bool {
-        NonZeroU32::new(n).is_none_or(|n| matches!(self.limiter.check_n(n), Ok(Ok(()))))
+        n == 0 || self.take(n, 0).is_ok()
     }
 
     /// A limiter at `rate`, no looser in either field than `old`'s, taking
@@ -722,23 +750,14 @@ impl Paced {
     }
 
     /// Take every request this limiter could send at once, and count them.
-    ///
-    /// Governor has no reading of what a limiter has left, so it is taken in
-    /// halving steps from the largest power of two within the burst: each
-    /// step that fits is kept, and what is left after it is less than the
-    /// step, so the sum is the count. A token that refills between two steps
-    /// can be missed, which only ever counts low.
     fn take_left(&self) -> u32 {
-        let mut left = 0;
-        let mut step = 1 << self.rate.burst.ilog2();
-        loop {
-            if self.spend(step) {
-                left += step;
-            }
-            if step == 1 {
-                return left;
-            }
-            step /= 2;
+        let left = self.left();
+        // What `left` counted fits unless another caller took some between
+        // the two, and then it is counted again.
+        if self.spend(left) {
+            left
+        } else {
+            self.take_left()
         }
     }
 }
@@ -1081,17 +1100,34 @@ mod tests {
             Duration::from_millis(n)
         }
 
+        /// Whether `grants`, sorted, are requests a server held to `rate`
+        /// a second with a burst of `burst` could have been sent: replayed
+        /// through the quota's own arithmetic, none early. The first one
+        /// early, where one is.
+        fn early(grants: &[Duration], rate: u32, burst: u32) -> Option<Duration> {
+            let interval = Duration::from_secs(1) / rate;
+            let mut tat = Duration::ZERO;
+            grants.iter().copied().find(|&at| {
+                let from = tat.max(at);
+                let early = from - at > interval * (burst - 1);
+                tat = from + interval;
+                early
+            })
+        }
+
         /// A sync's twenty requests queued at the start, and a person's
         /// eight arriving a few at a time while they wait, at ten a second
         /// with a burst of five: run once with the person's requests in the
         /// interactive lane and once in the background one, beside the sync
-        /// as they waited before the lane. The instants the quota lets a
-        /// request through are the same both times, request for request:
-        /// the lane changes who goes, never when, so the origin sees the
-        /// same rate and the same burst. And in the first run every one of
-        /// the person's goes before any sync request still waiting.
+        /// as they waited before the lane. Both runs are within the quota,
+        /// replayed through its arithmetic: the origin sees no more a second
+        /// and no bigger burst whoever sends. With the lane, the person's
+        /// first two of each few go the moment they arrive, out of the half
+        /// of the burst the sync leaves, and the third at the next refill;
+        /// the sync ends when it would have with the burst its own but for
+        /// the two it left, 200 ms at ten a second.
         #[tokio::test(start_paused = true)]
-        async fn the_lane_reorders_who_goes_and_never_how_many_or_when() {
+        async fn the_lane_changes_who_goes_and_never_how_many() {
             async fn run(origin: &str, person: Lane) -> Vec<(Lane, Duration)> {
                 let url = url::Url::parse(origin).expect("url");
                 let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 5));
@@ -1107,7 +1143,8 @@ mod tests {
                     handles.push(send(&limiter, person, start, ms(at), &grants));
                 }
                 all(handles).await;
-                let grants = grants.lock().unwrap().clone();
+                let mut grants = grants.lock().unwrap().clone();
+                grants.sort_by_key(|g| g.1);
                 grants
             }
 
@@ -1115,15 +1152,10 @@ mod tests {
             let unlaned = run("http://unlaned.invalid:2479", Lane::Background).await;
 
             let when = |grants: &[(Lane, Duration)]| grants.iter().map(|g| g.1).collect::<Vec<_>>();
-            assert_eq!(laned.len(), 28);
-            assert_eq!(when(&laned), when(&unlaned), "the same instants, in order");
-            // Ten a second with a burst of five: the five at once, then one
-            // every 100 ms.
-            let expected: Vec<Duration> =
-                (0..28u64).map(|n| ms(n.saturating_sub(4) * 100)).collect();
-            assert_eq!(when(&laned), expected);
-            // Each of the person's requests is let through at the first
-            // instant the quota has one after it arrived.
+            assert_eq!((laned.len(), unlaned.len()), (28, 28));
+            assert_eq!(early(&when(&laned), 10, 5), None, "{laned:?}");
+            assert_eq!(early(&when(&unlaned), 10, 5), None, "{unlaned:?}");
+            assert_eq!(laned.last().map(|g| g.1), Some(ms(2_500)));
             let person: Vec<Duration> = laned
                 .iter()
                 .filter(|g| g.0 == Lane::Interactive)
@@ -1131,7 +1163,63 @@ mod tests {
                 .collect();
             assert_eq!(
                 person,
-                [400, 500, 600, 1_000, 1_100, 1_600, 1_700, 1_800].map(ms)
+                [350, 350, 400, 905, 910, 1_501, 1_501, 1_600].map(ms)
+            );
+        }
+
+        /// The checker above is no rubber stamp: a sixth request at once, or
+        /// one sooner than a refill after the burst, is early.
+        #[test]
+        fn a_burst_past_the_quota_is_early() {
+            assert_eq!(early(&[ms(0); 5], 10, 5), None);
+            assert_eq!(early(&[ms(0); 6], 10, 5), Some(ms(0)));
+            let mut steady = vec![ms(0); 5];
+            steady.extend([ms(100), ms(150)]);
+            assert_eq!(early(&steady, 10, 5), Some(ms(150)));
+        }
+
+        /// A sync keeping the quota full leaves half the burst: a person's
+        /// page of two requests goes at once, where it waited a refill for
+        /// each before the reserve (the priority lane, 2026-11-13).
+        #[tokio::test(start_paused = true)]
+        async fn a_persons_first_requests_go_at_once_beside_a_full_sync() {
+            let url = url::Url::parse("http://reserve.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let sync = {
+                let (limiter, grants) = (limiter.clone(), Arc::clone(&grants));
+                tokio::spawn(on_lane(Lane::Background, async move {
+                    while start.elapsed() < ms(2_000) {
+                        limiter
+                            .until_ready_within(Duration::from_secs(60))
+                            .await
+                            .expect("let through");
+                        grants
+                            .lock()
+                            .unwrap()
+                            .push((Lane::Background, start.elapsed()));
+                    }
+                }))
+            };
+            let person: Vec<_> = [1_050, 1_050]
+                .into_iter()
+                .map(|at| send(&limiter, Lane::Interactive, start, ms(at), &grants))
+                .collect();
+            all(person).await;
+            sync.await.expect("the sync");
+
+            let mut grants = grants.lock().unwrap().clone();
+            grants.sort_by_key(|g| g.1);
+            let person: Vec<Duration> = grants
+                .iter()
+                .filter(|g| g.0 == Lane::Interactive)
+                .map(|g| g.1)
+                .collect();
+            assert_eq!(person, [ms(1_050), ms(1_050)]);
+            assert_eq!(
+                early(&grants.iter().map(|g| g.1).collect::<Vec<_>>(), 10, 4),
+                None
             );
         }
 

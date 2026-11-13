@@ -22,7 +22,6 @@ test-util = ["tokio/rt"]
 # For `Bytes`, the chunk type of a streamed body; already in the tree through
 # reqwest (issue #1012).
 bytes = "1"
-governor.workspace = true
 # The body cap (#1640): a response's body is re-wrapped through `http`'s
 # `Response` and read through an `http_body::Body` that counts it. Both are
 # the copies reqwest already resolves.
