@@ -382,7 +382,7 @@ test("Add an application: placeholders insert, the preview fills this checkout, 
   await settle();
   expect(command.value).toBe("MyGitViewer {path}");
   // A path with a space is quoted for the reader, as the backend keeps it one argument.
-  expect(text(dialog.querySelector("pre"))).toBe("MyGitViewer '/Users/mara/My Code/payout-service'");
+  expect(text(dialog.querySelector("pre"))).toBe('MyGitViewer "/Users/mara/My Code/payout-service"');
   expect(dialog.querySelectorAll("[role='status']")).toHaveLength(0);
 
   type(command, "MyGitViewer {path} | tee log");
