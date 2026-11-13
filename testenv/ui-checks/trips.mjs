@@ -112,6 +112,10 @@
 //   scroller-tab  Round 17. `scroller` at `at`, a real press in its words, then Tab. Fails if the scroller moves, or if focus lands on nothing.
 //   pane-esc      Round 17. A real press in the pane's words, then Esc. Fails unless the address moved, focus left the pane, and the next ↓ walks.
 //
+//   app-page      The application page (PR #2479, 2026-11-13). From `route` (a repository), *Open in… › Add an application*, the page
+//                 must be at its address; name and command typed, the second repository picked, *It will run* must name that repository's
+//                 checkout; *Try it* must start it there, *Add application* must save and go back to `route`, whose *Open in…* then lists it.
+//
 //   rows-still    The still-rows pass (PR #2479, 2026-11-11; Björn: "another repo just pops in where my cursor was"). Records the box of every
 //                 `rows` element in view, each frame, from the first draw (3 rows, or all there are) until the page has settled, and fails if
 //                 one of those rows moves or changes height, leaves, or a row comes in above one of them in its column. `query` holds `fake-late`, so each
@@ -133,6 +137,9 @@ const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 // A hidden monitor adds the fold's own row, so a Hide would otherwise leave the count alone.
 const MONITOR_ROWS = ".tf-mon tbody tr:not(.tf-mon-foldrow)";
 const RUN = "build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187";
+
+// The application page's trips start with its name and command typed.
+const APP_TYPED = [{ wait: 600 }, { fill: "#tf-app-name", text: "MyGitViewer" }, { fill: "#tf-app-command", text: "MyGitViewer {path}" }, { wait: 300 }];
 
 // The still-rows trips' fixture: Björn's scale, each read landing late, and `window.__fake` to grow the corpus and end a run.
 const STILL_Q = "&fake-scale&fake-sources-healthy&fake-hooks&fake-late=list_entities:250,code_facts:700,entity_checkouts:900,list_sources:150,filter_suggestions:400,mini_board:200,inbox_items:250";
@@ -206,6 +213,32 @@ const PAGES = [
   { page: "Settings, Applications", route: "settings/checkouts", trips: [
     { id: "make-default", kind: "enter-twice", finding: "F-646", press: { sel: ".tf-main button", text: "Make default" } },
     { id: "default-undo", kind: "undo-stale", strict: true, finding: "F-648", changes: [{ sel: ".tf-stg-apps button", text: "Make default", row: "Terminal" }, { sel: ".tf-stg-apps button", text: "Make default", row: "Fork" }], value: "[...document.querySelectorAll('.tf-stg-apps tbody tr')].find((r) => [...r.querySelectorAll('.tf-chip')].some((c) => c.textContent.trim() === 'Default'))?.querySelector('b')?.textContent.trim() ?? null" },
+  ] },
+  // The application page (PR #2479, 2026-11-13): every press it brought, twice by key, twice with the pointer still, and left during its toast.
+  { page: "Settings, adding an application", route: "settings/checkouts/add/mock%3Atidewater%2Fpayout-service", trips: [
+    { id: "app-try-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" } },
+    { id: "app-try-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", once: true, prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" } },
+    { id: "app-try-leave", kind: "leave-back", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" }, rows: ".tf-apprun", rowsStay: true, via: "inbox" },
+    { id: "app-add-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Add application" }, leaves: true },
+    { id: "app-add-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", once: true, prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Add application" } },
+    { id: "app-add-leave", kind: "leave-back", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Add application" }, rows: ".tf-stg-apps tbody tr", rowsStay: true, via: "inbox", backTo: "settings/checkouts" },
+    { id: "app-cancel-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Cancel" }, leaves: true },
+  ] },
+  { page: "Settings, an application", route: "settings/checkouts/app/fork", trips: [
+    { id: "app-save-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: [{ wait: 600 }, { fill: "#tf-app-command", text: "open -a Fork --new {path}" }, { wait: 200 }], press: { sel: ".tf-apppage button", text: "Save" }, leaves: true },
+    { id: "app-remove-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: [{ wait: 600 }], press: { sel: ".tf-apppage button", text: "Remove" }, leaves: true },
+    { id: "app-remove-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", once: true, prep: [{ wait: 600 }], press: { sel: ".tf-apppage button", text: "Remove" } },
+    { id: "app-remove-leave", kind: "leave-back", strict: true, finding: "apps-page", prep: [{ wait: 600 }], press: { sel: ".tf-apppage button", text: "Remove" }, rows: ".tf-stg-apps tbody tr", rowsStay: true, via: "inbox", backTo: "settings/checkouts" },
+  ] },
+  { page: "Settings, Applications' Edit and ↑", route: "settings/checkouts", trips: [
+    { id: "app-edit-link", kind: "enter-twice", strict: true, finding: "apps-page", press: { sel: ".tf-stg-apps a", text: "Edit" }, leaves: true },
+    { id: "app-move-up-key", kind: "enter-twice", strict: true, finding: "apps-page", press: { sel: ".tf-stg-apps button[aria-label='Move Fork up']" }, rows: ".tf-stg-apps tbody tr" },
+    { id: "app-move-up-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", press: { sel: ".tf-stg-apps button[aria-label='Move Fork up']" }, rows: ".tf-stg-apps tbody tr" },
+  ] },
+  { page: "A repository's Open in…", route: REPO, trips: [
+    { id: "openin-browser-key", kind: "enter-twice", strict: true, finding: "open-on-gitea", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", starts: "Browser" }, returns: "Open in…" },
+    { id: "openin-add-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", text: "Add an application" }, leaves: true },
+    { id: "app-page-flow", kind: "app-page", strict: true, finding: "apps-page" },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },
@@ -2781,7 +2814,43 @@ async function worker(queue, results) {
     return { reasons, note: notes.join("; ") };
   }
 
-  const KINDS = { "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  async function appPage(t) {
+    await open(t);
+    const reasons = [];
+    const click = (sel, words) => evaluate(`window.__trip.click(${JSON.stringify({ sel, ...words })})`);
+    const field = (sel, text) => evaluate(`window.__trip.fill(${JSON.stringify(sel)}, ${JSON.stringify(text)})`);
+    const menu = () => evaluate(`JSON.stringify([...document.querySelectorAll('[role=menuitem]')].map((item) => item.textContent.trim()))`).then(JSON.parse);
+    const from = await evaluate("location.hash");
+    if (!(await click(".tf-openin > button", { starts: "Open in" }))) throw new Error("no Open in… on the repository");
+    await sleep(400);
+    if (!(await click("[role=menuitem]", { text: "Add an application" }))) throw new Error("Open in… has no Add an application");
+    await opener.settleAfterChange();
+    const at = await evaluate("location.hash");
+    if (!at.startsWith("#/settings/checkouts/add/")) throw new Error(`Add an application went to ${at}`);
+    await sleep(600);
+    await field("#tf-app-name", "Trip App");
+    await field("#tf-app-command", "trip-app {path}");
+    const picked = await evaluate(`(() => { const s = document.querySelector('#tf-app-repo'); if (!s || s.options.length < 2) return null; s.value = s.options[1].value; s.dispatchEvent(new Event('change', { bubbles: true })); return s.options[1].textContent.split('/').pop(); })()`);
+    if (picked === null) throw new Error("Try it on offers fewer than two repositories");
+    await sleep(400);
+    const line = await evaluate(`document.querySelector('.tf-apprun code')?.textContent ?? ''`);
+    if (!line.includes(`/${picked}`)) reasons.push(`It will run reads "${line}", not ${picked}'s checkout`);
+    await click(".tf-apprun button", { text: "Try it" });
+    await sleep(700);
+    const toasts = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('.tf-toast')].map((x) => x.textContent.trim()))`));
+    if (!toasts.some((x) => x.startsWith("Started Trip App:") && x.includes(`/${picked}`))) reasons.push(`Try it said ${JSON.stringify(toasts)}, not that it started at ${picked}`);
+    await click(".tf-apppage button", { text: "Add application" });
+    await opener.settleAfterChange();
+    const back = await evaluate("location.hash");
+    if (back !== from) reasons.push(`Add application went to ${back}, not back to ${from}`);
+    await click(".tf-openin > button", { starts: "Open in" });
+    await sleep(400);
+    const items = await menu();
+    if (!items.some((item) => item.startsWith("Trip App"))) reasons.push(`Open in… lists ${JSON.stringify(items)} after the save, without Trip App`);
+    return { reasons, note: `${from} → ${at}, tried on ${picked}, saved, back at ${back}, menu ${items.length} items` };
+  }
+
+  const KINDS = { "app-page": appPage, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };

@@ -25,6 +25,7 @@
   import { appPageHash } from "../openin/app-page";
   import TfDialog from "./TfDialog.svelte";
   import TfCloneAll from "../openin/TfCloneAll.svelte";
+  import { PressHold } from "../press-hold.svelte";
 
   let {
     apps = sharedApps,
@@ -104,15 +105,26 @@
     }
   }
 
+  /**
+   * A ↑ pressed twice moves one application one place (the press rule). The whole column holds, not the row: the row moves
+   * up, so a second press under a still pointer lands on the ↑ of the row that took its place. For a second, so a person
+   * walking one up three places isn't kept waiting.
+   */
+  const upHold = new PressHold();
+  const UP_HOLD_MS = 1000;
+
   /** *↑*: the application one place up the list, saved at once. */
   async function moveUp(index: number) {
     const list = [...(apps.settings?.applications ?? [])];
     if (index < 1 || index >= list.length) return;
+    if (upHold.held()) return;
+    upHold.hold("", UP_HOLD_MS);
     const [moved] = list.splice(index, 1);
     list.splice(index - 1, 0, moved!);
     try {
       await apps.save(list, apps.settings?.default_application ?? null);
     } catch (cause) {
+      upHold.release();
       push({ text: `Could not save the order: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }

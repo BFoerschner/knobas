@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CheckoutApplicationDraft, CheckoutSettings, EntityRow, OpenObject } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
 import { pageContext } from "../kept-pages.svelte";
+import { PRESS_HOLD_MS } from "../press-hold.svelte";
 import { appPagePlace, LAST_TRIED_KEY } from "./app-page";
 import { createApps, type Apps } from "./apps.svelte";
 import TfAppPage, { forgetAppDrafts } from "./TfAppPage.svelte";
@@ -197,7 +198,7 @@ test("adding: placeholders insert, It will run fills the repository it came from
   expect(left).toBe(1);
 });
 
-test("Try it saves the draft and runs it by the id the save gave it; a second try and Save write over that entry", async () => {
+test("Try it saves the draft and runs it by the id the save gave it; pressed twice it runs once; a later try and Save write over that entry", async () => {
   await draw("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service");
   type("command", "MyGitViewer {path}");
   expect(tryButton("command").disabled).toBe(true);
@@ -206,6 +207,11 @@ test("Try it saves the draft and runs it by the id the save gave it; a second tr
 
   tryButton("command").click();
   await settle();
+  // The same press again at once is the hold's, not a second run (the press rule).
+  tryButton("command").click();
+  await settle();
+  expect(opened).toHaveLength(1);
+  await new Promise((resolve) => setTimeout(resolve, PRESS_HOLD_MS + 50));
   type("command", "MyGitViewer --new {path}");
   tryButton("command").click();
   await settle();

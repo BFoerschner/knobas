@@ -48,6 +48,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { backStep } from "../page-name.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
+  import { PressHold } from "../press-hold.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
   import {
     draftCommand,
@@ -106,7 +107,8 @@
   });
 
   const changed = $derived(!sameDraft(draft, draftFrom(saved)));
-  const ready = $derived(draft.name.trim() !== "" && draft.command.trim() !== "" && !busy);
+  const named = $derived(draft.name.trim() !== "" && draft.command.trim() !== "");
+  const ready = $derived(named && !busy);
   const why = $derived(
     busy ? null : draft.name.trim() === "" ? (draft.command.trim() === "" ? "Name it, and give its command." : "Name it first.") : draft.command.trim() === "" ? "Give its command." : null,
   );
@@ -325,10 +327,14 @@
     return (await tried?.id) ?? at.app ?? "";
   }
 
+  /** A *Try it* pressed twice runs once (the press rule): each row's press holds while it saves and starts, and a while after. */
+  const tryHold = new PressHold();
+
   async function tryIt(kind: OpenObjectKind) {
     const object = objects[kind];
     const picked = repo;
-    if (!ready || object === null || picked === null) return;
+    if (!ready || object === null || picked === null || tryHold.held(kind)) return;
+    tryHold.hold(kind);
     busy = true;
     error = null;
     const first = tried === null;
@@ -345,6 +351,8 @@
       error = ipcErrorMessage(cause);
       if (first) tried = null;
       busy = false;
+      // A refused save isn't held, so the corrected command can go at once.
+      tryHold.release(kind);
       return;
     }
     busy = false;
@@ -568,7 +576,7 @@
               <div class="tf-apprun">
                 {#if line.run !== null}
                   <code class="tf-mono" aria-label="It will run, {row.label.toLowerCase()}">{line.run}</code>
-                  <button type="button" class="tf-btn tf-sm" disabled={!ready} title={ready ? `Saves it, then runs this on ${repo?.title}` : (why ?? undefined)} onclick={() => void tryIt(row.kind)}>Try it</button>
+                  <button type="button" class="tf-btn tf-sm" disabled={!named} title={named ? `Saves it, then runs this on ${repo?.title}` : (why ?? undefined)} onclick={() => void tryIt(row.kind)}>Try it</button>
                 {:else}
                   <span class="tf-dim">{line.wait}</span>
                 {/if}
