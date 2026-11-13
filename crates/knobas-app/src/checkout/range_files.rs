@@ -332,6 +332,93 @@ async fn listing(
     new: Option<&str>,
     ignore_whitespace: bool,
 ) -> Option<(Vec<DiffFile>, bool)> {
+    listing_in(git, path, old, new, ignore_whitespace, CHUNK_OVER).await
+}
+
+/// Over this many files, the counts are read in up to [`CHUNKS`] gits at
+/// once: counting is a diff of every file's two blobs, 110 to 280 ms for
+/// 10,000 files in one git on a busy Mac, and the names alone (`--raw`) are
+/// a tenth of that.
+pub const CHUNK_OVER: usize = 1_000;
+const CHUNKS: usize = 4;
+
+/// [`listing`], counting in chunks over `chunk_over` files: `--raw` first,
+/// for every file and its paths, then `--numstat` of each chunk's paths
+/// (both of a rename's), the chunks at once. Under it, or where a chunk
+/// cannot be read or leaves a file uncounted, the one read of both.
+async fn listing_in(
+    git: &Path,
+    path: &Path,
+    old: &str,
+    new: Option<&str>,
+    ignore_whitespace: bool,
+    chunk_over: usize,
+) -> Option<(Vec<DiffFile>, bool)> {
+    let diff = |formats: &[&str]| {
+        let mut command = git_read(git, path);
+        command
+            .args([
+                "-c",
+                "diff.autoRefreshIndex=false",
+                "diff",
+                "--no-ext-diff",
+                "--no-color",
+                "--no-textconv",
+                "-M",
+                "-z",
+            ])
+            .args(formats);
+        if ignore_whitespace {
+            command.arg("-w");
+        }
+        command.arg(old);
+        if let Some(new) = new {
+            command.arg(new);
+        }
+        command.arg("--");
+        command
+    };
+    let (out, cut) = run_capped(diff(&["--raw"]), usize::MAX, READ_BYTES)
+        .await
+        .ok()?;
+    let (raws, _) = scan(&String::from_utf8_lossy(&out));
+    if !cut && raws.len() > chunk_over {
+        let per = raws.len().div_ceil(CHUNKS);
+        let mut chunks = raws.chunks(per).map(|chunk| {
+            let mut command = diff(&["--numstat"]);
+            // Literal paths: a name is the file's, never a pattern.
+            command.env("GIT_LITERAL_PATHSPECS", "1");
+            for raw in chunk {
+                command.args(&raw.paths);
+            }
+            command
+        });
+        // Joined in this task, not spawned: a read called off stops all four gits with it.
+        let (a, b, c, d) = tokio::join!(
+            counts_of(chunks.next()),
+            counts_of(chunks.next()),
+            counts_of(chunks.next()),
+            counts_of(chunks.next())
+        );
+        let counted: Option<Vec<Vec<Count>>> = [a, b, c, d].into_iter().collect();
+        if let Some(counted) = counted {
+            let by_path: std::collections::HashMap<String, (Option<u32>, Option<u32>)> = counted
+                .into_iter()
+                .flatten()
+                .map(|(added, deleted, path)| (path, (added, deleted)))
+                .collect();
+            let files: Option<Vec<DiffFile>> = raws
+                .into_iter()
+                .map(|raw| {
+                    let (added, deleted) = *by_path.get(raw.paths.last()?)?;
+                    Some(file_of(raw, added, deleted))
+                })
+                .collect();
+            if let Some(files) = files {
+                return Some((files, false));
+            }
+        }
+    }
     let mut command = git_read(git, path);
     command.args([
         "-c",
@@ -356,6 +443,16 @@ async fn listing(
     let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
     let (files, cut_inside) = parse_stat(&out, cut);
     Some((files, cut || cut_inside))
+}
+
+/// One chunk's `--numstat` records; none for no chunk, `None` where git
+/// could not answer it whole.
+async fn counts_of(command: Option<tokio::process::Command>) -> Option<Vec<Count>> {
+    let Some(command) = command else {
+        return Some(Vec::new());
+    };
+    let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
+    (!cut).then(|| scan(&String::from_utf8_lossy(&out)).1)
 }
 
 /// The list a source's three-dot compare of two tips is, at the checkout
@@ -497,13 +594,33 @@ struct Raw {
 /// short, so a last record may be partial and is dropped. Answers the files
 /// and whether a record was dropped.
 pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
-    let text = String::from_utf8_lossy(out);
+    let (raws, counts) = scan(&String::from_utf8_lossy(out));
+    let whole = raws.len().min(counts.len());
+    let dropped = raws.len() != counts.len() || (cut && whole > 0);
+    // A cut read may have stopped inside the last record whose count came.
+    let keep = if cut { whole.saturating_sub(1) } else { whole };
+    let files = raws
+        .into_iter()
+        .zip(counts)
+        .take(keep)
+        .map(|(raw, (added, deleted, _))| file_of(raw, added, deleted))
+        .collect();
+    (files, dropped)
+}
+
+/// A numstat record: its counts (`None` for a binary file's `-`) and the
+/// path it is at after the change.
+type Count = (Option<u32>, Option<u32>, String);
+
+/// The `--raw` and `--numstat` records of `-z` output, in the order git
+/// wrote them; a record cut short ends the scan.
+fn scan(text: &str) -> (Vec<Raw>, Vec<Count>) {
     let mut tokens = text
         .split('\0')
         .map(|t| t.trim_start_matches('\n'))
         .peekable();
     let mut raws: Vec<Raw> = Vec::new();
-    let mut counts: Vec<(Option<u32>, Option<u32>)> = Vec::new();
+    let mut counts: Vec<Count> = Vec::new();
     while let Some(token) = tokens.next() {
         if token.is_empty() {
             continue;
@@ -544,22 +661,17 @@ pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
         else {
             break;
         };
-        if path.is_empty() && (tokens.next().is_none() || tokens.next().is_none()) {
-            break;
-        }
-        counts.push((added.parse().ok(), deleted.parse().ok()));
+        let path = if path.is_empty() {
+            match (tokens.next(), tokens.next()) {
+                (Some(_old), Some(new)) => new.to_owned(),
+                _ => break,
+            }
+        } else {
+            path.to_owned()
+        };
+        counts.push((added.parse().ok(), deleted.parse().ok(), path));
     }
-    let whole = raws.len().min(counts.len());
-    let dropped = raws.len() != counts.len() || (cut && whole > 0);
-    // A cut read may have stopped inside the last record whose count came.
-    let keep = if cut { whole.saturating_sub(1) } else { whole };
-    let files = raws
-        .into_iter()
-        .zip(counts)
-        .take(keep)
-        .map(|(raw, (added, deleted))| file_of(raw, added, deleted))
-        .collect();
-    (files, dropped)
+    (raws, counts)
 }
 
 /// What the patch parser makes of the same file (`knobas_source::diff`): a
@@ -950,6 +1062,28 @@ mod tests {
         assert!(listed.files.iter().any(|f| f.path == "run.sh"
             && f.new_mode.as_deref() == Some("100755")
             && f.blob.is_none()));
+    }
+
+    #[tokio::test]
+    async fn the_counts_read_in_chunks_are_the_counts_read_in_one() {
+        let (dir, base, head) = repo();
+        let p = dir.path();
+        let git = git_at_checkout(p).await.unwrap();
+        let one = listing_in(&git, p, &base, Some(&head), false, usize::MAX)
+            .await
+            .unwrap();
+        // Every list over one file counted in chunks: renames, binaries and the rest split over four gits.
+        let chunked = listing_in(&git, p, &base, Some(&head), false, 1)
+            .await
+            .unwrap();
+        assert_eq!(chunked, one);
+        assert_eq!(
+            one.0,
+            whole(p, &base, &head)
+                .iter()
+                .map(super::listed)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
