@@ -27,7 +27,8 @@
 //   leave-back    press by key, which raises a toast and hides a row. While the toast is up, go to `via` and back. Fails if the rows
 //                 differ from just after the press. Can't run if the press hides no row or the toast has gone by the return.
 //                 `rowsStay`: the press isn't meant to hide one (*Save link set*), so the rows are only compared. `reopen`: what to press on the
-//                 return, for rows in something a leave closes.
+//                 return, for rows in something a leave closes. `backTo`: where to come back to, for a press that itself leaves (*Create pull
+//                 request* lands on *Pull requests*); the route by default.
 //   esc-sweep     focus each field on the page, or those in `fields`, and press Esc. Fails if focus falls to the body. For each of `typed` (a value with no
 //                 Save, which is the rule in Settings), also type a character, press Esc, leave and come back, and fails if the typed
 //                 value stayed.
@@ -288,6 +289,15 @@ const PAGES = [
   ] },
   { page: "A repository's branches", route: `${REPO}/branches`, trips: [
     { id: "new-pr-branches", kind: "enter-twice", finding: "F-241", press: { sel: ".tf-main a.tf-btn", text: "New pull request" }, leaves: true },
+    // The default branch's row offers one too, into another branch (2026-11-13: "I cannot make a pullrequest into any branch FROM master").
+    { id: "new-pr-default-row", kind: "enter-twice", finding: "from-default", press: { sel: ".tf-main a.tf-btn", text: "New pull request", row: "main" }, leaves: true },
+    { id: "new-pr-default-row-pointer", kind: "pointer-twice", strict: true, once: true, finding: "from-default", press: { sel: ".tf-main a.tf-btn", text: "New pull request", row: "main" }, rows: ".tf-rbranches tbody tr" },
+  ] },
+  { page: "Compare from the default branch", route: `${REPO}/compare/main`, trips: [
+    // *Into* is the newest other branch; *Create pull request* sends head main and lands on *Pull requests* (2026-11-13).
+    { id: "create-pr-from-default", kind: "enter-twice", finding: "from-default", prep: [{ wait: 900 }], press: { sel: ".tf-cgo .tf-primary", text: "Create pull request" }, leaves: true },
+    { id: "create-pr-from-default-pointer", kind: "pointer-twice", strict: true, once: true, finding: "from-default", prep: [{ wait: 900 }], press: { sel: ".tf-cgo .tf-primary", text: "Create pull request" } },
+    { id: "create-pr-from-default-back", kind: "leave-back", strict: true, finding: "from-default", prep: [{ wait: 900 }], press: { sel: ".tf-cgo .tf-primary", text: "Create pull request" }, rows: ".tf-main tbody tr", rowsStay: true, via: "inbox", backTo: `${REPO}/prs` },
   ] },
   { page: "A repository", route: `${REPO}/prs`, trips: [
     { id: "new-pr-repo", kind: "enter-twice", finding: "F-241", press: { sel: ".tf-main a.tf-btn", text: "New pull request" }, leaves: true },
@@ -1159,7 +1169,7 @@ async function worker(queue, results) {
     const toast = after.toasts.at(-1);
     await go(t.via);
     const away = await snap();
-    await go(t.route);
+    await go(t.backTo ?? t.route);
     await sleep(150);
     if (t.reopen) {
       if (!(await evaluate(`window.__trip.click(${JSON.stringify({ sel: t.reopen.click, text: t.reopen.text, starts: t.reopen.starts })})`))) throw new Error(`can't find ${t.reopen.click} on the return`);

@@ -219,6 +219,10 @@ _Avoid_: shortcut, hotkey, binding
 **Write-back**:
 An operation that changes data in a source: status, comment, approval, trigger, worklog, page, pausing a [monitor](#monitor). Links, contexts, notes and [blocks](#block) are never write-back; a [worklog](#worklog) is one.
 
+**Compare**:
+Where a [pull request](#kind) is proposed: *Into* is its base and *From* its head, any two branches of the repository, the default branch on either side (2026-11-13: a pull request from the default branch brings it into another). What it changes and the commits it carries are the source's compare from *Into* to *From*. A branch's own view measures the branch against the default branch, so it speaks for the compare only while *Into* is the default and *From* is not.
+_Avoid_: diff page (the diff between any two commits, at its own address), branch view
+
 **Account**:
 A second credential stored beside a source's ordinary one, in the same keychain item: a username and password, optional, for a source whose write channel its ordinary credential cannot open. Uptime Kuma is the only one: its API key opens `/metrics` and nothing else, so a Kuma with only the key reads every monitor and offers no [write-back](#write-back), and adding the account turns pause and resume on. Not an auth method, which is how a source authenticates its ordinary traffic. Added from the Add-source form or from the credential strip the sources view's **Account** button opens.
 _Avoid_: second secret, write credential, admin login
