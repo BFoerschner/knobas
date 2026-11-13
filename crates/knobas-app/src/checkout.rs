@@ -879,11 +879,7 @@ pub async fn local_tree(
         return Ok(None);
     };
     match local::tree(Path::new(&path), &tip.commit).await {
-        Some(tree) => {
-            let mut tree = (*tree).clone();
-            tree.as_of = tip.as_of;
-            Ok(Some(tree))
-        }
+        Some(tree) => Ok(Some(tree.sent(tip.as_of))),
         None => {
             if let Some(fetches) = fetches {
                 fetches
@@ -893,6 +889,89 @@ pub async fn local_tree(
             Ok(None)
         }
     }
+}
+
+/// One directory of `entity_id`'s tree read at its checkout (the big-folder
+/// pass of PR #2479, 2026-11-13): what *Files* draws for a folder, read when it
+/// opens, so the page holds what it draws and a folder past twenty thousand
+/// entries is drawn whole. With no `commit`, at the commit the mirror names
+/// for the branch, as [`local_tree`] reads it (a checkout that lacks it is
+/// fetched into behind the answer); with one, at that commit, from the tree
+/// kept for it wherever it was read, so a folder's read finds no checkout
+/// again. `None` where the checkout cannot answer, or holds no such directory.
+///
+/// # Errors
+///
+/// As [`local_tree`].
+pub async fn local_dir(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    fetches: Option<&std::sync::Arc<fetch::Fetches>>,
+    entity_id: &str,
+    commit: Option<&str>,
+    dir: &str,
+) -> Result<Option<local::LocalDir>, IpcError> {
+    let dir = dir.trim_matches('/');
+    if let Some(sha) = commit {
+        if !checkout::open::is_sha(sha) {
+            return Ok(None);
+        }
+        if let Some(tree) = local::kept_at(sha) {
+            return Ok(local::listing(&tree, dir, None));
+        }
+        let checkout = resolve(pool, entity_id).await?;
+        let Some(path) = checkout.path else {
+            return Ok(None);
+        };
+        return Ok(local::tree(Path::new(&path), sha)
+            .await
+            .and_then(|tree| local::listing(&tree, dir, None)));
+    }
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    let Some(tip) = mirror_tip(pool, registry, entity_id).await? else {
+        return Ok(None);
+    };
+    match local::tree(Path::new(&path), &tip.commit).await {
+        Some(tree) => Ok(local::listing(&tree, dir, tip.as_of)),
+        None => {
+            if let Some(fetches) = fetches {
+                fetches
+                    .behind(pool, registry, entity_id, &path, &tip.commit)
+                    .await;
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Every file of `entity_id`'s tree at `commit` (a sha [`local_dir`]
+/// answered), read at its checkout (the big-folder pass): what *Go to file*
+/// filters. `None` where the checkout cannot answer.
+///
+/// # Errors
+///
+/// As [`local_tree`].
+pub async fn local_paths(
+    pool: &PgPool,
+    entity_id: &str,
+    commit: &str,
+) -> Result<Option<local::LocalPaths>, IpcError> {
+    if !checkout::open::is_sha(commit) {
+        return Ok(None);
+    }
+    if let Some(tree) = local::kept_at(commit) {
+        return Ok(Some(local::paths(&tree)));
+    }
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    Ok(local::tree(Path::new(&path), commit)
+        .await
+        .map(|tree| local::paths(&tree)))
 }
 
 /// The file at `file` in `entity_id`'s tree at `commit`, read at its

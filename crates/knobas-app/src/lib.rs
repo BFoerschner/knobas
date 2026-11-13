@@ -781,6 +781,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The smoothness pass's local reads (PR #2479, ADR-0041),
         // appended at the foot: the list is append-only (§10.8).
         commands::entity::entity_local_tree,
+        commands::entity::entity_local_dir,
+        commands::entity::entity_local_paths,
         commands::entity::entity_local_file,
         commands::entity::entity_source_range_diff,
         commands::entity::clone_all_plan,

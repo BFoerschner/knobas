@@ -2753,6 +2753,36 @@ export type LinkSetRuleRow = { kind: LinkSetRuleKind, value: string,
 title: string | null, };
 
 /**
+ * One directory of a tree read at a checkout (the big-folder pass of PR
+ * #2479, 2026-11-13): what *Files* draws for a folder, read when it opens,
+ * instead of the whole tree at the tab's open.
+ */
+export type LocalDir = { 
+/**
+ * The whole sha the tree was read at.
+ */
+commit: string, 
+/**
+ * When the mirror last stored that tip (RFC 3339), for a read at the
+ * mirror's tip; `None` for a read at a commit named.
+ */
+as_of: string | null, 
+/**
+ * The directory, from the top (`""` the top itself).
+ */
+dir: string, 
+/**
+ * Its entries, each by its whole path, in git's order.
+ */
+entries: Array<LocalEntry>, 
+/**
+ * Every entry of the directory is here. `false` only where the read of
+ * a tree past [`KEPT_CAP`] was cut in or before it: the shell reads it
+ * from the source instead.
+ */
+complete: boolean, };
+
+/**
  * One entry of a tree read at a checkout.
  *
  * The smoothness pass (PR #2479).
@@ -2766,6 +2796,24 @@ path: string, kind: EntryKind,
  * A file's size in bytes; `None` for a directory or a submodule.
  */
 size: number | null, };
+
+/**
+ * Every file of a tree read at a checkout, by its whole path (the big-folder
+ * pass): what *Go to file* filters.
+ */
+export type LocalPaths = { 
+/**
+ * The whole sha the tree was read at.
+ */
+commit: string, 
+/**
+ * The files and links, in git's order.
+ */
+entries: Array<LocalEntry>, 
+/**
+ * The read stopped at [`KEPT_CAP`].
+ */
+truncated: boolean, };
 
 /**
  * A repository's whole tree at one commit, as its checkout holds it.

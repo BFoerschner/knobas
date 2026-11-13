@@ -26,7 +26,7 @@
 //! Each argument is a checked sha (`is_sha`). A file is cut and named as the
 //! source's view cuts and names it ([`knobas_source::file_text`]).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
@@ -43,12 +43,21 @@ use super::working_tree::{APPLE_SHIM, command_line_tools_installed, is_dir_off_r
 /// How long one local read may take before the source is asked instead.
 pub const TIMEOUT: std::time::Duration = super::range::TIMEOUT;
 
-/// The most entries a tree read here carries: the source's own walk stops at
-/// twenty thousand (`knobas-source-gitea`'s `TREE_PAGES`), and this one too.
+/// The most entries `entity_local_tree`'s answer carries: the source's own
+/// walk stops at twenty thousand (`knobas-source-gitea`'s `TREE_PAGES`), and
+/// that answer too. The tree kept here is not cut there (the big-folder pass
+/// of PR #2479, 2026-11-13): a directory is answered from it whole
+/// ([`listing`]), so a folder past the twenty thousandth entry is drawn, not
+/// left out.
 pub const ENTRY_CAP: usize = 20_000;
 
-/// The most of `ls-tree`'s answer read: twenty thousand long paths.
-const LISTING_BYTES: usize = 16 * 1024 * 1024;
+/// The most entries a tree read here keeps: two million, far past any
+/// repository a person browses. A tree past it is cut, and the directories
+/// the cut fell in say they are not whole ([`LocalDir::complete`]).
+pub const KEPT_CAP: usize = 2_000_000;
+
+/// The most of `ls-tree`'s answer read: about two million long paths.
+const LISTING_BYTES: usize = 256 * 1024 * 1024;
 
 /// How many trees are kept in memory: a few repositories' current branch.
 const KEPT: usize = 8;
@@ -85,6 +94,147 @@ pub struct LocalTree {
     pub entries: Vec<LocalEntry>,
     /// [`ENTRY_CAP`] or the read's own cap stopped it short.
     pub truncated: bool,
+    /// Each directory's entries, by their place in `entries`, `""` the top:
+    /// what a directory is answered from ([`listing`]). Never sent.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub children: HashMap<String, Vec<usize>>,
+}
+
+/// One directory of a tree read at a checkout (the big-folder pass of PR
+/// #2479, 2026-11-13): what *Files* draws for a folder, read when it opens,
+/// instead of the whole tree at the tab's open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct LocalDir {
+    /// The whole sha the tree was read at.
+    pub commit: String,
+    /// When the mirror last stored that tip (RFC 3339), for a read at the
+    /// mirror's tip; `None` for a read at a commit named.
+    pub as_of: Option<String>,
+    /// The directory, from the top (`""` the top itself).
+    pub dir: String,
+    /// Its entries, each by its whole path, in git's order.
+    pub entries: Vec<LocalEntry>,
+    /// Every entry of the directory is here. `false` only where the read of
+    /// a tree past [`KEPT_CAP`] was cut in or before it: the shell reads it
+    /// from the source instead.
+    pub complete: bool,
+}
+
+/// Every file of a tree read at a checkout, by its whole path (the big-folder
+/// pass): what *Go to file* filters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct LocalPaths {
+    /// The whole sha the tree was read at.
+    pub commit: String,
+    /// The files and links, in git's order.
+    pub entries: Vec<LocalEntry>,
+    /// The read stopped at [`KEPT_CAP`].
+    pub truncated: bool,
+}
+
+impl LocalTree {
+    /// A tree of `entries` read at `commit`, indexed by directory.
+    pub fn new(commit: String, entries: Vec<LocalEntry>, truncated: bool) -> Self {
+        let mut children: HashMap<String, Vec<usize>> = HashMap::new();
+        for (at, entry) in entries.iter().enumerate() {
+            let up = entry.path.rsplit_once('/').map_or("", |(up, _)| up);
+            children.entry(up.to_owned()).or_default().push(at);
+        }
+        Self {
+            commit,
+            as_of: None,
+            entries,
+            truncated,
+            children,
+        }
+    }
+
+    /// The answer `entity_local_tree` sends: the first [`ENTRY_CAP`] entries,
+    /// cut there as it always was, no index.
+    pub fn sent(&self, as_of: Option<String>) -> Self {
+        Self {
+            commit: self.commit.clone(),
+            as_of,
+            entries: self.entries.iter().take(ENTRY_CAP).cloned().collect(),
+            truncated: self.truncated || self.entries.len() > ENTRY_CAP,
+            children: HashMap::new(),
+        }
+    }
+
+    /// Whether `dir` is a directory of this tree (`""` always is).
+    fn has_dir(&self, dir: &str) -> bool {
+        dir.is_empty()
+            || self.children.contains_key(dir)
+            || self
+                .entries
+                .iter()
+                .any(|e| e.path == dir && e.kind == EntryKind::Dir)
+    }
+
+    /// Whether every entry of `dir` was read. In git's order a directory's
+    /// entries follow it together, so where the read was cut the only
+    /// directories it cut short are the last entry's own; one past the cut
+    /// was not read at all.
+    fn whole(&self, dir: &str) -> bool {
+        if !self.truncated {
+            return true;
+        }
+        let Some(last) = self.entries.last() else {
+            return false;
+        };
+        self.has_dir(dir)
+            && !dir.is_empty()
+            && last.path != dir
+            && !last.path.starts_with(&format!("{dir}/"))
+    }
+}
+
+/// `dir` of `tree`, `None` where the tree holds no such directory.
+pub fn listing(tree: &LocalTree, dir: &str, as_of: Option<String>) -> Option<LocalDir> {
+    let complete = tree.whole(dir);
+    if complete && !tree.has_dir(dir) {
+        return None;
+    }
+    let entries = tree
+        .children
+        .get(dir)
+        .map(|at| at.iter().map(|&i| tree.entries[i].clone()).collect())
+        .unwrap_or_default();
+    Some(LocalDir {
+        commit: tree.commit.clone(),
+        as_of,
+        dir: dir.to_owned(),
+        entries,
+        complete,
+    })
+}
+
+/// Every file and link of `tree`.
+pub fn paths(tree: &LocalTree) -> LocalPaths {
+    LocalPaths {
+        commit: tree.commit.clone(),
+        entries: tree
+            .entries
+            .iter()
+            .filter(|e| matches!(e.kind, EntryKind::File | EntryKind::Symlink))
+            .cloned()
+            .collect(),
+        truncated: tree.truncated,
+    }
+}
+
+/// A tree kept at `sha` at any checkout: a commit's tree is the same wherever
+/// it is read, so a folder of a tree read once needs no checkout found again.
+pub fn kept_at(sha: &str) -> Option<Arc<LocalTree>> {
+    let trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
+    trees
+        .iter()
+        .rev()
+        .find(|(_, commit, tree)| commit == sha || tree.commit == sha)
+        .map(|(_, _, tree)| tree.clone())
 }
 
 /// One kept tree: the checkout it was read at, the sha asked, and the tree.
@@ -144,12 +294,7 @@ pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<Loc
         command.arg(&whole);
         let (out, cut) = run_capped(command, usize::MAX, LISTING_BYTES).await.ok()?;
         let (entries, short) = parse_listing(&out);
-        Some(Arc::new(LocalTree {
-            commit: whole,
-            as_of: None,
-            entries,
-            truncated: cut || short,
-        }))
+        Some(Arc::new(LocalTree::new(whole, entries, cut || short)))
     };
     let tree = tokio::time::timeout(TIMEOUT, read).await.ok().flatten()?;
     keep(path, tree.clone());
@@ -170,7 +315,7 @@ fn keep_alias(path: &Path, sha: &str, tree: &Arc<LocalTree>) {
 
 /// `ls-tree -r -t -z --long`'s records: `<mode> <type> <object> <size>\t<path>`,
 /// each ended by a NUL. A record the read cut off is dropped. The second
-/// value says [`ENTRY_CAP`] stopped it.
+/// value says [`KEPT_CAP`] stopped it.
 fn parse_listing(out: &[u8]) -> (Vec<LocalEntry>, bool) {
     let mut records: Vec<&[u8]> = out.split(|b| *b == 0).collect();
     // The last piece is empty after a whole answer, and a part record after a
@@ -178,7 +323,7 @@ fn parse_listing(out: &[u8]) -> (Vec<LocalEntry>, bool) {
     records.pop();
     let mut entries = Vec::new();
     for record in records {
-        if entries.len() >= ENTRY_CAP {
+        if entries.len() >= KEPT_CAP {
             return (entries, true);
         }
         let Some(tab) = record.iter().position(|b| *b == b'\t') else {
@@ -438,6 +583,113 @@ mod tests {
         assert_eq!(std::fs::read(dir.path().join(".git/index")).unwrap(), index);
         assert_eq!(git(dir.path(), &["for-each-ref"]), refs);
         assert_eq!(git(dir.path(), &["status", "--porcelain"]), status);
+    }
+
+    /// A repository of `a/` with 25,000 files and then `z/` with 300, made by
+    /// `git fast-import`: past twenty thousand entries, `z` sorts after them.
+    fn big_repo() -> (tempfile::TempDir, String) {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "--bare"]);
+        let mut stream = String::from(
+            "commit refs/heads/main\ncommitter t <t@knobas.invalid> 1794528000 +0000\ndata 4\nbig\n",
+        );
+        let mut file = |path: String| {
+            stream.push_str(&format!("M 100644 inline {path}\ndata 2\nx\n\n"));
+        };
+        for n in 0..25_000 {
+            file(format!("a/f{n:05}.txt"));
+        }
+        for n in 0..300 {
+            file(format!("z/g{n:03}.txt"));
+        }
+        let mut child = std::process::Command::new("git")
+            .arg("-C")
+            .arg(p)
+            .args(["fast-import", "--quiet"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stream.as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let sha = git(p, &["rev-parse", "main"]);
+        (dir, sha)
+    }
+
+    /// The big-folder pass (2026-11-13): a tree past twenty thousand entries
+    /// is kept whole, so a folder after the twenty thousandth is answered with
+    /// every entry, where the read cut at twenty thousand left it out and the
+    /// tab drew the tree as if whole. `entity_local_tree`'s own answer is cut
+    /// where it always was.
+    #[tokio::test]
+    async fn a_folder_past_twenty_thousand_entries_is_answered_whole() {
+        let (dir, sha) = big_repo();
+        let tree = tree(dir.path(), &sha).await.expect("the tree reads");
+        assert!(!tree.truncated);
+        let z = listing(&tree, "z", None).expect("z is there");
+        assert!(z.complete);
+        assert_eq!(z.entries.len(), 300);
+        assert_eq!(z.entries[299].path, "z/g299.txt");
+        let a = listing(&tree, "a", None).unwrap();
+        assert_eq!(a.entries.len(), 25_000);
+        let top = listing(&tree, "", Some("2026-11-13T08:00:00Z".into())).unwrap();
+        assert_eq!(
+            top.entries
+                .iter()
+                .map(|e| e.path.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "z"]
+        );
+        assert_eq!(top.as_of.as_deref(), Some("2026-11-13T08:00:00Z"));
+        assert!(listing(&tree, "nowhere", None).is_none());
+        assert_eq!(paths(&tree).entries.len(), 25_300);
+        let sent = tree.sent(None);
+        assert_eq!(sent.entries.len(), ENTRY_CAP);
+        assert!(sent.truncated, "the old answer is cut where it was");
+        assert!(kept_at(&sha).is_some(), "kept by its commit");
+    }
+
+    /// A tree the read cut says which directories it does not hold whole: the
+    /// ones the last entry read is in, and any past it.
+    #[test]
+    fn a_cut_tree_says_which_folders_are_not_whole() {
+        let entry = |path: &str, kind| LocalEntry {
+            path: path.to_owned(),
+            kind,
+            size: None,
+            blob: None,
+        };
+        let tree = LocalTree::new(
+            "c".repeat(40),
+            vec![
+                entry("a", EntryKind::Dir),
+                entry("a/x", EntryKind::File),
+                entry("b", EntryKind::Dir),
+                entry("b/c", EntryKind::Dir),
+                entry("b/c/y", EntryKind::File),
+            ],
+            true,
+        );
+        assert!(
+            listing(&tree, "a", None).unwrap().complete,
+            "before the cut"
+        );
+        assert!(
+            !listing(&tree, "", None).unwrap().complete,
+            "the top holds the cut"
+        );
+        assert!(!listing(&tree, "b", None).unwrap().complete);
+        assert!(!listing(&tree, "b/c", None).unwrap().complete);
+        let past = listing(&tree, "z", None).unwrap();
+        assert!(!past.complete && past.entries.is_empty(), "past the cut");
     }
 
     #[test]

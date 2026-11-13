@@ -438,6 +438,56 @@ pub async fn entity_local_tree(
     crate::checkout::local_tree(&pool, lifecycle.registry(), Some(&fetches), &entity_id).await
 }
 
+/// One directory of `entity_id`'s tree read at its checkout (the big-folder
+/// pass of PR #2479, 2026-11-13): with no `commit` at the commit the mirror
+/// names for the branch (the tab's top, which fetches a missing tip behind
+/// it, as `entity_local_tree`), with one at that commit. What *Files* reads
+/// for each folder it opens, so the page holds what it draws and a folder
+/// past twenty thousand entries is drawn whole. `null` where the checkout
+/// cannot answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_dir`] refuses with.
+#[tauri::command]
+pub async fn entity_local_dir(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: Option<String>,
+    dir: String,
+) -> Result<Option<crate::checkout::local::LocalDir>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let fetches = crate::checkout::fetch::Fetches::global();
+    crate::checkout::local_dir(
+        &pool,
+        lifecycle.registry(),
+        Some(&fetches),
+        &entity_id,
+        commit.as_deref(),
+        &dir,
+    )
+    .await
+}
+
+/// Every file of `entity_id`'s tree at `commit` (a sha `entity_local_dir`
+/// answered), read at its checkout (the big-folder pass): what *Go to file*
+/// filters. `null` where the checkout cannot answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_paths`] refuses with.
+#[tauri::command]
+pub async fn entity_local_paths(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: String,
+) -> Result<Option<crate::checkout::local::LocalPaths>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::local_paths(&pool, &entity_id, &commit).await
+}
+
 /// The file at `path` in `entity_id`'s tree at `commit` (a sha
 /// `entity_local_tree` answered), read at its checkout (ADR-0041), drawn as
 /// the source's file block is; `null` where the checkout cannot answer.
