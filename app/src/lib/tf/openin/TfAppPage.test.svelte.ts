@@ -13,7 +13,8 @@ import { pageContext } from "../kept-pages.svelte";
 import { PRESS_HOLD_MS } from "../press-hold.svelte";
 import { appPagePlace, LAST_TRIED_KEY } from "./app-page";
 import { createApps, type Apps } from "./apps.svelte";
-import TfAppPage, { forgetAppDrafts } from "./TfAppPage.svelte";
+import { forgetAppDrafts } from "./app-drafts.svelte";
+import TfAppPage from "./TfAppPage.svelte";
 import type { TryReads } from "./try-reads";
 
 const PAYOUT = "gitea:tidewater/payout-service";

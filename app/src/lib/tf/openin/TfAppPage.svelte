@@ -26,18 +26,6 @@
     where the page was opened from. *Remove* is at once, with *Undo* on its
     toast (the removal rule).
 -->
-<script module lang="ts">
-  import type { AppDraft } from "./app-page";
-
-  /** What was typed and not saved, per page (an application's id, or `add`), for the session. */
-  const typedDrafts = new Map<string, AppDraft>();
-
-  /** Tests only: forget what was typed. */
-  export function forgetAppDrafts(): void {
-    typedDrafts.clear();
-  }
-</script>
-
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
 
@@ -50,6 +38,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import { PressHold } from "../press-hold.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
+  import { typedDrafts } from "./app-drafts.svelte";
   import {
     draftCommand,
     draftFrom,
@@ -60,6 +49,7 @@
     tryObject,
     withEntry,
     withoutTry,
+    type AppDraft,
     type AppPageAt,
   } from "./app-page";
   import { insertAt, PLACEHOLDERS, runPreview, warnings, worktreeOf } from "./openin";
