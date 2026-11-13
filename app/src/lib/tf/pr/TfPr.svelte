@@ -48,6 +48,7 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { SourceFacts } from "../job/job";
   import type { DetailRefreshPorts } from "../refresh.svelte";
+  import type { RangeFileRead, RangeFilesRead } from "../diff/fill";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface PrPorts {
@@ -68,6 +69,10 @@
     listen?: EchoListen;
     /** The header's *Refresh* (#2107); the bridge's when left out. */
     refresh?: DetailRefreshPorts;
+    /** *Files changed*'s clone diff and commit picks a file at a time (the compare pass, 2026-11-13); whole when left out. */
+    rangeFiles?: RangeFilesRead;
+    rangeFile?: RangeFileRead;
+    cancelRead?: (read: string) => Promise<boolean>;
   }
 </script>
 
@@ -79,6 +84,9 @@
   import {
     entityCheckout,
     codeFacts,
+    cancelRead,
+    entityRangeFile,
+    entityRangeFiles,
     entityView,
     getEntity,
     listEntities,
@@ -170,6 +178,9 @@
       submitWrite: (payload) => submitWrite(payload),
       prViewedFiles: (id, blobs) => prViewedFiles(id, blobs),
       setPrFileViewed: (id, path, viewed, blobs) => setPrFileViewed(id, path, viewed, blobs),
+      rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
+      rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+      cancelRead: (read) => cancelRead(read),
     },
     pending = sharedPending,
     follower = writeFollower(),
@@ -918,6 +929,9 @@
           {follower}
           openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
           {me}
+          rangeFiles={ports.rangeFiles ?? null}
+          rangeFile={ports.rangeFile ?? null}
+          cancelRead={ports.cancelRead ?? null}
         />
       {:else}
         <div>

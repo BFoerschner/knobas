@@ -27,6 +27,15 @@ vi.mock("../../ipc/entity", async (original) => ({
   // The range read as the source answers it: the compare section's diff block.
   entityRangeDiff: (id: string, base: string, head: string) =>
     bridge.entityView(id, `compare:${base}...${head}`).then((v) => fromSource(v)),
+  // The same, a file at a time (the compare pass): the list without lines, then each file whole in one page.
+  entityRangeFiles: (id: string, base: string, head: string) =>
+    bridge.entityView(id, `compare:${base}...${head}`).then((v) => {
+      const diff = fromSource(v);
+      return { ...diff, files: diff.files.map((f) => ({ ...f, hunks: [] })) };
+    }),
+  entityRangeFile: (id: string, base: string, head: string, path: string, _old: string | null, _ws: boolean, from: number) =>
+    bridge.entityView(id, `compare:${base}...${head}`).then((v) => ({ file: fromSource(v).files.find((f) => f.path === path)!, from, continues: false, next: null })),
+  cancelRead: async () => false,
   getEntity: bridge.getEntity,
 }));
 

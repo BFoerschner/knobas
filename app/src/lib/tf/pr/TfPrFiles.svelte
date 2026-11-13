@@ -58,6 +58,8 @@
   import { rangeContext } from "../diff/context";
   import { pickedEnds, type PrPick } from "../diff/pick";
   import { diffOf } from "./files";
+  import { fillEnds, rangeFill, type RangeFileRead, type RangeFilesRead } from "../diff/fill";
+  import type { DiffFill } from "../diff/diff";
   import TfPrPicker from "./TfPrPicker.svelte";
 
   let {
@@ -78,6 +80,9 @@
     rangeDiff = (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
     fileBytes = (entityId, path, commit) => entityFileBytes(entityId, path, commit),
     piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
+    rangeFiles = null,
+    rangeFile = null,
+    cancelRead = null,
   }: {
     prId: string;
     entityView: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
@@ -112,7 +117,30 @@
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
     /** A file pipeline over a file at a commit, for pipelines on diffs (#2270); the IPC by default. */
     piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
+    /**
+     * A range's files without their lines, and each file's a page at a time (the compare pass, 2026-11-13): where both are
+     * given, the clone's diff and a pick's are read so, and drawn as soon as their lists come; `rangeDiff` whole otherwise.
+     */
+    rangeFiles?: RangeFilesRead | null;
+    rangeFile?: RangeFileRead | null;
+    /** Calls a named read off at the backend. */
+    cancelRead?: ((read: string) => Promise<boolean>) | null;
   } = $props();
+
+  /** Each read of a list named, so a page that moved on calls it off (the compare pass). */
+  const uid = $props.id();
+  let reads = 0;
+  const newRead = () => `prfiles-${uid}-${++reads}`;
+  const stopRead = (name: string) => void cancelRead?.(name).catch(() => {});
+  /** The range read a file at a time: its list, and where its files' lines are read; `null` where it is read whole. */
+  function readRange(repo: string, base: string, head: string, name: string): Promise<{ diff: RangeDiff; fill: DiffFill | null }> {
+    if (rangeFiles === null || rangeFile === null) return rangeDiff(repo, base, head, false).then((diff) => ({ diff, fill: null }));
+    const lines = rangeFile;
+    return rangeFiles(repo, base, head, false, name).then((diff) => ({ diff, fill: rangeFill(lines, repo, fillEnds(diff, base, head), false, stopRead) }));
+  }
+  /** The fills of the clone's diff and of a pick's, while each is drawn. */
+  let predictedFill = $state.raw<DiffFill | null>(null);
+  let pickedFill = $state.raw<DiffFill | null>(null);
 
   /** The surface the replies and resolves queued here are tagged with (#2277). */
   const SURFACE = "pr-files";
@@ -159,10 +187,11 @@
   }
 
   /** The clone's diff between the branches' tips, drawn until the source's *Files* answers (ADR-0042). */
-  function readPredicted(at: { repoId: string; base: string; head: string }, live: () => boolean) {
-    rangeDiff(at.repoId, at.base, at.head, false).then(
-      (diff) => {
+  function readPredicted(at: { repoId: string; base: string; head: string }, live: () => boolean, name: string) {
+    readRange(at.repoId, at.base, at.head, name).then(
+      ({ diff, fill }) => {
         if (!live() || view !== undefined || diff.read_at !== "checkout") return;
+        predictedFill = fill;
         predicted = {
           sections: [
             {
@@ -198,9 +227,11 @@
     const at = predict;
     void prId;
     let live = true;
-    if (at !== null && untrack(() => view === undefined && predicted === null)) readPredicted(at, () => live);
+    const name = newRead();
+    if (at !== null && untrack(() => view === undefined && predicted === null)) readPredicted(at, () => live, name);
     return () => {
       live = false;
+      stopRead(name);
     };
   });
 
@@ -254,9 +285,12 @@
     pickFailed = null;
     if (!repo || asked === null) return;
     let live = true;
-    rangeDiff(repo, asked.base, asked.head, false).then(
-      (answer) => {
-        if (live) picked = answer;
+    const name = newRead();
+    readRange(repo, asked.base, asked.head, name).then(
+      ({ diff: answer, fill }) => {
+        if (!live) return;
+        pickedFill = fill;
+        picked = answer;
       },
       (error) => {
         if (live) pickFailed = ipcErrorMessage(error);
@@ -264,6 +298,7 @@
     );
     return () => {
       live = false;
+      stopRead(name);
     };
   });
 
@@ -406,6 +441,7 @@
         cut={shown.truncated}
         repository={range?.repository ?? null}
         {me}
+        fill={section !== null ? pickedFill : view === undefined && predicted !== null ? predictedFill : null}
         {...render ? { render } : {}}
       />
     {/key}

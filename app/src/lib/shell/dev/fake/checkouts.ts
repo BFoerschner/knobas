@@ -3,7 +3,7 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
 import { fillObject, isDiffEnd, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
@@ -72,6 +72,23 @@ function fakeRepoOf(entityId: string): string | null {
 function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): RangeDiff {
   const shas = isDiffEnd(base, true) && isDiffEnd(head, false);
   return fakeDiffOf(repoView(entityId, `compare:${base}...${head}`), shas && fakeCheckout(entityId).path !== null, ignoreWhitespace);
+}
+
+/** The fake compares listed, by repository and the ends their files are read between, as the backend keeps the source's. */
+const listedDiffs = new Map<string, RangeDiff>();
+
+/** `entity_range_files` (the compare pass, 2026-11-13): the fake compare's files, without their lines. */
+function fakeRangeFiles(entityId: string, base: string, head: string, diff: RangeDiff): RangeFiles {
+  listedDiffs.set(`${entityId}\n${diff.range?.base ?? base}\n${diff.range?.head ?? head}`, diff);
+  return { ...diff, files: diff.files.map((file) => ({ ...file, hunks: [], truncated: false })) };
+}
+
+/** `entity_range_file`: one file of the fake compare, whole in one page (the fake has no file long enough to page). */
+function fakeRangeFile(entityId: string, base: string, head: string, path: string, from: number, ignoreWhitespace: boolean): RangeFilePage {
+  const diff = listedDiffs.get(`${entityId}\n${base}\n${head}`) ?? fakeRangeDiff(entityId, base, head, ignoreWhitespace);
+  const file = diff.files.find((one) => one.path === path);
+  if (file === undefined) throw { code: "not_found", message: `the diff changes no file ${path}`, source_id: null };
+  return { file, from, continues: false, next: null };
 }
 
 /**
@@ -575,6 +592,24 @@ export function handlers(): Handlers {
     entity_local_file: () => null,
     entity_source_range_diff: (args) =>
       fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),
+    entity_range_files: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, args["ignoreWhitespace"] === true));
+    },
+    entity_source_range_files: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, false));
+    },
+    entity_range_file: (args) =>
+      fakeRangeFile(
+        String(args["entityId"] ?? ""),
+        String(args["base"] ?? ""),
+        String(args["head"] ?? ""),
+        String(args["path"] ?? ""),
+        Number(args["from"] ?? 0),
+        args["ignoreWhitespace"] === true,
+      ),
+    cancel_read: () => false,
     // *Clone all* (PR #2479): the corpus's repositories not on this machine, one after another.
     clone_all_plan: () => fakeCloneAllPlan(),
     clone_all: () => fakeStartCloneAll(),
@@ -621,6 +656,7 @@ onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
   fakeWorktrees = [];
   fakeCloneAll = null;
+  listedDiffs.clear();
   ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
 keepSeed(fakeOverrides, fakeCloning, fakeCloned);

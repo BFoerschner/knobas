@@ -32,6 +32,9 @@
     entityFileBytes,
     entityFilePiped,
     entityRangeDiff,
+    entityRangeFile,
+    entityRangeFiles,
+    cancelRead,
     entityView,
     getEntity,
     type EntityDetail,
@@ -52,6 +55,14 @@
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
     /** A file pipeline over a file at a commit, for pipelines on diffs (#2270). */
     piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
+    /**
+     * The range's files without their lines, then each file's a page at a time as it nears the view (the compare pass,
+     * 2026-11-13); the whole diff with `rangeDiff` when left out.
+     */
+    rangeFiles?: RangeFilesRead;
+    rangeFile?: RangeFileRead;
+    /** Calls a named read off at the backend. */
+    cancelRead?: (read: string) => Promise<boolean>;
   }
 
   /** Called through, not bound at load: a test's mock of the bridge may not carry every command. */
@@ -61,13 +72,18 @@
     getEntity: (entityId) => getEntity(entityId),
     fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
     piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
+    rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
+    rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+    cancelRead: (read) => cancelRead(read),
   };
 </script>
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { caretOf, isSha, shortEnd } from "./sha";
+  import { fillEnds, rangeFill, type RangeFileRead, type RangeFilesRead } from "./fill";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
+  import type { DiffFill } from "./diff";
   import type { EscTarget } from "../escape";
   import { namePage, parentPage } from "../page-name.svelte";
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
@@ -101,13 +117,14 @@
   } = $props();
 
   let title = $state<string | null>(null);
-  let files = $state<DiffFile[] | null>(null);
+  // Raw: thousands of files, replaced whole on each read and never changed in place (the compare pass, 2026-11-13).
+  let files = $state.raw<DiffFile[] | null>(null);
   /** The diff hit the parser's ceiling (#2269). */
   let cut = $state(false);
   let reading = $state(false);
   let failed = $state<string | null>(null);
   /** What the drawn diff is between, where the source named it. */
-  let range = $state<DiffRange | null>(null);
+  let range = $state.raw<DiffRange | null>(null);
   /** Where the drawn diff was read; whitespace is ignored only at the checkout. */
   let readAt = $state<DiffReadAt | null>(null);
   let ignoreWhitespace = $state(false);
@@ -148,9 +165,11 @@
     const ws = ignoreWhitespace;
     let live = true;
     failed = null;
-    read(id, from, to, ws, () => live);
+    const name = newRead();
+    read(id, from, to, ws, () => live, false, name);
     return () => {
       live = false;
+      stopRead(name);
     };
   });
 
@@ -164,13 +183,27 @@
     },
   );
 
-  /** The diff between `from` and `to`; `again` keeps what the page drew when the read fails. */
-  function read(id: string, from: string, to: string, ws: boolean, alive: () => boolean, again = false): Promise<unknown> {
+  /** Each read named, so another range or a page left calls it off at the backend (the compare pass). */
+  const uid = $props.id();
+  let reads = 0;
+  const newRead = () => `diffpage-${uid}-${++reads}`;
+  const stopRead = (name: string) => void ports.cancelRead?.(name).catch(() => {});
+  /** The fill the drawn list's files are read by, a page of lines at a time; `null` while the diff drawn carries its lines. */
+  let fill = $state.raw<DiffFill | null>(null);
+
+  /**
+   * The diff between `from` and `to`; `again` keeps what the page drew when the read fails. Where the ports read a range
+   * a file at a time, its list, each file's lines read as it nears the view.
+   */
+  function read(id: string, from: string, to: string, ws: boolean, alive: () => boolean, again = false, name = newRead()): Promise<unknown> {
     reading = true;
-    return ports.rangeDiff(id, from, to, ws).then(
+    const listing = ports.rangeFiles;
+    const answer: Promise<RangeDiff> = listing !== undefined && ports.rangeFile !== undefined ? listing(id, from, to, ws, name) : ports.rangeDiff(id, from, to, ws);
+    return answer.then(
       (diff) => {
         if (!alive()) return;
         reading = false;
+        fill = listing !== undefined && ports.rangeFile !== undefined ? rangeFill(ports.rangeFile, id, fillEnds(diff, from, to), ws, stopRead) : null;
         files = diff.files;
         cut = diff.truncated;
         range = diff.range;
@@ -235,7 +268,7 @@
         <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
       {/if}
       {#key `${section}\n${range?.base}\n${range?.head}\n${ignoreWhitespace}`}
-        <TfDiffView {files} {cut} {context} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
+        <TfDiffView {files} {cut} {context} {fill} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
       {/key}
     {/if}
   </TfWaiting>

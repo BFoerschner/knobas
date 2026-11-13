@@ -67,6 +67,8 @@
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
   import type { DiffFile, DiffRange, RangeCommit, RangeDiff } from "../../ipc/entity";
+  import type { DiffFill } from "../diff/diff";
+  import { fillEnds, rangeFill } from "../diff/fill";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
@@ -114,7 +116,7 @@
     guessed = null,
     onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "sourceRangeFiles" | "cancelRead" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -154,14 +156,15 @@
 
   let standing = $state<BranchStanding | null>(null);
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
-  let files = $state<DiffFile[] | null>(null);
+  // Raw: thousands of files, replaced whole on each read and never changed in place (the compare pass, 2026-11-13).
+  let files = $state.raw<DiffFile[] | null>(null);
   /** The section `files` was read for: until another base's diff answers, the page still draws the last one. */
   let filesFor = $state<string | null>(null);
   let reading = $state(false);
   /** The diff hit the parser's ceiling. */
   let cut = $state(false);
   /** What the compare's diff is between, where the source settled it (#2310): context reads at its shas. */
-  let range = $state<DiffRange | null>(null);
+  let range = $state.raw<DiffRange | null>(null);
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
   /** The source answered the compare 404: it holds no such branch, as of that read. */
@@ -255,20 +258,29 @@
     failed = null;
     missing = false;
     if (asked === null) return;
-    readDiff(asked, () => live);
+    const read = newRead();
+    readDiff(asked, () => live, false, read);
     return () => {
       live = false;
+      // Another pick: the read it superseded stops at the backend too, its check behind with it.
+      stopRead(read);
+      stopRead(`${read}-check`);
     };
   });
 
   // A branch the list did not hold when its diff was read is listed now (a read of the list found it, or the branch this
   // session made landed): its diff is read again where none is drawn for it, as the source may hold it now.
+  // Only for the branch the page already shows: a pick changes the listed id too, and the effect above reads its diff
+  // (the compare pass, 2026-11-13: every pick read the whole diff twice, at once).
   let listedWas = untrack(() => listedId);
+  let sectionWas = untrack(() => section);
   $effect(() => {
     const id = listedId;
-    if (id === listedWas) return;
+    const asked = section;
+    const [was, wasFor] = [listedWas, sectionWas];
     listedWas = id;
-    const asked = untrack(() => section);
+    sectionWas = asked;
+    if (id === was || asked !== wasFor) return;
     if (id !== null && asked !== null && untrack(() => files === null || filesFor !== asked)) void readDiff(asked, () => section === asked);
   });
 
@@ -335,8 +347,31 @@
     untrack(() => ports.listen),
   );
 
-  /** The diff `asked` names; `again` keeps what the page drew when a read fails. */
-  function readDiff(asked: string, alive: () => boolean, again = false): Promise<unknown> {
+  /**
+   * Each read of the diff is named, so the pick that supersedes it calls it off at the backend (`cancelRead`, the compare
+   * pass, 2026-11-13): a branch of 10,000 files left for another stops costing the clone and the forge.
+   */
+  const uid = $props.id();
+  let reads = 0;
+  const newRead = () => `compare-${uid}-${++reads}`;
+  const stopRead = (read: string) => void ports.cancelRead?.(read).catch(() => {});
+  /**
+   * The two ends the drawn list's files are read between, a page of lines at a time as each comes near the view: the
+   * commits it settled, else the names it was read by. `null` while the diff drawn carries its lines (no `rangeFiles`).
+   */
+  let fillAt = $state<{ base: string; head: string } | null>(null);
+  const fill = $derived.by((): DiffFill | null => {
+    const read = ports.rangeFile;
+    const at = fillAt;
+    return read === undefined || at === null ? null : rangeFill(read, repoId, at, false, stopRead);
+  });
+
+  /**
+   * The diff `asked` names; `again` keeps what the page drew when a read fails. Where the ports read a range a file at a
+   * time (`rangeFiles`), this is the list of its files, each file's lines read by the diff as it comes near the view
+   * (`fill`): what draws in a frame or two at any number of files.
+   */
+  function readDiff(asked: string, alive: () => boolean, again = false, read = newRead()): Promise<unknown> {
     const fail = (error: unknown) => {
       if (!alive() || again) return;
       failed = ipcErrorMessage(error);
@@ -348,12 +383,16 @@
     const [from, to] = [base, head ?? ""];
     // Local-first, as every diff (ADR-0036, Spec 6 of the review of spec #2234): branch names are the source's, and
     // its compare names the two commits (`range`) that *Open as diff* takes to a checkout.
-    return (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false).then((diff) => {
+    const listing = ports.rangeFiles;
+    const answer: Promise<RangeDiff> =
+      listing !== undefined ? listing(repoId, from, to, false, read) : (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false);
+    return answer.then((diff) => {
       if (!alive()) return;
       reading = false;
       failed = null;
       missing = false;
       files = diff.files;
+      fillAt = listing === undefined ? null : fillEnds(diff, from, to);
       cut = diff.truncated;
       range = diff.range;
       filesFor = asked;
@@ -361,7 +400,7 @@
       moved = null;
       predicted = null;
       checking = null;
-      if (diff.predicted_at !== undefined && ports.sourceRangeDiff !== undefined) checkPredicted(asked, from, to, diff, alive);
+      if (diff.predicted_at !== undefined && (ports.sourceRangeFiles ?? ports.sourceRangeDiff) !== undefined) checkPredicted(asked, from, to, diff, alive, `${read}-check`);
     }, (error) => {
       if (!alive()) return;
       reading = false;
@@ -378,9 +417,14 @@
     return shape(a) === shape(b);
   }
 
-  /** The source's compare, asked behind a predicted diff: the same checks it; another replaces it in place, and says so. */
-  function checkPredicted(asked: string, from: string, to: string, shown: RangeDiff, alive: () => boolean) {
-    const ask = ports.sourceRangeDiff;
+
+  /**
+   * The source's compare, asked behind a predicted diff: the same checks it; another replaces it in place, and says so.
+   * Its list of files where the page reads a file at a time (`sourceRangeFiles`), never its every line.
+   */
+  function checkPredicted(asked: string, from: string, to: string, shown: RangeDiff, alive: () => boolean, read: string) {
+    const listing = ports.sourceRangeFiles;
+    const ask = listing !== undefined && fillAt !== null ? (a: string, b: string, c: string) => listing(a, b, c, read) : ports.sourceRangeDiff;
     if (ask === undefined) return;
     predicted = { section: asked, checked: false };
     const differs = ask(repoId, from, to).then(
@@ -391,6 +435,7 @@
           if (same) predicted = { section: asked, checked: true };
           else {
             files = fresh.files;
+            if (fillAt !== null) fillAt = fillEnds(fresh, from, to);
             cut = fresh.truncated;
             range = fresh.range;
             predicted = null;
@@ -493,13 +538,18 @@
         ? `${sourceName(source)} has no branch ${head ?? ""} to open a pull request from.`
         : (refused ?? (title.trim() === "" ? "Give it a title." : null)),
   );
-  /** From the default branch, what the compare itself listed (its view measures nothing); else the branch's own, against the default branch. */
+  /**
+   * What the compare itself listed, wherever it listed any: the clone's `git log` of the range or the source's compare,
+   * which come with the diff's list (the compare pass, 2026-11-13), so *Commits* never waits for the branch's own view, a
+   * read of seconds on the forge for a branch knobas has not read. Else, from the default branch, nothing (its view
+   * measures nothing); else the branch's own, against the default branch.
+   */
   const commits = $derived(
-    fromDefault
-      ? compareCommits !== null && compareCommits.section === section && filesFor === section
-        ? compareCommits.commits.map((commit) => ({ entity_id: null, title: commit.title, meta: commit.meta, tone: null, chip: shortEnd(commit.sha), url: null }))
-        : []
-      : (standing?.commits ?? []),
+    compareCommits !== null && compareCommits.section === section && filesFor === section
+      ? compareCommits.commits.map((commit) => ({ entity_id: null, title: commit.title, meta: commit.meta, tone: null, chip: shortEnd(commit.sha), url: null }))
+      : fromDefault
+        ? []
+        : (standing?.commits ?? []),
   );
 
   // One commit says what the change is better than its branch's name does (F-241). Only over the name proposed: typed words stay.
@@ -715,7 +765,7 @@
             <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
           {/if}
           {#key `${filesFor}\n${range?.base}\n${range?.head}`}
-            <TfDiffView {files} {cut} {context} openAt={head === null ? null : { entityId: repoId, at: head }} />
+            <TfDiffView {files} {cut} {context} {fill} openAt={head === null ? null : { entityId: repoId, at: head }} />
           {/key}
         {/if}
       </TfWaiting>

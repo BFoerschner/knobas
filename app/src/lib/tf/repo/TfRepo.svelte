@@ -70,6 +70,8 @@
     PipeRun,
     PipeStep,
     RangeDiff,
+    RangeFilePage,
+    RangeFiles,
     RefusedWrite,
     RepoBuilds,
     RunRow,
@@ -125,6 +127,18 @@
     repoPipelines?: (repoId: string) => Promise<RepoBuilds>;
     /** A pipeline's runs, for the Builds tab's pipeline; the bridge's when left out. */
     pipelineRuns?: (pipelineId: string) => Promise<RunRow[]>;
+    /**
+     * A range's files without their lines, read where `rangeDiff` reads (the compare pass, 2026-11-13), under a name
+     * `cancelRead` calls it off by; with `rangeFile`, Compare lists a range of thousands of files at once and reads each
+     * file's lines as it reaches it. Compare reads the whole diff with `rangeDiff` when left out.
+     */
+    rangeFiles?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string) => Promise<RangeFiles>;
+    /** One page of one file's lines (the compare pass). */
+    rangeFile?: (entityId: string, base: string, head: string, path: string, oldPath: string | null, ignoreWhitespace: boolean, from: number, read: string) => Promise<RangeFilePage>;
+    /** The source's compare now as a list of files (the compare pass): what Compare checks a predicted list against. */
+    sourceRangeFiles?: (entityId: string, base: string, head: string, read: string) => Promise<RangeFiles>;
+    /** Calls off a named read at the backend (the compare pass). */
+    cancelRead?: (read: string) => Promise<boolean>;
   }
 
   /**
@@ -165,6 +179,10 @@
     entityFileBytes,
     entityFilePiped,
     entityRangeDiff,
+    entityRangeFile,
+    entityRangeFiles,
+    entitySourceRangeFiles,
+    cancelRead,
     entityCommitDiff,
     entityLocalFile,
     entityLocalTree,
@@ -270,6 +288,10 @@
       localPaths: (entityId, commit) => entityLocalPaths(entityId, commit),
       localFile: (entityId, commit, path) => entityLocalFile(entityId, commit, path),
       sourceRangeDiff: (entityId, base, head) => entitySourceRangeDiff(entityId, base, head),
+      rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
+      rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+      sourceRangeFiles: (entityId, base, head, read) => entitySourceRangeFiles(entityId, base, head, read),
+      cancelRead: (read) => cancelRead(read),
     },
     now: fixedNow,
   }: {
