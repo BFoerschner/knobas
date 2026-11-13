@@ -45,6 +45,11 @@ and 20. Scrolling *Files changed* ran at 6.9 frames a second at 1x before; the s
   Files does); the run dialog's branch list. Through the app's `Windowed`, which gained a row's own estimate
   (`estimateOf`, `textHeight`) for rows of very different heights, and keeps focus: a row the window takes out while it
   holds focus leaves it on the list, which gives it back to the same control when the row is drawn again.
+- **A repository's Builds tab** (added the same day by the repo-builds pass): its branch rail, the groups' headings
+  and their branches as one windowed list in the order the groups hold, and a pipeline's runs on the repository, a
+  windowed table; the problems above its table are `PROBLEMS_SHOWN`. Pinned by `TfRepoBuilds.test.svelte.ts`; its
+  timing on the 5,000-branch repository is owed, the WSL box having been taken back before the seed's TeamCity part
+  ran.
 - **Drawn as it comes into view:** a Docs body draws a piece a task only while its end is near the view
   (`shell/near-view.ts`), and a long table, a long list or a run of thousands of blocks under one heading draws its
   first rows and the rest a piece a task. A find, a section's address, a
