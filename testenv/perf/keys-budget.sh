@@ -3,14 +3,14 @@
 # for the length of the run, presses the keys that keep most of a page (`keys.mjs`) in a headless Chrome at each
 # throttle, and fails when a key's rows are drawn later than its line in `budget-keys.json`, or anything drawn moved.
 #
-#   testenv/perf/keys-budget.sh --real <port> [--throttle 1,4] [--only a,b] [--repeat 5] [--out <dir>]
+#   testenv/perf/keys-budget.sh --real <port> [--throttle 1,4] [--only a,b] [--repeat 7] [--out <dir>]
 #
 # --real <port>  the windowless backend on the saved scale database (examples/headless_ipc.rs): the keys are its
 #                projects and priorities, so there is no fixture run
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4" only="" out="" repeat=5
+real="" throttle="1,4" only="" out="" repeat=7
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;

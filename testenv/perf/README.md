@@ -188,10 +188,11 @@ just keys-budget --real 5411 --only tickets   # the cases whose name holds a wor
 backend's own `--timings` splits `answered` into what it spent and what the IPC took. A release build of the backend is
 what the app runs, and its number, not a debug build's, is the one the lines hold.
 
-The 1x lines are under 100 ms since the broad-keys pass of the same day (95, 100, 90 and 100), the 4x lines 200. One
-letter under *Everything* ranks its matches on four processes, so it is the case that slows most when something else
-has the cores: 91 ms measured with other agents building beside it, its backend 52 ms alone and about 70 in that run.
-Read a miss on that line against the machine's load before the code.
+The 1x lines are Björn's 100 ms since the broad-keys pass of the same day (90 for `-priority:`), the 4x lines 200,
+over the median of seven presses a case. They were measured at 71, 83, 64 and 91 ms with other agents' test runs and
+browsers on the machine, and a press feels that: a letter's backend read was 54 ms asked alone and 65 to 75 during a
+run, and one letter under *Everything*, which ranks its matches on four processes, slows most when something else has
+the cores. Read a miss of a few ms against the machine's load and the backend's `--timings` before the code.
 
 ### With a sync running: `just open-budget --inner --syncing <source>`
 

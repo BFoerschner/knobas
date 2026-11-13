@@ -205,8 +205,9 @@ seven (five for `-priority:`); no row drawn on screen moved in any press:
 
 Both columns were measured in one session with other agents' builds and browsers on the machine (a load average of
 9 to 10 during the *after* run, 5 to 9 during the *before*), which the four processes of a one-letter search feel
-most: its backend read was 52 ms asked alone and about 70 during the run. `testenv/perf/budget-keys.json` holds the
-1x lines at 95, 100, 90 and 100.
+most: its backend read was 52 ms asked alone and about 70 during the run. A second run of five presses a key, as
+loaded, read 96, 75, 67 and 96 at 1x. `testenv/perf/budget-keys.json` holds the 1x lines at Björn's 100, and 90 for
+`-priority:`.
 
 **Same answers.** Each changed read keeps the read it replaces in the tree, and a test asks both.
 

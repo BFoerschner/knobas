@@ -1,10 +1,10 @@
 {
- "_": "Lines for testenv/perf/keys.mjs (just keys-budget --real <port>): from a key pressed as real input to the first frame that draws the rows it asks for (rowsMs, the median of the presses), and how many frames after that moved or took away a row drawn on screen (moved). Björn's line is 100 ms at 1x and 200 ms at 4x, measured in headless Chrome on an M2 Pro over the saved scale database through a release build of examples/headless_ipc.rs. The broad-filters pass of PR #2479 (2026-11-13) measured 103 to 132 ms at 1x and set these lines at 130 to 160. The broad-keys pass of the same day brought every key under the line: 71, 83, 64 and 91 ms at 1x, 93 to 104 at 4x, with other agents' builds and browsers loading the machine (the backend's own read of one letter under Everything was 52 ms measured alone and about 70 during the run). So the 1x lines are what it measured with margin and none is over Björn's; Everything's is his line itself, with 9 ms to spare on a loaded machine. docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md has both passes.",
+ "_": "Lines for testenv/perf/keys.mjs (just keys-budget --real <port>): from a key pressed as real input to the first frame that draws the rows it asks for (rowsMs, the median of the presses), and how many frames after that moved or took away a row drawn on screen (moved). Björn's line is 100 ms at 1x and 200 ms at 4x, measured in headless Chrome on an M2 Pro over the saved scale database through a release build of examples/headless_ipc.rs. The broad-filters pass of PR #2479 (2026-11-13) measured 103 to 132 ms at 1x and set these lines at 130 to 160. The broad-keys pass of the same day brought every key under his line, so the 1x lines are his line: 71, 83, 64 and 91 ms measured as the median of seven presses, 93 to 104 at 4x. Those were taken with other agents' test runs and browsers on the machine, which a press feels: the backend's own read of a letter was 54 ms asked alone and 65 to 75 during a run, and single presses ran 20 ms either side of the median. A second run of five presses read 96, 75, 67 and 96. So a miss by a few ms on a loaded machine is the machine; read the backend's --timings beside it. docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md has both passes.",
  "real": {
   "keys": {
    "tickets-letter": {
     "1": {
-     "rowsMs": 95,
+     "rowsMs": 100,
      "moved": 0
     },
     "4": {
