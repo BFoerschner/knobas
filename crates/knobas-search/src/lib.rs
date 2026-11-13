@@ -361,7 +361,12 @@ impl Searcher {
         let started = Instant::now();
         let query = validate(query)?;
 
-        let vocab = self.vocabulary().await?;
+        // The vocabulary, and beside it which mirror the match stage reads
+        // (migration `0084`, [`corpus::mirror`]): one probe, asked while the
+        // vocabulary's two reads are out, so it adds no wait of its own.
+        let (vocab, mirror) = tokio::try_join!(self.vocabulary(), async {
+            Ok(corpus::mirror(&self.pool).await?)
+        })?;
         let mut parsed = query::parse(&query.raw, &vocab);
         // Pipelines under the shell's word, and no runs or commits (#2422).
         let frames = frames::LauncherFrames::of(&vocab.declarations);
@@ -404,7 +409,10 @@ impl Searcher {
         let rows: Vec<RawHit> = if known_under.admits_nothing {
             Vec::new()
         } else {
-            let corpora = corpus::searched(self.corpora(), filters.titles);
+            // The mirror's match stage off its search copies alone, once
+            // every copy holds what the stage reads (migration `0084`).
+            let corpora =
+                corpus::with_mirror(corpus::searched(self.corpora(), filters.titles), mirror);
             let built = sql::search_sql(
                 &corpora,
                 text,
@@ -413,7 +421,7 @@ impl Searcher {
                 PER_GROUP,
                 query.limit,
             );
-            self.rows_of(built, text.is_some()).await?
+            self.rows_of(built, text).await?
         };
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
@@ -442,17 +450,23 @@ impl Searcher {
     }
 
     /// The rows of a statement [`sql::search_sql`] built: through the indexes
-    /// when it has words to match ([`sql::fetch_matched`]), as the planner
-    /// chooses for a browse.
+    /// when it has words to match ([`sql::fetch_matched`]), the narrow table
+    /// read whole for a single character
+    /// ([`sql::fetch_matched_by_a_letter`]), as the planner chooses for a
+    /// browse.
     async fn rows_of(
         &self,
         built: sql::SearchSql,
-        words: bool,
+        words: Option<&str>,
     ) -> Result<Vec<RawHit>, sqlx::Error> {
-        if words {
-            sql::fetch_matched(&self.pool, built).await
-        } else {
-            sql::query_as_with(built).fetch_all(&self.pool).await
+        match words {
+            // One character matches most of any mirror: read whole, where
+            // the whole is the narrow table and not the mirror's own rows.
+            Some(text) if text.chars().count() == 1 && built.matches_narrowly() => {
+                sql::fetch_matched_by_a_letter(&self.pool, built).await
+            }
+            Some(_) => sql::fetch_matched(&self.pool, built).await,
+            None => sql::query_as_with(built).fetch_all(&self.pool).await,
         }
     }
 
@@ -606,14 +620,14 @@ impl Searcher {
             });
         }
         let built = sql::search_sql(
-            &[&corpus::LIVE_ITEM],
+            &[corpus::mirror(&self.pool).await?],
             text,
             parsed.prefix_last_term,
             &filters,
             query.limit,
             query.limit,
         );
-        let rows = self.rows_of(built, text.is_some()).await?;
+        let rows = self.rows_of(built, text).await?;
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
             .find(|g| g.kind == PAGE);

@@ -72,8 +72,16 @@ pub fn excerpts(
         }
         out.push(Excerpt { place, segments });
     };
+    // **Nothing past the last excerpt is read** (the broad-keys pass,
+    // 2026-11-13): `keep` takes no more once the list is full, so the rest of
+    // the text can add nothing. One letter under *Everything* fills every
+    // hit's list within its first lines, and the page's forty hits carried
+    // 800 kB of text that was still cut into sentences to the end.
     if let Some(first) = first_line {
         for (offset, line) in text.lines().enumerate() {
+            if out.len() >= MAX {
+                break;
+            }
             let number = first.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
             keep(
                 Some(format!("line {number}")),
@@ -85,6 +93,9 @@ pub fn excerpts(
     }
     let read = indexed::read(text);
     for run in read.runs {
+        if out.len() >= MAX {
+            break;
+        }
         match &run.part {
             Part::Lead => {}
             Part::Section(heading) => {
@@ -113,8 +124,14 @@ pub fn excerpts(
             _ => run.text,
         };
         for sentence in sentences(&body) {
+            if out.len() >= MAX {
+                break;
+            }
             keep(place.clone(), &|| marked(&sentence, &stems), &mut out);
         }
+    }
+    if out.len() >= MAX {
+        return out;
     }
     // Taken before the first link, so one link's line never silences another:
     // each names a different page.
@@ -546,6 +563,158 @@ mod tests {
         assert!(text.starts_with('…') && text.ends_with('…'), "{text}");
         assert!(text.chars().count() <= SPAN + 2, "{text}");
         assert!(out[0].segments.iter().any(|s| s.hit && s.text == "needle"));
+    }
+
+    /// [`excerpts`] as it read every text to its end before the list could
+    /// be full: the same marking, with no early stop. The reference the test
+    /// below holds [`excerpts`] to.
+    fn excerpts_to_the_end(
+        title: &str,
+        text: &str,
+        first_line: Option<i64>,
+        needles: &[String],
+    ) -> Vec<Excerpt> {
+        let stems: Vec<Vec<char>> = needles
+            .iter()
+            .map(|n| stem(n))
+            .filter(|s| !s.is_empty())
+            .collect();
+        if stems.is_empty() || text.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<Excerpt> = Vec::new();
+        let mut keep = |place: Option<String>, segments: Option<Vec<Segment>>| {
+            let Some(segments) = segments else { return };
+            if out.len() >= MAX
+                || out
+                    .iter()
+                    .any(|e| e.place == place && e.segments == segments)
+            {
+                return;
+            }
+            out.push(Excerpt { place, segments });
+        };
+        if let Some(first) = first_line {
+            for (offset, line) in text.lines().enumerate() {
+                let number = first.saturating_add(i64::try_from(offset).unwrap());
+                keep(Some(format!("line {number}")), marked(line.trim(), &stems));
+            }
+            return out;
+        }
+        let read = indexed::read(text);
+        for run in read.runs {
+            match &run.part {
+                Part::Lead => {}
+                Part::Section(heading) => keep(Some("Heading".to_owned()), marked(heading, &stems)),
+                Part::Comment(by) => keep(None, author_line(by, &stems)),
+            }
+            let place = match &run.part {
+                Part::Lead => None,
+                Part::Section(heading) => Some(heading.clone()),
+                Part::Comment(by) if by.is_empty() => Some("Comment".to_owned()),
+                Part::Comment(by) => Some(format!("Comment by {by}")),
+            };
+            let body = match run.part {
+                Part::Lead => run
+                    .text
+                    .strip_prefix(title)
+                    .unwrap_or(&run.text)
+                    .trim()
+                    .to_owned(),
+                _ => run.text,
+            };
+            for sentence in sentences(&body) {
+                keep(place.clone(), marked(&sentence, &stems));
+            }
+        }
+        drop(keep);
+        let unquoted: Vec<Vec<char>> = stems
+            .iter()
+            .filter(|stem| !out.iter().any(|excerpt| quotes(excerpt, stem)))
+            .cloned()
+            .collect();
+        for (space, title) in &read.links {
+            if out.len() >= MAX {
+                break;
+            }
+            if let Some(segments) = link_line(space, title, &stems, &unquoted)
+                && !out
+                    .iter()
+                    .any(|e| e.place.is_none() && e.segments == segments)
+            {
+                out.push(Excerpt {
+                    place: None,
+                    segments,
+                });
+            }
+        }
+        out
+    }
+
+    /// Stopping at the last excerpt quotes what reading to the end quoted:
+    /// pages of sections, comments and links, and run logs, long enough that
+    /// a common word fills the list early and a rare one sits past where it
+    /// would have filled, asked for words that fill it in the lead, in one
+    /// section, across comments, only by a link, and never.
+    #[test]
+    fn stopping_at_the_last_excerpt_quotes_what_reading_to_the_end_did() {
+        let mut page = String::from("Runbook\nRetry the payout. Then page the owner.\n");
+        for n in 0..40 {
+            page.push_str(&format!(
+                "\u{1e}Section {n} backoff\nRetry number {n} waits. The ledger settles after {n} tries? Payout {n} is late!\n"
+            ));
+            if n % 3 == 0 {
+                page.push_str(&format!(
+                    "\u{1f}Priya {n}\nCap the retry at {n}. Rare{n} word here.\n"
+                ));
+            }
+            if n % 5 == 0 {
+                page.push_str(&format!("\u{1d}ENG\u{1d}Budget page {n}\u{1d}\n"));
+            }
+        }
+        page.push_str("\u{1e}Last\nOnly here: zebra crossing.\n");
+        let log: String = (0..300)
+            .map(|n| {
+                if n % 7 == 0 {
+                    format!("step {n} retry failed\n")
+                } else if n == 290 {
+                    "zebra at the end\n".to_owned()
+                } else {
+                    format!("step {n} ok\n")
+                }
+            })
+            .collect();
+        let asked: [&[&str]; 15] = [
+            &["rare3"],
+            &["crossing"],
+            &["end", "last"],
+            &["retry"],
+            &["r"],
+            &["p"],
+            &["payout", "ledger"],
+            &["priya"],
+            &["backoff"],
+            &["budget"],
+            &["zebra"],
+            &["rare39", "retry"],
+            &["section", "eng"],
+            &["s"],
+            &["nothing-holds-this"],
+        ];
+        let mut full = 0;
+        let mut some = 0;
+        for words in asked {
+            let needles = needles(words);
+            for (text, first_line) in [(&page, None), (&log, Some(12))] {
+                let now = excerpts("Runbook", text, first_line, &needles);
+                let before = excerpts_to_the_end("Runbook", text, first_line, &needles);
+                assert_eq!(now, before, "{words:?}, a log {}", first_line.is_some());
+                full += usize::from(now.len() == MAX);
+                some += usize::from(!now.is_empty() && now.len() < MAX);
+            }
+        }
+        assert!(full >= 8, "{full} lists were full");
+        assert!(some >= 4, "{some} lists were short of full");
     }
 
     #[test]

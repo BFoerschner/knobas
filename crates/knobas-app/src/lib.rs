@@ -1021,6 +1021,22 @@ async fn bring_up_app<R: tauri::Runtime>(
                 ),
                 Err(error) => tracing::warn!(%error, "the lists' rows could not all be filled"),
             }
+            // Then what the launcher reads of a match beside its vector
+            // (migration `0084`), for the rows written before it: last, the
+            // longest of the three and the one no page waits on, since the
+            // launcher reads the mirror's own rows until every copy is
+            // filled, as it always did.
+            let started = std::time::Instant::now();
+            match knobas_core::item_search::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the search copies are filled"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "the search copies could not all be filled");
+                }
+            }
         });
         // Before `Ready`, and before `AppState` is installed: the sync
         // engine is part of "the database is up" as far as the frontend is

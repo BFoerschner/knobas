@@ -8,13 +8,23 @@
 //! ([`corpus::LIVE_ITEM_UNSTORED`]), over a corpus written from the scale
 //! seed's own words (`testenv/scale/common.py`).
 //!
+//! Since migration `0084` the copy also holds what the match stage reads of
+//! a row beside its vector (its kind, source, date and the words it is named
+//! by), and on a mirror whose every copy holds them the stage reads the
+//! narrow table alone ([`corpus::LIVE_ITEM_FILLED`]): the columns held to the
+//! mirror as the vector is, the stage to the one that joins the mirror
+//! ([`LIVE_ITEM`]), and a search to the same answer while some copies are
+//! not filled yet.
+//!
 //! The database is shared by this crate's tests, so each test reads the rows
 //! of a source it made, except the one check that is true of every row at
 //! every instant.
 
-use knobas_search::corpus::{self, LIVE_ITEM, LIVE_ITEM_UNSTORED};
+use knobas_search::corpus::{self, LIVE_ITEM, LIVE_ITEM_FILLED, LIVE_ITEM_UNSTORED};
 use knobas_search::query::EffectiveFilters;
-use knobas_search::sql::{explain_matched, fetch_matched, query_as_with, search_sql};
+use knobas_search::sql::{
+    explain_matched, fetch_matched, fetch_matched_by_a_letter, query_as_with, search_sql,
+};
 use knobas_search::{KindCatalog, RawHit, group};
 
 async fn pool() -> sqlx::PgPool {
@@ -225,7 +235,10 @@ async fn seed_scale_words(pool: &sqlx::PgPool, tickets: usize) -> String {
 }
 
 /// How many mirror rows have no copy, or a copy that is not their vector
-/// and its weight-A half: of `source`, or of the whole mirror.
+/// and its weight-A half, or whose six columns of migration `0084` are not
+/// the mirror row's: of `source`, or of the whole mirror. A copy whose
+/// `kind` is null holds none of the six yet (a row the fill has not
+/// reached, which one test here makes on purpose) and is in step.
 async fn out_of_step(pool: &sqlx::PgPool, source: Option<&str>) -> i64 {
     sqlx::query_scalar(
         "select count(*) from sync.item i
@@ -233,7 +246,25 @@ async fn out_of_step(pool: &sqlx::PgPool, source: Option<&str>) -> i64 {
           where ($1::text is null or i.source_id = $1)
             and (s.entity_id is null
                  or s.fts is distinct from i.fts
-                 or s.fts_a is distinct from ts_filter(i.fts, '{a}'))",
+                 or s.fts_a is distinct from ts_filter(i.fts, '{a}')
+                 or (s.kind is not null
+                     and (s.kind, s.source_id, s.item_updated_at,
+                          s.title_words, s.title_tail_words, s.key_words)
+                         is distinct from
+                         (i.kind, i.source_id, i.item_updated_at,
+                          i.title_words, i.title_tail_words, i.key_words)))",
+    )
+    .bind(source)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// How many of `source`'s copies hold none of the six columns yet.
+async fn unfilled(pool: &sqlx::PgPool, source: &str) -> i64 {
+    sqlx::query_scalar(
+        "select count(*) from sync.item_search s
+          where s.entity_id like $1 || ':%' and s.kind is null",
     )
     .bind(source)
     .fetch_one(pool)
@@ -440,10 +471,12 @@ async fn a_kind_is_cut_to_the_rows_the_window_kept() {
     );
 }
 
-/// The copy is the mirror's vector after every kind of write: an insert, a
-/// retitle, a new body, a payload that leaves the vector alone, a stamp and
-/// a delete. And at any instant no row of the whole mirror is out of step
-/// with its copy, whatever the other tests of this file are writing.
+/// The copy is the mirror's vector, and its six columns the mirror row's,
+/// after every kind of write: an insert, a retitle, a new body, a payload
+/// that leaves the vector alone, a stamp, a date that moves or goes with no
+/// word changed, a kind that changes and a delete. A stamp rewrites no copy.
+/// And at any instant no row of the whole mirror is out of step with its
+/// copy, whatever the other tests of this file are writing.
 #[tokio::test]
 async fn the_copy_follows_the_mirror_under_every_write() {
     let pool = pool().await;
@@ -478,6 +511,20 @@ async fn the_copy_follows_the_mirror_under_every_write() {
             "stamped",
             "update sync.item set synced_at = now() + interval '1 second' where source_id = $1",
         ),
+        // The six columns beside the vector (migration `0084`): a date that
+        // moves with no word changed, one that goes, a kind that changes.
+        (
+            "a date that moved",
+            "update sync.item set item_updated_at = item_updated_at + interval '3 hours' where source_id = $1 and kind = 'ticket'",
+        ),
+        (
+            "a date that went",
+            "update sync.item set item_updated_at = null where source_id = $1 and kind = 'page'",
+        ),
+        (
+            "another kind",
+            "update sync.item set kind = 'pull_request' where source_id = $1 and kind = 'pr'",
+        ),
     ] {
         sqlx::query(statement)
             .bind(&source)
@@ -485,7 +532,43 @@ async fn the_copy_follows_the_mirror_under_every_write() {
             .await
             .unwrap();
         assert_eq!(out_of_step(&pool, Some(&source)).await, 0, "{what}");
+        assert_eq!(unfilled(&pool, &source).await, 0, "{what}");
     }
+    // The date reached the copy, and a stamp writes no copy at all: the same
+    // row versions before it and after.
+    let moved: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_search s join sync.item i on i.entity_id = s.entity_id
+          where i.source_id = $1 and i.kind = 'ticket'
+            and s.item_updated_at > timestamptz '2026-11-01 14:00+00'",
+    )
+    .bind(&source)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(moved, 60);
+    let versions = |pool: sqlx::PgPool, source: String| async move {
+        sqlx::query_scalar::<_, Vec<String>>(
+            "select array_agg(s.ctid::text || ' ' || s.xmin::text order by s.entity_id)
+               from sync.item_search s where s.entity_id like $1 || ':%'",
+        )
+        .bind(source)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let before = versions(pool.clone(), source.clone()).await;
+    sqlx::query(
+        "update sync.item set synced_at = now() + interval '2 seconds' where source_id = $1",
+    )
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        versions(pool.clone(), source.clone()).await,
+        before,
+        "a stamp rewrites no search copy"
+    );
     // The retitle reached the weight-A half, and only the tickets'.
     let renamed: i64 = sqlx::query_scalar(
         "select count(*) from sync.item_search s
@@ -497,13 +580,430 @@ async fn the_copy_follows_the_mirror_under_every_write() {
     .unwrap();
     assert_eq!(renamed, 60);
 
-    sqlx::query("delete from sync.item where source_id = $1 and kind = 'pr'")
+    sqlx::query("delete from sync.item where source_id = $1 and kind = 'pull_request'")
         .bind(&source)
         .execute(&pool)
         .await
         .unwrap();
     assert_eq!(copies(pool.clone(), source.clone()).await, rows - 20);
     assert_eq!(out_of_step(&pool, None).await, 0, "the whole mirror");
+}
+
+/// **The match stage off the narrow table alone answers as the one joined to
+/// the mirror does** (migration `0084`), and as the mirror read alone does:
+/// every probe under both scopes, whole and typed, the launcher's page and
+/// every match, with the dimensions the narrow table answers (sources,
+/// kinds, a kind left out, a kind answered as a pipeline, a window of days),
+/// over a mirror with entities withdrawn and a source switched off.
+///
+/// And a search is the same search while copies are unfilled, as rows
+/// written before the migration are until the fill reaches them: with every
+/// other copy unfilled and with none filled, [`corpus::mirror`] hands out
+/// the mirror joined, on which a search finds every row; read off the narrow
+/// table then, the unfilled rows would be gone. The fill leaves no copy
+/// unfilled and none out of step, and the narrow table is read again.
+#[tokio::test]
+async fn the_match_stage_reads_the_narrow_table_as_it_read_the_mirror() {
+    use knobas_search::{SearchFilters, SearchQuery, Searcher};
+
+    let pool = pool().await;
+    let source = seed_scale_words(&pool, 600).await;
+    // A second source, switched off: its rows match every probe and no
+    // answer holds one.
+    let off = seed_scale_words(&pool, 60).await;
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config, enabled)
+         values ($1, 'jira', $1, 'http://x', 'Pat', '{}', false)",
+    )
+    .bind(&off)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // One row in seven withdrawn.
+    sqlx::query(
+        "update knobas.entity e set deleted_at = now()
+           from (select entity_id, row_number() over (order by entity_id) as n
+                   from sync.item where source_id = $1) i
+          where e.id = i.entity_id and i.n % 7 = 0",
+    )
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Dates across three weeks, so a window of days keeps some; and a word
+    // only these two sources' rows hold, for a search of the whole mirror
+    // that other tests' rows cannot answer.
+    let word = format!("zq{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    sqlx::query(
+        "update sync.item i
+            set item_updated_at = now() - make_interval(hours => (x.n % 500)::int),
+                body_text = i.body_text || ' ' || $2
+           from (select entity_id, row_number() over (order by entity_id) as n
+                   from sync.item where source_id = any($1)) x
+          where i.entity_id = x.entity_id",
+    )
+    .bind(vec![source.clone(), off.clone()])
+    .bind(&word)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Two tickets that hold one key at the same weight, once each: the first
+    // has it for its key, the second, the newer, in its title. Equal ranks,
+    // so the one **named** by what was typed comes first, which the copy's
+    // `key_words` say.
+    let key = format!("ZK{}-7", &uuid::Uuid::new_v4().simple().to_string()[..6]).to_uppercase();
+    let keyed = format!("{source}:{key}");
+    let titled = format!("{source}:ZZ-{}", &key[2..8]);
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'a'), ($2, 'ticket', 'b')",
+    )
+    .bind(&keyed)
+    .bind(&titled)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1, $3, 'ticket', 'Settles late', '', '{}', now() - interval '2 days'),
+                ($2, $3, 'ticket', $4, '', '{}', now())",
+    )
+    .bind(&keyed)
+    .bind(&titled)
+    .bind(&source)
+    .bind(format!("{key} beta"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(out_of_step(&pool, Some(&source)).await, 0);
+    assert_eq!(unfilled(&pool, &source).await, 0, "the triggers fill");
+    for corpus in [&LIVE_ITEM_FILLED, &LIVE_ITEM, &LIVE_ITEM_UNSTORED] {
+        let built = search_sql(
+            &[corpus],
+            Some(&key),
+            false,
+            &EffectiveFilters {
+                sources: vec![source.clone()],
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        let hits = answer(fetch_matched(&pool, built).await.unwrap());
+        let [(_, 2, tickets)] = &hits[..] else {
+            panic!("both tickets hold the key: {hits:?}");
+        };
+        assert_eq!(tickets[0].1, tickets[1].1, "equal ranks: {tickets:?}");
+        assert_eq!(
+            tickets[0].0, keyed,
+            "the ticket named by the key comes first"
+        );
+    }
+
+    let probes = [
+        "r",
+        "p",
+        "pa",
+        "retry",
+        "deploy",
+        "fx quotes",
+        "\"retry queue\"",
+        "retry -queue",
+        "payout or ledger",
+        "PAY-12",
+        "runbook",
+        "the",
+    ];
+    let both = vec![source.clone(), off.clone()];
+    let dimensions = |n: usize| -> EffectiveFilters {
+        let base = EffectiveFilters {
+            sources: both.clone(),
+            ..EffectiveFilters::default()
+        };
+        match n {
+            0 => base,
+            1 => EffectiveFilters {
+                kinds: vec!["ticket".to_owned(), "page".to_owned()],
+                ..base
+            },
+            2 => EffectiveFilters {
+                hidden_kinds: vec!["pr".to_owned()],
+                pipeline_kinds: vec!["page".to_owned()],
+                ..base
+            },
+            _ => EffectiveFilters {
+                updated_within_days: Some(7),
+                ..base
+            },
+        }
+    };
+    // Every probe, off the narrow table, joined to the mirror, and of the
+    // mirror alone. How many answers held a row.
+    let ask = async || -> usize {
+        let mut kept = 0;
+        for probe in probes {
+            for n in 0..4 {
+                for titles in [false, true] {
+                    for prefix_last in [false, true] {
+                        let (per_group, limit) = if n % 2 == 0 {
+                            (10, 50)
+                        } else {
+                            (100_000, 100_000)
+                        };
+                        let filters = EffectiveFilters {
+                            titles,
+                            ..dimensions(n)
+                        };
+                        let statement = |corpus: &'static corpus::Corpus| {
+                            search_sql(
+                                &[corpus],
+                                Some(probe),
+                                prefix_last,
+                                &filters,
+                                per_group,
+                                limit,
+                            )
+                        };
+                        assert!(
+                            statement(&LIVE_ITEM_FILLED)
+                                .sql()
+                                .contains("from sync.item_search sx cross join q"),
+                            "the match stage reads the narrow table alone"
+                        );
+                        assert!(!statement(&LIVE_ITEM).sql().contains("sx.kind"));
+                        let narrow = answer(
+                            fetch_matched(&pool, statement(&LIVE_ITEM_FILLED))
+                                .await
+                                .unwrap(),
+                        );
+                        let joined =
+                            answer(fetch_matched(&pool, statement(&LIVE_ITEM)).await.unwrap());
+                        let alone = answer(
+                            query_as_with(statement(&LIVE_ITEM_UNSTORED))
+                                .fetch_all(&pool)
+                                .await
+                                .unwrap(),
+                        );
+                        let what = format!(
+                            "{probe:?}, dimensions {n}, titles {titles}, typing {prefix_last}"
+                        );
+                        assert_eq!(narrow, joined, "{what}: as the stage joined to the mirror");
+                        assert_eq!(narrow, alone, "{what}: as the mirror read alone");
+                        // One character is read with the narrow table whole.
+                        if probe.chars().count() == 1 {
+                            assert!(statement(&LIVE_ITEM_FILLED).matches_narrowly());
+                            let whole = answer(
+                                fetch_matched_by_a_letter(&pool, statement(&LIVE_ITEM_FILLED))
+                                    .await
+                                    .unwrap(),
+                            );
+                            assert_eq!(whole, narrow, "{what}: read whole");
+                        }
+                        kept += usize::from(!narrow.is_empty());
+                    }
+                }
+            }
+        }
+        kept
+    };
+    let asked = probes.len() * 16;
+    let kept = ask().await;
+    assert!(kept * 2 > asked, "{kept} of {asked} answers held a row");
+
+    // A search of the whole mirror for the word only these rows hold: what
+    // the launcher's own path answers, whichever relation it reads.
+    let searcher = Searcher::new(pool.clone());
+    let search = async || -> (u32, Vec<String>) {
+        let response = searcher
+            .search(SearchQuery {
+                raw: format!("{word} retry"),
+                titles: false,
+                limit: 200,
+                filters: SearchFilters::default(),
+            })
+            .await
+            .unwrap();
+        let ids = response
+            .groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+            .collect();
+        (response.total, ids)
+    };
+    let narrowly = async || -> usize {
+        let built = search_sql(
+            &[&LIVE_ITEM_FILLED],
+            Some(&word),
+            false,
+            &EffectiveFilters::default(),
+            100_000,
+            100_000,
+        );
+        fetch_matched::<RawHit>(&pool, built).await.unwrap().len()
+    };
+    let is_filled =
+        async || -> bool { corpus::mirror(&pool).await.unwrap().relation_is_narrowed() };
+    let found = search().await;
+    assert!(found.0 > 50, "the search found the rows: {}", found.0);
+    assert!(found.1.iter().all(|id| id.starts_with(&source)));
+    let every = narrowly().await;
+    assert!(every > 400, "{every} live rows hold the word");
+
+    // Rows written before the migration: none of the six columns.
+    let unfill = "update sync.item_search s
+            set kind = null, source_id = null, item_updated_at = null,
+                title_words = null, title_tail_words = null, key_words = null
+           from (select entity_id, row_number() over (order by entity_id) as n
+                   from sync.item where source_id = any($1)) i
+          where s.entity_id = i.entity_id and i.n % $2 = 0";
+    for (every_nth, when) in [(2_i64, "every other copy unfilled"), (1, "no copy filled")] {
+        sqlx::query(unfill)
+            .bind(&both)
+            .bind(every_nth)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(unfilled(&pool, &source).await > 300, "{when}");
+        assert!(!is_filled().await, "{when}: the mirror is read joined");
+        assert_eq!(search().await, found, "{when}: the same search");
+        // Not a thing the data could not show: off the narrow table the
+        // unfilled rows are gone.
+        assert!(narrowly().await < every, "{when}");
+        assert_eq!(out_of_step(&pool, Some(&source)).await, 0, "{when}");
+    }
+
+    // The fill: every copy filled, in batches, and none out of step.
+    let mut after = String::new();
+    let mut batches = 0;
+    while let Some(next) =
+        sqlx::query_scalar::<_, Option<String>>("select sync.fill_item_search($1, 100)")
+            .bind(&after)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    {
+        after = next;
+        batches += 1;
+    }
+    assert!(batches > 5, "{batches} batches");
+    assert_eq!(unfilled(&pool, &source).await, 0, "filled");
+    assert_eq!(unfilled(&pool, &off).await, 0, "filled");
+    assert_eq!(out_of_step(&pool, Some(&source)).await, 0, "filled");
+    assert!(is_filled().await, "filled: the narrow table is read again");
+    assert_eq!(search().await, found, "filled again");
+    assert_eq!(narrowly().await, every, "filled again");
+    assert_eq!(ask().await, kept, "filled again");
+}
+
+/// The app's fill (`knobas_core::item_search::fill`, run behind bring-up):
+/// every copy written before `0084` filled, a batch at a time, the table
+/// vacuumed, and a second run finds nothing to do. On a database of its own:
+/// it fills every row there is, and the test above keeps some unfilled.
+#[tokio::test]
+async fn the_fill_fills_every_copy_once() {
+    let pool = knobas_db::test_util::scratch_database("item_search_fill")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool on the scratch database");
+    let source = seed_scale_words(&pool, 450).await;
+    let rows: i64 = sqlx::query_scalar("select count(*) from sync.item_search")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 450 + 150 + 90);
+    assert_eq!(
+        knobas_core::item_search::fill(&pool).await.unwrap(),
+        0,
+        "the triggers filled every copy: nothing to do"
+    );
+    sqlx::query(
+        "update sync.item_search
+            set kind = null, source_id = null, item_updated_at = null,
+                title_words = null, title_tail_words = null, key_words = null",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(unfilled(&pool, &source).await, rows);
+    assert!(
+        !corpus::mirror(&pool).await.unwrap().relation_is_narrowed(),
+        "unfilled: the mirror is read joined"
+    );
+    let batches = knobas_core::item_search::fill(&pool).await.unwrap();
+    assert_eq!(
+        i64::from(batches),
+        (rows + i64::from(knobas_core::item_search::BATCH) - 1)
+            / i64::from(knobas_core::item_search::BATCH),
+        "every copy, a batch at a time"
+    );
+    assert_eq!(unfilled(&pool, &source).await, 0);
+    assert_eq!(out_of_step(&pool, None).await, 0);
+    assert!(corpus::mirror(&pool).await.unwrap().relation_is_narrowed());
+    assert_eq!(knobas_core::item_search::fill(&pool).await.unwrap(), 0);
+}
+
+/// A query that asks what the narrow table does not hold is matched through
+/// the mirror's own rows, as before `0084`: an author, a parent, a reach, a
+/// name glob, a ticket key. And a browse, which matches nothing.
+#[tokio::test]
+async fn a_query_the_narrow_table_cannot_answer_reads_the_mirror() {
+    use knobas_search::query::{FieldFilter, FieldKey};
+    let base = EffectiveFilters::default();
+    let wide = [
+        EffectiveFilters {
+            names: vec!["pay*".to_owned()],
+            ..base.clone()
+        },
+        EffectiveFilters {
+            under: vec!["pay-1".to_owned()],
+            ..base.clone()
+        },
+        EffectiveFilters {
+            reach: vec!["pay-1".to_owned()],
+            ..base.clone()
+        },
+        EffectiveFilters {
+            mine: true,
+            ..base.clone()
+        },
+        EffectiveFilters {
+            fields: vec![FieldFilter {
+                key: FieldKey::Status,
+                negated: false,
+                values: vec!["done".to_owned()],
+                within_days: None,
+                me: Vec::new(),
+            }],
+            ..base.clone()
+        },
+    ];
+    let joined = "from sync.live_item i join sync.item_search sx";
+    let narrow = "from sync.item_search sx cross join q";
+    for filters in &wide {
+        let built = search_sql(&[&LIVE_ITEM_FILLED], Some("retry"), true, filters, 10, 50);
+        assert!(built.sql().contains(joined), "{filters:?}");
+        assert!(!built.sql().contains(narrow), "{filters:?}");
+        assert!(!built.matches_narrowly(), "{filters:?}");
+    }
+    let browse = search_sql(
+        &[&LIVE_ITEM_FILLED],
+        None,
+        false,
+        &EffectiveFilters {
+            sources: vec!["jira".to_owned()],
+            ..base.clone()
+        },
+        10,
+        50,
+    );
+    assert!(browse.sql().contains(joined) && !browse.sql().contains(narrow));
+    assert!(!browse.matches_narrowly());
+    let typed = search_sql(&[&LIVE_ITEM_FILLED], Some("retry"), true, &base, 10, 50);
+    assert!(typed.sql().contains(narrow) && typed.matches_narrowly());
+    // And the mirror as it is read while a copy is unfilled never is.
+    let unfilled = search_sql(&[&LIVE_ITEM], Some("retry"), true, &base, 10, 50);
+    assert!(unfilled.sql().contains(joined) && !unfilled.sql().contains(narrow));
+    assert!(!unfilled.matches_narrowly());
 }
 
 /// A *Titles* search reads the rows the word names from the title index and

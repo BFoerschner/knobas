@@ -264,6 +264,23 @@ pub struct Corpus {
     ///
     /// For the mirror, [`LIVE_ITEM_FIELDS_CARDED`].
     pub(crate) fields_carded: &'static [(crate::query::FieldKey, &'static str)],
+    /// The same rows as a narrower relation the **match stage** can read in
+    /// this corpus's place, or `None`: `crate::sql` matches, ranks and cuts
+    /// through it when the query asks nothing the narrower relation does not
+    /// hold, and draws the page's rows from this corpus either way.
+    ///
+    /// For [`LIVE_ITEM_FILLED`], [`LIVE_ITEM_MATCH`].
+    pub(crate) matched: Option<&'static Corpus>,
+}
+
+impl Corpus {
+    /// Whether the match stage reads this corpus's rows off a narrower
+    /// relation ([`Self::matched`]): [`LIVE_ITEM_FILLED`] does, and it is how
+    /// a caller tells which mirror [`mirror`] handed out.
+    #[must_use]
+    pub fn relation_is_narrowed(&self) -> bool {
+        self.matched.is_some()
+    }
 }
 
 /// One declared scalar field's candidates for every source and kind the
@@ -1119,7 +1136,94 @@ pub const LIVE_ITEM: Corpus = Corpus {
     ),
     fields: LIVE_ITEM_FIELDS,
     fields_carded: LIVE_ITEM_FIELDS_CARDED,
+    matched: None,
 };
+
+/// The mirror for the launcher's **match stage** (the broad-keys pass,
+/// 2026-11-13): `sync.item_search` and nothing else. Each matched row's kind,
+/// source, date and the words it is named by are columns beside its vector
+/// (migration `0084`), and a row is live when it is not one of the withdrawn
+/// entities and its source is not switched off, both read once a statement:
+/// `sync.live_item`'s two tests, as `knobas_core::live_by_exclusion!` spells
+/// them.
+///
+/// One letter under *Everything* matched 35,232 of 39,770 rows and fetched
+/// each one's row of `sync.item` and of `knobas.entity` by its key, 3 µs of
+/// the 7 a match cost.
+///
+/// **Only of a mirror whose every copy holds the six columns.** A copy
+/// written before `0084` holds none until the fill reaches it, and read here
+/// its row would have no kind and match nothing. [`mirror`] says which the
+/// database is, and hands out [`LIVE_ITEM_FILLED`] or [`LIVE_ITEM`].
+///
+/// **What it cannot answer.** It has no author, no title text and no
+/// payload, so a query with `by:`, `name:`, `under:`, `reach:` or a ticket
+/// key is matched through [`LIVE_ITEM`]'s own relation, as before
+/// (`crate::sql`'s match stage decides).
+pub const LIVE_ITEM_MATCH: Corpus = Corpus {
+    relation: "sync.item_search sx",
+    entity_id: "sx.entity_id",
+    kind: "sx.kind",
+    source_id: "sx.source_id",
+    title: "null::text",
+    named: Some(
+        "coalesce(sx.title_words = q.words or sx.title_tail_words = q.words \
+         or sx.key_words = q.words, false)",
+    ),
+    fts: "sx.fts",
+    title_fts: Some("sx.fts_a"),
+    headline_text: "null::text",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
+    author: None,
+    updated_at: "sx.item_updated_at",
+    synced_at: "null::timestamptz",
+    path: "null::text",
+    state: "null::jsonb",
+    cell: "null::text",
+    scope: Some(knobas_core::live_by_exclusion!("sx")),
+    under: None,
+    fields: &[],
+    fields_carded: &[],
+    matched: None,
+};
+
+/// [`LIVE_ITEM`] on a mirror whose every search copy holds its six columns
+/// (migration `0084`): the same rows, its match stage read off the copy alone
+/// ([`LIVE_ITEM_MATCH`]). What [`mirror`] hands out once the fill is done.
+pub const LIVE_ITEM_FILLED: Corpus = Corpus {
+    matched: Some(&LIVE_ITEM_MATCH),
+    ..LIVE_ITEM
+};
+
+/// The mirror as a search reads it on this database now: [`LIVE_ITEM_FILLED`]
+/// where every row of `sync.item_search` holds its six columns, and
+/// [`LIVE_ITEM`], the read before `0084`, while one written before that
+/// migration is still unfilled (bring-up fills them in the background,
+/// `knobas_core::item_search::fill`).
+///
+/// One probe of `item_search_unfilled_idx`, which holds the unfilled rows
+/// and so, on a filled mirror, nothing. **A row never goes back**: the
+/// triggers write the six columns with every copy they write, so a mirror
+/// found filled stays filled, and a statement built on this answer reads a
+/// mirror at least as filled as the one asked.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the probe fails.
+pub async fn mirror(pool: &sqlx::PgPool) -> Result<&'static Corpus, sqlx::Error> {
+    let unfilled: bool =
+        sqlx::query_scalar("select exists (select from sync.item_search where kind is null)")
+            .fetch_one(pool)
+            .await?;
+    Ok(if unfilled {
+        &LIVE_ITEM
+    } else {
+        &LIVE_ITEM_FILLED
+    })
+}
 
 /// [`LIVE_ITEM`] as it read the mirror before migration `0077`: the row's
 /// own `sync.item.fts` for the match and the rank, filtered per match under
@@ -1134,6 +1238,7 @@ pub const LIVE_ITEM_UNSTORED: Corpus = Corpus {
     title_fts: None,
     path: mirror_path!("pd.d"),
     state: mirror_state!("pd.d"),
+    matched: None,
     ..LIVE_ITEM
 };
 
@@ -1144,6 +1249,7 @@ pub const LIVE_ITEM_UNSTORED: Corpus = Corpus {
 pub const LIVE_ITEM_PROBED: Corpus = Corpus {
     fields: LIVE_ITEM_FIELDS_PROBED,
     fields_carded: &[],
+    matched: None,
     ..LIVE_ITEM
 };
 
@@ -1204,6 +1310,7 @@ pub const NOTE: Corpus = Corpus {
     // Knobas' own rows carry none of a ticket's fields.
     fields: &[],
     fields_carded: &[],
+    matched: None,
 };
 
 /// Assets: the estate, and the corpus this module's own docs designed (#428).
@@ -1269,6 +1376,7 @@ pub const ASSET: Corpus = Corpus {
     // Knobas' own rows carry none of a ticket's fields.
     fields: &[],
     fields_carded: &[],
+    matched: None,
 };
 
 /// Routes: what an asset is reachable at, and the second corpus of the estate
@@ -1359,6 +1467,7 @@ pub const ROUTE: Corpus = Corpus {
     // Knobas' own rows carry none of a ticket's fields.
     fields: &[],
     fields_carded: &[],
+    matched: None,
 };
 
 /// A saved ticket view (#2422, `knobas.ticket_view`, migration `0035`): the
@@ -1399,6 +1508,7 @@ pub const VIEW: Corpus = Corpus {
     under: None,
     fields: &[],
     fields_carded: &[],
+    matched: None,
 };
 
 /// A link set (#2422, `knobas.link_set`, migration `0039`): the launcher's
@@ -1455,6 +1565,7 @@ pub const SET: Corpus = Corpus {
     under: None,
     fields: &[],
     fields_carded: &[],
+    matched: None,
 };
 
 /// The lists a reader saved (#2423, spec #2419 story 13), as kind `list`:
@@ -1498,6 +1609,7 @@ pub const SAVED_LIST: Corpus = Corpus {
     under: None,
     fields: &[],
     fields_carded: &[],
+    matched: None,
 };
 
 /// Every corpus the launcher searches.
@@ -1547,6 +1659,7 @@ pub const PIPELINE_LOG: Corpus = Corpus {
     fields: LIVE_ITEM_FIELDS,
     // Its rows are pipelines, which have no card.
     fields_carded: &[],
+    matched: None,
 };
 
 pub const ALL: &[&Corpus] = &[
@@ -1586,9 +1699,51 @@ pub fn searched(corpora: &[&'static Corpus], titles: bool) -> Vec<&'static Corpu
         .collect()
 }
 
+/// `corpora` with the mirror read as `mirror` reads it ([`mirror`]'s
+/// answer): [`LIVE_ITEM`]'s place taken by it, every other corpus as it is.
+#[must_use]
+pub fn with_mirror(corpora: Vec<&'static Corpus>, mirror: &'static Corpus) -> Vec<&'static Corpus> {
+    corpora
+        .into_iter()
+        .map(|c| {
+            if c.relation == LIVE_ITEM.relation && c.unless.is_none() {
+                mirror
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The match stage reads no `sync.live_item`, so it spells the view's
+    /// two tests itself: they must be `knobas_core::live_by_exclusion!`'s,
+    /// over the search copy's id and the row's source.
+    #[test]
+    fn the_match_stage_tests_liveness_as_the_view_does() {
+        assert_eq!(
+            LIVE_ITEM_MATCH.scope,
+            Some(knobas_core::live_by_exclusion!("sx"))
+        );
+        // It draws nothing: `sql` reads the page's rows from the corpus it
+        // stands in for, which is the mirror filled and no other.
+        assert!(LIVE_ITEM_MATCH.matched.is_none());
+        assert!(LIVE_ITEM.matched.is_none());
+        assert_eq!(
+            LIVE_ITEM_FILLED.matched.map(|corpus| corpus.relation),
+            Some(LIVE_ITEM_MATCH.relation)
+        );
+        assert_eq!(LIVE_ITEM_FILLED.relation, LIVE_ITEM.relation);
+        // Only the mirror's own corpus is swapped, never the run logs, which
+        // join the same view.
+        let swapped = with_mirror(searched(ALL, false), &LIVE_ITEM_FILLED);
+        assert_eq!(swapped.len(), ALL.len());
+        assert_eq!(swapped.iter().filter(|c| c.matched.is_some()).count(), 1);
+        assert!(swapped[0].matched.is_some());
+    }
 
     #[test]
     fn titles_leaves_the_run_logs_out_and_everything_keeps_them() {

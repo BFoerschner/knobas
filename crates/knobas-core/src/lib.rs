@@ -13,6 +13,7 @@ pub mod inbox;
 pub mod item_card;
 mod item_field;
 pub mod item_row;
+pub mod item_search;
 pub mod link;
 pub mod link_set;
 mod live;

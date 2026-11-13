@@ -122,6 +122,10 @@ pub(crate) enum Bind {
 pub struct SearchSql {
     sql: String,
     binds: Vec<Bind>,
+    /// Whether every mirror row the statement matches is read off a narrower
+    /// relation (`Corpus::matched`), and none off `sync.item`:
+    /// [`Self::matches_narrowly`].
+    narrowly: bool,
 }
 
 impl SearchSql {
@@ -135,6 +139,15 @@ impl SearchSql {
     #[must_use]
     pub fn bind_count(&self) -> usize {
         self.binds.len()
+    }
+
+    /// Whether the statement's match stage reads a corpus through its
+    /// narrower relation (`Corpus::matched`): the mirror off
+    /// `sync.item_search` alone, where a scan of the whole relation reads no
+    /// row of `sync.item` ([`fetch_matched_by_a_letter`]).
+    #[must_use]
+    pub fn matches_narrowly(&self) -> bool {
+        self.narrowly
     }
 }
 
@@ -303,11 +316,22 @@ fn build_search_sql(
         _ => index,
     };
 
+    let mut narrowly = false;
     sql.push_str("m as materialized (\n");
     for (index, corpus) in corpora.iter().enumerate() {
         if index > 0 {
             sql.push_str("  union all\n");
         }
+        // The rows of this corpus, matched through its narrower relation
+        // where the query asks nothing that relation does not hold
+        // (`Corpus::matched`); the page's rows are drawn from `corpus` below.
+        let corpus: &Corpus = match corpus.matched {
+            Some(narrower) if text.is_some() && matched_narrowly(&bound) => {
+                narrowly = true;
+                narrower
+            }
+            _ => corpus,
+        };
         let rank = match (text.is_some(), prefix_last) {
             (true, true) => RANK_WHOLE.replace("{fts}", corpus.fts),
             (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
@@ -447,6 +471,7 @@ fn build_search_sql(
     SearchSql {
         sql,
         binds: builder.binds,
+        narrowly,
     }
 }
 
@@ -477,6 +502,7 @@ pub fn ids_sql(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> 
     SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     }
 }
 
@@ -496,6 +522,7 @@ pub fn ids_sql_probed(alternatives: &[WordAlternative], filters: &EffectiveFilte
     SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     }
 }
 
@@ -680,6 +707,7 @@ pub(crate) fn board_sql(
     SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     }
 }
 
@@ -829,6 +857,7 @@ pub fn ids_count_sql(alternatives: &[WordAlternative], filters: &EffectiveFilter
     SearchSql {
         sql: format!("select count(*)::bigint from (\n{}\n) matched", ids.sql),
         binds: ids.binds,
+        narrowly: false,
     }
 }
 
@@ -862,6 +891,7 @@ pub fn ids_counts_sql(queries: &[(&[WordAlternative], &EffectiveFilters)]) -> Op
     Some(SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     })
 }
 
@@ -927,6 +957,18 @@ fn walk_probe(corpus: &Corpus, bound: &BoundFilters) -> String {
     } else {
         format!(" cross join lateral (select {} as eid) o", corpus.entity_id)
     }
+}
+
+/// Whether a query asks only what a corpus's narrower match relation holds
+/// (`Corpus::matched`): the words, the scope, and the sources, kinds and
+/// dates. An author, a parent, a reach, a name glob or a ticket key reads the
+/// corpus's own row.
+fn matched_narrowly(bound: &BoundFilters) -> bool {
+    bound.authors.is_none()
+        && bound.under.is_none()
+        && bound.reach.is_none()
+        && bound.names.is_none()
+        && bound.fields.is_empty()
 }
 
 /// Allocate one statement's filter binds, in the order they are read.
@@ -1385,6 +1427,7 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
     Some(SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     })
 }
 
@@ -1398,7 +1441,7 @@ pub fn query_as_with<O>(built: SearchSql) -> QueryAs<'static, Postgres, O, PgArg
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
-    let SearchSql { sql, binds } = built;
+    let SearchSql { sql, binds, .. } = built;
     let mut query = sqlx::query_as::<Postgres, O>(sqlx::AssertSqlSafe(sql))
         // **Not a cached prepared statement, and this is a measured decision.**
         //
@@ -1461,14 +1504,83 @@ pub async fn fetch_matched<O>(pool: &sqlx::PgPool, built: SearchSql) -> Result<V
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
+    fetch_planned(pool, built, MATCHED_PLANNING).await
+}
+
+/// [`fetch_matched`] for a statement whose words are **one character**, still
+/// being typed (the broad-keys pass, 2026-11-13): planned with sequential
+/// scans left on.
+///
+/// One letter matches every row that holds a word beginning with it, 35,232
+/// of 39,770 on Björn's scale. Through the index that is a list of nearly
+/// every row, built by one process while the others wait for it, 6 ms, and
+/// then every page of the table read anyway; read whole, every process
+/// starts at once: `p` 54 ms to 47. Since migration `0084` the narrow table
+/// holds its vectors in its rows, so the reason [`fetch_matched`] turns the
+/// scan off (a vector fetched from beside the table to be tested) is gone
+/// for it. Only for one character: a longer word the planner misjudged
+/// would read the whole table to find a few rows.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_matched_by_a_letter<O>(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    fetch_planned(pool, built, LETTER_PLANNING).await
+}
+
+/// `built`'s rows, planned under `planning` in a transaction of its own.
+async fn fetch_planned<O>(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    planning: &'static str,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
     let mut tx = pool.begin().await?;
-    sqlx::query("set local enable_seqscan = off")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(planning).execute(&mut *tx).await?;
     let rows = query_as_with::<O>(built).fetch_all(&mut *tx).await?;
     tx.commit().await?;
     Ok(rows)
 }
+
+/// What a statement with words is planned under, set for its transaction
+/// alone (`set_config(..., true)` is `set local`), in one round trip.
+///
+/// * **`enable_seqscan` off**: [`fetch_matched`] says why.
+/// * **`parallel_tuple_cost` 0, `parallel_setup_cost` 850 and three
+///   workers** (the broad-keys pass, 2026-11-13). The planner prices
+///   `ts_rank_cd` as one cheap operator a row, where it is most of a broad
+///   word's work: 2 µs a match, 60 ms for the 35,000 rows one letter
+///   matches. So it saw nothing for more processes to share, and since the
+///   match stage reads the narrow table alone (migration `0084`) the
+///   statement looked cheap enough to run on one: `p` 97 ms. With no charge
+///   a row passed up, a start-up charge of 850 where the default is 1,000,
+///   and the three workers the server's own rule gives a table of this size
+///   where the default caps a statement at two, a word half the mirror
+///   holds is ranked on four processes (`p` 97 ms to 54, `pa` 73 to 44,
+///   `retry` 56 to 35, `deploy`, 19,273 rows, 50 to 33) and a rare one
+///   still on one, where starting workers costs more than they save
+///   (`iban`, 553 rows: 10 ms alone, 13 with workers). The charge is set
+///   between the two on Björn's scale: at 700 `iban` starts workers, at
+///   1,000 `deploy` no longer does. Where the line falls between them, and
+///   on another mirror, was not measured.
+const MATCHED_PLANNING: &str = "select set_config('enable_seqscan', 'off', true), \
+     set_config('parallel_tuple_cost', '0', true), \
+     set_config('parallel_setup_cost', '850', true), \
+     set_config('max_parallel_workers_per_gather', '3', true)";
+
+/// [`MATCHED_PLANNING`] with sequential scans left on:
+/// [`fetch_matched_by_a_letter`]'s.
+const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', true), \
+     set_config('parallel_setup_cost', '850', true), \
+     set_config('max_parallel_workers_per_gather', '3', true)";
 
 /// What the mirror and the estate say of each typed `under:` value, by its
 /// 1-based position among `values`, for `crate::under::report_unknown`
@@ -1579,9 +1691,7 @@ pub async fn parent_positions(
 #[cfg(any(test, feature = "test-util"))]
 pub async fn explain_matched(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("set local enable_seqscan = off")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(MATCHED_PLANNING).execute(&mut *tx).await?;
     let plan = explain_on(&mut tx, built).await?;
     tx.commit().await?;
     Ok(plan)
@@ -1613,7 +1723,7 @@ async fn explain_on(
     conn: &mut sqlx::PgConnection,
     built: SearchSql,
 ) -> Result<String, sqlx::Error> {
-    let SearchSql { sql, binds } = built;
+    let SearchSql { sql, binds, .. } = built;
     let mut query = sqlx::query_as::<Postgres, (String,)>(sqlx::AssertSqlSafe(format!(
         "explain (analyze, buffers, costs off)
 {sql}"
@@ -2741,6 +2851,7 @@ mod tests {
             under: None,
             fields: &[],
             fields_carded: &[],
+            matched: None,
         };
         let built = search_sql(
             &[&LIVE_ITEM, &OTHER],
