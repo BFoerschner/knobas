@@ -3807,6 +3807,22 @@ export type RefusedWrite = { entity: string, op: string,
 field?: string, reason: string, };
 
 /**
+ * One pipeline that builds a repository, for the repository's Builds tab
+ * (the repo-builds pass, 2026-11-13, `mockups/builds/repo-builds.md`): the
+ * pipeline as the Builds list names it, and its newest run on each branch
+ * among the runs that built one of the repository's mirrored commits.
+ *
+ * `latest` holds one run per branch, newest first; the branch is as the run
+ * spells it, so `refs/heads/main` and `main` are two entries where a source
+ * writes both.
+ */
+export type RepoPipelineRow = { entity_id: string, source_id: string, source_name: string, name: string, group: string | null, 
+/**
+ * The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+ */
+path: Array<string>, web_url: string | null, latest: Array<RunRow>, };
+
+/**
  * A *Publish again* that has not landed (F-327): the newest `UpdatePage` on the
  * date's page, pending, held or refused. A sent one is simply the page.
  */

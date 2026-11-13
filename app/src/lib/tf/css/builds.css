@@ -260,3 +260,42 @@
   .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
   .tf-runs { padding-left: 16px; padding-right: 16px; }
 }
+
+/* ---------- Builds on the repository page (the repo-builds pass, `TfRepoBuilds.svelte`) ---------- */
+/* The branches as a rail on the left, one branch on the right; `.tf-cbody` pads the tab (code.css). */
+.tf-rbv { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 22px; align-items: start; }
+/* The rail is the Builds rail (`.tf-pl`) in a box, held in view while the branch's page scrolls. */
+/* Its head stays put and its rows scroll in `.tf-pl-list` (#2091's rule: bounded by the window, its last row reachable). */
+.tf-rbv > .tf-rbrail { border: 1px solid var(--rule); border-radius: 6px; display: flex; overflow: hidden; position: sticky; top: 0; max-height: calc(100vh - 250px); }
+.tf-rbrail .tf-pl-top .tf-fsearch { max-width: none; }
+.tf-rb-count { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; margin-left: auto; }
+/* A branch name is code; its namespace (`feature/`, `renovate/`) is drawn in the second ink, as a shared prefix is. */
+.tf-rbr .tf-pi-nm { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+/* The branch's page, capped so a run stays near its pipeline's name on a wide window. */
+.tf-rbp { max-width: 1040px; min-width: 0; }
+.tf-rbp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tf-rbp-h h2 { font: 600 var(--t-xl) var(--mono); font-variant-ligatures: none; min-width: 0; overflow-wrap: anywhere; }
+.tf-rbp-sub { color: var(--ink-2); font-size: var(--t-sm); margin: 4px 0 14px; }
+.tf-rbp .tf-problem { margin-bottom: 10px; }
+.tf-rbp-ok { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+/* What ran here beside what ran on the default branch, and in a word what that means; failures lead. */
+.tf-rbp .tf-rbt { table-layout: fixed; width: 100%; margin-top: 4px; }
+.tf-rbt col.tf-rbt-run { width: 170px; }
+.tf-rbt col.tf-rbt-vc { width: 170px; }
+.tf-rbt td.tf-rbt-pl a { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tf-rbt td.tf-rbt-pl .tf-pi-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-cbody .tf-rbt td.tf-rbt-pl a:hover .tf-pi-nm { text-decoration: underline; text-underline-offset: 2px; }
+.tf-cbody .tf-rbt a.tf-rbt-cell { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-cbody .tf-rbt a.tf-rbt-cell.tf-err { color: var(--err); font-weight: 600; }
+.tf-cbody .tf-rbt a.tf-rbt-cell.tf-info { color: var(--info); }
+.tf-rbt td.tf-rbt-v { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-rbt td.tf-rbt-v.tf-err { color: var(--err); font-weight: 600; }
+.tf-rbt td.tf-rbt-v.tf-ok { color: var(--ok); }
+.tf-rbt td.tf-rbt-v.tf-info { color: var(--info); }
+.tf-rb-none { color: var(--muted); font-size: var(--t-xs); }
+.tf-rb-notrun { font-size: var(--t-sm); color: var(--ink-2); margin: 12px 0 0; }
+.tf-cbody .tf-rb-notrun a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 900px) {
+  .tf-rbv { grid-template-columns: minmax(0, 1fr); }
+  .tf-rbv > .tf-rbrail { position: static; max-height: 45vh; }
+}

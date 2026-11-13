@@ -20,7 +20,7 @@
  */
 import { litTab, readRepoRoute, repoHash, type RepoRoute, type RepoTabId } from "./repo";
 
-export const SLOTS = ["files", "commits", "commit", "branches", "compare", "prs", "local"] as const;
+export const SLOTS = ["files", "commits", "commit", "branches", "compare", "prs", "builds", "local"] as const;
 export type TabSlot = (typeof SLOTS)[number];
 
 /** The slot an address of the repository page draws. */

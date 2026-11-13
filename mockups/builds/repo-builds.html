@@ -1,0 +1,599 @@
+<!doctype html>
+<!--
+  Builds on the repository page (2026-11-13): what builds this repo, branch by branch, beside the Builds page kept for
+  the whole estate. The question it answers is "is my branch green, everywhere this repo is built?".
+
+  Three screens, switched with the yellow bar (bottom right), which is not part of the app:
+    1. Repository › Builds: the branches as a rail (the Builds rail's rows; the default, yours, those with a pull request,
+       the rest) and, for the branch picked, a verdict (does anything fail here that passes on main?) over a table of
+       each pipeline's latest run here beside its latest run on main. It opens on your branch.
+    2. Repository › Builds › a pipeline: its runs on main or on every branch, without leaving the repo.
+    3. Builds, grouped by repository: the estate view stays, and can group by repository instead of the CI's own
+       projects. Pipelines that check out no repository (nightlies, deploys, infrastructure) keep a fold of their own.
+  Two repositories: payout-service, built by TeamCity and one GitHub Actions workflow, and booking-web, built by
+  GitHub Actions alone.
+
+  Drawn on the app's own stylesheets (tf.css). The rail's rows, the glyph and the repo header are the DOM the app
+  draws today; the classes in "Proposed additions" are new. The data it needs is a pipeline's repositories in the
+  mirrored row, declared by the adapter (today they are a live read, `pipeline_settings`): repo-builds.md.
+  ?screen=tab|pipeline|estate, ?repo=payout|booking, ?theme=light|dark.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repository builds</title>
+<link rel="stylesheet" href="../../app/node_modules/@fontsource-variable/archivo/wdth.css">
+<link rel="stylesheet" href="../../app/node_modules/@fontsource/jetbrains-mono/latin-400.css">
+<link rel="stylesheet" href="../../app/node_modules/@fontsource/jetbrains-mono/latin-600.css">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../app/src/lib/tf/tf.css">
+<style>
+  :root { --sans: "Archivo Variable", "Archivo", system-ui, sans-serif; }
+  html, body { height: 100%; }
+
+  /* ================================================================================
+     Proposed additions (a new repo-builds.css, or code.css).
+     ================================================================================ */
+
+  /* The Builds tab (`.tf-cbody` pads it, code.css): the branches as a rail on the left, one branch on the right. */
+  .tf-rbv { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 22px; align-items: start; }
+  /* The rail is the Builds rail (`.tf-pl`) in a box, held in view while the branch's page scrolls. */
+  .tf-rbv > .tf-rbrail { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; position: sticky; top: 0; max-height: min(720px, calc(100vh - 250px)); }
+  .tf-rbrail .tf-pl-top .tf-fsearch { max-width: none; }
+  .tf-rb-count { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; }
+  /* A branch name is code; its namespace (`feature/`, `renovate/`) is drawn in the second ink, as a shared prefix is. */
+  .tf-rbr .tf-pi-nm { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+  /* The branch's page: its name, what it is compared with, the verdict, the table. Capped, so a cell stays near its
+     pipeline's name on a wide window. */
+  .tf-rbp { max-width: 1040px; }
+  .tf-rbp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tf-rbp-h h2 { font: 600 var(--t-xl) var(--mono); font-variant-ligatures: none; min-width: 0; overflow-wrap: anywhere; }
+  .tf-rbp-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
+  .tf-rbp-sub { color: var(--ink-2); font-size: var(--t-sm); margin: 4px 0 14px; }
+  .tf-rbp .tf-problem { margin-bottom: 10px; }
+  .tf-rbp-ok { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+  /* The table: what ran here beside what ran on main, and in a word what that means. Failures lead. */
+  .tf-rbp .tf-rbt { table-layout: fixed; width: 100%; margin-top: 4px; }
+  .tf-rbt col.tf-rbt-run { width: 170px; }
+  .tf-rbt col.tf-rbt-vc { width: 170px; }
+  .tf-rbt td.tf-rbt-pl a { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tf-rbt td.tf-rbt-pl .tf-pi-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tf-cbody .tf-rbt td.tf-rbt-pl a:hover .tf-pi-nm { text-decoration: underline; text-underline-offset: 2px; }
+  .tf-cbody .tf-rbt a.tf-rbt-cell { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .tf-cbody .tf-rbt a.tf-rbt-cell.tf-err { color: var(--err); font-weight: 600; }
+  .tf-cbody .tf-rbt a.tf-rbt-cell.tf-info { color: var(--info); }
+  .tf-rbt td.tf-rbt-v { font-size: var(--t-xs); color: var(--ink-2); }
+  .tf-rbt td.tf-rbt-v.tf-err { color: var(--err); font-weight: 600; }
+  .tf-rbt td.tf-rbt-v.tf-ok { color: var(--ok); }
+  .tf-rbt td.tf-rbt-v.tf-info { color: var(--info); }
+  .tf-rbt td.tf-rbt-v.tf-warn { color: var(--warn); }
+  .tf-rbm-none { color: var(--muted); font-size: var(--t-xs); }
+  .tf-rb-notrun { font-size: var(--t-sm); color: var(--ink-2); margin: 12px 0 0; }
+  .tf-cbody .tf-rb-notrun a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .tf-rb-lead { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 12px; max-width: 90ch; }
+  .tf-rb-lead a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .tf-rb-today { padding: 0 22px; }
+  @media (max-width: 900px) {
+    .tf-rbv { grid-template-columns: minmax(0, 1fr); }
+    .tf-rbv > .tf-rbrail { position: static; max-height: 45vh; }
+  }
+  /* The Branches tab's *Builds* cell: the worst glyph and the words, loud only when something failed. */
+  .tf-rbranches td.tf-rbr-builds a { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; }
+  .tf-rbranches td.tf-rbr-builds a:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .tf-rbranches td.tf-rbr-builds a.tf-err { color: var(--err); font-weight: 600; }
+  .tf-rbranches td.tf-rbr-builds a.tf-info { color: var(--info); }
+
+  /* The tab's pipeline: where it was opened from, over the pipeline page the Builds view draws, and which runs. */
+  .tf-rb-back { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); }
+  .tf-cbody .tf-rb-back a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+  .tf-rb-scope { margin: 4px 0 0; }
+  .tf-rb-ph { display: flex; align-items: center; gap: 10px; padding: 8px 0 4px; flex-wrap: wrap; }
+  .tf-rb-ph h2 { font-size: var(--t-2xl); font-weight: 700; font-variation-settings: "wdth" 85; }
+  .tf-rb-ph .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
+  .tf-rb-ph + .tf-sub { padding: 0 0 4px; color: var(--ink-2); font-size: var(--t-sm); }
+  .tf-cbody .tf-runs { padding-left: 0; padding-right: 0; }
+  /* The estate's grouping: the CI's projects, or repositories. */
+  .tf-pl-top .tf-pl-group { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
+  .tf-pi-src { flex: none; font-size: var(--t-2xs); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+  .tf-pi[aria-current="true"] .tf-pi-src { color: inherit; border-color: currentColor; opacity: .8; }
+
+  /* ================================================================================
+     Mockup only.
+     ================================================================================ */
+  .mk { position: fixed; right: 12px; bottom: 40px; z-index: 50; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; max-width: min(760px, 70vw);
+        background: var(--card); color: var(--card-ink); border: 1px solid var(--card-2); border-radius: 6px; padding: 6px 8px; font: 12px var(--sans); box-shadow: var(--shadow); }
+  .mk b { font-weight: 700; margin-right: 4px; }
+  .mk span { opacity: .6; }
+  .mk button { border: 1px solid rgba(0,0,0,.25); border-radius: 4px; padding: 2px 8px; background: rgba(255,255,255,.3); color: inherit; font: inherit; cursor: pointer; }
+  .mk button[aria-pressed="true"] { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+</style>
+</head>
+<body>
+<div class="tf">
+  <header class="tf-top">
+    <span class="tf-brand">knobas</span>
+    <nav class="tf-nav" aria-label="Main" id="nav"></nav>
+    <span class="tf-spacer"></span>
+    <button class="tf-search" aria-label="Search everything">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+      <span class="tf-label">Search</span><kbd>⌘K</kbd>
+    </button>
+  </header>
+  <main class="tf-main" id="main"></main>
+  <footer class="tf-status">
+    <a class="tf-sources" href="#/settings">Sources</a>
+    <span class="tf-read">Tidewater TeamCity synced 14:21</span><span class="tf-read">GitHub Actions synced 14:20</span><span class="tf-read">Tidewater Gitea synced 14:19</span>
+  </footer>
+</div>
+
+<div class="mk" role="group" aria-label="Mockup switches">
+  <b>Mockup</b>
+  <button data-screen="tab">Repo › Builds</button>
+  <button data-screen="pipeline">Repo › Builds › pipeline</button>
+  <button data-screen="branches">Repo › Branches</button>
+  <button data-screen="estate">Builds by repository</button>
+  <span>·</span>
+  <button data-repo="payout">payout-service</button>
+  <button data-repo="booking">booking-web</button>
+  <button data-repo="many">portal-web (31 branches)</button>
+  <span>·</span>
+  <button data-theme="light">Light</button>
+  <button data-theme="dark">Dark</button>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ fixtures
+   The dev fake's estate (app/src/lib/shell/dev/fake/builds.ts and corpus.ts), with a GitHub Actions source beside
+   TeamCity. A pipeline names the repositories it checks out (`repos`): the fact the mirror would have to hold. A cell is
+   [tone, time] for the latest run of the pipeline on that branch, or null where it never ran there. */
+const TC = "Tidewater TeamCity", GHA = "GitHub Actions";
+const JOB = "PAY-231";
+const REPOS = {
+  payout: {
+    id: "mock:tidewater/payout-service", name: "tidewater/payout-service", sub: "Payments, Rust, last push 22 Aug.",
+    branches: [
+      { key: "main", name: "main", tags: [["Default", ""]] },
+      { key: "mine", name: "feat/PAY-231-idempotent-retry", tags: [["#142", "tf-info"]], job: true },
+      { key: "csv", name: "feature/csv-export", tags: [["#150", "tf-info"]] },
+      { key: "spike", name: "spike/sepa-instant", tags: [] },
+    ],
+    prs: 2, local: 1,
+    pipelines: [
+      { src: TC, group: "Payments › Payouts", name: "Payout_Build", cells: { main: ["ok", "09:12"], mine: ["run", "11:45"], csv: ["ok", "yesterday 18:02"], spike: ["ok", "13 Aug"] } },
+      { src: TC, group: "Payments › Payouts", name: "Payout_IntegrationTests", cells: { main: ["ok", "09:20"], mine: ["err", "10:09"], csv: ["ok", "yesterday 18:10"], spike: ["err", "13 Aug"] } },
+      { src: TC, group: "Payments › Payouts", name: "Payout_Lint", cells: { main: ["ok", "09:12"], mine: ["ok", "11:44"], csv: ["ok", "yesterday 18:02"], spike: ["ok", "13 Aug"] } },
+      { src: TC, group: "Payments › Payouts", name: "Payout_Docker", cells: { main: ["ok", "09:31"], mine: ["ok", "11:52"], csv: null, spike: null } },
+      { src: TC, group: "Payments › Payouts › Deploy", name: "Payout_Deploy_Staging", cells: { main: ["ok", "09:40"], mine: ["ok", "12:04"], csv: null, spike: null } },
+      { src: TC, group: "Payments › Payouts › Deploy", name: "Payout_Deploy_Prod", cells: { main: ["q", "queued"], mine: null, csv: null, spike: null } },
+      { src: TC, group: "Payments › PSP client", name: "PspClient_Build", also: "also builds tidewater/psp-client", cells: { main: ["ok", "Wed 15:20"], mine: ["ok", "11:40"], csv: null, spike: null } },
+      { src: GHA, group: "tidewater/payout-service", name: "CodeQL", cells: { main: ["ok", "06:00"], mine: ["ok", "10:02"], csv: ["warn", "yesterday 17:58"], spike: null } },
+    ],
+  },
+  booking: {
+    id: "mock:tidewater/booking-web", name: "tidewater/booking-web", sub: "Logistics, TypeScript, last push today.",
+    branches: [
+      { key: "main", name: "main", tags: [["Default", ""]] },
+      { key: "banner", name: "feature/quote-banner", tags: [["#318", "tf-info"]] },
+      { key: "vite", name: "renovate/vite-6", tags: [["#320", "tf-info"]] },
+    ],
+    prs: 2, local: 0,
+    pipelines: [
+      { src: GHA, group: "tidewater/booking-web", name: "CI", cells: { main: ["ok", "13:02"], banner: ["ok", "13:05"], vite: ["err", "12:40"] } },
+      { src: GHA, group: "tidewater/booking-web", name: "E2E", cells: { main: ["ok", "13:20"], banner: ["err", "13:19"], vite: ["wait", "waiting"] } },
+      { src: GHA, group: "tidewater/booking-web", name: "Release", cells: { main: ["ok", "Mon 10:00"], banner: null, vite: null } },
+      { src: GHA, group: "tidewater/booking-web", name: "CodeQL", cells: { main: ["ok", "06:00"], banner: ["ok", "12:59"], vite: ["ok", "12:31"] } },
+      { src: TC, group: "Logistics › Booking", name: "BookingWeb_Build", cells: { main: ["ok", "13:04"], banner: ["ok", "13:06"], vite: null } },
+    ],
+  },
+};
+/* A repository with many branches: four GitHub workflows, one TeamCity pipeline, thirty open pull requests (eight
+   of them Renovate's). Generated with a fixed seed, so it is the same on every load. */
+function seeded(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+function clock(ago) {
+  const now = 14 * 60 + 30, at = now - ago;
+  if (at >= 0) return `${String(Math.floor(at / 60)).padStart(2, "0")}:${String(at % 60).padStart(2, "0")}`;
+  if (at > -24 * 60) return "yesterday";
+  return ["Wed", "Tue", "Mon", "Sun", "Sat", "Fri", "Thu"][Math.min(6, Math.floor(-at / 1440) - 1)] ?? "6 Aug";
+}
+REPOS.many = (() => {
+  const rnd = seeded(11);
+  const names = ["renovate/vite-6", "feature/checkout-v2", "fix/cart-rounding", "feature/PAY-231-portal-retry-banner", "renovate/typescript-5.7",
+    "feature/address-autocomplete", "renovate/playwright-1.49", "fix/safari-date-input", "feature/dark-mode", "renovate/eslint-9",
+    "fix/locale-fallback", "chore/storybook-8", "renovate/react-19", "feature/invoice-download", "chore/split-bundles",
+    "renovate/node-22", "feature/order-history-filters", "fix/a11y-focus-trap", "feature/promo-codes", "renovate/vitest-2",
+    "spike/edge-rendering", "feature/shipping-estimates", "fix/flaky-e2e-login", "chore/ci-cache", "renovate/tailwind-4",
+    "feature/saved-carts", "fix/currency-format", "feature/gift-cards", "fix/scroll-restore", "chore/remove-moment"];
+  const people = ["jonas", "priya", "lena", "tomasz"];
+  const branches = [{ key: "main", name: "main", tags: [["Default", ""]], ago: 25, by: "jonas", against: "" }];
+  names.forEach((name, i) => {
+    const ago = Math.round(i * i * 9 + 15 + rnd() * 40);
+    const job = name.includes("PAY-231");
+    branches.push({ key: `b${i}`, name, tags: [[`#${412 - i}`, "tf-info"]], job, ago, by: name.startsWith("renovate/") ? "renovate" : job ? "you" : people[Math.floor(rnd() * 4)],
+      against: `${1 + Math.floor(rnd() * 6)} ahead, ${Math.floor(rnd() * 12)} behind` });
+  });
+  const cellFor = (b, kind) => {
+    if (b.key === "main") return ["ok", clock(b.ago + (kind === "e2e" ? 9 : 2))];
+    if (kind === "preview" && !b.name.startsWith("feature/")) return null;
+    if (kind === "tc" && !(b.job || rnd() < 0.2)) return null;
+    if (b.ago > 7000 && rnd() < 0.5) return null;
+    const r = rnd();
+    const tone = b.ago < 60 && r < 0.3 ? "run" : kind === "e2e" && r < 0.08 ? "wait" : r < (kind === "e2e" ? 0.14 : 0.05) ? "err" : "ok";
+    return [tone, tone === "wait" ? "waiting" : clock(b.ago + Math.floor(rnd() * 5))];
+  };
+  const pipeline = (src, group, name, kind) => ({ src, group, name, cells: Object.fromEntries(branches.map((b) => [b.key, cellFor(b, kind)])) });
+  return {
+    id: "mock:tidewater/portal-web", name: "tidewater/portal-web", sub: "Storefront, TypeScript, last push today.",
+    branches, prs: names.length, local: 0,
+    pipelines: [
+      pipeline(GHA, "tidewater/portal-web", "CI", "ci"),
+      pipeline(GHA, "tidewater/portal-web", "E2E", "e2e"),
+      pipeline(GHA, "tidewater/portal-web", "Lint", "lint"),
+      pipeline(GHA, "tidewater/portal-web", "Preview deploy", "preview"),
+      pipeline(TC, "Storefront", "PortalWeb_Build", "tc"),
+    ],
+  };
+})();
+/* The small repositories' branches: how long since their last run, and the Branches tab's facts. */
+const FACTS = { main: [20, "jonas", ""], mine: [160, "you", "3 ahead, 0 behind"], csv: [900, "jonas", "4 ahead, 1 behind"], spike: [13000, "you", "2 ahead, 9 behind"],
+  banner: [40, "priya", "5 ahead, 0 behind"], vite: [120, "renovate", "1 ahead, 0 behind"] };
+for (const r of [REPOS.payout, REPOS.booking]) for (const b of r.branches) [b.ago, b.by, b.against] = FACTS[b.key];
+
+/* The estate for screen 3: every pipeline with the repositories it checks out (none for a nightly or a deploy). */
+const ESTATE = [
+  ["Payout_Build", TC, ["tidewater/payout-service"], "run", "11:45"],
+  ["Payout_IntegrationTests", TC, ["tidewater/payout-service"], "err", "10:09"],
+  ["Payout_Lint", TC, ["tidewater/payout-service"], "ok"],
+  ["Payout_Docker", TC, ["tidewater/payout-service"], "ok"],
+  ["Payout_Deploy_Staging", TC, ["tidewater/payout-service"], "ok"],
+  ["Payout_Deploy_Prod", TC, ["tidewater/payout-service"], "q"],
+  ["CodeQL", GHA, ["tidewater/payout-service"], "ok"],
+  ["PspClient_Build", TC, ["tidewater/payout-service", "tidewater/psp-client"], "ok"],
+  ["PspClient_Release", TC, ["tidewater/psp-client"], "ok"],
+  ["Ledger_Build", TC, ["tidewater/ledger-api"], "ok"],
+  ["Ledger_Tests", TC, ["tidewater/ledger-api"], "ok"],
+  ["Ledger_Migrations_Check", TC, ["tidewater/ledger-api"], "ok"],
+  ["CI", GHA, ["tidewater/booking-web"], "ok"],
+  ["E2E", GHA, ["tidewater/booking-web"], "ok"],
+  ["Release", GHA, ["tidewater/booking-web"], "ok"],
+  ["CodeQL", GHA, ["tidewater/booking-web"], "ok"],
+  ["BookingWeb_Build", TC, ["tidewater/booking-web"], "ok"],
+  ["BookingWeb_E2E", TC, ["tidewater/booking-web"], "err", "13:19"],
+  ["EdiParser_Build", TC, ["tidewater/edi-parser"], "ok"],
+  ["EdiParser_Fuzz", TC, ["tidewater/edi-parser"], "err", "06:31"],
+  ["Settlement_Nightly", TC, [], "ok"],
+  ["Dbt_Run_Nightly", TC, [], "ok"],
+  ["Dbt_Test", TC, [], "err", "05:33"],
+  ["Terraform_Plan", TC, [], "q", "queued"],
+  ["Terraform_Apply_Stage", TC, [], "ok"],
+  ["EtaModel_Train", TC, [], "run", "13:00"],
+  ["MonitoringStack_Deploy", TC, [], "ok"],
+];
+
+/* ------------------------------------------------------------------ state */
+const params = new URLSearchParams(location.search);
+const S = { screen: params.get("screen") ?? "tab", repo: params.get("repo") ?? "payout", pipeline: null, branch: params.get("branch"), runScope: null, bq: "", bchips: [], estateSel: "Payout_IntegrationTests|" + TC, remembered: new Map() };
+document.documentElement.dataset.theme = params.get("theme") ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+/* ------------------------------------------------------------------ the app's pieces, as the DOM it draws today */
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const WORD = { ok: "Passed", err: "Failed", warn: "Warning", run: "Running", q: "Queued", muted: "Finished", none: "No runs", wait: "Waiting for approval" };
+/* TfRunGlyph.svelte. `wait` is not in the app: the "waiting for a person" state the GitHub and Jenkins adapters need. */
+function glyph(tone) {
+  const g = {
+    ok: '<path class="tf-rg-line" d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke-width="2"/>',
+    err: '<circle cx="8" cy="8" r="7" fill="currentColor"/><path class="tf-rg-x" d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke-width="1.8"/>',
+    warn: '<path d="M8 1.5 15 14H1z" fill="currentColor"/><path class="tf-rg-x" d="M8 6v3.6" stroke-width="1.7"/><circle class="tf-rg-dot" cx="8" cy="11.8" r=".95"/>',
+    run: '<circle class="tf-rg-pulse" cx="8" cy="8" r="5" fill="currentColor"/>',
+    q: '<circle class="tf-rg-dash" cx="8" cy="8" r="5.6" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>',
+    wait: '<circle cx="8" cy="8" r="7" fill="currentColor"/><path class="tf-rg-x" d="M6.3 5v6M9.7 5v6" stroke-width="1.8"/>',
+    none: '<path class="tf-rg-line" d="M4.5 8h7" stroke-width="1.6"/>',
+  }[tone];
+  const cls = tone === "wait" ? "tf-rg tf-rg-warn" : `tf-rg tf-rg-${tone}`;
+  return `<svg class="${cls}" viewBox="0 0 16 16" width="12" height="12" role="img" aria-label="${WORD[tone]}">${g}</svg>`;
+}
+/* builds.ts `sharedPrefix`. */
+function sharedPrefix(names) {
+  if (names.length < 2) return "";
+  let common = names[0];
+  for (const n of names) while (!n.startsWith(common)) common = common.slice(0, -1);
+  const cut = /^.*[_.\-\s:/]/.exec(common)?.[0] ?? "";
+  return names.every((n) => n.length > cut.length) ? cut : "";
+}
+const nameHtml = (name, pre, bad) => `<span class="tf-pi-nm${bad ? " tf-bad" : ""}">${pre ? `<span class="tf-pi-pre">${esc(pre)}</span>` : ""}${esc(name.slice(pre.length))}</span>`;
+
+function nav() {
+  const on = S.screen === "estate" ? "builds" : "code";
+  document.getElementById("nav").innerHTML = [["tickets", "Tickets"], ["inbox", "Inbox <span class=\"tf-count\">10</span>"], ["code", "Code"], ["builds", "Builds"], ["docs", "Docs"], ["monitors", "Monitors"], ["time", "Time"]]
+    .map(([id, label]) => `<a href="#/${id}"${id === on ? ' aria-current="page"' : ""}>${label}</a>`).join("");
+}
+
+/* ------------------------------------------------------------------ screens 1 and 2: the repository page */
+function repoPage() {
+  const r = REPOS[S.repo];
+  /* The tab's count: what fails on main or on your branch, in err; else how many pipelines build the repo. */
+  const watched = r.branches.filter((b) => b.key === "main" || b.job);
+  const failingOnDefault = r.pipelines.filter((p) => watched.some((b) => p.cells[b.key]?.[0] === "err")).length;
+  const tabs = `<nav class="tf-tabs" aria-label="Repository">`
+    + `<a href="#">Files</a> <a href="#">Commits</a> <a href="#" data-go="branches"${S.screen === "branches" ? ' aria-current="page"' : ""}>Branches <span class="tf-count">${r.branches.length}</span></a> <a href="#">Compare</a>`
+    + `<span class="tf-tabgrp" aria-hidden="true"></span> <a href="#">Pull requests <span class="tf-count">${r.prs}</span></a>`
+    + ` <a href="#" data-go="tab"${S.screen !== "branches" ? ' aria-current="page"' : ""}>Builds ${failingOnDefault > 0 ? `<span class="tf-count tf-err" title="${failingOnDefault} failing on main or your branch">${failingOnDefault}</span>` : `<span class="tf-count">${r.pipelines.length}</span>`}</a>`
+    + (r.local ? ` <a href="#">Local changes <span class="tf-count tf-warn">${r.local}</span></a>` : ` <a href="#">Local changes</a>`)
+    + `</nav>`;
+  const crumbs = `<nav class="tf-crumbs" aria-label="Breadcrumb"><a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span><strong><span class="tf-mono tf-key tf-key-lead">${esc(r.name)}</span></strong> <a class="tf-esc" href="#/code"><span class="tf-esc-t">Back to Code</span> <kbd>Esc</kbd></a></nav>`;
+  const head = `<header class="tf-fhead tf-repohead"><div><h1 class="tf-mono">${esc(r.name)}</h1> <div class="tf-sub">${esc(r.sub)}</div></div>`
+    + `<div class="tf-acts"><span class="tf-repohold"><a class="tf-btn tf-primary" href="#">New pull request</a></span> <button type="button" class="tf-btn">New branch…</button> <button type="button" class="tf-btn tf-ghost">Open in…</button> <button type="button" class="tf-btn tf-refresh">Refresh</button></div></header>`;
+  const body = S.screen === "pipeline" ? repoPipeline(r) : S.screen === "branches" ? repoBranches(r) : repoBuilds(r);
+  return `<div class="tf-kept"><div class="tf-keptpage"><div class="tf-full">${crumbs}${head}${tabs}<div class="tf-cbody">${body}</div></div></div></div>`;
+}
+
+/* ------------------------------------------------------------------ the Builds tab: one branch against the default
+   The rail lists the branches (the Builds rail's rows): the default, yours, those with a pull request, the rest. The
+   page answers the question a branch is opened with: does anything fail here that passes on main? */
+const STALE = 14 * 24 * 60;
+const VERDICT = {
+  only: ["Only on this branch", "tf-err"], waiting: ["Waiting for approval", "tf-warn"], running: ["Running", "tf-info"],
+  queued: ["Queued", ""], also: ["Fails on main too", ""], fixed: ["Fixed on this branch", "tf-ok"], pass: ["", ""],
+};
+const ORDER = ["only", "waiting", "running", "queued", "also", "fixed", "pass"];
+function runNo(p, b) { let h = 0; for (const c of p.name + b.key) h = (h * 31 + c.charCodeAt(0)) >>> 0; return 1100 + (h % 90); }
+function verdictOf(p, b, def) {
+  const c = p.cells[b.key], d = p.cells[def.key];
+  if (!c) return "notrun";
+  const t = c[0];
+  if (t === "err") return b !== def && d?.[0] === "err" ? "also" : "only";
+  if (t === "wait") return "waiting";
+  if (t === "run") return "running";
+  if (t === "q") return "queued";
+  return b !== def && d?.[0] === "err" ? "fixed" : "pass";
+}
+function branchGroups(r) {
+  const def = r.branches[0];
+  const rest = r.branches.slice(1).sort((a, b) => a.ago - b.ago);
+  const yours = rest.filter((b) => b.job || b.by === "you");
+  const prs = rest.filter((b) => !yours.includes(b) && b.tags.some(([t]) => t.startsWith("#")));
+  const other = rest.filter((b) => !yours.includes(b) && !prs.includes(b));
+  return [["Default branch", [def]], ["Yours", yours], ["Pull requests", prs], ["Other branches", other]];
+}
+function failingOn(r, b) { return r.pipelines.filter((p) => p.cells[b.key]?.[0] === "err").length; }
+
+function branchRow(r, b) {
+  const bu = buildsOf(r, b);
+  const slash = b.name.lastIndexOf("/");
+  const pre = slash > 0 ? b.name.slice(0, slash + 1) : "";
+  const n = failingOn(r, b);
+  const right = n ? `<span class="tf-pi-when tf-err">${n} failing</span>` : bu.tone === "run" ? `<span class="tf-pi-when tf-info">running</span>` : bu.tone === "wait" ? `<span class="tf-pi-when">waiting</span>` : "";
+  return `<a class="tf-tr tf-pi tf-d0 tf-rbr" href="#" data-branch="${b.key}" aria-current="${b.key === S.branch}" title="${esc(`${b.name}: ${bu.words}`)}">${glyph(bu.tone)}`
+    + `<span class="tf-pi-nm${n ? " tf-bad" : ""}">${pre ? `<span class="tf-pi-pre">${esc(pre)}</span>` : ""}${esc(b.name.slice(pre.length))}</span>${right}</a>`;
+}
+
+function branchRail(r) {
+  const q = (S.bq ?? "").toLowerCase(), chips = S.bchips ?? [];
+  const keep = (b) => (!q || b.name.toLowerCase().includes(q)) && (!chips.includes("Failing") || failingOn(r, b) > 0) && (!chips.includes("Mine") || b.job || b.by === "you");
+  const groups = branchGroups(r).map(([h, bs]) => [h, bs.filter(keep)]).filter(([, bs]) => bs.length > 0);
+  const shown = groups.reduce((n, [, bs]) => n + bs.length, 0);
+  const chip = (c) => `<button type="button" aria-pressed="${chips.includes(c)}" data-rchip="${c}">${c}</button>`;
+  return `<nav class="tf-pl tf-rbrail" aria-label="Branches">
+    <div class="tf-pl-top">
+      <label class="tf-fsearch"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg><input placeholder="Filter branches" aria-label="Filter branches" value="${esc(S.bq ?? "")}" data-bq></label>
+      <div class="tf-pl-tools"><div class="tf-fchips" role="group" aria-label="Show only">${chip("Failing")}${chip("Mine")}</div><div class="tf-trail"><span class="tf-rb-count">${shown === r.branches.length ? `${shown} branches` : `${shown} of ${r.branches.length}`}</span></div></div>
+    </div>
+    <div class="tf-pl-list"><div class="tf-pl-rows">${groups.length ? groups.map(([h, bs]) => `<h3>${h}</h3>${bs.map((b) => branchRow(r, b)).join("")}`).join("") : `<p class="tf-pl-note">No branch matches.</p>`}</div></div>
+  </nav>`;
+}
+
+function runCell(p, b) {
+  const c = p.cells[b.key];
+  if (!c) return `<span class="tf-rbm-none" title="Never ran on ${esc(b.name)}">Not run</span>`;
+  const [tone, at] = c;
+  const loud = tone === "err" ? " tf-err" : tone === "run" ? " tf-info" : "";
+  const no = tone === "q" || tone === "wait" ? "" : `#${runNo(p, b)} `;
+  return `<a href="#" class="tf-rbt-cell${loud}" title="${esc(`${p.name} on ${b.name}: ${WORD[tone]}, ${at}`)}">${glyph(tone)}${esc(no + at)}</a>`;
+}
+
+function branchPage(r) {
+  const def = r.branches[0];
+  const b = r.branches.find((x) => x.key === S.branch) ?? def;
+  const isDef = b === def;
+  const all = r.pipelines.map((p) => ({ p, v: verdictOf(p, b, def) }));
+  const ran = all.filter((x) => x.v !== "notrun").sort((x, y) => ORDER.indexOf(x.v) - ORDER.indexOf(y.v));
+  const notrun = all.filter((x) => x.v === "notrun");
+  const only = ran.filter((x) => x.v === "only");
+  const pr = b.tags.find(([t]) => t.startsWith("#"));
+  const head = `<div class="tf-rbp-h"><h2>${esc(b.name)}</h2>`
+    + (pr ? `<span class="tf-chip tf-info">${esc(pr[0])} open</span>` : "") + (b.job ? `<span class="tf-chip tf-jobchip-sm">${JOB}</span>` : "")
+    + `<div class="tf-acts">${pr ? `<a class="tf-btn tf-sm" href="#">Open pull request</a>` : ""}${isDef ? "" : `<a class="tf-btn tf-sm tf-ghost" href="#">Compare with main</a>`}</div></div>`
+    + `<p class="tf-rbp-sub">${isDef ? "The default branch. Every other branch here is compared with it." : `Compared with main, ${esc(b.against)}.`}</p>`;
+  /* The verdict: the one loud thing on the page. A failure only this branch has is a problem box, as the run page draws one. */
+  const problem = ({ p }) => {
+    const c = p.cells[b.key], d = p.cells[def.key];
+    const tail = isDef ? "fails on main" : d ? "fails here and passes on main" : "fails here and has not run on main";
+    return `<div class="tf-problem"><h3>${esc(p.name)} ${tail}</h3><pre>3 failed, 41 passed in #${runNo(p, b)}, ${esc(c[1])}.</pre>`
+      + `<div class="tf-acts"><a class="tf-btn tf-sm" href="#">Log</a><button type="button" class="tf-btn tf-sm">Run again</button><a class="tf-btn tf-sm tf-ghost" href="#" data-open="${esc(p.name)}">Its runs</a></div></div>`;
+  };
+  const also = ran.filter((x) => x.v === "also").length;
+  const busy = ran.filter((x) => ["running", "queued", "waiting"].includes(x.v)).length;
+  const calm = isDef
+    ? `Every pipeline that ran on main passed${busy ? `, and ${busy} ${busy === 1 ? "is" : "are"} still going` : ""}.`
+    : `Nothing fails here that passes on main${also ? `. ${also} ${also === 1 ? "pipeline fails" : "pipelines fail"} on main as well` : ""}${busy ? `. ${busy} still going` : ""}.`;
+  const verdict = only.length
+    ? only.slice(0, 2).map(problem).join("") + (only.length > 2 ? `<p class="tf-rbp-sub">${only.length - 2} more fail only here; they lead the list below.</p>` : "")
+    : `<p class="tf-rbp-ok">${glyph(busy ? "run" : "ok")}<span>${calm}</span></p>`;
+  const rows = ran.map(({ p, v }) => {
+    const [word, tone] = isDef && v === "only" ? ["Failing", "tf-err"] : VERDICT[v];
+    const latest = p.cells[b.key][0];
+    return `<tr><td class="tf-rbt-pl"><a href="#" data-open="${esc(p.name)}" title="${esc(`${p.src} › ${p.group} › ${p.name}`)}">${glyph(latest)}${nameHtml(p.name, "", latest === "err")}</a></td>`
+      + `<td>${runCell(p, b)}</td>${isDef ? "" : `<td>${runCell(p, def)}</td>`}<td class="tf-rbt-v ${tone}">${word}</td></tr>`;
+  }).join("");
+  const table = `<table class="tf-tbl tf-rbt"><colgroup><col><col class="tf-rbt-run">${isDef ? "" : `<col class="tf-rbt-run">`}<col class="tf-rbt-vc"></colgroup>`
+    + `<thead><tr><th>Pipeline</th><th>${isDef ? "main" : "This branch"}</th>${isDef ? "" : "<th>main</th>"}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  const missing = notrun.length ? `<p class="tf-rb-notrun">Not run on this branch: ${notrun.map(({ p }) => `<a href="#" data-open="${esc(p.name)}">${esc(p.name)}</a>`).join(", ")}.</p>` : "";
+  return `<section class="tf-rbp" aria-label="Builds of ${esc(b.name)}">${head}${verdict}${table}${missing}
+    <p class="tf-rb-notrun">${r.pipelines.length} pipelines in ${[...new Set(r.pipelines.map((p) => p.src))].join(" and ")} build this repository. <a href="#" data-go="estate">Every pipeline in Builds</a></p></section>`;
+}
+
+function repoBuilds(r) {
+  return `<div class="tf-rbv">${branchRail(r)}${branchPage(r)}</div>`;
+}
+
+/*
+ * The Branches tab as it is (TfRepoBranches), with a *Builds* column: per branch, the worst of its pipelines' latest
+ * runs as one glyph and in words. It scales with the list: the tab's own filter, chips and count.
+ */
+const WORST = ["err", "wait", "run", "q", "warn", "ok"];
+function buildsOf(r, b) {
+  const ran = r.pipelines.map((p) => p.cells[b.key]).filter(Boolean);
+  if (ran.length === 0) return { tone: "none", words: "No runs" };
+  const n = (t) => ran.filter((c) => c[0] === t).length;
+  const tone = WORST.find((t) => n(t) > 0) ?? "ok";
+  const words = n("err") ? `${n("err")} of ${ran.length} failing` : n("wait") ? `${n("wait")} waiting for approval` : n("run") ? `${n("run")} running` : n("q") ? `${n("q")} queued` : `All ${ran.length} passed`;
+  return { tone, words };
+}
+function repoBranches(r) {
+  const chip = (t) => `<button type="button" aria-pressed="${S.chips?.includes(t) ?? false}" data-bchip="${t}">${t}</button>`;
+  const shown = r.branches.filter((b) => (!S.chips?.includes("Mine") || b.by === "you") && (!S.chips?.includes("Failing") || buildsOf(r, b).tone === "err"));
+  const rows = shown.map((b, i) => {
+    const bu = buildsOf(r, b);
+    const loud = bu.tone === "err" ? "tf-err" : bu.tone === "run" ? "tf-info" : "";
+    const pr = b.tags.find(([t]) => t.startsWith("#"));
+    return `<tr><td title="${esc(b.name)}"><span class="tf-mono">${esc(b.name)}</span>${i === 0 && b.key === "main" ? ' <span class="tf-chip">Default</span>' : ""}${b.job ? ` <span class="tf-chip tf-jobchip-sm">${JOB}</span>` : ""}</td>`
+      + `<td>${esc(b.against)}</td><td>${pr ? `<a href="#">${esc(pr[0])}</a> <span class="tf-chip tf-info">Open</span>` : '<span class="tf-dim">none</span>'}</td><td>${esc(b.by)}</td>`
+      + `<td class="tf-rbr-builds"><a href="#" class="${loud}" data-branch-go="${b.key}" title="Show ${esc(b.name)}'s builds">${glyph(bu.tone)}${esc(bu.words)}</a></td>`
+      + `<td class="tf-dim tf-nowrap">${esc(clock(b.ago))}</td></tr>`;
+  }).join("");
+  return `<div class="tf-rbar"><div class="tf-fbar"><label class="tf-fsearch"><input placeholder="Filter branches" aria-label="Filter branches"></label>`
+    + `<div class="tf-ftail"><div class="tf-fchips" role="group" aria-label="Show">${chip("Mine")}${chip("Failing")}<button type="button" aria-pressed="false">No PR</button><button type="button" aria-pressed="false">Merged</button></div>`
+    + `<span class="tf-fend"><span class="tf-fcount"><span class="tf-fcount-n">${shown.length === r.branches.length ? `${r.branches.length} branches` : `${shown.length} of ${r.branches.length} branches`}</span></span></span></div></div></div>`
+    + `<table class="tf-tbl tf-rbranches"><thead><tr><th>Branch</th><th>Against main</th><th>Pull request</th><th>By</th><th>Builds</th><th>Updated</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function repoPipeline(r) {
+  const p = r.pipelines.find((x) => x.name === S.pipeline) ?? r.pipelines.find((x) => Object.values(x.cells).some((c) => c?.[0] === "err")) ?? r.pipelines[0];
+  const CHIP = { ok: ["tf-ok", "Passed"], err: ["tf-err", "Failed"], warn: ["tf-warn", "Warning"], run: ["tf-info", "Running"], q: ["tf-info", "Queued"], wait: ["tf-warn", "Waiting"] };
+  let no = 1190;
+  const runs = [];
+  const def = r.branches[0], cur = r.branches.find((x) => x.key === S.branch) ?? def;
+  const scope = S.runScope ?? "every";
+  for (const b of r.branches) {
+    const c = p.cells[b.key];
+    if (!c) continue;
+    if (scope === "main" && b !== def) continue;
+    runs.push([b.name, c[0], c[1]]);
+    if (b.key === "main" || b.job) runs.push([b.name, "ok", b.key === "main" ? "yesterday 18:10" : "yesterday 17:35"]);
+  }
+  const rows = runs.map(([br, t, at]) => `<tr><td class="tf-nowrap tf-run-no"><a href="#">${t === "q" ? "" : `#${no--}`}</a><span class="tf-chip ${CHIP[t][0]}">${CHIP[t][1]}</span></td>`
+    + `<td class="tf-mono tf-run-br"><span class="tf-run-brin"><span class="tf-run-brname">${esc(br)}</span>${br.includes("PAY-231") ? `<span class="tf-chip tf-jobchip-sm">${JOB}</span>` : ""}</span></td>`
+    + `<td class="tf-dim tf-run-trig">${br === "main" ? "VCS trigger" : "Mara Lindqvist"}</td><td class="tf-nowrap tf-run-tests">${t === "err" ? '<span class="tf-tests-failed">3 failed</span>, 41 passed' : t === "ok" ? "44 passed" : ""}</td>`
+    + `<td class="tf-nowrap tf-num tf-run-dur">${t === "run" ? '<progress class="tf-progress" aria-label="Running"></progress> running' : t === "q" || t === "wait" ? "" : "4m 12s"}</td><td class="tf-nowrap tf-dim tf-num tf-run-at">${esc(at)}</td><td class="tf-run-acts"></td></tr>`).join("");
+  const seg = (id, label) => `<button type="button" aria-pressed="${scope === id}" data-runscope="${id}">${label}</button>`;
+  return `<div class="tf-rb-back"><a href="#" data-go="tab">Builds of <span class="tf-mono">${esc(cur.name)}</span></a></div>
+    <div class="tf-rb-ph"><h2>${esc(p.name)}</h2><div class="tf-acts"><button type="button" class="tf-btn tf-primary">Run…</button><a class="tf-btn tf-ghost" href="#" data-go="estate">Open in Builds</a><button type="button" class="tf-btn tf-ghost">Open in ${esc(p.src)}</button></div></div>
+    <div class="tf-sub">${esc(p.src)} › ${esc(p.group)}. Its runs on this repository${p.also ? `; it ${esc(p.also)}, whose runs are in Builds` : ""}.</div>
+    <div class="tf-rb-scope"><div class="tf-seg" role="group" aria-label="Runs on">${seg("main", "main")}${seg("every", "Every branch")}</div></div>
+    <div class="tf-runs"><div class="tf-days"><div class="tf-day tf-day-first"><h3 class="tf-dayh">Recent</h3>
+      <table class="tf-tbl tf-runtbl"><colgroup><col class="tf-run-no"/><col class="tf-run-br"/><col class="tf-run-trig"/><col class="tf-run-tests"/><col class="tf-run-dur"/><col class="tf-run-at"/><col class="tf-run-acts"/></colgroup><tbody>${rows}</tbody></table>
+    </div></div></div>`;
+}
+
+/* ------------------------------------------------------------------ screen 3: the Builds page, grouped by repository */
+function estate() {
+  const byRepo = new Map();
+  for (const [name, src, repos, tone, at] of ESTATE) {
+    for (const repo of repos.length ? repos : ["No repository"]) {
+      if (!byRepo.has(repo)) byRepo.set(repo, []);
+      byRepo.get(repo).push({ name, src, tone, at, repos });
+    }
+  }
+  const order = [...byRepo.keys()].filter((k) => k !== "No repository").sort().concat(byRepo.has("No repository") ? ["No repository"] : []);
+  let rows = "";
+  for (const repo of order) {
+    const ps = byRepo.get(repo);
+    const failing = ps.filter((p) => p.tone === "err").length, running = ps.filter((p) => p.tone === "run").length;
+    const open = S.remembered.get(repo) ?? (failing > 0 || ps.some((p) => `${p.name}|${p.src}` === S.estateSel));
+    rows += `<details class="tf-pl-fold"${open ? " open" : ""} data-fold="${esc(repo)}"><summary class="tf-tr tf-tfold tf-d0"><span class="tf-fold-nm${repo === "No repository" ? "" : " tf-mono"}">${esc(repo)}</span><span class="tf-fold-at">`
+      + (failing ? `<span class="tf-count tf-err">${failing}<span class="tf-sr"> failing</span></span>` : "") + (running ? `<span class="tf-count tf-info">${running}<span class="tf-sr"> running</span></span>` : "")
+      + `<span class="tf-fold-n">${ps.length}</span></span></summary></details>`;
+    if (!open) continue;
+    /* In a repository built by two sources, only the fewer's rows say where they run. */
+    const counts = ps.reduce((m, p) => m.set(p.src, (m.get(p.src) ?? 0) + 1), new Map());
+    const most = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const pre = sharedPrefix(ps.map((p) => p.name));
+    for (const p of ps) {
+      const id = `${p.name}|${p.src}`;
+      const time = p.tone === "err" ? `<span class="tf-pi-when tf-err">${p.at}</span>` : p.tone === "run" ? `<span class="tf-pi-when tf-info">${p.at}</span>` : p.tone === "q" ? `<span class="tf-pi-when">queued</span>` : "";
+      rows += `<a class="tf-tr tf-pi tf-d1" href="#" data-estate="${esc(id)}" aria-current="${id === S.estateSel}" title="${esc(`${p.src} › ${p.name}`)}">${glyph(p.tone)}${nameHtml(p.name, pre, p.tone === "err")}`
+        + (counts.size > 1 && p.src !== most ? `<span class="tf-pi-src">${p.src === GHA ? "GitHub Actions" : "TeamCity"}</span>` : "") + time + `</a>`;
+    }
+  }
+  const sel = ESTATE.find(([n, s]) => `${n}|${s}` === S.estateSel);
+  const rail = `<nav class="tf-pl tf-rail" aria-label="Pipelines">
+    <div class="tf-pl-top">
+      <div class="tf-pl-group"><div class="tf-seg" role="group" aria-label="Scope"><button type="button" aria-pressed="false">This job <span class="tf-count">7</span></button><button type="button" aria-pressed="true">All</button></div>
+        <div class="tf-seg" role="group" aria-label="Group by" title="Group by"><button type="button" aria-pressed="false">By project</button><button type="button" aria-pressed="true">By repository</button></div></div>
+      <div class="tf-pl-tools"><div class="tf-fchips" role="group" aria-label="Show only"><button type="button" aria-pressed="false">Failing</button><button type="button" aria-pressed="false">Running</button></div><div class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost">Collapse all</button></div></div>
+    </div>
+    <div class="tf-pl-list"><div class="tf-pl-rows">${rows}</div></div></nav>`;
+  const [name, src, repos, tone] = sel;
+  const page = `<div class="tf-shost"><section class="tf-scroller tf-bmain"><div class="tf-sclip"><div class="tf-sbody">
+    <nav class="tf-crumbs" aria-label="Breadcrumb"><span class="tf-crumb-here">Builds</span><span class="tf-sep">›</span><strong>${esc(name)}</strong></nav>
+    <header class="tf-fhead tf-bhead"><div><h1>${esc(name)}</h1><div class="tf-sub">${esc(src)} pipeline${repos.length ? `, builds ${repos.map((r) => `<a class="tf-mono" href="#" data-repo-go="${r.includes("booking") ? "booking" : "payout"}">${esc(r)}</a>`).join(", ")}` : ", checks out no repository"}.</div></div>
+      <div class="tf-acts"><button type="button" class="tf-btn tf-primary">Run…</button><button type="button" class="tf-btn tf-ghost">Pin</button><button type="button" class="tf-btn tf-ghost">Open in ${esc(src)}</button></div></header>
+    <p class="tf-rb-lead tf-rb-today">The pipeline page as it is today: chart, Runs, Parameters, Triggers.</p>
+  </div></div></section></div>`;
+  return `<div class="tf-bv">${rail}${page}</div>`;
+}
+
+/* ------------------------------------------------------------------ drawing and switches */
+function draw() {
+  /* The branch the tab opens on: yours, else the default. */
+  if (S.branch === null || !REPOS[S.repo]?.branches.some((b) => b.key === S.branch)) S.branch = (REPOS[S.repo].branches.find((b) => b.job) ?? REPOS[S.repo].branches[0]).key;
+  nav();
+  document.getElementById("main").innerHTML = S.screen === "estate" ? estate() : repoPage();
+  for (const b of document.querySelectorAll(".mk button")) {
+    const [k, v] = Object.entries(b.dataset)[0];
+    const now = { screen: S.screen, repo: S.repo, theme: document.documentElement.dataset.theme }[k];
+    b.setAttribute("aria-pressed", String(now === v));
+  }
+}
+document.addEventListener("click", (event) => {
+  const t = event.target;
+  const mk = t.closest(".mk button");
+  if (mk) {
+    const [k, v] = Object.entries(mk.dataset)[0];
+    if (k === "theme") document.documentElement.dataset.theme = v;
+    else { S[k] = v; if (k === "screen") S.pipeline = null; if (k === "repo") { S.branch = null; S.chips = []; S.bchips = []; S.bq = ""; } }
+    return draw();
+  }
+  const open = t.closest("[data-open]");
+  if (open) { event.preventDefault(); S.screen = "pipeline"; S.pipeline = open.dataset.open; S.runScope = null; return draw(); }
+  const br = t.closest("[data-branch], [data-branch-go]");
+  if (br) { event.preventDefault(); S.branch = br.dataset.branch ?? br.dataset.branchGo; S.screen = "tab"; S.runScope = null; return draw(); }
+  const rchip = t.closest("[data-rchip]");
+  if (rchip) { const c = rchip.dataset.rchip; S.bchips = S.bchips.includes(c) ? S.bchips.filter((x) => x !== c) : [...S.bchips, c]; return draw(); }
+  const rs = t.closest("[data-runscope]");
+  if (rs) { S.runScope = rs.dataset.runscope; return draw(); }
+  const bchip = t.closest("[data-bchip]");
+  if (bchip) { const c = bchip.dataset.bchip; S.chips = (S.chips ?? []).includes(c) ? S.chips.filter((x) => x !== c) : [...(S.chips ?? []), c]; return draw(); }
+  const go = t.closest("[data-go]");
+  if (go) { event.preventDefault(); S.screen = go.dataset.go; return draw(); }
+  const repoGo = t.closest("[data-repo-go]");
+  if (repoGo) { event.preventDefault(); S.repo = repoGo.dataset.repoGo; S.screen = "tab"; return draw(); }
+  const est = t.closest("[data-estate]");
+  if (est) { event.preventDefault(); S.estateSel = est.dataset.estate; return draw(); }
+  const summary = t.closest("summary");
+  if (summary) { event.preventDefault(); const d = summary.parentElement; S.remembered.set(d.dataset.fold, !d.open); return draw(); }
+  if (t.closest("a[href='#']")) event.preventDefault();
+});
+/* The branch filter narrows as it is typed; focus and caret stay in the field across the redraw. */
+document.addEventListener("input", (event) => {
+  if (!event.target.matches("[data-bq]")) return;
+  S.bq = event.target.value;
+  const at = event.target.selectionStart;
+  draw();
+  const field = document.querySelector("[data-bq]");
+  field?.focus();
+  field?.setSelectionRange(at, at);
+});
+draw();
+</script>
+</body>
+</html>

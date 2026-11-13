@@ -82,6 +82,8 @@ export const REPO_TABS = [
   { id: "branches", label: "Branches", group: "ref" },
   { id: "compare", label: "Compare", group: "ref" },
   { id: "prs", label: "Pull requests", group: "work" },
+  // The pipelines that build the repository, branch by branch (the repo-builds pass).
+  { id: "builds", label: "Builds", group: "work" },
   { id: "local", label: "Local changes", group: "work" },
 ] as const;
 
@@ -107,7 +109,7 @@ export interface RepoRoute {
   line: number | null;
   /** Commits: the commit's entity id, whose diff opens. */
   commit: string | null;
-  /** Compare: the branch proposed (#837's `compare/<branch>`). */
+  /** Compare: the branch proposed (#837's `compare/<branch>`). Builds: the branch shown (`builds/<branch>`). */
   branch: string | null;
   /** Compare: the branch it goes into, where the address names one (`compare/<base>...<head>`, #2427). */
   base: string | null;
@@ -139,7 +141,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
     path: tab === "files" || tab === "edit" ? tail : null,
     line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
-    branch: tab === "compare" ? compared.branch : null,
+    branch: tab === "compare" ? compared.branch : tab === "builds" ? tail : null,
     base: tab === "compare" ? compared.base : null,
   };
 }

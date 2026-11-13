@@ -1064,3 +1064,119 @@ fn node_types(node: &serde_json::Value, out: &mut Vec<String>) {
         node_types(child, out);
     }
 }
+
+/// Twenty Gitea repositories over the mirror's builds (the repo-builds pass):
+/// each build's revision is a commit of one of them, so a repository's commits
+/// are 75 of the 1,500 builds' shas, and every repository's commits name it as
+/// Gitea's records do. What `repo_pipelines` is planned over.
+async fn repositories(pool: &PgPool) {
+    crate::support::source_config(pool, "git", "gitea", "Gitea", &serde_json::json!({})).await;
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select 'git:repo:acme/r' || k, 'repo', 'acme/r' || k from generate_series(0, 19) k
+         union all
+         select 'git:commit:' || (payload #>> '{revisions,revision,0,version}'), 'commit', entity_id
+           from sync.item where source_id = 'ci' and kind = 'build'",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         select 'git:repo:acme/r' || k, 'git', 'repo', 'acme/r' || k, '',
+                jsonb_build_object('full_name', 'acme/r' || k, 'name', 'r' || k, 'default_branch', 'main'), now()
+           from generate_series(0, 19) k
+         union all
+         select 'git:commit:' || b.sha, 'git', 'commit', b.sha, '',
+                jsonb_build_object('sha', b.sha, 'repository',
+                  jsonb_build_object('full_name', 'acme/r' || (b.n % 20), 'name', 'r' || (b.n % 20))), now()
+           from (select payload #>> '{revisions,revision,0,version}' as sha,
+                        row_number() over (order by entity_id) as n
+                   from sync.item where source_id = 'ci' and kind = 'build') b",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// **A repository's Builds tab reads the repository's, not the mirror's**
+/// (the repo-builds pass): its commits by their stored parent, the runs of
+/// their shas by `item_revision_revision_idx`, each run's pipeline and branch
+/// by its stored row. No link table is read whole and no item is filtered per
+/// row, on tables never analyzed and analyzed; the time it takes is printed.
+async fn assert_repo_pipelines_read_the_repositorys_rows(analyzed: bool) {
+    let (pool, declarations) = mirror(false).await;
+    repositories(&pool).await;
+    if analyzed {
+        sqlx::query("analyze").execute(&pool).await.unwrap();
+    }
+    let registry = Registry::for_process();
+    let answered =
+        knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
+            .await
+            .unwrap();
+    assert!(!answered.is_empty(), "the repository's builds are found");
+    assert!(
+        answered.iter().all(|p| !p.latest.is_empty()),
+        "each pipeline with its newest run per branch"
+    );
+    let fillers = vec!["ci".to_owned()];
+    let plan = explain(&pool, knobas_core::builds::REPO_PIPELINES, |q| {
+        q.bind(declarations.as_param())
+            .bind("git:repo:acme/r3")
+            .bind(fillers.clone())
+    })
+    .await;
+    let name = "repo pipelines";
+    let mut wrong = corpus_shapes(name, &plan);
+    wrong.extend(
+        knobas_db::plan_shape::filtered_per_row(&plan, "item")
+            .into_iter()
+            .chain(
+                ["item_pipeline", "item_revision", "item_parent"]
+                    .iter()
+                    .flat_map(|t| whole_reads(&plan[0]["Plan"], t)),
+            )
+            .map(|f| format!("{name}: {f}")),
+    );
+    let state = if analyzed {
+        "analyzed"
+    } else {
+        "never analyzed"
+    };
+    assert!(wrong.is_empty(), "tables {state}: {wrong:#?}");
+
+    let mut fastest = std::time::Duration::MAX;
+    for _ in 0..5 {
+        let at = std::time::Instant::now();
+        knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
+            .await
+            .unwrap();
+        fastest = fastest.min(at.elapsed());
+    }
+    let (analysis,): (serde_json::Value,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "explain (analyze, format json) {}",
+        knobas_core::builds::REPO_PIPELINES
+    )))
+    .bind(declarations.as_param())
+    .bind("git:repo:acme/r3")
+    .bind(&fillers)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    println!(
+        "repo_pipelines, tables {state}: {} pipelines in {fastest:?} (fastest of five), the statement {} ms",
+        answered.len(),
+        analysis[0]["Execution Time"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_pipelines_read_the_repositorys_rows_on_tables_never_analyzed() {
+    assert_repo_pipelines_read_the_repositorys_rows(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_pipelines_read_the_repositorys_rows_on_analyzed_tables() {
+    assert_repo_pipelines_read_the_repositorys_rows(true).await;
+}

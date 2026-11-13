@@ -19,6 +19,7 @@ import type {
   LocalDir,
   LocalPaths,
   LocalTree,
+  RepoPipelineRow,
   ViewBlock,
   ArtifactEntry,
   ArtifactPreview,
@@ -267,6 +268,7 @@ export type {
   ReachOrigin,
   Reached,
   RefusedWrite,
+  RepoPipelineRow,
   Republication,
   RuleTicket,
   RunLog,
@@ -392,6 +394,16 @@ export function entityHead(entityId: string): Promise<EntityDetail> {
  */
 export function pipelines(): Promise<PipelineRow[]> {
   return invoke<PipelineRow[]>("pipelines");
+}
+
+/**
+ * The pipelines that build one repository, each with its newest run per branch (the repo-builds pass,
+ * `mockups/builds/repo-builds.md`): the runs that built one of the repository's mirrored commits. The mirror alone,
+ * one statement; CI's fillers only. Rejects with `invalid` for a non-id; a repository the mirror does not hold
+ * answers none.
+ */
+export function repoPipelines(repoId: string): Promise<RepoPipelineRow[]> {
+  return invoke<RepoPipelineRow[]>("repo_pipelines", { repoId });
 }
 
 /**

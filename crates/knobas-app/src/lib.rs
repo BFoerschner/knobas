@@ -808,6 +808,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::inbox_shelves,
         // The extremes pass (PR #2479, 2026-11-13): an entity's row without its text.
         commands::entity::entity_head,
+        // A repository's Builds tab (the repo-builds pass, 2026-11-13): the
+        // pipelines that built its commits, appended at the foot (§10.8).
+        commands::entity::repo_pipelines,
     ]
 }
 

@@ -80,6 +80,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::entity::AttachmentBytes::export_all(cfg)?;
     knobas_core::builds::RunRow::export_all(cfg)?;
     knobas_core::builds::PipelineRow::export_all(cfg)?;
+    knobas_core::builds::RepoPipelineRow::export_all(cfg)?;
     crate::commands::entity::PipelineReason::export_all(cfg)?;
     crate::commands::entity::JobPipeline::export_all(cfg)?;
     crate::commands::entity::CodeFacts::export_all(cfg)?;

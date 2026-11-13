@@ -414,7 +414,7 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
     expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline"]),
   );
   // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
-  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree" };
+  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree", ".tf-rbv > .tf-rbrail": ".tf-pl-list" };
   const scrolls = (selector: string, body: string) =>
     INNER[selector] === undefined
       ? /overflow(-y)?:\s*auto/.test(body)

@@ -789,6 +789,25 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return pins.has(id);
     },
     job_pipelines: (args) => fakeJobPipelines(String(args["entityId"] ?? "")),
+    // The repository's Builds tab: the pipelines that build it (prototype-6's `repoOfCfg`), each with its newest run per
+    // branch, as the server reads the runs of the repository's commits. A queued run has built no commit yet.
+    repo_pipelines: (args) => {
+      const repo = String(args["repoId"] ?? "").replace(/^mock:tidewater\//, "");
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      const runs = history(new Date());
+      return fakePipelines()
+        .filter((pipeline) => fillers.has(pipeline.source_id) && repositoryOf(configOf(pipeline.entity_id)) === repo)
+        .map(({ recent: _recent, pinned: _pinned, ...pipeline }) => {
+          const seen = new Set<string>();
+          const latest: RunRow[] = [];
+          for (const run of runs.get(configOf(pipeline.entity_id)) ?? []) {
+            if (run.branch === null || run.started === null || seen.has(run.branch)) continue;
+            seen.add(run.branch);
+            latest.push(run);
+          }
+          return { ...pipeline, latest };
+        });
+    },
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
       const bulkRow = bulkById.get(id);

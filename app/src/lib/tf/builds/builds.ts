@@ -85,10 +85,28 @@ const UNSAID: Record<GlyphTone, string> = {
  * ({@link stateWord}, design system, Words), *Queued* as the run table's chip says a waiting one.
  */
 export function railGlyph(pipeline: PipelineRow): { tone: GlyphTone; word: string } {
-  const latest = pipeline.recent[0];
-  const tone: GlyphTone = latest === undefined ? "none" : runTone(latest);
-  const said = tone === "q" || tone === "none" ? "" : stateWord(latest?.state?.text ?? "");
+  return runGlyph(pipeline.recent[0]);
+}
+
+/** What a glyph of `tone` says where its run declares no state of its own, and what a branch's glyph says. */
+export function toneWord(tone: GlyphTone): string {
+  return UNSAID[tone];
+}
+
+/** One run's glyph and word, as {@link railGlyph} draws a pipeline's latest; `undefined` is a pipeline nothing ran. */
+export function runGlyph(run: RunRow | undefined): { tone: GlyphTone; word: string } {
+  const tone: GlyphTone = run === undefined ? "none" : runTone(run);
+  const said = tone === "q" || tone === "none" ? "" : stateWord(run?.state?.text ?? "");
   return { tone, word: said || UNSAID[tone] };
+}
+
+/**
+ * The instant a run is told by: a failure when it failed, that is when it finished; any other when it started, or,
+ * not started, when the source last touched it. `null` where it has none.
+ */
+export function runAt(run: RunRow): string | null {
+  const started = run.started ?? run.updated_at;
+  return runTone(run) === "err" ? (run.finished ?? started) : started;
 }
 
 /**
@@ -116,7 +134,7 @@ export function railTime(
   const tone = runTone(latest);
   if (tone === "q") return { text: "queued", tone: null };
   if (tone === "run") return { text: latestTime(pipeline, now), tone: "info" };
-  const failedAt = latest.finished ?? latest.started ?? latest.updated_at;
+  const failedAt = runAt(latest);
   if (tone === "err") return { text: failedAt === null ? "" : shortTime(failedAt, now), tone: "err" };
   return null;
 }

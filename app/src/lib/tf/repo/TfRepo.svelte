@@ -71,6 +71,7 @@
     PipeStep,
     RangeDiff,
     RefusedWrite,
+    RepoPipelineRow,
     ShownView,
     SourceView,
     ViewBlock,
@@ -119,6 +120,8 @@
     localFile?: (entityId: string, commit: string, path: string) => Promise<ViewBlock | null>;
     /** The source's compare now, never local (ADR-0041): what Compare checks a predicted diff against; no check when left out. */
     sourceRangeDiff?: (entityId: string, base: string, head: string) => Promise<RangeDiff>;
+    /** The Builds tab's read (the repo-builds pass): the pipelines that built the repository's commits; the bridge's when left out. */
+    repoPipelines?: (repoId: string) => Promise<RepoPipelineRow[]>;
   }
 
   /**
@@ -211,6 +214,8 @@
   import TfRepoBranches from "./TfRepoBranches.svelte";
   import TfRepoCompare from "./TfRepoCompare.svelte";
   import TfRepoPrs from "./TfRepoPrs.svelte";
+  import TfRepoBuilds from "./TfRepoBuilds.svelte";
+  import { yoursOf } from "./repo-builds";
   import TfRepoLocal from "./TfRepoLocal.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -1020,6 +1025,22 @@
                 />
               {:else if one === "commits"}
                 <TfRepoCommits {ports} {repoId} {at} {source} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
+              {:else if one === "builds"}
+                <TfRepoBuilds
+                  {repoId}
+                  branches={known}
+                  defaultBranch={defaultBranch?.name ?? null}
+                  mine={yoursOf(
+                    (known ?? []).map((option) => option.name),
+                    job,
+                    checkout?.tree?.status === "read" ? checkout.tree.branch : null,
+                    defaultBranch?.name ?? null,
+                  )}
+                  {job}
+                  branch={placeOf(one).branch}
+                  {refreshed}
+                  read={ports.repoPipelines}
+                />
               {:else if one === "prs"}
                 <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
               {/if}

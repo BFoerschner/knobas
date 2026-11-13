@@ -5,7 +5,7 @@ use super::*;
 // -- the Builds frame (ADR-0022, #848) -------------------------------------
 
 use knobas_core::builds::RawRun;
-pub(super) use knobas_core::builds::{PipelineRow, RunRow};
+pub(super) use knobas_core::builds::{PipelineRow, RepoPipelineRow, RunRow};
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
 /// list. The read is CI's by definition, so it narrows itself to the role's
@@ -35,6 +35,34 @@ pub async fn pipelines_inner(
     let runs = knobas_core::builds::recent_runs(&mut pipelines);
     with_commits(pool, &declarations, None, runs).await?;
     Ok(pipelines)
+}
+
+/// The pipelines that build one repository, each with its newest run per
+/// branch, for the repository's Builds tab (the repo-builds pass,
+/// 2026-11-13): [`knobas_core::builds::repo_pipelines`]. The mirror alone, one
+/// statement, as [`pipelines_inner`]: CI's fillers only, no live read, no run's
+/// `commit_id`.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not an entity
+/// id; [`Internal`](crate::IpcErrorCode::Internal) for a query failure. An id
+/// no live repository carries answers no pipelines.
+pub async fn repo_pipelines_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    repo_id: &str,
+) -> Result<Vec<RepoPipelineRow>, IpcError> {
+    let repo = EntityRef::parse(repo_id).map_err(IpcError::invalid)?;
+    // As [`pipelines_inner`]: the stored rows follow the stored declarations.
+    crate::commands::search::declare(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
+    let identity = identity_of(pool).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
+    Ok(
+        knobas_core::builds::repo_pipelines(pool, &declarations, &identity, &fillers, &repo)
+            .await?,
+    )
 }
 
 /// One pipeline's runs, newest first, at most `limit` (100 when `None`).
@@ -892,6 +920,21 @@ pub async fn download_run_file<R: tauri::Runtime>(
 pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRow>, IpcError> {
     let pool = lifecycle.pool()?;
     pipelines_inner(&pool, lifecycle.registry()).await
+}
+
+/// The pipelines that build one repository (the repo-builds pass).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`repo_pipelines_inner`] refuses with.
+#[tauri::command]
+pub async fn repo_pipelines(
+    lifecycle: State<'_, Lifecycle>,
+    repo_id: String,
+) -> Result<Vec<RepoPipelineRow>, IpcError> {
+    let pool = lifecycle.pool()?;
+    repo_pipelines_inner(&pool, lifecycle.registry(), &repo_id).await
 }
 
 /// One pipeline's runs (#848).

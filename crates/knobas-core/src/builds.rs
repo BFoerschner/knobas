@@ -197,6 +197,39 @@ macro_rules! run_columns {
     };
 }
 
+/// A run of `r` (the alias [`run_columns!`] reads into) as one jsonb object in
+/// [`RawRun`]'s fields: what a pipeline's runs are aggregated into.
+macro_rules! run_object {
+    () => {
+        "jsonb_build_object(
+           'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
+           'branch', r.branch, 'started', r.started, 'finished', r.finished,
+           'updated_at', r.item_updated_at, 'web_url', r.web_url,
+           'trigger', r.trig, 'started_by', r.started_by,
+           'agent', r.agent, 'current_step', r.current_step,
+           'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
+           'tests_ignored', r.tests_ignored,
+           'revision', r.revision)"
+    };
+}
+
+/// A pipeline item `i`'s declared chain of groups (#849), in order, as a jsonb
+/// array of names; the declarations are `$1`. One candidate is what a source
+/// declares; a second's names would follow the first's.
+macro_rules! pipeline_path {
+    () => {
+        concat!(
+            "(select coalesce(jsonb_agg(btrim(e.elem #>> c.entry_segs) order by e.ord), '[]'::jsonb) from ",
+            crate::declared_list_candidates!("$1", "group_path"),
+            " c cross join lateral jsonb_array_elements(
+             case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
+                  then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
+           where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
+             and nullif(btrim(e.elem #>> c.entry_segs), '') is not null)"
+        )
+    };
+}
+
 /// A pipeline's newest live runs, by the stored rows (#2185, migration
 /// `0062`): `sync.item_pipeline` keeps each run's declared `pipeline` as the
 /// database writes the run, and `item_pipeline_runs_idx` holds one
@@ -261,16 +294,10 @@ p as materialized (
     crate::declared_string!("$1", "group"),
     " as grp, ",
     crate::declared_string!("$1", "pipeline"),
-    // The declared chain of groups, in order (#849). One candidate is what a
-    // source declares; a second's names would follow the first's.
     " as pkey,
-         (select coalesce(jsonb_agg(btrim(e.elem #>> c.entry_segs) order by e.ord), '[]'::jsonb) from ",
-    crate::declared_list_candidates!("$1", "group_path"),
-    " c cross join lateral jsonb_array_elements(
-             case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
-                  then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
-           where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
-             and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) as path
+         ",
+    pipeline_path!(),
+    " as path
     from frames f
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
     left join knobas.source_config c on c.id = i.source_id
@@ -293,15 +320,9 @@ r as materialized (
    where p.pkey is not null and p.name is not null
 ),
 recent as materialized (
-  select r.pipeline, jsonb_agg(jsonb_build_object(
-           'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
-           'branch', r.branch, 'started', r.started, 'finished', r.finished,
-           'updated_at', r.item_updated_at, 'web_url', r.web_url,
-           'trigger', r.trig, 'started_by', r.started_by,
-           'agent', r.agent, 'current_step', r.current_step,
-           'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
-           'tests_ignored', r.tests_ignored,
-           'revision', r.revision)
+  select r.pipeline, jsonb_agg(",
+    run_object!(),
+    "
            order by r.item_updated_at desc nulls last, r.entity_id desc) as runs
     from r
    group by r.pipeline
@@ -312,6 +333,131 @@ select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path
   from p
   left join recent rc on rc.pipeline = p.entity_id
  where p.pkey is not null and p.name is not null
+ order by lower(p.name), p.entity_id
+"
+);
+
+/// One pipeline that builds a repository, for the repository's Builds tab
+/// (the repo-builds pass, 2026-11-13, `mockups/builds/repo-builds.md`): the
+/// pipeline as the Builds list names it, and its newest run on each branch
+/// among the runs that built one of the repository's mirrored commits.
+///
+/// `latest` holds one run per branch, newest first; the branch is as the run
+/// spells it, so `refs/heads/main` and `main` are two entries where a source
+/// writes both.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RepoPipelineRow {
+    pub entity_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    pub name: String,
+    pub group: Option<String>,
+    /// The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+    pub path: Vec<String>,
+    pub web_url: Option<String>,
+    pub latest: Vec<RunRow>,
+}
+
+/// The pipelines that build the repository `$2`, each with its newest run per
+/// branch ([`RepoPipelineRow`]). `$1` is the declarations, `$3` the CI role's
+/// fillers, as for [`PIPELINES`].
+///
+/// **A run builds the repository when its commit is one of the repository's
+/// mirrored commits**, nothing else: the commits that name the repository as
+/// their parent (`sync.item_parent`, `item_parent_name_idx`), their declared
+/// shas, the runs that built a sha (`item_revision_revision_idx`), and each
+/// run's stored pipeline and branch (`sync.item_pipeline`,
+/// `item_pipeline_entity_idx`). A branch name alone would be shared: every
+/// repository has a `main`.
+///
+/// **So it sees only the runs of commits the mirror holds.** A queued run
+/// that has no commit yet is not here until it starts. A run of a commit the
+/// code host has not synced yet is not here until its next sync, so for that
+/// while the branch shows the run before it. Runs of commits older than the
+/// code host's window (`commits_per_repo`), and runs that name no branch, are
+/// not here at all.
+///
+/// **Its cost is the repository's, not the mirror's.** It reads one
+/// repository's commits (Gitea keeps `commits_per_repo`, 100 by default) and
+/// the runs of those shas, and reads each pipeline's declared `pipeline` once
+/// but its name and chain only for the pipelines that matched: a declared read
+/// is about 17 µs a row (`first_string_of!`). `tests/it/read_plans.rs` holds
+/// the plan to that.
+///
+/// Public so the app's plan test can read its plan.
+pub const REPO_PIPELINES: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ",
+repo as (
+  select i.source_id, lower(i.title) as name
+    from sync.live_item i
+   where i.entity_id = $2
+),
+shas as materialized (
+  select distinct ",
+    crate::declared_string!("$1", "commit"),
+    " as sha
+    from repo
+    join sync.item_parent ip
+      on ip.arm = 'child' and lower(ip.name) = repo.name and ip.source_id = repo.source_id
+    join sync.live_item i on i.entity_id = ip.entity_id and i.kind = 'commit'
+),
+built as materialized (
+  select distinct on (ip.source_id, ip.pkey, ip.adapter_kind, ip.branch)
+         ip.source_id, ip.pkey, ip.adapter_kind, ip.entity_id
+    from shas
+    join sync.item_revision rv on rv.revision = shas.sha
+    join sync.item_pipeline ip on ip.entity_id = rv.entity_id and ip.adapter_kind = rv.adapter_kind
+    join knobas.entity e on e.id = ip.entity_id and e.deleted_at is null
+   where shas.sha is not null and ip.branch is not null and ip.source_id = any($3::text[])
+   order by ip.source_id, ip.pkey, ip.adapter_kind, ip.branch, ip.at desc nulls last, ip.entity_id desc
+),
+keyed as materialized (
+  select i.entity_id, i.source_id, c.kind as adapter_kind, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config c on c.id = i.source_id
+   where f.frame = 'pipeline' and i.source_id in (select b.source_id from built b)
+),
+p as materialized (
+  select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name, ",
+    crate::declared_string!("$1", "name"),
+    " as name, ",
+    crate::declared_string!("$1", "group"),
+    " as grp, ",
+    pipeline_path!(),
+    " as path
+    from keyed k
+    join sync.live_item i on i.entity_id = k.entity_id
+    left join knobas.source_config c on c.id = i.source_id
+   where exists (select 1 from built b
+                  where b.source_id = k.source_id and b.pkey = k.pkey and b.adapter_kind = k.adapter_kind)
+),
+r as materialized (
+  select k.entity_id as pipeline, ",
+    run_columns!(),
+    "
+    from built b
+    join keyed k on k.source_id = b.source_id and k.pkey = b.pkey and k.adapter_kind = b.adapter_kind
+    join sync.item i on i.entity_id = b.entity_id
+),
+latest as (
+  select r.pipeline, jsonb_agg(",
+    run_object!(),
+    "
+           order by r.item_updated_at desc nulls last, r.entity_id desc) as runs
+    from r
+   group by r.pipeline
+)
+select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path, l.runs
+  from p
+  join latest l on l.pipeline = p.entity_id
+ where p.name is not null
  order by lower(p.name), p.entity_id
 "
 );
@@ -495,6 +641,50 @@ pub async fn pipelines(
             })
         })
         .collect()
+}
+
+/// The pipelines that build the repository `repo`, each with its newest run
+/// per branch ([`REPO_PIPELINES`]): the sources in `fillers` only, `identity`
+/// the configured usernames, as for [`pipelines`]. No run's `commit_id` is
+/// filled here. Empty for an id no live repository carries.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn repo_pipelines(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    identity: &[String],
+    fillers: &[String],
+    repo: &EntityRef,
+) -> Result<Vec<RepoPipelineRow>, CoreError> {
+    let rows = sqlx::query(REPO_PIPELINES)
+        .bind(declarations.as_param())
+        .bind(repo.to_string())
+        .bind(fillers)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let latest: sqlx::types::Json<Vec<RawRun>> = row.get("runs");
+            let path: sqlx::types::Json<Vec<String>> = row.get("path");
+            RepoPipelineRow {
+                entity_id: row.get("entity_id"),
+                source_id: row.get("source_id"),
+                source_name: row.get("source_name"),
+                name: row.get("name"),
+                group: row.get("grp"),
+                path: path.0,
+                web_url: row.get("web_url"),
+                latest: latest
+                    .0
+                    .into_iter()
+                    .map(|raw| RunRow::read(raw, identity))
+                    .collect(),
+            }
+        })
+        .collect())
 }
 
 /// Every run of `pipelines`, each with the id of its pipeline: what the app

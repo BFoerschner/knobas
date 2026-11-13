@@ -297,9 +297,9 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(target.querySelector(".tf-crumbs strong .tf-mono")).not.toBeNull();
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   // Two groups (#2257): the repository at a ref, then work in flight, split by a rule.
-  expect(tabs.map(text)).toEqual(["Files", "Commits", "Branches 2", "Compare", "Pull requests 1", "Local changes 1"]);
+  expect(tabs.map(text)).toEqual(["Files", "Commits", "Branches 2", "Compare", "Pull requests 1", "Builds", "Local changes 1"]);
   const strip = [...target.querySelector(".tf-tabs")!.children].map((el) => (el.tagName === "A" ? text(el) : "|"));
-  expect(strip).toEqual(["Files", "Commits", "Branches 2", "Compare", "|", "Pull requests 1", "Local changes 1"]);
+  expect(strip).toEqual(["Files", "Commits", "Branches 2", "Compare", "|", "Pull requests 1", "Builds", "Local changes 1"]);
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
   expect(tabs[1]!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/commits");
   const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
