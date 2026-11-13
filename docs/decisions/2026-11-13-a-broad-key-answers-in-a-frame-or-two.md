@@ -56,14 +56,15 @@ on clones of the saved database, median of seven, the answers byte-equal:
 | `filter_suggestions` | 33 | 34 |
 
 From the key to its rows on screen, real input in headless Chrome, a key never asked before each press, median of
-seven (five for `-priority:`); no row drawn on screen moved in any press:
+seven (five for `-priority:`; the launcher's letters none of the English stopwords, which answer in 2 ms); no row
+drawn on screen moved in any press:
 
 | Key | 1x before | 1x after | 4x before | 4x after |
 |---|---|---|---|---|
 | Tickets, the first letter | 234 ms | 103 ms | 277 ms | 115 ms |
 | Tickets, `-project:` | 257 | 119 | 285 | 132 |
 | Tickets, `-priority:` | 219 | 117 | 279 | 156 |
-| Everything, one letter | 216 | 127 | 255 | 161 |
+| Everything, one letter | 225 | 132 | 228 | 134 |
 
 **Same answers.** Each changed read is held to the read it replaces on data that would catch a difference:
 
@@ -102,11 +103,11 @@ here:
 
 **Left, with what it would take.**
 
-- **Every broad key is 3 to 27 ms over 100 at 1x**, all of it the backend's read: a letter's board 82 ms (the search's
+- **Every broad key is 3 to 32 ms over 100 at 1x**, all of it the backend's read: a letter's board 82 ms (the search's
   ids 21, the round trip of the ids 10, the board 45, the rest the vocabulary, the signals and the answer). Under 100
   would take the board's cut off the sort (above), or one statement that filters as it scans, which the search's
   grammar and the board's statement do not share today.
-- **One letter under Everything, 105 ms in the backend, 127 to its rows at 1x.** `p` matches 28,955 rows and ranks
+- **One letter under Everything, 105 ms in the backend, 132 to its rows at 1x.** `p` matches 28,955 rows and ranks
   each, every one probing `sync.item` and `knobas.entity` by key across three workers. Storing the kind and the date
   beside the search vector would take the first probe off, about a third; the stored-reads record of 2026-11-12
   declined it because a date that moves rewrites the vector's row and its two index entries. Not reopened here.
