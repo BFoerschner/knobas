@@ -791,7 +791,12 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     const diffs = [...sides].map(([path, [before, after]]) => diffOf(path, before, after));
     // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest; and the
     // commits it carries, newest first, as Gitea's compare lists them (2026-11-13: Compare draws them from the default branch).
-    const commits = PAYOUT_COMMITS.slice(newest, oldest + 1).map(([sha, subject, author, at]) => ({ sha, title: subject, meta: `${author} · ${age(at)}` }));
+    // A head named by another branch than the job's lists that branch's own commits, as its view does: Compare draws the
+    // compare's commits wherever it lists them (the compare pass, 2026-11-13).
+    const other = at(head) === -1 && head !== FEATURE_NAME ? (PAYOUT_BRANCHES.find((b) => b.name === head) ?? BULK_BRANCHES.find((b) => b.name === head)) : undefined;
+    const listed: (readonly [string, string, string, string])[] =
+      other !== undefined ? (other.ahead === 0 ? [] : [other.tip]) : PAYOUT_COMMITS.slice(newest, oldest + 1).map(([sha, subject, author, at]) => [sha, subject, author, at] as const);
+    const commits = listed.map(([sha, subject, author, at]) => ({ sha, title: subject, meta: `${author} · ${age(at)}` }));
     const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits };
     return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [], range }], diffs.length));
   }
