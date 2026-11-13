@@ -405,6 +405,10 @@ A curated export in the backup's own format restricted to tables, named `knobas-
 The ⌘K box; one search over everything, under 100 ms. Its text search, and every full-text read of the [mirror](#mirror), runs under PostgreSQL's `english` configuration with no `unaccent`, on purpose and with named gaps (ADR-0030).
 _Avoid_: command palette, spotlight
 
+**Section's place**:
+The last address a reader stood on in a section of the nav, however deep (a Docs page or space, a ticket, a pull request at its tab, a run at its tab, a marked monitor, a link set, a source's page in Settings): where the section's nav entry, the gear or `⌘,` comes back to from another section, as the kept page that was left (2026-11-13, `docs/decisions/2026-11-13-a-nav-entry-comes-back-to-where-you-were.md`). Pressed inside the section, the entry goes to the section's own page as it was left instead (its tab, saved view, pipeline or search). Not a card row's narrowing and not home. A launcher row naming a section opens the section's own page, not its place.
+_Avoid_: last page, history (Back steps through history; a place is one per section)
+
 **Coverage**:
 Per query, which sources could answer a filter and which have nothing it can match, measured on the corpus each source contributed and never on what matched. A source that answered and found nobody says something different from one whose items never name a person.
 _Avoid_: capability (a static claim on the descriptor; this is a measured one about a corpus), support
