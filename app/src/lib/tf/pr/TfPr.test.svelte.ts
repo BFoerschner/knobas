@@ -1745,6 +1745,50 @@ test("a view knobas held draws at once under a line saying from when, and the fr
   expect(text(".tf-heldnote")).toBe("");
 });
 
+test("on Conversation, a held view the mirror drew reads that section alone and draws it before the whole view lands", async () => {
+  const ear = freshEar();
+  const old = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const mirrored = withBlocks("conversation", [mutedLine("The reviews and comments are read from Gitea; the last sync holds none.")]);
+  const asked: (string | null)[] = [];
+  await draw(
+    [PR, "conversation"],
+    ports({
+      listen: ear.listen,
+      entityView: async (_id, section) => {
+        asked.push(section);
+        return section === "conversation" ? prView() : { ...mirrored, held_at: old };
+      },
+    }),
+  );
+  const messages = () => [...target.querySelectorAll(".tf-convo .tf-msg")].length;
+  expect(asked).toEqual([null, "conversation"]);
+  expect(messages(), "the section's two, with the whole view still being read behind").toBe(2);
+  expect(text(".tf-heldnote")).toBe("As knobas read it 3 h ago. Checking Tidewater Gitea…");
+});
+
+test("on Overview, or with a held conversation, nothing more is read", async () => {
+  const old = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const mirrored = withBlocks("conversation", [mutedLine("The reviews and comments are read from Gitea; the last sync holds none.")]);
+  for (const [rest, answer] of [
+    [[PR], { ...mirrored, held_at: old }],
+    [[PR, "conversation"], { ...prView(), held_at: old }],
+  ] as const) {
+    const asked: (string | null)[] = [];
+    await draw(
+      [...rest],
+      ports({
+        entityView: async (_id, section) => {
+          asked.push(section);
+          return answer;
+        },
+      }),
+    );
+    expect(asked).toEqual([null]);
+    unmount(view!);
+    view = null;
+  }
+});
+
 test("a source that does not answer behind a held view is named with its reason, and the view stays", async () => {
   const ear = freshEar();
   const old = new Date(Date.now() - 3 * 3_600_000).toISOString();

@@ -315,6 +315,35 @@
     );
   }
 
+  /** The read of the view whose Conversation was asked for on its own, so it is asked once. */
+  let conversationAsked = 0;
+
+  // A view drawn from what knobas held that holds no conversation (one the
+  // mirror drew: the last sync keeps none) is read again behind it whole,
+  // which on a forge a sync is loading waits on its slowest read, the
+  // landing's compare. Shown on Conversation, the page also asks for that
+  // section alone, two quick reads, and draws it the moment it lands; the
+  // whole answer then replaces it with the same words (the priority lane,
+  // 2026-11-13).
+  $effect(() => {
+    const id = prId;
+    const shown = view;
+    if (id === null || tab !== "conversation" || shown == null || !("held_at" in shown) || shown.held_at == null) return;
+    if (conversationParts(shown).some((part) => "message" in part)) return;
+    const asked = viewAsked;
+    if (conversationAsked === asked) return;
+    conversationAsked = asked;
+    untrack(() => ports.entityView(id, "conversation")).then(
+      (answer) => {
+        const said = answer?.sections.find((section) => section.id === "conversation");
+        if (said === undefined || prId !== id || asked !== viewAsked || view == null) return;
+        view = { ...view, sections: view.sections.map((section) => (section.id === "conversation" ? said : section)) };
+      },
+      // The whole view's read behind says what failed.
+      () => {},
+    );
+  });
+
   // The view drawn from what knobas held, or kept, was read again behind it
   // (ADR-0042): the fresh answer over it, or why the source did not answer.
   onViewFresh(
