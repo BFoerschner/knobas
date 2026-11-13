@@ -114,7 +114,7 @@ SCROLL.push(
   { name: "x-repo-prs", setup: `await __s.go(${JSON.stringify(`${XREPO}/prs`)}, 4000); return "main.tf-main";` },
   ...(XIDS.page ? [{ name: "x-docs-page", setup: `await __s.go(${JSON.stringify(`#/page/${xenc(XIDS.page)}`)}, 4000); return ".tf-rd-main";` }] : []),
   ...(XIDS.hugePage ? [{ name: "x-docs-huge", setup: `await __s.go(${JSON.stringify(`#/page/${xenc(XIDS.hugePage)}`)}, 5000); return ".tf-rd-main";` }] : []),
-  ...(XRUN ? [{ name: "x-run-artifacts", setup: `await __s.go(${JSON.stringify(`${XRUN}/artifacts`)}, 4000); return "main.tf-main";` }] : []),
+  ...(XRUN ? [{ name: "x-run-artifacts", setup: `await __s.go(${JSON.stringify(`${XRUN}/artifacts`)}, 4000); return ".tf-bmain";` }] : []),
 );
 const FILTER = "main input[type=search], main input[type=text], main input:not([type])";
 const TYPE = [
