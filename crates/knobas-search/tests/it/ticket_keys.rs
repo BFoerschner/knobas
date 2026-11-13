@@ -372,9 +372,13 @@ async fn a_key_asked_as_a_set_admits_what_its_row_by_row_read_did() {
     };
     let mut asked = 0;
     let mut admitted = 0;
-    for (declarations, key, left_out) in [&stored_declarations, &unstored]
-        .into_iter()
-        .flat_map(|declarations| keys.iter().map(move |(key, left_out)| (declarations, *key, *left_out)))
+    for (declarations, key, left_out) in
+        [&stored_declarations, &unstored]
+            .into_iter()
+            .flat_map(|declarations| {
+                keys.iter()
+                    .map(move |(key, left_out)| (declarations, *key, *left_out))
+            })
     {
         // The word is the project's key, which every one of its tickets
         // holds in its own.
