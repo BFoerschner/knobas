@@ -101,11 +101,14 @@ export async function up({ port, dir }) {
   source = live.id;
   await call(port, "update_source", { id: live.id, patch: { config: { ...live.config, owners: [...owners, ORG] } } });
   await call(port, "sync_now", { sourceId: live.id }).catch(() => {});
-  for (let i = 0; i < 120; i++) {
-    const briefs = await call(port, "entity_briefs", { entityIds: [cloned(), forge()] }).catch(() => []);
+  for (let i = 0; i < 240; i++) {
+    // Each repository and its `main`: the clone's tree is read at the commit the mirror names for the branch, and a
+    // source with many repositories may store a new repository's branches in a later run than the repository.
+    const ids = [cloned(), forge(), `${cloned()}@refs/heads/main`, `${forge()}@refs/heads/main`];
+    const briefs = await call(port, "entity_briefs", { entityIds: ids }).catch(() => []);
     const status = (await call(port, "sync_status")).find((s) => s.source_id === live.id);
-    if (briefs.length === 2 && status && !status.running) break;
-    if (i === 119) throw new Error("big-folders: the source never synced the two repositories");
+    if (briefs.length === ids.length && status && !status.running) break;
+    if (i === 239) throw new Error("big-folders: the source never synced the two repositories and their branches");
     // A run under way when the owners changed read the old ones: ask for the next.
     if (status && !status.running && i % 10 === 9) await call(port, "sync_now", { sourceId: live.id }).catch(() => {});
     await sleep(1000);
