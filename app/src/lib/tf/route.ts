@@ -241,7 +241,8 @@ export function sectionTabOf(route: TfRoute): Section | null {
   if (route.view !== "full" || route.head !== route.section) return null;
   if (route.section === "code" || route.section === "time" || route.section === "builds") return route.section;
   if (route.section === "docs") return route.rest[0] === undefined || route.rest[0] === "search" ? "docs" : null;
-  if (route.section === "settings") return route.rest[0] === "source" ? null : "settings";
+  // A source's page and an application's (`#/settings/checkouts/add`, PR #2479) are places, not the section's tab.
+  if (route.section === "settings") return route.rest[0] === "source" || (route.rest[0] === "checkouts" && route.rest.length > 1) ? null : "settings";
   return route.section === "monitors" && route.rest[0] !== MONITOR_AT ? "monitors" : null;
 }
 
@@ -312,8 +313,11 @@ export function parentOf(route: TfRoute): string | null {
   if (route.head === "monitors" && route.rest[0] === MONITOR_AT) return sectionHash("monitors");
   // A section's own tabs, and a pipeline picked on Builds, are the section's page: its parent would be a sibling.
   if (TABBED_HEADS.has(route.head)) return null;
-  // A source's page sits under Sources; every other section of Settings is a tab of it.
-  if (route.head === "settings") return route.rest[0] === "source" ? "#/settings/sources" : null;
+  // A source's page sits under Sources, an application's under Checkouts; every other section of Settings is a tab of it.
+  if (route.head === "settings") {
+    if (route.rest[0] === "source") return "#/settings/sources";
+    return route.rest[0] === "checkouts" && route.rest.length > 1 ? "#/settings/checkouts" : null;
+  }
   return sectionHash(route.section);
 }
 

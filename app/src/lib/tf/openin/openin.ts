@@ -294,7 +294,7 @@ export function worktreeOf(clonesRoot: string | null, repoEntityId: string | nul
   if (clonesRoot === null || repoEntityId === null) return null;
   const [owner, repo, ...rest] = keyOf(repoEntityId).split("/");
   if (!owner || !repo || rest.length > 0) return null;
-  return `${clonesRoot.replace(/\/+$/, "")}/pull-requests/${owner}/${repo}-${number}`;
+  return joinInside(clonesRoot, `pull-requests/${owner}/${repo}-${number}`);
 }
 
 /** Whether `end` is a sha the Diff tool takes: 7 to 64 hex digits, a base with one `^` allowed. */

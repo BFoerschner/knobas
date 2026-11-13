@@ -130,7 +130,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* Open in…: a press moves the *Default* tag and the button, and no column moves for it (F-639). */
 .tf-tbl.tf-stg-apps { table-layout: fixed; }
 .tf-stg-apps th:nth-child(1) { width: 200px; }
-.tf-stg-apps th:nth-child(4) { width: 124px; }
+/* *Make default*, ↑ and *Edit* (PR #2479, 2026-11-13). */
+.tf-stg-apps th:nth-child(4) { width: 212px; }
 .tf-stg-apps .tf-chip { white-space: nowrap; }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
@@ -173,3 +174,14 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-sc-chip { max-width: 100%; cursor: grab; gap: 2px 4px; flex-wrap: wrap; white-space: normal; }
 .tf-sc-word { cursor: grab; overflow-wrap: anywhere; min-width: 0; text-align: left; }
 .tf-sc-chip .tf-sc-reset { margin-left: 6px; color: var(--muted); font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+/* The application page (PR #2479, 2026-11-13): each command's field over the line it will run, with *Try it* beside that line. */
+.tf-stg-c.tf-appcmd { flex-direction: column; align-items: stretch; gap: 6px; }
+.tf-appcmd .tf-stg-in { width: 100%; }
+.tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-sm); }
+.tf-apprun code { flex: 1 1 auto; min-width: 0; padding: 3px 8px; background: var(--sheet-2); border-radius: 4px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-apprun .tf-dim { padding: 3px 0; }
+.tf-apppage .tf-phs { margin: 4px 0 6px; }
+.tf-appremove { margin-left: auto; }
+.tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
+/* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
+.tf-stg-l small.tf-req { display: inline; margin-left: 4px; }

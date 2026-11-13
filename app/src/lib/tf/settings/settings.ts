@@ -6,6 +6,7 @@
  * Pure. The components hand in what the IPC answered and draw what comes
  * back, so every sentence on these pages can be tested as a string.
  */
+import { appPagePlace } from "../openin/app-page";
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
@@ -79,6 +80,8 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
 /** Whether what follows `#/settings` names a section or a source's page: an address that names neither has no page. */
 export function settingsKnows(rest: readonly string[]): boolean {
   const [head, arg] = rest;
+  // Checkouts' application page (PR #2479, 2026-11-13); anything else under it names nothing.
+  if (head === "checkouts" && rest.length > 1) return appPagePlace(rest) !== null;
   return head === undefined || (head === "source" && !!arg) || SETTINGS_SECTIONS.some(([key]) => key === head);
 }
 

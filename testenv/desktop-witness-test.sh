@@ -663,18 +663,16 @@ pin_label $tf/settings/TfCheckoutsSection.svelte 'aria-label="Clones root"' \
     "the clones root field still has its accessible name"
 pin_label $tf/settings/TfCheckoutsSection.svelte 'form="tf-stg-root" disabled={rootUnchanged || savingRoot}>Save</button>' \
     "the clones root field is still stored by a button called Save"
-pin_label $tf/settings/TfCheckoutsSection.svelte '>Edit applications…</button>' \
-    "the Open in… table still offers Edit applications…"
-pin_label $tf/openin/TfAppsManage.svelte '>Add an application…</button>' \
-    "the applications dialog still offers Add an application…"
-pin_label $tf/openin/TfAppsManage.svelte 'onclick={onclose}>Done</button>' \
-    "the applications dialog still closes on Done"
-pin_label $tf/openin/TfAppDialog.svelte 'id="tf-app-name" aria-label="Name"' \
-    "the application dialog's name field is still labelled Name"
-pin_label $tf/openin/TfAppDialog.svelte 'aria-label="Command"' \
-    "the application dialog's command field is still labelled Command"
-pin_label $tf/openin/TfAppDialog.svelte '"Add application"' \
-    "the application dialog still adds with a button called Add application"
+pin_label $tf/settings/TfCheckoutsSection.svelte 'href={appPageHash()}>Add an application</a>' \
+    "the Open in… table still offers Add an application"
+pin_label $tf/openin/TfAppPage.svelte 'id="tf-app-name" aria-label="Name"' \
+    "the application page's name field is still labelled Name"
+pin_label $tf/openin/TfAppPage.svelte '{ field: "command", kind: "repository", label: "Command",' \
+    "the application page's command field is still labelled Command"
+pin_label $tf/openin/TfAppPage.svelte 'aria-label={row.label}' \
+    "the application page's command fields are still named by their labels"
+pin_label $tf/openin/TfAppPage.svelte '"Save" : "Add application"' \
+    "the application page still adds with a button called Add application"
 pin_label $tf/openin/TfOpenIn.svelte '}}>Open in…<svg class="tf-caret"' \
     "the checkout's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenIn.svelte 'role="menuitem" onclick={() => run(' \
@@ -723,8 +721,8 @@ pin_label $tf/settings/TfSourcePage.svelte '<span>Delete what it synced<small>' 
     "removing a source still offers Delete what it synced"
 pin_label $tf/settings/TfSourcePage.svelte 'onclick={() => void remove()}>Remove</button>' \
     "removing a source is still confirmed with Remove"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-pr">For a pull request</label>' \
-    "the application dialog's pull-request command is still labelled For a pull request"
+pin_label $tf/openin/TfAppPage.svelte '{ field: "pr", kind: "pull_request", label: "For a pull request",' \
+    "the application page's pull-request command is still labelled For a pull request"
 pin_label $tf/openin/TfOpenObject.svelte '}}>Open in…<svg class="tf-caret"' \
     "the pull request's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenObject.svelte '<b>Diff tool</b>' \

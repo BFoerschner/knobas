@@ -71,7 +71,7 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
     try {
       settings = await ports.checkoutSettings();
     } catch {
-      // A menu with no list draws only *Add an application…*; Settings says why.
+      // A menu with no list draws only *Add an application* and *Manage applications*; Settings says why.
     }
   }
 

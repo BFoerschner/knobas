@@ -70,10 +70,8 @@ readonly CHECKOUTS_SECTION='Checkouts and Open in'    # settings/settings.ts
 readonly CHANGE_ROOT='Change…'                         # TfCheckoutsSection.svelte
 readonly CLONES_ROOT_FIELD='Clones root'
 readonly SAVE_ROOT='Save'
-readonly EDIT_APPS='Edit applications…'
-readonly ADD_APP='Add an application…'                 # openin/TfAppsManage.svelte
-readonly DONE='Done'
-readonly NAME_FIELD='Name'                             # openin/TfAppDialog.svelte
+readonly ADD_APP='Add an application'                  # the link under the table; the page is openin/TfAppPage.svelte
+readonly NAME_FIELD='Name'                             # openin/TfAppPage.svelte
 readonly COMMAND_FIELD='Command'
 readonly PR_COMMAND_FIELD='For a pull request'
 readonly ADD_BUTTON='Add application'
@@ -335,20 +333,18 @@ say "'$SOURCE_NAME' is a source"
 # --- 2. Settings › Checkouts: the clones root and the application ------------
 
 press_when "$CHECKOUTS_SECTION"
-lands_named settings-checkouts "$CHANGE_ROOT" "$EDIT_APPS"
+lands_named settings-checkouts "$CHANGE_ROOT" "$ADD_APP"
 press_when "$CHANGE_ROOT"
 fill "$CLONES_ROOT_FIELD" "$clones"
 press_when "$SAVE_ROOT"
 root_stored() { absent "$CLONES_ROOT_FIELD" && reads "$clones"; }
 wait_until "the clones root was not stored: the row does not read $clones" root_stored
-press_when "$EDIT_APPS"
 press_when "$ADD_APP"
 fill "$NAME_FIELD" "$APP_NAME"
 fill "$COMMAND_FIELD" "$stub {path}"
 fill "$PR_COMMAND_FIELD" "$stub {path}"
 press_when "$ADD_BUTTON"
-press_when "$DONE"
-app_stored() { absent "$DONE" && absent "$COMMAND_FIELD" && reads "$APP_NAME"; }
+app_stored() { absent "$COMMAND_FIELD" && reads "$APP_NAME"; }
 wait_until "the application '$APP_NAME' was not stored" app_stored
 say "clones root $clones; '$APP_NAME' runs the stub for a pull request"
 

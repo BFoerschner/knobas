@@ -94,9 +94,28 @@ test("the section draws the clones root, the git found and the applications, the
   expect(rows[1]).toContain("git at /usr/bin/git");
   const apps = [...target.querySelectorAll("tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(apps).toEqual([
-    ["VS Code Default", "code {path}", "code --goto {file}:{line}", ""],
-    ["Fork", "open -a Fork {path}", "opens the checkout", "Make default"],
+    ["VS Code Default", "code {path}", "code --goto {file}:{line}", "↑ Edit"],
+    ["Fork", "open -a Fork {path}", "opens the checkout", "Make default ↑ Edit"],
   ]);
+  // *Edit* opens the application's page (PR #2479, 2026-11-13), and *Add an application* the page to add one.
+  expect([...target.querySelectorAll<HTMLAnchorElement>("a.tf-btn")].map((a) => [text(a), a.getAttribute("href")])).toEqual([
+    ["Edit", "#/settings/checkouts/app/vscode"],
+    ["Edit", "#/settings/checkouts/app/fork"],
+    ["Add an application", "#/settings/checkouts/add"],
+  ]);
+});
+
+test("↑ moves an application one up and saves the list at once; the first has none to take", async () => {
+  await draw();
+  const ups = [...target.querySelectorAll<HTMLButtonElement>("button[aria-label$=' up']")];
+  expect(ups.map((up) => [up.getAttribute("aria-label"), up.disabled])).toEqual([
+    ["Move VS Code up", true],
+    ["Move Fork up", false],
+  ]);
+  ups[1]!.click();
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => draft.id)).toEqual(["fork", "vscode"]);
+  expect(saved.at(-1)![1]).toBe("vscode");
 });
 
 test("Make default saves the list with the new default, and Change… sets the clones root", async () => {
@@ -218,11 +237,11 @@ test("the pull request worktrees are listed, a closed one marked, and Remove… 
   );
 });
 
-test("the section's buttons are small, Edit applications… among them (#2343)", async () => {
+test("the section's buttons are small, Add an application among them (#2343)", async () => {
   await draw();
   const atDefault = [...target.querySelectorAll<HTMLElement>(".tf-btn")]
     .filter((b) => !b.closest('[role="dialog"]') && !b.classList.contains("tf-sm"))
     .map((b) => b.textContent!.trim());
-  expect([...target.querySelectorAll(".tf-btn")].map((b) => b.textContent!.trim())).toContain("Edit applications…");
+  expect([...target.querySelectorAll(".tf-btn")].map((b) => b.textContent!.trim())).toContain("Add an application");
   expect(atDefault).toEqual([]);
 });

@@ -42,6 +42,9 @@
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
   import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
+  import { appPagePlace } from "../openin/app-page";
+  import { apps as sharedApps } from "../openin/apps.svelte";
+  import TfAppPage from "../openin/TfAppPage.svelte";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
@@ -87,6 +90,11 @@
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
+  /** Checkouts' application page (PR #2479, 2026-11-13), `null` anywhere else. */
+  const appAt = $derived(appPagePlace(rest));
+  const appName = $derived(
+    appAt === null ? null : appAt.app === null ? "Add an application" : (sharedApps.settings?.applications.find((app) => app.id === appAt.app)?.name ?? "An application"),
+  );
   /** An address that names neither a section nor a source: the rail stays, so the way back is one click. */
   const known = $derived(settingsKnows(rest));
 
@@ -209,7 +217,7 @@
   /** Below 900 px, whether the sections rail is unfolded under its bar. */
   let railOpen = $state(false);
   /** Which section or source is drawn: only a move between them starts the column at its top, not a dialog's own address. */
-  const shownPlace = $derived(`${place.section}/${sourceId ?? ""}`);
+  const shownPlace = $derived(`${place.section}/${sourceId ?? ""}/${appAt === null ? "" : (appAt.app ?? "add")}`);
   /**
    * The section's column is the page's scroller, so moving to another section starts it at its top (F-650). After the
    * flush: `keepScroll` on the kept page sets back what it noted before the move, and its effect runs after this one, which
@@ -222,7 +230,17 @@
 </script>
 
 <div class="tf-full tf-stgpage">
-  <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, ...(sourceId === null ? [{ name: crumbName }] : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }])]} {back} />
+  <TfCrumbs
+    parts={[
+      bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" },
+      ...(appName !== null && known
+        ? [{ name: sectionName, href: settingsHash("checkouts") }, { name: appName }]
+        : sourceId === null
+          ? [{ name: crumbName }]
+          : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }]),
+    ]}
+    {back}
+  />
   <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} {layers} />
   <div class="tf-stg" class:tf-rail-shut={!railOpen}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -279,6 +297,10 @@
         <TfKeyboardSection />
       {:else if place.section === "logs"}
         <TfLogsSection ports={sectionPorts} />
+      {:else if place.section === "checkouts" && appAt !== null}
+        {#key rest.join("/")}
+          <TfAppPage at={appAt} {back} />
+        {/key}
       {:else if place.section === "checkouts"}
         <TfCheckoutsSection {layers} />
       {:else if place.section === "notes"}
