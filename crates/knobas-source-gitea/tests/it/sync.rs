@@ -692,8 +692,8 @@ async fn branch_listings_are_paged() {
 #[tokio::test]
 async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
     let mut state = State::tidewater();
-    // One record past the 20 pages of 50 the cap's 21 requests can carry.
-    let many: Vec<serde_json::Value> = (0..=20 * PAGE)
+    // One record past the 200 pages of 50 the cap's 201 requests can carry.
+    let many: Vec<serde_json::Value> = (0..=200 * PAGE)
         .map(|i| {
             branch(
                 &format!("wip/{i:05}"),
@@ -715,7 +715,7 @@ async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
     // message instead.
     assert!(
         matches!(error, SourceError::Protocol { message: ref m, .. }
-            if m.contains("1001 branches in one repository") && m.contains("never finished walking")),
+            if m.contains("10001 branches in one repository") && m.contains("never finished walking")),
         "{error:?}"
     );
 }
@@ -790,21 +790,22 @@ async fn branch_walk_of(count: usize) -> Result<Vec<SyncItem>, SourceError> {
 ///
 /// **The cap's request budget now includes the empty page that proves the
 /// end** (issue #81), so the record target costs one more request than it did
-/// and `MAX_BRANCH_PAGES` is 21 for a target of 1,000. `20 * PAGE` walks
-/// cleanly -- which the short-page rule never managed, because a full page 20
-/// could not prove there was no page 21 -- and one record past it is fatal, as
-/// is a corpus that fills every request the cap affords.
+/// and `MAX_BRANCH_PAGES` is 201 for a target of 10,000 (the extremes pass,
+/// 2026-11-13; it was 21 for 1,000). `200 * PAGE` walks cleanly -- which the
+/// short-page rule never managed, because a full last page could not prove
+/// there was no page after it -- and one record past it is fatal, as is a
+/// corpus that fills every request the cap affords.
 #[tokio::test]
 async fn a_cap_fires_at_exactly_the_boundary_it_names() {
-    let clean = branch_walk_of(20 * PAGE)
+    let clean = branch_walk_of(200 * PAGE)
         .await
-        .expect("20 pages of records, and the 21st request proves the end");
-    assert_eq!(ids(&clean, "branch").len(), 20 * PAGE);
+        .expect("200 pages of records, and the 201st request proves the end");
+    assert_eq!(ids(&clean, "branch").len(), 200 * PAGE);
 
-    // One record more, and the 21st request comes back non-empty instead. The
+    // One record more, and the 201st request comes back non-empty instead. The
     // second case fills every request the cap affords, and is the value the
     // message's arithmetic is easiest to check against.
-    for count in [20 * PAGE + 1, 21 * PAGE] {
+    for count in [200 * PAGE + 1, 201 * PAGE] {
         let error = branch_walk_of(count)
             .await
             .map(|items| format!("Ok({} branches)", ids(&items, "branch").len()))
