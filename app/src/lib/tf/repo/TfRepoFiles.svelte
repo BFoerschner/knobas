@@ -1196,6 +1196,10 @@
     if (section === null || section === MISSING) return Promise.resolve();
     // The file a commit made is at the branch's new tip: the top says which.
     void rereadTop();
+    // A file kept under the section that names its commit (`keepFile`) cannot have changed: a branch that moved names
+    // another section in the top read again, and the file is read there. Reading it again here asked the source on every
+    // run's end, and a page opened meanwhile waited on it (the WSL block, 2026-11-14: 0.2 to 2.2 s on Gitea).
+    if (hasDrawnFile(where, section)) return Promise.resolve();
     forgetDrawnFiles(where);
     return readSection(section, where).then(
       (read) => {

@@ -891,6 +891,45 @@ test("the app's view:fresh for the top directory reads the tree at the new commi
   expect(source.reads).toContain("file@2:main.rs");
 });
 
+test("a refresh reads the top again and not a file drawn at a commit; a branch that moved draws the file at its new commit", async () => {
+  const source = commitSource();
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "main.rs" as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: { dir: "files:", file: "file:" },
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  // A run of the source ended and the branch stands where it did: the top is read again, the file at the commit it was
+  // drawn at is not, since it cannot have changed (the WSL block, 2026-11-14: every run's end read it again from Gitea,
+  // 0.2 to 2.2 s, and a page opened meanwhile waited on it).
+  const before = source.reads.length;
+  props.refreshed += 1;
+  await settle();
+  expect(source.reads.slice(before)).toContain("files");
+  expect(source.reads.slice(before).filter((id) => id.endsWith("main.rs")), "the file drawn at its commit is not read again").toEqual([]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  // A run that moved the branch: the top names the file at the new commit, and that is read and drawn.
+  source.push();
+  props.refreshed += 1;
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// two"]);
+  expect(source.reads).toContain("file@2:main.rs");
+});
+
 test("a deep link's guess that drew the file stands for the section its listing names, so the file is not read twice", async () => {
   const source = commitSource();
   draw(source.entityView, "main.rs");
