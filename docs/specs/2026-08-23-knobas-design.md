@@ -224,7 +224,7 @@ Links are what knobas adds that no source system has. They are **local**: create
 | Create ticket / page / repo / branch; pull / push | Decided | |
 | Build failure → comment on ticket / create ticket / re-run | Proposed | |
 | Runbook page → interactive checklist, progress stored locally | Proposed | |
-| Open in editor (VS Code / JetBrains) / terminal at the checkout | Proposed | |
+| Open in editor (VS Code / JetBrains) / terminal at the checkout | Proposed | Built as *Open in…* (#844, #2274). Adding and editing an application is a page in Settings › Checkouts and Open in, with a repository on this disk to try it on (2026-11-13, `docs/decisions/2026-11-13-open-in-applications-get-a-page.md`). |
 
 ---
 
