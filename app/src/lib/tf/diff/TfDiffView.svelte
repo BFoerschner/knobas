@@ -712,6 +712,9 @@
     filesHost = host;
     if (found === null) return;
     const read = () => {
+      // A page kept hidden has no boxes to measure, every card at the top: it keeps the file it was in until shown. The
+      // shell's scroller stays shown around a hidden kept page, so it is the files' own box that says.
+      if (host.checkVisibility?.() === false) return;
       if (heldAt !== null && Math.abs(found.scrollTop - heldAt) < SCROLLED) return;
       heldAt = null;
       const last = drawn.at(-1);

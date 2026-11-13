@@ -438,6 +438,54 @@ test("a pick holds the pill while the page stands where the pick put it, the rea
   expect(pill()).toBe("src/c.rs");
 });
 
+test("a page kept hidden keeps its current file through a read again, so its pill never moves when it is shown", () => {
+  // The WSL block, 2026-11-13: Compare read again behind a hidden kept page (a sync's end), and the rail's spy measured
+  // cards that have no box, all at the top, so the last drawn file became current; shown again, the first file's row
+  // took the pill back a frame after it drew and moved 2 px (`open-budget --inner`, every compare's synced round).
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => 0, set: () => {} });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 600 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 600 });
+  let shown = true;
+  // The kept page is hidden inside the shell's scroller, which stays shown: the scroller is visible, the diff is not.
+  const visible = (HTMLElement.prototype as { checkVisibility?: () => boolean }).checkVisibility;
+  Object.defineProperty(HTMLElement.prototype, "checkVisibility", {
+    configurable: true,
+    value: function (this: HTMLElement) {
+      return this === page || shown;
+    },
+  });
+  // Each card a screen apart while the page is shown; hidden, every box is at 0, as a browser measures one.
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  const tops: Record<string, number> = { "src/a.rs": 0, "src/b.rs": 600, "src/c.rs": 1200 };
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const top = shown ? (tops[this.getAttribute("data-file") ?? ""] ?? 0) : 0;
+    return { top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  };
+  try {
+    const props = $state({ files: [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")], layout: createDiffLayout(() => null) });
+    draw(props, page);
+    const pill = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+    expect(pill()).toBe("src/a.rs");
+    shown = false;
+    props.files = [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")];
+    flushSync();
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+    expect(pill()).toBe("src/a.rs");
+    shown = true;
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+    expect(pill()).toBe("src/a.rs");
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = rect;
+    if (visible === undefined) delete (HTMLElement.prototype as { checkVisibility?: () => boolean }).checkVisibility;
+    else Object.defineProperty(HTMLElement.prototype, "checkVisibility", { configurable: true, value: visible });
+  }
+});
+
 test("v keeps the file it marked current through the collapse, so j goes on from it (F-250)", () => {
   const page = document.createElement("div");
   page.className = "tf-main";
