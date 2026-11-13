@@ -116,6 +116,7 @@
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { ago } from "../../shell/time";
   import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
   import { drawnFile, forgetDrawnFiles, hasDrawnFile, keepDrawnFile } from "./drawn-files";
   import {
@@ -227,7 +228,7 @@
    * The checkout's tree at the mirror's tip (ADR-0041), while the listings are its: the commit it was read at, each
    * folder read when it opens (the big-folder pass, 2026-11-13); `checked` once the source's top stood at the same commit.
    */
-  let local = $state<{ commit: string; checked: boolean } | null>(null);
+  let local = $state<{ commit: string; checked: boolean; asOf: string | null } | null>(null);
   /** A folder the source listed past the whole tree it reads at once, one at a time (`read_alone`): the tree says so. */
   let readAlone = $state(false);
   /** Folders the source cut at its cap, by path: how many entries it shows, and its page there. */
@@ -246,6 +247,17 @@
   let fileReading = $state(false);
   /** The commit the source's top directory named when it answered, at the current `at`; `null` before, or where it named none. */
   let sourceTop: string | null = null;
+  /** When knobas read that top, where it was what knobas held (`held_at`, ADR-0042); `null` for a read made now. */
+  let sourceTopHeld: string | null = null;
+  /**
+   * The file drawn stands at a commit before the tree's, and its read at the tree's commit is on its way (the forge-waits
+   * pass, 2026-11-13: after a sync moved the branch, the file waited 2.1 s on Gitea, dimmed): drawn undimmed meanwhile,
+   * its header saying from when it is, and replaced in place when the clone or the source answers. `failed` where the
+   * source did not.
+   */
+  let fileBehind = $state<{ heldAt: string; failed: string | null } | null>(null);
+  /** When knobas read each answer of the source's this tab drew: `held_at` where it was held, else when it came. */
+  const readAtOf = new WeakMap<ViewSection, string>();
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
   // Each file the tab drew is kept by the listing's section that opens it (`drawn-files.ts`, the inner-pages pass).
@@ -287,7 +299,22 @@
   async function readSection(section: string, where = at): Promise<ViewSection | undefined> {
     if (section.startsWith(LOCAL)) return readLocalSection(section, where);
     const view = await ports.entityView(where, section);
-    return view?.sections[0];
+    const read = view?.sections[0];
+    if (read !== undefined) {
+      const held = view !== null && "held_at" in view && typeof view.held_at === "string" ? view.held_at : null;
+      readAtOf.set(read, held ?? new Date().toISOString());
+      if (held !== null) heldReads.add(read);
+    }
+    return read;
+  }
+
+  /** Whether `read` was answered from what knobas held, not read now: the backend said when (`held_at`). */
+  const heldReads = new WeakSet<ViewSection>();
+  const heldBefore = (read: ViewSection) => heldReads.has(read);
+
+  /** The source's top was what knobas held from before the sync the clone's tree stands at: the clone's is newer. */
+  function olderThanClone(heldAt: string | null, asOf: string | null): boolean {
+    return heldAt !== null && asOf !== null && Date.parse(heldAt) < Date.parse(asOf);
   }
 
   // ---- The checkout's copy (ADR-0041) ----
@@ -344,36 +371,73 @@
     const read = ports.localDir;
     if (read === undefined) return;
     read(where, null, "").then(
-      async (top) => {
-        if (top === null || !top.complete || mine !== generation || where !== at) return;
-        // The source's top answered first (the app keeps it, so on a later open it beats `git ls-tree`): where it stands
-        // at the clone's commit, the clone draws the tree after all, and its files are read there, not on the forge (the
-        // inner-pages pass, 2026-11-12). At another commit the branch moved since the sync, and the source's tree stands.
-        const first = listings[""] !== undefined;
-        if (first && sourceTop !== top.commit) return;
-        const drawn: Record<string, TreeEntry[]> = { "": localListing(top.commit, top.entries) };
-        if (first) {
-          // Every folder the source's tree has drawn is read from the clone first and swapped in with the top, so no row
-          // moves (the big-folder pass); one the clone cannot answer whole leaves the source's tree standing.
-          const dirs = Object.keys(listings).filter((dir) => dir !== "");
-          const more = await Promise.all(dirs.map((dir) => read(where, top.commit, dir).catch(() => null)));
-          if (mine !== generation || where !== at || sourceTop !== top.commit) return;
-          for (const [i, dir] of dirs.entries()) {
-            const answer = more[i];
-            if (answer == null || !answer.complete) return;
-            drawn[dir] = localListing(top.commit, answer.entries);
-          }
-          // Taking over from the source's tree: its directory reads still under way would write the source's sections
-          // over the clone's.
-          generation += 1;
-          asked = new Set(Object.keys(drawn));
-          early = new Map();
-        }
-        local = { commit: top.commit, checked: first };
-        listings = drawn;
-        pathsSection = localId(top.commit, "paths", "");
-      },
+      (top) => (top === null ? false : land(top, where, mine)),
       // No checkout's copy: the source's reads draw the tree, as before.
+      () => false,
+    );
+  }
+
+  /**
+   * The checkout's top `top`, at the mirror's tip, drawn as the tree: at once where nothing is drawn yet, or taking over
+   * from the source's tree drawn first. `true` where it was taken.
+   */
+  async function land(top: LocalDir, where: string, mine: number, synced = false): Promise<boolean> {
+    const read = ports.localDir;
+    if (read === undefined || !top.complete || mine !== generation || where !== at) return false;
+    // The source's top answered first (the app keeps it, so on a later open it beats `git ls-tree`): where it stands
+    // at the clone's commit, the clone draws the tree after all, and its files are read there, not on the forge (the
+    // inner-pages pass, 2026-11-12). At another commit the branch moved since the sync, and the source's tree stands;
+    // unless the source's answer was what knobas held from before the sync the clone stands at (the forge-waits pass,
+    // 2026-11-13: after a sync the page drew the old commit's tree, and read the old commit's files, until Gitea answered).
+    const first = listings[""] !== undefined;
+    // `synced`: a sync since moved the mirror's tip past the clone's tree drawn, so the clone's is the newer.
+    const newer = synced || olderThanClone(sourceTopHeld, top.as_of);
+    if (first && sourceTop !== top.commit && !newer) return false;
+    const drawn: Record<string, TreeEntry[]> = { "": localListing(top.commit, top.entries) };
+    if (first) {
+      // Every folder the source's tree has drawn is read from the clone first and swapped in with the top, so no row
+      // moves (the big-folder pass); one the clone cannot answer whole leaves the source's tree standing.
+      const dirs = Object.keys(listings).filter((dir) => dir !== "");
+      const more = await Promise.all(dirs.map((dir) => read(where, top.commit, dir).catch(() => null)));
+      if (mine !== generation || where !== at || (sourceTop !== top.commit && !newer)) return false;
+      for (const [i, dir] of dirs.entries()) {
+        const answer = more[i];
+        // A folder the newer commit no longer holds is left out; any other the clone cannot answer leaves the source's tree.
+        if (answer === null && newer) continue;
+        if (answer == null || !answer.complete) return false;
+        drawn[dir] = localListing(top.commit, answer.entries);
+      }
+      // Taking over from the source's tree: its directory reads still under way would write the source's sections
+      // over the clone's.
+      generation += 1;
+      asked = new Set(Object.keys(drawn));
+      early = new Map();
+    }
+    local = { commit: top.commit, checked: first && sourceTop === top.commit, asOf: top.as_of };
+    listings = drawn;
+    pathsSection = localId(top.commit, "paths", "");
+    return true;
+  }
+
+  /**
+   * The clone at the mirror's tip again, where its tree is drawn (the forge-waits pass, 2026-11-13): on a return or a
+   * refresh, and when a fetch behind lands. A sync that moved the branch moved the mirror's tip with it, and where the
+   * clone holds the new commit its tree takes over in place at once, the file read there, before the source's read
+   * behind says the branch moved (3 s on a forge that takes 1 s a request, and the file read from the forge after it).
+   * Where the clone lacks it, the read fetches it behind (ADR-0041), and `checkout:fetched` asks again.
+   */
+  function rereadLocal(): Promise<unknown> {
+    const held = local;
+    const read = ports.localDir;
+    const [where, mine] = [at, generation];
+    if (held === null || read === undefined) return Promise.resolve();
+    return read(where, null, "").then(
+      (top) => {
+        if (top === null || top.commit === held.commit || local?.commit !== held.commit || mine !== generation) return;
+        // A tip the mirror stored after the one drawn: the clone's tree is newer than what the tab shows.
+        if (held.asOf === null || top.as_of === null || Date.parse(top.as_of) <= Date.parse(held.asOf)) return;
+        void land(top, where, mine, true);
+      },
       () => {},
     );
   }
@@ -390,13 +454,36 @@
       local = { ...held, checked: block.commit !== undefined };
       return true;
     }
-    local = null;
-    movedFrom = file === null ? null : { path: file.path, sha: file.sha ?? null };
-    generation += 1;
-    asked = new Set([""]);
-    early = new Map();
-    listings = { "": block.entries };
-    pathsSection = block.paths ?? null;
+    // What knobas held from before the sync the clone's tree stands at: older than the clone's, and read again behind.
+    if (olderThanClone(sourceTopHeld, held.asOf)) return true;
+    // The branch moved past the clone's tree. A sync since moves the mirror's tip with it (the forge-waits pass,
+    // 2026-11-13: the tab went to the source's tree here and read every file on the forge, 2.1 s for a large one): the
+    // clone is asked at the mirror's tip first, and where it stands at the source's commit it takes over in place. Where
+    // it lacks that tip the read fetches it behind (ADR-0041), and `checkout:fetched` hands the tree back to it.
+    const mine = generation;
+    const toSource = () => {
+      if (mine !== generation || local !== held) return;
+      local = null;
+      movedFrom = file === null ? null : { path: file.path, sha: file.sha ?? null };
+      generation += 1;
+      asked = new Set([""]);
+      early = new Map();
+      listings = { "": block.entries };
+      pathsSection = block.paths ?? null;
+    };
+    const read = ports.localDir;
+    if (read === undefined) {
+      toSource();
+      return true;
+    }
+    const where = at;
+    read(where, null, "").then(
+      async (top) => {
+        if (top !== null && top.commit === block.commit && (await land(top, where, mine))) return;
+        toSource();
+      },
+      toSource,
+    );
     return true;
   }
 
@@ -462,7 +549,10 @@
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
-        if (dir === "" && block?.type === "tree") sourceTop = block.commit ?? null;
+        if (dir === "" && block?.type === "tree") {
+          sourceTop = block.commit ?? null;
+          sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
+        }
         if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
         listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
         if (block?.type === "tree" && block.read_alone) readAlone = true;
@@ -481,6 +571,8 @@
     void at;
     generation += 1;
     sourceTop = null;
+    sourceTopHeld = null;
+    fileBehind = null;
     asked = new Set();
     early = new Map();
     listings = {};
@@ -507,7 +599,10 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.checkoutFetched, ({ payload }) => {
       const fetched = payload as Fetched;
-      if (live && fetched.entity_id === where && untrack(() => local) === null) readLocal(where, generation);
+      if (!live || fetched.entity_id !== where) return;
+      const held = untrack(() => local);
+      if (held === null) readLocal(where, generation);
+      else if (held.commit !== fetched.commit) void rereadLocal();
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;
@@ -614,6 +709,7 @@
     drawnRead = read;
     if (file !== null) keepFile(section, read, file.path);
     fileReading = false;
+    fileBehind = null;
     fileFailed = null;
     draft = null;
     settleCommit(file);
@@ -639,12 +735,17 @@
       fileFailed = null;
       return;
     }
-    // A deep link's guess drew this file before its listing named the section: it stands for it.
+    // A deep link's guess drew this file before its listing named the section: it stands for it, where it stands at the
+    // tree's commit. A guess read at the commit before a sync does not stand for the clone's tree at the commit after it
+    // (the forge-waits pass, 2026-11-13: a page opened after a sync kept the file before it).
+    const guessed = untrack(() => file);
+    const guessAt = untrack(() => local?.commit ?? null) ?? sourceTop;
     if (
       section !== null &&
       section !== MISSING &&
       drawnSection === GUESSED &&
-      untrack(() => file)?.path === untrack(() => shown)
+      guessed?.path === untrack(() => shown) &&
+      !(typeof guessed?.commit === "string" && guessAt !== null && guessed.commit !== guessAt)
     ) {
       drawnSection = section;
       keepFile(section, drawnRead, untrack(() => shown) ?? "");
@@ -655,7 +756,21 @@
     fileFailed = null;
     // Waiting for the directory that says which section opens the file; with no file to show, nothing is drawn.
     const showing = untrack(() => shown) !== null;
-    fileReading = showing;
+    // The file drawn is this one at a commit before the tree's (a sync or a push moved the branch): it stays drawn,
+    // undimmed, saying from when it is, until the read at the new commit replaces it (the forge-waits pass, 2026-11-13).
+    const before = untrack(() => file);
+    const treeAt = untrack(() => local?.commit ?? null) ?? sourceTop;
+    const behind =
+      section !== null &&
+      section !== MISSING &&
+      before !== null &&
+      before.path === untrack(() => shown) &&
+      typeof before.commit === "string" &&
+      treeAt !== null &&
+      before.commit !== treeAt;
+    fileReading = showing && !behind;
+    // The clone answers in a few milliseconds: only a read of the source is said to be waited on.
+    fileBehind = behind && !section.startsWith(LOCAL) ? { heldAt: (drawnRead && readAtOf.get(drawnRead)) ?? new Date().toISOString(), failed: null } : null;
     if (!showing) {
       file = null;
       drawnSection = null;
@@ -681,6 +796,11 @@
       (error) => {
         if (!live) return;
         fileReading = false;
+        // The file knobas drew stays, saying the source did not answer; nothing is read again until the next look.
+        if (fileBehind !== null) {
+          fileBehind = { ...fileBehind, failed: ipcErrorMessage(error) };
+          return;
+        }
         file = null;
         drawnSection = null;
         fileFailed = ipcErrorMessage(error);
@@ -690,6 +810,13 @@
       live = false;
     };
   });
+
+  /** What the header says of a file drawn from a commit before the tree's: from when it is, and what is being read. */
+  function behindLine(behind: { heldAt: string; failed: string | null }, commit: string | null): string {
+    const when = ago(behind.heldAt, new Date());
+    const read = `As knobas read it ${when === "just now" ? "a moment ago" : when}${commit === null ? "" : `, at ${commit.slice(0, 7)}`}.`;
+    return behind.failed === null ? `${read} Checking ${sourceName(source)}…` : `${read} ${sourceName(source)} did not answer: ${behind.failed}`;
+  }
 
   /**
    * A directory read failed before the file's section was known: no answer is
@@ -1107,6 +1234,7 @@
         // pass, 2026-11-13: the first answer can be the app's kept read at the commit before a push).
         const was = sourceTop;
         sourceTop = block.commit ?? null;
+        sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
         if (settleLocal(block)) return;
         const before = (listings[""] ?? []).map((entry) => entry.section).join("\u0000");
         if (block.entries.map((entry) => entry.section).join("\u0000") !== before) {
@@ -1149,7 +1277,7 @@
 
   function rereadTree(): Promise<unknown> {
     const mine = generation;
-    const reads: Promise<unknown>[] = [rereadTop()];
+    const reads: Promise<unknown>[] = [rereadLocal(), rereadTop()];
     for (const dir of Object.keys(listings)) {
       if (dir === "") continue;
       const section = entryOf(dir)?.section;
@@ -1497,7 +1625,12 @@
       {@const cut = file.path.lastIndexOf("/") + 1}
       <header>
         <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
-        <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
+        {#if fileBehind !== null}
+          <!-- The held line (ADR-0042) in the meta's own place, so nothing under the header moves when it comes or goes. -->
+          <span class="tf-dim tf-small tf-fmeta" role="status">{behindLine(fileBehind, file.commit ?? null)}</span>
+        {:else}
+          <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
+        {/if}
         <span class="tf-trail">
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}

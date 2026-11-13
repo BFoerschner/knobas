@@ -8,10 +8,11 @@
  * source that never answers (a slow or hung forge) is the default here.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { LocalTree, SourceView, TreeEntry, ViewBlock } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import TfRepoFilesRefreshed from "./TfRepoFiles.refresh.fixture.svelte";
 import { checkoutPorts } from "./checkout-ports.test-support";
 
 const REPO = "gitea:tidewater/payout-service";
@@ -165,10 +166,12 @@ test("a branch that moved since the sync replaces the copy in place, and a file 
   release("files", newer, MOVED);
   await settle();
 
-  // The source's tree stands now; the file is read again through it, the copy drawn meanwhile.
+  // The source's tree stands now; the file is read again through it, the copy drawn meanwhile, undimmed, its header
+  // saying from when it is (the forge-waits pass, 2026-11-13).
   expect(tree()).toEqual(["src", "README.md", "CHANGELOG.md"]);
   expect(note()).toBe("");
-  expect(shownFile()).toContain("at c0ffee0 Render as Markdown payout-service");
+  expect(text(target.querySelector(".tf-fileview .tf-fmeta"))).toBe("As knobas read it a moment ago, at c0ffee0. Checking the code host…");
+  expect(shownFile()).toContain("Render as Markdown payout-service");
   release("file:README.md", newer, MOVED, "b10b-newer");
   await settle();
   expect(shownFile()).toContain("newer");
@@ -501,4 +504,233 @@ test("a folder the source listed on its own, or cut, says so under the tree", as
     "wide shows its first 1 entries; the rest are on the code host.",
   ]);
   expect(target.querySelector<HTMLAnchorElement>(".tf-gonote a")?.href).toBe("https://gitea.example/o/r/src/branch/main/wide");
+});
+
+/**
+ * The forge-waits pass (2026-11-13): after a sync moved the branch, the tab read the file at the new commit from the
+ * forge (2.1 s for a large file on the live Gitea), because the source's tree replaced the clone's and the clone was
+ * never asked again. The source names its sections by commit here, as Gitea does, so a file at a new commit is a read
+ * knobas never made.
+ */
+describe("a file reopened after a sync moved the branch", () => {
+  const SYNCED: Files = { ...FILES, "README.md": "# payout-service, synced\n" };
+  const filesAt = (commit: string) => (commit === MOVED ? SYNCED : FILES);
+  /** The source's answer with each file's section naming the commit, `file@<commit>:<path>`. */
+  function atCommit(section: string, commit: string): SourceView {
+    const at = section.match(/^file@([0-9a-f]+):(.*)$/);
+    if (at !== null) return sourceAnswer(filesAt(at[1]!), `file:${at[2]}`, at[1]!, `blob-${at[1]!.slice(0, 4)}`);
+    const view = sourceAnswer(filesAt(commit), section, commit, "b10b");
+    for (const block of view.sections[0]!.blocks) {
+      if (block.type === "tree") for (const entry of block.entries) if (entry.section?.startsWith("file:")) entry.section = `file@${commit}:${entry.section.slice(5)}`;
+    }
+    return view;
+  }
+
+  function mountSynced(cloned = true) {
+    const handlers = new Map<string, ((event: { payload: unknown }) => void)[]>();
+    const state = { top: TIP, clone: cloned ? localTree(FILES) : (null as LocalTree | null), holdFiles: false };
+    const held: (() => void)[] = [];
+    const ports = {
+      entityView: (_at: string, section: string | null) => {
+        asked.push({ section: section ?? "", release: () => {} });
+        const answer = atCommit(section ?? "", state.top);
+        if (state.holdFiles && (section ?? "").startsWith("file@")) return new Promise<SourceView>((resolve) => held.push(() => resolve(answer)));
+        return Promise.resolve(answer);
+      },
+      ...checkoutPorts(() => state.clone),
+      localFile: async (_at: string, commit: string, path: string) => {
+        localReads.push(`${commit.slice(0, 7)}:${path}`);
+        const text = filesAt(commit)[path];
+        return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+      },
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+      listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+        return () => {};
+      },
+    };
+    view = mount(TfRepoFiles, {
+      target,
+      props: { ports, repoId: REPO, at: REPO, branch: "main", path: "README.md", changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+    });
+    const tell = (event: string, payload: unknown) => {
+      for (const handler of handlers.get(event) ?? []) handler({ payload });
+    };
+    return { state, held, tell };
+  }
+  const fileReads = () => sourceReads().filter((section) => section.startsWith("file@"));
+  const meta = () => text(target.querySelector(".tf-fileview .tf-fmeta"));
+
+  test("a clone that holds the new commit draws the tree and the file there at once, with no read of the file on the source", async () => {
+    const { state, tell } = mountSynced();
+    await settle();
+    expect(text(target)).toContain("From your clone at c0ffee0");
+    expect(shownFile()).toMatch(/payout-service$/);
+    const before = fileReads().length;
+
+    // A sync moved the branch; the clone holds the new commit (a pull, or a fetch behind an earlier read). The app's read
+    // behind the kept top finds the branch there.
+    state.top = MOVED;
+    state.clone = localTree(SYNCED, MOVED);
+    tell("view:fresh", { entity_id: REPO, section: "files", failed: null });
+    await settle();
+
+    expect(text(target)).toContain("From your clone at d00d000, the same as on");
+    expect(shownFile()).toContain("payout-service, synced");
+    expect(localReads).toContain("d00d000:README.md");
+    expect(fileReads().length, "the file at the new commit came from the clone").toBe(before);
+    expect(target.querySelector(".tf-fileview .tf-banner.tf-info"), "a sync's move is quiet").toBeNull();
+  });
+
+  test("on a return after the sync, the clone at the mirror's new tip takes over before the source says the branch moved", async () => {
+    const handlers = new Map<string, ((event: { payload: unknown }) => void)[]>();
+    const state = { clone: localTree(FILES) as LocalTree | null };
+    const ports = {
+      // The source answers what knobas kept from before the sync; its read behind has not landed.
+      entityView: async (_at: string, section: string | null) => {
+        asked.push({ section: section ?? "", release: () => {} });
+        return atCommit(section ?? "", TIP);
+      },
+      ...checkoutPorts(() => state.clone),
+      localFile: async (_at: string, commit: string, path: string) => {
+        localReads.push(`${commit.slice(0, 7)}:${path}`);
+        const text = filesAt(commit)[path];
+        return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+      },
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+      listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+        return () => {};
+      },
+    };
+    const props = $state({ ports, repoId: REPO, at: REPO, branch: "main", path: "README.md", changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" }, refreshed: 0 });
+    // Under a page that counts its refreshes, as `TfRepo` holds the tab: a return reads the tab again.
+    view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+    await settle();
+    expect(text(target)).toContain("From your clone at c0ffee0");
+    const before = fileReads().length;
+
+    // A sync moved the mirror's tip, as of a later sync, and the clone holds it; the reader comes back to the page.
+    state.clone = { ...localTree(SYNCED, MOVED), as_of: "2026-11-09T11:00:00Z" };
+    props.refreshed += 1;
+    await settle();
+
+    expect(text(target)).toContain("From your clone at d00d000, as of the last sync");
+    expect(shownFile()).toContain("payout-service, synced");
+    expect(fileReads().length, "nothing read from the source at the new commit").toBe(before);
+  });
+
+  test("a clone that lacks it keeps the file knobas drew, undimmed under the held line, and the fetch's landing replaces it in place", async () => {
+    const { state, held, tell } = mountSynced();
+    await settle();
+    const before = fileReads().length;
+
+    // The clone lacks the mirror's new tip: the read at it fetches behind (ADR-0041), and the source is slow.
+    state.top = MOVED;
+    state.clone = null;
+    state.holdFiles = true;
+    tell("view:fresh", { entity_id: REPO, section: "files", failed: null });
+    await settle();
+
+    expect(shownFile()).toMatch(/payout-service$/);
+    expect(shownFile()).not.toContain("synced");
+    expect(target.querySelector(".tf-fileview [aria-busy='true']"), "the file knobas drew is not dimmed").toBeNull();
+    expect(meta()).toBe("As knobas read it a moment ago, at c0ffee0. Checking the code host…");
+    expect(fileReads().length).toBe(before + 1);
+
+    state.clone = localTree(SYNCED, MOVED);
+    tell("checkout:fetched", { entity_id: REPO, commit: MOVED });
+    await settle();
+    expect(shownFile()).toContain("payout-service, synced");
+    expect(meta()).toContain("at d00d000");
+    expect(meta()).not.toContain("Checking");
+    expect(localReads).toContain("d00d000:README.md");
+    // The forge's late answer lands nowhere.
+    for (const release of held) release();
+    await settle();
+    expect(text(target)).toContain("From your clone at d00d000");
+  });
+
+  test("opened after the sync, the source's top knobas held from before it gives way to the clone's tree at the new commit", async () => {
+    const files = new Map<string, number>();
+    let release!: (tree: LocalTree) => void;
+    const late = new Promise<LocalTree>((resolve) => (release = resolve));
+    const ports = {
+      // What knobas held from before the sync, answered at once (ADR-0042), its read behind still out.
+      entityView: async (_at: string, section: string | null) => {
+        asked.push({ section: section ?? "", release: () => {} });
+        if ((section ?? "").startsWith("file@")) files.set(section!, (files.get(section!) ?? 0) + 1);
+        return { ...atCommit(section ?? "", TIP), held_at: "2026-11-09T09:00:00Z" };
+      },
+      ...checkoutPorts(() => late),
+      localFile: async (_at: string, commit: string, path: string) => {
+        localReads.push(`${commit.slice(0, 7)}:${path}`);
+        const text = filesAt(commit)[path];
+        return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+      },
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    };
+    view = mount(TfRepoFiles, {
+      target,
+      props: { ports, repoId: REPO, at: REPO, branch: "main", path: "README.md", changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+    });
+    await settle();
+    // The clone stands at the mirror's tip as of the sync at 10:00, after the source's held read at 09:00.
+    release(localTree(SYNCED, MOVED));
+    await settle();
+    expect(text(target)).toContain("From your clone at d00d000");
+    expect(shownFile()).toContain("payout-service, synced");
+    expect(localReads).toContain("d00d000:README.md");
+    expect([...files.keys()].filter((section) => section.includes(MOVED)), "nothing at the new commit read from the source").toEqual([]);
+  });
+
+  test("a deep link's guess read at the commit before the sync does not stand for the clone's file at the commit after it", async () => {
+    let release!: (tree: LocalTree) => void;
+    const late = new Promise<LocalTree>((resolve) => (release = resolve));
+    const ports = {
+      // The guess at the file answers at once, from what knobas kept at the commit before; the source's tree never answers.
+      entityView: (_at: string, section: string | null) =>
+        section === "file:README.md" ? Promise.resolve(atCommit(section, TIP)) : new Promise<SourceView>(() => {}),
+      ...checkoutPorts(() => late),
+      localFile: async (_at: string, commit: string, path: string) => {
+        localReads.push(`${commit.slice(0, 7)}:${path}`);
+        const text = filesAt(commit)[path];
+        return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+      },
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    };
+    view = mount(TfRepoFiles, {
+      target,
+      props: { ports, repoId: REPO, at: REPO, branch: "main", path: "README.md", changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+    });
+    await settle();
+    expect(shownFile()).toMatch(/payout-service$/);
+    release(localTree(SYNCED, MOVED));
+    await settle();
+    expect(localReads).toEqual(["d00d000:README.md"]);
+    expect(shownFile()).toContain("payout-service, synced");
+  });
+
+  test("with no clone, the source's answer at the new commit replaces the file knobas drew, quietly", async () => {
+    const { state, held, tell } = mountSynced(false);
+    await settle();
+    state.top = MOVED;
+    state.holdFiles = true;
+    tell("view:fresh", { entity_id: REPO, section: "files", failed: null });
+    await settle();
+    expect(meta()).toBe("As knobas read it a moment ago, at c0ffee0. Checking the code host…");
+    for (const release of held) release();
+    await settle();
+    expect(shownFile()).toContain("payout-service, synced");
+    expect(meta()).toContain("at d00d000");
+    expect(target.querySelector(".tf-fileview .tf-banner.tf-info")).toBeNull();
+  });
 });
