@@ -159,6 +159,13 @@
     onretry?: () => void;
   } = $props();
 
+  /** Sizes the box `px` tall, through the CSSOM: the CSP takes no inline style (`house-rules.test.ts`). */
+  function room(px: number): Attachment<HTMLElement> {
+    return (node) => {
+      node.style.height = `${px}px`;
+    };
+  }
+
   /** Calls `go` as the box comes within a screen of the view of the page that scrolls it. */
   function near(go: () => void): Attachment<HTMLElement> {
     return (node) => {
@@ -538,7 +545,7 @@
       </div>
     {:else if waiting}
       <!-- Its lines are being read: their room, held, so nothing below moves much when they come. -->
-      <div class="tf-dwait tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading {keyOf(file)}'s lines" style:height="{waitingRows(file) * 21}px">
+      <div class="tf-dwait tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading {keyOf(file)}'s lines" {@attach room(waitingRows(file) * 21)}>
         {#each { length: Math.min(waitingRows(file), 6) }, k (k)}<span class="tf-skel-bar"></span>{/each}
       </div>
     {:else if file.hunks.length === 0 && file.old_mode && file.new_mode && file.old_mode !== file.new_mode}

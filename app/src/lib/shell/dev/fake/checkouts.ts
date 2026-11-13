@@ -656,7 +656,6 @@ onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
   fakeWorktrees = [];
   fakeCloneAll = null;
-  listedDiffs.clear();
   ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
-keepSeed(fakeOverrides, fakeCloning, fakeCloned);
+keepSeed(fakeOverrides, fakeCloning, fakeCloned, listedDiffs);
