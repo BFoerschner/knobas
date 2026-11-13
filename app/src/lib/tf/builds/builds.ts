@@ -9,9 +9,7 @@
 import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import { clockLabel } from "../../time/format";
 import { originLabel } from "../job/job";
-
-/** How many runs the strip under a pipeline's name shows (R-9.4a). */
-export const STRIP = 12;
+import { stateWord } from "../state-word";
 
 /** The list's two chips, in prototype-6's words (R-9.1). */
 export const CHIPS = ["Failing", "Running"] as const;
@@ -59,7 +57,7 @@ export function isRunning(pipeline: PipelineRow): boolean {
  * A run's block in the strip: finished, its declared tone; in flight,
  * running once it started and queued before.
  */
-export { stateWord } from "../state-word";
+export { stateWord };
 
 export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | "q" {
   if (run.finished === null && run.started !== null) return "run";
@@ -68,9 +66,29 @@ export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | 
   return tone === "ok" || tone === "err" || tone === "warn" ? tone : "muted";
 }
 
-/** The last {@link STRIP} runs, oldest first, so the newest is on the right. */
-export function stripOf(pipeline: PipelineRow): RunRow[] {
-  return pipeline.recent.slice(0, STRIP).reverse();
+/** A rail row's glyph: its latest run's {@link runTone}, or `none` for a pipeline nothing ran. */
+export type GlyphTone = ReturnType<typeof runTone> | "none";
+
+/** What a glyph says where its run declares no state of its own. */
+const UNSAID: Record<GlyphTone, string> = {
+  ok: "Passed",
+  err: "Failed",
+  warn: "Warning",
+  run: "Running",
+  q: "Queued",
+  muted: "Finished",
+  none: "No runs",
+};
+
+/**
+ * The glyph a rail row draws for its pipeline's latest run, and its word: the run's state as its chip says it
+ * ({@link stateWord}, design system, Words), *Queued* as the run table's chip says a waiting one.
+ */
+export function railGlyph(pipeline: PipelineRow): { tone: GlyphTone; word: string } {
+  const latest = pipeline.recent[0];
+  const tone: GlyphTone = latest === undefined ? "none" : runTone(latest);
+  const said = tone === "q" || tone === "none" ? "" : stateWord(latest?.state?.text ?? "");
+  return { tone, word: said || UNSAID[tone] };
 }
 
 /**
@@ -82,6 +100,25 @@ export function latestTime(pipeline: PipelineRow, now: Date = new Date()): strin
   const latest = pipeline.recent[0];
   const at = latest?.started ?? latest?.updated_at ?? null;
   return at === null ? "" : shortTime(at, now);
+}
+
+/**
+ * The time a rail row shows, and its tone: only where it says something. A failed latest run says when it failed,
+ * that is when it finished (err), a running one when it started (info), a queued one that it waits. A pass, a
+ * warning, a cancelled run and a pipeline nothing ran show none: the row's title carries {@link latestTime}.
+ */
+export function railTime(
+  pipeline: PipelineRow,
+  now: Date = new Date(),
+): { text: string; tone: "err" | "info" | null } | null {
+  const latest = pipeline.recent[0];
+  if (latest === undefined) return null;
+  const tone = runTone(latest);
+  if (tone === "q") return { text: "queued", tone: null };
+  if (tone === "run") return { text: latestTime(pipeline, now), tone: "info" };
+  const failedAt = latest.finished ?? latest.started ?? latest.updated_at;
+  if (tone === "err") return { text: failedAt === null ? "" : shortTime(failedAt, now), tone: "err" };
+  return null;
 }
 
 /** An instant as a row writes it, on the one ladder: *11:45* today, *yesterday 16:20*, *Wed 14:32*, then *3 Nov*. */
@@ -159,6 +196,8 @@ export interface Fold {
   count: number;
   /** How many of those are failing. */
   failing: number;
+  /** How many of those are running. */
+  running: number;
 }
 
 /** One source's tree: the pipelines at its top and its top folds. */
@@ -201,6 +240,7 @@ function fold(node: Draft, parentKey: string): Fold {
     folds,
     count: at.pipelines.length + folds.reduce((sum, f) => sum + f.count, 0),
     failing: at.pipelines.filter(isFailing).length + folds.reduce((sum, f) => sum + f.failing, 0),
+    running: at.pipelines.filter(isRunning).length + folds.reduce((sum, f) => sum + f.running, 0),
   };
 }
 
@@ -258,11 +298,12 @@ export function foldOpen(remembered: boolean | undefined, f: Fold, selected: str
 /**
  * One row of the pipeline list as the windowed list draws it (#2211): a
  * heading, a pipeline at its depth, or a fold's summary. `key` is unique: a
- * pinned pipeline is also in its fold.
+ * pinned pipeline is also in its fold. A pipeline's `pre` is the
+ * {@link sharedPrefix} of its fold's own pipelines, which the row draws dim.
  */
 export type ListRow =
   | { kind: "head"; key: string; text: string }
-  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number }
+  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number; pre: string }
   | { kind: "fold"; key: string; fold: Fold; depth: number; open: boolean };
 
 /**
@@ -280,10 +321,11 @@ export function listRows(
   const rows: ListRow[] = [];
   if (pinned.length > 0) {
     rows.push({ kind: "head", key: "head:pinned", text: "Pinned" });
-    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0 });
+    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0, pre: "" });
   }
   const walk = (pipelines: readonly PipelineRow[], folds: readonly Fold[], depth: number) => {
-    for (const pipeline of pipelines) rows.push({ kind: "pipeline", key: `tree:${pipeline.entity_id}`, pipeline, depth });
+    const pre = sharedPrefix(pipelines.map((pipeline) => pipeline.name));
+    for (const pipeline of pipelines) rows.push({ kind: "pipeline", key: `tree:${pipeline.entity_id}`, pipeline, depth, pre });
     for (const f of folds) {
       const isOpen = open(f);
       rows.push({ kind: "fold", key: `fold:${f.key}`, fold: f, depth, open: isOpen });
@@ -296,6 +338,19 @@ export function listRows(
     walk(tree.pipelines, tree.folds, 0);
   });
   return rows;
+}
+
+/**
+ * The prefix every one of a folder's own pipelines starts with, cut after its last separator (`_`, `.`, `-`, a space,
+ * `:` or `/`): the rail draws it in the second ink, so `Payout_` of *Payout_Build*, *Payout_Lint* is read past and the
+ * part that differs is read first. Nothing for a lone pipeline, and nothing that would leave a name empty.
+ */
+export function sharedPrefix(names: readonly string[]): string {
+  if (names.length < 2) return "";
+  let common = names[0]!;
+  for (const name of names) while (!name.startsWith(common)) common = common.slice(0, -1);
+  const cut = /^.*[_.\-\s:/]/.exec(common)?.[0] ?? "";
+  return names.every((name) => name.length > cut.length) ? cut : "";
 }
 
 /** The pinned pipelines among `list`, in its order. */

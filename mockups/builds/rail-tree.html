@@ -1,0 +1,493 @@
+<!doctype html>
+<!--
+  Builds, the pipelines rail as a tree (2026-11-13).
+
+  The rail today gives every pipeline two lines: its name and time, then a strip of its last twelve runs. This
+  mockup drops the strip and draws the rail as one tree: one 26 px line a pipeline, a status glyph in its own
+  column so a scan down the left edge finds the red, guide lines for depth, the prefix a folder's pipelines share
+  dimmed so the part that differs is read first, and a time only where it says something (failed, running,
+  queued). Folders keep their count and say how many fail and run.
+
+  Drawn on the app's own stylesheets (tf.css and its parts under app/src/lib/tf/css/). Every class here exists
+  there except the ones in the "Proposed additions to builds.css" block, which is the whole CSS change. The markup
+  is the DOM TfBuilds.svelte would produce, so porting it is two snippets in that file and that block.
+  rail-tree.md has the port.
+
+  Open from the repository root (a static server or the file itself). The yellow bar at the bottom right is not
+  part of the app: it switches between the new rail and today's, the scope, the time rule and the theme.
+  ?rail=old|new, ?theme=light|dark, ?scope=all|job do the same from the address.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Builds rail tree</title>
+<link rel="stylesheet" href="../../app/node_modules/@fontsource-variable/archivo/wdth.css">
+<link rel="stylesheet" href="../../app/node_modules/@fontsource/jetbrains-mono/latin-400.css">
+<link rel="stylesheet" href="../../app/node_modules/@fontsource/jetbrains-mono/latin-600.css">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<!-- The app's stylesheets, in tf.css's order (its bare @fontsource imports fail here and are covered above). -->
+<link rel="stylesheet" href="../../app/src/lib/tf/tf.css">
+<style>
+  :root { --sans: "Archivo Variable", "Archivo", system-ui, sans-serif; }
+  html, body { height: 100%; }
+
+  /* ================================================================================
+     Proposed additions to builds.css. They replace the `.tf-pi*`, `.tf-strip*`,
+     `.tf-pl-fold` and `.tf-pl .tf-dN` rules of "Builds (#848)" and the 240 px
+     media block that re-flowed the two-line row.
+     ================================================================================ */
+
+  /* The depth as a number, so the indent, the guides and the highlight are one calc each. 14 px a level, as before. */
+  .tf-pl .tf-d0 { --d: 0; } .tf-pl .tf-d1 { --d: 1; } .tf-pl .tf-d2 { --d: 2; } .tf-pl .tf-d3 { --d: 3; }
+  .tf-pl .tf-d4 { --d: 4; } .tf-pl .tf-d5 { --d: 5; } .tf-pl .tf-d6 { --d: 6; } .tf-pl .tf-d7 { --d: 7; } .tf-pl .tf-d8 { --d: 8; }
+
+  /* One tree row, a pipeline or a folder: one line, 26 px, so the windowed list's estimate is exact. The glyph
+     column is 12 px; a guide line runs down the middle of each ancestor's glyph column. */
+  .tf-pl .tf-tr {
+    position: relative; isolation: isolate;
+    display: flex; align-items: center; gap: 6px; height: var(--control-h-sm);
+    padding: 0 8px 0 calc(8px + var(--d, 0) * 14px);
+    font-size: var(--t-sm); color: var(--ink); text-decoration: none; white-space: nowrap; cursor: pointer;
+    background: repeating-linear-gradient(90deg, var(--rule-2) 0 1px, transparent 1px 14px) 14px 0 / calc(var(--d, 0) * 14px) 100% no-repeat;
+  }
+  /* Hover and the selection start at the row's own indent, so the guides to its left stay drawn. */
+  .tf-pl .tf-tr::after { content: ""; position: absolute; inset: 1px 0 1px calc(3px + var(--d, 0) * 14px); border-radius: 4px; z-index: -1; }
+  .tf-pl .tf-tr:hover::after { background: var(--sheet-2); }
+  /* The selected pipeline: the inset ink pill every rail draws, with the tones re-declared for the ink. */
+  .tf-pl .tf-tr[aria-current="true"] {
+    color: var(--sheet); --st-x: var(--fill);
+    --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted); --rule: var(--on-ink-muted);
+  }
+  .tf-pl .tf-tr[aria-current="true"]::after { background: var(--fill); }
+  .tf-pl .tf-tr:focus-visible { outline: none; }
+  .tf-pl .tf-tr:focus-visible::after { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+  /* The glyph: a quiet tick for a pass, a filled red disc for a failure, so red is the only loud thing on a scan. */
+  .tf-st { flex: none; width: 12px; height: 12px; --st-x: var(--sheet); }
+  .tf-pl .tf-tr[aria-current="true"] .tf-st { --st-x: var(--fill); }
+  .tf-st-ok { color: var(--ok); }
+  .tf-st-err { color: var(--err); }
+  .tf-st-warn { color: var(--warn); }
+  .tf-st-run, .tf-st-q { color: var(--info); }
+  .tf-st-q { color: var(--ink-2); }
+  .tf-st-muted, .tf-st-none { color: var(--muted); }
+  .tf-pl .tf-tr[aria-current="true"] :is(.tf-st-q, .tf-st-muted, .tf-st-none) { color: inherit; opacity: .7; }
+  .tf-st-run .tf-spin { transform-origin: 8px 8px; animation: tf-st-spin 1.1s linear infinite; }
+  @keyframes tf-st-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .tf-st-run .tf-spin { animation: none; } }
+
+  /* The name gives up its end; the prefix its folder's pipelines share is drawn in the second ink. */
+  .tf-tr-nm { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tf-tr-nm.tf-bad { color: var(--err); font-weight: 600; }
+  .tf-tr-pre { color: var(--ink-2); font-weight: 400; }
+  .tf-tr-nm.tf-bad .tf-tr-pre { color: inherit; opacity: .7; }
+  .tf-pl .tf-tr[aria-current="true"] :is(.tf-tr-nm.tf-bad, .tf-tr-pre) { color: inherit; }
+  .tf-pl .tf-tr[aria-current="true"] .tf-tr-pre { opacity: .7; }
+  /* *This job*'s reason, after the name, in the second ink: it has only the room the name leaves, so it gives way first. */
+  .tf-tr-why { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--t-xs); color: var(--ink-2); }
+  /* The time, or a folder's counts, on the right edge. */
+  .tf-tr-at { flex: none; margin-left: auto; padding-left: 6px; display: inline-flex; gap: 4px; align-items: center; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .tf-tr-at.tf-err { color: var(--err); }
+  .tf-tr-at.tf-info { color: var(--info); }
+  .tf-pl .tf-tr[aria-current="true"] :is(.tf-tr-why, .tf-tr-at) { color: inherit; opacity: .8; }
+
+  /* A folder: the app's one fold chevron (chrome.css) set in the glyph column, its name in 600, its counts right. */
+  .tf-pl-fold > summary.tf-tfold::before { margin: 0 3px 1px 3px; }
+  .tf-tfold .tf-tr-nm { font-weight: 600; }
+  .tf-tfold .tf-count { font-size: var(--t-2xs); }
+  .tf-tfold .tf-tr-total { min-width: 2ch; text-align: right; }
+
+  /* The rail's tools: the chips, and on the right *Expand all* / *Collapse all*. */
+  .tf-pl-tools { display: flex; align-items: center; gap: var(--control-gap); }
+  .tf-pl-tools > .tf-btn { margin-left: auto; }
+  /* The source's name over its tree, and *Pinned*: the rows below line up under its first letter. */
+  .tf-pl .tf-pl-list > .tf-pl-rows > h3 { padding: 12px 8px 4px 11px; }
+
+  /* ================================================================================
+     Mockup only: the right side's stand-in data and the yellow switch bar.
+     ================================================================================ */
+  .mk { position: fixed; right: 12px; bottom: 40px; z-index: 50; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; max-width: min(720px, 70vw);
+        background: var(--card); color: var(--card-ink); border: 1px solid var(--card-2); border-radius: 6px; padding: 6px 8px; font: 12px var(--sans); box-shadow: var(--shadow); }
+  .mk b { font-weight: 700; margin-right: 4px; }
+  .mk span { opacity: .6; }
+  .mk button { border: 1px solid rgba(0,0,0,.25); border-radius: 4px; padding: 2px 8px; background: rgba(255,255,255,.3); color: inherit; font: inherit; cursor: pointer; }
+  .mk button[aria-pressed="true"] { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+</style>
+</head>
+<body>
+<div class="tf">
+  <header class="tf-top">
+    <span class="tf-brand">knobas</span>
+    <nav class="tf-nav" aria-label="Main">
+      <a href="#/tickets">Tickets</a>
+      <a href="#/inbox">Inbox <span class="tf-count">10</span></a>
+      <a href="#/code">Code</a>
+      <a href="#/builds" aria-current="page">Builds</a>
+      <a href="#/docs">Docs</a>
+      <a href="#/monitors">Monitors <span class="tf-count tf-err">1</span></a>
+      <a href="#/time">Time</a>
+    </nav>
+    <span class="tf-spacer"></span>
+    <button class="tf-search" aria-label="Search everything">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+      <span class="tf-label">Search</span><kbd>⌘K</kbd>
+    </button>
+  </header>
+
+  <main class="tf-main" id="main"></main>
+
+  <footer class="tf-status">
+    <a class="tf-sources" href="#/settings">Sources</a>
+    <span class="tf-healthy"><span>Tidewater TeamCity synced 14:21</span></span>
+  </footer>
+</div>
+
+<div class="mk" role="group" aria-label="Mockup switches">
+  <b>Mockup</b>
+  <button data-rail="new">Tree</button>
+  <button data-rail="old">Today's rail</button>
+  <span>·</span>
+  <button data-scope="all">All</button>
+  <button data-scope="job">Job PAY-231</button>
+  <span>·</span>
+  <button data-times="quiet">Times when not green</button>
+  <button data-times="all">Times on every row</button>
+  <span>·</span>
+  <button data-prefix="1">Dim shared prefix</button>
+  <span>·</span>
+  <button data-theme="light">Light</button>
+  <button data-theme="dark">Dark</button>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ fixtures
+   The dev fake's TeamCity (app/src/lib/shell/dev/fake/builds.ts): its projects, its configurations, the
+   latest runs that have a story, its pins and PAY-231's reasons. */
+const SOURCE = "Tidewater TeamCity";
+const CONFIGURATIONS = {
+  "Payments/Payouts": ["Payout_Build", "Payout_IntegrationTests", "Payout_Lint", "Payout_Docker"],
+  "Payments/Payouts/Deploy": ["Payout_Deploy_Staging", "Payout_Deploy_Prod"],
+  "Payments/Payouts/Dashboard": ["Dashboard_Build", "Dashboard_E2E"],
+  "Payments/PSP client": ["PspClient_Build", "PspClient_Release"],
+  "Payments/Workers": ["RefundWorker_Build", "Settlement_Nightly", "Notifier_Build"],
+  "Payments/Ledger": ["Ledger_Build", "Ledger_Tests", "Ledger_Migrations_Check", "FxRates_Build"],
+  "Payments/Ledger/Deploy": ["Ledger_Deploy_Staging", "Ledger_Deploy_Prod"],
+  "Logistics/Customs": ["CustomsGateway_Build", "CustomsGateway_Contract", "CustomsDocs_Build", "HsLookup_Build", "EdiParser_Build", "EdiParser_Fuzz", "EdiGateway_Deploy"],
+  "Logistics/Tracking": ["TrackingEvents_Build", "CarrierAdapters_Build", "CarrierDhl_Contract", "CarrierMaersk_Contract", "EtaModel_Train", "ContainerTracker_Build", "PortCalls_Build", "VesselSchedule_Build"],
+  "Logistics/Booking": ["BookingApi_Build", "BookingWeb_Build", "BookingWeb_E2E", "RateQuotes_Build", "QuoteEngine_Build", "QuoteEngine_Bench", "InvoiceEngine_Build", "InvoicePdf_Build", "DocStore_Build"],
+  "Platform/Services": ["AuthGateway_Build", "UserAdmin_Build", "NotificationHub_Build"],
+  "Platform/Infrastructure": ["Terraform_Plan", "Terraform_Apply_Stage", "Helm_Lint", "TraefikConfig_Validate", "MonitoringStack_Deploy"],
+  "Platform/Tooling": ["CiTemplates_Test", "Runbooks_Linkcheck"],
+  "Data": ["DataPipeline_Build", "DataPipeline_Nightly", "Dbt_Run_Nightly", "Dbt_Test", "WarehouseSync_Build", "YardPlanner_Build"],
+};
+/* tone: the latest run's (runTone in builds.ts); at: latestTime's words. */
+const LATEST = {
+  Payout_Build: { tone: "run", at: "11:45", no: 1188, br: "feature/PAY-231-sepa-retry" },
+  Payout_IntegrationTests: { tone: "err", at: "10:05", no: 1187, br: "feature/PAY-231-sepa-retry", tests: "3 failed, 41 passed" },
+  Payout_Lint: { tone: "ok", at: "11:44", no: 904, br: "feature/PAY-231-sepa-retry" },
+  Payout_Docker: { tone: "ok", at: "11:52", no: 611, br: "feature/PAY-231-sepa-retry" },
+  Payout_Deploy_Staging: { tone: "ok", at: "12:04", no: 318, br: "feature/PAY-231-sepa-retry" },
+  PspClient_Build: { tone: "ok", at: "Wed 15:20", no: 233 },
+  PspClient_Release: { tone: "ok", at: "Wed 15:31", no: 41 },
+  Ledger_Deploy_Staging: { tone: "ok", at: "yesterday 16:20", no: 412 },
+  Dashboard_Build: { tone: "ok", at: "Tue 14:32", no: 377 },
+  EdiParser_Fuzz: { tone: "err", at: "06:00", no: 88 },
+  BookingWeb_E2E: { tone: "err", at: "13:12", no: 2093, br: "feature/quote-banner", tests: "1 failed, 212 passed" },
+  Dbt_Test: { tone: "err", at: "05:30", no: 640 },
+  EtaModel_Train: { tone: "run", at: "13:00", no: 52 },
+  Terraform_Plan: { tone: "q", at: "14:20", no: null },
+  QuoteEngine_Bench: { tone: "warn", at: "yesterday 09:40", no: 310 },
+  Helm_Lint: { tone: "muted", at: "Mon 17:02", no: 95 },
+  Runbooks_Linkcheck: { tone: "none", at: "" },
+};
+const PINS = ["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_Staging"];
+const JOB = "PAY-231";
+const REASONS = {
+  Payout_Build: "your branch, PR check", Payout_IntegrationTests: "your branch, PR check", Payout_Lint: "your branch, PR check",
+  Payout_Docker: "your branch", Payout_Deploy_Staging: "your branch", PspClient_Build: "PR check", PspClient_Release: "Parent PAY-200",
+};
+
+/* A small fixed-seed generator: the same fixture on every load. */
+function seeded(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+const random = seeded(7);
+const PAST = ["09:12", "08:40", "yesterday 18:02", "yesterday 11:15", "Wed 10:05", "Tue 16:48", "Mon 09:30", "3 Nov"];
+
+const PIPELINES = Object.entries(CONFIGURATIONS).flatMap(([path, configs]) => configs.map((name) => {
+  const latest = LATEST[name] ?? { tone: "ok", at: PAST[Math.floor(random() * PAST.length)], no: 100 + Math.floor(random() * 2000) };
+  /* Twelve runs for today's strip and the page's chart, oldest first; the newest is the latest above. */
+  const strip = latest.tone === "none" ? [] : [...Array.from({ length: 11 }, () => (random() < 0.07 ? "err" : "ok")), latest.tone];
+  return { id: name, name, path: path.split("/"), pinned: PINS.includes(name), latest, strip };
+})).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+/* ------------------------------------------------------------------ state */
+const params = new URLSearchParams(location.search);
+const S = {
+  rail: params.get("rail") ?? "new",
+  scope: params.get("scope") ?? "all",
+  times: "quiet",
+  prefix: true,
+  chips: [],
+  selected: "Payout_IntegrationTests",
+  remembered: new Map(),
+  allOpen: null,
+};
+document.documentElement.dataset.theme = params.get("theme") ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+/* ------------------------------------------------------------------ the rules (builds.ts as it stands, plus sharedPrefix) */
+const isFailing = (p) => p.latest.tone === "err";
+const isRunning = (p) => p.latest.tone === "run";
+
+function kept() {
+  return PIPELINES.filter((p) => (S.scope !== "job" || p.id in REASONS)
+    && (!S.chips.includes("Failing") || isFailing(p)) && (!S.chips.includes("Running") || isRunning(p)));
+}
+
+/* treeOf + fold(): folders by name, a chain of single children as one row, own pipelines before subfolders. */
+function treeOf(list) {
+  const root = { name: "", pipelines: [], kids: new Map() };
+  for (const p of list) {
+    let at = root;
+    for (const g of p.path) {
+      if (!at.kids.has(g)) at.kids.set(g, { name: g, pipelines: [], kids: new Map() });
+      at = at.kids.get(g);
+    }
+    at.pipelines.push(p);
+  }
+  const fold = (node, parentKey) => {
+    let name = node.name, at = node;
+    while (at.pipelines.length === 0 && at.kids.size === 1) { at = [...at.kids.values()][0]; name += ` › ${at.name}`; }
+    const key = `${parentKey}/${name}`;
+    const folds = [...at.kids.values()].sort((a, b) => a.name.localeCompare(b.name)).map((k) => fold(k, key));
+    const sum = (f) => folds.reduce((n, k) => n + k[f], 0);
+    return {
+      name, key, pipelines: at.pipelines, folds,
+      count: at.pipelines.length + sum("count"),
+      failing: at.pipelines.filter(isFailing).length + sum("failing"),
+      running: at.pipelines.filter(isRunning).length + sum("running"),
+    };
+  };
+  return { pipelines: root.pipelines, folds: [...root.kids.values()].sort((a, b) => a.name.localeCompare(b.name)).map((k) => fold(k, "tc")) };
+}
+const foldHolds = (f, id) => f.pipelines.some((p) => p.id === id) || f.folds.some((k) => foldHolds(k, id));
+
+/* New: the prefix every one of a folder's own pipelines shares, cut at a separator, so `Payout_` of
+   Payout_Build, Payout_Lint… is drawn dim. None for a lone pipeline, and never the whole of a name. */
+function sharedPrefix(names) {
+  if (names.length < 2) return "";
+  let common = names[0];
+  for (const n of names) while (!n.startsWith(common)) common = common.slice(0, -1);
+  const cut = /^.*[_.\-\s:/]/.exec(common)?.[0] ?? "";
+  return names.every((n) => n.length > cut.length) ? cut : "";
+}
+
+/* listRows: what the windowed list draws, flattened. A pipeline row now carries its sibling prefix. */
+function listRows() {
+  const list = kept();
+  const rows = [];
+  const narrowed = S.chips.length > 0 || S.scope === "job";
+  const open = (f) => S.allOpen ?? S.remembered.get(f.key) ?? (narrowed || f.failing > 0 || foldHolds(f, S.selected));
+  const pinned = S.scope === "job" ? [] : list.filter((p) => p.pinned);
+  if (pinned.length > 0) {
+    rows.push({ kind: "head", text: "Pinned" });
+    for (const p of pinned) rows.push({ kind: "pipeline", key: `pin:${p.id}`, p, depth: 0, pre: "" });
+  }
+  const tree = treeOf(list);
+  const walk = (pipelines, folds, depth) => {
+    const pre = sharedPrefix(pipelines.map((p) => p.name));
+    for (const p of pipelines) rows.push({ kind: "pipeline", key: `tree:${p.id}`, p, depth, pre });
+    for (const f of folds) {
+      const isOpen = open(f);
+      rows.push({ kind: "fold", key: `fold:${f.key}`, f, depth, open: isOpen });
+      if (isOpen) walk(f.pipelines, f.folds, depth + 1);
+    }
+  };
+  if (list.length > 0) rows.push({ kind: "head", text: S.scope === "all" ? SOURCE : "By project" });
+  walk(tree.pipelines, tree.folds, 0);
+  return { rows, list };
+}
+
+/* ------------------------------------------------------------------ drawing */
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const d = (depth) => `tf-d${Math.min(depth, 8)}`;
+const WORD = { ok: "passed", err: "failed", warn: "passed with warnings", run: "running", q: "queued", muted: "cancelled", none: "no runs" };
+
+/* TfRunGlyph.svelte, new: one 12 px glyph a tone. */
+const GLYPH = {
+  ok: '<path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  err: '<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke="var(--st-x)" stroke-width="1.8" stroke-linecap="round"/>',
+  warn: '<path d="M8 1.5 15 14H1z" fill="currentColor"/><path d="M8 6v3.6" stroke="var(--st-x)" stroke-width="1.7" stroke-linecap="round"/><circle cx="8" cy="11.8" r=".95" fill="var(--st-x)"/>',
+  run: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="2" opacity=".3"/><path class="tf-spin" d="M8 2.4a5.6 5.6 0 0 1 5.6 5.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  q: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>',
+  muted: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4.2 11.8 11.8 4.2" stroke="currentColor" stroke-width="1.6"/>',
+  none: '<path d="M4.5 8h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+};
+const glyph = (tone) => `<svg class="tf-st tf-st-${tone}" viewBox="0 0 16 16" aria-hidden="true">${GLYPH[tone]}</svg>`;
+
+/* The time a row shows: by default only where it says something; a passing row's is in its title. */
+function rowTime(p) {
+  const { tone, at } = p.latest;
+  if (tone === "run") return `<span class="tf-tr-at tf-info">${esc(at)}</span>`;
+  if (tone === "q") return `<span class="tf-tr-at">queued</span>`;
+  if (tone === "err") return `<span class="tf-tr-at tf-err">${esc(at)}</span>`;
+  return S.times === "all" && at !== "" ? `<span class="tf-tr-at">${esc(at)}</span>` : "";
+}
+
+function newItem({ p, depth, pre, key }) {
+  const usePre = S.prefix && pre !== "" ? pre : "";
+  const rest = p.name.slice(usePre.length);
+  const why = S.scope === "job" ? REASONS[p.id] ?? "" : "";
+  const title = `${[...p.path, p.name].join(" › ")}\nLatest ${WORD[p.latest.tone]}${p.latest.at ? `, ${p.latest.at}` : ""}`;
+  return `<a class="tf-tr ${d(depth)}" href="#/builds/${esc(p.id)}" data-id="${esc(p.id)}" data-key="${esc(key)}" aria-current="${p.id === S.selected}" title="${esc(title)}" aria-label="${esc(`${p.name}, ${WORD[p.latest.tone]}`)}">`
+    + glyph(p.latest.tone)
+    + `<span class="tf-tr-nm${isFailing(p) ? " tf-bad" : ""}">${usePre ? `<span class="tf-tr-pre">${esc(usePre)}</span>` : ""}${esc(rest)}</span>`
+    + (why ? `<span class="tf-tr-why">${esc(why)}</span>` : "")
+    + rowTime(p) + `</a>`;
+}
+
+function newFold({ f, depth, open, key }) {
+  const counts = (f.failing > 0 ? `<span class="tf-count tf-err" title="${f.failing} failing">${f.failing}</span>` : "")
+    + (f.running > 0 ? `<span class="tf-count tf-info" title="${f.running} running">${f.running}</span>` : "")
+    + `<span class="tf-tr-total" title="${f.count} pipelines">${f.count}</span>`;
+  return `<details class="tf-pl-fold" data-key="${esc(f.key)}"${open ? " open" : ""}><summary class="tf-tr tf-tfold ${d(depth)}">`
+    + `<span class="tf-tr-nm">${esc(f.name)}</span><span class="tf-tr-at">${counts}</span></summary></details>`;
+}
+
+/* Today's rail, as TfBuilds.svelte draws it now, for the comparison. */
+function oldItem({ p, depth }) {
+  return `<a class="tf-pi ${d(depth)}" href="#/builds/${esc(p.id)}" data-id="${esc(p.id)}" aria-current="${p.id === S.selected}" title="${esc([...p.path, p.name].join(" › "))}">`
+    + `<span class="tf-pi-nm${isFailing(p) ? " tf-bad" : ""}">${esc(p.name)}</span><span class="tf-pi-when">${esc(p.latest.at)}</span>`
+    + `<span class="tf-strip" role="img">${p.strip.map((t) => `<i class="tf-run-${t === "none" ? "muted" : t}"></i>`).join("")}</span>`
+    + (S.scope === "job" && REASONS[p.id] ? `<span class="tf-pi-why">${esc(REASONS[p.id])}</span>` : "") + `</a>`;
+}
+function oldFold({ f, depth, open }) {
+  return `<details class="tf-pl-fold" data-key="${esc(f.key)}"${open ? " open" : ""}><summary class="${d(depth)}">${esc(f.name)} <span class="tf-count">${f.count}</span>`
+    + (f.failing > 0 ? `<span class="tf-chip tf-err">${f.failing} failing</span>` : "") + `</summary></details>`;
+}
+/* Today's rail styles its folds' summaries with `.tf-pl-fold > summary`; the new rows style them as .tf-tr. */
+
+function drawRail() {
+  const { rows, list } = listRows();
+  const fresh = S.rail === "new";
+  const body = rows.map((r) => r.kind === "head" ? `<h3>${esc(r.text)}</h3>`
+    : r.kind === "pipeline" ? (fresh ? newItem(r) : oldItem(r))
+    : (fresh ? newFold(r) : oldFold(r))).join("");
+  const onJob = PIPELINES.filter((p) => p.id in REASONS).length;
+  const scopeSeg = `<div class="tf-seg" role="group" aria-label="Scope">`
+    + `<button type="button" data-set-scope="job" aria-pressed="${S.scope === "job"}">This job <span class="tf-count">${onJob}</span></button>`
+    + `<button type="button" data-set-scope="all" aria-pressed="${S.scope === "all"}">All</button></div>`;
+  const chips = ["Failing", "Running"].map((c) => `<button type="button" data-chip="${c}" aria-pressed="${S.chips.includes(c)}">${c}</button>`).join("");
+  const anyOpen = rows.some((r) => r.kind === "fold" && r.open);
+  const tools = fresh
+    ? `<div class="tf-pl-tools"><div class="tf-fchips" role="group" aria-label="Show only">${chips}</div><button type="button" class="tf-btn tf-sm tf-ghost" data-all="${anyOpen ? "close" : "open"}">${anyOpen ? "Collapse all" : "Expand all"}</button></div>`
+    : `<div class="tf-fchips" role="group" aria-label="Show only">${chips}</div>`;
+  const note = S.scope === "job" ? `<p class="tf-scope-note">${list.length} of ${PIPELINES.length} pipelines are relevant to <span class="tf-mono">${JOB}</span>. <button type="button" class="tf-linkish" data-set-scope="all">Show all</button></p>` : "";
+  return `<nav id="tf-pipelines-rail" class="tf-pl tf-rail" aria-label="Pipelines">
+    <div class="tf-pl-top">${scopeSeg}${tools}</div>
+    <div class="tf-pl-list">${note}${list.length === 0 ? `<p class="tf-pl-note">No pipeline matches.</p>` : ""}<div class="tf-pl-rows"${fresh ? ' role="tree"' : ""}>${body}</div></div>
+  </nav>`;
+}
+
+/* The right side: the selected pipeline's page, as TfPipeline.svelte draws its top and its runs. */
+function drawPage() {
+  const p = PIPELINES.find((x) => x.id === S.selected) ?? PIPELINES[0];
+  const runs = p.strip.slice().reverse();
+  let no = p.latest.no ?? 1400;
+  const chartW = 12 * 14;
+  const bars = p.strip.map((t, i) => { const h = 14 + Math.round(random() * 22); return `<rect class="tf-bar tf-run-${t}" x="${i * 14}" y="${40 - h}" width="10" height="${h}" rx="2"/>`; }).join("");
+  const CHIP = { ok: ["tf-ok", "Passed"], err: ["tf-err", "Failed"], warn: ["tf-warn", "Warnings"], run: ["tf-info", "Running"], q: ["tf-info", "Queued"], muted: ["", "Cancelled"] };
+  const rows = runs.map((t, i) => {
+    const n = t === "q" ? null : no--;
+    const br = i === 0 && p.latest.br ? p.latest.br : (random() < 0.6 ? "main" : "feature/PAY-231-sepa-retry");
+    const tests = i === 0 && p.latest.tests ? p.latest.tests.replace(/^(\d+ failed)/, '<span class="tf-tests-failed">$1</span>') : t === "err" ? '<span class="tf-tests-failed">2 failed</span>, 39 passed' : t === "ok" ? "41 passed" : "";
+    const dur = t === "run" ? '<progress class="tf-progress" aria-label="Running"></progress> running' : t === "q" ? "" : `${3 + Math.floor(random() * 3)}m ${10 + Math.floor(random() * 49)}s`;
+    const at = i === 0 ? p.latest.at : PAST[Math.min(i - 1, PAST.length - 1)];
+    return `<tr><td class="tf-nowrap tf-run-no"><a href="#">${n === null ? "" : `#${n}`}</a><span class="tf-chip ${CHIP[t][0]}">${CHIP[t][1]}</span></td>`
+      + `<td class="tf-mono tf-run-br"><span class="tf-run-brin"><span class="tf-run-brname">${esc(br)}</span></span></td>`
+      + `<td class="tf-dim tf-run-trig">${br === "main" ? "VCS trigger" : "Mara Lindqvist"}</td><td class="tf-nowrap tf-run-tests">${tests}</td>`
+      + `<td class="tf-nowrap tf-num tf-run-dur">${dur}</td><td class="tf-nowrap tf-dim tf-num tf-run-at">${esc(at)}</td><td class="tf-run-acts"></td></tr>`;
+  }).join("");
+  return `<div class="tf-shost"><section class="tf-scroller tf-bmain" tabindex="-1"><div class="tf-sclip"><div class="tf-sbody">
+    <nav class="tf-crumbs" aria-label="Breadcrumb"><span class="tf-crumb-here">Builds</span><span class="tf-sep">›</span>${p.path.map((g) => `<span class="tf-crumb-here">${esc(g)}</span><span class="tf-sep">›</span>`).join("")}<strong>${esc(p.name)}</strong></nav>
+    <header class="tf-fhead tf-bhead"><div><h1>${esc(p.name)}</h1><div class="tf-sub">${SOURCE} build configuration, builds <a class="tf-mono" href="#">tidewater/payout-service</a>. Runs on every push.</div></div>
+      <div class="tf-acts"><button type="button" class="tf-btn tf-primary">Run…</button><button type="button" class="tf-btn tf-ghost">${p.pinned ? "Unpin" : "Pin"}</button><button type="button" class="tf-btn tf-ghost">Open in ${SOURCE}</button></div></header>
+    ${runs.length === 0 ? `<div class="tf-runs"><div class="tf-empty"><p>No runs yet.</p></div></div>` : `
+    <div class="tf-hist"><div class="tf-chart"><svg class="tf-bars" width="${chartW}" height="40" aria-hidden="true">${bars}</svg>
+      <div class="tf-axis"><span>Mon</span><span>now</span></div>
+      <div class="tf-legend"><span><i class="tf-run-ok"></i>passed</span><span><i class="tf-run-err"></i>failed</span><span><i class="tf-run-run"></i>running</span><span>bar height is duration</span></div></div>
+      <div class="tf-facts2"><div><b>Passed</b>${p.strip.filter((t) => t === "ok").length} of the last ${p.strip.length}</div><div><b>Usual duration</b>4m 12s</div></div></div>
+    <nav class="tf-tabs" aria-label="Pipeline"><a href="#" aria-current="page">Runs <span class="tf-count">34</span></a><a href="#">Parameters</a><a href="#">Triggers</a></nav>
+    <div class="tf-runs"><div class="tf-days"><div class="tf-day tf-day-first"><h3 class="tf-dayh">Recent</h3>
+      <table class="tf-tbl tf-runtbl"><colgroup><col class="tf-run-no"/><col class="tf-run-br"/><col class="tf-run-trig"/><col class="tf-run-tests"/><col class="tf-run-dur"/><col class="tf-run-at"/><col class="tf-run-acts"/></colgroup><tbody>${rows}</tbody></table>
+    </div></div></div>`}
+  </div></div></section></div>`;
+}
+
+function draw() {
+  const focused = document.activeElement?.dataset?.key ?? document.activeElement?.closest?.("details")?.dataset?.key;
+  const scroll = document.querySelector(".tf-pl-list")?.scrollTop ?? 0;
+  document.getElementById("main").innerHTML = `<div class="tf-bv">${drawRail()}${drawPage()}</div>`;
+  document.querySelector(".tf-pl-list").scrollTop = scroll;
+  if (focused) document.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.querySelector?.("summary")?.focus?.() ?? document.querySelector(`a[data-key="${CSS.escape(focused)}"]`)?.focus();
+  for (const b of document.querySelectorAll(".mk button")) {
+    const [k, v] = Object.entries(b.dataset)[0];
+    const now = { rail: S.rail, scope: S.scope, times: S.times, prefix: S.prefix ? "1" : "0", theme: document.documentElement.dataset.theme }[k];
+    b.setAttribute("aria-pressed", String(now === v));
+  }
+}
+
+/* ------------------------------------------------------------------ interaction */
+document.addEventListener("click", (event) => {
+  const t = event.target;
+  const mk = t.closest(".mk button");
+  if (mk) {
+    const [k, v] = Object.entries(mk.dataset)[0];
+    if (k === "theme") document.documentElement.dataset.theme = v;
+    else if (k === "prefix") S.prefix = !S.prefix;
+    else S[k] = v;
+    return draw();
+  }
+  const row = t.closest("a[data-id]");
+  if (row) { event.preventDefault(); S.selected = row.dataset.id; return draw(); }
+  const scope = t.closest("[data-set-scope]");
+  if (scope) { S.scope = scope.dataset.setScope; S.allOpen = null; return draw(); }
+  const chip = t.closest("[data-chip]");
+  if (chip) { const c = chip.dataset.chip; S.chips = S.chips.includes(c) ? S.chips.filter((x) => x !== c) : [...S.chips, c]; return draw(); }
+  const all = t.closest("[data-all]");
+  if (all) {
+    /* Expand all / Collapse all sets every fold the reader has, so a later toggle of one is still theirs. */
+    const open = all.dataset.all === "open";
+    S.remembered.clear();
+    const mark = (f) => { S.remembered.set(f.key, open); f.folds.forEach(mark); };
+    treeOf(PIPELINES).folds.forEach(mark);
+    return draw();
+  }
+  const summary = t.closest("summary");
+  if (summary) {
+    event.preventDefault();
+    const det = summary.parentElement;
+    S.remembered.set(det.dataset.key, !det.open);
+    return draw();
+  }
+});
+
+/* A tree's keys: Up and Down move along the drawn rows, Right opens a folder, Left shuts it, Enter opens a pipeline. */
+document.addEventListener("keydown", (event) => {
+  const rows = [...document.querySelectorAll(".tf-pl-rows .tf-tr")];
+  const at = rows.indexOf(document.activeElement);
+  if (at < 0) return;
+  const row = rows[at];
+  const det = row.closest("details");
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))].focus();
+  } else if (det && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+    event.preventDefault();
+    const open = event.key === "ArrowRight";
+    if (det.open !== open) { S.remembered.set(det.dataset.key, open); draw(); }
+  }
+});
+
+draw();
+</script>
+</body>
+</html>

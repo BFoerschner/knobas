@@ -12,10 +12,15 @@
     subgroups, a chain of single children as one row, a fold open on a
     failure, the selection or anything narrowing, else as the reader left
     it). *This job* draws the same tree pruned to the job's pipelines, each
-    with its reasons, under "N of M pipelines are relevant to KEY". Each
-    pipeline by name, in err tone when its latest run failed, the time of
-    that run, and a strip of the last twelve runs newest right. A hover
-    gives its groups and name. The selected one is drawn inverted and kept
+    with its reasons, under "N of M pipelines are relevant to KEY". The
+    list is a tree of one-line rows (the rail-tree pass, 2026-11-13): each
+    pipeline a glyph of its latest run (`TfRunGlyph`), its name in err tone
+    when that run failed with the prefix its fold's pipelines share drawn
+    dim, and a time only when it failed, runs or waits (`railTime`); a
+    hover gives its groups, name and latest run. A fold's summary counts
+    what fails and runs under it; *Collapse all* / *Expand all* sets every
+    fold as the reader's own. Up and Down step along the rows, Left and
+    Right shut and open a fold. The selected one is drawn inverted and kept
     in view. The list is windowed (#2211) over its flattened rows
     (`listRows`): headings, pipelines and the summaries of folds, a fold's
     rows following its summary while it is open.
@@ -33,7 +38,6 @@
   import { SvelteMap } from "svelte/reactivity";
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
-  import { stateWord } from "../state-word";
   import { replaceAddress } from "../opener";
 
   import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
@@ -84,6 +88,7 @@
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfPipeline from "./TfPipeline.svelte";
   import TfRun from "./TfRun.svelte";
+  import TfRunGlyph from "./TfRunGlyph.svelte";
   import { pipelineOfRun } from "./run";
   import { RUN_BRIDGE } from "./pipeline-ports";
   import {
@@ -99,11 +104,11 @@
     pipelineHash,
     pipelineOf,
     pinnedOf,
+    railGlyph,
+    railTime,
     reasonsById,
     reasonsLine,
     runHash,
-    runTone,
-    stripOf,
     treeOf,
     type Fold,
     type Scope,
@@ -292,8 +297,10 @@
       return foldsDrew.get(f.key)! || foldHolds(f, at);
     });
   });
-  // A pipeline with its strip is about 36 px; headings and summaries are measured once drawn.
-  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 36 });
+  // A pipeline or a fold is one 26 px line; headings are measured once drawn.
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 26 });
+  /** Whether any drawn fold is open: the tools' button then shuts them all, else opens them all. */
+  const anyOpen = $derived(rows.some((row) => row.kind === "fold" && row.open));
 
   /** The job's key resolved to its ticket, then its pipelines (#850). */
   async function jobPipelinesByKey(key: string) {
@@ -325,6 +332,68 @@
     if (open !== foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)) remembered.set(f.key, open);
   }
 
+  /**
+   * *Collapse all* / *Expand all*: every fold, as if the reader had toggled each. The unfiltered tree's too, so a fold
+   * a chip or *This job* hides is set when it comes back (a filter can join single children another way).
+   */
+  function setAllFolds(open: boolean) {
+    const walk = (folds: readonly Fold[]) => {
+      for (const f of folds) {
+        remembered.set(f.key, open);
+        walk(f.folds);
+      }
+    };
+    for (const tree of [...trees, ...treeOf(all ?? [])]) walk(tree.folds);
+  }
+
+  /** A drawn row's depth, read off its indent class. */
+  function depthOf(row: HTMLElement): number {
+    return Number(/\btf-d(\d)\b/.exec(row.className)?.[1] ?? 0);
+  }
+
+  /**
+   * The rail's keys, the docs tree's table (`docs/tree-keys.ts`, F-444) over the rows drawn: Up and Down step, Home and
+   * End go to the ends, Right opens a fold and then steps into it, Left shuts it, and from a pipeline goes to its fold.
+   * A fold opened or shut so is the reader's own toggle.
+   */
+  function railKeys(event: KeyboardEvent) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || list === undefined) return;
+    const row = event.target instanceof HTMLElement ? event.target : null;
+    if (row === null || !row.matches(".tf-pl-rows .tf-tr")) return;
+    const drawn = [...list.querySelectorAll<HTMLElement>(".tf-pl-rows .tf-tr")];
+    const at = drawn.indexOf(row);
+    const fold = row.dataset["fold"];
+    const open = fold !== undefined && (row.parentElement as HTMLDetailsElement | null)?.open === true;
+    let next: HTMLElement | undefined;
+    switch (event.key) {
+      case "ArrowDown":
+        next = drawn[at + 1];
+        break;
+      case "ArrowUp":
+        next = drawn[at - 1];
+        break;
+      case "Home":
+        next = drawn[0];
+        break;
+      case "End":
+        next = drawn.at(-1);
+        break;
+      case "ArrowRight":
+        if (fold !== undefined && !open) remembered.set(fold, true);
+        else if (open && drawn[at + 1] !== undefined && depthOf(drawn[at + 1]!) > depthOf(row)) next = drawn[at + 1];
+        break;
+      case "ArrowLeft":
+        if (fold !== undefined && open) remembered.set(fold, false);
+        else next = drawn.slice(0, at).reverse().find((above) => above.dataset["fold"] !== undefined && depthOf(above) < depthOf(row));
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    next?.focus();
+    next?.scrollIntoView?.({ block: "nearest" });
+  }
+
   function message(error: unknown): string {
     if (error && typeof error === "object" && "message" in error) return String(error.message);
     return String(error);
@@ -349,14 +418,8 @@
   });
 
 
-  /** A 240 px rail: the time goes short and moves to the ticks' line, so the name has the row (`builds.css`). Stacked, the rail is wide again. */
-
   /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
   let railOpen = $state(false);
-
-  function stateText(run: RunRow): string {
-    return stateWord(run.state?.text ?? "");
-  }
 </script>
 
 <!-- The header while no pipeline or run is drawn: the view's name and its *Sync now* (#2287). -->
@@ -368,37 +431,41 @@
   <TfCrumbs {parts} {back} />
 {/snippet}
 
-{#snippet item(pipeline: PipelineRow, depth: number, key: string)}
-  {@const strip = stripOf(pipeline)}
+<!-- A pipeline's name, the prefix its fold's pipelines share drawn dim (`sharedPrefix`). -->
+{#snippet name(pipeline: PipelineRow, pre: string)}
+  <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}
+    >{#if pre !== ""}<span class="tf-pi-pre">{pre}</span>{/if}{pipeline.name.slice(pre.length)}</span
+  >
+{/snippet}
+
+{#snippet item(pipeline: PipelineRow, depth: number, key: string, pre: string)}
+  {@const glyph = railGlyph(pipeline)}
+  {@const time = railTime(pipeline)}
+  {@const latest = latestTime(pipeline)}
   {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
   <a
-    class={`tf-pi ${indent(depth)}`}
+    class={`tf-tr tf-pi ${indent(depth)}`}
     href={pipelineHash(pipeline.entity_id)}
     aria-current={pipeline.entity_id === selected?.entity_id}
-    title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
+    title={`${[...groupsOf(pipeline), pipeline.name].join(" › ")}\n${glyph.word}${latest !== "" ? ` ${latest}` : ""}`}
     {@attach win.row(key)}
   >
-    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)} title={pipeline.name}>{pipeline.name}</span>
-    <span class="tf-pi-when" title={latestTime(pipeline)}>{latestTime(pipeline)}</span>
-    <span
-      class="tf-strip"
-      role="img"
-      aria-label={strip.length > 0
-        ? `Last ${strip.length} runs, newest ${stateText(strip[strip.length - 1]!) || "without a state"}`
-        : "No runs"}
-    >
-      {#each strip as run (run.entity_id)}<i class={`tf-run-${runTone(run)}`}></i>{/each}
-    </span>
+    <TfRunGlyph {...glyph} />
+    {@render name(pipeline, pre)}
     {#if why !== ""}<span class="tf-pi-why"><TfKeyed text={why} /></span>{/if}
+    {#if time !== null}<span class={`tf-pi-when${time.tone !== null ? ` tf-${time.tone}` : ""}`}>{time.text}</span>{/if}
   </a>
 {/snippet}
 
 {#snippet foldView(f: Fold, depth: number, open: boolean, key: string)}
   <!-- The summary alone: a fold's rows follow it while it is open, and a closed one has none (#2200's class, #2211). -->
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
-    <summary class={indent(depth)}
-      >{f.name} <span class="tf-count">{f.count}</span>{#if f.failing > 0}<span class="tf-chip tf-err">{f.failing} failing</span
-        >{/if}</summary
+    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key}
+      ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
+        >{#if f.failing > 0}<span class="tf-count tf-err">{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
+            class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span
+          >{/if}<span class="tf-fold-n">{f.count}<span class="tf-sr">{f.count === 1 ? " pipeline" : " pipelines"}</span></span></span
+      ></summary
     >
   </details>
 {/snippet}
@@ -413,6 +480,7 @@
     onclick={(event) => {
       if ((event.target as Element).closest("a[href]")) railOpen = false;
     }}
+    onkeydown={railKeys}
   >
     <div class="tf-pl-top">
       {#if job !== null}
@@ -422,10 +490,17 @@
           onpick={(id) => setScope(id as Scope)}
         />
       {/if}
-      <div class="tf-fchips" role="group" aria-label="Show only">
-        {#each CHIPS as chip (chip)}
-          <button type="button" aria-pressed={chips.includes(chip)} onclick={() => toggle(chip)}>{chip}</button>
-        {/each}
+      <div class="tf-pl-tools">
+        <div class="tf-fchips" role="group" aria-label="Show only">
+          {#each CHIPS as chip (chip)}
+            <button type="button" aria-pressed={chips.includes(chip)} onclick={() => toggle(chip)}>{chip}</button>
+          {/each}
+        </div>
+        {#if rows.some((row) => row.kind === "fold")}
+          <div class="tf-trail">
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => setAllFolds(!anyOpen)}>{anyOpen ? "Collapse all" : "Expand all"}</button>
+          </div>
+        {/if}
       </div>
     </div>
     <div class="tf-pl-list" bind:this={list}>
@@ -448,8 +523,9 @@
       {#if outside !== null}
         <!-- The filter hides the page you are on, so the rail would show no place at all: it stays, until you leave it. -->
         <div class="tf-pl-pin">
-          <a class="tf-pi" href={pipelineHash(outside.entity_id)} aria-current="true" title={outside.name}>
-            <span class="tf-pi-nm" class:tf-bad={isFailing(outside)}>{outside.name}</span>
+          <a class="tf-tr tf-pi tf-d0" href={pipelineHash(outside.entity_id)} aria-current="true" title={outside.name}>
+            <TfRunGlyph {...railGlyph(outside)} />
+            {@render name(outside, "")}
             <span class="tf-pi-why">{#if scope === "job" && !jobsOwn.some((p) => p.entity_id === outside.entity_id)}Not in <TfKey value={job ?? ""} />{:else}Hidden by the filter{/if}</span>
           </a>
         </div>
@@ -459,7 +535,7 @@
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>
           {:else if row.kind === "pipeline"}
-            {@render item(row.pipeline, row.depth, row.key)}
+            {@render item(row.pipeline, row.depth, row.key, row.pre)}
           {:else}
             {@render foldView(row.fold, row.depth, row.open, row.key)}
           {/if}

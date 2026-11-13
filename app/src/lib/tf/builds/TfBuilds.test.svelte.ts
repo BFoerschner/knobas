@@ -130,20 +130,33 @@ test("an open Pipeline fold is a panel: Esc folds it first, and focus returns to
   expect(sharedLayers.open).toHaveLength(before);
 });
 
-test("each pipeline is a row: its name, err when its latest run failed, a strip of the last twelve runs, its path on hover", async () => {
+test("each pipeline is one line: a glyph of its latest run, its name, err when that run failed, its path on hover", async () => {
   draw([]);
   await settle();
   expect(names()).toEqual(["Payout_Build", "Payout_IntegrationTests", "Payout_Lint"]);
-  const tests = rows()[1]!;
-  expect(tests.querySelector(".tf-pi-nm")?.classList.contains("tf-bad")).toBe(true);
-  expect(rows()[2]!.querySelector(".tf-pi-nm")?.classList.contains("tf-bad")).toBe(false);
-  const blocks = tests.querySelectorAll(".tf-strip i");
-  expect(blocks).toHaveLength(12);
-  // The newest run, failed, is the right-most block.
-  expect(blocks[11]?.className).toBe("tf-run-err");
-  expect(rows()[0]!.querySelector(".tf-strip i")?.className).toBe("tf-run-run");
-  expect(tests.title).toBe("Payout › Payout_IntegrationTests");
-  expect(tests.getAttribute("href")).toBe("#/builds/teamcity%3AbuildType%3APayout_IntegrationTests");
+  const [build, tests, lint] = rows();
+  expect(tests!.querySelector(".tf-pi-nm")?.classList.contains("tf-bad")).toBe(true);
+  expect(lint!.querySelector(".tf-pi-nm")?.classList.contains("tf-bad")).toBe(false);
+  // No run strip: the latest run is one glyph, named for a reader that cannot see it.
+  expect(target.querySelector(".tf-strip")).toBeNull();
+  const glyph = (row: Element) => row.querySelector(".tf-rg")!;
+  expect([build, tests, lint].map((row) => glyph(row!).getAttribute("aria-label"))).toEqual(["Running", "Failed", "Passed"]);
+  expect(glyph(tests!).classList.contains("tf-rg-err")).toBe(true);
+  // The path on hover, then the latest run's word.
+  expect(tests!.title.split("\n")).toEqual(["Payout › Payout_IntegrationTests", expect.stringMatching(/^Failed /)]);
+  expect(tests!.getAttribute("href")).toBe("#/builds/teamcity%3AbuildType%3APayout_IntegrationTests");
+});
+
+test("a row shows a time only where it says something, and dims the prefix its folder's pipelines share", async () => {
+  draw([]);
+  await settle();
+  const [build, tests, lint] = rows();
+  expect(tests!.querySelector(".tf-pi-when")?.classList.contains("tf-err")).toBe(true);
+  expect(build!.querySelector(".tf-pi-when")?.classList.contains("tf-info")).toBe(true);
+  // A pass is quiet: its time is in the title.
+  expect(lint!.querySelector(".tf-pi-when")).toBeNull();
+  expect(lint!.querySelector(".tf-pi-pre")?.textContent).toBe("Payout_");
+  expect(lint!.querySelector(".tf-pi-nm")?.textContent).toBe("Payout_Lint");
 });
 
 test("a bare #/builds selects the first failing pipeline and lists its runs newest first", async () => {
@@ -308,9 +321,15 @@ function drawTree(
   });
 }
 
+/** Each fold's summary as its name, failing, running and total, as a reader hears them. */
 const summaries = () =>
   [...target.querySelectorAll<HTMLElement>(".tf-pl-fold > summary")].map((s) =>
-    [s.firstChild?.textContent?.trim(), s.querySelector(".tf-count")?.textContent, s.querySelector(".tf-chip")?.textContent ?? ""].join("|"),
+    [
+      s.firstChild?.textContent?.trim(),
+      s.querySelector(".tf-count.tf-err")?.textContent ?? "",
+      s.querySelector(".tf-count.tf-info")?.textContent ?? "",
+      s.querySelector(".tf-fold-n")?.textContent,
+    ].join("|"),
   );
 /** The `n` rows after a fold's summary, each as its indent and name. */
 const after = (from: Element, n: number) => {
@@ -333,13 +352,18 @@ test("All: Pinned first, then the tree as deep as it goes, with counts, failures
   const pinned = target.querySelector(".tf-pl h3 + .tf-pi .tf-pi-nm")?.textContent;
   expect(pinned).toBe("Payout_Build");
   // A fold's rows follow its summary, one level deeper (#2211).
-  expect(summaries()).toEqual(["Data|1|1 failing", "Payments › Payouts|3|1 failing", "Deploy|1|1 failing", "Platform › Infra|1|"]);
+  expect(summaries()).toEqual([
+    "Data|1 failing||1 pipeline",
+    "Payments › Payouts|1 failing||3 pipelines",
+    "Deploy|1 failing||1 pipeline",
+    "Platform › Infra|||1 pipeline",
+  ]);
   // Own pipelines before the subgroup.
   expect(after(fold("Payments › Payouts"), 3)).toEqual(["tf-d1 Payout_Build", "tf-d1 Payout_Lint", "tf-d1 Deploy"]);
   // Open on a failure (and the selection, the first failing one); closed otherwise.
   expect(fold("Data").open).toBe(true);
   expect(fold("Platform › Infra").open).toBe(false);
-  expect(target.querySelector<HTMLAnchorElement>('.tf-pi[title="Payments › Payouts › Deploy › Payout_Deploy_Prod"]')).not.toBeNull();
+  expect(rows().some((row) => row.title.startsWith("Payments › Payouts › Deploy › Payout_Deploy_Prod\n"))).toBe(true);
 });
 
 test("a fold the reader closes stays closed as the list redraws", async () => {
@@ -355,6 +379,64 @@ test("a fold the reader closes stays closed as the list redraws", async () => {
   running.click();
   flushSync();
   expect(fold("Data").open).toBe(false);
+});
+
+test("Collapse all shuts every fold and Expand all opens them, and a redraw keeps what the reader chose", async () => {
+  drawTree();
+  await settle();
+  const button = () => target.querySelector<HTMLButtonElement>(".tf-pl-tools .tf-trail > .tf-btn")!;
+  const opened = () => [...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].map((d) => d.open);
+  expect(button().textContent).toBe("Collapse all");
+  button().click();
+  flushSync();
+  expect(opened().every((open) => !open)).toBe(true);
+  expect(button().textContent).toBe("Expand all");
+  button().click();
+  flushSync();
+  expect(opened().every((open) => open)).toBe(true);
+  // Infra, closed by default, stays open through a chip's redraw: Expand all is the reader's own choice.
+  const running = [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!;
+  running.click();
+  flushSync();
+  running.click();
+  flushSync();
+  expect(fold("Platform › Infra").open).toBe(true);
+});
+
+test("the rail's keys are the docs tree's: Up and Down step, Home and End, Right opens then enters, Left shuts or goes up", async () => {
+  drawTree();
+  await settle();
+  const key = (el: Element, k: string) => {
+    const event = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+    el.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const focused = () => document.activeElement?.querySelector(".tf-pi-nm, .tf-fold-nm")?.textContent;
+  const data = fold("Data").querySelector<HTMLElement>(":scope > summary")!;
+  data.focus();
+  key(data, "ArrowDown");
+  expect(focused()).toBe("Dbt_Test");
+  // Left from a pipeline goes to its fold.
+  key(document.activeElement!, "ArrowLeft");
+  expect(document.activeElement).toBe(data);
+  // Left shuts an open fold, Right opens it, and Right again steps into it.
+  key(data, "ArrowLeft");
+  flushSync();
+  expect(fold("Data").open).toBe(false);
+  expect(names()).not.toContain("Dbt_Test");
+  const shut = fold("Data").querySelector<HTMLElement>(":scope > summary")!;
+  key(shut, "ArrowRight");
+  flushSync();
+  expect(fold("Data").open).toBe(true);
+  key(fold("Data").querySelector(":scope > summary")!, "ArrowRight");
+  expect(focused()).toBe("Dbt_Test");
+  // Home and End go to the ends; a step past the first row is taken, so the list does not scroll.
+  key(document.activeElement!, "End");
+  expect(focused()).toBe("Platform › Infra");
+  key(document.activeElement!, "Home");
+  expect(focused()).toBe("Payout_Build");
+  expect(key(document.activeElement!, "ArrowUp")).toBe(true);
+  expect(focused()).toBe("Payout_Build");
 });
 
 test("a closed fold draws nothing under it until the reader opens it, so a big CI draws only what is open (#2200's class)", async () => {
@@ -447,7 +529,7 @@ test("All is the default, as on every page; This job prunes the tree to its pipe
   // Every pipeline is back (Payout_Build twice, pinned and in its fold); the
   // closed fold holds its one, undrawn until opened.
   expect(names()).toHaveLength(5);
-  expect(summaries()).toContain("Platform › Infra|1|");
+  expect(summaries()).toContain("Platform › Infra|||1 pipeline");
   expect(target.querySelector(".tf-scope-note")).toBeNull();
   expect(target.querySelector(".tf-pi-why")).toBeNull();
 });

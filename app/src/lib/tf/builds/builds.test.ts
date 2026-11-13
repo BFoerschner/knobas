@@ -20,7 +20,10 @@ import {
   pipelineOf,
   runHash,
   runTone,
-  stripOf,
+  sharedPrefix,
+  railTime,
+  railGlyph,
+  listRows,
   newestFirst,
   recentNewestFirst,
 } from "./builds";
@@ -87,12 +90,15 @@ test("a run's block tone: finished by its declared tone, in flight as running or
   expect(runTone(run({ state: null }))).toBe("muted");
 });
 
-test("the strip is the last twelve runs oldest first, so the newest is on the right", () => {
-  const recent = Array.from({ length: 14 }, (_, i) => run({ entity_id: `r${i}` }));
-  const strip = stripOf(pipeline("A", recent));
-  expect(strip).toHaveLength(12);
-  expect(strip.at(-1)?.entity_id).toBe("r0");
-  expect(strip[0]?.entity_id).toBe("r11");
+test("a rail row's glyph is its latest run's tone, and says it in words", () => {
+  expect(railGlyph(pipeline("A", [failed, run()]))).toEqual({ tone: "err", word: "Failed" });
+  expect(railGlyph(pipeline("B", [running]))).toEqual({ tone: "run", word: "Running" });
+  expect(railGlyph(pipeline("C", [queued]))).toEqual({ tone: "q", word: "Queued" });
+  // The run's own state, as its chip says it; a finished run that declares none says only that.
+  expect(railGlyph(pipeline("D", [run({ state: { text: "WARNING", tone: "warn" } })]))).toEqual({ tone: "warn", word: "Warning" });
+  expect(railGlyph(pipeline("E", [run({ state: { text: "cancelled", tone: "muted" } })]))).toEqual({ tone: "muted", word: "Cancelled" });
+  expect(railGlyph(pipeline("G", [run({ state: null })]))).toEqual({ tone: "muted", word: "Finished" });
+  expect(railGlyph(pipeline("F", []))).toEqual({ tone: "none", word: "No runs" });
 });
 
 test("the latest time reads as prototype-6 writes it: a time today, yesterday and a time, else the date", () => {
@@ -241,11 +247,68 @@ test("runs sort newest first by when they started, a queued one by its queue tim
   expect(newestFirst([undated, a, b, same, q]).map((r) => r.entity_id)).toEqual(["q", "b", "same", "a", "u"]);
 });
 
-test("the Builds list's strip and latest run read the recent runs newest first", () => {
+test("the Builds list's latest run reads the recent runs newest first", () => {
   const older = run({ entity_id: "older", started: "2026-08-22T09:00:00Z", finished: "2026-08-22T12:00:00Z", state: { text: "FAILURE", tone: "err" } });
   const newer = run({ entity_id: "newer", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:05:00Z" });
   const row = recentNewestFirst(pipeline("Payout", [older, newer]));
   expect(row.recent.map((r) => r.entity_id)).toEqual(["newer", "older"]);
   expect(isFailing(row)).toBe(false);
-  expect(stripOf(row).at(-1)?.entity_id).toBe("newer");
+  expect(railGlyph(row)).toEqual({ tone: "ok", word: "Passed" });
+});
+
+test("a folder's pipelines share the prefix they all start with, cut at a separator, never a whole name", () => {
+  expect(sharedPrefix(["Payout_Build", "Payout_Lint", "Payout_Docker"])).toBe("Payout_");
+  expect(sharedPrefix(["Payout_Deploy_Staging", "Payout_Deploy_Prod"])).toBe("Payout_Deploy_");
+  expect(sharedPrefix(["web.build", "web.e2e"])).toBe("web.");
+  expect(sharedPrefix(["api - build", "api - lint"])).toBe("api - ");
+  // No separator after the common letters: nothing is shared.
+  expect(sharedPrefix(["BookingApi_Build", "BookingWeb_Build"])).toBe("");
+  // A lone pipeline, and one that would be left with nothing, keep their whole names.
+  expect(sharedPrefix(["Payout_Build"])).toBe("");
+  expect(sharedPrefix(["Payout_", "Payout_Build"])).toBe("");
+  expect(sharedPrefix([])).toBe("");
+});
+
+test("a rail row shows a time only where it says something: when it failed, when it started running, or that it is queued", () => {
+  const now = new Date(2026, 7, 22, 14, 32);
+  const t = (h: number, m: number) => new Date(2026, 7, 22, h, m).toISOString();
+  const latest = (extra: Partial<RunRow>) => pipeline("A", [run({ started: t(10, 5), finished: t(10, 9), updated_at: t(10, 9), ...extra })]);
+  // A failure says when it failed: when the run finished, not when it started.
+  expect(railTime(latest({ state: { text: "FAILURE", tone: "err" } }), now)).toEqual({ text: "10:09", tone: "err" });
+  expect(railTime(latest({ state: { text: "running", tone: "info" }, finished: null }), now)).toEqual({ text: "10:05", tone: "info" });
+  expect(railTime(latest({ state: { text: "queued", tone: "info" }, started: null, finished: null }), now)).toEqual({ text: "queued", tone: null });
+  // A pass, a warning, a cancelled run and no run at all leave the row quiet: its title has the time.
+  expect(railTime(latest({}), now)).toBeNull();
+  expect(railTime(latest({ state: { text: "WARNING", tone: "warn" } }), now)).toBeNull();
+  expect(railTime(latest({ state: { text: "cancelled", tone: "muted" } }), now)).toBeNull();
+  expect(railTime(pipeline("B", []), now)).toBeNull();
+  // Only the latest run counts: an older failure under a newer pass says nothing.
+  const recovered = pipeline("C", [run({ started: t(11, 0) }), run({ started: t(10, 0), state: { text: "FAILURE", tone: "err" } })]);
+  expect(railTime(recovered, now)).toBeNull();
+});
+
+test("a folder counts its running pipelines beside its failing ones, at any depth", () => {
+  const go = (name: string, path: string[]) => pipeline(name, [running], { path });
+  const [tree] = treeOf([go("A_Build", ["Payments", "Payouts"]), go("B_Build", ["Payments", "Ledger"]), at("C_Build", ["Payments"])]);
+  const payments = tree!.folds[0]!;
+  expect([payments.count, payments.failing, payments.running]).toEqual([3, 0, 2]);
+  expect(payments.folds.map((f) => f.running)).toEqual([1, 1]);
+});
+
+test("a rail row carries the prefix its folder's own pipelines share; a pinned row and a lone one carry none", () => {
+  const list = [
+    at("Payout_Build", ["Payments", "Payouts"], false, { pinned: true }),
+    at("Payout_Lint", ["Payments", "Payouts"]),
+    at("Payout_Deploy_Prod", ["Payments", "Payouts", "Deploy"]),
+    at("Ledger_Build", ["Payments"]),
+  ];
+  const rows = listRows(pinnedOf(list), treeOf(list), "all", () => true);
+  const pre = rows.flatMap((row) => (row.kind === "pipeline" ? [[row.key, row.pre]] : []));
+  expect(pre).toEqual([
+    ["pin:teamcity:buildType:Payout_Build", ""],
+    ["tree:teamcity:buildType:Ledger_Build", ""],
+    ["tree:teamcity:buildType:Payout_Build", "Payout_"],
+    ["tree:teamcity:buildType:Payout_Lint", "Payout_"],
+    ["tree:teamcity:buildType:Payout_Deploy_Prod", ""],
+  ]);
 });
