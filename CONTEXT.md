@@ -160,6 +160,10 @@ _Avoid_: auto-detected, probed
 The one line an adapter says about the far end that nothing else on the connection report says, shown wherever a test result is shown and never stored. Not [credential health](#credential-health), which a good sync may rewrite; a note is true of the far end as just found.
 _Avoid_: detail (the field's name), diagnostic, warning
 
+**Quota**:
+How many requests a second, and how many at once, knobas sends one server: one per origin (scheme, host and port), shared by every source on it and by every request knobas makes there, a sync's, a live read's, a write's and an [external adapter](#external-adapter)'s alike; where two sources name different quotas, the stricter governs. The quota decides how many go, and a **lane** decides who goes next: a request a person waits for (a live read behind an open page or a pointer resting on a link, *Test connection*, a write they pressed) takes the next request the quota lets through ahead of any a sync or the write queue's tick has waiting. The sync sends nothing new while a person's request waits or is in flight, and leaves half the burst unspent, so a page's first requests go at once. It stands aside for at most a second without one of its own let through, so it is never stopped. Neither lane changes how many requests the server sees (2026-11-13).
+_Avoid_: rate limit (the code's word, `knobas-http`'s limiter), throttle, priority (the lane is about order, not a share of the quota)
+
 ## Links and contexts
 
 **Link**:

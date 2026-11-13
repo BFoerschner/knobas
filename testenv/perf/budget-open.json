@@ -738,5 +738,236 @@
    }
   }
  },
- "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; in a repository with no clone the first press of the 300 and 3,000 ones is Gitea's `contents` route, which works out each entry's last commit (about 0.6 s and 9 s on the WSL box), and the 12,000 one is left out: that route did not answer it within 45 s."
+ "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; in a repository with no clone the first press of the 300 and 3,000 ones is Gitea's `contents` route, which works out each entry's last commit (about 0.6 s and 9 s on the WSL box), and the 12,000 one is left out: that route did not answer it within 45 s.",
+ "syncing": {
+  "file-readme": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "files-go-to": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-overview": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-branches": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-landing": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "files-deep": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "file-small": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "file-large": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "file-binary": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 1
+   }
+  },
+  "repo-commit": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "repo-compare": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "new-pull-request": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "pr-files": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 2
+   }
+  },
+  "pr-files-large": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 2
+   }
+  },
+  "run-tests": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "run-artifacts": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "pr-conversation": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  }
+ },
+ "_syncing": "Lines for open.mjs --set inner with a run of the Gitea source kept going (just open-budget --real <port> --inner --syncing live-gitea; the priority lane, 2026-11-13, docs/decisions/2026-11-13-a-persons-read-goes-ahead-of-the-sync.md), from two passes on the live Gitea on the WSL box with its scheduled run filling the quota at ten requests a second: a place knobas holds within the inner pages' aim (100 ms at 1x, 200 at 4x) on every round; a place only the forge holds within 3 s at 1x and 6 s at 4x on its first open and on its return after every source's run, which reads a file at its branch from the forge again (up to 3.4 s at 4x with the lane, 7.9 s without), where before the lane it reached 7.8 s (a pull request's Files) and 8.7 s (a deep folder at 4x); what knobas holds, and Conversation's own section, within the aim on the first open too. The binary file at 4x may move one row: once in two passes its first frame still held the file before it. Compare on a branch with many changes and a run's Log have no line: the first waits on each branch's whole view, longer than the probe's cap under a sync's load, and the second's item makes no read in the rig. The big folders are left out: their set-up waits for a run of its own."
 }
