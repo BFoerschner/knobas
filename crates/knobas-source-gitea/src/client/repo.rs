@@ -346,6 +346,35 @@ impl GiteaClient {
         .await
     }
 
+    /// One page of `GET /repos/{o}/{r}/git/trees/{sha}`, not recursive (the
+    /// big-folder pass, 2026-11-13): one directory's entries by the sha of its
+    /// tree (a commit's sha is its top), `per_page` of them, with
+    /// `total_count`. What a directory past the recursive tree's cut is read
+    /// by: Gitea answers it by the tree alone, with no last commit per entry,
+    /// where `contents` works one out for each.
+    pub(crate) async fn git_tree_level_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        page: u32,
+        per_page: usize,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/git/trees/{}",
+                segment(owner)?,
+                segment(repo)?,
+                super::object_id(sha)?
+            ),
+            &[
+                ("page", page.to_string()),
+                ("per_page", per_page.to_string()),
+            ],
+        )
+        .await
+    }
+
     /// The newest `limit` commits of `branch`, the listing projections off,
     /// with Gitea's `X-Total-Count` beside them: how many
     /// commits the branch has in all (#2311, the last-commit strip's *N

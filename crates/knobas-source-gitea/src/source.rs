@@ -109,6 +109,13 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
 }
 
 impl GiteaSource {
+    /// Which token on which server this is (a hash, never the secret): what a
+    /// cache that outlives the built source keys its reads by, so one token's
+    /// answers are never handed to another's reads (`view::files`' whole trees).
+    pub(crate) fn viewer_key(&self) -> u64 {
+        self.viewer_key
+    }
+
     /// The login the token belongs to, or `None` where Gitea would not say.
     ///
     /// Asked once per token and server for the life of the process

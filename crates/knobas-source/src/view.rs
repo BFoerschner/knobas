@@ -339,6 +339,15 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         commit: Option<String>,
+        /// The listing was read on its own, because the whole tree the source
+        /// reads at once (the one `paths` names) was cut before this
+        /// directory (the big-folder pass of PR #2479, 2026-11-13): every entry
+        /// is here, and the shell says that folders past the cut are read one
+        /// at a time. `None` for a listing drawn from the whole tree, and where
+        /// the source reads no whole tree. Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        read_alone: Option<bool>,
     },
     File {
         trail: Vec<Crumb>,
@@ -1046,6 +1055,7 @@ mod tests {
                 url: Some("https://gitea.example/o/r/src/branch/main/src".into()),
                 paths: Some("paths".into()),
                 commit: None,
+                read_alone: Some(true),
             },
             Block::File {
                 trail: vec![Crumb {
@@ -1202,6 +1212,7 @@ mod tests {
             url: None,
             paths: None,
             commit: None,
+            read_alone: None,
         };
         assert_eq!(
             serde_json::to_value(&tree).unwrap(),

@@ -395,25 +395,38 @@ async fn a_nested_directory_is_read_by_the_section_its_entry_names() {
             Some(named("main", "file:src/lib/view.rs"))
         ]
     );
-    let asked = server.received_requests().await.unwrap();
+    // At a sha nothing is read for the branch: the whole tree at the sha (none here, so the listing), and
+    // the repository's record for the directory's page (the big-folder pass, 2026-11-13).
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert!(
+        asked.iter().all(|p| !p.contains("/branches/")),
+        "a directory at a sha reads no branch: {asked:?}"
+    );
     assert_eq!(
-        asked.len(),
+        asked.iter().filter(|p| p.contains("/contents/")).count(),
         1,
-        "a directory at a sha reads its listing alone: {:?}",
-        asked.iter().map(|r| r.url.path()).collect::<Vec<_>>()
+        "{asked:?}"
     );
 }
 
-/// A directory past 1,000 entries keeps the first 1,000 in order, says it
-/// was cut, and names its page on Gitea, where the rest is.
+/// A directory past 20,000 entries keeps the first 20,000 in order, says it
+/// was cut, and names its page on Gitea, where the rest is. The cap was a
+/// thousand until the big-folder pass (2026-11-13): a folder of 3,000 drew
+/// its first thousand.
 #[tokio::test]
 async fn a_directory_over_the_entry_cap_is_cut_at_it() {
     let server = gitea().await;
-    let many: Vec<Value> = (0..1_001)
+    let many: Vec<Value> = (0..20_001)
         .map(|n| {
             entry(
-                &format!("f{n:04}.txt"),
-                &format!("gen/f{n:04}.txt"),
+                &format!("f{n:05}.txt"),
+                &format!("gen/f{n:05}.txt"),
                 "file",
                 1,
             )
@@ -433,13 +446,13 @@ async fn a_directory_over_the_entry_cap_is_cut_at_it() {
         panic!("one tree block");
     };
     assert!(*truncated);
-    assert_eq!(entries.len(), 1_000);
-    assert_eq!(entries.last().map(|e| e.name.as_str()), Some("f0999.txt"));
+    assert_eq!(entries.len(), 20_000);
+    assert_eq!(entries.last().map(|e| e.name.as_str()), Some("f19999.txt"));
     assert_eq!(url.as_deref(), Some(page_at("main", "gen").as_str()));
 
     // Exactly at the cap is not cut.
-    let at: Vec<Value> = (0..1_000)
-        .map(|n| entry(&format!("g{n:04}"), &format!("all/g{n:04}"), "file", 1))
+    let at: Vec<Value> = (0..20_000)
+        .map(|n| entry(&format!("g{n:05}"), &format!("all/g{n:05}"), "file", 1))
         .collect();
     listing(&server, "all", "main", Value::Array(at)).await;
     let section = read(&server, ENTITY, "files:all").await;
@@ -452,7 +465,7 @@ async fn a_directory_over_the_entry_cap_is_cut_at_it() {
         panic!("one tree block");
     };
     assert!(!*truncated);
-    assert_eq!(entries.len(), 1_000);
+    assert_eq!(entries.len(), 20_000);
 }
 
 /// A branch's tab is the same tree at that branch.
@@ -1287,17 +1300,18 @@ async fn the_whole_tree_lists_every_file_by_its_path() {
         ]
     );
     assert!(!truncated);
-    let asked: Vec<_> = server
+    let mut asked: Vec<_> = server
         .received_requests()
         .await
         .unwrap()
         .into_iter()
         .map(|r| r.url.path().to_owned())
         .collect();
+    asked.sort();
     assert_eq!(
         asked,
-        [format!("{REPO}/git/trees/{sha}")],
-        "one read, no tip"
+        [REPO.to_owned(), format!("{REPO}/git/trees/{sha}")],
+        "one read of the tree, and the repository's record for a directory's page; no tip"
     );
 
     // A commit's own tree, by its plain id.
@@ -1363,7 +1377,7 @@ async fn a_whole_tree_past_the_page_cap_is_cut_and_says_so() {
     assert!(truncated);
     assert_eq!(files.len(), 20_000, "twenty pages of a thousand");
     let reads = server.received_requests().await.unwrap().len();
-    assert_eq!(reads, 20);
+    assert_eq!(reads, 21, "twenty pages and the repository's record");
 }
 
 /// The whole tree at a sha is kept (ADR-0032); by the tip it moves.
@@ -1397,4 +1411,208 @@ async fn a_smaller_server_page_is_read_by_its_own_size() {
     let (files, truncated) = every(&section);
     assert_eq!(files.len(), 1_200);
     assert!(!truncated);
+}
+
+/// `git/trees/{sha}` (one level, no `recursive`) answers `entries` of `total`, page `page`.
+async fn git_level(server: &MockServer, sha: &str, page: u32, entries: Vec<Value>, total: usize) {
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/git/trees/{sha}")))
+        .and(wiremock::matchers::query_param_is_missing("recursive"))
+        .and(query_param("page", page.to_string().as_str()))
+        .and(query_param("per_page", "1000"))
+        .and(header("Authorization", format!("token {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "sha": sha, "url": "", "tree": entries, "truncated": false, "page": page, "total_count": total
+        })))
+        .mount(server)
+        .await;
+}
+
+fn git_object(path: &str, kind: &str, mode: &str, size: u64, sha: &str) -> Value {
+    json!({ "path": path, "type": kind, "mode": mode, "size": size, "sha": sha, "url": "" })
+}
+
+/// What a listing draws, all of it: each entry's name, kind, size and section, and the block's own fields.
+fn drawn(section: &ViewSection) -> Value {
+    serde_json::to_value(&section.blocks).unwrap()
+}
+
+/// A directory is drawn from the whole tree at the commit (the big-folder pass, 2026-11-13), and what it
+/// draws is what Gitea's `contents` drew: the same entries in the same order, with the same kinds, sizes
+/// and sections, and the same page. `contents` is not asked.
+#[tokio::test]
+async fn a_directory_is_drawn_from_the_whole_tree_as_contents_drew_it() {
+    let sha = tip("main");
+    let tree = vec![
+        git_object("README.md", "blob", "100644", 10, &"1".repeat(40)),
+        git_object("src", "tree", "040000", 0, &"2".repeat(40)),
+        git_object("src/Zeta.rs", "blob", "100644", 7, &"3".repeat(40)),
+        git_object("src/alpha.rs", "blob", "100755", 5, &"4".repeat(40)),
+        git_object("src/lib", "tree", "040000", 0, &"5".repeat(40)),
+        git_object("src/lib/x.rs", "blob", "100644", 1, &"6".repeat(40)),
+        git_object("src/link", "blob", "120000", 9, &"7".repeat(40)),
+        git_object("src/vendor", "commit", "160000", 0, &"8".repeat(40)),
+    ];
+    let contents = json!([
+        entry("Zeta.rs", "src/Zeta.rs", "file", 7),
+        entry("alpha.rs", "src/alpha.rs", "file", 5),
+        entry("lib", "src/lib", "dir", 0),
+        entry("link", "src/link", "symlink", 9),
+        entry("vendor", "src/vendor", "submodule", 0),
+    ]);
+    let id = format!("files@{sha}:src");
+
+    // As `contents` drew it: a server with no tree to read.
+    let before = gitea().await;
+    listing(&before, "src", "main", contents.clone()).await;
+    let was = drawn(&read(&before, ENTITY, &id).await);
+
+    let now = gitea().await;
+    git_tree(&now, &sha, 1, tree, 8).await;
+    let section = read(&now, ENTITY, &id).await;
+    assert_eq!(
+        drawn(&section),
+        was,
+        "the same listing, drawn from the tree"
+    );
+    let asked: Vec<String> = now
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert!(asked.iter().all(|p| !p.contains("/contents")), "{asked:?}");
+
+    // Another directory of the same commit is drawn from the tree read once.
+    let lib = read(&now, ENTITY, &format!("files@{sha}:src/lib")).await;
+    let (_, entries) = tree_of(&lib);
+    assert_eq!(
+        entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+        ["x.rs"]
+    );
+    let trees = now
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().contains("/git/trees/"))
+        .count();
+    assert_eq!(trees, 1, "the tree at a commit is read once and kept");
+}
+
+fn tree_of(section: &ViewSection) -> (&[Crumb], &[TreeEntry]) {
+    tree(section)
+}
+
+/// A directory the whole tree's cut left out is read on its own, a level at a time by each tree's sha from
+/// the deepest of its directories the tree holds, and says so (`read_alone`); `contents` is not asked. One
+/// the tree holds whole, before the cut, is drawn from it.
+#[tokio::test]
+async fn a_directory_past_the_whole_trees_cut_is_read_level_by_level_and_says_so() {
+    let server = gitea().await;
+    let sha = tip("main");
+    // The recursive tree: `a-bulk` and its thousand files, then the cut (the count says 90,000).
+    let mut first = vec![git_object("a-bulk", "tree", "040000", 0, &"a".repeat(40))];
+    first.extend((0..999).map(|n| {
+        git_object(
+            &format!("a-bulk/f{n:03}"),
+            "blob",
+            "100644",
+            1,
+            &"b".repeat(40),
+        )
+    }));
+    let more = |page: u32| -> Vec<Value> {
+        (0..1000)
+            .map(|n| {
+                git_object(
+                    &format!("a-bulk/p{page:02}/f{n:03}"),
+                    "blob",
+                    "100644",
+                    1,
+                    &"c".repeat(40),
+                )
+            })
+            .collect()
+    };
+    git_tree(&server, &sha, 1, first, 90_000).await;
+    for page in 2..=20 {
+        git_tree(&server, &sha, page, more(page), 90_000).await;
+    }
+    // The top, one level, by the commit's sha; then `zz`, by its tree's.
+    let zz = "d".repeat(40);
+    git_level(
+        &server,
+        &sha,
+        1,
+        vec![
+            git_object("a-bulk", "tree", "040000", 0, &"a".repeat(40)),
+            git_object("zz", "tree", "040000", 0, &zz),
+        ],
+        2,
+    )
+    .await;
+    let page = |from: usize, to: usize| -> Vec<Value> {
+        (from..to)
+            .map(|n| {
+                git_object(
+                    &format!("g{n:04}.json"),
+                    "blob",
+                    "100644",
+                    2,
+                    &"e".repeat(40),
+                )
+            })
+            .collect()
+    };
+    git_level(&server, &zz, 1, page(0, 1000), 1_500).await;
+    git_level(&server, &zz, 2, page(1000, 1500), 1_500).await;
+
+    let section = read(&server, ENTITY, &format!("files@{sha}:zz")).await;
+    let [
+        Block::Tree {
+            entries,
+            truncated,
+            read_alone,
+            ..
+        },
+    ] = section.blocks.as_slice()
+    else {
+        panic!("one tree block");
+    };
+    assert_eq!(
+        entries.len(),
+        1_500,
+        "every entry, past the whole tree's cut"
+    );
+    assert!(!*truncated);
+    assert_eq!(*read_alone, Some(true), "it says it was read on its own");
+    assert_eq!(
+        entries[1_499].section.as_deref(),
+        Some(format!("file@{sha}:zz/g1499.json").as_str())
+    );
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert!(asked.iter().all(|p| !p.contains("/contents")), "{asked:?}");
+
+    // A directory before the cut, held whole: drawn from the tree, not on its own.
+    let held = read(&server, ENTITY, &format!("files@{sha}:a-bulk/p03")).await;
+    let [
+        Block::Tree {
+            entries,
+            read_alone,
+            ..
+        },
+    ] = held.blocks.as_slice()
+    else {
+        panic!("one tree block");
+    };
+    assert_eq!(entries.len(), 1_000);
+    assert_eq!(*read_alone, None);
 }

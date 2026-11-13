@@ -4687,7 +4687,16 @@ paths?: string,
  * never parsed or sent back. `None` where the source cannot say.
  * Absent on the wire when `None`.
  */
-commit?: string, } | { "type": "file", trail: Array<Crumb>, path: string, 
+commit?: string, 
+/**
+ * The listing was read on its own, because the whole tree the source
+ * reads at once (the one `paths` names) was cut before this
+ * directory (the big-folder pass of PR #2479, 2026-11-13): every entry
+ * is here, and the shell says that folders past the cut are read one
+ * at a time. `None` for a listing drawn from the whole tree, and where
+ * the source reads no whole tree. Absent on the wire when `None`.
+ */
+read_alone?: boolean, } | { "type": "file", trail: Array<Crumb>, path: string, 
 /**
  * Empty for a binary file.
  */

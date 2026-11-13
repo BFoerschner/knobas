@@ -33,6 +33,9 @@
 //! for its blob sha at the ref (#883), the base an edit of it commits against,
 //! and its page.
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+
 use knobas_source::SourceError;
 use knobas_source::view::{
     Block, Crumb, EntryKind, FileBytes, TreeEntry, TreeSections, ViewSection,
@@ -47,8 +50,10 @@ use crate::source::GiteaSource;
 /// The tab's id, and its top directory's.
 pub(super) const FILES: &str = "files";
 
-/// The most entries of one directory a view carries.
-const ENTRY_CAP: usize = 1_000;
+/// The most entries of one directory a view carries: as many as the whole
+/// tree holds (the big-folder pass, 2026-11-13; it was a thousand, and a
+/// folder of 3,000 drew its first thousand with nothing said in the tab).
+const ENTRY_CAP: usize = 20_000;
 /// The whole tree's id (#2311).
 const PATHS: &str = "paths";
 /// How many entries one page of Gitea's recursive tree is asked for: its
@@ -322,6 +327,15 @@ struct Listed {
     html_url: Option<String>,
 }
 
+/// A directory's listing at `at` (the big-folder pass of PR #2479,
+/// 2026-11-13): drawn from the whole tree at the commit ([`whole`], read once
+/// and kept by its sha, the read *Go to file* filters), not from Gitea's
+/// `contents`, which works out each entry's last commit and took 9 s for a
+/// folder of 3,000 entries and never answered one of 12,000. The tree draws
+/// no last commit, so nothing the listing drew is lost. A directory the whole
+/// tree's cut left out is read on its own, level by level by the sha of each
+/// tree ([`walk`]), as fast, and says so (`read_alone`). Where Gitea answers no
+/// tree at all, `contents` reads it, as before.
 async fn directory(
     source: &GiteaSource,
     owner: &str,
@@ -329,41 +343,88 @@ async fn directory(
     at: &At<'_>,
     dir: &str,
 ) -> Result<Block, SourceError> {
-    let listing: Vec<Listed> = source
+    let Ok(whole) = whole(source, owner, repo, at.sha).await else {
+        return listed(source, owner, repo, at, dir).await;
+    };
+    if whole.holds(dir) {
+        return Ok(listing(
+            at,
+            dir,
+            whole.children(dir),
+            whole.web(at.sha, dir),
+            false,
+        ));
+    }
+    match walk(source, owner, repo, at.sha, &whole, dir).await? {
+        Some(entries) => Ok(listing(at, dir, entries, whole.web(at.sha, dir), true)),
+        // No such directory along the way: `contents` says so as Gitea does.
+        None => listed(source, owner, repo, at, dir).await,
+    }
+}
+
+/// A directory's listing as `contents` answers it: what [`directory`] falls
+/// back to where Gitea answers no tree.
+async fn listed(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    at: &At<'_>,
+    dir: &str,
+) -> Result<Block, SourceError> {
+    let answered: Vec<Listed> = source
         .client
         .contents_at_as(owner, repo, dir, at.sha)
         .await?;
     // The directory's own page is any entry's, its name taken off.
-    let url = listing.iter().find_map(|listed| {
+    let url = answered.iter().find_map(|listed| {
         listed
             .html_url
             .as_deref()?
             .rsplit_once('/')
             .map(|(up, _)| up.to_owned())
     });
-    let mut entries: Vec<TreeEntry> = listing
+    let entries = answered
         .into_iter()
         .map(|listed| {
-            let path = if dir.is_empty() {
-                listed.name.clone()
-            } else {
-                format!("{dir}/{}", listed.name)
-            };
             let kind = match listed.kind.as_str() {
                 "dir" => EntryKind::Dir,
                 "symlink" => EntryKind::Symlink,
                 "submodule" => EntryKind::Submodule,
                 _ => EntryKind::File,
             };
+            (listed.name, kind, listed.size)
+        })
+        .collect();
+    Ok(listing(at, dir, entries, url, false))
+}
+
+/// A directory's block from its entries (name, kind, size), however read:
+/// sorted directories first and by name as the shell draws them, at most
+/// [`ENTRY_CAP`], each naming the section that opens it at `at`.
+fn listing(
+    at: &At<'_>,
+    dir: &str,
+    found: Vec<(String, EntryKind, u64)>,
+    url: Option<String>,
+    alone: bool,
+) -> Block {
+    let mut entries: Vec<TreeEntry> = found
+        .into_iter()
+        .map(|(name, kind, size)| {
+            let path = if dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{dir}/{name}")
+            };
             let (size, section) = match kind {
                 EntryKind::Dir => (None, Some(at.id(Place::Dir(&path)))),
                 EntryKind::Submodule => (None, None),
                 EntryKind::File | EntryKind::Symlink => {
-                    (Some(listed.size), Some(at.id(Place::File(&path))))
+                    (Some(size), Some(at.id(Place::File(&path))))
                 }
             };
             TreeEntry {
-                name: listed.name,
+                name,
                 kind,
                 size,
                 section,
@@ -378,18 +439,20 @@ async fn directory(
     });
     let truncated = entries.len() > ENTRY_CAP;
     entries.truncate(ENTRY_CAP);
-    Ok(Block::Tree {
+    Block::Tree {
         trail: trail(at, dir, false),
         entries,
         truncated,
         url: at.page(url.as_deref()),
         paths: Some(at.id(Place::Every)),
         commit: Some(at.sha.to_owned()),
-    })
+        read_alone: alone.then_some(true),
+    }
 }
 
-/// One entry of Gitea's recursive tree.
-#[derive(Debug, serde::Deserialize)]
+/// One entry of Gitea's tree, recursive (its whole path) or one level (its
+/// name).
+#[derive(Debug, Clone, serde::Deserialize)]
 struct GitEntry {
     path: String,
     #[serde(rename = "type", default)]
@@ -398,12 +461,29 @@ struct GitEntry {
     mode: String,
     #[serde(default)]
     size: u64,
+    /// The object's sha: a tree's is what its own level is read by.
+    #[serde(default)]
+    sha: String,
 }
 
-/// One page of `git/trees/{sha}?recursive=true`.
+impl GitEntry {
+    /// What a listing draws it as: a `tree` a directory, a `commit` a
+    /// submodule, a blob of mode `120000` a symlink, any other blob a file.
+    fn kind(&self) -> EntryKind {
+        match (self.kind.as_str(), self.mode.as_str()) {
+            ("tree", _) => EntryKind::Dir,
+            ("commit", _) => EntryKind::Submodule,
+            (_, "120000") => EntryKind::Symlink,
+            _ => EntryKind::File,
+        }
+    }
+}
+
+/// One page of `git/trees/{sha}`, recursive or one level.
 #[derive(Debug, serde::Deserialize)]
 struct GitTree {
-    #[serde(default)]
+    /// Gitea answers `null` for a page past the last.
+    #[serde(default, deserialize_with = "null_as_empty")]
     tree: Vec<GitEntry>,
     /// Every entry of the tree, all pages together (measured on Gitea 1.27.3
     /// and Forgejo 17, #2311): what says how many pages to read. The
@@ -413,23 +493,218 @@ struct GitTree {
     total_count: Option<usize>,
 }
 
-/// Every file of the tree at `at` (#2311), by its whole path, in git's order:
-/// page by page of Gitea's recursive tree, the first read alone (it says how
-/// many there are), the rest side by side, at most [`TREE_PAGES`]. A tree
-/// past them is cut and says so. Directories and submodules are left out; a
-/// symlink is a file, as in a listing.
-async fn every(
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<GitEntry>, D::Error> {
+    use serde::Deserialize as _;
+    Ok(Option::<Vec<GitEntry>>::deserialize(d)?.unwrap_or_default())
+}
+
+/// The whole tree at one commit, as Gitea's recursive tree answered it, cut
+/// at [`TREE_PAGES`] pages: what *Go to file* filters and every directory it
+/// holds whole is drawn from.
+struct Whole {
+    /// Every entry read, in git's order: a directory before what it holds,
+    /// and what it holds together.
+    entries: Vec<GitEntry>,
+    /// The read stopped at [`TREE_PAGES`] with entries left.
+    truncated: bool,
+    /// Each directory's entries, by their place in `entries`; `""` the top.
+    children: HashMap<String, Vec<usize>>,
+    /// The repository's page (`html_url`), which a directory's is under.
+    html: Option<String>,
+}
+
+impl Whole {
+    fn new(entries: Vec<GitEntry>, truncated: bool, html: Option<String>) -> Self {
+        let mut children: HashMap<String, Vec<usize>> = HashMap::new();
+        for (at, entry) in entries.iter().enumerate() {
+            let up = entry.path.rsplit_once('/').map_or("", |(up, _)| up);
+            children.entry(up.to_owned()).or_default().push(at);
+        }
+        Self {
+            entries,
+            truncated,
+            children,
+            html,
+        }
+    }
+
+    /// Whether `dir` is here with all it holds. In git's order a directory's
+    /// entries follow it together, so where the read was cut the only ones
+    /// it cut short are the last entry's directories; one not read at all
+    /// is past the cut.
+    fn holds(&self, dir: &str) -> bool {
+        let here = dir.is_empty() || self.children.contains_key(dir) || self.is_dir(dir);
+        if !self.truncated {
+            return here;
+        }
+        let Some(last) = self.entries.last() else {
+            return false;
+        };
+        here && !dir.is_empty() && last.path != dir && !last.path.starts_with(&format!("{dir}/"))
+    }
+
+    fn is_dir(&self, dir: &str) -> bool {
+        let up = dir.rsplit_once('/').map_or("", |(up, _)| up);
+        self.children.get(up).is_some_and(|at| {
+            at.iter()
+                .any(|&i| self.entries[i].path == dir && self.entries[i].kind() == EntryKind::Dir)
+        })
+    }
+
+    /// `dir`'s entries as (name, kind, size).
+    fn children(&self, dir: &str) -> Vec<(String, EntryKind, u64)> {
+        self.children
+            .get(dir)
+            .map(|at| {
+                at.iter()
+                    .map(|&i| {
+                        let entry = &self.entries[i];
+                        let name = entry.path.rsplit_once('/').map_or(&*entry.path, |(_, n)| n);
+                        (name.to_owned(), entry.kind(), entry.size)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The sha of the tree at `dir`, where the read holds its entry.
+    fn tree_sha(&self, dir: &str) -> Option<&str> {
+        let up = dir.rsplit_once('/').map_or("", |(up, _)| up);
+        self.children.get(up)?.iter().find_map(|&i| {
+            let entry = &self.entries[i];
+            (entry.path == dir && entry.kind() == EntryKind::Dir && !entry.sha.is_empty())
+                .then_some(entry.sha.as_str())
+        })
+    }
+
+    /// The directory's page at the commit, as `contents` names an entry's
+    /// (`{repo}/src/commit/{sha}/{dir}`), path segments escaped as Gitea
+    /// escapes them.
+    fn web(&self, sha: &str, dir: &str) -> Option<String> {
+        let html = self.html.as_deref()?.trim_end_matches('/');
+        if dir.is_empty() {
+            return Some(format!("{html}/src/commit/{sha}"));
+        }
+        let path: Vec<String> = dir.split('/').map(escape_segment).collect();
+        Some(format!("{html}/src/commit/{sha}/{}", path.join("/")))
+    }
+}
+
+/// A path segment as Go's `url.PathEscape` writes it, which Gitea's
+/// `html_url` uses: unreserved characters and `$&+,:;=@` stay, the rest is
+/// percent-encoded byte by byte.
+fn escape_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.~$&+,:;=@".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// What [`whole`] keeps a tree under: the token and server, the repository
+/// and the commit, which cannot change.
+type WholeKey = (u64, String, String, String);
+
+/// How many whole trees are kept: a few repositories' current commit.
+const WHOLES_KEPT: usize = 8;
+
+/// The whole trees read, for the life of the process (the app builds a
+/// source for each view it reads, so one on the instance would last one read).
+#[derive(Default)]
+struct Wholes {
+    /// The trees read, newest last.
+    kept: VecDeque<(WholeKey, Arc<Whole>)>,
+    /// One lock per tree being read, so two reads of it at once send its
+    /// pages once.
+    reading: HashMap<WholeKey, Arc<futures_util::lock::Mutex<()>>>,
+}
+
+fn wholes() -> &'static Mutex<Wholes> {
+    static WHOLES: OnceLock<Mutex<Wholes>> = OnceLock::new();
+    WHOLES.get_or_init(Default::default)
+}
+
+fn kept_whole(key: &WholeKey) -> Option<Arc<Whole>> {
+    let held = wholes().lock().unwrap_or_else(PoisonError::into_inner);
+    held.kept
+        .iter()
+        .find(|(at, _)| at == key)
+        .map(|(_, whole)| Arc::clone(whole))
+}
+
+/// The whole tree at `sha`, kept by it: read page by page of Gitea's
+/// recursive tree, the first alone (it says how many there are), the rest
+/// side by side, at most [`TREE_PAGES`], beside the repository's record for
+/// its page. A failed read is not kept.
+async fn whole(
     source: &GiteaSource,
     owner: &str,
     repo: &str,
-    at: &At<'_>,
-) -> Result<Block, SourceError> {
-    let first: GitTree = source
-        .client
-        .git_tree_as(owner, repo, at.sha, 1, TREE_PAGE)
-        .await?;
-    // No count: a page short of full is the last one, so another is read
-    // only after a full one, one at a time.
+    sha: &str,
+) -> Result<Arc<Whole>, SourceError> {
+    let key: WholeKey = (
+        source.viewer_key(),
+        owner.to_owned(),
+        repo.to_owned(),
+        sha.to_owned(),
+    );
+    if let Some(whole) = kept_whole(&key) {
+        return Ok(whole);
+    }
+    let reading = {
+        let mut held = wholes().lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(held.reading.entry(key.clone()).or_default())
+    };
+    let _one = reading.lock().await;
+    // Another read of it may have kept it while this one waited.
+    if let Some(whole) = kept_whole(&key) {
+        return Ok(whole);
+    }
+    let read = read_whole(source, owner, repo, sha).await;
+    let mut held = wholes().lock().unwrap_or_else(PoisonError::into_inner);
+    held.reading.remove(&key);
+    let whole = Arc::new(read?);
+    held.kept.push_back((key, Arc::clone(&whole)));
+    while held.kept.len() > WHOLES_KEPT {
+        held.kept.pop_front();
+    }
+    Ok(whole)
+}
+
+async fn read_whole(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    sha: &str,
+) -> Result<Whole, SourceError> {
+    let page = |page| {
+        source
+            .client
+            .git_tree_as::<GitTree>(owner, repo, sha, page, TREE_PAGE)
+    };
+    let (first, record) = tokio::join!(page(1), source.client.repo_as::<RepoRecord>(owner, repo));
+    let html = record.ok().and_then(|record| record.repo.html_url);
+    let (entries, truncated) = pages(first?, TREE_PAGES, page).await?;
+    Ok(Whole::new(entries, truncated, html))
+}
+
+/// Every page of a tree after `first`, which says how many there are, side by
+/// side [`TREE_READS_AT_ONCE`] at a time, at most `most`; with no count a page
+/// short of full is the last, so another is read only after a full one. The
+/// entries, and whether the read stopped at `most` with entries left.
+async fn pages<F, R>(
+    first: GitTree,
+    most: u32,
+    page: F,
+) -> Result<(Vec<GitEntry>, bool), SourceError>
+where
+    F: Fn(u32) -> R,
+    R: std::future::Future<Output = Result<GitTree, SourceError>>,
+{
     let total = first.total_count;
     let mut pages = vec![first];
     match total {
@@ -438,30 +713,18 @@ async fn every(
             let size = pages[0].tree.len().clamp(1, TREE_PAGE);
             let wanted = u32::try_from(total.div_ceil(size))
                 .unwrap_or(u32::MAX)
-                .min(TREE_PAGES);
+                .min(most);
             let rest: Vec<u32> = (2..=wanted).collect();
             for some in rest.chunks(TREE_READS_AT_ONCE) {
-                let reads = some
-                    .iter()
-                    .map(|page| {
-                        source
-                            .client
-                            .git_tree_as::<GitTree>(owner, repo, at.sha, *page, TREE_PAGE)
-                    })
-                    .collect();
+                let reads = some.iter().map(|n| page(*n)).collect();
                 pages.extend(super::rows::all_of(reads).await?);
             }
         }
         None => {
-            let mut page = 1;
-            while page < TREE_PAGES && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE) {
-                page += 1;
-                pages.push(
-                    source
-                        .client
-                        .git_tree_as(owner, repo, at.sha, page, TREE_PAGE)
-                        .await?,
-                );
+            let mut at = 1;
+            while at < most && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE) {
+                at += 1;
+                pages.push(page(at).await?);
             }
         }
     }
@@ -469,35 +732,96 @@ async fn every(
     let truncated = match total {
         Some(total) => read < total,
         None => {
-            pages.len() as u32 == TREE_PAGES
-                && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE)
+            pages.len() as u32 == most && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE)
         }
     };
-    let entries = pages
-        .into_iter()
-        .flat_map(|page| page.tree)
+    Ok((pages.into_iter().flat_map(|p| p.tree).collect(), truncated))
+}
+
+/// How many pages one level of a tree reads at most: a directory of up to
+/// twenty thousand entries, as the whole tree.
+const LEVEL_PAGES: u32 = TREE_PAGES;
+
+/// `dir`'s entries, read past the whole tree's cut: from the deepest of its
+/// directories the whole tree holds (the top at worst, by the commit's sha),
+/// one level at a time by each tree's sha, down to `dir`. `None` where a
+/// directory on the way is not there.
+async fn walk(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    sha: &str,
+    whole: &Whole,
+    dir: &str,
+) -> Result<Option<Vec<(String, EntryKind, u64)>>, SourceError> {
+    let parts: Vec<&str> = dir.split('/').filter(|part| !part.is_empty()).collect();
+    // The deepest directory on the way whose tree the whole tree names.
+    let mut depth = parts.len();
+    let mut tree = loop {
+        if depth == 0 {
+            break sha.to_owned();
+        }
+        if let Some(found) = whole.tree_sha(&parts[..depth].join("/")) {
+            break found.to_owned();
+        }
+        depth -= 1;
+    };
+    loop {
+        let level = |page| {
+            source
+                .client
+                .git_tree_level_as::<GitTree>(owner, repo, &tree, page, TREE_PAGE)
+        };
+        let (entries, _) = pages(level(1).await?, LEVEL_PAGES, level).await?;
+        if depth == parts.len() {
+            return Ok(Some(
+                entries
+                    .iter()
+                    .map(|entry| (entry.path.clone(), entry.kind(), entry.size))
+                    .collect(),
+            ));
+        }
+        let Some(next) = entries
+            .iter()
+            .find(|entry| entry.path == parts[depth] && entry.kind() == EntryKind::Dir)
+        else {
+            return Ok(None);
+        };
+        tree = next.sha.clone();
+        depth += 1;
+    }
+}
+
+/// Every file of the tree at `at` (#2311), by its whole path, in git's order:
+/// the whole tree ([`whole`]), which directories are drawn from too. A tree
+/// past [`TREE_PAGES`] is cut and says so. Directories and submodules are
+/// left out; a symlink is a file, as in a listing.
+async fn every(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    at: &At<'_>,
+) -> Result<Block, SourceError> {
+    let whole = whole(source, owner, repo, at.sha).await?;
+    let entries = whole
+        .entries
+        .iter()
         .filter(|entry| entry.kind == "blob")
-        .map(|entry| {
-            let kind = if entry.mode == "120000" {
-                EntryKind::Symlink
-            } else {
-                EntryKind::File
-            };
-            TreeEntry {
-                section: Some(at.id(Place::File(&entry.path))),
-                name: entry.path,
-                kind,
-                size: Some(entry.size),
-            }
+        .map(|entry| TreeEntry {
+            section: Some(at.id(Place::File(&entry.path))),
+            name: entry.path.clone(),
+            kind: entry.kind(),
+            size: Some(entry.size),
         })
         .collect();
     Ok(Block::Tree {
         trail: trail(at, "", false),
         entries,
-        truncated,
+        truncated: whole.truncated,
         url: None,
         paths: None,
         commit: Some(at.sha.to_owned()),
+        read_alone: None,
     })
 }
 
