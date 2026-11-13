@@ -314,3 +314,63 @@ test("a checkout's tree that lands after the source's top at another commit leav
   expect(text(target)).not.toContain("From your clone");
   expect(localReads).toEqual([]);
 });
+
+for (const order of ["the source's re-read, then the fetch", "the fetch, then the source's re-read"] as const)
+  test(`after a push, the kept top at the commit before, then ${order}: the clone takes over at the new commit`, async () => {
+    // Every listener by event: the last commit above the README hears `view:fresh` too.
+    const handlers = new Map<string, ((event: { payload: unknown }) => void)[]>();
+    const tell = (event: string, payload: unknown) => {
+      for (const handler of handlers.get(event) ?? []) handler({ payload });
+    };
+    let top = MOVED;
+    let held: LocalTree | null = null;
+    const ports = {
+      entityView: async (_at: string, section: string | null) => {
+        asked.push({ section: section ?? "", release: () => {} });
+        return sourceAnswer(FILES, section ?? "", top, "b10b");
+      },
+      localTree: async () => held,
+      localFile: async (_at: string, commit: string, path: string) => {
+        localReads.push(`${commit.slice(0, 7)}:${path}`);
+        const text = FILES[path];
+        return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+      },
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+      listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+        return () => {};
+      },
+    };
+    view = mount(TfRepoFiles, {
+      target,
+      props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+    });
+    await settle();
+    expect(text(target)).not.toContain("From your clone");
+    // The app's read behind its kept answer finds the branch at the mirror's new tip; the clone fetched it.
+    top = TIP;
+    const fresh = () => tell("view:fresh", { entity_id: REPO, section: "files", failed: false });
+    const fetched = () => {
+      held = localTree(FILES);
+      tell("checkout:fetched", { entity_id: REPO, commit: TIP });
+    };
+    if (order === "the source's re-read, then the fetch") {
+      fresh();
+      await settle();
+      fetched();
+    } else {
+      fetched();
+      await settle();
+      expect(text(target)).not.toContain("From your clone");
+      fresh();
+    }
+    await settle();
+    expect(text(target)).toContain("From your clone at c0ffee0, the same as on");
+    const reads = sourceReads().length;
+    (target.querySelector('.tf-ftree [data-path="src"]') as HTMLElement).click();
+    await settle();
+    expect(tree()).toEqual(["src", "lib.rs", "README.md"]);
+    expect(sourceReads().length, "the folder came from the clone").toBe(reads);
+  });

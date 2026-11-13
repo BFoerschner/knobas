@@ -352,6 +352,13 @@
         // inner-pages pass, 2026-11-12). At another commit the branch moved since the sync, and the source's tree stands.
         const first = listings[""] !== undefined;
         if (first && sourceTop !== tree.commit) return;
+        // Taking over from the source's tree: its directory reads still under way would write the source's sections
+        // over the clone's.
+        if (first) {
+          generation += 1;
+          asked = new Set([""]);
+          early = new Map();
+        }
         local = { tree, checked: first };
         listings = localListings(tree);
         pathsSection = localId(tree.commit, "paths", "");
@@ -1078,14 +1085,21 @@
       (read) => {
         const block = read?.blocks[0];
         if (mine !== generation || block?.type !== "tree") return;
+        // The commit the source's tree stands at now, which a clone's tree must stand at to take over (the big-folder
+        // pass, 2026-11-13: the first answer can be the app's kept read at the commit before a push).
+        const was = sourceTop;
+        sourceTop = block.commit ?? null;
         if (settleLocal(block)) return;
         const before = (listings[""] ?? []).map((entry) => entry.section).join("\u0000");
-        if (block.entries.map((entry) => entry.section).join("\u0000") === before) return;
-        generation += 1;
-        asked = new Set([""]);
-        early = new Map();
-        listings = { "": block.entries };
-        pathsSection = block.paths ?? null;
+        if (block.entries.map((entry) => entry.section).join("\u0000") !== before) {
+          generation += 1;
+          asked = new Set([""]);
+          early = new Map();
+          listings = { "": block.entries };
+          pathsSection = block.paths ?? null;
+        }
+        // The clone may hold the new commit already (a fetch behind an earlier read): its tree takes over if so.
+        if (sourceTop !== was) readLocal(at, generation);
       },
       // The tree keeps what it drew.
       () => {},
