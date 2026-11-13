@@ -37,7 +37,11 @@
 //!   (before a retry, it is what the source said the attempt before). A
 //!   caller that has to tell that failure from a refusal runs the call
 //!   under [`watch_local_quota`], which hands back the quota it stopped on
-//!   (#1729).
+//!   (#1729). **A person's request goes first**: a request sent under
+//!   [`on_lane`] with [`Lane::Background`] -- the sync, the write queue's
+//!   tick -- yields the next request the quota lets through to one a person
+//!   is waiting for, for at most [`BACKGROUND_FLOOR`]; the quota itself is
+//!   unchanged (the priority lane, 2026-11-13).
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
 //!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
 //!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
@@ -98,7 +102,9 @@ use tokio::time::Instant;
 
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
-pub use limiter::{InstanceLimiter, LocalQuota, watch_local_quota};
+pub use limiter::{
+    BACKGROUND_FLOOR, InstanceLimiter, Lane, LocalQuota, current_lane, on_lane, watch_local_quota,
+};
 pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on

@@ -779,9 +779,14 @@ pub async fn execute_run(
     progress: Option<Arc<dyn ProgressSink>>,
     started: std::time::Instant,
 ) -> RunResult {
-    run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started)
-        .await
-        .0
+    // A run, so in the background lane as a scheduled one is
+    // ([`Inner::run_task_in_background`]).
+    knobas_http::on_lane(
+        knobas_http::Lane::Background,
+        run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started),
+    )
+    .await
+    .0
 }
 
 /// [`execute_run`], handing back the adapter of a run that committed, for
@@ -2614,13 +2619,37 @@ impl Inner {
         // waiting at the door, so the pool is still open for it.
         if self.cancel.is_cancelled() {
             drop(tasks);
-            inner.run_task(id, run_id, mode, watchers).await;
+            inner
+                .run_task_in_background(id, run_id, mode, watchers)
+                .await;
             return Err(TriggerError::ShuttingDown);
         }
-        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, watchers).await });
+        let handle = tokio::spawn(async move {
+            inner
+                .run_task_in_background(id, run_id, mode, watchers)
+                .await
+        });
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
         Ok(Triggered::Started(run_id))
+    }
+
+    /// [`run_task`](Self::run_task) in [`knobas_http::Lane::Background`]:
+    /// every request the run sends -- discovery, the sync, the pipelines'
+    /// latest logs after it -- yields to one a person is waiting for on the
+    /// same origin (the priority lane, 2026-11-13). Boxed, as the sync's
+    /// future is in [`attempt`], to keep the callers' futures shallow.
+    fn run_task_in_background(
+        self: Arc<Self>,
+        source_id: String,
+        run_id: i64,
+        mode: RunMode,
+        watchers: Arc<Watchers>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            self.run_task(source_id, run_id, mode, watchers),
+        ))
     }
 
     /// One spawned run: take a permit, do the work (or give up when cancelled),
@@ -2947,7 +2976,15 @@ async fn flush_loop(inner: Arc<Inner>) {
             () = inner.cancel.cancelled() => return,
             () = inner.flush_due.notified() => {}
         }
-        crate::write_queue::flush_all(&inner.deps).await;
+        // The tick's writes are retries nobody is watching: they yield to a
+        // person's requests. A write a person just pressed is flushed by its
+        // own submit, outside this task, in the interactive lane (the
+        // priority lane, 2026-11-13).
+        knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            crate::write_queue::flush_all(&inner.deps),
+        )
+        .await;
     }
 }
 
