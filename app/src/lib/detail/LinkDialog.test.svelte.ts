@@ -185,13 +185,16 @@ test("closing the dialog within the debounce sends no search", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const screen = render();
 
+  // The first key of a settled box is asked at once (the broad-filters pass, 2026-11-13); the next, inside the
+  // debounce, waits on the timer the close must disarm.
+  screen.type(screen.picker(), "p");
   screen.type(screen.picker(), "payout");
   screen.done();
   // Past the debounce on the fake clock, which would fire a timer the close left armed (#2048).
   vi.advanceTimersByTime(DEBOUNCE_MS);
   await Promise.resolve();
 
-  expect(queries, "a search was sent after the dialog closed").toEqual([]);
+  expect(queries, "a search was sent after the dialog closed").toEqual(["p"]);
 });
 
 /**
