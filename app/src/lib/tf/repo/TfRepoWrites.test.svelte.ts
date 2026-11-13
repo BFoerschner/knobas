@@ -347,7 +347,8 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   await draw([REPO, "branches"]);
   const rows = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(rows).toEqual([
-    ["main Default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", ""],
+    // The default branch offers a pull request into another branch too (2026-11-13).
+    ["main Default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", "New pull request"],
     ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 Open", "you", "c90d11e4a7 · 3 hours ago", "Delete…"],
     ["spike/sepa-instant", "2 ahead, 9 behind", "none", "you", "9a1b2c3d4e · 9 days ago", "New pull request Delete…"],
     ["chore/bump-tokio", "Merged", "none", "jonas", "77aa00bb11 · 5 days ago", "Delete…"],
@@ -630,7 +631,8 @@ test("the compare page proposes Into and From, the change and its commits, and q
   expect(into!.value).toBe("main");
   expect([...into!.options].map((o) => o.value)).toEqual(["main", "feature/PAY-231-sepa-retry", "spike/sepa-instant", "chore/bump-tokio", "release/1.9"]);
   expect(from!.value).toBe("spike/sepa-instant");
-  expect([...from!.options].map((o) => o.value)).not.toContain("main");
+  // A pull request may come from the default branch too (2026-11-13), into another branch.
+  expect([...from!.options].map((o) => o.value)).toContain("main");
   const title = target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!;
   // One commit says what the change is better than the branch's name does (F-241).
   expect(title.value).toBe("PAY-231: jitter in backoff");

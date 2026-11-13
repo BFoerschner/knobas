@@ -29,6 +29,16 @@
     what it carries over the default branch (its *Commits*).
   - **Into and From the same**: nothing to compare, so one line says so where the
     form ends, and there is no diff, no *Commits* and no open pull request's line.
+  - **From the default branch** (2026-11-13): *From* offers every branch, the
+    default one too, so a pull request can bring the default branch into
+    another. A branch can't go into itself, so choosing the default as *From*
+    while *Into* is the default moves *Into* to the branch the reader came
+    from, else the newest other branch, and a line above the form says so; an
+    *Into* the reader picked stays, and one the page moved goes back to the
+    default branch once *From* leaves it. Its *Title* names both ends. The
+    branch's own view measures a branch against the default branch, so none
+    is read for the default branch: its *Commits* are the compare's own, and a
+    pull request this session sent from it holds back only that *Into*.
 
   **Predicted at the checkout, checked behind** (ADR-0041, the smoothness
   pass of PR #2479): where the repository's checkout holds the tips the
@@ -56,7 +66,7 @@
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
-  import type { DiffFile, DiffRange, RangeDiff } from "../../ipc/entity";
+  import type { DiffFile, DiffRange, RangeCommit, RangeDiff } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
@@ -74,6 +84,7 @@
   import { onViewFresh } from "./view-fresh.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
+  import { shortEnd } from "../diff/sha";
   import {
     branchStanding,
     compareHash,
@@ -132,7 +143,14 @@
   const listed = $derived(branches.find((option) => option.name === head) ?? null);
   /** The branch's entity: a refresh's new listing of the same branch reads nothing again on its own. */
   const listedId = $derived(listed?.entityId ?? null);
-  const into = $derived(defaultBranch ?? branches[0]?.name ?? "");
+  /** *From* is the default branch: its pull request goes into another branch (2026-11-13). */
+  const fromDefault = $derived(head !== null && head === defaultBranch);
+  /** The newest branch but the default and *From*: the list's order after the default one, as the header's *New pull request* reads it. */
+  const newestOther = $derived(branches.find((option) => !option.isDefault && option.name !== head)?.name ?? null);
+  /** *Into* proposed: the default branch, or for a pull request from it, the newest other branch. */
+  const into = $derived(fromDefault ? (newestOther ?? "") : (defaultBranch ?? branches[0]?.name ?? ""));
+  /** Where the branch's standing is read: none for the default branch, which its view measures against nothing. */
+  const standingId = $derived(fromDefault ? null : listedId);
 
   let standing = $state<BranchStanding | null>(null);
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
@@ -153,6 +171,16 @@
    * source's compare answered the same. `null` for a diff the source answered.
    */
   let predicted = $state<{ section: string; checked: boolean } | null>(null);
+  /**
+   * The commits the source's compare listed, by the section it was read for: *Commits* from the default branch, whose own
+   * view measures it against nothing. A diff predicted at the checkout lists none, so the check behind it brings them.
+   */
+  let compareCommits = $state<{ section: string; commits: RangeCommit[] } | null>(null);
+  /** Keeps what the source's compare `diff` listed for `asked`, where it listed any. */
+  function keepCommits(asked: string, diff: RangeDiff): void {
+    const listed = diff.range?.commits ?? [];
+    if (listed.length > 0 || compareCommits?.section !== asked) compareCommits = listed.length > 0 ? { section: asked, commits: listed } : null;
+  }
   /** The source's compare differed from the predicted diff: a branch moved since the sync, and its diff now stands. */
   let moved = $state<string | null>(null);
   /** The check of the drawn predicted diff, by its section: whether the source's compare differed. */
@@ -164,6 +192,26 @@
   $effect.pre(() => {
     const asked = addressed;
     if (asked !== null) untrack(() => (base = asked));
+  });
+  /** *Into* where the page moved it because *From* became the default branch, and why: said above the form until the reader picks another. */
+  let intoMoved = $state<{ branch: string; why: "came" | "newest" } | null>(
+    untrack(() => (fromDefault && addressed === null && newestOther !== null ? { branch: newestOther, why: "newest" } : null)),
+  );
+  // *From* the default branch with *Into* the default too (the page shown at `compare/<default>` while *Into* stood there): *Into*
+  // is the newest other branch. *From* leaving the default branch takes an *Into* the page moved back to the default branch.
+  $effect.pre(() => {
+    const from = fromDefault;
+    untrack(() => {
+      if (from) {
+        if (addressed === null && base === head && newestOther !== null) {
+          base = newestOther;
+          intoMoved = { branch: newestOther, why: "newest" };
+        }
+      } else if (intoMoved !== null) {
+        if (addressed === null && base === intoMoved.branch && defaultBranch !== null) base = defaultBranch;
+        intoMoved = null;
+      }
+    });
   });
   /** *Into* and *From* are one branch: there is nothing to compare, and no diff, commits or open pull request to speak of. */
   const same = $derived(base === head);
@@ -189,7 +237,7 @@
 
   // The branch's view, read for each branch the address names.
   $effect(() => {
-    const id = listedId;
+    const id = standingId;
     let live = true;
     standing = null;
     failed = null;
@@ -228,10 +276,10 @@
   onRefreshed(
     () => refreshed,
     () => {
-      const id = listedId;
+      const id = standingId;
       const asked = section;
-      if (id === null || asked === null) return Promise.resolve();
-      return Promise.all([readStanding(id, () => listedId === id, true), readDiff(asked, () => section === asked, true)]);
+      if (asked === null || (id === null && !fromDefault)) return Promise.resolve();
+      return Promise.all([id === null ? null : readStanding(id, () => standingId === id, true), readDiff(asked, () => section === asked, true)]);
     },
   );
 
@@ -239,7 +287,12 @@
    * The pull request this session sent from this branch, until the source's view holds it (F-257). Not while its own press is
    * leaving: the form stays as the tab hides, so *Pull requests* can take focus from it for the row it landed on (F-242).
    */
-  const sentFrom = $derived(head === null || busy ? undefined : echoesOn(repoId, MADE_PR).find((echo) => echo.base === head));
+  const sentFrom = $derived(
+    head === null || busy
+      ? undefined
+      : // From the default branch, one sent into another branch holds nothing back here.
+        echoesOn(repoId, MADE_PR).find((echo) => echo.base === head && (!fromDefault || echo.into === undefined || echo.into === base)),
+  );
   $effect(() => {
     if (!shown) busy = false;
   });
@@ -249,8 +302,8 @@
       watchEchoes(
         REPO_PRS,
         () => {
-          const id = listedId;
-          if (id !== null) void readStanding(id, () => listedId === id, true);
+          const id = standingId;
+          if (id !== null) void readStanding(id, () => standingId === id, true);
         },
         { listen: ports.listen },
       ),
@@ -273,11 +326,11 @@
 
   // The standing knobas held, read again behind it (ADR-0042).
   onViewFresh(
-    () => listedId,
+    () => standingId,
     null,
     () => {
-      const id = listedId;
-      if (id !== null) void readStanding(id, () => listedId === id, true);
+      const id = standingId;
+      if (id !== null) void readStanding(id, () => standingId === id, true);
     },
     untrack(() => ports.listen),
   );
@@ -304,6 +357,7 @@
       cut = diff.truncated;
       range = diff.range;
       filesFor = asked;
+      keepCommits(asked, diff);
       moved = null;
       predicted = null;
       checking = null;
@@ -333,6 +387,7 @@
       (fresh) => {
         const same = sameDiff(shown, fresh);
         if (alive() && filesFor === asked) {
+          keepCommits(asked, fresh);
           if (same) predicted = { section: asked, checked: true };
           else {
             files = fresh.files;
@@ -381,9 +436,47 @@
     };
   });
 
+  // A pull request may go from the default branch into another (2026-11-13), so *From* offers it too.
   const heads = $derived.by(() => {
-    const names = branches.filter((option) => !option.isDefault).map((option) => option.name);
+    const names = branches.map((option) => option.name);
     return head !== null && !names.includes(head) ? [head, ...names] : names;
+  });
+
+  /**
+   * *From* picked: the page reads that branch, and *Into* stays as it stands. The default branch picked while *Into* is the
+   * default too moves *Into* to the branch the reader came from, else the newest other; an *Into* the page moved goes back
+   * to the default branch once *From* leaves it. The address names *Into* wherever it is not the default branch.
+   */
+  function pickFrom(value: string) {
+    let next = base;
+    if (value === defaultBranch && base === value) {
+      const came = head !== null && head !== value && branches.some((option) => option.name === head) ? head : null;
+      const other = came ?? branches.find((option) => !option.isDefault && option.name !== value)?.name ?? null;
+      if (other !== null) {
+        next = other;
+        intoMoved = { branch: other, why: came !== null ? "came" : "newest" };
+      }
+    } else if (value !== defaultBranch && intoMoved !== null) {
+      if (intoMoved.branch === base && defaultBranch !== null) next = defaultBranch;
+      intoMoved = null;
+    }
+    base = next;
+    // From the default branch, *Into* is never the default proposal, so the address always names it.
+    location.hash = compareHash(repoId, value, value !== defaultBranch && next === (defaultBranch ?? branches[0]?.name ?? "") ? null : next);
+  }
+
+  /** A pull request from the default branch is titled by both ends: the branch's own name says nothing of where it goes. */
+  const mergeTitle = (from: string, to: string) => `Merge ${from} into ${to}`;
+  let mergeProposed = "";
+  // Over the name proposed, or the last such title only: typed words stay.
+  $effect(() => {
+    const [from, to] = [head, base];
+    if (!fromDefault || from === null || to === "" || to === from) return;
+    untrack(() => {
+      const next = mergeTitle(from, to);
+      if (title === mergeProposed || title === proposal(from, null).title) title = next;
+      mergeProposed = next;
+    });
   });
   /** The files changed: this base's diff's, or before it is read the branch's own count, which is against the default branch. */
   const changed = $derived(
@@ -400,12 +493,19 @@
         ? `${sourceName(source)} has no branch ${head ?? ""} to open a pull request from.`
         : (refused ?? (title.trim() === "" ? "Give it a title." : null)),
   );
-  const commits = $derived(standing?.commits ?? []);
+  /** From the default branch, what the compare itself listed (its view measures nothing); else the branch's own, against the default branch. */
+  const commits = $derived(
+    fromDefault
+      ? compareCommits !== null && compareCommits.section === section && filesFor === section
+        ? compareCommits.commits.map((commit) => ({ entity_id: null, title: commit.title, meta: commit.meta, tone: null, chip: shortEnd(commit.sha), url: null }))
+        : []
+      : (standing?.commits ?? []),
+  );
 
   // One commit says what the change is better than its branch's name does (F-241). Only over the name proposed: typed words stay.
   $effect(() => {
     const only = commits.length === 1 ? (commits[0]?.title ?? "") : "";
-    if (only === "" || ticket !== null) return;
+    if (only === "" || ticket !== null || fromDefault) return;
     untrack(() => {
       if (title === proposal(head ?? "", null).title) {
         title = only;
@@ -456,7 +556,7 @@
       // The press lands on the tab that shows it, so the toast has nowhere to offer.
       toastQueued(`open PR ${words}`, source, { write });
       // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
-      echoWrite(repoId, MADE_PR, words, { write, base: head, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
+      echoWrite(repoId, MADE_PR, words, { write, base: head, into: base, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
       // Sent before the check of what the page predicted answered: if the source's compare then differs, the pull
       // request holds the branches as they stand there now, not as the page drew them, and the reader is told.
       const pending = checking !== null && predicted?.section === checking.section && !predicted.checked ? checking.differs : null;
@@ -499,6 +599,11 @@
     {#if guessed !== null && guessed.branch === head && !standing?.pr && sentFrom === undefined}
       <p class="tf-cstart">Starting from <span class="tf-mono">{guessed.branch}</span>, {guessed.why}.</p>
     {/if}
+    {#if fromDefault && intoMoved !== null && intoMoved.branch === base && sentFrom === undefined}
+      <p class="tf-cstart">
+        {#if intoMoved.why === "came"}Into moved to <span class="tf-mono">{base}</span>, the branch you came from.{:else}Into is <span class="tf-mono">{base}</span>, the newest other branch.{/if}
+      </p>
+    {/if}
     <form
       class="tf-panel tf-cform"
       {@attach holdArrivingEnter}
@@ -509,7 +614,7 @@
     >
       <div class="tf-formgrid">
         <label for="tf-cmp-into">Into</label>
-        <select id="tf-cmp-into" class="tf-cbranch" bind:value={base}>
+        <select id="tf-cmp-into" class="tf-cbranch" bind:value={base} onchange={() => (intoMoved = null)}>
           {#each branches as option (option.name)}<option value={option.name}>{option.name}</option>{/each}
         </select>
         <label for="tf-cmp-from">From</label>
@@ -517,7 +622,7 @@
           id="tf-cmp-from"
           class="tf-cbranch"
           value={head ?? ""}
-          onchange={(event) => (location.hash = compareHash(repoId, (event.currentTarget as HTMLSelectElement).value, base === into ? null : base))}
+          onchange={(event) => pickFrom((event.currentTarget as HTMLSelectElement).value)}
         >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
@@ -536,7 +641,7 @@
         {#if same && standing?.pr}
           <p class="tf-dwhy" role="status">{needs}</p>
         {:else if sentFrom !== undefined && !standing?.pr}
-          <span class="tf-cexists">A pull request from this branch is on its way: {sentFrom.text}.</span>
+          <span class="tf-cexists">A pull request from {fromDefault ? `${head} into ${base}` : "this branch"} is on its way: {sentFrom.text}.</span>
           <a class="tf-btn tf-sm" href={repoHash(repoId, "prs")}>Show in Pull requests</a>
         {:else if standing?.pr}
           <span class="tf-cexists">PR {standing.pr.number ?? ""} is already open from this branch.</span>
@@ -568,8 +673,8 @@
             <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}><TfKeyed text={commit.title} /></span></div>
           {/each}
         </div>
-      {:else if standing !== null}
-        <p class="tf-prnote tf-cnone">Nothing that {defaultBranch ?? "the default branch"} lacks.</p>
+      {:else if fromDefault ? filesFor === section && files !== null && files.length === 0 : standing !== null}
+        <p class="tf-prnote tf-cnone">Nothing that {fromDefault ? base : (defaultBranch ?? "the default branch")} lacks.</p>
       {/if}
     </div>
   </aside>

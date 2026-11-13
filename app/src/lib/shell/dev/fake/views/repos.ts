@@ -789,8 +789,10 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
       sides.set(path, [sides.get(path)?.[0] ?? before, after]);
     }
     const diffs = [...sides].map(([path, [before, after]]) => diffOf(path, before, after));
-    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest.
-    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits: [] };
+    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest; and the
+    // commits it carries, newest first, as Gitea's compare lists them (2026-11-13: Compare draws them from the default branch).
+    const commits = PAYOUT_COMMITS.slice(newest, oldest + 1).map(([sha, subject, author, at]) => ({ sha, title: subject, meta: `${author} · ${age(at)}` }));
+    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits };
     return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [], range }], diffs.length));
   }
   // A file whole at one of the branch's commits or main's tip (#2310): `file@<sha>:<path>`.

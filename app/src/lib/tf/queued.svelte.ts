@@ -59,6 +59,8 @@ export interface Echo {
   text: string;
   /** What the read said when the write was queued, for a page whose read moving is the landing. */
   base: string | null;
+  /** Where it goes, for a write whose place is a pair (a pull request from the default branch: its *Into*). */
+  into?: string;
   /** Where its write is: `queued` while open, `sent` once it left the queue's open rows as sent (#2102). */
   state: "queued" | "sent";
   /** The surface that drew it, whose `watchEchoes` re-reads for it; `null` for none. */
@@ -73,6 +75,8 @@ export interface Echoing {
   write?: (Pick<QueuedWrite, "id"> & Partial<Pick<QueuedWrite, "state">>) | null;
   /** What the read said as the write was queued. */
   base?: string | null;
+  /** Where it goes, where `base` alone does not say (a pull request's *Into*). */
+  into?: string;
   /** Several of this kind live side by side (comments, pages); otherwise a new one replaces the old. */
   many?: boolean;
   /** Follow the write: held or refused drops the echo and toasts in these words (held as unconfirmed keeps it, #1966). */
@@ -101,7 +105,7 @@ export function echoWrite(entity: string, kind: string, text: string, how: Echoi
   const write = typeof how.write?.id === "number" ? how.write.id : null;
   const kept = (echoes[entity] ?? []).filter((echo) => how.many || echo.kind !== kind);
   const state = how.write?.state === "sent" ? "sent" : "queued";
-  echoes[entity] = [...kept, { write, kind, text, base: how.base ?? null, state, surface: how.surface ?? null, source: how.source ?? null }];
+  echoes[entity] = [...kept, { write, kind, text, base: how.base ?? null, ...(how.into === undefined ? {} : { into: how.into }), state, surface: how.surface ?? null, source: how.source ?? null }];
   if (write === null) return;
   const gone = () => drop(entity, (echo) => echo.write === write);
   follows.add(onWithdrawn(write, gone));

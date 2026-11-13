@@ -19,6 +19,11 @@
   cell, *Queued* then *Sent*, a link to the *Pull requests* tab (F-264), and
   its *New pull request* goes, until the branch's view holds it (F-257).
 
+  The default branch's row offers *New pull request* too (2026-11-13), into
+  another branch: its view measures it against nothing and offers none, so the
+  row offers it where another branch's view shows the repository takes pull
+  requests. Compare picks its *Into*.
+
   *Delete…* opens prototype-6's `openDeleteBranch` and queues `DeleteBranch`
   against the branch. A branch made or deleted this session is drawn at once
   with its echo (`tf/queued.svelte.ts`, #2105), *queued* and then *sent*,
@@ -246,6 +251,8 @@
   });
   const notes = $derived((listed ?? []).filter(isNote));
   const defaultName = $derived(rows.find((row) => row.isDefault)?.name ?? "the default branch");
+  /** Another branch's view offers a pull request (or says why not): the repository takes them, so the default branch's row offers one too. */
+  const takesPrs = $derived(rows.some((row) => !row.isDefault && row.standing !== null && (row.standing.canOpenPr || row.standing.prBlocked !== null)));
 
   const filter = $derived(sessionFilter(`repo-branches:${repoId}`));
   const config = $derived<FilterConfig>({
@@ -320,7 +327,11 @@
           <td>{row.mine ? "you" : (row.author ?? "")}</td>
           <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
           <td class="tf-nowrap tf-racts"
-            ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr && !prSent.has(row.name)}<a
+            ><span class="tf-rowend">{#if row.isDefault && takesPrs}<a
+                class="tf-btn tf-sm"
+                href={compareHash(repoId, row.name)}
+                onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
+              >{:else if standing !== null && !gone}{#if standing.canOpenPr && !prSent.has(row.name)}<a
                   class="tf-btn tf-sm"
                   href={compareHash(repoId, row.name)}
                   onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
