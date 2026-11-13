@@ -7844,3 +7844,154 @@ async fn the_declared_code_pages_are_pages_the_server_serves() {
         );
     }
 }
+
+/// A pull request from the default branch into another (2026-11-13; Björn: "I
+/// cannot make a pullrequest into any branch FROM master"), against the real
+/// server, on a scratch repository of the account's own
+/// (`knobas-live-from-default`), so the seeded and scale repositories stay as
+/// found. `main` gains a commit the scratch base `release/scratch` lacks; the
+/// compare from that base to `main` is the diff Compare draws, and its range
+/// lists that commit, which Compare draws as *Commits* for the default branch;
+/// the adapter opens the pull request with head `main` and base
+/// `release/scratch`, and the server lists it so. The repository is removed
+/// before the run (a killed run leaves it) and again before anything is
+/// asserted.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_pull_request_goes_from_the_default_branch_into_another() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1", env.url);
+    let me = env.login().await;
+    let full = format!("{me}/knobas-live-from-default");
+    let base = "release/scratch";
+    let remove = async || {
+        let _ = http
+            .delete(format!("{api}/repos/{full}"))
+            .header("Authorization", &auth)
+            .send()
+            .await;
+    };
+    remove().await;
+
+    let created = http
+        .post(format!("{api}/user/repos"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": "knobas-live-from-default", "auto_init": true, "default_branch": "main" }))
+        .send()
+        .await
+        .expect("POST /user/repos")
+        .status()
+        .as_u16();
+    let branched = http
+        .post(format!("{api}/repos/{full}/branches"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "new_branch_name": base, "old_branch_name": "main" }))
+        .send()
+        .await
+        .expect("POST a branch")
+        .status()
+        .as_u16();
+    let pushed: serde_json::Value = http
+        .post(format!("{api}/repos/{full}/contents/from-default.txt"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "branch": "main",
+            "content": "a25vYmFzIGxpdmUgY2hlY2sK",
+            "message": "Carry main's fix into the release",
+        }))
+        .send()
+        .await
+        .expect("write a file on main")
+        .json()
+        .await
+        .unwrap_or_default();
+    let carried = pushed["commit"]["sha"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+
+    let source = env.source(serde_json::json!({ "repos": [full] }));
+    let entity = format!("gitea:{full}");
+    let compare = source
+        .view(&entity, Some(&format!("compare:{base}...main")))
+        .await;
+    let drawn = match &compare {
+        Ok(Some(view)) => view.sections.first().and_then(|s| match s.blocks.first() {
+            Some(Block::Diff { files, range, .. }) => Some((
+                files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+                range.as_ref().map(|r| {
+                    r.commits
+                        .iter()
+                        .map(|c| (c.sha.clone(), c.title.clone()))
+                        .collect::<Vec<_>>()
+                }),
+            )),
+            _ => None,
+        }),
+        _ => None,
+    };
+    let opened = source
+        .write(knobas_source::WriteOp::CreatePullRequest {
+            entity: entity.clone(),
+            title: "Merge main into release/scratch".to_owned(),
+            body: "Opened by knobas from the default branch.".to_owned(),
+            head: "main".to_owned(),
+            base: base.to_owned(),
+        })
+        .await;
+    let listed: Vec<serde_json::Value> = http
+        .get(format!("{api}/repos/{full}/pulls?state=open"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the pull requests")
+        .json()
+        .await
+        .unwrap_or_default();
+    let ends: Vec<(String, String)> = listed
+        .iter()
+        .map(|p| {
+            (
+                p["head"]["ref"].as_str().unwrap_or_default().to_owned(),
+                p["base"]["ref"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    println!("LIVE from the default branch: compare {drawn:?}, write {opened:?}, open {ends:?}");
+    remove().await;
+
+    assert_eq!(
+        (created, branched),
+        (201, 201),
+        "the scratch repository's set-up"
+    );
+    assert!(!carried.is_empty(), "main gained a commit: {pushed}");
+    let (files, commits) = drawn.unwrap_or_else(|| panic!("the compare draws a diff: {compare:?}"));
+    assert_eq!(
+        files,
+        ["from-default.txt"],
+        "the change main carries over the base"
+    );
+    assert_eq!(
+        commits.expect("a range the listing settles"),
+        [(carried, "Carry main's fix into the release".to_owned())],
+        "the range lists the commit main carries"
+    );
+    let opened = opened.expect("the adapter opens a pull request from the default branch");
+    assert!(
+        opened.remote_id.is_some(),
+        "the receipt names it: {opened:?}"
+    );
+    assert_eq!(
+        ends,
+        [("main".to_owned(), base.to_owned())],
+        "one pull request open, head the default branch and base the other"
+    );
+}
