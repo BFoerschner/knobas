@@ -103,6 +103,11 @@ pub(crate) enum Bind {
     /// `jsonb` through `Declarations::as_param`, the one place that wraps
     /// them, as every path-driven read does.
     Json(sqlx::types::Json<serde_json::Value>),
+    /// A board's own binds ([`board_sql`]), each null where the board asks
+    /// for no such narrowing: a `text`, a `text[]` and a `bigint`.
+    MaybeText(Option<String>),
+    MaybeTexts(Option<Vec<String>>),
+    MaybeI64(Option<i64>),
 }
 
 /// A generated statement and the arguments that go with it.
@@ -326,6 +331,7 @@ fn build_search_sql(
         if text.is_some() {
             sql.push_str(" cross join q");
         }
+        sql.push_str(&walk_probe(corpus, &bound));
         sql.push('\n');
 
         let predicates = corpus_predicates(corpus, text.is_some().then_some("q.tsq"), &bound);
@@ -493,6 +499,70 @@ pub fn ids_sql_probed(alternatives: &[WordAlternative], filters: &EffectiveFilte
     }
 }
 
+/// What a query narrows a scan of the mirror's rows by: the pieces
+/// [`ids_sql`] reads the ids with and [`board_sql`] puts in a board's own
+/// scan. The row is `i`, a `sync.item` row, and with words `crd`, its stored
+/// card under the declarations `cards` binds.
+struct Narrow {
+    /// The CTEs the predicates read, each ending in `,\n`: a ticket key's
+    /// ([`field_paths`]) and `reach:`'s ([`reaches`]).
+    ctes: String,
+    /// What the predicates read beside `i`: `pd`, the declarations, with
+    /// words, and `o`, the row's id for a walk's probe ([`WALK_PROBE_OF_I`]),
+    /// with words or a ticket key.
+    joins: String,
+    /// The predicates, every one of which the row must meet.
+    predicates: Vec<String>,
+    /// With words or a key a card answers (`Corpus::fields_carded`), the
+    /// placeholder of the declarations whose stored card they read as `crd`
+    /// (`knobas_core::card_join!`).
+    cards: Option<String>,
+}
+
+/// [`Narrow`] of a query over `corpus`, its placeholders allocated on
+/// `builder` in the order [`ids_sql`]'s statement reads them: the keys and
+/// dimensions ([`bind_filters`]), the words' declarations, then each word.
+fn narrow(
+    builder: &mut Builder,
+    corpus: &Corpus,
+    alternatives: &[WordAlternative],
+    filters: &EffectiveFilters,
+) -> Narrow {
+    let mut bound = bind_filters(builder, filters);
+    // The row's card is joined for the words, and for a key it answers.
+    let card_key = bound.fields.iter().any(|field| {
+        corpus
+            .fields_carded
+            .iter()
+            .any(|(key, _)| *key == field.key)
+    });
+    let words = !alternatives.is_empty();
+    let cards = (words || card_key).then(|| match &bound.declarations {
+        Some(declarations) => declarations.clone(),
+        None => builder.declarations(filters),
+    });
+    bound.carded = cards.is_some();
+    let mut ctes = field_paths(&bound);
+    ctes.push_str(&reaches(&bound));
+    let mut predicates = corpus_predicates(corpus, None, &bound);
+    let mut joins = String::new();
+    if let (true, Some(declarations)) = (words, &cards) {
+        let _ = write!(joins, " cross join (select {declarations}::jsonb as d) pd");
+        predicates.push(words_predicate(builder, alternatives));
+    }
+    // `o.eid`: the row's id, for the walks' primary-key probes
+    // (`WALKED_ASSIGNEE`, a ticket key's `corpus::walked!`), which rebind `i`.
+    if words || !bound.fields.is_empty() {
+        joins.push_str(WALK_PROBE_OF_I);
+    }
+    Narrow {
+        ctes,
+        joins,
+        predicates,
+        cards,
+    }
+}
+
 /// [`ids_sql`]'s statement, its placeholders allocated on `builder`, so that
 /// several can share one statement ([`ids_counts_sql`]).
 fn ids_body(
@@ -501,18 +571,14 @@ fn ids_body(
     alternatives: &[WordAlternative],
     filters: &EffectiveFilters,
 ) -> String {
-    let bound = bind_filters(builder, filters);
-    let word_declarations = (!alternatives.is_empty()).then(|| match &bound.declarations {
-        Some(declarations) => declarations.clone(),
-        None => builder.param(Bind::Json(filters.declarations.as_param())),
-    });
+    let narrow = narrow(builder, corpus, alternatives, filters);
 
     let mut sql = String::from("with\n");
-    sql.push_str(&field_paths(&bound));
-    sql.push_str(&reaches(&bound));
-    if let Some(declarations) = &word_declarations {
+    sql.push_str(&narrow.ctes);
+    if let Some(declarations) = &narrow.cards {
         // The key each source's stored cards are read under (migration
-        // `0075`, `knobas_core::card_keys!`), for the words' `crd`.
+        // `0075`, `knobas_core::card_keys!`), for the words' and the keys'
+        // `crd`.
         let _ = writeln!(
             sql,
             "card_keys as materialized (select d.source_id, sync.card_key({declarations}::jsonb -> d.source_id) as k \
@@ -531,27 +597,90 @@ fn ids_body(
     // it). The exclusion sets are the view's two filters (`0002`, `0012`).
     let _ = write!(
         sql,
-        "select {} as entity_id from sync.item i",
-        corpus.entity_id
+        "select {} as entity_id from sync.item i{}",
+        corpus.entity_id, narrow.joins
     );
-    let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
-    predicates.extend(corpus_predicates(corpus, None, &bound));
-    if let Some(declarations) = &word_declarations {
-        // `o.eid`: the row's id, for the walks' primary-key probes
-        // (`WALKED_ASSIGNEE`), which rebind `i`. `crd`: the row's stored
-        // card under these declarations, null where it has none.
-        let _ = write!(
-            sql,
-            " cross join (select {declarations}::jsonb as d) pd cross join lateral (select i.entity_id as eid) o{}",
-            knobas_core::card_join!("crd", "i")
-        );
-        predicates.push(words_predicate(builder, alternatives));
+    if narrow.cards.is_some() {
+        // `crd`: the row's stored card under those declarations, null where
+        // it has none.
+        sql.push_str(knobas_core::card_join!("crd", "i"));
     }
     sql.push('\n');
-    if !predicates.is_empty() {
-        let _ = write!(sql, " where {}", predicates.join("\n   and "));
-    }
+    let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
+    predicates.extend(narrow.predicates);
+    let _ = write!(sql, " where {}", predicates.join("\n   and "));
     sql
+}
+
+/// A ticket board's cards statement with a query's narrowing in its own scan
+/// (the broad-keys pass, 2026-11-13): `statement`'s pieces
+/// (`knobas_core::mini_board::CardsStatement`) with [`ids_sql`]'s CTEs, joins
+/// and predicates between them, so the board ranks the rows the query keeps
+/// in the scan that reads them. `binds` are the statement's own `$1` to
+/// `$7`; the query's follow.
+///
+/// **The rows [`ids_sql`]'s ids would give the statement as `$1`.** Both
+/// read `sync.item i` and test liveness the same way
+/// (`knobas_core::live_by_exclusion!`), so a row kept here meets the board's
+/// `where` and every predicate [`ids_sql`] keeps a row by: the same
+/// predicates, from the same function ([`narrow`]), true where a `where`
+/// would have kept the row.
+///
+/// **Only under the declarations the query was parsed with.** The words read
+/// the row's stored card as `crd`, which in the statement is the card under
+/// its own declarations (`$4`), and the keys read `$4` where they bound the
+/// query's: the caller asks for this statement when the two are the same
+/// declarations and for the ids when they are not
+/// (`Narrowing`'s `CardsNarrowing`).
+#[must_use]
+pub(crate) fn board_sql(
+    statement: knobas_core::mini_board::CardsStatement,
+    binds: knobas_core::mini_board::CardsBinds<'_>,
+    alternatives: &[WordAlternative],
+    filters: &EffectiveFilters,
+) -> SearchSql {
+    let texts = |ids: Option<&[String]>| Bind::MaybeTexts(ids.map(<[String]>::to_vec));
+    let text = |value: Option<&str>| Bind::MaybeText(value.map(str::to_owned));
+    let mut builder = Builder {
+        binds: vec![
+            texts(binds.members),
+            texts(binds.sources),
+            text(binds.project),
+            Bind::Json(binds.declared.clone()),
+            Bind::MaybeI64(binds.per_column),
+            text(binds.lanes),
+            Bind::MaybeI64(binds.lanes_first),
+        ],
+        declarations: Some("$4".to_owned()),
+    };
+    let narrow = narrow(
+        &mut builder,
+        &crate::corpus::LIVE_ITEM,
+        alternatives,
+        filters,
+    );
+    let mut sql = String::with_capacity(statement.whole.len() + narrow.ctes.len() + 4096);
+    sql.push_str(statement.with);
+    sql.push_str(&narrow.ctes);
+    sql.push_str(statement.ctes);
+    // The predicate as a column of the board's scan, and the rows it keeps
+    // cut above it, behind `offset 0`: `CardsStatement` says why.
+    sql.push_str("select x.entity_id, x.source_id, x.at, x.status, x.lane from (\n       ");
+    sql.push_str(statement.select);
+    let _ = write!(
+        sql,
+        ",\n              (({})) as keep",
+        narrow.predicates.join(")\n               and (")
+    );
+    sql.push_str(statement.from);
+    sql.push_str(&narrow.joins);
+    sql.push_str(statement.filter);
+    sql.push_str("\n       offset 0) x where x.keep");
+    sql.push_str(statement.cut);
+    SearchSql {
+        sql,
+        binds: builder.binds,
+    }
 }
 
 /// [`ids_sql`]'s word filter: the row meets one of `alternatives`, holding
@@ -765,6 +894,10 @@ struct BoundFilters {
     pipelines: Option<String>,
     /// [`EffectiveFilters::hidden_kinds`]' placeholder (#2422).
     hidden: Option<String>,
+    /// Whether the statement joins each row's stored card as `crd`
+    /// ([`narrow`]): a key the card answers is then read off it
+    /// (`Corpus::fields_carded`).
+    carded: bool,
 }
 
 /// One ticket-key condition's placeholders.
@@ -778,13 +911,30 @@ struct BoundField {
     me: String,
 }
 
+/// `o (eid)`, the id of the mirror row `i`, joined beside it: what a walk
+/// made through the row's primary key reads the id from, since the probe
+/// rebinds `i` (`corpus::walked!`, [`WALKED_ASSIGNEE`]). One row a row and no
+/// plan node: the planner pulls it up.
+const WALK_PROBE_OF_I: &str = " cross join lateral (select i.entity_id as eid) o";
+
+/// [`WALK_PROBE_OF_I`]'s join for a corpus branch whose predicates hold a
+/// ticket key's fragment, and nothing for any other: a corpus with no such
+/// fragment answers each key with `false`, and a statement without a key
+/// reads no `o`.
+fn walk_probe(corpus: &Corpus, bound: &BoundFilters) -> String {
+    if bound.fields.is_empty() || corpus.fields.is_empty() {
+        String::new()
+    } else {
+        format!(" cross join lateral (select {} as eid) o", corpus.entity_id)
+    }
+}
+
 /// Allocate one statement's filter binds, in the order they are read.
 ///
 /// With a ticket key the declarations come first: the statement's
 /// `fdecl` CTE reads them before any predicate does (`crate::corpus::FIELD_PATHS`).
 fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilters {
-    let declarations = (!filters.fields.is_empty())
-        .then(|| builder.param(Bind::Json(filters.declarations.as_param())));
+    let declarations = (!filters.fields.is_empty()).then(|| builder.declarations(filters));
     let mut bound = bind_dimensions(builder, filters, declarations.as_ref());
     bound.declarations = declarations.or_else(|| bound.under.as_ref().map(|(d, _)| d.clone()));
     for filter in &filters.fields {
@@ -870,7 +1020,7 @@ fn bind_dimensions(
             (
                 declarations
                     .cloned()
-                    .unwrap_or_else(|| builder.param(Bind::Json(filters.declarations.as_param()))),
+                    .unwrap_or_else(|| builder.declarations(filters)),
                 bind_lowered(builder, &filters.under),
             )
         }),
@@ -882,6 +1032,7 @@ fn bind_dimensions(
         titles: filters.titles,
         pipelines,
         hidden,
+        carded: false,
     }
 }
 
@@ -1010,7 +1161,19 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         // `fd` is the one row a fragment reads its binds from, as `ud` is for
         // `under:`. A fragment that misses yields null, and null is "does not
         // match": `coalesce` makes it false before a `not` can see it.
-        let matches = match corpus.fields.iter().find(|(key, _)| *key == field.key) {
+        // Off the row's own card where the statement joins it, as the set
+        // beside it where it does not (`Corpus::fields_carded`).
+        let carded = bound
+            .carded
+            .then(|| {
+                corpus
+                    .fields_carded
+                    .iter()
+                    .find(|(key, _)| *key == field.key)
+            })
+            .flatten();
+        let asked = carded.or_else(|| corpus.fields.iter().find(|(key, _)| *key == field.key));
+        let matches = match asked {
             // Every key reads its binds in place (`has:` since #815, the
             // rest since the query audit of 2026-11-12): a fragment asks
             // its values as a set (`in (select ...)`) that must be read once
@@ -1206,8 +1369,10 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             }
             let _ = writeln!(
                 sql,
-                "  select {} as synced_at\n    from {}",
-                corpus.synced_at, corpus.relation
+                "  select {} as synced_at\n    from {}{}",
+                corpus.synced_at,
+                corpus.relation,
+                walk_probe(corpus, &bound)
             );
             let predicates = corpus_predicates(corpus, fts.as_deref(), &bound);
             if !predicates.is_empty() {
@@ -1264,6 +1429,9 @@ where
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
             Bind::Json(value) => query.bind(value),
+            Bind::MaybeText(value) => query.bind(value),
+            Bind::MaybeTexts(value) => query.bind(value),
+            Bind::MaybeI64(value) => query.bind(value),
         };
     }
     query
@@ -1457,6 +1625,9 @@ async fn explain_on(
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
             Bind::Json(value) => query.bind(value),
+            Bind::MaybeText(value) => query.bind(value),
+            Bind::MaybeTexts(value) => query.bind(value),
+            Bind::MaybeI64(value) => query.bind(value),
         };
     }
     Ok(query
@@ -1632,9 +1803,22 @@ fn order_by(prefix: &str, ranked: bool, nullable: bool) -> String {
 #[derive(Default)]
 struct Builder {
     binds: Vec<Bind>,
+    /// The placeholder the statement already binds the declarations at, for
+    /// one built around a statement that binds them itself ([`board_sql`]);
+    /// `None` and a filter that reads them binds its own.
+    declarations: Option<String>,
 }
 
 impl Builder {
+    /// The placeholder a filter reads the declarations from: the one the
+    /// statement already has, or a new bind of `filters`' own.
+    fn declarations(&mut self, filters: &EffectiveFilters) -> String {
+        match &self.declarations {
+            Some(placeholder) => placeholder.clone(),
+            None => self.param(Bind::Json(filters.declarations.as_param())),
+        }
+    }
+
     /// Push a value and get back the placeholder that reads it.
     ///
     /// The only way to add a bind, which is what makes it impossible for a
@@ -2556,6 +2740,7 @@ mod tests {
             scope: Some("o.archived is false"),
             under: None,
             fields: &[],
+            fields_carded: &[],
         };
         let built = search_sql(
             &[&LIVE_ITEM, &OTHER],

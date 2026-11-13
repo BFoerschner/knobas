@@ -19,6 +19,7 @@ mod attachments_ipc;
 mod background_write;
 mod backup;
 mod backup_ipc;
+mod board_narrowed;
 mod bring_up;
 mod builds_ipc;
 mod builds_list_plan;

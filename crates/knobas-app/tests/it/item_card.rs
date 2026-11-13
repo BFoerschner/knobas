@@ -11,7 +11,7 @@ use sqlx::PgPool;
 
 /// This file's database, migrated, the adapters' declarations stored as
 /// bring-up stores them (ADR-0019).
-async fn pool() -> PgPool {
+pub(crate) async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
     declared(&pool).await;
@@ -37,7 +37,7 @@ async fn declared(pool: &PgPool) {
 }
 
 /// A source of adapter `adapter` nothing else in this database holds.
-async fn source(pool: &PgPool, adapter: &str) -> String {
+pub(crate) async fn source(pool: &PgPool, adapter: &str) -> String {
     let source = format!(
         "{adapter}-{}",
         &uuid::Uuid::new_v4().simple().to_string()[..12]
@@ -49,7 +49,7 @@ async fn source(pool: &PgPool, adapter: &str) -> String {
 /// Write `rows` -- `(key, title, payload)` tickets of `source` -- as one
 /// multi-row upsert, the sync writer's shape (a sync, and a write's echo,
 /// which the sink writes the same way).
-async fn upsert(pool: &PgPool, source: &str, rows: &[(&str, &str, Value)]) {
+pub(crate) async fn upsert(pool: &PgPool, source: &str, rows: &[(&str, &str, Value)]) {
     let ids: Vec<String> = rows
         .iter()
         .map(|(k, _, _)| format!("{source}:{k}"))
@@ -82,7 +82,7 @@ async fn upsert(pool: &PgPool, source: &str, rows: &[(&str, &str, Value)]) {
 /// Jira tickets: every field found, every kind of miss (absent, blank, not a
 /// string, not a list, a number written as a string), a parent by
 /// `fields.parent` and one by `epic`, and the parent itself.
-fn jira_tickets() -> Vec<(&'static str, &'static str, Value)> {
+pub(crate) fn jira_tickets() -> Vec<(&'static str, &'static str, Value)> {
     vec![
         (
             "PAY-0",
@@ -122,7 +122,7 @@ fn jira_tickets() -> Vec<(&'static str, &'static str, Value)> {
 
 /// Gitea issues: the declared `knobas` block, labels as objects, and a
 /// parent named in it.
-fn gitea_tickets() -> Vec<(&'static str, &'static str, Value)> {
+pub(crate) fn gitea_tickets() -> Vec<(&'static str, &'static str, Value)> {
     vec![
         (
             "o/r/issues/1",
@@ -143,7 +143,7 @@ fn gitea_tickets() -> Vec<(&'static str, &'static str, Value)> {
 }
 
 /// The mock adapter's tickets, the third adapter that declares them.
-fn mock_tickets() -> Vec<(&'static str, &'static str, Value)> {
+pub(crate) fn mock_tickets() -> Vec<(&'static str, &'static str, Value)> {
     vec![
         (
             "M-1",
@@ -229,7 +229,7 @@ const STORED: &str =
          on c.entity_id = i.entity_id and c.paths_key = sync.card_key($1::jsonb -> i.source_id)
       where i.source_id = $2 order by i.entity_id";
 
-async fn declarations(pool: &PgPool) -> Declarations {
+pub(crate) async fn declarations(pool: &PgPool) -> Declarations {
     knobas_app::sources::paths::declared_paths(pool, &Registry::for_process())
         .await
         .unwrap()

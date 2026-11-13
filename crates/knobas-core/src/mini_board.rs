@@ -334,39 +334,95 @@ macro_rules! priority_read {
 ///
 /// `$ranked` is the `ranked` CTE: [`CARDS`] in lanes, [`CARDS_UNLANED`]
 /// without.
+///
+/// **In pieces a search's narrowing goes between** ([`CardsStatement`], the
+/// broad-keys pass, 2026-11-13): `with `, [`cards_ctes!`] to where `scoped`
+/// opens, [`cards_select!`], its select list, [`cards_from!`], its `from`,
+/// [`cards_filter!`], its `where`, and [`cards_cut!`], the rest. Joined with
+/// nothing between them they are the statement as it always read.
 macro_rules! cards {
-    ($ranked:literal) => {
+    ($($ranked:tt)+) => {
         concat!(
-    "with ",
-    status_paths!("$4"),
-    ", ",
-    lane_paths!("$4", "$6"),
-    ", ",
-    crate::card_keys!("$4"),
-    ",
+            "with ",
+            cards_ctes!(),
+            cards_select!(),
+            cards_from!(),
+            cards_filter!(),
+            cards_cut!($($ranked)+)
+        )
+    };
+}
+
+/// [`cards!`]' CTEs before `scoped`, and `scoped`'s opening.
+macro_rules! cards_ctes {
+    () => {
+        concat!(
+            status_paths!("$4"),
+            ", ",
+            lane_paths!("$4", "$6"),
+            ", ",
+            crate::card_keys!("$4"),
+            ",
      scoped as materialized (
-       select i.entity_id, i.source_id,
+       "
+        )
+    };
+}
+
+/// `scoped`'s select list: what the cut ranks a ticket by.
+macro_rules! cards_select {
+    () => {
+        concat!(
+            "select i.entity_id, i.source_id,
               coalesce(i.item_updated_at,
                 (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, ",
-    status_of_ticket!("$4"),
-    " as status, ",
-    lane_of_ticket_probed!("$4", "$6"),
-    " as lane
+            status_of_ticket!("$4"),
+            " as status, ",
+            lane_of_ticket_probed!("$4", "$6"),
+            " as lane"
+        )
+    };
+}
+
+/// `scoped`'s `from`: the scan of the tickets (`i`), the row's id for a
+/// probe (`k.eid`) and its stored card (`crd`).
+macro_rules! cards_from {
+    () => {
+        concat!(
+            "
        from sync.item i cross join lateral (select i.entity_id as eid) k",
-    crate::card_join!("crd", "i"),
-    "
+            crate::card_join!("crd", "i")
+        )
+    };
+}
+
+/// [`cards!`]' `where` of `scoped`: the live tickets the room's scope
+/// admits.
+macro_rules! cards_filter {
+    () => {
+        concat!(
+            "
       where i.kind = 'ticket'
         and ",
-    crate::live_by_exclusion!("i"),
-    "
+            crate::live_by_exclusion!("i"),
+            "
         and ($1::text[] is null or i.entity_id in (select unnest($1::text[])))
         and ($2::text[] is null or i.source_id = any($2))
         and ($3::text is null or ",
-    crate::project_key_read!("$4"),
-    " = $3)
+            crate::project_key_read!("$4"),
+            " = $3)"
+        )
+    };
+}
+
+/// [`cards!`] past `scoped`: the cut (`$ranked`) and the kept cards' fields.
+macro_rules! cards_cut {
+    ($($ranked:tt)+) => {
+        concat!(
+    "
      ),
 ",
-    $ranked,
+    $($ranked)+,
     "     select r.entity_id, r.source_id, ti.title, r.status, r.lane, r.lane_count, r.place,
             r.lanes, case when $6::text is null then null else
               (select jsonb_agg(jsonb_build_array(c.status, c.n))
@@ -430,9 +486,10 @@ macro_rules! cards {
     };
 }
 
-/// The board's cards in lanes: [`cards!`] with the lanes ranked and each
-/// lane's columns cut and counted on their own.
-const CARDS: &str = cards!(
+/// [`CARDS`]' `ranked`: the lanes ranked and each lane's columns cut and
+/// counted on their own.
+macro_rules! ranked_laned {
+    () => {
     "     lanes as (
        select s.lane, count(*) as n,
               row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
@@ -451,26 +508,185 @@ const CARDS: &str = cards!(
         where $7::bigint is null or l.place <= $7
      )
 "
-);
+    };
+}
+/// The board's cards in lanes: [`cards!`] with [`ranked_laned!`].
+const CARDS: &str = cards!(ranked_laned!());
 
+/// [`CARDS`] in the pieces a narrowing goes between.
+const CARDS_PIECES: CardsStatement = CardsStatement {
+    with: "with ",
+    ctes: cards_ctes!(),
+    select: cards_select!(),
+    from: cards_from!(),
+    filter: cards_filter!(),
+    cut: cards_cut!(ranked_laned!()),
+    whole: CARDS,
+};
+
+/// [`CARDS_UNLANED`]' `ranked`: the one lane spelled out.
+macro_rules! ranked_unlaned {
+    () => {
+        "     columns as materialized (
+       select c.status, c.n, row_number() over () as pos
+         from (select s.status, count(*) as n from scoped s group by s.status) c
+     ),
+     numbered as (
+       select s.entity_id, s.source_id, s.at, s.status, s.lane, p.pos,
+              row_number() over (partition by p.pos order by s.at desc, s.entity_id) as rn
+         from scoped s
+        cross join lateral (select array_position(
+                 (select array_agg(c.status order by c.pos) from columns c), s.status) as pos) p
+     ),
+     ranked as (
+       select n.entity_id, n.source_id, n.at, n.status, n.lane,
+              (select sum(c.n) from columns c)::bigint as lane_count,
+              1::bigint as place, 1::bigint as lanes, n.rn, c.n as total
+         from numbered n join columns c on c.pos = n.pos
+        where $5::bigint is null or n.rn <= $5
+     )
+"
+    };
+}
 /// The board's cards without lanes, `$6` and `$7` null: [`CARDS`]' one lane
 /// spelled out, every row its place and the board its only lane (the
 /// broad-filters pass, 2026-11-13). Grouping 23,000 tickets by a lane they
 /// all share and joining it back to each was 10 ms of a broad filter's 60,
 /// for the same rows, `tests/it/item_card.rs` holding the two together.
-const CARDS_UNLANED: &str = cards!(
-    "     ranked as (
-       select s.entity_id, s.source_id, s.at, s.status, s.lane,
-              count(*) over () as lane_count, 1::bigint as place, 1::bigint as lanes,
-              row_number() over (partition by array_position(
-                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
-                                 order by s.at desc, s.entity_id) as rn,
-              count(*) over (partition by array_position(
-                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
-         from scoped s
-     )
-"
-);
+///
+/// **The columns are counted once, and only the cut is a window** (the
+/// broad-keys pass, 2026-11-13). `columns` groups the tickets by status in
+/// one hashed pass: each column's count, and the statuses themselves, which
+/// `numbered` places a ticket by. The count beside every row was two more
+/// windows over all 23,000 (one a column, one the board), and the statuses a
+/// sort of every ticket's to find eight: 9 ms of a broad key's 54, for the
+/// counts of the 300 rows kept. `ranked` reads them off `columns` for those
+/// rows alone.
+const CARDS_UNLANED: &str = cards!(ranked_unlaned!());
+
+/// [`CARDS_UNLANED`] in the pieces a narrowing goes between.
+const CARDS_UNLANED_PIECES: CardsStatement = CardsStatement {
+    with: "with ",
+    ctes: cards_ctes!(),
+    select: cards_select!(),
+    from: cards_from!(),
+    filter: cards_filter!(),
+    cut: cards_cut!(ranked_unlaned!()),
+    whole: CARDS_UNLANED,
+};
+
+/// The cards statement in the pieces a narrowing goes between (the
+/// broad-keys pass, 2026-11-13). With nothing between them they are `whole`,
+/// the statement [`read_scoped`] runs:
+///
+/// ```sql
+/// with <a narrowing's own CTEs, each ending in a comma>
+///      status_paths ..., scoped as materialized (         -- ctes
+///        select x.entity_id, x.source_id, x.at, x.status, x.lane from (
+///        select i.entity_id, ... as lane                  -- select
+///               , (<the narrowing's predicate>) as keep
+///          from sync.item i ... left join sync.item_card crd ...   -- from
+///               <what the predicate reads beside i>
+///         where i.kind = 'ticket' and ...                 -- filter
+///        offset 0) x where x.keep
+///      ), ranked as (...) select ...                      -- cut
+/// ```
+///
+/// **Why a search narrows the scan and hands over no ids.** A filter typed
+/// into Tickets was two statements, each over every ticket: the search's ids,
+/// then this one with the ids as `$1`. A letter that keeps 23,000 tickets
+/// read them twice and carried 17,000 ids out of the database and back, 21 ms
+/// and about 10 of a key's 82. In one scan the row a predicate keeps is the
+/// row the board ranks.
+///
+/// **Why the predicate is a column and not a `where`.** As a `where` it sits
+/// on the scan, and the planner, which cannot count what a search keeps,
+/// halves its estimate for each test: `-project:PAY` keeps 20,000 tickets,
+/// was counted as 1,489, and each ticket's card was then fetched by its key,
+/// 23,000 probes and 21 ms where one read of the cards takes 5. Behind
+/// `offset 0` the scan and its join to the cards are planned as the unfiltered
+/// board's, whatever the search, and the rows it keeps are cut above them.
+///
+/// The pieces name the ticket `i` (a `sync.item` row), its id for a probe
+/// `k.eid`, and its stored card `crd` under the declarations `$4`
+/// ([`crate::card_join!`]), and bind `$1` to `$7` as [`CardsBinds`] holds
+/// them; a narrowing's own binds follow.
+#[derive(Clone, Copy, Debug)]
+pub struct CardsStatement {
+    pub with: &'static str,
+    pub ctes: &'static str,
+    pub select: &'static str,
+    pub from: &'static str,
+    pub filter: &'static str,
+    pub cut: &'static str,
+    /// The six with nothing between them: the statement unnarrowed.
+    pub whole: &'static str,
+}
+
+/// What the cards statement binds, `$1` to `$7` in this order.
+#[derive(Clone, Copy, Debug)]
+pub struct CardsBinds<'a> {
+    /// `$1`: only these ids, or `None` for no such narrowing.
+    pub members: Option<&'a [String]>,
+    /// `$2`: only these sources, or `None` for every source.
+    pub sources: Option<&'a [String]>,
+    /// `$3`: a project key within `sources`.
+    pub project: Option<&'a str>,
+    /// `$4`: the declarations.
+    pub declared: &'a sqlx::types::Json<serde_json::Value>,
+    /// `$5`: each column's cap.
+    pub per_column: Option<i64>,
+    /// `$6`: the field a lane shares.
+    pub lanes: Option<&'a str>,
+    /// `$7`: only the first this many lanes.
+    pub lanes_first: Option<i64>,
+}
+
+/// Reads the board's card rows with a narrowing of its own in the scan
+/// ([`read_scoped_narrowed`]): `knobas-search`'s, for the Tickets view's
+/// filter. It builds its statement from the pieces and the binds it is
+/// handed, which is why it lives where runtime SQL is confined.
+///
+/// **The rows must be the statement's rows for the tickets the narrowing
+/// admits**: what [`CardsStatement::whole`] answers with `members` cut to
+/// those tickets. `knobas-app`'s `tests/it/board_narrowed.rs` holds the two
+/// together.
+pub trait CardsNarrowing: Sync {
+    /// The card rows of `statement` under `binds`, narrowed.
+    fn rows(
+        &self,
+        pool: &PgPool,
+        statement: CardsStatement,
+        binds: CardsBinds<'_>,
+    ) -> impl std::future::Future<Output = Result<Vec<CardRow>, sqlx::Error>> + Send;
+}
+
+/// No narrowing: [`read_scoped`]'s.
+struct Unnarrowed;
+
+impl CardsNarrowing for Unnarrowed {
+    async fn rows(
+        &self,
+        pool: &PgPool,
+        statement: CardsStatement,
+        binds: CardsBinds<'_>,
+    ) -> Result<Vec<CardRow>, sqlx::Error> {
+        // Planned for its parameters every time (#753): reused, the statement
+        // went to PostgreSQL's generic plan on its sixth execution and an All
+        // room of 15,000 tickets took 6 s where its own plan takes 0.1 s.
+        sqlx::query_as(statement.whole)
+            .persistent(false)
+            .bind(binds.members)
+            .bind(binds.sources)
+            .bind(binds.project)
+            .bind(binds.declared)
+            .bind(binds.per_column)
+            .bind(binds.lanes)
+            .bind(binds.lanes_first)
+            .fetch_all(pool)
+            .await
+    }
+}
 
 /// The signals of the cards a board keeps (#815): [`crate::signals`]' reader
 /// over the kept ids (`$3`), one statement for the whole board, the same
@@ -846,9 +1062,10 @@ pub struct SourceStatuses {
     pub statuses: Vec<String>,
 }
 
-/// One row of [`CARDS`].
+/// One row of [`CARDS`]: what a [`CardsNarrowing`] reads and hands back,
+/// and nothing a caller looks into.
 #[derive(sqlx::FromRow)]
-struct CardRow {
+pub struct CardRow {
     entity_id: String,
     source_id: String,
     title: String,
@@ -1008,6 +1225,24 @@ pub async fn read_scoped(
     declarations: &crate::payload::Declarations,
     per_column: Option<u32>,
 ) -> Result<MiniBoard, CoreError> {
+    read_scoped_narrowed(pool, scope, declarations, per_column, &Unnarrowed).await
+}
+
+/// [`read_scoped`] with the card rows read by `narrowing`, which admits only
+/// some tickets (the Tickets view's filter): the board of the tickets the
+/// scope and the narrowing both admit, as [`Scope::only`] of those tickets
+/// would draw it, read in one scan ([`CardsStatement`]).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn read_scoped_narrowed<N: CardsNarrowing>(
+    pool: &PgPool,
+    scope: Scope<'_>,
+    declarations: &crate::payload::Declarations,
+    per_column: Option<u32>,
+    narrowing: &N,
+) -> Result<MiniBoard, CoreError> {
     let Scope {
         ctx_id,
         sources,
@@ -1032,28 +1267,27 @@ pub async fn read_scoped(
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
     let cards = async {
-        // Planned for its parameters every time (#753): reused, the statement
-        // went to PostgreSQL's generic plan on its sixth execution and an All
-        // room of 15,000 tickets took 6 s where its own plan takes 0.1 s.
-        let rows: Vec<CardRow> = sqlx::query_as(if lanes.is_some() {
-            CARDS
-        } else {
-            CARDS_UNLANED
-        })
-        .persistent(false)
-        .bind(&members)
-        .bind(&scope)
-        .bind(project)
-        .bind(&declared)
-        .bind(per_column.map(i64::from))
-        .bind(lanes.map(|lanes| lanes.by.as_str()))
-        .bind(
-            lanes
-                .and_then(|lanes| lanes.first)
-                .map(|first| i64::from(first.max(1))),
-        )
-        .fetch_all(pool)
-        .await?;
+        let rows: Vec<CardRow> = narrowing
+            .rows(
+                pool,
+                if lanes.is_some() {
+                    CARDS_PIECES
+                } else {
+                    CARDS_UNLANED_PIECES
+                },
+                CardsBinds {
+                    members: members.as_deref(),
+                    sources: scope.as_deref(),
+                    project,
+                    declared: &declared,
+                    per_column: per_column.map(i64::from),
+                    lanes: lanes.map(|lanes| lanes.by.as_str()),
+                    lanes_first: lanes
+                        .and_then(|lanes| lanes.first)
+                        .map(|first| i64::from(first.max(1))),
+                },
+            )
+            .await?;
         let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
         let signals = signals_of(pool, &kept, &declared, identity).await?;
         Ok::<_, CoreError>((rows, signals))
@@ -1490,6 +1724,48 @@ fn statuses_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A narrowing is spliced between the pieces, so with nothing between
+    /// them they must be the statement the board runs unnarrowed.
+    #[test]
+    fn the_pieces_of_a_cards_statement_are_the_statement() {
+        for pieces in [CARDS_PIECES, CARDS_UNLANED_PIECES] {
+            assert_eq!(
+                [
+                    pieces.with,
+                    pieces.ctes,
+                    pieces.select,
+                    pieces.from,
+                    pieces.filter,
+                    pieces.cut
+                ]
+                .concat(),
+                pieces.whole
+            );
+            // Where a narrowing goes: `scoped` opens at the end of `ctes`,
+            // its select list ends `select`, its joins end `from`, and `cut`
+            // closes it after `filter`.
+            assert!(pieces.ctes.trim_end().ends_with("scoped as materialized ("));
+            assert!(
+                pieces
+                    .select
+                    .starts_with("select i.entity_id, i.source_id,")
+            );
+            assert!(pieces.select.ends_with(" as lane"));
+            assert!(pieces.from.trim_start().starts_with("from sync.item i "));
+            assert!(pieces.from.ends_with("crd.paths_key = crd_k.k "));
+            assert!(
+                pieces
+                    .filter
+                    .trim_start()
+                    .starts_with("where i.kind = 'ticket'")
+            );
+            assert!(pieces.cut.trim_start().starts_with(')'));
+        }
+        assert_eq!(CARDS_PIECES.whole, CARDS);
+        assert_eq!(CARDS_UNLANED_PIECES.whole, CARDS_UNLANED);
+        assert_ne!(CARDS, CARDS_UNLANED);
+    }
 
     /// The order the board promises, over a set deliberately shuffled: the
     /// four lead in their own order rather than alphabetically, strays follow
