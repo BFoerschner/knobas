@@ -41,6 +41,7 @@ trace on every state write, which made the measured app's filter keys several ti
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
 | `inner-items.json`, `slow-forge.mjs` | the inner pages' items per throttle, and the proxy that slows the forge (below) |
+| `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
@@ -128,6 +129,38 @@ just open-budget --real 5411 --inner --forge 1000   # every request held 1 s: `f
   `--timings` before blaming the page.
 - **What waits on the forge is named per call**: each IPC call in `open.json` carries its arguments (`what`), and
   `--timings` on the backend each command's time, so a slow open says which section of which entity it waited for.
+
+### Big folders
+
+Part of every `--inner` run (the big-folder pass, 2026-11-13, `docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md`).
+`big-folders.mjs` makes two scratch repositories on the live Gitea for the run, `knobas-perf-big-folders/cloned` and
+`/forge`, each with folders of 300, 3,000 and 12,000 entries and one of 800 ten directories down (made with `git
+fast-import` at a fixed date, so every run pushes the same commit). It adds the org to the profile's `live-gitea`
+source (`KNOBAS_PERF_GITEA_SOURCE` names another), syncs, and clones `cloned` into a clones root of the run's own. It
+pushes with this worktree's seed token (`testenv/seed-state.json`, or `KNOBAS_GITEA_TOKEN`). When the run ends, or is
+stopped, the org and the repositories are deleted on Gitea, and the source's owners and the profile's clones root are put
+back. `--no-big-folders` on `open.mjs` leaves them out.
+
+| Place | Press | Line |
+|---|---|---|
+| `folder-300`, `folder-3000`, `folder-12000`, `folder-deep` | the folder's row in the cloned repository (`deep` opens at a file beside it) | the aim on every round, the first too: no IPC, the rows in the next frame or two |
+| `forge-folder-300`, `forge-folder-3000` | the same in the repository with no clone; the 4x run presses twins of its own (`hundreds-2`), so its first press is a read knobas never made | the first press is Gitea's `contents` route (0.6 s and 9 s on the WSL box); the rounds after it are held to the aim |
+
+A place's line holds `drawnMs` too: the probe's frame after the one that found the rows, by which time that frame has
+drawn. `usefulMs` alone is taken at the start of the frame the rows are in, so it read 12 ms for a folder whose 12,006
+rows then took 2.7 s to lay out and paint at 4x. A return folds the folder and presses it again; a round that comes
+back to the tab with it still open folds it first (`undo`). The 12,000-entry folder has no forge place: Gitea's
+`contents` route did not answer it within the backend's 45 s.
+
+`folders.mjs` is the same press broken down, for a pass on one repository: the main thread's script, style, layout and
+paint from a trace, the IPC calls, and how many rows are in the DOM, unfolded, folded and unfolded again.
+`--fetched <ms>` tells the page the app's `view:fresh` and `checkout:fetched` that long after it drew, for a clone
+behind the mirror's commit, since the windowless backend tells the page no event.
+
+```sh
+node testenv/perf/folders.mjs --app "http://127.0.0.1:5362/?fake-ipc&fake-hooks&fake-real=5411#/time" \
+  --repo live-gitea:knobas-perf-big-folders/cloned --folders hundreds,thousands,huge --throttle 1,4
+```
 
 ## A broad key: `just keys-budget`
 

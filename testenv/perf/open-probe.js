@@ -50,7 +50,7 @@
       calls.length = 0;
       // `marks`: named lists of [selector, min, counted-unseen], each timed when it first holds, waiting or not (a repository's
       // branch list, its *New pull request*): what draws later than the page's useful content, and when.
-      run = { useful, min, hash, quietMs, maxMs, anyKey, anywhere, titled, marks, markAt: {}, press: null, firstFrame: null, usefulAt: null, lastChange: 0, rects: null, done: false };
+      run = { useful, min, hash, quietMs, maxMs, anyKey, anywhere, titled, marks, markAt: {}, press: null, firstFrame: null, usefulAt: null, drawnAt: null, lastChange: 0, rects: null, done: false };
       const r = run;
       const obs = new MutationObserver(() => { r.lastChange = now(); });
       obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -59,6 +59,8 @@
         if (r.done) return;
         if (r.press !== null) {
           if (r.firstFrame === null) r.firstFrame = t;
+          // The frame after the one that found the useful content: that one's rendering has ended by now.
+          if (r.usefulAt !== null && r.drawnAt === null && t > r.usefulAt) r.drawnAt = t;
           for (const [name, parts] of r.hash === null || location.hash.startsWith(r.hash) ? Object.entries(r.marks) : []) {
             if (r.markAt[name] !== undefined) continue;
             const root = r.anywhere ? document.body : shown();
@@ -132,6 +134,7 @@
         hash: location.hash,
         firstFrameMs: ms(r.firstFrame),
         usefulMs: ms(r.usefulAt),
+        drawnMs: ms(r.drawnAt),
         settledMs: ms(settled),
         moved,
         gone,

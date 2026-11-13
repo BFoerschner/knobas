@@ -5,11 +5,14 @@
 //
 //   node testenv/perf/open.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--rounds first,return]
 //                               [--check budget-open.json --lines real] [--set nav|inner] [--items inner-items.json]
+//                               [--no-big-folders]
 //
 // --set   `nav` (the default): the nav pages and the detail pages their rows open; `inner` (the inner-pages pass,
 //         2026-11-12): a repository's landing and tabs, files, a commit, Compare, *New pull request*, a pull request's
 //         tabs and a run's tabs, at the items `--items` names for each throttle, so each throttle's first open is a
-//         read knobas has never made
+//         read knobas has never made; and big folders (`big-folders.mjs`, the big-folder pass, 2026-11-13): two scratch
+//         repositories on the live Gitea, one cloned by knobas and one read from the forge, made for the run and
+//         removed after it (`--no-big-folders` leaves them out)
 // --app   a built app, `?fake-ipc&fake-real=<port>` on the saved scale database (examples/headless_ipc.rs), as
 //         `just frame-budget --real` runs it
 // --check fail (exit 1) when a place's useful or settled time, or rows moved after its first useful frame, is over
@@ -23,7 +26,9 @@
 // nothing waiting), settled (the page's DOM quiet 700 ms after that), the rows that moved after the first useful
 // frame, and every IPC call between the press and settled with its start and end.
 import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { attach, launch, sleep } from "./cdp.mjs";
+import * as bigFolders from "./big-folders.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
@@ -39,7 +44,8 @@ const lines = opt("--lines") ?? "real";
 const set = opt("--set") ?? "nav";
 const items = JSON.parse(readFileSync(opt("--items") ?? new URL("./inner-items.json", import.meta.url), "utf8"));
 if (!app) { console.log("open.mjs: --app <url> is required"); process.exit(2); }
-setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, Number(opt("--max-minutes", "45")) * 60000).unref();
+setTimeout(() => { console.log("watchdog: gave up"); void bigFolders.down().finally(() => process.exit(3)); }, Number(opt("--max-minutes", "45")) * 60000).unref();
+const withBig = set === "inner" && !args.includes("--no-big-folders");
 
 const base = app.replace(/#.*$/, "");
 /** A section's nav entry, which names the place last shown in it (`#/builds/<pipeline>`). */
@@ -117,7 +123,7 @@ function innerPlaces(i) {
     { name: "run-artifacts", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/artifacts"]`, hash: `${RUN}/artifacts`, useful: [[`${shown} .tf-atree, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
   ].map((p) => ({ ...p, inner: true }));
 }
-const placesAt = (rate) => (set === "inner" ? innerPlaces(items[String(rate)] ?? items["1"]) : PLACES);
+const placesAt = (rate) => (set === "inner" ? [...innerPlaces(items[String(rate)] ?? items["1"]), ...(withBig ? bigFolders.places(rate, shown) : [])] : PLACES);
 /** Whether the nav is drawn: a full page (a ticket, a run) keeps it in the document but shows none. */
 const NAV_SHOWN = `[...document.querySelectorAll(".tf-nav a")].some((a) => a.getBoundingClientRect().width > 0)`;
 /** Every section the nav and the cog reach, for the `late` round's tour. */
@@ -126,6 +132,20 @@ const SECTIONS = ["tickets", "inbox", "code", "builds", "docs", "monitors", "tim
 const SYNCED = `(async () => { const all = await window.__TAURI_INTERNALS__.invoke("sync_status", {}); for (const s of all) window.__fake.emit("sync:state", { ...s, running: false, run_id: (s.run_id ?? 0) + 100000 + Math.floor(Math.random() * 1000), last_outcome: "ok", last_changed: true, last_finished_at: new Date().toISOString() }); return all.length; })()`;
 const picked = (p) => !only || only.some((w) => p.name === w || p.name.startsWith(w));
 
+// The big folders are made only for a run that presses one.
+if (withBig && placesAt(1).filter(picked).some((p) => /^(forge-)?folder-/.test(p.name))) {
+  const port = Number(new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real"));
+  const dir = resolve(dirname(out), "big-folders");
+  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void bigFolders.down().finally(() => process.exit(130)));
+  try {
+    console.log("big-folders: making the repositories, their source and the clone");
+    await bigFolders.up({ port, dir });
+  } catch (e) {
+    console.log(String(e.message || e));
+    await bigFolders.down();
+    process.exit(1);
+  }
+}
 const browser = await launch();
 const c = await attach(browser.port);
 const js = (code, timeout = 60000) => c.js(code, { timeout });
@@ -177,6 +197,8 @@ async function key({ key, code, modifiers = 0, windowsVirtualKeyCode = 0 }) {
 const ESCAPE = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 };
 
 async function measure(place) {
+  // A folder a round came back to still open is folded first, so the press opens it.
+  if (place.undo && (await js(`!!document.querySelector(${JSON.stringify(place.undo)})`))) { await press(place.undo); await quiet(800); }
   // A place that opens what its row names (`titled`) is useful once that name is drawn, not an earlier one.
   const at = place.key || place.go ? null : await find(place.press);
   const titled = place.titled ? at.text : null;
@@ -212,7 +234,7 @@ async function leave(how) {
 
 const results = { app, at: new Date().toISOString(), throttles, places: [] };
 const save = () => writeFileSync(out, JSON.stringify(results, null, 1));
-const say = (r) => `useful ${r.usefulMs ?? "never"} ms, settled ${r.settledMs} ms, first frame ${r.firstFrameMs} ms, moved ${r.moved}${r.gone ? `, gone ${r.gone}` : ""}, ${r.ipc.length} calls (${r.ipcBeforeUseful} before useful)${r.longestTaskMs ? `, longest task ${r.longestTaskMs} ms` : ""}${Object.keys(r.marks ?? {}).length ? `, ${Object.entries(r.marks).map(([k, v]) => `${k} ${v ?? "never"}`).join(", ")}` : ""}`;
+const say = (r) => `useful ${r.usefulMs ?? "never"} ms, drawn ${r.drawnMs ?? "never"} ms, settled ${r.settledMs} ms, first frame ${r.firstFrameMs} ms, moved ${r.moved}${r.gone ? `, gone ${r.gone}` : ""}, ${r.ipc.length} calls (${r.ipcBeforeUseful} before useful)${r.longestTaskMs ? `, longest task ${r.longestTaskMs} ms` : ""}${Object.keys(r.marks ?? {}).length ? `, ${Object.entries(r.marks).map(([k, v]) => `${k} ${v ?? "never"}`).join(", ")}` : ""}`;
 
 for (const rate of throttles) {
   for (const place of placesAt(rate).filter(picked)) {
@@ -311,6 +333,7 @@ async function innerRounds(place, rate, entry) {
 await cpu(1);
 save();
 console.log("wrote", out);
+await bigFolders.down();
 
 let failed = 0;
 if (check) {
@@ -325,6 +348,8 @@ if (check) {
       // An inner page's first open may be a read knobas never made, which only the forge answers: its own line.
       const useful = round === "first" && line.firstUsefulMs !== undefined ? line.firstUsefulMs : line.usefulMs;
       if (r.usefulMs === null) over.push("never useful");
+      // The frame that shows the rows, drawn: its own line where a place has one (a big folder).
+      else if (line.drawnMs !== undefined && r.drawnMs > (round === "first" && line.firstDrawnMs !== undefined ? line.firstDrawnMs : line.drawnMs)) over.push(`drawn ${r.drawnMs} ms`);
       else if (useful !== undefined && r.usefulMs > useful) over.push(`useful ${r.usefulMs} > ${useful} ms`);
       if (line.settledMs !== undefined && r.settledMs > line.settledMs) over.push(`settled ${r.settledMs} > ${line.settledMs} ms`);
       if (r.moved > (line.moved ?? 0)) over.push(`${r.moved} rows moved`);
