@@ -167,5 +167,7 @@ const CEILING_INBOX: usize = 4;
 const CEILING_DOCS: usize = 10;
 const CEILING_PROJECTS: usize = 2;
 // The board reads its sources' statuses beside its cards (the scale pass,
-// 2026-11-10), so a board with no card reads them too: one more here.
-const CEILING_BOARD: usize = 9;
+// 2026-11-10), so a board with no card reads them too: one more here. And
+// one fewer since the broad-keys pass (2026-11-13): the search hands the
+// board its predicates, and the statement that read the ids is gone.
+const CEILING_BOARD: usize = 8;
