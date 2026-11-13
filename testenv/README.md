@@ -1795,6 +1795,48 @@ repository, with a README of its own: open a clone with `HOME=<clone>
 target/debug/knobas-app --demo`, never the binary without `--demo` and `HOME`
 (that opens the default profile).
 
+## The extremes (`testenv/seed-extremes.sh`)
+
+Björn's scale has every item in an ordinary shape, and the speed checks press only what they are scripted to press,
+so a folder of thousands of files taking a second to open was found by Björn, not by a check (PR #2479, 2026-11-13).
+`testenv/seed-extremes.sh` makes the worst shapes a real team's data has on the live products, beside the seed and the
+scale estate and never in them, each product under a scope of its own that no live suite reads:
+
+| Product | Scope | What it makes |
+|---|---|---|
+| `jira` | project `XTRM` (*Extreme shapes*) | XTRM-1 with 500 comments (one at Jira's 32,767-character limit), 200 sub-tasks, 100 links, 200 attachments and 100 labels; 5,000 people (`xtrm-person-NNNN`) each the assignee of a ticket, and 3,000 labels |
+| `confluence` | space `XTRM` | *A page with everything*: a 2,000-row table, 100 expand macros, 300 comments (one 300 KB); *A 5 MB page*; 3,000 pages at one level under the home page |
+| `gitea` | org `knobas-extremes`, repository `everything` | 5,000 branches; 2,000 open pull requests; one pull request (`wide`) of 3,000 changed files over 500 commits, one file a single 1 MB line, with 300 comments (one 300 KB) |
+| `teamcity` | project `Extremes` | one build of 5,000 artifacts (3,000 in one folder), 20,000 tests (400 failed) and a log with a 1 MB line |
+
+```sh
+testenv/seed-extremes.sh gitea            # idempotent: reads what is there, adds what is missing
+testenv/seed-extremes.sh gitea --remove   # the scope deleted again
+```
+
+- **Each run holds its product's live lock** (the Gitea lock, or the JVM product's own; *One environment, one owner
+  at a time*), so it never writes into a product while that product's suite runs.
+- **Credentials** are this worktree's `seed-state.json`; `KNOBAS_EXTREMES_STATE` names another, for a worktree whose
+  own lacks a product's block because another run rewrote it.
+- **What the products refuse, and how it is got round.** Jira's ten-user licence stops 5,000 people having
+  application access, and Jira assigns no one without it: the people are made without it and set as their tickets'
+  assignees in Jira's own database, then those tickets reindexed (`/rest/api/2/reindex/issue`). Jira's text fields stop
+  at 32,767 characters, so the 300 KB comments are Confluence's and Gitea's. TeamCity publishes at most 1,000 files a
+  build (`maxArtifactsNumber` in `main-config.xml`): the seed raises it for its one build and puts back the value it
+  found the moment the build ends. The project is not named `Knobas…`, which the seeded TeamCity suite deletes as its own.
+- **Not named for the suites' sweeps:** the Gitea suite reads `tidewater`, the Jira suite its seeded projects, the
+  Confluence suite its own space, and the TeamCity suite deletes only `Knobas…` projects.
+- **How long:** Jira about 14 minutes (the 5,300 tickets in bulk, 5,000 people at about 67 a second), Confluence 2,
+  TeamCity 1, Gitea about 35 (the forge opens a pull request about once a second, each checked against its base).
+
+**Synced and measured by `just open-budget --extremes`** (`testenv/perf/README.md`, *The extremes*): the run seeds
+what is missing, widens the profile's sources to the scopes, syncs, presses the extreme pages, and removes the extremes
+again at the end (`--keep-extremes` leaves them).
+
+**The Gitea adapter's branch walk** used to fail a whole source's run on a repository of more than 1,000 branches
+(`cap_reached`), so a team with such a repository mirrored nothing of it. It walks 10,000 now
+(`MAX_BRANCH_PAGES`, the extremes pass), as the issues walk does.
+
 ## The estate file
 
 `estate.json` is the estate knobas models, written down: this notebook, the
@@ -2283,10 +2325,10 @@ out of the DOM.
 spawn: it writes a stub executable and a fake clone into a scratch directory,
 and in Settings › *Checkouts and Open in* sets the **Clones root** to that
 directory (*Change…*, *Save*) and adds an application whose command is
-`<stub> {path}` (*Edit applications…*, *Add an application…*). It opens the
+`<stub> {path}` (*Add an application*, the application page). It opens the
 repository payout-service through the launcher, waits for its *Cloned at* line
 to name the clone, picks the new application from *Open in…* (the menu's last
-application, three steps up from the focused default), and asserts that the stub ran with
+application, walked up to from the focused default), and asserts that the stub ran with
 **exactly one** argument and that it is the checkout path. Exactly one is the
 assertion ADR-0016 asks for: what the program received is what the disk
 answered, and nothing the mirror holds. Each run leaves its application in the

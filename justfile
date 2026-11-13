@@ -1345,7 +1345,9 @@ frame-budget *args:
 # `testenv/perf/budget-open.json`, or a row moved after it drew. On the windowless backend over the saved scale
 # database: `just open-budget --real <port>`. `--inner` presses a repository's tabs, files, a commit, Compare, a pull
 # request's tabs and a run's tabs against the live forge instead, and `--inner --forge <ms>` with every request held
-# that long (the inner-pages pass, 2026-11-12; the README's *The inner pages*).
+# that long (the inner-pages pass, 2026-11-12; the README's *The inner pages*). `--extremes` presses the worst shapes
+# a real team's data has, seeded on the live products for the run and removed after (the extremes pass, 2026-11-13;
+# the README's *The extremes*).
 open-budget *args:
     testenv/perf/open-budget.sh {{args}}
 
@@ -1432,6 +1434,13 @@ live-demo: (live-sources "")
 # Fill a live product to Björn's scale, beside the seed.
 seed-scale product *args:
     testenv/seed-scale.sh {{ product }} {{ args }}
+
+# testenv/README.md, *The extremes*: `just seed-extremes jira`, `... confluence`,
+# `... gitea`, `... teamcity`, each under its own scope and the product's live
+# lock; `--remove` deletes the scope again. Idempotent.
+# Make the worst shapes a real team's data has on a live product, beside the seed.
+seed-extremes product *args:
+    testenv/seed-extremes.sh {{ product }} {{ args }}
 
 # testenv/scale-sync.sh: the debug app on a scratch profile under `root`, its
 # sources added with --scale, each source's first sync timed. *Björn's scale*
