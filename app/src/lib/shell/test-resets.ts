@@ -114,6 +114,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "ipc/entity.ts#readsAhead": async () => (await import("../ipc/entity")).forgetReadsAhead(),
   "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
   "tf/docs/TfDocs.svelte#openSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  // What was typed on an application's page and not saved (PR #2479, 2026-11-13): each test starts with none.
+  "tf/openin/TfAppPage.svelte#typedDrafts": async () => (await import("../tf/openin/TfAppPage.svelte")).forgetAppDrafts(),
   "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.

@@ -371,6 +371,7 @@ const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfAppPage = (await import("../tf/openin/TfAppPage.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
@@ -1252,6 +1253,30 @@ const CASES: Case[] = [
           failure: null,
           now: new Date(2026, 9, 15, 14, 0),
           oncomment: () => new Promise<boolean>(() => {}),
+        },
+      }),
+    }),
+  },
+  {
+    /** The application page (PR #2479, 2026-11-13): it reads the repositories and their checkouts, and its leaving takes a try back. */
+    name: "TfAppPage",
+    source: "lib/tf/openin/TfAppPage.svelte",
+    open: (target) => ({
+      app: mount(TfAppPage, {
+        target,
+        props: {
+          at: { app: null, repo: "mock:tidewater/payout-service", kind: null, value: null },
+          apps: residueApps(),
+          reads: {
+            repos: () => Promise.resolve([]),
+            checkouts: () => Promise.resolve([]),
+            files: () => Promise.resolve(null),
+            commits: () => Promise.resolve([]),
+            prs: () => Promise.resolve([]),
+            prEnds: () => Promise.resolve(null),
+            page: () => Promise.resolve(null),
+          },
+          leave: () => {},
         },
       }),
     }),
