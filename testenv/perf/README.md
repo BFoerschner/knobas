@@ -41,6 +41,7 @@ trace on every state write, which made the measured app's filter keys several ti
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
 | `inner-items.json`, `slow-forge.mjs` | the inner pages' items per throttle, and the proxy that slows the forge (below) |
+| `extremes.mjs`, `extremes-items.json` | the extremes an `--extremes` run seeds, syncs, presses and removes (*The extremes*, below) |
 | `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
 | `syncing.mjs`, `lane-probe.mjs` | one source kept syncing for a run's length, and the felt waits a sync can hold timed at the backend per adapter (*With a sync running*, below) |
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
@@ -162,6 +163,32 @@ behind the mirror's commit, since the windowless backend tells the page no event
 node testenv/perf/folders.mjs --app "http://127.0.0.1:5362/?fake-ipc&fake-hooks&fake-real=5411#/time" \
   --repo live-gitea:knobas-perf-big-folders/cloned --folders hundreds,thousands,huge --throttle 1,4
 ```
+
+### The extremes: `just open-budget --real <port> --extremes`
+
+The worst shapes a real team's data has (the extremes pass, 2026-11-13,
+`docs/decisions/2026-11-13-pages-draw-the-worst-shapes-in-a-frame.md`; `testenv/README.md`, *The extremes*): a ticket
+of 500 comments and 200 attachments, a pull request of 3,000 files, 500 commits and 300 comments, a repository of
+5,000 branches and 2,000 open pull requests, a Confluence page of a 2,000-row table and 300 comments, a 5 MB page, a
+space of 3,000 pages at one level, a run of 5,000 artifacts and 20,000 tests. `extremes.mjs` seeds what is missing on
+the live products (`testenv/seed-extremes.sh`, each product under its live lock), adds the scopes to the profile's own
+sources, syncs them, and `open.mjs --set extremes` presses each page's own link or tab, first and on return, against
+`budget-open.json`'s `extremes` lines. When the run ends, or is stopped, the scopes are put back and the extremes
+removed from the products (`--keep-extremes` leaves them, for the next run).
+
+```sh
+just open-budget --real 5411 --extremes                    # seed, sync, press, remove
+node testenv/perf/open.mjs --app "<app>?fake-ipc&fake-hooks&fake-real=5411#/time" --set extremes --no-seed \
+  --throttle 1,4 --rounds first,return --out x.json        # on a profile synced with them already
+```
+
+- The pages whose ids the products give (the Confluence pages, the TeamCity run) are read from the products; with a
+  product down, `KNOBAS_EXTREMES_IDS` (JSON: `page`, `hugePage`, `run`) names them, and a place without its item is
+  left out.
+- **Scrolling them:** `run.mjs`'s `x-` scenarios (`--only x-`) scroll the same pages under a trace, with
+  `KNOBAS_EXTREMES_IDS` for the ids the products give.
+- A place's useful selector waits for its first rows on screen; a page that draws in pieces (the 5 MB page) is useful
+  at its first section, and `settled` says when its pieces near the view are drawn.
 
 ## A broad key: `just keys-budget`
 

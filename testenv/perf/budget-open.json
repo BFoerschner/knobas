@@ -969,5 +969,188 @@
    }
   }
  },
- "_syncing": "Lines for open.mjs --set inner with a run of the Gitea source kept going (just open-budget --real <port> --inner --syncing live-gitea; the priority lane, 2026-11-13, docs/decisions/2026-11-13-a-persons-read-goes-ahead-of-the-sync.md), from two passes on the live Gitea on the WSL box with its scheduled run filling the quota at ten requests a second: a place knobas holds within the inner pages' aim (100 ms at 1x, 200 at 4x) on every round; a place only the forge holds within 3 s at 1x and 6 s at 4x on its first open and on its return after every source's run, which reads a file at its branch from the forge again (up to 3.4 s at 4x with the lane, 7.9 s without), where before the lane it reached 7.8 s (a pull request's Files) and 8.7 s (a deep folder at 4x); what knobas holds, and Conversation's own section, within the aim on the first open too. The binary file at 4x may move one row: once in two passes its first frame still held the file before it. Compare on a branch with many changes and a run's Log have no line: the first waits on each branch's whole view, longer than the probe's cap under a sync's load, and the second's item makes no read in the rig. The big folders are left out: their set-up waits for a run of its own."
+ "_syncing": "Lines for open.mjs --set inner with a run of the Gitea source kept going (just open-budget --real <port> --inner --syncing live-gitea; the priority lane, 2026-11-13, docs/decisions/2026-11-13-a-persons-read-goes-ahead-of-the-sync.md), from two passes on the live Gitea on the WSL box with its scheduled run filling the quota at ten requests a second: a place knobas holds within the inner pages' aim (100 ms at 1x, 200 at 4x) on every round; a place only the forge holds within 3 s at 1x and 6 s at 4x on its first open and on its return after every source's run, which reads a file at its branch from the forge again (up to 3.4 s at 4x with the lane, 7.9 s without), where before the lane it reached 7.8 s (a pull request's Files) and 8.7 s (a deep folder at 4x); what knobas holds, and Conversation's own section, within the aim on the first open too. The binary file at 4x may move one row: once in two passes its first frame still held the file before it. Compare on a branch with many changes and a run's Log have no line: the first waits on each branch's whole view, longer than the probe's cap under a sync's load, and the second's item makes no read in the rig. The big folders are left out: their set-up waits for a run of its own.",
+ "_extremes": "Lines for open.mjs --set extremes (just open-budget --real <port> --extremes; the extremes pass of PR #2479, 2026-11-13; testenv/README.md, *The extremes*): the aim, 100 ms at 1x and 200 at 4x, nothing moved, except where the read itself is the floor, measured on the Mac (M2 Pro) with margin: x-pr-files waits for the 8 MB *Files* view of 3,000 files over the bridge and its parse; x-docs-page for the 2.6 MB page body of a 2,000-row table; x-docs-huge for a 5 MB page's 10 MB body, which the backend turns into blocks in about 330 ms; x-repo-compare's first open for the forge's own compare of the branch (1.1 to 5.7 s on the WSL box), its return held to the aim. x-run's one moved row is the run page's, before and after this pass.",
+ "extremes": {
+  "x-ticket": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-overview": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-conversation": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-repo-branches": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-repo-prs": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-docs-space": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-run": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 1
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 1
+   }
+  },
+  "x-run-artifacts": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-run-tests": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-run-log": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-files": {
+   "1": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "moved": 0
+   }
+  },
+  "x-docs-page": {
+   "1": {
+    "usefulMs": 250,
+    "firstUsefulMs": 250,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 400,
+    "firstUsefulMs": 400,
+    "moved": 0
+   }
+  },
+  "x-docs-huge": {
+   "1": {
+    "usefulMs": 600,
+    "firstUsefulMs": 600,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 700,
+    "firstUsefulMs": 700,
+    "moved": 0
+   }
+  },
+  "x-repo-compare": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 8000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 8000,
+    "moved": 0
+   }
+  }
+ }
 }

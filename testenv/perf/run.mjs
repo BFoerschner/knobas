@@ -98,6 +98,24 @@ const SCROLL = [
   { name: "pipeline-history", setup: `await __s.go("#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", 2500); return ".tf-bmain";` },
   { name: "monitors", setup: `await __s.go("#/monitors", 2000); return null;` },
 ];
+// The extremes (the extremes pass, 2026-11-13; testenv/README.md, *The extremes*): the worst shapes a real team's
+// data has, on a profile synced with them. The ids the products give (a Confluence page's, a TeamCity run's) come from
+// `KNOBAS_EXTREMES_IDS` (JSON, as `open.mjs --set extremes` takes it); a scenario without its id is left out.
+const XIDS = JSON.parse(process.env.KNOBAS_EXTREMES_IDS ?? "{}");
+const xenc = encodeURIComponent;
+const XPR = `#/pr/${xenc("live-gitea:knobas-extremes/everything#1")}`;
+const XREPO = `#/repo/${xenc("live-gitea:knobas-extremes/everything")}`;
+const XRUN = XIDS.run ? `#/build/${xenc("live-teamcity:buildType:Extremes_Everything")}/${xenc(XIDS.run)}` : null;
+SCROLL.push(
+  { name: "x-ticket", setup: `await __s.go(${JSON.stringify(`#/ticket/${xenc("live-jira:XTRM-1")}`)}, 3000); return ".tf-scroller.tf-work";` },
+  { name: "x-pr-conversation", setup: `await __s.go(${JSON.stringify(`${XPR}/conversation`)}, 4000); return "main.tf-main";` },
+  { name: "x-pr-files", setup: `await __s.go(${JSON.stringify(`${XPR}/diff`)}, 6000); return "main.tf-main";` },
+  { name: "x-repo-branches", setup: `await __s.go(${JSON.stringify(`${XREPO}/branches`)}, 4000); return "main.tf-main";` },
+  { name: "x-repo-prs", setup: `await __s.go(${JSON.stringify(`${XREPO}/prs`)}, 4000); return "main.tf-main";` },
+  ...(XIDS.page ? [{ name: "x-docs-page", setup: `await __s.go(${JSON.stringify(`#/page/${xenc(XIDS.page)}`)}, 4000); return ".tf-rd-main";` }] : []),
+  ...(XIDS.hugePage ? [{ name: "x-docs-huge", setup: `await __s.go(${JSON.stringify(`#/page/${xenc(XIDS.hugePage)}`)}, 5000); return ".tf-rd-main";` }] : []),
+  ...(XRUN ? [{ name: "x-run-artifacts", setup: `await __s.go(${JSON.stringify(`${XRUN}/artifacts`)}, 4000); return "main.tf-main";` }] : []),
+);
 const FILTER = "main input[type=search], main input[type=text], main input:not([type])";
 const TYPE = [
   { name: "tickets-board-filter", setup: `await __s.board(); return "input[placeholder='Filter tickets']";`, text: "payment" },

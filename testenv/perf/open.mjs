@@ -5,7 +5,7 @@
 //
 //   node testenv/perf/open.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--rounds first,return]
 //                               [--check budget-open.json --lines real] [--set nav|inner] [--items inner-items.json]
-//                               [--no-big-folders]
+//                               [--no-big-folders] [--set extremes [--no-seed] [--keep-extremes]]
 //
 // --set   `nav` (the default): the nav pages and the detail pages their rows open; `inner` (the inner-pages pass,
 //         2026-11-12): a repository's landing and tabs, files, a commit, Compare, *New pull request*, a pull request's
@@ -13,6 +13,10 @@
 //         read knobas has never made; and big folders (`big-folders.mjs`, the big-folder pass, 2026-11-13): two scratch
 //         repositories on the live Gitea, one cloned by knobas and one read from the forge, made for the run and
 //         removed after it (`--no-big-folders` leaves them out)
+//         `extremes` (the extremes pass, 2026-11-13; `extremes.mjs`): the worst shapes a real team's data has, seeded
+//         on the live products for the run (`testenv/seed-extremes.sh`, idempotent), synced through the profile's own
+//         sources, and removed after it; `--no-seed` takes them as already seeded and synced, `--keep-extremes` leaves
+//         them on the products
 // --app   a built app, `?fake-ipc&fake-real=<port>` on the saved scale database (examples/headless_ipc.rs), as
 //         `just frame-budget --real` runs it
 // --check fail (exit 1) when a place's useful or settled time, or rows moved after its first useful frame, is over
@@ -29,6 +33,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { attach, launch, sleep } from "./cdp.mjs";
 import * as bigFolders from "./big-folders.mjs";
+import * as extremes from "./extremes.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
@@ -44,7 +49,8 @@ const lines = opt("--lines") ?? "real";
 const set = opt("--set") ?? "nav";
 const items = JSON.parse(readFileSync(opt("--items") ?? new URL("./inner-items.json", import.meta.url), "utf8"));
 if (!app) { console.log("open.mjs: --app <url> is required"); process.exit(2); }
-setTimeout(() => { console.log("watchdog: gave up"); void bigFolders.down().finally(() => process.exit(3)); }, Number(opt("--max-minutes", "45")) * 60000).unref();
+const downAll = () => Promise.all([bigFolders.down(), extremes.down()]);
+setTimeout(() => { console.log("watchdog: gave up"); void downAll().finally(() => process.exit(3)); }, Number(opt("--max-minutes", set === "extremes" ? "180" : "45")) * 60000).unref();
 const withBig = set === "inner" && !args.includes("--no-big-folders");
 
 const base = app.replace(/#.*$/, "");
@@ -123,7 +129,8 @@ function innerPlaces(i) {
     { name: "run-artifacts", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/artifacts"]`, hash: `${RUN}/artifacts`, useful: [[`${shown} .tf-atree, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
   ].map((p) => ({ ...p, inner: true }));
 }
-const placesAt = (rate) => (set === "inner" ? [...innerPlaces(items[String(rate)] ?? items["1"]), ...(withBig ? bigFolders.places(rate, shown) : [])] : PLACES);
+let extremeItems = null;
+const placesAt = (rate) => (set === "extremes" ? extremes.places(extremeItems, shown) : set === "inner" ? [...innerPlaces(items[String(rate)] ?? items["1"]), ...(withBig ? bigFolders.places(rate, shown) : [])] : PLACES);
 /** Whether the nav is drawn: a full page (a ticket, a run) keeps it in the document but shows none. */
 const NAV_SHOWN = `[...document.querySelectorAll(".tf-nav a")].some((a) => a.getBoundingClientRect().width > 0)`;
 /** Every section the nav and the cog reach, for the `late` round's tour. */
@@ -143,6 +150,22 @@ if (withBig && placesAt(1).filter(picked).some((p) => /^(forge-)?folder-/.test(p
   } catch (e) {
     console.log(String(e.message || e));
     await bigFolders.down();
+    process.exit(1);
+  }
+}
+// The extremes are seeded and synced for the run, and taken away after it.
+if (set === "extremes") {
+  const port = Number(new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real"));
+  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void extremes.down().finally(() => process.exit(130)));
+  try {
+    if (!args.includes("--no-seed")) {
+      await extremes.up({ port, seed: true, keep: args.includes("--keep-extremes"), wait: [] });
+    }
+    extremeItems = await extremes.items();
+    if (!args.includes("--no-seed")) await extremes.up({ port, seed: false, keep: args.includes("--keep-extremes"), wait: Object.values(extremeItems).filter((v) => typeof v === "string" && v.includes(":")) });
+  } catch (e) {
+    console.log(String(e.message || e));
+    await extremes.down();
     process.exit(1);
   }
 }
@@ -333,7 +356,7 @@ async function innerRounds(place, rate, entry) {
 await cpu(1);
 save();
 console.log("wrote", out);
-await bigFolders.down();
+await downAll();
 
 let failed = 0;
 if (check) {

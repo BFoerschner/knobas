@@ -17,10 +17,13 @@
 # --syncing <source>  with --inner: keep a run of that source going for the length of the run (`syncing.mjs`),
 #                so its sync fills the forge's quota while the pages are pressed (big folders left out), checked against
 #                `syncing` lines (the priority lane, 2026-11-13; README, *With a sync running*)
+# --extremes     the extreme pages instead (`open.mjs --set extremes`, the extremes pass, 2026-11-13; README, *The
+#                extremes*): seeded on the live products for the run (`testenv/seed-extremes.sh`), synced through the
+#                profile's sources and removed after it, checked against `extremes` lines; `--keep-extremes` leaves them
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4" only="" out="" inner="" forge="" syncing=""
+real="" throttle="1,4" only="" out="" inner="" forge="" syncing="" extremes="" keep=""
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
@@ -30,10 +33,13 @@ while [ $# -gt 0 ]; do
     --inner) inner=1; shift ;;
     --forge) forge=$2; shift 2 ;;
     --syncing) syncing=$2; shift 2 ;;
-    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    --extremes) extremes=1; shift ;;
+    --keep-extremes) keep=1; shift ;;
+    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
-[ -n "$real" ] || { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$real" ] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -z "$extremes" ] || [ -z "$inner" ] || { echo "open-budget: --extremes and --inner are two runs" >&2; exit 2; }
 [ -z "$forge" ] || [ -n "$inner" ] || { echo "open-budget: --forge measures the inner pages: add --inner" >&2; exit 2; }
 [ -z "$syncing" ] || [ -n "$inner" ] || { echo "open-budget: --syncing measures the inner pages: add --inner" >&2; exit 2; }
 [ -z "$syncing" ] || [ -z "$forge" ] || { echo "open-budget: --syncing and --forge are two runs" >&2; exit 2; }
@@ -46,6 +52,11 @@ set_args=() lines=real
 if [ -n "$inner" ]; then
   set_args=(--set inner --rounds "first,return,synced")
   lines=inner
+fi
+if [ -n "$extremes" ]; then
+  set_args=(--set extremes --rounds "first,return")
+  [ -z "$keep" ] || set_args+=(--keep-extremes)
+  lines=extremes
 fi
 proxy="" load=""
 trap 'kill $proxy $load 2>/dev/null' EXIT
