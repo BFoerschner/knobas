@@ -12,7 +12,9 @@
 //         tabs and a run's tabs, at the items `--items` names for each throttle, so each throttle's first open is a
 //         read knobas has never made; and big folders (`big-folders.mjs`, the big-folder pass, 2026-11-13): two scratch
 //         repositories on the live Gitea, one cloned by knobas and one read from the forge, made for the run and
-//         removed after it (`--no-big-folders` leaves them out)
+//         removed after it (`--no-big-folders` leaves them out); and big compares (`big-compare.mjs`, the compare pass,
+//         2026-11-13): branches of 300, 3,000 and 10,000 changed files in a repository knobas cloned and in one it did
+//         not, made for the run and removed after it (`--no-big-compares` leaves them out)
 //         `extremes` (the extremes pass, 2026-11-13; `extremes.mjs`): the worst shapes a real team's data has, seeded
 //         on the live products for the run (`testenv/seed-extremes.sh`, idempotent), synced through the profile's own
 //         sources, and removed after it; `--no-seed` takes them as already seeded and synced, `--keep-extremes` leaves
@@ -33,6 +35,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { attach, launch, sleep } from "./cdp.mjs";
 import * as bigFolders from "./big-folders.mjs";
+import * as bigCompare from "./big-compare.mjs";
 import * as extremes from "./extremes.mjs";
 
 const args = process.argv.slice(2);
@@ -49,9 +52,11 @@ const lines = opt("--lines") ?? "real";
 const set = opt("--set") ?? "nav";
 const items = JSON.parse(readFileSync(opt("--items") ?? new URL("./inner-items.json", import.meta.url), "utf8"));
 if (!app) { console.log("open.mjs: --app <url> is required"); process.exit(2); }
-const downAll = () => Promise.all([bigFolders.down(), extremes.down()]);
+const downAll = () => Promise.all([bigFolders.down(), bigCompare.down(), extremes.down()]);
 setTimeout(() => { console.log("watchdog: gave up"); void downAll().finally(() => process.exit(3)); }, Number(opt("--max-minutes", set === "extremes" ? "180" : "45")) * 60000).unref();
 const withBig = set === "inner" && !args.includes("--no-big-folders");
+// The big compares (the compare pass, 2026-11-13): branches of 300, 3,000 and 10,000 changed files, with a clone and without.
+const withCompares = set === "inner" && !args.includes("--no-big-compares");
 
 const base = app.replace(/#.*$/, "");
 /** A section's nav entry, which names the place last shown in it (`#/builds/<pipeline>`). */
@@ -130,7 +135,7 @@ function innerPlaces(i) {
   ].map((p) => ({ ...p, inner: true }));
 }
 let extremeItems = null;
-const placesAt = (rate) => (set === "extremes" ? extremes.places(extremeItems, shown) : set === "inner" ? [...innerPlaces(items[String(rate)] ?? items["1"]), ...(withBig ? bigFolders.places(rate, shown) : [])] : PLACES);
+const placesAt = (rate) => (set === "extremes" ? extremes.places(extremeItems, shown) : set === "inner" ? [...innerPlaces(items[String(rate)] ?? items["1"]), ...(withBig ? bigFolders.places(rate, shown) : []), ...(withCompares ? bigCompare.places(rate, shown) : [])] : PLACES);
 /** Whether the nav is drawn: a full page (a ticket, a run) keeps it in the document but shows none. */
 const NAV_SHOWN = `[...document.querySelectorAll(".tf-nav a")].some((a) => a.getBoundingClientRect().width > 0)`;
 /** Every section the nav and the cog reach, for the `late` round's tour. */
@@ -150,6 +155,20 @@ if (withBig && placesAt(1).filter(picked).some((p) => /^(forge-)?folder-/.test(p
   } catch (e) {
     console.log(String(e.message || e));
     await bigFolders.down();
+    process.exit(1);
+  }
+}
+// The big compares too, for a run that presses one.
+if (withCompares && placesAt(1).filter(picked).some((p) => /^(forge-)?compare-\d/.test(p.name))) {
+  const port = Number(new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real"));
+  const dir = resolve(dirname(out), "big-compare");
+  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void bigCompare.down().finally(() => process.exit(130)));
+  try {
+    console.log("big-compare: making the repositories, their branches, their source and the clone");
+    await bigCompare.up({ port, dir });
+  } catch (e) {
+    console.log(String(e.message || e));
+    await downAll();
     process.exit(1);
   }
 }
