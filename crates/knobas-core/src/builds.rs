@@ -360,6 +360,40 @@ pub struct RepoPipelineRow {
     pub latest: Vec<RunRow>,
 }
 
+/// An open pull request of a repository, by the branch it is opened from: what
+/// puts a branch in the Builds tab's *Pull requests* group.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct PullHead {
+    /// The branch it is opened from, as the source names it (declared `head`).
+    pub branch: String,
+    pub entity_id: String,
+    /// Its key as the source writes it (`#142`), where the record carries one.
+    pub cell: Option<String>,
+}
+
+/// A repository's Builds tab in one answer: the pipelines that built its
+/// commits ([`RepoPipelineRow`]) and its open pull requests' branches.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RepoBuilds {
+    pub pipelines: Vec<RepoPipelineRow>,
+    pub pull_requests: Vec<PullHead>,
+}
+
+/// A mirrored commit's repository: what *By repository* on the Builds list
+/// groups a pipeline by, through the commits its runs built.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct CommitRepository {
+    pub commit_id: String,
+    pub repo_id: String,
+    pub repo_title: String,
+}
+
 /// The pipelines that build the repository `$2`, each with its newest run per
 /// branch ([`RepoPipelineRow`]). `$1` is the declarations, `$3` the CI role's
 /// fillers, as for [`PIPELINES`].
@@ -461,6 +495,49 @@ select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path
  order by lower(p.name), p.entity_id
 "
 );
+
+/// The open pull requests of the repository `$2` by the branch each is opened
+/// from, `$1` the declarations: those naming the repository as their parent
+/// (`item_parent_name_idx`), open by their declared state, opened from a branch
+/// of the repository itself. A fork's same-named branch is not this one's, and
+/// nor is a deleted fork's pull request, whose `head_repo` is gone. One per
+/// branch, the most recently updated where two name it.
+pub const REPO_PULL_HEADS: &str = concat!(
+    "with repo as (
+  select i.source_id, lower(i.title) as name
+    from sync.live_item i
+   where i.entity_id = $2
+)
+select distinct on (p.branch) p.branch, p.entity_id, p.cell from (
+  select i.entity_id, i.key_cell as cell, i.item_updated_at, repo.name as repo_name, ",
+    crate::declared_string!("$1", "head"),
+    " as branch, ",
+    crate::declared_string!("$1", "head_repo"),
+    " as head_repo, ",
+    crate::declared_state!("$1"),
+    " as state
+    from repo
+    join sync.item_parent ip
+      on ip.arm = 'child' and lower(ip.name) = repo.name and ip.source_id = repo.source_id
+    join sync.live_item i on i.entity_id = ip.entity_id and i.kind = 'pr'
+) p
+ where p.branch is not null and lower(p.state->>'text') = 'open'
+   and lower(p.head_repo) = p.repo_name
+ order by p.branch, p.item_updated_at desc nulls last, p.entity_id
+"
+);
+
+/// The repositories of the mirrored commits `$1`: each commit's stored parent
+/// (`item_parent_entity_idx`) matched to the live item of that kind and title
+/// in its source. A commit the mirror does not hold answers nothing.
+pub const COMMIT_REPOSITORIES: &str = "
+select distinct ip.entity_id as commit_id, r.entity_id as repo_id, r.title as repo_title
+  from sync.item_parent ip
+  join sync.live_item r
+    on r.source_id = ip.source_id and r.kind = ip.kind and lower(r.title) = lower(ip.name)
+ where ip.arm = 'child' and ip.entity_id = any($1::text[])
+ order by ip.entity_id, r.entity_id
+";
 
 /// The runs of the pipeline `$2`, newest first, at most `$3`: the head of its
 /// range of the stored rows (`newest_runs!`, #2185), each read through its
@@ -643,10 +720,12 @@ pub async fn pipelines(
         .collect()
 }
 
-/// The pipelines that build the repository `repo`, each with its newest run
-/// per branch ([`REPO_PIPELINES`]): the sources in `fillers` only, `identity`
-/// the configured usernames, as for [`pipelines`]. No run's `commit_id` is
-/// filled here. Empty for an id no live repository carries.
+/// The repository `repo`'s Builds tab ([`RepoBuilds`]): the pipelines that
+/// build it, each with its newest run per branch ([`REPO_PIPELINES`]), the
+/// sources in `fillers` only and `identity` the configured usernames as for
+/// [`pipelines`], and its open pull requests by branch ([`REPO_PULL_HEADS`]).
+/// No run's `commit_id` is filled here. Empty for an id no live repository
+/// carries.
 ///
 /// # Errors
 ///
@@ -657,14 +736,14 @@ pub async fn repo_pipelines(
     identity: &[String],
     fillers: &[String],
     repo: &EntityRef,
-) -> Result<Vec<RepoPipelineRow>, CoreError> {
+) -> Result<RepoBuilds, CoreError> {
     let rows = sqlx::query(REPO_PIPELINES)
         .bind(declarations.as_param())
         .bind(repo.to_string())
         .bind(fillers)
         .fetch_all(pool)
         .await?;
-    Ok(rows
+    let pipelines = rows
         .iter()
         .map(|row| {
             let latest: sqlx::types::Json<Vec<RawRun>> = row.get("runs");
@@ -684,7 +763,47 @@ pub async fn repo_pipelines(
                     .collect(),
             }
         })
-        .collect())
+        .collect();
+    let pull_requests = sqlx::query_as::<_, (String, String, Option<String>)>(REPO_PULL_HEADS)
+        .bind(declarations.as_param())
+        .bind(repo.to_string())
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(branch, entity_id, cell)| PullHead {
+            branch,
+            entity_id,
+            cell,
+        })
+        .collect();
+    Ok(RepoBuilds {
+        pipelines,
+        pull_requests,
+    })
+}
+
+/// The repositories of the mirrored commits `commits` ([`COMMIT_REPOSITORIES`]).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn commit_repositories(
+    pool: &PgPool,
+    commits: &[String],
+) -> Result<Vec<CommitRepository>, CoreError> {
+    Ok(
+        sqlx::query_as::<_, (String, String, String)>(COMMIT_REPOSITORIES)
+            .bind(commits)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(|(commit_id, repo_id, repo_title)| CommitRepository {
+                commit_id,
+                repo_id,
+                repo_title,
+            })
+            .collect(),
+    )
 }
 
 /// Every run of `pipelines`, each with the id of its pipeline: what the app

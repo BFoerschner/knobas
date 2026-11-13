@@ -1115,9 +1115,12 @@ async fn assert_repo_pipelines_read_the_repositorys_rows(analyzed: bool) {
         knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
             .await
             .unwrap();
-    assert!(!answered.is_empty(), "the repository's builds are found");
     assert!(
-        answered.iter().all(|p| !p.latest.is_empty()),
+        !answered.pipelines.is_empty(),
+        "the repository's builds are found"
+    );
+    assert!(
+        answered.pipelines.iter().all(|p| !p.latest.is_empty()),
         "each pipeline with its newest run per branch"
     );
     let fillers = vec!["ci".to_owned()];
@@ -1138,6 +1141,42 @@ async fn assert_repo_pipelines_read_the_repositorys_rows(analyzed: bool) {
                     .flat_map(|t| whole_reads(&plan[0]["Plan"], t)),
             )
             .map(|f| format!("{name}: {f}")),
+    );
+    // *By repository*'s read: the repositories of a repository's commits, by
+    // the commits' stored parents, never every parent read whole.
+    let commits: Vec<String> = sqlx::query_scalar(
+        "select i.entity_id from sync.item i
+          where i.kind = 'commit' and i.payload #>> '{repository,full_name}' = 'acme/r3'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let plan = explain(&pool, knobas_core::builds::COMMIT_REPOSITORIES, |q| {
+        q.bind(commits.clone())
+    })
+    .await;
+    wrong.extend(
+        whole_reads(&plan[0]["Plan"], "item_parent")
+            .into_iter()
+            .map(|f| format!("commit repositories: {f}")),
+    );
+    // The tab's open pull requests: the repository's children by their stored parent, never every parent read whole.
+    let plan = explain(&pool, knobas_core::builds::REPO_PULL_HEADS, |q| {
+        q.bind(declarations.as_param()).bind("git:repo:acme/r3")
+    })
+    .await;
+    wrong.extend(
+        whole_reads(&plan[0]["Plan"], "item_parent")
+            .into_iter()
+            .map(|f| format!("repo pull heads: {f}")),
+    );
+    let named = knobas_app::commands::entity::commit_repositories_inner(&pool, &commits)
+        .await
+        .unwrap();
+    assert_eq!(
+        named.len(),
+        commits.len(),
+        "each commit names its repository"
     );
     let state = if analyzed {
         "analyzed"
@@ -1166,7 +1205,7 @@ async fn assert_repo_pipelines_read_the_repositorys_rows(analyzed: bool) {
     .unwrap();
     println!(
         "repo_pipelines, tables {state}: {} pipelines in {fastest:?} (fastest of five), the statement {} ms",
-        answered.len(),
+        answered.pipelines.len(),
         analysis[0]["Execution Time"]
     );
 }

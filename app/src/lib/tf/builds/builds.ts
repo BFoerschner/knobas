@@ -321,7 +321,7 @@ export function foldOpen(remembered: boolean | undefined, f: Fold, selected: str
  */
 export type ListRow =
   | { kind: "head"; key: string; text: string }
-  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number; pre: string }
+  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number; pre: string; tag: string | null }
   | { kind: "fold"; key: string; fold: Fold; depth: number; open: boolean };
 
 /**
@@ -339,21 +339,28 @@ export function listRows(
   const rows: ListRow[] = [];
   if (pinned.length > 0) {
     rows.push({ kind: "head", key: "head:pinned", text: "Pinned" });
-    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0, pre: "" });
+    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0, pre: "", tag: null });
   }
-  const walk = (pipelines: readonly PipelineRow[], folds: readonly Fold[], depth: number) => {
+  // A pipeline sits in one fold of a source's tree, but in each repository's it built: there every row is keyed by its
+  // fold, so a row keeps its key whichever folds are open.
+  const walk = (pipelines: readonly PipelineRow[], folds: readonly Fold[], depth: number, at: string, byFold: boolean) => {
     const pre = sharedPrefix(pipelines.map((pipeline) => pipeline.name));
-    for (const pipeline of pipelines) rows.push({ kind: "pipeline", key: `tree:${pipeline.entity_id}`, pipeline, depth, pre });
+    const tags = minorityTags(pipelines);
+    for (const pipeline of pipelines) {
+      const key = byFold ? `tree:${at}/${pipeline.entity_id}` : `tree:${pipeline.entity_id}`;
+      rows.push({ kind: "pipeline", key, pipeline, depth, pre, tag: tags.get(pipeline.source_id) ?? null });
+    }
     for (const f of folds) {
       const isOpen = open(f);
       rows.push({ kind: "fold", key: `fold:${f.key}`, fold: f, depth, open: isOpen });
-      if (isOpen) walk(f.pipelines, f.folds, depth + 1);
+      if (isOpen) walk(f.pipelines, f.folds, depth + 1, f.key, byFold);
     }
   };
   trees.forEach((tree, at) => {
-    const text = scope === "all" ? tree.source : at === 0 ? "By project" : null;
+    // The repositories' tree says so whatever the scope; a source's trees under *This job* share one heading.
+    const text = tree.sourceId === REPOS || scope === "all" ? tree.source : at === 0 ? "By project" : null;
     if (text !== null) rows.push({ kind: "head", key: `head:${tree.sourceId}:${text}`, text });
-    walk(tree.pipelines, tree.folds, 0);
+    walk(tree.pipelines, tree.folds, 0, tree.sourceId, tree.sourceId === REPOS);
   });
   return rows;
 }
@@ -369,6 +376,56 @@ export function sharedPrefix(names: readonly string[]): string {
   for (const name of names) while (!name.startsWith(common)) common = common.slice(0, -1);
   const cut = /^.*[_.\-\s:/]/.exec(common)?.[0] ?? "";
   return names.every((name) => name.length > cut.length) ? cut : "";
+}
+
+/**
+ * Where two sources share a fold (*By repository*), the fewer's name by its id: what its rows say beside their name.
+ * Nothing for a fold one source holds, as every fold of a source's own tree.
+ */
+function minorityTags(pipelines: readonly PipelineRow[]): Map<string, string> {
+  const counts = new Map<string, { name: string; n: number }>();
+  for (const p of pipelines) counts.set(p.source_id, { name: p.source_name, n: (counts.get(p.source_id)?.n ?? 0) + 1 });
+  if (counts.size < 2) return new Map();
+  const most = [...counts.entries()].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]))[0]![0];
+  return new Map([...counts.entries()].filter(([id]) => id !== most).map(([id, { name }]) => [id, name]));
+}
+
+/** The id of {@link repoTreeOf}'s one tree, which no source carries. */
+const REPOS = "repos";
+
+/**
+ * The pipelines by the repositories their runs built (*By repository*, the repo-builds pass): one tree, a fold for
+ * each repository by its name, a pipeline under each it built (`reposOf`), then *No repository* for the pipelines that
+ * built none mirrored: nightlies, deploys, infrastructure.
+ */
+export function repoTreeOf(
+  list: readonly PipelineRow[],
+  reposOf: (pipeline: PipelineRow) => readonly { id: string; title: string }[],
+): SourceTree[] {
+  const byRepo = new Map<string, { title: string; pipelines: PipelineRow[] }>();
+  const none: PipelineRow[] = [];
+  for (const pipeline of list) {
+    const repos = reposOf(pipeline);
+    if (repos.length === 0) none.push(pipeline);
+    for (const repo of repos) {
+      if (!byRepo.has(repo.id)) byRepo.set(repo.id, { title: repo.title, pipelines: [] });
+      byRepo.get(repo.id)!.pipelines.push(pipeline);
+    }
+  }
+  const fold = (key: string, name: string, pipelines: PipelineRow[]): Fold => ({
+    name,
+    key: `repos/${key}`,
+    pipelines,
+    folds: [],
+    count: pipelines.length,
+    failing: pipelines.filter(isFailing).length,
+    running: pipelines.filter(isRunning).length,
+  });
+  const folds = [...byRepo.entries()]
+    .sort((a, b) => a[1].title.toLowerCase().localeCompare(b[1].title.toLowerCase()))
+    .map(([id, repo]) => fold(id, repo.title, repo.pipelines));
+  if (none.length > 0) folds.push(fold("", "No repository", none));
+  return [{ source: "By repository", sourceId: REPOS, pipelines: [], folds }];
 }
 
 /** The pinned pipelines among `list`, in its order. */

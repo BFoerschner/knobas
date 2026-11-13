@@ -113,6 +113,8 @@ export interface RepoRoute {
   branch: string | null;
   /** Compare: the branch it goes into, where the address names one (`compare/<base>...<head>`, #2427). */
   base: string | null;
+  /** Builds: the pipeline whose runs open inside the tab (`builds/<branch>/<pipeline id>`, each encoded whole). */
+  pipeline: string | null;
 }
 
 /** Between the base and the head in a compare address: git's own, and never part of a ref name. */
@@ -129,7 +131,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
   if (rest[1] === LINE) {
     const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
-    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null };
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null, pipeline: null };
   }
   const tab = (TABS.has(rest[1] ?? "") ? rest[1] : "files") as RepoTab;
   const tail = rest.slice(2).join("/") || null;
@@ -141,8 +143,10 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
     path: tab === "files" || tab === "edit" ? tail : null,
     line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
-    branch: tab === "compare" ? compared.branch : tab === "builds" ? tail : null,
+    // Builds' branch and pipeline are each one segment, encoded whole (`buildsHash`).
+    branch: tab === "compare" ? compared.branch : tab === "builds" ? (rest[2] ?? null) : null,
     base: tab === "compare" ? compared.base : null,
+    pipeline: tab === "builds" ? (rest[3] ?? null) : null,
   };
 }
 
@@ -156,6 +160,11 @@ export function repoHash(repoId: string, tab?: RepoTab, ...tail: string[]): stri
   const parts = [`#/repo/${encodeURIComponent(repoId)}`];
   if (tab !== undefined) parts.push(tab, ...tail);
   return parts.join("/");
+}
+
+/** The Builds tab at `branch`, and inside it `pipeline`'s runs where given; each encoded whole. */
+export function buildsHash(repoId: string, branch: string, pipeline?: string): string {
+  return repoHash(repoId, "builds", encodeURIComponent(branch), ...(pipeline === undefined ? [] : [encodeURIComponent(pipeline)]));
 }
 
 /** The Files tab with `path` open; each segment encoded, the slashes kept. */

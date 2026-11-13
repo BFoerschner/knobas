@@ -1750,7 +1750,7 @@ const CASES: Case[] = [
               jobReach: () => deferred([]),
               submitWrite: () => deferred({} as never),
               codeFacts: () => deferred([]),
-              repoPipelines: () => deferred([]),
+              repoPipelines: () => deferred({ pipelines: [], pull_requests: [] }),
             },
           },
         }),

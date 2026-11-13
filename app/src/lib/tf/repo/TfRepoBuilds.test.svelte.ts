@@ -70,7 +70,9 @@ const ROWS = [
 
 const option = (name: string, isDefault = false): BranchOption => ({ name, entityId: `git:${name}`, isDefault });
 
-function draw(props: { branch?: string | null; rows?: RepoPipelineRow[]; reads?: string[] } = {}) {
+function draw(
+  props: { branch?: string | null; rows?: RepoPipelineRow[]; pipeline?: string | null; pulls?: { branch: string; entity_id: string; cell: string | null }[] } = {},
+) {
   page = mount(TfRepoBuilds, {
     target,
     props: {
@@ -80,10 +82,14 @@ function draw(props: { branch?: string | null; rows?: RepoPipelineRow[]; reads?:
       mine: ["feat/PAY-231-retry"],
       job: "PAY-231",
       branch: props.branch ?? null,
-      read: (id: string) => {
-        props.reads?.push(id);
-        return Promise.resolve(props.rows ?? ROWS);
-      },
+      pipeline: props.pipeline ?? null,
+      builds: { pipelines: props.rows ?? ROWS, pull_requests: props.pulls ?? [] },
+      runs: () =>
+        Promise.resolve([
+          run("1187", "feat/PAY-231-retry", "err", "2026-08-22T10:09:00Z"),
+          run("1171", "main", "ok", "2026-08-22T09:20:00Z"),
+          run("77", "elsewhere/x", "ok", "2026-08-22T08:00:00Z"),
+        ]),
     },
   });
 }
@@ -94,10 +100,8 @@ const rail = () =>
   );
 
 test("the rail: the default branch, yours, then the rest by newest run, and it opens on yours", async () => {
-  const reads: string[] = [];
-  draw({ reads });
+  draw();
   await settle();
-  expect(reads).toEqual(["git:repo:tidewater/payout-service"]);
   expect(rail()).toEqual(["# Default branch", "main", "# Yours", "feat/PAY-231-retry *", "# Other branches", "spike/x", "chore/quiet"]);
   const mine = target.querySelector<HTMLAnchorElement>('.tf-rbr[aria-current="true"]')!;
   expect(mine.querySelector(".tf-rg")?.getAttribute("aria-label")).toBe("Failed");
@@ -156,4 +160,25 @@ test("Mine keeps your branches, and the default branch is not one", async () => 
   flushSync();
   expect(rail()).toEqual(["# Yours", "feat/PAY-231-retry *"]);
   expect(target.querySelector(".tf-rb-count")?.textContent).toBe("1 of 4");
+});
+
+test("a branch an open pull request is opened from is in Pull requests, its key on the row", async () => {
+  draw({ pulls: [{ branch: "spike/x", entity_id: "git:pr:142", cell: "#142" }] });
+  await settle();
+  expect(rail()).toEqual(["# Default branch", "main", "# Yours", "feat/PAY-231-retry *", "# Pull requests", "spike/x", "# Other branches", "chore/quiet"]);
+});
+
+test("a pipeline opens inside the tab: its runs on every branch of the repository, or the default branch's", async () => {
+  draw({ pipeline: "tc:buildType:Payout_IntegrationTests" });
+  await settle();
+  expect(target.querySelector(".tf-rbp h2")?.textContent).toBe("Payout_IntegrationTests");
+  const runs = () => [...target.querySelectorAll(".tf-rbruns tbody tr")].map((tr) => tr.querySelector(".tf-rbt-br")?.textContent?.trim());
+  // A run on a branch this repository does not have is another repository's.
+  expect(runs()).toEqual(["feat/PAY-231-retry PAY-231", "main"]);
+  [...target.querySelectorAll<HTMLButtonElement>('.tf-seg[aria-label="Runs on"] button')].find((b) => b.textContent === "main")!.click();
+  flushSync();
+  expect(runs()).toEqual(["main"]);
+  expect(target.querySelector<HTMLAnchorElement>(".tf-rb-back a")?.getAttribute("href")).toBe(
+    "#/repo/git%3Arepo%3Atidewater%2Fpayout-service/builds/feat%2FPAY-231-retry",
+  );
 });

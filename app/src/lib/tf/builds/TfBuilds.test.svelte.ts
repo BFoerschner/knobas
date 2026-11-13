@@ -505,7 +505,7 @@ test("a pipeline This job leaves out stays pinned over the list while you are on
 test("All is the default, as on every page; This job prunes the tree to its pipelines, each with its reasons", async () => {
   drawTree({ job: "PAY-231", reasons: ON_JOB });
   await settle();
-  const scope = [...target.querySelectorAll<HTMLButtonElement>(".tf-pl .tf-seg button")];
+  const scope = [...target.querySelectorAll<HTMLButtonElement>('.tf-pl .tf-seg[aria-label="Scope"] button')];
   expect(scope.map((b) => [b.textContent?.replace(/\s+/g, " ").trim(), b.getAttribute("aria-pressed")])).toEqual([
     [`This job ${ON_JOB.length}`, "false"],
     ["All", "true"],
@@ -671,4 +671,40 @@ test("a filter that opens every fold of a big CI draws only the rows near the vi
   expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Bulk_0997");
   expect(names()).not.toContain("Bulk_0000");
   running();
+});
+
+test("By repository folds the pipelines by the repositories their runs built, those that built none last", async () => {
+  const commit = (repo: string) => `git:${repo}@abc`;
+  const at = (id: string, repo: string | null, failing = false): PipelineRow => ({
+    ...pipeline(id, id, [{ ...run(`teamcity:build:${id}`, failing ? "err" : "ok"), commit_id: repo === null ? null : commit(repo) }]),
+  });
+  const list = [at("Payout_Build", "tidewater/payout-service", true), at("Ledger_Build", "tidewater/ledger-api"), at("Nightly", null)];
+  const asked: string[][] = [];
+  page = mount(TfBuilds, {
+    target,
+    props: {
+      ready: true,
+      head: "builds",
+      rest: [],
+      job: null,
+      ports: {
+        pipelines: () => Promise.resolve(list),
+        runs: () => Promise.resolve([]),
+        commitRepositories: (ids: string[]) => {
+          asked.push(ids);
+          return Promise.resolve(
+            ids.map((id) => ({ commit_id: id, repo_id: id.replace(/@.*/, ""), repo_title: id.replace(/^git:|@.*$/g, "") })),
+          );
+        },
+      },
+    },
+  });
+  await settle();
+  expect(asked).toEqual([]);
+  [...target.querySelectorAll<HTMLButtonElement>('.tf-seg[aria-label="Group by"] button')].find((b) => b.textContent === "By repository")!.click();
+  await settle();
+  expect(asked).toEqual([[commit("tidewater/ledger-api"), commit("tidewater/payout-service")]]);
+  expect([...target.querySelectorAll(".tf-pl h3")].map((h) => h.textContent)).toEqual(["By repository"]);
+  const folds = [...target.querySelectorAll(".tf-pl-fold > summary")].map((s) => s.querySelector(".tf-fold-nm")?.textContent);
+  expect(folds).toEqual(["tidewater/ledger-api", "tidewater/payout-service", "No repository"]);
 });

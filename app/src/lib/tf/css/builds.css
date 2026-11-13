@@ -295,6 +295,24 @@
 .tf-rb-none { color: var(--muted); font-size: var(--t-xs); }
 .tf-rb-notrun { font-size: var(--t-sm); color: var(--ink-2); margin: 12px 0 0; }
 .tf-cbody .tf-rb-notrun a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+/* A pipeline inside the tab: where it was opened from, its name (a title, not code), which runs, then its runs. */
+.tf-rb-back { font-size: var(--t-sm); margin: 0 0 6px; }
+.tf-cbody .tf-rb-back a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.tf-rbp-h h2.tf-rbp-pl { font: 600 var(--t-xl) var(--sans); }
+.tf-rbp > .tf-seg { margin: 0 0 12px; }
+.tf-rbt col.tf-rbt-no { width: 170px; }
+.tf-rbt col.tf-rbt-dur { width: 110px; }
+.tf-rbt td.tf-rbt-br { font-size: var(--t-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-cbody .tf-rbruns td a { color: inherit; margin-right: 6px; }
+/* The Branches tab's *Builds* cell: the worst glyph and the words, loud only where something failed. */
+.tf-cbody .tf-rbranches td.tf-rbr-builds a { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-cbody .tf-rbranches td.tf-rbr-builds a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.tf-cbody .tf-rbranches td.tf-rbr-builds a.tf-err { color: var(--err); font-weight: 600; }
+.tf-cbody .tf-rbranches td.tf-rbr-builds a.tf-info { color: var(--info); }
+/* *By repository* on the Builds list: where a repository is built by two sources, the fewer's rows say which. */
+.tf-pi-src { flex: none; font-size: var(--t-2xs); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.tf-pi[aria-current="true"] .tf-pi-src { color: inherit; border-color: currentColor; }
+.tf-pl-top .tf-pl-group { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 @media (max-width: 900px) {
   .tf-rbv { grid-template-columns: minmax(0, 1fr); }
   .tf-rbv > .tf-rbrail { position: static; max-height: 45vh; }

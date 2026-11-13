@@ -9,6 +9,7 @@ import type { DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewActio
 import {
   ancestors,
   branchOptions,
+  buildsHash,
   withMade,
   readAllRows,
   branchStanding,
@@ -48,7 +49,7 @@ import {
 const REPO = "gitea:tidewater/payout-service";
 
 test("an address names the repository, its tab and what the tab has selected", () => {
-  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null });
+  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null });
   expect(readRepoRoute([REPO, "files", "src", "sepa", "retry.rs"])).toMatchObject({ tab: "files", path: "src/sepa/retry.rs" });
   expect(readRepoRoute([REPO, "commits"])).toMatchObject({ tab: "commits", commit: null });
   expect(readRepoRoute([REPO, "commits", `${REPO}@c90d11`])).toMatchObject({ tab: "commits", commit: `${REPO}@c90d11` });
@@ -72,6 +73,7 @@ test("a link to a line of a file is the Files tab at that line (#2251)", () => {
     commit: null,
     branch: null,
     base: null,
+    pipeline: null,
   });
   expect(readRepoRoute([REPO, "files", "line", "7"])).toMatchObject({ path: "line/7", line: null });
   // No line number, or none worth one, is the file at its top.
@@ -585,4 +587,11 @@ test("readAllRows hands each page over as it arrives, the rows so far appended, 
   expect(handed[2]![2499]).toBe("o/r2499");
   // Whoever awaits the whole list still gets it in one piece.
   expect(rows.length).toBe(2500);
+});
+
+test("Builds' address names the branch and the pipeline, each one segment however many slashes it holds", () => {
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  const hash = buildsHash(REPO, "feature/x", "tc:buildType:Payout_Build");
+  expect(readRepoRoute(segments(hash))).toMatchObject({ tab: "builds", branch: "feature/x", pipeline: "tc:buildType:Payout_Build" });
+  expect(readRepoRoute(segments(buildsHash(REPO, "main")))).toMatchObject({ tab: "builds", branch: "main", pipeline: null });
 });

@@ -1309,3 +1309,51 @@ test("the page asks for its own repository's pull requests by name, and keeps th
   // The open one of its own; the other repository's open one is not counted.
   expect([...target.querySelectorAll(".tf-tabs a")].map(text)).toContain("Pull requests 1");
 });
+
+/** A run of the fixture's one pipeline on `branch`, failed or passed (the repo-builds pass). */
+function built(id: string, branch: string, failed: boolean) {
+  return {
+    entity_id: `tc:build:${id}`,
+    number: id,
+    state: { text: failed ? "FAILURE" : "SUCCESS", tone: failed ? ("err" as const) : ("ok" as const) },
+    branch,
+    started: "2026-08-22T10:00:00Z",
+    finished: "2026-08-22T10:05:00Z",
+    duration_seconds: 300,
+    updated_at: "2026-08-22T10:05:00Z",
+    web_url: null,
+    trigger: null,
+    started_by: null,
+    started_by_me: false,
+    revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
+    tests: null,
+  };
+}
+
+test("Branches says each branch's builds, linking to the Builds tab at it; the tab counts what builds the repository", async () => {
+  const builds = {
+    pipelines: [
+      {
+        entity_id: "tc:buildType:Payout_Build",
+        source_id: "tc",
+        source_name: "TeamCity",
+        name: "Payout_Build",
+        group: null,
+        path: [],
+        web_url: null,
+        latest: [built("2", "feature/PAY-231-sepa-retry", true), built("1", "main", false)],
+      },
+    ],
+    pull_requests: [],
+  };
+  await draw([REPO, "branches"], ports({ repoPipelines: () => Promise.resolve(builds) }));
+  const cells = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => text(tr.querySelector(".tf-rbr-builds")));
+  expect(cells).toEqual(["All 1 passed", "1 of 1 failing"]);
+  const failing = target.querySelector<HTMLAnchorElement>(".tf-rbranches .tf-rbr-builds a.tf-err")!;
+  expect(failing.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/builds/${encodeURIComponent("feature/PAY-231-sepa-retry")}`);
+  const tab = [...target.querySelectorAll(".tf-tabs a")].find((a) => a.textContent?.startsWith("Builds"))!;
+  expect(text(tab)).toBe("Builds 1");
+});

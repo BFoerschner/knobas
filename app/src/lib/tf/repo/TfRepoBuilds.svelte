@@ -1,25 +1,33 @@
 <!--
   A repository's Builds tab (the repo-builds pass, `mockups/builds/repo-builds.md`): the pipelines that built the
-  repository's commits (`repo_pipelines`, one statement over the mirror, kept by the answer cache), branch by branch.
+  repository's commits, branch by branch. The page reads them once (`repo_pipelines`, `TfRepo.svelte`) and hands the
+  answer here, to the tab's count and to the Branches tab's *Builds* column.
 
   - **Left**, the branches as the Builds rail draws its rows (`builds.css`): the default branch, yours (the checkout's,
-    those naming the job), then every other by its newest run. Each is the glyph of its pipelines' worst newest run,
-    its name with its namespace dim, and *N failing* where something failed. A filter by name and a *Failing* chip.
+    those naming the job), those an open pull request is opened from, then every other, each by its newest run. Each
+    is the glyph of its pipelines' worst newest run, its name with its namespace dim, and *N failing* or its pull
+    request. A filter by name, *Failing* and *Mine*. Rows keep the place they first drew.
   - **Right**, the branch shown (`builds/<branch>`; yours, else the default) against the default branch: what fails
     only on it, as the run page's problem box with its log, then a table of each pipeline's newest run here beside
     the default branch's, and in a word what that means. The pipelines that never ran on it are one line under it.
+  - **A pipeline** (`builds/<branch>/<pipeline>`): its runs on the default branch or on every branch of the
+    repository, without leaving it; *Open in Builds* for its whole page.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
   import { ipcErrorMessage } from "../../ipc";
-  import { repoPipelines, type RepoPipelineRow, type RunRow } from "../../ipc/entity";
+  import { commitRepositories, pipelineRuns, type CommitRepository, type RepoBuilds, type RepoPipelineRow, type RunRow } from "../../ipc/entity";
   import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import { filterKeys } from "../filter-keys";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfRunGlyph from "../builds/TfRunGlyph.svelte";
-  import { pipelineHash, runAt, runGlyph, runHash, runTone, shortTime, testsWords, toneWord } from "../builds/builds";
-  import { compareOn, groupBranches, holdOrder, latestOn, railOf, type RailBranch, type Verdict } from "./repo-builds";
-  import { repoHash, type BranchOption } from "./repo";
+  import { pipelineHash, runAt, runGlyph, runHash, runTone, shortTime, stateWord, testsWords, toneWord } from "../builds/builds";
+  import { branchName } from "../builds/pipeline";
+  import { secondsLabel } from "../../time/format";
+  import { branchWords, compareOn, groupBranches, holdOrder, latestOn, railOf, type Verdict } from "./repo-builds";
+  import { buildsHash, repoHash, type BranchOption } from "./repo";
+  import { itemHash } from "../job/job";
 
   let {
     repoId,
@@ -28,8 +36,12 @@
     mine,
     job,
     branch,
+    pipeline = null,
+    builds,
+    failed = null,
+    runs = (id: string) => pipelineRuns(id),
+    commitsOf = (ids: string[]) => commitRepositories(ids),
     refreshed = 0,
-    read = repoPipelines,
   }: {
     repoId: string;
     /** The repository's branches, as the page's branch list reads them; `null` until it answered. */
@@ -41,40 +53,32 @@
     job: string | null;
     /** The branch the address names (`builds/<branch>`), else `null`. */
     branch: string | null;
-    /** Bumped by the page's *Refresh* and a return to the tab: reads again, keeping what it drew meanwhile. */
+    /** The pipeline the address names (`builds/<branch>/<pipeline>`), whose runs open here. */
+    pipeline?: string | null;
+    /** The page's answer (`repo_pipelines`); `null` until it answered. */
+    builds: RepoBuilds | null;
+    /** Why the page's read failed, while it has no answer to draw. */
+    failed?: string | null;
+    /** A pipeline's runs, injectable so a test needs no bridge. */
+    runs?: ((pipelineId: string) => Promise<RunRow[]>) | undefined;
+    /** The repositories of the runs' commits, injectable so a test needs no bridge. */
+    commitsOf?: ((commitIds: string[]) => Promise<CommitRepository[]>) | undefined;
+    /** Bumped by the page's *Refresh* and a return to the tab: the pipeline's runs are read again over what is drawn. */
     refreshed?: number;
-    /** The read, injectable so a test needs no bridge. */
-    read?: ((repoId: string) => Promise<RepoPipelineRow[]>) | undefined;
   } = $props();
 
-  let rows = $state.raw<RepoPipelineRow[] | null>(null);
-  let failed = $state<string | null>(null);
-  /** Bumped by every read, so an older one answering late is dropped. */
-  let reads = 0;
-  let readFor: string | null = null;
+  const rows = $derived(builds?.pipelines ?? null);
+  /** The branches an open pull request is opened from, and each one's key (`#142`). */
+  const pulls = $derived(new Map((builds?.pull_requests ?? []).map((pull) => [pull.branch, pull])));
+
+  /** Whose answer the held places are: another repository's are not this one's. */
+  let heldFor: string | null = null;
   $effect(() => {
-    const id = repoId;
-    void refreshed;
-    const at = ++reads;
-    // Another repository's rows, error and held places are not this one's; a read again of the same keeps them meanwhile.
-    if (readFor !== id) {
-      rows = null;
-      failed = null;
-      readFor = id;
-      firstDraw = null;
-      railPlaces.clear();
-      tablePlaces.clear();
-    }
-    untrack(() => read(id)).then(
-      (answer) => {
-        if (at !== reads) return;
-        rows = answer;
-        failed = null;
-      },
-      (error: unknown) => {
-        if (at === reads) failed = ipcErrorMessage(error);
-      },
-    );
+    if (heldFor === repoId) return;
+    heldFor = repoId;
+    firstDraw = null;
+    railPlaces.clear();
+    tablePlaces.clear();
   });
 
   /** A branch this session is still making has run nothing yet, and is not listed. */
@@ -86,16 +90,18 @@
   const rail = $derived(rows === null ? [] : railOf(rows, listed));
 
   /**
-   * What the tab first drew with, held for the visit (rows stay where they drew, 2026-11-11): your branches, and the
-   * branch it opened on when the address names none. A checkout read that lands later moves no branch into *Yours*.
+   * What the tab first drew with, held for the visit (rows stay where they drew, 2026-11-11): your branches, the
+   * branches a pull request was open from, and the branch it opened on when the address names none. A checkout read or
+   * a new pull request that lands later moves no branch from one group to another.
    */
-  let firstDraw = $state<{ mine: readonly string[]; opened: string } | null>(null);
+  let firstDraw = $state<{ mine: readonly string[]; pulled: readonly string[]; opened: string } | null>(null);
   $effect(() => {
     if (!ready || firstDraw !== null) return;
     const yours = mine;
-    firstDraw = { mine: yours, opened: yours.find((name) => rail.some((b) => b.name === name)) ?? def };
+    firstDraw = { mine: yours, pulled: [...pulls.keys()], opened: yours.find((name) => rail.some((b) => b.name === name)) ?? def };
   });
   const heldMine = $derived(firstDraw?.mine ?? mine);
+  const heldPulls = $derived(firstDraw?.pulled ?? [...pulls.keys()]);
   /** Each branch's place in the rail and each pipeline's in a branch's table, from the first time they drew. */
   const railPlaces = new Map<string, number>();
   const tablePlaces = new Map<string, Map<string, number>>();
@@ -112,7 +118,10 @@
     ),
   );
   const groups = $derived(
-    groupBranches(kept, def, heldMine).map((group) => ({ ...group, branches: holdOrder(railPlaces, group.branches, (b) => b.name) })),
+    groupBranches(kept, def, heldMine, heldPulls).map((group) => ({
+      ...group,
+      branches: holdOrder(railPlaces, group.branches, (b) => b.name),
+    })),
   );
   /** The branch shown: the address's, else the one the tab opened on. */
   const current = $derived(branch ?? firstDraw?.opened ?? def);
@@ -127,12 +136,6 @@
   const only = $derived(page?.ran.filter((x) => x.verdict === "only") ?? []);
   const busy = $derived(page?.ran.filter((x) => x.verdict === "running" || x.verdict === "queued").length ?? 0);
   const also = $derived(page?.ran.filter((x) => x.verdict === "also").length ?? 0);
-
-  /** A branch in words, for its title: how many failed, else its state. */
-  function branchWord(b: RailBranch): string {
-    if (b.failing > 0) return `${b.failing} failing`;
-    return b.tone === "ok" ? "All passed" : toneWord(b.tone);
-  }
 
   function verdictWord(verdict: Verdict): { text: string; tone: string } {
     switch (verdict) {
@@ -157,8 +160,61 @@
   }
 
   function branchHref(name: string): string {
-    return repoHash(repoId, "builds", encodeURIComponent(name));
+    return buildsHash(repoId, name);
   }
+
+  /** A pipeline's runs inside the tab, at the branch shown. */
+  function pipelineHref(pipelineId: string): string {
+    return buildsHash(repoId, current, pipelineId);
+  }
+
+  /** The pipeline shown inside the tab: its row, and its runs as `pipeline_runs` answers them. */
+  const shownPipeline = $derived(pipeline === null ? null : (rows?.find((row) => row.entity_id === pipeline) ?? null));
+  let pipelineRows = $state.raw<RunRow[] | null>(null);
+  let pipelineFailed = $state<string | null>(null);
+  let runsRead = 0;
+  /** Each run's commit by the repository it is in: a run is this repository's when its commit is (`commit_repositories`). */
+  let runRepos = $state.raw<Map<string, string> | null>(null);
+  let runsFor: string | null = null;
+  $effect(() => {
+    const id = pipeline;
+    void refreshed;
+    // Another pipeline's runs are not drawn under this one's name; a read again of the same keeps them meanwhile.
+    if (runsFor !== id) {
+      runsFor = id;
+      pipelineRows = null;
+      pipelineFailed = null;
+      runRepos = null;
+    }
+    if (id === null) return;
+    const at = ++runsRead;
+    untrack(() => runs(id))
+      .then(async (answer) => {
+        const commits = [...new Set(answer.flatMap((run) => (run.commit_id === null ? [] : [run.commit_id])))];
+        const named = commits.length === 0 ? [] : await untrack(() => commitsOf(commits));
+        if (at !== runsRead) return;
+        runRepos = new Map(named.map((c) => [c.commit_id, c.repo_id]));
+        pipelineRows = answer;
+      })
+      .catch((error: unknown) => {
+        if (at === runsRead) pipelineFailed = ipcErrorMessage(error);
+      });
+  });
+  /** Which runs: the default branch's, or every branch's of this repository. */
+  let runScope = $state<"main" | "every">("every");
+  const branchNames = $derived(new Set(rail.map((b) => b.name)));
+  /**
+   * The runs this repository's: by their commit's repository where the mirror holds the commit (a pipeline that builds
+   * two repositories has two `main`s), else by a branch name this repository has.
+   */
+  const shownRuns = $derived(
+    (pipelineRows ?? []).filter((run) => {
+      const name = run.branch === null ? null : branchName(run.branch);
+      if (name === null || (runScope === "main" && name !== def)) return false;
+      const repo = run.commit_id === null ? undefined : runRepos?.get(run.commit_id);
+      return repo !== undefined ? repo === repoId : branchNames.has(name);
+    }),
+  );
 </script>
 
 {#snippet cell(row: RepoPipelineRow, name: string)}
@@ -211,14 +267,14 @@
             <h3>{group.head}</h3>
             {#each group.branches as b (b.name)}
               {@const slash = b.name.lastIndexOf("/")}
-              <a class="tf-tr tf-pi tf-d0 tf-rbr" href={branchHref(b.name)} aria-current={b.name === current} title="{b.name}: {branchWord(b)}">
+              <a class="tf-tr tf-pi tf-d0 tf-rbr" href={branchHref(b.name)} aria-current={b.name === current} title="{b.name}: {branchWords(b)}">
                 <TfRunGlyph tone={b.tone} word={toneWord(b.tone)} />
                 <span class="tf-pi-nm" class:tf-bad={b.failing > 0}
                   >{#if slash > 0}<span class="tf-pi-pre">{b.name.slice(0, slash + 1)}</span>{/if}{b.name.slice(slash + 1)}</span
                 >
                 {#if b.failing > 0}<span class="tf-pi-when tf-err">{b.failing} failing</span>{:else if b.tone === "run"}<span
                     class="tf-pi-when tf-info">running</span
-                  >{/if}
+                  >{:else if pulls.get(b.name)?.cell}<span class="tf-pi-when">{pulls.get(b.name)?.cell}</span>{/if}
               </a>
             {/each}
           {:else}
@@ -228,10 +284,58 @@
       </div>
     </nav>
 
+    {#if pipeline !== null}
+      <section class="tf-rbp" aria-label="Runs of {shownPipeline?.name ?? pipeline}">
+        <p class="tf-rb-back"><a href={branchHref(current)}>Builds of <span class="tf-mono">{current}</span></a></p>
+        <div class="tf-rbp-h">
+          <h2 class="tf-rbp-pl">{shownPipeline?.name ?? pipeline}</h2>
+          <div class="tf-trail"><a class="tf-btn tf-sm tf-ghost" href={pipelineHash(pipeline)}>Open in Builds</a></div>
+        </div>
+        <p class="tf-rbp-sub">
+          {#if shownPipeline !== null}{[shownPipeline.source_name, ...shownPipeline.path].join(" › ")}.{/if} Its runs on this repository's branches.
+        </p>
+        <div class="tf-seg" role="group" aria-label="Runs on">
+          <button type="button" aria-pressed={runScope === "main"} onclick={() => (runScope = "main")}>{def}</button>
+          <button type="button" aria-pressed={runScope === "every"} onclick={() => (runScope = "every")}>Every branch</button>
+        </div>
+        {#if pipelineFailed !== null}
+          <p class="tf-dim">Runs could not be read: {pipelineFailed}</p>
+        {:else if pipelineRows === null}
+          <p class="tf-dim">Reading runs…</p>
+        {:else if shownRuns.length === 0}
+          <p class="tf-rb-notrun">No run of it on {runScope === "main" ? def : "a branch of this repository"} yet.</p>
+        {:else}
+          <table class="tf-tbl tf-rbt tf-rbruns">
+            <colgroup><col class="tf-rbt-no" /><col /><col class="tf-rbt-run" /><col class="tf-rbt-dur" /><col class="tf-rbt-run" /></colgroup>
+            <thead><tr><th>Run</th><th>Branch</th><th>Tests</th><th>Duration</th><th>When</th></tr></thead>
+            <tbody>
+              {#each shownRuns as run (run.entity_id)}
+                {@const name = run.branch === null ? "" : branchName(run.branch)}
+                <tr>
+                  <td class="tf-nowrap"
+                    ><a href={runHash(pipeline, run.entity_id)}>{run.number !== null ? `#${run.number}` : ""}</a>
+                    <TfStateChip text={runTone(run) === "q" ? "Queued" : stateWord(run.state?.text ?? "")} tone={run.state?.tone ?? null} /></td
+                  >
+                  <td class="tf-mono tf-rbt-br"
+                    >{name}{#if job !== null && heldMine.includes(name)}{" "}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</td
+                  >
+                  <td class="tf-nowrap">{run.tests !== null ? testsWords(run.tests) : ""}</td>
+                  <td class="tf-nowrap tf-num">{run.duration_seconds !== null ? secondsLabel(run.duration_seconds) : ""}</td>
+                  <td class="tf-nowrap tf-dim tf-num">{when(run)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </section>
+    {:else}
     <section class="tf-rbp" aria-label="Builds of {current}">
       <div class="tf-rbp-h">
         <h2>{current}</h2>
         {#if job !== null && heldMine.includes(current)}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}
+        {#if pulls.get(current) !== undefined}{@const pull = pulls.get(current)!}<a class="tf-chip tf-info" href={itemHash({ entity_id: pull.entity_id, kind: "pr" })}
+            >{pull.cell ?? "Pull request"} open</a
+          >{/if}
         {#if !isDefault}
           <div class="tf-trail">
             <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "compare", encodeURIComponent(current))}>Compare with {def}</a>
@@ -250,7 +354,7 @@
           <div class="tf-acts">
             <a class="tf-btn tf-sm" href="{runHash(row.entity_id, run.entity_id)}/log">Log</a>
             <a class="tf-btn tf-sm" href={runHash(row.entity_id, run.entity_id)}>Open run</a>
-            <a class="tf-btn tf-sm tf-ghost" href={pipelineHash(row.entity_id)}>All its runs</a>
+            <a class="tf-btn tf-sm tf-ghost" href={pipelineHref(row.entity_id)}>All its runs</a>
           </div>
         </div>
       {:else}
@@ -283,7 +387,7 @@
               {@const here = latestOn(row, current)!}
               <tr>
                 <td class="tf-rbt-pl"
-                  ><a href={pipelineHash(row.entity_id)} title={[...row.path, row.name].join(" › ")}
+                  ><a href={pipelineHref(row.entity_id)} title={[...row.path, row.name].join(" › ")}
                     ><TfRunGlyph {...runGlyph(here)} /><span class="tf-pi-nm" class:tf-bad={runTone(here) === "err"}>{row.name}</span></a
                   ></td
                 >
@@ -297,7 +401,7 @@
       {/if}
       {#if page.notRun.length > 0}
         <p class="tf-rb-notrun">
-          Not run on this branch: {#each page.notRun as row, at (row.entity_id)}{#if at > 0},{" "}{/if}<a href={pipelineHash(row.entity_id)}
+          Not run on this branch: {#each page.notRun as row, at (row.entity_id)}{#if at > 0},{" "}{/if}<a href={pipelineHref(row.entity_id)}
               >{row.name}</a
             >{/each}.
         </p>
@@ -307,5 +411,6 @@
         {rows.length === 1 ? "pipeline builds" : "pipelines build"} this repository. <a href="#/builds">Every pipeline in Builds</a>
       </p>
     </section>
+    {/if}
   </div>
 {/if}

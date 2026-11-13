@@ -66,6 +66,7 @@
     REPO_BRANCHES,
     REPO_PRS,
     branchStanding,
+    buildsHash,
     compareHash,
     repoHash,
     sourceName,
@@ -75,6 +76,10 @@
     type BranchStanding,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfRunGlyph from "../builds/TfRunGlyph.svelte";
+  import { toneWord } from "../builds/builds";
+  import { branchWords, railOf } from "./repo-builds";
+  import type { RepoBuilds } from "../../ipc/entity";
   import { waitPhase } from "../waiting";
   import { Windowed } from "../../shell/windowed.svelte";
 
@@ -83,6 +88,7 @@
     source = null,
     repoId,
     refreshed = 0,
+    builds = null,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "codeFacts" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -90,7 +96,14 @@
     repoId: string;
     /** The page's refreshes (#2135): each reads the listing again over what the tab drew. */
     refreshed?: number;
+    /** The page's Builds answer (`repo_pipelines`, the repo-builds pass): each branch's builds, in the *Builds* column. */
+    builds?: RepoBuilds | null;
   } = $props();
+
+  /** Each branch's builds: the worst of its pipelines' newest runs, by name (`railOf`, the Builds tab's rail). */
+  const buildsByBranch = $derived(
+    builds === null ? null : new Map(railOf(builds.pipelines, []).map((branch) => [branch.name, branch])),
+  );
 
   /** How many branch views are read at once: a source's burst stays small. */
   const AT_ONCE = 4;
@@ -288,9 +301,14 @@
     placeholder: "Filter branches",
     noun: "branches",
     one: "branch",
-    chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged"].map((value) => ({ value, label: value })) }],
+    chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged", "Failing"].map((value) => ({ value, label: value })) }],
   });
-  const shown = $derived(visibleBranches(rows, filter.chips["show"] ?? [], filter.text));
+  /** *Failing* (the repo-builds pass): the branches whose builds failed, by the page's Builds answer. */
+  const shown = $derived(
+    visibleBranches(rows, filter.chips["show"] ?? [], filter.text).filter(
+      (row) => !(filter.chips["show"] ?? []).includes("Failing") || (buildsByBranch?.get(row.name)?.failing ?? 0) > 0,
+    ),
+  );
   /** Thousands of branches draw only the rows near the viewport (the extremes pass, 2026-11-13); a row is 41 px. */
   const win = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.name, estimate: 41 });
   const drawnIds = $derived(win.slice(shown).flatMap((row) => standingId(row) ?? []));
@@ -341,15 +359,17 @@
 {#if shown.length === 0}
   <TfNoMatch noun="branches" {filter} />
 {:else}
-  <table class="tf-tbl tf-rbranches" bind:this={table}>
+  <!-- The *Builds* column holds its room from the first draw, so the builds answering later moves no column. -->
+  <table class="tf-tbl tf-rbranches tf-rb-withbuilds" bind:this={table}>
     <thead>
-      <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Updated</th><th></th></tr>
+      <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Builds</th><th>Updated</th><th></th></tr>
     </thead>
     <tbody {@attach win.list}>
-      {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="6" {@attach win.room("before")}></td></tr>{/if}
+      {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
       {#each win.slice(shown) as row (row.name)}
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
+        {@const built = buildsByBranch?.get(row.name)}
         <tr data-place {@attach win.row(row.name)}>
           <td title={row.name}
             ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
@@ -363,6 +383,14 @@
                 >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<a class="tf-sentlink" href={repoHash(repoId, "prs")} title="Show in Pull requests" onclick={(event) => jumpAcross(event, "Branches")}><TfStateChip text={prSent.get(row.name)} tone="info" /></a>{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
           <td>{row.mine ? "you" : (row.author ?? "")}</td>
+          <td class="tf-rbr-builds tf-nowrap"
+            >{#if built !== undefined}<a
+                class:tf-err={built.failing > 0}
+                class:tf-info={built.tone === "run"}
+                href={buildsHash(repoId, row.name)}
+                title="Show {row.name}'s builds"><TfRunGlyph tone={built.tone} word={toneWord(built.tone)} />{branchWords(built)}</a
+              >{:else if buildsByBranch !== null}<span class="tf-dim" title="No pipeline built a commit of {row.name}">–</span>{/if}</td
+          >
           <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
           <td class="tf-nowrap tf-racts"
             ><span class="tf-rowend">{#if row.isDefault && takesPrs}<a
@@ -385,7 +413,7 @@
           >
         </tr>
       {/each}
-      {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="6" {@attach win.room("after")}></td></tr>{/if}
+      {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("after")}></td></tr>{/if}
     </tbody>
   </table>
 {/if}

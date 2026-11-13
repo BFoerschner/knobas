@@ -40,7 +40,7 @@
   import TfKeyed from "../TfKeyed.svelte";
   import { replaceAddress } from "../opener";
 
-  import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
+  import type { CommitRepository, JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
 
   /** The reads and the write this page makes, injectable so a test needs no bridge. */
   export interface BuildsPorts {
@@ -52,6 +52,8 @@
     jobPipelines?: (job: string) => Promise<JobPipeline[]>;
     /** A run's whole view, for the pipeline a bare run address names (#853); the bridge's when omitted. */
     view?: (runId: string) => Promise<SourceView | null>;
+    /** The repositories of the list's commits, for *By repository* (the repo-builds pass); the bridge's when omitted. */
+    commitRepositories?: (commitIds: string[]) => Promise<CommitRepository[]>;
   }
 
   /** The folds the reader opened or closed this session, by key (R-9.3). */
@@ -73,6 +75,7 @@
   import type { RoleFrameProps } from "../page-entry";
 
   import {
+    commitRepositories,
     getEntity,
     jobPipelines as readJobPipelines,
     pipelineRuns,
@@ -108,6 +111,7 @@
     railTime,
     reasonsById,
     reasonsLine,
+    repoTreeOf,
     runHash,
     treeOf,
     type Fold,
@@ -272,7 +276,52 @@
     );
   });
   const pinned = $derived(scope === "job" ? [] : pinnedOf(kept));
-  const trees = $derived(treeOf(kept));
+
+  /**
+   * *By project* or *By repository* (the repo-builds pass): the source's own tree, or a fold for each repository the
+   * pipeline's runs built. A run names its commit (`commit_id`) already, so the repositories are one keyed read of
+   * those commits, made only while *By repository* is on and kept by the answer cache.
+   */
+  const grouping = sessionValue("builds-group");
+  const byRepository = $derived(grouping.value === "repository");
+  /** Each commit the list's runs name, by its repositories; `null` until the read answered. */
+  let commitRepos = $state.raw<Map<string, { id: string; title: string }[]> | null>(null);
+  /** Why the read failed: said over the list, with *Try again*, since every pipeline then sits under *No repository*. */
+  let commitReposFailed = $state<string | null>(null);
+  /** Bumped by *Try again*: the same commits are asked again. */
+  let commitsRetry = $state(0);
+  let commitsAsked = "";
+  $effect(() => {
+    void commitsRetry;
+    if (!byRepository || all === null) return;
+    const ids = [...new Set(all.flatMap((p) => p.recent.flatMap((run) => (run.commit_id === null ? [] : [run.commit_id]))))].sort();
+    const asked = JSON.stringify(ids);
+    if (asked === commitsAsked) return;
+    commitsAsked = asked;
+    untrack(() => ports.commitRepositories ?? commitRepositories)(ids).then(
+      (rows) => {
+        if (asked !== commitsAsked) return;
+        const map = new Map<string, { id: string; title: string }[]>();
+        for (const row of rows) map.set(row.commit_id, [...(map.get(row.commit_id) ?? []), { id: row.repo_id, title: row.repo_title }]);
+        commitRepos = map;
+        commitReposFailed = null;
+      },
+      // A read that fails groups nothing by repository: every pipeline is under *No repository*, and the list says why.
+      (error: unknown) => {
+        if (asked !== commitsAsked) return;
+        commitRepos = new Map();
+        commitReposFailed = message(error);
+        commitsAsked = "";
+      },
+    );
+  });
+  /** The repositories a pipeline's recent runs built, each once. */
+  function reposOf(pipeline: PipelineRow): { id: string; title: string }[] {
+    const seen = new Map<string, { id: string; title: string }>();
+    for (const run of pipeline.recent) for (const repo of (run.commit_id === null ? null : commitRepos?.get(run.commit_id)) ?? []) seen.set(repo.id, repo);
+    return [...seen.values()];
+  }
+  const trees = $derived(byRepository ? (commitRepos === null ? [] : repoTreeOf(kept, reposOf)) : treeOf(kept));
   /** Whether anything narrows the list, which opens every fold. */
   const narrowed = $derived(chips.length > 0 || scope === "job");
   /**
@@ -438,7 +487,7 @@
   >
 {/snippet}
 
-{#snippet item(pipeline: PipelineRow, depth: number, key: string, pre: string)}
+{#snippet item(pipeline: PipelineRow, depth: number, key: string, pre: string, tag: string | null)}
   {@const glyph = railGlyph(pipeline)}
   {@const time = railTime(pipeline)}
   {@const latest = latestTime(pipeline)}
@@ -452,6 +501,7 @@
   >
     <TfRunGlyph {...glyph} />
     {@render name(pipeline, pre)}
+    {#if tag !== null}<span class="tf-pi-src">{tag}</span>{/if}
     {#if why !== ""}<span class="tf-pi-why"><TfKeyed text={why} /></span>{/if}
     {#if time !== null}<span class={`tf-pi-when${time.tone !== null ? ` tf-${time.tone}` : ""}`}>{time.text}</span>{/if}
   </a>
@@ -483,13 +533,19 @@
     onkeydown={railKeys}
   >
     <div class="tf-pl-top">
-      {#if job !== null}
-        <TfScope
-          scopes={[{ id: "job", label: "This job", count: reasons === null ? null : jobsOwn.length, title: `The pipelines ${job} reaches` }, { id: "all", label: "All" }]}
-          {scope}
-          onpick={(id) => setScope(id as Scope)}
-        />
-      {/if}
+      <div class="tf-pl-group">
+        {#if job !== null}
+          <TfScope
+            scopes={[{ id: "job", label: "This job", count: reasons === null ? null : jobsOwn.length, title: `The pipelines ${job} reaches` }, { id: "all", label: "All" }]}
+            {scope}
+            onpick={(id) => setScope(id as Scope)}
+          />
+        {/if}
+        <div class="tf-seg" role="group" aria-label="Group by">
+          <button type="button" aria-pressed={!byRepository} onclick={() => (grouping.value = null)}>By project</button>
+          <button type="button" aria-pressed={byRepository} onclick={() => (grouping.value = "repository")}>By repository</button>
+        </div>
+      </div>
       <div class="tf-pl-tools">
         <div class="tf-fchips" role="group" aria-label="Show only">
           {#each CHIPS as chip (chip)}
@@ -530,12 +586,20 @@
           </a>
         </div>
       {/if}
+      {#if byRepository && commitRepos === null && all !== null && all.length > 0}
+        <p class="tf-pl-note">Reading which repositories each pipeline builds…</p>
+      {:else if byRepository && commitReposFailed !== null}
+        <p class="tf-pl-note">
+          Which repositories the pipelines build could not be read: {commitReposFailed}.
+          <button type="button" class="tf-linkish" onclick={() => (commitsRetry += 1)}>Try again</button>
+        </p>
+      {/if}
       <div class="tf-pl-rows" {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>
           {:else if row.kind === "pipeline"}
-            {@render item(row.pipeline, row.depth, row.key, row.pre)}
+            {@render item(row.pipeline, row.depth, row.key, row.pre, row.tag)}
           {:else}
             {@render foldView(row.fold, row.depth, row.open, row.key)}
           {/if}

@@ -608,6 +608,14 @@ export function runView(id: string, section: string | null): SourceView | undefi
   return { sections: section === null ? sections : sections.filter((s) => s.id === section), actions: [] };
 }
 
+/** The fixture's open pull requests by the branch each is opened from (`views/repos.ts`' branches). */
+const PULL_HEADS: Record<string, { branch: string; entity_id: string; cell: string | null }[]> = {
+  "payout-service": [
+    { branch: "feat/PAY-231-idempotent-retry", entity_id: "mock:payout-service#142", cell: "#142" },
+    { branch: "feature/csv-export", entity_id: "mock:payout-service#150", cell: "#150" },
+  ],
+};
+
 /** prototype-6's `repoOfCfg`: the repository a configuration builds, by the mock's repository ids. */
 function repositoryOf(config: string): string | null {
   if (/^(Payout_|Dashboard_)/.test(config)) return "payout-service";
@@ -795,7 +803,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const repo = String(args["repoId"] ?? "").replace(/^mock:tidewater\//, "");
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
       const runs = history(new Date());
-      return fakePipelines()
+      const pipelines = fakePipelines()
         .filter((pipeline) => fillers.has(pipeline.source_id) && repositoryOf(configOf(pipeline.entity_id)) === repo)
         .map(({ recent: _recent, pinned: _pinned, ...pipeline }) => {
           const seen = new Set<string>();
@@ -807,7 +815,14 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
           }
           return { ...pipeline, latest };
         });
+      return { pipelines, pull_requests: PULL_HEADS[repo] ?? [] };
     },
+    // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
+    commit_repositories: (args) =>
+      ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {
+        const repo = /^mock:(tidewater\/[^@]+)@/.exec(commitId)?.[1];
+        return repo === undefined ? [] : [{ commit_id: commitId, repo_id: `mock:${repo}`, repo_title: repo }];
+      }),
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
       const bulkRow = bulkById.get(id);

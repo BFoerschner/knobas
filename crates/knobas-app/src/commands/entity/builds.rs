@@ -5,7 +5,7 @@ use super::*;
 // -- the Builds frame (ADR-0022, #848) -------------------------------------
 
 use knobas_core::builds::RawRun;
-pub(super) use knobas_core::builds::{PipelineRow, RepoPipelineRow, RunRow};
+pub(super) use knobas_core::builds::{CommitRepository, PipelineRow, RepoBuilds, RunRow};
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
 /// list. The read is CI's by definition, so it narrows itself to the role's
@@ -37,11 +37,11 @@ pub async fn pipelines_inner(
     Ok(pipelines)
 }
 
-/// The pipelines that build one repository, each with its newest run per
-/// branch, for the repository's Builds tab (the repo-builds pass,
-/// 2026-11-13): [`knobas_core::builds::repo_pipelines`]. The mirror alone, one
-/// statement, as [`pipelines_inner`]: CI's fillers only, no live read, no run's
-/// `commit_id`.
+/// The repository's Builds tab in one answer (the repo-builds pass,
+/// 2026-11-13): the pipelines that build it, each with its newest run per
+/// branch, and its open pull requests by branch
+/// ([`knobas_core::builds::repo_pipelines`]). The mirror alone, as
+/// [`pipelines_inner`]: CI's fillers only, no live read, no run's `commit_id`.
 ///
 /// # Errors
 ///
@@ -52,7 +52,7 @@ pub async fn repo_pipelines_inner(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     repo_id: &str,
-) -> Result<Vec<RepoPipelineRow>, IpcError> {
+) -> Result<RepoBuilds, IpcError> {
     let repo = EntityRef::parse(repo_id).map_err(IpcError::invalid)?;
     // As [`pipelines_inner`]: the stored rows follow the stored declarations.
     crate::commands::search::declare(pool, registry).await?;
@@ -63,6 +63,21 @@ pub async fn repo_pipelines_inner(
         knobas_core::builds::repo_pipelines(pool, &declarations, &identity, &fillers, &repo)
             .await?,
     )
+}
+
+/// The repositories of mirrored commits, for *By repository* on the Builds
+/// list (the repo-builds pass): the list's runs already name their commits
+/// (`commit_id`), so a pipeline's repositories are one keyed read of those
+/// commits' stored parents. A commit the mirror does not hold answers nothing.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn commit_repositories_inner(
+    pool: &PgPool,
+    commit_ids: &[String],
+) -> Result<Vec<CommitRepository>, IpcError> {
+    Ok(knobas_core::builds::commit_repositories(pool, commit_ids).await?)
 }
 
 /// One pipeline's runs, newest first, at most `limit` (100 when `None`).
@@ -932,9 +947,24 @@ pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRo
 pub async fn repo_pipelines(
     lifecycle: State<'_, Lifecycle>,
     repo_id: String,
-) -> Result<Vec<RepoPipelineRow>, IpcError> {
+) -> Result<RepoBuilds, IpcError> {
     let pool = lifecycle.pool()?;
     repo_pipelines_inner(&pool, lifecycle.registry(), &repo_id).await
+}
+
+/// The repositories of mirrored commits (the repo-builds pass).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`commit_repositories_inner`] refuses with.
+#[tauri::command]
+pub async fn commit_repositories(
+    lifecycle: State<'_, Lifecycle>,
+    commit_ids: Vec<String>,
+) -> Result<Vec<CommitRepository>, IpcError> {
+    let pool = lifecycle.pool()?;
+    commit_repositories_inner(&pool, &commit_ids).await
 }
 
 /// One pipeline's runs (#848).

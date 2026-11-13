@@ -6,7 +6,7 @@
  * a branch is opened with: does anything fail here that passes on the default branch?
  */
 import type { RepoPipelineRow, RunRow } from "../../ipc/entity";
-import { runAt, runTone, type GlyphTone } from "../builds/builds";
+import { runAt, runTone, toneWord, type GlyphTone } from "../builds/builds";
 import { branchName } from "../builds/pipeline";
 
 /** Each answered row's newest run by branch, as a person names it: built once a row, so the rail's branches × pipelines are lookups. */
@@ -72,8 +72,12 @@ export interface RailBranch {
   name: string;
   /** The worst of its pipelines' newest runs; `none` where nothing ran on it. */
   tone: GlyphTone;
+  /** How many of its pipelines ran on it. */
+  ran: number;
   /** How many of its pipelines' newest runs failed. */
   failing: number;
+  /** How many of its pipelines' newest runs are still running. */
+  running: number;
   /** When its newest run was made, in ms; `-Infinity` where nothing ran on it. */
   lastRun: number;
 }
@@ -105,20 +109,24 @@ export function railOf(rows: readonly RepoPipelineRow[], listed: readonly string
     return {
       name,
       tone: WORST.find((tone) => tones.includes(tone)) ?? "none",
+      ran: runs.length,
       failing: tones.filter((tone) => tone === "err").length,
+      running: tones.filter((tone) => tone === "run").length,
       lastRun: made.length > 0 ? Math.max(...made) : Number.NEGATIVE_INFINITY,
     };
   });
 }
 
 /**
- * The rail's groups: the default branch, yours (`mine`: the checkout's, those naming the job), then every other; yours
- * and the others newest run first, those nothing ran on last in the order they came. An empty group is left out.
+ * The rail's groups: the default branch, yours (`mine`: the checkout's, those naming the job), those an open pull
+ * request is opened from (`pulled`), then every other; each newest run first, those nothing ran on last in the order
+ * they came. An empty group is left out.
  */
 export function groupBranches(
   rail: readonly RailBranch[],
   defaultBranch: string,
   mine: readonly string[],
+  pulled: readonly string[] = [],
 ): { head: string; branches: RailBranch[] }[] {
   const newestFirst = (branches: readonly RailBranch[]) =>
     branches
@@ -127,10 +135,13 @@ export function groupBranches(
       .map(({ b }) => b);
   const def = rail.filter((b) => b.name === defaultBranch);
   const yours = newestFirst(rail.filter((b) => b.name !== defaultBranch && mine.includes(b.name)));
-  const other = newestFirst(rail.filter((b) => b.name !== defaultBranch && !mine.includes(b.name)));
+  const rest = rail.filter((b) => b.name !== defaultBranch && !mine.includes(b.name));
+  const pulls = newestFirst(rest.filter((b) => pulled.includes(b.name)));
+  const other = newestFirst(rest.filter((b) => !pulled.includes(b.name)));
   return [
     { head: "Default branch", branches: def },
     { head: "Yours", branches: yours },
+    { head: "Pull requests", branches: pulls },
     { head: "Other branches", branches: other },
   ].filter((group) => group.branches.length > 0);
 }
@@ -158,4 +169,16 @@ export function yoursOf(
 export function holdOrder<T>(held: Map<string, number>, items: readonly T[], key: (item: T) => string): T[] {
   for (const item of items) if (!held.has(key(item))) held.set(key(item), held.size);
   return [...items].sort((a, b) => held.get(key(a))! - held.get(key(b))!);
+}
+
+/**
+ * A branch's builds in words, one way wherever a branch is drawn (the rail's titles, the Branches tab's *Builds*
+ * column): what failed, else what still runs, else that every one passed; *No builds* where nothing ran on it.
+ */
+export function branchWords(branch: RailBranch): string {
+  if (branch.ran === 0) return "No builds";
+  if (branch.failing > 0) return `${branch.failing} of ${branch.ran} failing`;
+  if (branch.running > 0) return `${branch.running} running`;
+  if (branch.tone === "ok") return `All ${branch.ran} passed`;
+  return toneWord(branch.tone);
 }

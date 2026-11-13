@@ -71,7 +71,8 @@
     PipeStep,
     RangeDiff,
     RefusedWrite,
-    RepoPipelineRow,
+    RepoBuilds,
+    RunRow,
     ShownView,
     SourceView,
     ViewBlock,
@@ -121,7 +122,9 @@
     /** The source's compare now, never local (ADR-0041): what Compare checks a predicted diff against; no check when left out. */
     sourceRangeDiff?: (entityId: string, base: string, head: string) => Promise<RangeDiff>;
     /** The Builds tab's read (the repo-builds pass): the pipelines that built the repository's commits; the bridge's when left out. */
-    repoPipelines?: (repoId: string) => Promise<RepoPipelineRow[]>;
+    repoPipelines?: (repoId: string) => Promise<RepoBuilds>;
+    /** A pipeline's runs, for the Builds tab's pipeline; the bridge's when left out. */
+    pipelineRuns?: (pipelineId: string) => Promise<RunRow[]>;
   }
 
   /**
@@ -174,6 +177,7 @@
     listContexts,
     listEntities,
     refusedWrites,
+    repoPipelines,
     setCheckoutOverride,
     submitWrite,
     type EntityRow,
@@ -215,7 +219,8 @@
   import TfRepoCompare from "./TfRepoCompare.svelte";
   import TfRepoPrs from "./TfRepoPrs.svelte";
   import TfRepoBuilds from "./TfRepoBuilds.svelte";
-  import { yoursOf } from "./repo-builds";
+  import { latestOn, yoursOf } from "./repo-builds";
+  import { runTone } from "../builds/builds";
   import TfRepoLocal from "./TfRepoLocal.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -462,6 +467,38 @@
     const alive = () => repoId === id;
     void readBranches(id, alive, true);
     void readRow(id, alive, true);
+    readBuilds(id);
+  }
+
+  /**
+   * The Builds tab's answer (the repo-builds pass): read once for the page, so the tab's count, the tab and the
+   * Branches tab's *Builds* column share it. One statement over the mirror, kept by the answer cache; read again with
+   * the page's lists, and on the tab's own refresh, over what is drawn.
+   */
+  let builds = $state.raw<RepoBuilds | null>(null);
+  let buildsFailed = $state<string | null>(null);
+  let buildsFor: string | null = null;
+  let buildsReads = 0;
+  /** The repository a read is on its way for: a second ask while it is (a return reads the lists and the tab) is that read. */
+  let buildsAsking: string | null = null;
+  function readBuilds(id: string): void {
+    if (buildsAsking === id) return;
+    buildsAsking = id;
+    const at = ++buildsReads;
+    (ports.repoPipelines ?? repoPipelines)(id)
+      .then(
+        (answer) => {
+          if (at !== buildsReads || repoId !== id) return;
+          builds = answer;
+          buildsFailed = null;
+        },
+        (error: unknown) => {
+          if (at === buildsReads && repoId === id) buildsFailed = ipcErrorMessage(error);
+        },
+      )
+      .finally(() => {
+        if (buildsAsking === id) buildsAsking = null;
+      });
   }
 
   /** The branch list again, where the app read it again behind its answer and it moved (#2242). */
@@ -714,6 +751,20 @@
   });
   /** The tabs held for this repository: none while the page has not noted the one it now names. */
   const held = $derived(tabs.repoId === repoId ? tabs : NO_TABS);
+  /** The tab's own reads again (its refresh, a return to it): a number, so moving between tabs, which replaces the held tabs, asks nothing. */
+  const buildsAsked = $derived(held.reads["builds"] ?? 0);
+  $effect(() => {
+    const id = repoId;
+    if (!ready || id === null) return;
+    void buildsAsked;
+    if (buildsFor !== id) {
+      buildsFor = id;
+      buildsAsking = null;
+      builds = null;
+      buildsFailed = null;
+    }
+    untrack(() => readBuilds(id));
+  });
   /** Each slot drawn, in a fixed order so a switch moves no node: the held ones and the one shown. */
   const drawn = $derived(SLOTS.filter((one) => one === slot || held.places[one] !== undefined));
   /** The address a slot is drawn at: the page's for the one shown, the one it was left at for the rest. */
@@ -727,8 +778,31 @@
     checkout?.tree?.status === "read" ? checkout.tree.changed + checkout.tree.untracked : 0,
   );
 
+  /** Your branches (`yoursOf`): the Builds tab's *Yours*, and what its count watches beside the default branch. */
+  const buildsMine = $derived(
+    yoursOf(
+      (known ?? []).map((option) => option.name),
+      job,
+      checkout?.tree?.status === "read" ? checkout.tree.branch : null,
+      defaultBranch?.name ?? null,
+    ),
+  );
+  /** The pipelines whose newest run failed on the default branch or one of yours: the Builds tab's count, in err. */
+  const buildsFailing = $derived(
+    builds === null
+      ? 0
+      : builds.pipelines.filter((row) =>
+          [defaultBranch?.name ?? null, ...buildsMine].some((name) => {
+            const run = name === null ? null : latestOn(row, name);
+            return run !== null && runTone(run) === "err";
+          }),
+        ).length,
+  );
+
   /** A tab's count, drawn only above zero once its read answered. */
-  function countOf(id: RepoTabId): { n: number; warn: boolean } | null {
+  function countOf(id: RepoTabId): { n: number; warn: boolean; err?: boolean } | null {
+    if (id === "builds" && builds !== null && builds.pipelines.length > 0)
+      return buildsFailing > 0 ? { n: buildsFailing, warn: false, err: true } : { n: builds.pipelines.length, warn: false };
     if (id === "branches" && known !== null && known.length > 0) return { n: known.length, warn: false };
     // One on its way counts as its row does, so the tab agrees with the list under it (F-242).
     const onTheWay = id === "prs" && repoId !== null ? echoesOn(repoId, MADE_PR).length : 0;
@@ -962,7 +1036,7 @@
         {@const count = countOf(entry.id)}
         {#if n > 0 && REPO_TABS[n - 1]!.group !== entry.group}<span class="tf-tabgrp" aria-hidden="true"></span>{/if}
         <a href={tabHref(held, repoId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
-          >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn}>{count.n}</span
+          >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn} class:tf-err={count.err === true} title={entry.id === "builds" && count.err === true ? `${count.n} failing on ${defaultBranch?.name ?? "the default branch"} or your branch` : undefined}>{count.n}</span
             >{/if}</a
         >
       {/each}
@@ -1006,7 +1080,7 @@
               {:else if one === "commit" && placeOf(one).commit !== null}
                 <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
               {:else if one === "branches"}
-                <TfRepoBranches {ports} {repoId} {source} {refreshed} />
+                <TfRepoBranches {ports} {repoId} {source} {refreshed} {builds} />
               {:else if one === "compare" && known !== null}
                 <TfRepoCompare
                   {ports}
@@ -1030,16 +1104,14 @@
                   {repoId}
                   branches={known}
                   defaultBranch={defaultBranch?.name ?? null}
-                  mine={yoursOf(
-                    (known ?? []).map((option) => option.name),
-                    job,
-                    checkout?.tree?.status === "read" ? checkout.tree.branch : null,
-                    defaultBranch?.name ?? null,
-                  )}
+                  mine={buildsMine}
                   {job}
                   branch={placeOf(one).branch}
+                  pipeline={placeOf(one).pipeline}
+                  {builds}
+                  failed={buildsFailed}
+                  runs={ports.pipelineRuns}
                   {refreshed}
-                  read={ports.repoPipelines}
                 />
               {:else if one === "prs"}
                 <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />

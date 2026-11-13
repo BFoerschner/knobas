@@ -9,6 +9,13 @@
 .tf-rbranches th:nth-child(3) { width: 13%; }
 .tf-rbranches th:nth-child(4) { width: 14%; }
 .tf-rbranches th:nth-child(5) { width: 10%; }
+/* With the *Builds* column (the repo-builds pass) the same 87 %, shared six ways, so the actions keep their 13 %. */
+.tf-rbranches.tf-rb-withbuilds th:nth-child(1) { width: 27%; }
+.tf-rbranches.tf-rb-withbuilds th:nth-child(2) { width: 14%; }
+.tf-rbranches.tf-rb-withbuilds th:nth-child(3) { width: 11%; }
+.tf-rbranches.tf-rb-withbuilds th:nth-child(4) { width: 10%; }
+.tf-rbranches.tf-rb-withbuilds th:nth-child(5) { width: 15%; }
+.tf-rbranches.tf-rb-withbuilds th:nth-child(6) { width: 10%; }
 .tf-rbranches td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-rbranches td.tf-racts { overflow: visible; }
 /* Every row is as tall as a row with its actions from the start: *New pull request* and *Delete…* are small buttons,

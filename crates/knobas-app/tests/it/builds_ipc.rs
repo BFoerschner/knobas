@@ -7,7 +7,8 @@
 //! back are told apart by `source_id` from anything else in this database.
 
 use knobas_app::commands::entity::{
-    pipeline_runs_inner, pipelines_inner, repo_pipelines_inner, set_pipeline_pinned_inner,
+    commit_repositories_inner, pipeline_runs_inner, pipelines_inner, repo_pipelines_inner,
+    set_pipeline_pinned_inner,
 };
 
 /// A TeamCity source nothing else in this database uses.
@@ -1740,6 +1741,7 @@ async fn a_repositorys_pipelines_are_the_ones_that_built_its_commits() {
         .await
         .unwrap();
     let seen: Vec<_> = answered
+        .pipelines
         .iter()
         .map(|p| {
             let runs: Vec<_> = p
@@ -1769,14 +1771,15 @@ async fn a_repositorys_pipelines_are_the_ones_that_built_its_commits() {
         ],
         "each pipeline that built one of its commits, its newest run per branch, newest first"
     );
-    assert_eq!(answered[0].name, "Payout Build");
-    assert_eq!(answered[0].source_id, tc);
+    assert_eq!(answered.pipelines[0].name, "Payout Build");
+    assert_eq!(answered.pipelines[0].source_id, tc);
 
     let other = repo_pipelines_inner(&pool, &registry, &ledger)
         .await
         .unwrap();
     assert_eq!(
         other
+            .pipelines
             .iter()
             .map(|p| p.entity_id.as_str())
             .collect::<Vec<_>>(),
@@ -1787,11 +1790,122 @@ async fn a_repositorys_pipelines_are_the_ones_that_built_its_commits() {
         .await
         .unwrap();
     assert!(
-        none.is_empty(),
+        none.pipelines.is_empty(),
         "a repository the mirror does not hold builds nothing"
     );
     let refused = repo_pipelines_inner(&pool, &registry, "not an id")
         .await
         .unwrap_err();
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+}
+
+/// A pull request of `base`, opened from `head` of `head_repo`, as Gitea's
+/// records name both.
+async fn pull(
+    pool: &sqlx::PgPool,
+    gitea: &str,
+    id: &str,
+    head: &str,
+    head_repo: &str,
+    state: &str,
+) -> String {
+    let entity = format!("{gitea}:pr:{id}");
+    item(
+        pool,
+        &entity,
+        gitea,
+        "pr",
+        "2026-08-21T00:00:00Z",
+        serde_json::json!({
+            "state": state, "merged": false,
+            "head": { "ref": head, "sha": "0", "repo": { "full_name": head_repo } },
+            "base": { "ref": "main", "repo": { "full_name": "tidewater/payout-service", "name": "payout-service" } }
+        }),
+    )
+    .await;
+    entity
+}
+
+/// **The tab's *Pull requests* group** (the repo-builds pass): a repository's
+/// open pull requests by the branch each is opened from. A closed one, and a
+/// fork's pull request from a branch of the same name, name no branch here.
+#[tokio::test]
+async fn a_repositorys_open_pull_requests_name_their_branches() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let gitea = format!("gitea{}", &tc[2..]);
+    crate::support::source_config(&pool, &gitea, "gitea", "Gitea", &serde_json::json!({})).await;
+    let repo = repository(&pool, &gitea, "tidewater/payout-service", &[]).await;
+    let own = "tidewater/payout-service";
+    let open = pull(&pool, &gitea, "142", "feature/x", own, "open").await;
+    pull(&pool, &gitea, "140", "feature/old", own, "closed").await;
+    pull(
+        &pool,
+        &gitea,
+        "141",
+        "feature/fork",
+        "someone/payout-service",
+        "open",
+    )
+    .await;
+    // A deleted fork's pull request has no head repository, and proposes no branch of this one.
+    item(
+        &pool,
+        &format!("{gitea}:pr:143"),
+        &gitea,
+        "pr",
+        "2026-08-21T00:00:00Z",
+        serde_json::json!({
+            "state": "open", "merged": false,
+            "head": { "ref": "feature/x", "sha": "0", "repo": null },
+            "base": { "ref": "main", "repo": { "full_name": own, "name": "payout-service" } }
+        }),
+    )
+    .await;
+    let answered =
+        repo_pipelines_inner(&pool, &knobas_app::sources::Registry::for_process(), &repo)
+            .await
+            .unwrap();
+    let heads: Vec<_> = answered
+        .pull_requests
+        .iter()
+        .map(|p| (p.branch.as_str(), p.entity_id.as_str()))
+        .collect();
+    assert_eq!(heads, [("feature/x", open.as_str())]);
+}
+
+/// **The repositories of commits** (*By repository*, the repo-builds pass):
+/// each mirrored commit's repository by its stored parent; a commit the
+/// mirror does not hold answers nothing.
+#[tokio::test]
+async fn a_commit_names_its_repository() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let gitea = format!("gitea{}", &tc[2..]);
+    crate::support::source_config(&pool, &gitea, "gitea", "Gitea", &serde_json::json!({})).await;
+    let sha = format!("dddd{}", &tc[2..]);
+    let repo = repository(&pool, &gitea, "tidewater/ledger-api", &[&sha]).await;
+    let commit = format!("{gitea}:commit:tidewater/ledger-api/{sha}");
+    // The stored parents follow the stored declarations, which a read of the mirror writes first.
+    repo_pipelines_inner(&pool, &knobas_app::sources::Registry::for_process(), &repo)
+        .await
+        .unwrap();
+    let answered =
+        commit_repositories_inner(&pool, &[commit.clone(), format!("{gitea}:commit:gone")])
+            .await
+            .unwrap();
+    let named: Vec<_> = answered
+        .iter()
+        .map(|c| {
+            (
+                c.commit_id.as_str(),
+                c.repo_id.as_str(),
+                c.repo_title.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        named,
+        [(commit.as_str(), repo.as_str(), "tidewater/ledger-api")]
+    );
 }

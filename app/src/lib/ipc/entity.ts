@@ -19,7 +19,7 @@ import type {
   LocalDir,
   LocalPaths,
   LocalTree,
-  RepoPipelineRow,
+  RepoBuilds,
   ViewBlock,
   ArtifactEntry,
   ArtifactPreview,
@@ -34,6 +34,7 @@ import type {
   OpenObject,
   CloneAnswer,
   CodeFacts,
+  CommitRepository,
   ContextRow,
   DiffRead,
   DocExport,
@@ -145,6 +146,7 @@ export type {
   CloneFailureCause,
   CloneState,
   CodeFacts,
+  CommitRepository,
   Commenting,
   ContextKind,
   ContextRow,
@@ -268,6 +270,7 @@ export type {
   ReachOrigin,
   Reached,
   RefusedWrite,
+  RepoBuilds,
   RepoPipelineRow,
   Republication,
   RuleTicket,
@@ -397,13 +400,21 @@ export function pipelines(): Promise<PipelineRow[]> {
 }
 
 /**
- * The pipelines that build one repository, each with its newest run per branch (the repo-builds pass,
- * `mockups/builds/repo-builds.md`): the runs that built one of the repository's mirrored commits. The mirror alone,
- * one statement; CI's fillers only. Rejects with `invalid` for a non-id; a repository the mirror does not hold
- * answers none.
+ * A repository's Builds tab in one answer (the repo-builds pass, `mockups/builds/repo-builds.md`): the pipelines that
+ * built one of its mirrored commits, each with its newest run per branch, and its open pull requests by branch. The
+ * mirror alone; CI's fillers only. Rejects with `invalid` for a non-id; a repository the mirror does not hold answers
+ * none.
  */
-export function repoPipelines(repoId: string): Promise<RepoPipelineRow[]> {
-  return invoke<RepoPipelineRow[]>("repo_pipelines", { repoId });
+export function repoPipelines(repoId: string): Promise<RepoBuilds> {
+  return invoke<RepoBuilds>("repo_pipelines", { repoId });
+}
+
+/**
+ * The repositories of mirrored commits, by their stored parents: what *By repository* on the Builds list groups a
+ * pipeline by, through the commits its runs built (`RunRow.commit_id`). A commit the mirror does not hold answers none.
+ */
+export function commitRepositories(commitIds: string[]): Promise<CommitRepository[]> {
+  return invoke<CommitRepository[]>("commit_repositories", { commitIds });
 }
 
 /**

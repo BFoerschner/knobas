@@ -693,6 +693,12 @@ resolve: string | null,
 head: string | null, };
 
 /**
+ * A mirrored commit's repository: what *By repository* on the Builds list
+ * groups a pipeline by, through the commits its runs built.
+ */
+export type CommitRepository = { commit_id: string, repo_id: string, repo_title: string, };
+
+/**
  * What kind of working set this is.
  *
  * Stored as lowercase text in `knobas.context.kind`, whose
@@ -3703,6 +3709,20 @@ source_id: string,
 parent: string, };
 
 /**
+ * An open pull request of a repository, by the branch it is opened from: what
+ * puts a branch in the Builds tab's *Pull requests* group.
+ */
+export type PullHead = { 
+/**
+ * The branch it is opened from, as the source names it (declared `head`).
+ */
+branch: string, entity_id: string, 
+/**
+ * Its key as the source writes it (`#142`), where the record carries one.
+ */
+cell: string | null, };
+
+/**
  * A worktree, as Settings › Checkouts lists it.
  *
  * - `closed`: The mirror holds the pull request closed or merged.
@@ -3805,6 +3825,12 @@ export type RefusedWrite = { entity: string, op: string,
  * The [`WriteAsk::field`] refused, or `None` for the write itself.
  */
 field?: string, reason: string, };
+
+/**
+ * A repository's Builds tab in one answer: the pipelines that built its
+ * commits ([`RepoPipelineRow`]) and its open pull requests' branches.
+ */
+export type RepoBuilds = { pipelines: Array<RepoPipelineRow>, pull_requests: Array<PullHead>, };
 
 /**
  * One pipeline that builds a repository, for the repository's Builds tab

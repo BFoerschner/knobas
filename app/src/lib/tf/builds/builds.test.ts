@@ -24,6 +24,7 @@ import {
   railTime,
   railGlyph,
   listRows,
+  repoTreeOf,
   newestFirst,
   recentNewestFirst,
 } from "./builds";
@@ -311,4 +312,40 @@ test("a rail row carries the prefix its folder's own pipelines share; a pinned r
     ["tree:teamcity:buildType:Payout_Lint", "Payout_"],
     ["tree:teamcity:buildType:Payout_Deploy_Prod", ""],
   ]);
+});
+
+test("by repository: a fold for each repository a pipeline's runs built, by name, then the pipelines that built none", () => {
+  const list = [at("Payout_Build", ["Payments"]), at("Shared_Lint", ["Tools"], true), at("Nightly", ["Data"])];
+  const repos: Record<string, { id: string; title: string }[]> = {
+    Payout_Build: [{ id: "git:payout", title: "tidewater/payout-service" }],
+    Shared_Lint: [
+      { id: "git:payout", title: "tidewater/payout-service" },
+      { id: "git:ledger", title: "tidewater/ledger-api" },
+    ],
+  };
+  const [tree] = repoTreeOf(list, (p) => repos[p.name] ?? []);
+  expect(tree!.folds.map((f) => [f.name, f.pipelines.map((p) => p.name), f.failing])).toEqual([
+    ["tidewater/ledger-api", ["Shared_Lint"], 1],
+    ["tidewater/payout-service", ["Payout_Build", "Shared_Lint"], 1],
+    ["No repository", ["Nightly"], 0],
+  ]);
+  // A pipeline in two folds is two rows, each with a key of its own.
+  const rows = listRows([], [tree!], "all", () => true);
+  const keys = rows.filter((r) => r.kind === "pipeline").map((r) => r.key);
+  expect(new Set(keys).size).toBe(keys.length);
+});
+
+test("in a fold two sources share, the rows of the fewer say their source", () => {
+  const list = [
+    at("CI", ["Repo"], false, { source_id: "gha", source_name: "GitHub Actions" }),
+    at("E2E", ["Repo"], false, { source_id: "gha", source_name: "GitHub Actions" }),
+    at("Web_Build", ["Repo"]),
+  ];
+  const rows = listRows([], treeOf(list).concat(), "all", () => true);
+  const tags = rows.flatMap((r) => (r.kind === "pipeline" ? [[r.pipeline.name, r.tag]] : []));
+  // By project each source is its own tree, so no fold is shared and no row says its source.
+  expect(tags).toEqual([["CI", null], ["E2E", null], ["Web_Build", null]]);
+  const [repo] = repoTreeOf(list, () => [{ id: "git:web", title: "tidewater/web" }]);
+  const mixed = listRows([], [repo!], "all", () => true).flatMap((r) => (r.kind === "pipeline" ? [[r.pipeline.name, r.tag]] : []));
+  expect(mixed).toEqual([["CI", null], ["E2E", null], ["Web_Build", "TeamCity"]]);
 });

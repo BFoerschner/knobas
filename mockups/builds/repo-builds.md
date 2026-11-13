@@ -50,13 +50,12 @@ On `ux-polish-repo-builds`.
 - The repository page holds the tab mounted.
 
 **Changes from the mockup:**
-- There's no *Pull requests* group, because a pull request row doesn't carry its head branch. *Yours* is the checkout's branch plus the branches naming the job.
+- *Yours* is the checkout's branch plus the branches naming the job.
 - The rail holds the order it first drew in (rows stay where they drew).
+- *Pull requests* lists the branches an open pull request is opened from. The same `repo_pipelines` answer carries them (`pull_requests`), read from each pull request's declared `head`, a fork's left out.
 
-**Not built yet:**
-- the Branches tab's *Builds* column (screen 3);
-- the pipeline's runs inside the repository with *main | Every branch* (screen 2). A pipeline opens on the Builds page for now;
-- *By repository* on the Builds page (screen 4);
-- the tab's failing count;
-- ahead/behind in the subtitle;
-- *Run again* in the problem box.
+**Also built (second pass, the same day):**
+- **The repository page reads `repo_pipelines` once.** The tab's count (in red, the pipelines failing on the default branch or yours, else how many build the repository), the Builds tab and the Branches tab's *Builds* column share it.
+- **The Branches tab's *Builds* column.** Each branch shows the worst of its pipelines' newest runs ("1 of 7 failing", "All passed", "No builds") and links to the Builds tab at that branch.
+- **A pipeline's runs inside the tab** (`builds/<branch>/<pipeline>`). They come from `pipeline_runs`, filtered to *main* or *Every branch* of the repository, and *Open in Builds* opens its whole page.
+- ***By project | By repository* on the Builds page.** Each run already names its commit, so one more read, `commit_repositories`, names the repositories, read only while *By repository* is on. A repository's fold holds every pipeline that built it, and *No repository* the rest. Where two sources share a fold, the fewer's rows say their source.

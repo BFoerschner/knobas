@@ -5,7 +5,7 @@
 import { expect, test } from "vitest";
 
 import type { RepoPipelineRow, RunRow } from "../../ipc/entity";
-import { compareOn, groupBranches, holdOrder, latestOn, railOf, verdictOf, yoursOf } from "./repo-builds";
+import { branchWords, compareOn, groupBranches, holdOrder, latestOn, railOf, verdictOf, yoursOf } from "./repo-builds";
 
 function run(id: string, branch: string, tone: "ok" | "err" | "run" | "q", at: string): RunRow {
   const started = tone === "q" ? null : at;
@@ -110,4 +110,21 @@ test("yours: the branch the checkout is on, and every branch naming the job, wha
   expect(yoursOf(["main", "fix/y"], null, null)).toEqual([]);
   // The checkout on the default branch is not a branch of yours.
   expect(yoursOf(["main"], null, "main", "main")).toEqual([]);
+});
+
+test("a branch an open pull request is opened from is in Pull requests, unless it is yours", () => {
+  const rail = railOf(ROWS, ["main", "feature/x", "chore/quiet"]);
+  expect(groupBranches(rail, "main", ["fix/y"], ["feature/x", "fix/y"]).map((g) => [g.head, g.branches.map((b) => b.name)])).toEqual([
+    ["Default branch", ["main"]],
+    ["Yours", ["fix/y"]],
+    ["Pull requests", ["feature/x"]],
+    ["Other branches", ["chore/quiet"]],
+  ]);
+});
+
+test("a branch's builds in words: what failed of how many, else what runs, else that all passed", () => {
+  const words = Object.fromEntries(railOf(ROWS, ["main", "feature/x", "chore/quiet", "fix/y"]).map((b) => [b.name, branchWords(b)]));
+  expect(words).toEqual({ main: "1 of 4 failing", "feature/x": "1 of 2 failing", "chore/quiet": "No builds", "fix/y": "All 1 passed" });
+  const running = railOf([ROWS[0]!], ["feature/x"]).find((b) => b.name === "feature/x")!;
+  expect(branchWords(running)).toBe("1 running");
 });
