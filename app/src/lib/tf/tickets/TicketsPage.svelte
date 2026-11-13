@@ -115,6 +115,7 @@
     jobReach,
     listEntities,
     miniBoard,
+    type MiniBoard,
     type MiniBoardCard,
     type MiniBoardColumn,
   } from "../../ipc/entity";
@@ -571,6 +572,41 @@
     }
     return by;
   });
+  // -- a column that grows draws what the screen shows first (the broad-filters pass, 2026-11-13) --
+  /**
+   * The first key of a filter takes each column from the eight cards it drew to fifty (R-3.4): 300 new cards in one
+   * frame, about 45 ms of a quarter-speed main thread, where the screen shows five to eight a column. In the frame
+   * the answer lands such a column draws its first {@link FIRST_FRAME_CARDS}, and the rest the frame after, below
+   * them: nothing drawn moves. A column that already drew that many draws whole at once, so an answer that changes
+   * what a full column holds never takes cards away from under the pointer.
+   */
+  const FIRST_FRAME_CARDS = 16;
+  /** The board every card of which has drawn; until the frame after an answer lands, the one before it. */
+  let wholeBoard = $state.raw<MiniBoard | null>(null);
+  /** How many cards each column (by its place) drew when the last board drew whole. */
+  const drewWhole = new Map<string, number>();
+  const firstFrame = $derived(reader.board !== null && reader.board !== wholeBoard);
+  $effect(() => {
+    const board = reader.board;
+    if (board === null || board === wholeBoard) return;
+    // After the frame that draws the first cards has painted: a task queued from inside the frame's callback.
+    let task: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => (task = setTimeout(() => (wholeBoard = board), 0)));
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(task);
+    };
+  });
+  $effect(() => {
+    if (firstFrame) return;
+    drewWhole.clear();
+    for (const [place, cards] of heldCards) drewWhole.set(place, cards.length);
+  });
+  /** The cards a column draws now: the first frame's share of a column that grows past it, or every one. */
+  function drawnNow(place: string, cards: MiniBoardCard[]): MiniBoardCard[] {
+    if (!firstFrame || cards.length <= FIRST_FRAME_CARDS || (drewWhole.get(place) ?? 0) >= FIRST_FRAME_CARDS) return cards;
+    return cards.slice(0, FIRST_FRAME_CARDS);
+  }
   const listHold = new HeldOrder<{ card: MiniBoardCard }>(({ card }) => card.entity_id);
   const heldList = $derived(
     showing.layout === "list" && reader.board !== null ? listHold.place(rows, heldBasis) : { rows: [] as { card: MiniBoardCard }[], waiting: 0, stale: false },
@@ -1011,7 +1047,7 @@
                   >
                 </h3>
                 <div class="tf-stack">
-                  {#each heldCards.get(placeAt(lane, column)) ?? [] as card (card.entity_id)}
+                  {#each drawnNow(placeAt(lane, column), heldCards.get(placeAt(lane, column)) ?? []) as card (card.entity_id)}
                     <TicketCard
                       {card}
                       fields={view?.card_fields ?? null}

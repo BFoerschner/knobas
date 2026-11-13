@@ -59,6 +59,12 @@ async function settle() {
   flushSync();
 }
 
+/** The frame after: what a growing column draws below its first cards. */
+async function nextFrame() {
+  await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  await settle();
+}
+
 function card(key: string, title: string, extra: Partial<MiniBoardCard> = {}): MiniBoardCard {
   return {
     entity_id: `jira:${key}`,
@@ -433,14 +439,24 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
   await open(h);
   for (const char of "bulk") type(field(), char);
   await settle();
+  // The frame the answer lands in draws a growing column's first sixteen, and the next frame the rest below them
+  // (the broad-filters pass, 2026-11-13).
+  expect(columns()).toEqual([
+    { head: "To do 60", cards: 16, more: "Show 10 more" },
+    { head: "Done 55", cards: 16, more: "Show 5 more done" },
+  ]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  await nextFrame();
   expect(columns()).toEqual([
     { head: "To do 60", cards: 50, more: "Show 10 more" },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
   ]);
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
   expect(count()).toBe("115 of 133 tickets");
 
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
+  // A column that drew fifty draws all it holds at once.
   expect(columns()).toEqual([
     { head: "To do 60", cards: 60, more: null },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
