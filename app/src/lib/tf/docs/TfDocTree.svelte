@@ -8,7 +8,10 @@
   Drawn at a real space's size (#2200, 4,000 pages): the top call indexes the
   space by parent and finds the folds holding the open page once per read,
   and every fold below shares both; a closed fold draws nothing under it
-  until it is opened, so the rows drawn are the rows shown.
+  until it is opened, so the rows drawn are the rows shown. A level of
+  thousands draws only the rows near the tree's scroll (`Windowed`, the
+  extremes pass): ↑ and ↓ walk the rows drawn, which the window keeps ahead
+  of the one with focus as it scrolls into view.
 
   Drawn from part of the tree too (the instant-open pass, 2026-11-12,
   `tree-store.ts`): a page that says it has pages under it is a fold before
@@ -26,6 +29,7 @@
   import { childrenByParent, foldsHolding, pageHash } from "./docs";
   import { childrenMissing, hasChildren } from "./tree-store";
   import { treeKeys } from "./tree-keys";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     space,
@@ -57,6 +61,12 @@
   const own = new SvelteSet<string>();
   const open = $derived(opened ?? own);
   const nodes = $derived(index.get(parent) ?? []);
+  /**
+   * A level of thousands of pages (a space's 3,000 pages under its home) draws only the rows near the tree's scroll
+   * (the extremes pass, 2026-11-13: every one of them was drawn in the reader's sidebar each time a page of the space
+   * opened). A fold's row is as tall as what it holds open, measured once drawn.
+   */
+  const win = new Windowed({ count: () => nodes.length, key: (i) => nodes[i]!.entity_id, estimate: 26 });
 
   /**
    * The reader opened or closed fold `id`. A fold opening because it holds the
@@ -78,11 +88,12 @@
 </script>
 
 {#snippet rows()}
-{#each nodes as node (node.entity_id)}
+<div class="tf-dl-rows" {@attach win.list}>
+{#each win.slice(nodes) as node (node.entity_id)}
   {@const queued = echoesOn(node.entity_id, "page")}
   {@const starts = queued.length > 0 || holding.has(node.entity_id)}
   {#if hasChildren(node, index) || queued.length > 0}
-    <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)}>
+    <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)} {@attach win.row(node.entity_id)}>
       <summary class:tf-cur={node.entity_id === current}
         ><a class="tf-sl" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a
@@ -98,9 +109,10 @@
       </div>
     </details>
   {:else}
-    <a class="tf-dl-leaf" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}>{node.title}</a>
+    <a class="tf-dl-leaf" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined} {@attach win.row(node.entity_id)}>{node.title}</a>
   {/if}
 {/each}
+</div>
 {/snippet}
 
 <!-- The top call holds the keys: the folds below it draw into the same list. -->

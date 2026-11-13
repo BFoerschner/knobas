@@ -11,6 +11,7 @@
 <script lang="ts">
   import type { DocPage } from "../../ipc/entity";
   import { inlineWords, pageHash, sectionMatches, sectionsOf } from "./docs";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     page,
@@ -30,15 +31,17 @@
   } = $props();
 
   const outline = $derived(sectionsOf(page.blocks).filter((s) => s.heading !== null));
+  /** A page of thousands of sections lists only the entries near the outline's own scroll (the extremes pass, 2026-11-13). */
+  const win = new Windowed({ count: () => outline.length, key: (i) => outline[i]!.number, estimate: 32 });
   const counts = $derived(sectionMatches(page.blocks, stems));
   const total = $derived([...counts.values()].reduce((sum, n) => sum + n, 0));
 </script>
 
 {#snippet toc()}
-  <nav class="tf-toc">
-    {#each outline as section (section.number)}
+  <nav class="tf-toc" {@attach win.list}>
+    {#each win.slice(outline) as section (section.number)}
       {@const n = counts.get(section.number)}
-      <a href={pageHash(page.entity_id, section.number)} class:tf-on={active === section.number} onclick={() => onpick?.(section.number)}
+      <a href={pageHash(page.entity_id, section.number)} class:tf-on={active === section.number} onclick={() => onpick?.(section.number)} {@attach win.row(section.number)}
         >{inlineWords(section.heading?.text ?? [])}{#if n}<span class="tf-hits">{n}</span>{/if}</a
       >
     {/each}

@@ -806,6 +806,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::card_reads,
         // The query audit: the inbox's two shelves and its count from one run.
         commands::entity::inbox_shelves,
+        // The extremes pass (PR #2479, 2026-11-13): an entity's row without its text.
+        commands::entity::entity_head,
     ]
 }
 

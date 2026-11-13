@@ -291,6 +291,41 @@ pub async fn get_entity(
     get_entity_inner(&pool, lifecycle.registry(), &entity_id).await
 }
 
+/// [`get_entity`] less the two fields that carry the item's text: `body_text`
+/// empty and `payload` null. For a caller that reads the row, its source,
+/// links and banners and draws the body from a read of its own (Docs draws a
+/// page from `docs_page`): a 5 MB Confluence page was 9.5 MB of `get_entity`
+/// beside the 10 MB of its `docs_page`, both parsed on the page's thread as it
+/// opened (the extremes pass, PR #2479, 2026-11-13).
+///
+/// # Errors
+///
+/// As [`get_entity`].
+#[tauri::command]
+pub async fn entity_head(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<EntityDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    entity_head_inner(&pool, lifecycle.registry(), &entity_id).await
+}
+
+/// [`entity_head`] with the pool and the registry handed in, for a test.
+///
+/// # Errors
+///
+/// As [`get_entity_inner`].
+pub async fn entity_head_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<EntityDetail, IpcError> {
+    let mut detail = get_entity_inner(pool, registry, entity_id).await?;
+    detail.body_text = String::new();
+    detail.payload = serde_json::Value::Null;
+    Ok(detail)
+}
+
 // -- an attachment's bytes (spec #2396, #2405) -------------------------------
 
 /// What [`attachment_bytes`] and [`artifact_bytes`] answer: the file's media

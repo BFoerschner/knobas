@@ -30,8 +30,9 @@
   import TfDocInlines from "./TfDocInlines.svelte";
   import { refusedAttrs } from "../../shell/refused-writes";
   import { echoOn, takeAgain } from "../queued.svelte";
-  import { inlineWords, refusalReason, sectionKind, sectionsOf } from "./docs";
+  import { firstDrawWeight, inlineWords, refusalReason, sectionKind, sectionsOf } from "./docs";
   import { flushSync } from "svelte";
+  import { whileNear } from "../../shell/near-view";
 
   let {
     blocks,
@@ -68,12 +69,13 @@
 
   // A long page draws in pieces (PR #2479: the largest Confluence page's 216 KB body was one 94 ms task, 264 ms on a
   // main thread a quarter as fast): the sections that fit `FIRST` characters of body (more than a screenful), then `MORE` each task after,
-  // each its own task, so the page paints and answers between them. `drawAll` draws the rest at once, for whatever
+  // each its own task, so the page paints and answers between them, while the end of what is drawn is near the view
+  // (the extremes pass, 2026-11-13: a 5 MB page drawn on regardless was still building its body 30 s later). `drawAll` draws the rest at once, for whatever
   // needs the whole body on the page: a section's address, a find, the place a reader left.
   const FIRST = 24_000;
   const MORE = 16_000;
   const all = $derived(sectionsOf(blocks));
-  const weights = $derived(all.map((section) => JSON.stringify(section.blocks).length + 64));
+  const weights = $derived(all.map((section) => firstDrawWeight(section.blocks) + 64));
   /** How much of this page's body to draw now; a page drawn whole stays whole when it is read again. */
   let grown = $state<{ id: string; budget: number }>({ id: "", budget: FIRST });
   const budget = $derived(grown.id === entityId ? grown.budget : FIRST);
@@ -83,13 +85,12 @@
     while (n < all.length && (n === 0 || used + weights[n]! <= budget)) used += weights[n++]!;
     return n === all.length ? all : all.slice(0, n);
   });
-  $effect(() => {
-    const id = entityId;
-    const more = budget + MORE;
-    if (shown.length >= all.length) return;
-    const later = setTimeout(() => (grown = { id, budget: more }), 0);
-    return () => clearTimeout(later);
-  });
+  /** Draws the next piece, while the end of what is drawn nears the view (`whileNear`); `false` once all is drawn. */
+  function more(): boolean {
+    if (shown.length >= all.length) return false;
+    grown = { id: entityId, budget: budget + MORE };
+    return true;
+  }
 
   /** Draws the rest of the page's body now, before what needs all of it on the page. */
   export function drawAll(): void {
@@ -183,7 +184,7 @@
 
 {#each shown as section (section.number)}
   {#if section.heading === null}
-    <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} />
+    <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} whole={budget === Infinity} />
   {:else}
     {@const said = sections.find((s) => s.number === section.number)}
     {@const queued = queuedText(section.number)}
@@ -222,8 +223,8 @@
       {:else if queued !== null}
         <p class="tf-sec-queued">{queued}</p>
       {:else}
-        <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} />
+        <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} whole={budget === Infinity} />
       {/if}
     </section>
   {/if}
-{/each}
+{/each}{#if shown.length < all.length}<div class="tf-doc-more" aria-hidden="true" {@attach whileNear(more)}></div>{/if}

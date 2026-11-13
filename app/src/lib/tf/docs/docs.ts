@@ -661,6 +661,27 @@ export interface Section {
 }
 
 /** A body's sections, prototype-6's numbering: the first heading opens section 1. */
+/** A long table's rows a body draws at first (`TfDocBlocks`); the rest follow a piece a task. */
+export const TABLE_ROWS_FIRST = 40;
+
+/** The blocks of one run a body draws at first (`TfDocBlocks`), where one heading holds thousands. */
+export const DOC_BLOCKS_FIRST = 80;
+
+/**
+ * About how much a body draws of `blocks` at first, in characters of their JSON: a long table or list its first rows
+ * (`TfDocBlocks` draws the rest after). What a page body draws in each task is
+ * measured in this (`TfDocBody`), so a section of one huge table is not held back until a budget covers all of it.
+ */
+export function firstDrawWeight(blocks: DocBlock[]): number {
+  let n = 0;
+  for (const block of blocks.slice(0, DOC_BLOCKS_FIRST)) {
+    if (block.type === "table") n += JSON.stringify(block.rows.slice(0, TABLE_ROWS_FIRST + 1)).length;
+    else if (block.type === "list") n += JSON.stringify(block.items.slice(0, TABLE_ROWS_FIRST)).length;
+    else n += JSON.stringify(block).length;
+  }
+  return n;
+}
+
 export function sectionsOf(blocks: DocBlock[]): Section[] {
   const out: Section[] = [{ number: 0, heading: null, blocks: [] }];
   for (const block of blocks) {

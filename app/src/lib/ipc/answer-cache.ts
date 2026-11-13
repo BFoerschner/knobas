@@ -48,6 +48,7 @@ type Invoke = (cmd: string, args?: unknown, options?: unknown) => Promise<unknow
 export const READS: ReadonlySet<string> = new Set([
   "list_entities",
   "get_entity",
+  "entity_head",
   "docs_tree",
   "docs_outline",
   "docs_nodes",

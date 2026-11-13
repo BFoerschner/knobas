@@ -377,6 +377,14 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
 }
 
 /**
+ * `getEntity` less the item's text: `body_text` empty and `payload` null (the extremes pass, PR #2479, 2026-11-13). For
+ * a page that draws the body from a read of its own and wants the row, source, links and banners: Docs.
+ */
+export function entityHead(entityId: string): Promise<EntityDetail> {
+  return invoke<EntityDetail>("entity_head", { entityId });
+}
+
+/**
  * Every pipeline the sources filling the CI role declare, by name (#848). The
  * read narrows itself to CI's fillers (#1295, §10.8's #1294 entry): a source
  * with a CI miss, one that claims no CI and a removed source's leftovers draw

@@ -586,6 +586,7 @@ function visitEntity(args: Record<string, unknown>): string | null {
 export function handlers(): Handlers {
   return {
     get_entity: (args) => getEntity(args),
+    entity_head: (args) => ({ ...getEntity(args), body_text: "", payload: null }),
     refresh_entity: (args) => refreshEntity(args),
     // A reload starts the fixture over, so nothing filed before it is owed (#1953).
     owed_tickets: () => [],

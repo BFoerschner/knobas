@@ -469,6 +469,7 @@ const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
 const TfDocTree = (await import("../tf/docs/TfDocTree.svelte")).default;
 const TfDocsSpace = (await import("../tf/docs/TfDocsSpace.svelte")).default;
 const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
+const TfDocBlocks = (await import("../tf/docs/TfDocBlocks.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
@@ -2369,6 +2370,29 @@ const CASES: Case[] = [
             standupPublishTarget: () => deferred(null),
             follower: { follow: () => () => {} },
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * A page's blocks (#859): a long table's rows drawn a piece a task (the
+     * extremes pass, 2026-11-13), its one effect a timeout for the next piece,
+     * cleared with it; nothing is read.
+     */
+    name: "TfDocBlocks",
+    source: "lib/tf/docs/TfDocBlocks.svelte",
+    open: (target) => ({
+      app: mount(TfDocBlocks, {
+        target,
+        props: {
+          blocks: [{ type: "table", rows: Array.from({ length: 200 }, (_, r) => [{ header: false, colspan: 1, rowspan: 1, blocks: [{ type: "paragraph", text: [{ type: "text", text: `row ${r}` }] }] }]) }] as never,
+          entityId: "confluence:1",
+          sourceName: "Confluence",
+          webUrl: null,
+          whole: false,
+          onopen: () => {},
+          oncopy: () => {},
         },
       }),
     }),

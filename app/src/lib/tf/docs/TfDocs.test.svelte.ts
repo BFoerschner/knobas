@@ -416,7 +416,7 @@ test("a 4,000-page space draws its tree in one pass over the pages, and a closed
   fold.dispatchEvent(new Event("toggle"));
   await settle();
   expect(reads.parent - before).toBeLessThan(4000);
-  expect([...fold.querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")].map((a) => a.textContent)).toEqual(
+  expect([...fold.querySelectorAll(":scope > .tf-fold-in > .tf-dl-rows > a, :scope > .tf-fold-in > .tf-dl-rows > details > summary a")].map((a) => a.textContent)).toEqual(
     Array.from({ length: 8 }, (_, k) => `Page ${String(28 + k).padStart(5, "0")}`),
   );
 
@@ -432,7 +432,7 @@ test("a 4,000-page space draws its tree in one pass over the pages, and a closed
   expect(fold.querySelector(":scope > .tf-fold-in a")).toBeNull();
   await toggle(fold, true);
   expect(inner().open).toBe(true);
-  expect(inner().querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")).toHaveLength(8);
+  expect(inner().querySelectorAll(":scope > .tf-fold-in > .tf-dl-rows > a, :scope > .tf-fold-in > .tf-dl-rows > details > summary a")).toHaveLength(8);
 });
 
 test("a fold the reader opened holds for the session, in its space, past a tree read and a page drawn anew (F-464)", async () => {

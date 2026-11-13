@@ -6,7 +6,7 @@
 //! membership, never absolute row totals.
 
 use knobas_app::commands::entity::{
-    DEFAULT_RELATION, create_link_inner, get_entity_inner, list_entities_inner,
+    DEFAULT_RELATION, create_link_inner, entity_head_inner, get_entity_inner, list_entities_inner,
     list_projects_inner, unlink_inner,
 };
 use knobas_app::sources::Registry;
@@ -1042,6 +1042,29 @@ async fn the_source_filter_selects_a_room() {
 }
 
 // -- get_entity -------------------------------------------------------------
+
+/// `entity_head` is `get_entity` less the item's text (the extremes pass, PR
+/// #2479, 2026-11-13): the same row, source, links and banners field for
+/// field, with `body_text` empty and `payload` null, so Docs reads the open
+/// page's row without carrying its body twice.
+#[tokio::test]
+async fn the_head_is_the_entity_less_its_text() {
+    let pool = seeded().await;
+    let registry = Registry::for_process();
+    let whole = get_entity_inner(&pool, &registry, "mock:PAY-231")
+        .await
+        .unwrap();
+    let head = entity_head_inner(&pool, &registry, "mock:PAY-231")
+        .await
+        .unwrap();
+    assert!(!whole.body_text.is_empty() && !whole.payload.is_null());
+    assert_eq!(head.body_text, "");
+    assert!(head.payload.is_null());
+    let mut expected = serde_json::to_value(&whole).unwrap();
+    expected["body_text"] = serde_json::json!("");
+    expected["payload"] = serde_json::Value::Null;
+    assert_eq!(serde_json::to_value(&head).unwrap(), expected);
+}
 
 #[tokio::test]
 async fn returns_the_row_its_source_and_the_raw_payload() {

@@ -85,7 +85,7 @@
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
-  import { tick, untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
   import { on } from "svelte/events";
   import type { RoleFrameProps } from "../page-entry";
   import { MediaQuery } from "svelte/reactivity";
@@ -101,7 +101,7 @@
     docsTree as realDocsTree,
     docsOutline as realDocsOutline,
     docsNodes as realDocsNodes,
-    getEntity as realGetEntity,
+    entityHead as realEntityHead,
     jobReach as realJobReach,
     submitWrite as realSubmitWrite,
     visitEntity as realVisitEntity,
@@ -147,6 +147,8 @@
   import TfDocHits from "./TfDocHits.svelte";
   import TfDocMore from "./TfDocMore.svelte";
   import TfDocOutline from "./TfDocOutline.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
+  import { textHeight } from "../../shell/windowed";
   import TfDocsHome from "./TfDocsHome.svelte";
   import TfDocTree from "./TfDocTree.svelte";
   import TfKeyed from "../TfKeyed.svelte";
@@ -225,9 +227,10 @@
     /**
      * The open page's row (#2136): whether its source reads one page
      * (`refreshes`), is turned on, and still holds it, for *Refresh* and the
-     * two banners. A row that cannot be read draws neither.
+     * two banners. A row that cannot be read draws neither. Read without the page's text (`entity_head`): the body is
+     * `docsPage`'s, and a 5 MB page's text was 9.5 MB more to carry and parse as the page opened (the extremes pass).
      */
-    getEntity: typeof realGetEntity;
+    getEntity: typeof realEntityHead;
     /** The header's *Refresh* (#2136); the bridge's when omitted. */
     refresh?: DetailRefreshPorts;
     openExternal: (url: string) => Promise<void>;
@@ -285,7 +288,7 @@
       submitWrite: realSubmitWrite,
       visitEntity: realVisitEntity,
       jobReach: realJobReach,
-      getEntity: realGetEntity,
+      getEntity: realEntityHead,
       openExternal: realOpenExternal,
       copy: (text) => navigator.clipboard.writeText(text),
     },
@@ -477,6 +480,27 @@
     if (id === null || id !== target) return Promise.resolve(false);
     return Promise.all([readPage(id, true), readDetail(id, true)]).then(([read]) => read);
   }
+
+  /**
+   * A page's comments draw only those near the viewport (the extremes pass, 2026-11-13: 300 comments, one of 300 KB,
+   * were built whole under the body as the page opened). By place: comments are the source's, oldest first.
+   */
+  /** Every comment drawn: what needs them all on the page (a mention brought into view); a find draws them too. */
+  let commentsWhole = $state(false);
+  $effect(() => {
+    void page?.entity_id;
+    commentsWhole = false;
+  });
+  const commentsWin = new Windowed({
+    // A find marks its matches in every comment, and counts them on the page, so while it finds nothing is held back.
+    count: () => (commentsWhole || stems.length > 0 ? 0 : (page?.comments.length ?? 0)),
+    key: (i) => i,
+    estimate: 90,
+    gap: 10,
+    estimateOf: (i) => commentRoom[i] ?? 90,
+  });
+  /** Each comment's room before it is drawn, by its words' length. */
+  const commentRoom = $derived((page?.comments ?? []).map((c) => textHeight(JSON.stringify(c.blocks), { base: 40, line: 24, chars: 160 })));
 
   // ---- *Refresh* (#2136, #2107) ----
   /** The open page's row (`get_entity`), `null` until read or when it cannot be. */
@@ -965,6 +989,9 @@
   /** A page opened at its mention: the newest comment that names the reader, else the first mention in its body. */
   function toMention(): void {
     body?.drawAll();
+    // The newest mention may be a comment the list holds back: every comment drawn, as for a find.
+    commentsWhole = true;
+    flushSync();
     const comments = article?.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
     const at = comments?.[comments.length - 1] ?? article?.querySelector<HTMLElement>(".tf-ment.tf-me");
     at?.scrollIntoView?.({ block: "center" });
@@ -983,7 +1010,9 @@
     const p = page;
     const query = stems;
     if (p === null) return;
-    const again = started?.id === p.entity_id && started.stems === query;
+    // A find's matches kept through a read again: with nothing to find there is nothing to keep, and drawing the whole
+    // body for it drew a 2,000-row table in one task of 903 ms on each return (the extremes pass, 2026-11-13).
+    const again = started?.id === p.entity_id && started.stems === query && query.length > 0;
     // Only a page newly drawn lands on the section its address names, or its first match.
     const samePage = started?.id === p.entity_id;
     if (!samePage) findPlace = null;
@@ -1880,9 +1909,11 @@
             {/key}
             <div class="tf-cmts">
               <h2>Comments {#if p.comments.length + queuedComments.length > 0}<span class="tf-count">{p.comments.length + queuedComments.length}</span>{/if}</h2>
-              {#each p.comments as c, i (i)}
+              {#if p.comments.length > 0}
+              <div {@attach commentsWin.list}>
+              {#each commentsWin.slice(p.comments) as c, at (commentsWin.start + at)}
                 {@const mine = c.author !== null && p.me.includes(c.author)}
-                <div class="tf-msg" class:tf-mention={c.blocks.some(mentionsMe)}>
+                <div class="tf-msg" class:tf-mention={c.blocks.some(mentionsMe)} {@attach commentsWin.row(commentsWin.start + at)}>
                   <span class="tf-av" class:tf-me={mine}>{initials(c.author)}</span>
                   <div class="tf-cmt-body">
                     <div class="tf-who">
@@ -1901,6 +1932,8 @@
                   </div>
                 </div>
               {/each}
+              </div>
+              {/if}
               {#each queuedComments as echo, n (n)}
                 <div class="tf-msg tf-queued">
                   <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
