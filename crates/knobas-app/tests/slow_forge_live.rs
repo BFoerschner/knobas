@@ -665,3 +665,132 @@ async fn a_repository_never_read_draws_its_branches_and_last_commit_from_the_mir
     rig.proxy.set(0);
     live.settled().await;
 }
+
+/// **A big folder with no clone, through a slow forge** (the big-folder pass
+/// of PR #2479, 2026-11-13): a folder is its own level of Gitea's tree, read by
+/// the tree's sha, not Gitea's `contents`, which works out each entry's last
+/// commit (9 s for 3,000 entries, never for 12,000). Times each folder's first
+/// read with every request held 1 s (nothing read before: the top's level and
+/// the folder's), then the next (a session of its own: the adapter kept the
+/// level, so no request), then the same at full speed, which reads what the
+/// adapter kept; prints a `SLOW` line for each, and asserts each folder is
+/// drawn with every entry.
+///
+/// It reads a repository with big folders that the seed has none of:
+/// `KNOBAS_BIG_FOLDERS_REPO` (`owner/name` on the testenv Gitea) and
+/// `KNOBAS_BIG_FOLDERS` (its folders and their entries, `huge=12000,deep/x=800`),
+/// such as the ones `testenv/perf/big-folders.mjs` makes.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the testenv Gitea and a repository with big folders: KNOBAS_BIG_FOLDERS_REPO, KNOBAS_BIG_FOLDERS"]
+async fn a_big_folder_with_no_clone_reads_its_own_level_through_a_slow_forge() {
+    let proxy = slow::start(&need("KNOBAS_GITEA_URL")).await;
+    let repo_name = need("KNOBAS_BIG_FOLDERS_REPO");
+    let folders: Vec<(String, usize)> = need("KNOBAS_BIG_FOLDERS")
+        .split(',')
+        .filter_map(|f| f.split_once('='))
+        .map(|(dir, n)| (dir.to_owned(), n.parse().expect("a count")))
+        .collect();
+    let pool = knobas_db::test_util::scratch_database("slow_forge_big_folders")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto the scratch database");
+    let source = format!("gitea-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let token = need("KNOBAS_GITEA_TOKEN");
+    let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(&source),
+            &Secret::just(AuthMethod::Pat, token.clone()),
+        )
+        .expect("the token is stored");
+    let config = serde_json::json!({ "repos": [repo_name] });
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: source.clone(),
+            adapter_kind: "gitea".to_owned(),
+            display_name: source.clone(),
+            base_url: proxy.url.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: config.clone(),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    let built = knobas_source_gitea::build(knobas_source::instance::SourceInstance {
+        id: source.clone(),
+        kind: "gitea".to_owned(),
+        display_name: source.clone(),
+        base_url: proxy.url.clone(),
+        auth: Some(AuthMethod::Pat),
+        secret: Some(token),
+        account: None,
+        config,
+    })
+    .expect("the source builds");
+    knobas_sync::run_once(&pool, built.as_ref(), None)
+        .await
+        .expect("the repository syncs");
+    let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry::for_process());
+    let repo = format!("{source}:{repo_name}");
+    let read = |live: &LiveSources, section: String| {
+        let (pool, secrets, registry, repo) = (
+            pool.clone(),
+            secrets.clone(),
+            registry.clone(),
+            repo.clone(),
+        );
+        let live = live.clone();
+        async move {
+            time(knobas_app::sources::crud::view(
+                &pool,
+                &secrets,
+                &registry,
+                &live,
+                &repo,
+                Some(&section),
+            ))
+            .await
+        }
+    };
+    for (mode, ms) in [("1s", 1_000), ("0s", 0)] {
+        proxy.set(ms);
+        // A fresh session: nothing kept by the app; the adapter's levels are kept for the process, so only the first
+        // mode reads them from the forge.
+        let live = LiveSources::default();
+        let (_, top) = read(&live, "files".to_owned()).await;
+        let top = top.flatten().expect("the top is read");
+        let Block::Tree {
+            commit: Some(sha), ..
+        } = &top.sections[0].blocks[0]
+        else {
+            panic!("{top:#?}");
+        };
+        for (dir, entries) in &folders {
+            let section = format!("files@{sha}:{dir}");
+            let (first, drawn) = read(&live, section.clone()).await;
+            let (next, _) = read(&LiveSources::default(), section.clone()).await;
+            let drawn = drawn
+                .flatten()
+                .unwrap_or_else(|| panic!("{dir} is drawn: {first}"));
+            let Block::Tree {
+                entries: listed,
+                truncated,
+                ..
+            } = &drawn.sections[0].blocks[0]
+            else {
+                panic!("{drawn:#?}");
+            };
+            println!(
+                "SLOW {mode:>6} | no clone: {dir:<24} | first {first} | next {next} | {} entries",
+                listed.len()
+            );
+            assert_eq!(listed.len(), *entries, "every entry of {dir}");
+            assert!(!truncated, "{dir} is not cut");
+        }
+    }
+    proxy.set(0);
+}

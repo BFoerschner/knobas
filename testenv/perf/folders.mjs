@@ -3,15 +3,21 @@
 // input over the DevTools protocol, under a trace, at each CPU throttle: unfolded, folded, unfolded again.
 //
 //   node testenv/perf/folders.mjs --app <url> --repo <entity id> --folders a,b/c [--throttle 1,4] [--out <file.json>]
-//                                 [--fetched <ms>]
+//                                 [--fetched <ms>] [--open] [--by-key]
 //
 // --app      a built app on the windowless backend, `?fake-ipc&fake-real=<port>` (README, *On a real database*)
 // --repo     the repository's entity id (`live-gitea:owner/name`); its Files tab is opened first
 // --folders  the folders pressed, each a path from the top; a folder below another is pressed after its parent opens
+// --by-key   press by `Enter` on the focused row, with no pointer on it: no read is asked early, as resting the
+//            pointer on a folder asks it
+// --open     first, at each throttle, open the repository's Files tab from Code and time it to the frame that shows the
+//            tree's rows, with its IPC calls (the tab reads the clone's top, or its whole tree before the second
+//            big-folder pass)
 // --fetched  for a clone behind the mirror's commit: <ms> after the tab drew, tell the page `view:fresh` for its top and
 //            `checkout:fetched`, as the app does once its read behind the kept top and its fetch behind the clone land (the windowless backend tells the page no event; the app
 //            needs `?fake-hooks`)
 //
+// The pressed row is scrolled to the top of the tree first, so the rows it opens are on screen.
 // Per press it prints: `drawn` (the press to the end of the frame that first shows the folder's rows: the rAF after
 // the one that found them), `rows` (how many rows the tree holds in the DOM then), the IPC calls between the press and
 // drawn, the main thread's time by kind in that span from the trace, its longest task, and `moved`: whether a row on
@@ -28,6 +34,8 @@ const folders = (opt("--folders") ?? "").split(",").filter(Boolean);
 const throttles = (opt("--throttle") ?? "1,4").split(",").map(Number);
 const out = opt("--out") ?? "folders.json";
 const fetched = opt("--fetched");
+const opening = args.includes("--open");
+const byKey = args.includes("--by-key");
 if (!app || !repo || folders.length === 0) { console.log("folders.mjs: --app, --repo and --folders are required"); process.exit(2); }
 
 const base = app.replace(/#.*$/, "");
@@ -108,15 +116,26 @@ async function fresh(hash) {
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: `${base}${hash}` });
   await loaded;
-  for (let i = 0; i < 600; i++) { if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path]')`).catch(() => false)) break; await sleep(50); }
+  const ready = hash.includes("/repo/") ? `${shown} .tf-ftree [data-path]` : ".tf-nav";
+  for (let i = 0; i < 600; i++) { if (await js(`!!document.querySelector('${ready}')`).catch(() => false)) break; await sleep(50); }
   await quiet(1500);
   await js(PAGE);
 }
 
 async function pressRow(path) {
   const sel = `${shown} .tf-ftree [data-path="${path}"]`;
-  const at = await js(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.left + 40, y: r.top + r.height / 2 }; })()`);
+  const at = await js(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: "start" }); const r = e.getBoundingClientRect(); return { x: r.left + 40, y: r.top + r.height / 2 }; })()`);
   if (!at) throw new Error(`no row ${path}`);
+  if (byKey) {
+    // The pointer off the tree, the row focused, `Enter`.
+    await c.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1400, y: 860 });
+    await js(`document.querySelector(${JSON.stringify(sel)}).focus(), 1`);
+    await sleep(300);
+    await c.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await c.send("Input.dispatchKeyEvent", { type: "char", key: "Enter", text: "\r" });
+    await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    return;
+  }
   await c.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
   await sleep(300);
   await c.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
@@ -155,6 +174,18 @@ const say = (r) => {
 const results = { app, repo, at: new Date().toISOString(), presses: [] };
 for (const rate of throttles) {
   await cpu(1);
+  if (opening) {
+    // The tab from Code: the address set, as a link sets it, to the frame after the one that found the tree's rows.
+    await fresh("#/code");
+    await sleep(2000);
+    await cpu(rate);
+    await js(`(() => { const r = window.__openTab = { t0: performance.now(), found: null, drawn: null }; const tick = (t) => { if (r.found !== null && r.drawn === null) { r.drawn = t; return; } if (r.found === null && document.querySelectorAll('${shown} .tf-ftree [data-path]').length >= 2) r.found = t; requestAnimationFrame(tick); }; requestAnimationFrame(tick); location.hash = ${JSON.stringify(R)}; return 1; })()`);
+    const tab = await js(`new Promise((res) => { const t0 = performance.now(); const wait = () => (window.__openTab.drawn !== null || performance.now() - t0 > 30000 ? res({ drawnMs: Math.round((window.__openTab.drawn ?? NaN) - window.__openTab.t0) }) : setTimeout(wait, 50)); wait(); })`, 45000);
+    results.presses.push({ throttle: rate, folder: "(the tab)", round: "open", ...tab });
+    console.log(`${rate}x the tab open: tree drawn ${tab.drawnMs} ms`);
+    await cpu(1);
+    await quiet(1200);
+  }
   await fresh(R);
   await sleep(2000);
   if (fetched !== null) {
@@ -186,8 +217,11 @@ for (const rate of throttles) {
       await quiet(800);
       await cpu(rate);
     }
-    // Folded again, so the next folder's press starts from the same tree (a deep path keeps its parents open).
-    if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path="${folder}"][aria-expanded="true"]')`)) { await pressRow(folder); await quiet(800); }
+    // Folded again, with every folder opened above it, so the next folder's press starts from the same tree.
+    for (let i = parts.length; i >= 1; i--) {
+      const up = parts.slice(0, i).join("/");
+      if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path="${up}"][aria-expanded="true"]')`)) { await cpu(1); await pressRow(up); await quiet(800); await cpu(rate); }
+    }
   }
   writeFileSync(out, JSON.stringify(results, null, 1));
 }

@@ -157,7 +157,9 @@ back to the tab with it still open folds it first (`undo`). The 12,000-entry fol
 `folders.mjs` is the same press broken down, for a pass on one repository: the main thread's script, style, layout and
 paint from a trace, the IPC calls, and how many rows are in the DOM, unfolded, folded and unfolded again.
 `--fetched <ms>` tells the page the app's `view:fresh` and `checkout:fetched` that long after it drew, for a clone
-behind the mirror's commit, since the windowless backend tells the page no event.
+behind the mirror's commit, since the windowless backend tells the page no event. `--by-key` presses by `Enter` with the pointer off the
+tree, so no read is asked early, as resting the pointer on a folder asks it; `--open` first times the tab's own open
+from Code to its tree drawn, with its IPC calls.
 
 ```sh
 node testenv/perf/folders.mjs --app "http://127.0.0.1:5362/?fake-ipc&fake-hooks&fake-real=5411#/time" \
