@@ -392,6 +392,22 @@ function leftOutAnswer(raw: string): SearchResponse | null {
 }
 
 /** This feature's commands. */
+/**
+ * `?fake-projects=<n>`: `n` more projects among the ticket keys' values, to
+ * look at the view editor's Project condition at a real Jira's size
+ * (`&fake-projects=40`), where its values are a list to search.
+ */
+function manyProjects(): { key: string; value: string; detail: string }[] {
+  const count = Number(new URLSearchParams(globalThis.location?.search).get("fake-projects") ?? 0) || 0;
+  const areas = ["Billing", "Customs", "Tracking", "Warehouse", "Fleet", "Partner", "Returns", "Pricing", "Identity", "Analytics"];
+  const kinds = ["Platform", "Mobile", "Integrations", "Support", "Data", "Web"];
+  return Array.from({ length: count }, (_, at) => {
+    const area = areas[at % areas.length]!;
+    const kind = kinds[Math.floor(at / areas.length) % kinds.length]!;
+    return { key: "project", value: `${area.slice(0, 2)}${kind.slice(0, 1)}${at >= 60 ? at : ""}`.toUpperCase(), detail: `${area} ${kind}` };
+  });
+}
+
 export function handlers(): Handlers {
   return {
     // The launcher board (#504): the recent items alone since #2421 and
@@ -442,6 +458,7 @@ export function handlers(): Handlers {
       fields: [
         { key: "project", value: "PAY", detail: "Payments" },
         { key: "project", value: "OPS", detail: "Operations" },
+        ...manyProjects(),
         ...["In Progress", "To Do", "In Review", "Done"].map((value) => ({
           key: "status",
           value,

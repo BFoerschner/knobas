@@ -1230,6 +1230,136 @@ test("+ New view opens the editor: conditions write the search line, the preview
   expect(location.hash).toBe("#/tickets/payout-work");
 });
 
+/** A source with more projects than a row of toggles reads well with. */
+const MANY_PROJECTS: [string, string][] = [
+  ["PLY", "Platform Analytics Yearly"],
+  ["LAP", "Laptops"],
+  ["PAY", "Payments"],
+  ["TPY", "Team Pay"],
+  ["OPS", "Operations"],
+  ["CUS", "Customs"],
+  ["TRK", "Tracking"],
+  ["WEB", "Website"],
+  ["HR", "People"],
+  ["FIN", "Finance"],
+  ["LEG", "Legal"],
+  ["SEC", "Security"],
+];
+
+/** *New view…* with one Project condition, over a source that has {@link MANY_PROJECTS}. */
+async function projectCondition(): Promise<Harness> {
+  const h = harness();
+  h.ports = {
+    ...h.ports,
+    suggestions: () =>
+      Promise.resolve({ fields: MANY_PROJECTS.map(([value, detail]) => ({ key: "project", value, detail })), parents: [] }),
+  };
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
+  await previewed(h);
+  inDialog("Add a condition").click();
+  await settle();
+  return h;
+}
+const valueSearch = () => dialog()!.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+const offered = () => [...dialog()!.querySelectorAll<HTMLElement>('.tf-vw-rule [role="option"]')];
+const offeredNames = () => offered().map((option) => option.textContent!.trim());
+const pickedNames = () =>
+  [...dialog()!.querySelectorAll<HTMLElement>('.tf-vw-rule .tf-vw-val[aria-pressed="true"]')].map((chip) => chip.textContent!.trim());
+function key(element: HTMLElement, name: string): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
+  element.dispatchEvent(event);
+  return event;
+}
+
+test("a condition with many values is a list to search: typed letters find a value, a click picks it, the picked stay in sight", async () => {
+  await projectCondition();
+  expect(valueSearch().getAttribute("aria-label")).toBe("Search 12 projects");
+  expect(valueSearch().placeholder).toBe("Search 12 projects");
+  // Nothing typed: every value, as the source gave them, none as a toggle.
+  expect(offeredNames()).toEqual(MANY_PROJECTS.map(([value, detail]) => `${detail} (${value})`));
+  expect(pickedNames()).toEqual([]);
+
+  input(valueSearch(), "pay");
+  await settle();
+  expect(offeredNames()).toEqual(["Payments (PAY)", "Team Pay (TPY)", "Platform Analytics Yearly (PLY)"]);
+  expect([...offered()[0]!.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["Pay"]);
+  offered()[0]!.click();
+  await settle();
+  expect(searchLine().textContent).toBe("project:PAY");
+  expect(offered()[0]!.getAttribute("aria-selected")).toBe("true");
+  expect(pickedNames()).toEqual(["Payments (PAY)"]);
+
+  // Another search hides the picked value from the list, not from the condition.
+  input(valueSearch(), "trk");
+  await settle();
+  expect(offeredNames()).toEqual(["Tracking (TRK)"]);
+  expect(pickedNames()).toEqual(["Payments (PAY)"]);
+  offered()[0]!.click();
+  await settle();
+  expect(searchLine().textContent).toBe("project:PAY project:TRK");
+
+  // A picked value comes off at its chip.
+  [...dialog()!.querySelectorAll<HTMLButtonElement>(".tf-vw-rule .tf-vw-val")].find((chip) => chip.textContent!.trim() === "Payments (PAY)")!.click();
+  await settle();
+  expect(searchLine().textContent).toBe("project:TRK");
+
+  input(valueSearch(), "zq");
+  await settle();
+  expect(offeredNames()).toEqual([]);
+  expect(dialog()!.querySelector(".tf-vw-rule")!.textContent).toContain("No match for zq.");
+});
+
+test("the value search is worked from the keys: arrows move, Enter picks without saving, Esc clears the search before it closes the editor", async () => {
+  const h = await projectCondition();
+  input(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, "Ops work");
+  const current = () => offered().find((option) => option.id === valueSearch().getAttribute("aria-activedescendant"))?.textContent!.trim();
+
+  input(valueSearch(), "ops");
+  await settle();
+  expect(offeredNames()).toEqual(["Operations (OPS)", "Laptops (LAP)"]);
+  expect(current()).toBe("Operations (OPS)");
+  key(valueSearch(), "ArrowDown");
+  await settle();
+  expect(current()).toBe("Laptops (LAP)");
+  // The list ends: one more step stays on the last.
+  key(valueSearch(), "ArrowDown");
+  key(valueSearch(), "ArrowUp");
+  await settle();
+  expect(current()).toBe("Operations (OPS)");
+
+  // Enter in a form's field would save the view; here it picks, and the field is ready for the next search.
+  expect(key(valueSearch(), "Enter").defaultPrevented).toBe(true);
+  await settle();
+  expect(searchLine().textContent).toBe("project:OPS");
+  expect(valueSearch().value).toBe("");
+  expect(h.saved).toEqual([]);
+
+  input(valueSearch(), "pay");
+  await settle();
+  key(valueSearch(), "Escape");
+  await settle();
+  expect(valueSearch().value).toBe("");
+  expect(offeredNames()).toHaveLength(12);
+  key(valueSearch(), "Escape");
+  await settle();
+  expect(dialog()).toBeNull();
+});
+
+test("a condition with few values stays a row of toggles, with no search", async () => {
+  const h = harness();
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
+  await previewed(h);
+  inDialog("Add a condition").click();
+  await settle();
+  input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "issuetype");
+  await settle();
+  expect(valueSearch()).toBeNull();
+  expect(offered()).toEqual([]);
+  expect([...dialog()!.querySelectorAll(".tf-vw-rule .tf-vw-val")].map((chip) => chip.textContent)).toEqual(["Story", "Bug"]);
+});
+
 test("Edit view opens the text as conditions, saves over the view under its id, and keeps a text left alone as typed", async () => {
   const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: 'issuetype:Bug   assignee:me "sepa retry"' })]);
   await open(h, null, "bugs");

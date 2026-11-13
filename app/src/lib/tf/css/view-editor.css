@@ -32,10 +32,23 @@
   border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet);
 }
 .tf-vw-rule .tf-vw-x { justify-self: end; }
-.tf-vw-rule .tf-vw-vals { grid-column: 1 / -1; }
+.tf-vw-rule > .tf-vw-vals, .tf-vw-rule > .tf-vw-pick { grid-column: 1 / -1; }
 /* Values and statuses are multi-selects, so they are the filter bar's pills (`.tf-fchips`), on the rule's own line. */
 .tf-vw-vals { display: flex; }
 .tf-vw-vals button[disabled] { cursor: default; }
+/* A condition with many values (`ValuePicker`): the picked ones as toggles, a search, the values as rows in a box that scrolls. */
+.tf-vw-pick { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tf-vw-opts { display: flex; flex-direction: column; max-height: 178px; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); }
+.tf-vw-opts[hidden] { display: none; }
+.tf-vw-opt {
+  display: flex; gap: 6px; align-items: baseline; flex: none; border: 0; border-top: 1px solid var(--rule-2); background: none;
+  color: var(--ink-2); padding: 4px 8px; font-size: var(--t-sm); text-align: left; cursor: pointer;
+}
+.tf-vw-opt:first-child { border-top: 0; }
+.tf-vw-opt:hover, .tf-vw-opt.tf-vw-at { background: var(--sheet-2); color: var(--ink); }
+.tf-vw-opt[aria-selected="true"] { color: var(--ink); font-weight: 600; }
+.tf-vw-tick { flex: none; width: 12px; }
+.tf-vw-pick > .tf-dim { font-size: var(--t-xs); margin: 0; }
 .tf-vw-x, .tf-vw-move button { border: 0; background: none; color: var(--ink-2); cursor: pointer; border-radius: 3px; padding: 2px 6px; }
 .tf-vw-x:hover, .tf-vw-move button:hover:not([disabled]) { background: var(--sheet-2); color: var(--ink); }
 .tf-vw-move button[disabled] { opacity: .3; cursor: default; }

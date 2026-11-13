@@ -28,19 +28,22 @@ export type ConditionField =
   | "updated"
   | "assigned";
 
-/** The fields in prototype-6's order and words, each with the grammar key it writes. */
-export const CONDITION_FIELDS: readonly { field: ConditionField; label: string; key: string }[] = [
-  { field: "project", label: "Project", key: "project" },
-  { field: "status", label: "Status", key: "status" },
-  { field: "issuetype", label: "Issue type", key: "issuetype" },
-  { field: "priority", label: "Priority", key: "priority" },
-  { field: "assignee", label: "Assignee", key: "assignee" },
-  { field: "epic", label: "Epic", key: "under" },
-  { field: "label", label: "Label", key: "label" },
-  { field: "sprint", label: "Sprint", key: "sprint" },
-  { field: "signal", label: "Signal", key: "has" },
-  { field: "updated", label: "Updated", key: "updated" },
-  { field: "assigned", label: "Assigned to me", key: "assigned" },
+/**
+ * The fields in prototype-6's order and words, each with the grammar key it
+ * writes and what several of its values are called (*Search 40 projects*).
+ */
+export const CONDITION_FIELDS: readonly { field: ConditionField; label: string; key: string; many: string }[] = [
+  { field: "project", label: "Project", key: "project", many: "projects" },
+  { field: "status", label: "Status", key: "status", many: "statuses" },
+  { field: "issuetype", label: "Issue type", key: "issuetype", many: "issue types" },
+  { field: "priority", label: "Priority", key: "priority", many: "priorities" },
+  { field: "assignee", label: "Assignee", key: "assignee", many: "assignees" },
+  { field: "epic", label: "Epic", key: "under", many: "epics" },
+  { field: "label", label: "Label", key: "label", many: "labels" },
+  { field: "sprint", label: "Sprint", key: "sprint", many: "sprints" },
+  { field: "signal", label: "Signal", key: "has", many: "signals" },
+  { field: "updated", label: "Updated", key: "updated", many: "times" },
+  { field: "assigned", label: "Assigned to me", key: "assigned", many: "times" },
 ];
 
 /** One condition: a field, *is* or *is not*, and values any of which it means. */

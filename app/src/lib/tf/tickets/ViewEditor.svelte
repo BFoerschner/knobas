@@ -8,7 +8,9 @@
   into conditions when it opens (`editor.ts`) and writes text from them on
   save. A text whose conditions the reader left as they were is saved as it
   was typed, not rewritten. Under the conditions the same view shows as
-  search text, tokens the grammar does not read underlined.
+  search text, tokens the grammar does not read underlined. A condition's
+  values are drawn by `ValuePicker`: toggles while they are few, a list to
+  search once they are many.
 
   The preview reads `mini_board` with the text the view would store, a
   moment after each change of it, and draws the count, the board with its
@@ -54,6 +56,7 @@
   } from "./editor";
   import { assigneeName, columnHead, columnName, LANE_FIELDS, shortKey, splitLanes } from "./tickets";
   import { counted } from "../counted";
+  import ValuePicker from "./ValuePicker.svelte";
   import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
   let {
@@ -214,6 +217,8 @@
       (entry) => entry.field !== "signal" || hasSignals || condition.field === "signal",
     );
   }
+
+  const fieldWords = (field: ConditionField) => CONDITION_FIELDS.find((entry) => entry.field === field)!;
 
   function addCondition() {
     const used = conditions.map((condition) => condition.field);
@@ -460,15 +465,16 @@
                   aria-label="Remove this condition"
                   onclick={() => (conditions = conditions.filter((_, i) => i !== at))}>✕</button
                 >
-                <div class="tf-fchips tf-vw-vals">
-                  {#each options(condition) as [value, label] (value)}
-                    <button
-                      type="button"
-                      aria-pressed={condition.values.some((v) => same(v, value))}
-                      onclick={() => toggleValue(at, value)}>{label}</button
-                    >
-                  {/each}
-                </div>
+                <!-- A new field starts a new search. -->
+                {#key condition.field}
+                  <ValuePicker
+                    options={options(condition)}
+                    label={fieldWords(condition.field).label}
+                    many={fieldWords(condition.field).many}
+                    isPicked={(value) => condition.values.some((v) => same(v, value))}
+                    ontoggle={(value) => toggleValue(at, value)}
+                  />
+                {/key}
               </div>
             {/each}
           </div>
