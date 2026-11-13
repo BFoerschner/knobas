@@ -25,9 +25,10 @@
   import { pipelineHash, runAt, runGlyph, runHash, runTone, shortTime, stateWord, testsWords, toneWord } from "../builds/builds";
   import { branchName } from "../builds/pipeline";
   import { secondsLabel } from "../../time/format";
-  import { branchWords, compareOn, groupBranches, holdOrder, latestOn, railOf, type Verdict } from "./repo-builds";
+  import { PROBLEMS_SHOWN, branchWords, compareOn, groupBranches, holdOrder, latestOn, railOf, type RailBranch, type Verdict } from "./repo-builds";
   import { buildsHash, repoHash, type BranchOption } from "./repo";
   import { itemHash } from "../job/job";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     repoId,
@@ -123,6 +124,18 @@
       branches: holdOrder(railPlaces, group.branches, (b) => b.name),
     })),
   );
+  /**
+   * The rail as the rows it draws, each group's heading before its branches: a repository of thousands of branches
+   * draws only the rows near the rail's scroll (the extremes pass, 2026-11-13), as the Builds page's own rail does.
+   */
+  const railRows = $derived(
+    groups.flatMap((group): ({ key: string; head: string } | { key: string; branch: RailBranch })[] => [
+      { key: `h:${group.head}`, head: group.head },
+      ...group.branches.map((branch) => ({ key: `b:${branch.name}`, branch })),
+    ]),
+  );
+  const railWin = new Windowed({ count: () => railRows.length, key: (i) => railRows[i]!.key, estimate: 30 });
+
   /** The branch shown: the address's, else the one the tab opened on. */
   const current = $derived(branch ?? firstDraw?.opened ?? def);
   const isDefault = $derived(current === def);
@@ -207,6 +220,8 @@
    * The runs this repository's: by their commit's repository where the mirror holds the commit (a pipeline that builds
    * two repositories has two `main`s), else by a branch name this repository has.
    */
+  /** A pipeline's runs on a busy repository are thousands: drawn near the view (the extremes pass, 2026-11-13). */
+  const runsWin = new Windowed({ count: () => shownRuns.length, key: (i) => shownRuns[i]!.entity_id, estimate: 37 });
   const shownRuns = $derived(
     (pipelineRows ?? []).filter((run) => {
       const name = run.branch === null ? null : branchName(run.branch);
@@ -262,12 +277,14 @@
         </div>
       </div>
       <div class="tf-pl-list">
-        <div class="tf-pl-rows">
-          {#each groups as group (group.head)}
-            <h3>{group.head}</h3>
-            {#each group.branches as b (b.name)}
+        <div class="tf-pl-rows" {@attach railWin.list}>
+          {#each railWin.slice(railRows) as item (item.key)}
+            {#if "head" in item}
+            <h3 {@attach railWin.row(item.key)}>{item.head}</h3>
+            {:else}
+              {@const b = item.branch}
               {@const slash = b.name.lastIndexOf("/")}
-              <a class="tf-tr tf-pi tf-d0 tf-rbr" href={branchHref(b.name)} aria-current={b.name === current} title="{b.name}: {branchWords(b)}">
+              <a class="tf-tr tf-pi tf-d0 tf-rbr" href={branchHref(b.name)} aria-current={b.name === current} title="{b.name}: {branchWords(b)}" {@attach railWin.row(item.key)}>
                 <TfRunGlyph tone={b.tone} word={toneWord(b.tone)} />
                 <span class="tf-pi-nm" class:tf-bad={b.failing > 0}
                   >{#if slash > 0}<span class="tf-pi-pre">{b.name.slice(0, slash + 1)}</span>{/if}{b.name.slice(slash + 1)}</span
@@ -276,7 +293,7 @@
                     class="tf-pi-when tf-info">running</span
                   >{:else if pulls.get(b.name)?.cell}<span class="tf-pi-when">{pulls.get(b.name)?.cell}</span>{/if}
               </a>
-            {/each}
+            {/if}
           {:else}
             <p class="tf-pl-note">No branch matches.</p>
           {/each}
@@ -308,10 +325,11 @@
           <table class="tf-tbl tf-rbt tf-rbruns">
             <colgroup><col class="tf-rbt-no" /><col /><col class="tf-rbt-run" /><col class="tf-rbt-dur" /><col class="tf-rbt-run" /></colgroup>
             <thead><tr><th>Run</th><th>Branch</th><th>Tests</th><th>Duration</th><th>When</th></tr></thead>
-            <tbody>
-              {#each shownRuns as run (run.entity_id)}
+            <tbody {@attach runsWin.list}>
+              {#if runsWin.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach runsWin.room("before")}></td></tr>{/if}
+              {#each runsWin.slice(shownRuns) as run (run.entity_id)}
                 {@const name = run.branch === null ? "" : branchName(run.branch)}
-                <tr>
+                <tr {@attach runsWin.row(run.entity_id)}>
                   <td class="tf-nowrap"
                     ><a href={runHash(pipeline, run.entity_id)}>{run.number !== null ? `#${run.number}` : ""}</a>
                     <TfStateChip text={runTone(run) === "q" ? "Queued" : stateWord(run.state?.text ?? "")} tone={run.state?.tone ?? null} /></td
@@ -324,6 +342,7 @@
                   <td class="tf-nowrap tf-dim tf-num">{when(run)}</td>
                 </tr>
               {/each}
+              {#if runsWin.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach runsWin.room("after")}></td></tr>{/if}
             </tbody>
           </table>
         {/if}
@@ -345,7 +364,7 @@
       <p class="tf-rbp-sub">{isDefault ? "The default branch. Every other branch here is compared with it." : `Compared with ${def}.`}</p>
 
       <!-- The verdict, the one loud thing on the page: a failure this branch alone has is a problem, as the run page draws one. -->
-      {#each only.slice(0, 2) as { row } (row.entity_id)}
+      {#each only.slice(0, PROBLEMS_SHOWN) as { row } (row.entity_id)}
         {@const run = latestOn(row, current)!}
         {@const there = latestOn(row, def)}
         <div class="tf-problem">
@@ -368,7 +387,7 @@
           >
         </p>
       {/each}
-      {#if only.length > 2}<p class="tf-rbp-sub">{only.length - 2} more fail only here; they lead the table.</p>{/if}
+      {#if only.length > PROBLEMS_SHOWN}<p class="tf-rbp-sub">{only.length - PROBLEMS_SHOWN} more fail only here; they lead the table.</p>{/if}
 
       {#if page.ran.length > 0}
         <table class="tf-tbl tf-rbt">

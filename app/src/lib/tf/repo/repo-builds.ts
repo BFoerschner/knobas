@@ -9,6 +9,9 @@ import type { RepoPipelineRow, RunRow } from "../../ipc/entity";
 import { runAt, runTone, toneWord, type GlyphTone } from "../builds/builds";
 import { branchName } from "../builds/pipeline";
 
+/** The failures only on the branch shown that the tab draws as problems above its table; the rest lead the table. */
+export const PROBLEMS_SHOWN = 2;
+
 /** Each answered row's newest run by branch, as a person names it: built once a row, so the rail's branches × pipelines are lookups. */
 const byBranch = new WeakMap<RepoPipelineRow, Map<string, RunRow>>();
 

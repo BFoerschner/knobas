@@ -208,6 +208,8 @@ const SMALL: Record<string, string> = {
   "tf/repo/TfRepo.svelte  drawn": "a handful by what it is: the tabs kept drawn",
   "tf/repo/TfRepo.svelte  known ?? []": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
   "tf/repo/TfRepoBranches.svelte  notes": "a handful by what it is: the lines a cut listing ends on",
+  "tf/repo/TfRepoBuilds.svelte  page.notRun": "a handful by what it is: the pipelines that build this repository and never ran on the branch shown, as one line of links: tens",
+  "tf/repo/TfRepoBuilds.svelte  page.ran": "a handful by what it is: the pipelines that build this repository and ran on the branch shown: as many as its CI configures for it, tens",
   "tf/repo/TfRepoCommits.svelte  shown": "capped where it is read or drawn: the commits the view answers, which the source cuts at a page",
   "tf/repo/TfRepoCompare.svelte  branches": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
   "tf/repo/TfRepoCompare.svelte  commits": "capped where it is read or drawn: a branch's commits as its view lists them, which the source cuts at a page (Gitea's 250); left to the Compare pass",

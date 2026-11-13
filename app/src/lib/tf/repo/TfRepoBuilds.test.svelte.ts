@@ -71,25 +71,34 @@ const ROWS = [
 const option = (name: string, isDefault = false): BranchOption => ({ name, entityId: `git:${name}`, isDefault });
 
 function draw(
-  props: { branch?: string | null; rows?: RepoPipelineRow[]; pipeline?: string | null; pulls?: { branch: string; entity_id: string; cell: string | null }[] } = {},
+  props: {
+    branch?: string | null;
+    rows?: RepoPipelineRow[];
+    pipeline?: string | null;
+    pulls?: { branch: string; entity_id: string; cell: string | null }[];
+    branches?: BranchOption[];
+    runs?: () => Promise<RunRow[]>;
+  } = {},
 ) {
   page = mount(TfRepoBuilds, {
     target,
     props: {
       repoId: "git:repo:tidewater/payout-service",
-      branches: [option("main", true), option("feat/PAY-231-retry"), option("spike/x"), option("chore/quiet")],
+      branches: props.branches ?? [option("main", true), option("feat/PAY-231-retry"), option("spike/x"), option("chore/quiet")],
       defaultBranch: "main",
       mine: ["feat/PAY-231-retry"],
       job: "PAY-231",
       branch: props.branch ?? null,
       pipeline: props.pipeline ?? null,
       builds: { pipelines: props.rows ?? ROWS, pull_requests: props.pulls ?? [] },
-      runs: () =>
-        Promise.resolve([
+      runs:
+        props.runs ??
+        (() =>
+          Promise.resolve([
           run("1187", "feat/PAY-231-retry", "err", "2026-08-22T10:09:00Z"),
           run("1171", "main", "ok", "2026-08-22T09:20:00Z"),
-          run("77", "elsewhere/x", "ok", "2026-08-22T08:00:00Z"),
-        ]),
+            run("77", "elsewhere/x", "ok", "2026-08-22T08:00:00Z"),
+          ])),
     },
   });
 }
@@ -182,3 +191,40 @@ test("a pipeline opens inside the tab: its runs on every branch of the repositor
     "#/repo/git%3Arepo%3Atidewater%2Fpayout-service/builds/feat%2FPAY-231-retry",
   );
 });
+
+/** A repository of thousands of branches (the extremes pass, 2026-11-13): the rail is a windowed list. */
+const many = (n: number) => [option("main", true), option("feat/PAY-231-retry"), ...Array.from({ length: n }, (_, k) => option(`many/b-${String(k).padStart(4, "0")}`))];
+
+test("a rail of thousands of branches draws the rows near its scroll, its headings among them, and the filter still finds any", async () => {
+  draw({ branches: many(5000) });
+  await settle();
+  const drawn = rail();
+  // The groups lead as before; the rows past the window are room, not rows.
+  expect(drawn.slice(0, 5)).toEqual(["# Default branch", "main", "# Yours", "feat/PAY-231-retry *", "# Other branches"]);
+  expect(drawn.length).toBeGreaterThan(20);
+  expect(drawn.length).toBeLessThan(300);
+  // The 5,002 listed, and the one a run names that the list does not (`spike/x`).
+  expect(target.querySelector(".tf-rb-count")?.textContent).toBe("5003 branches");
+  // One far down the list is a filter away.
+  const box = target.querySelector<HTMLInputElement>('input[aria-label="Filter branches"]')!;
+  box.value = "b-4321";
+  box.dispatchEvent(new Event("input"));
+  await settle();
+  expect(rail()).toEqual(["# Other branches", "many/b-4321"]);
+  box.value = "no such branch";
+  box.dispatchEvent(new Event("input"));
+  await settle();
+  expect(target.querySelector(".tf-rbrail .tf-pl-note")?.textContent).toBe("No branch matches.");
+});
+
+test("a pipeline's thousands of runs on the repository draw the rows near the view", async () => {
+  const runs = Array.from({ length: 3000 }, (_, k) => run(String(5000 - k), "main", "ok", "2026-08-22T09:20:00Z"));
+  draw({ pipeline: "tc:buildType:Payout_IntegrationTests", runs: () => Promise.resolve(runs) });
+  await settle();
+  const rows = target.querySelectorAll(".tf-rbruns tbody tr:not(.tf-wgap)");
+  expect(rows.length).toBeGreaterThan(10);
+  expect(rows.length).toBeLessThan(300);
+  expect(rows[0]?.querySelector("a")?.textContent).toBe("#5000");
+  expect(target.querySelector(".tf-rbruns tbody tr.tf-wgap")).not.toBeNull();
+});
+
