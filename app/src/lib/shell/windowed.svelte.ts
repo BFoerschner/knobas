@@ -55,6 +55,12 @@ export interface WindowedOptions<K> {
   key: (index: number) => K;
   /** A row's height before it is drawn, in pixels. */
   estimate: number;
+  /**
+   * Row `key`'s own height before it is drawn, where rows differ by far (a comment of a line and one of a page, a
+   * file of three changed lines and one of three hundred): the room an undrawn row holds is nearer its own, so the
+   * scrollbar and a jump to it land closer. `estimate` stands where it is not given.
+   */
+  estimateOf?: ((key: K) => number) | null;
   /** The space between rows (a flex column's `gap`), in pixels. */
   gap?: number;
   /** How many pixels beyond the viewport to draw each side. */
@@ -113,6 +119,12 @@ export class Windowed<K = string> {
   readonly #drawn = new Set<HTMLElement>();
   /** Where row 0 sits on screen, once `list` is attached. */
   #origin = () => 0;
+  /** The element `list` is on. */
+  #listNode: HTMLElement | null = null;
+  /** The row that holds focus, and which of its focusable elements: what a row scrolled away gives focus back to. */
+  #focused: { key: K; at: number } | null = null;
+  /** Focus the list holds for a row the window took out (`row`), until that row is drawn again. */
+  #holding: { key: K; at: number } | null = null;
   readonly #sizes: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
@@ -155,11 +167,12 @@ export class Windowed<K = string> {
       gap: 0,
       from: 300,
       scrolls: false,
+      estimateOf: null,
       margin: overscan / 2,
       ...options,
       overscan,
     };
-    this.#heights = new Heights<K>(this.#options.estimate, this.#options.gap);
+    this.#heights = new Heights<K>(this.#options.estimate, this.#options.gap, this.#options.estimateOf);
     this.#sizes =
       typeof ResizeObserver === "undefined"
         ? null
@@ -258,6 +271,32 @@ export class Windowed<K = string> {
         this.#pin(top, bottom, event);
     };
     read();
+    // Focus in a row is noted, so a row the window takes out keeps it on the list (`row`) and gets it back when drawn.
+    this.#listNode = node;
+    const focusIn = (event: FocusEvent) => {
+      const row = [...this.#drawn].find((drawn) => drawn.contains(event.target as Node));
+      if (row === undefined) return;
+      this.#focused = { key: this.#keyOf.get(row)!, at: focusables(row).indexOf(event.target as HTMLElement) };
+      this.#holding = null;
+      delete node.dataset["heldFocus"];
+    };
+    const focusOut = (event: FocusEvent) => {
+      // Leaving the list (not to the list itself, which is a row taken out): nothing is held for it.
+      const to = event.relatedTarget;
+      if (to instanceof Node && node.contains(to)) return;
+      const from = event.target;
+      // Chrome tells a focused row's removal as a `focusout` while the row is still connected: whether it went is
+      // asked once this task's DOM work is over.
+      queueMicrotask(() => {
+        if (from instanceof Node && from.isConnected && document.activeElement !== node) {
+          this.#focused = null;
+          this.#holding = null;
+          delete node.dataset["heldFocus"];
+        }
+      });
+    };
+    node.addEventListener("focusin", focusIn);
+    node.addEventListener("focusout", focusOut);
     // Scroll events do not bubble; a capturing listener hears every box's.
     document.addEventListener("scroll", read, { capture: true, passive: true });
     window.addEventListener("resize", read, { passive: true });
@@ -268,6 +307,9 @@ export class Windowed<K = string> {
     resized?.observe(node);
     for (const clip of clips) resized?.observe(clip);
     return () => {
+      node.removeEventListener("focusin", focusIn);
+      node.removeEventListener("focusout", focusOut);
+      if (this.#listNode === node) this.#listNode = null;
       document.removeEventListener("scroll", read, { capture: true });
       window.removeEventListener("resize", read);
       resized?.disconnect();
@@ -292,9 +334,33 @@ export class Windowed<K = string> {
     this.#keyOf.set(node, key);
     this.#drawn.add(node);
     this.#sizes?.observe(node);
+    // The row that held focus when the window took it, drawn again while the list holds that focus: it has it back.
+    const held = this.#holding;
+    if (held !== null && held.key === key && this.#listNode !== null && document.activeElement === this.#listNode) {
+      const list = this.#listNode;
+      queueMicrotask(() => {
+        if (this.#holding !== held || document.activeElement !== list || !node.isConnected) return;
+        (focusables(node)[held.at] ?? focusables(node)[0] ?? node).focus({ preventScroll: true });
+      });
+    }
     return () => {
       this.#drawn.delete(node);
       this.#sizes?.unobserve(node);
+      // A row the window takes out while it holds focus (scrolled far off): the list holds focus for it, so keys and
+      // the page's place stay, and the row gets it back when it is drawn again. Chrome fixes focus up only at its next
+      // rendering update, so the row may still be the active element here; jsdom has dropped it to the body already.
+      const focused = this.#focused;
+      const list = this.#listNode;
+      const active = document.activeElement;
+      if (focused === null || focused.key !== key || list === null || !list.isConnected) return;
+      if (!(active === document.body || active === null || node.contains(active))) return;
+      // Only a row the window took out: one the list no longer holds (a comment box closed, a filter) is gone for good.
+      const at = this.#keys.indexOf(key);
+      if (at < 0 || (at >= this.start && at < this.end)) return;
+      if (!list.hasAttribute("tabindex")) list.tabIndex = -1;
+      list.dataset["heldFocus"] = "";
+      this.#holding = focused;
+      list.focus({ preventScroll: true });
     };
   };
 
@@ -370,9 +436,10 @@ export class Windowed<K = string> {
     this.#heights.keys(keys);
   }
 
-  #measure(entries: ResizeObserverEntry[]) {
+  /** `entries` may be missing: a test's stand-in observer calls back with none. */
+  #measure(entries: ResizeObserverEntry[] | undefined) {
     let moved = false;
-    for (const entry of entries) {
+    for (const entry of entries ?? []) {
       const key = this.#keyOf.get(entry.target);
       const px =
         entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
@@ -455,4 +522,10 @@ function clipsOf(node: HTMLElement): HTMLElement[] {
   )
     if (getComputedStyle(at).overflowY !== "visible") clips.push(at);
   return clips;
+}
+
+/** What in a row takes focus, in order. */
+function focusables(row: HTMLElement): HTMLElement[] {
+  const all = [...row.querySelectorAll<HTMLElement>("a[href], button, input, select, textarea, summary, [tabindex]")];
+  return (row.matches("a[href], button, summary, [tabindex]") ? [row, ...all] : all).filter((el) => el.tabIndex >= 0 || el === row);
 }

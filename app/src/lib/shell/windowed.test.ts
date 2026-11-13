@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Heights } from "./windowed";
+import { Heights, textHeight } from "./windowed";
 
 /** Ten rows keyed `r0` … `r9`, 50 px estimated, no gap. */
 const ten = () => new Heights(50, 0);
@@ -97,3 +97,26 @@ describe("Heights", () => {
     expect(h.around(2, 7)).toEqual({ start: 2, end: 7, before: 100, after: 150 });
   });
 });
+
+describe("a row's own estimate (the extremes pass)", () => {
+  it("stands for an undrawn row, and a measurement still wins", () => {
+    // A comment of one line and one of a page: their room before they are drawn is their own.
+    const h = new Heights<string>(50, 10, (key) => (key === "long" ? 2000 : 60));
+    h.keys(["a", "long", "b"]);
+    expect(h.total()).toBe(60 + 10 + 2000 + 10 + 60);
+    expect(h.offsetOf(2)).toBe(60 + 10 + 2000 + 10);
+    h.set("long", 400);
+    expect(h.offsetOf(2)).toBe(60 + 10 + 400 + 10);
+  });
+});
+
+describe("textHeight", () => {
+  it("counts a line per newline and per `chars` of a long one", () => {
+    expect(textHeight("", { base: 40, line: 20, chars: 100 })).toBe(60);
+    expect(textHeight("one\ntwo", { base: 40, line: 20, chars: 100 })).toBe(80);
+    expect(textHeight("x".repeat(250), { base: 40, line: 20, chars: 100 })).toBe(100);
+    // A 300 KB comment's room is long, so the rows after it are placed near where they will be.
+    expect(textHeight("word ".repeat(60_000), { base: 46, line: 21, chars: 110 })).toBeGreaterThan(50_000);
+  });
+});
+

@@ -323,3 +323,33 @@ test("the drawn rows hold still while the view moves inside them, and move to it
   expect(win.start <= 530 && win.end > 530).toBe(true);
   stop();
 });
+
+test("a row the window takes out while it holds focus leaves focus on the list, and gets it back when drawn again (the extremes pass)", async () => {
+  document.body.innerHTML = '<div class="list"><div class="row"><a href="#a">a</a><button type="button">b</button></div></div>';
+  const list = document.querySelector<HTMLElement>(".list")!;
+  const first = document.querySelector<HTMLElement>(".row")!;
+  const win = new Windowed({ count: () => 400, key: (i) => i, estimate: 20 });
+  let undraw: (() => void) | void = undefined;
+  const stop = $effect.root(() => {
+    win.list(list);
+    undraw = win.row(7)(first);
+  });
+  flushSync();
+  first.querySelector("button")!.focus();
+  expect(document.activeElement?.textContent).toBe("b");
+
+  // Scrolled far off: the window takes the row out of the DOM.
+  first.remove();
+  (undraw as unknown as () => void)();
+  expect(document.activeElement).toBe(list);
+  expect(list.dataset["heldFocus"]).toBe("");
+
+  // Scrolled back: the same row, drawn anew, has focus on the same control.
+  const again = Object.assign(document.createElement("div"), { innerHTML: '<a href="#a">a</a><button type="button">b</button>' });
+  list.append(again);
+  win.row(7)(again);
+  await Promise.resolve();
+  expect(document.activeElement).toBe(again.querySelector("button"));
+  expect(list.dataset["heldFocus"]).toBeUndefined();
+  stop();
+});
