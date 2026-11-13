@@ -194,9 +194,13 @@ async fn predicted_files(
         branch_tip(pool, registry, &repo, head)
     );
     let (base_tip, head_tip) = (base_tip.ok()??, head_tip.ok()??);
-    let path = Path::new(&path);
-    let from = super::range::merge_base(path, &base_tip.commit, &head_tip.commit).await?;
-    let local = stat(path, &from, &head_tip.commit, ignore_whitespace).await?;
+    let local = stat_between(
+        Path::new(&path),
+        &base_tip.commit,
+        &head_tip.commit,
+        ignore_whitespace,
+    )
+    .await?;
     let predicted_at = match (base_tip.as_of, head_tip.as_of) {
         (Some(a), Some(b)) => Some(a.max(b)),
         (a, b) => a.or(b),
@@ -248,18 +252,27 @@ impl LocalStat {
 /// resolves them: each a checked sha it holds, the base possibly `<sha>^`
 /// (the empty tree for a root commit). The git to run, the old side as git
 /// is to name it, the old side's sha (`None`: the empty tree) and the head's.
-async fn ends(
-    path: &Path,
-    base: &str,
-    head: &str,
-) -> Option<(std::path::PathBuf, String, Option<String>, String)> {
-    let (stem, caret) = match base.strip_suffix('^') {
-        Some(stem) => (stem, true),
-        None => (base, false),
-    };
-    if !is_sha(stem) || !is_sha(head) {
-        return None;
-    }
+///
+/// Two whole shas need no `rev-parse` each: they are handed to git as
+/// `<sha>^{commit}`, so a checkout that lacks one fails the read itself and
+/// the source is asked, one start of git fewer each for a read the page
+/// waits on (the compare pass: four starts of git in a row were most of a
+/// list's time on a busy machine).
+struct Ends {
+    git: std::path::PathBuf,
+    /// The old side as git is to name it, and the new.
+    old: String,
+    new: String,
+    base: Option<String>,
+    head: String,
+}
+
+/// A 40- or 64-digit sha: whole, so it names one commit and nothing else.
+fn whole(sha: &str) -> bool {
+    is_sha(sha) && matches!(sha.len(), 40 | 64)
+}
+
+async fn git_at_checkout(path: &Path) -> Option<std::path::PathBuf> {
     let search = std::env::var_os("PATH").unwrap_or_default();
     let git = locate(
         &search,
@@ -269,21 +282,118 @@ async fn ends(
     )
     .await
     .ok()?;
-    if !is_dir_off_runtime(path).await {
+    is_dir_off_runtime(path).await.then_some(git)
+}
+
+async fn ends(path: &Path, base: &str, head: &str) -> Option<Ends> {
+    let (stem, caret) = match base.strip_suffix('^') {
+        Some(stem) => (stem, true),
+        None => (base, false),
+    };
+    if !is_sha(stem) || !is_sha(head) {
         return None;
+    }
+    let git = git_at_checkout(path).await?;
+    if !caret && whole(stem) && whole(head) {
+        let (base, head) = (stem.to_ascii_lowercase(), head.to_ascii_lowercase());
+        return Some(Ends {
+            old: format!("{base}^{{commit}}"),
+            new: format!("{head}^{{commit}}"),
+            git,
+            base: Some(base),
+            head,
+        });
     }
     let head = commit(&git, path, head).await?;
     let stem = commit(&git, path, stem).await?;
-    if !caret {
-        return Some((git, stem.clone(), Some(stem), head));
-    }
-    match commit(&git, path, &format!("{stem}^")).await {
-        Some(parent) => Some((git, parent.clone(), Some(parent), head)),
-        None => {
-            let empty = empty_tree_if_whole(&git, path).await?;
-            Some((git, empty, None, head))
+    let (old, base) = if caret {
+        match commit(&git, path, &format!("{stem}^")).await {
+            Some(parent) => (parent.clone(), Some(parent)),
+            None => (empty_tree_if_whole(&git, path).await?, None),
         }
+    } else {
+        (stem.clone(), Some(stem))
+    };
+    Some(Ends {
+        git,
+        old,
+        new: head.clone(),
+        base,
+        head,
+    })
+}
+
+/// `git diff --raw --numstat -z -M <old> <new>` (`<old>` may be `A...B`),
+/// parsed: the files and whether the listing was cut.
+async fn listing(
+    git: &Path,
+    path: &Path,
+    old: &str,
+    new: Option<&str>,
+    ignore_whitespace: bool,
+) -> Option<(Vec<DiffFile>, bool)> {
+    let mut command = git_read(git, path);
+    command.args([
+        "-c",
+        "diff.autoRefreshIndex=false",
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        "--no-textconv",
+        "-M",
+        "--raw",
+        "--numstat",
+        "-z",
+    ]);
+    if ignore_whitespace {
+        command.arg("-w");
     }
+    command.arg(old);
+    if let Some(new) = new {
+        command.arg(new);
+    }
+    command.arg("--");
+    let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
+    let (files, cut_inside) = parse_stat(&out, cut);
+    Some((files, cut || cut_inside))
+}
+
+/// The list a source's three-dot compare of two tips is, at the checkout
+/// `path` (ADR-0041): `git diff A...B`, which diffs from their merge base,
+/// with the merge base and `git log A..B` read beside it, three starts of
+/// git at once. `None` where it cannot be read here, or the two share no
+/// history.
+pub async fn stat_between(
+    path: &Path,
+    base_tip: &str,
+    head_tip: &str,
+    ignore_whitespace: bool,
+) -> Option<LocalStat> {
+    if !whole(base_tip) || !whole(head_tip) {
+        return None;
+    }
+    let all = async {
+        let git = git_at_checkout(path).await?;
+        let (a, b) = (base_tip.to_ascii_lowercase(), head_tip.to_ascii_lowercase());
+        let range = format!("{a}^{{commit}}...{b}^{{commit}}");
+        let (from, listed, commits) = tokio::join!(
+            super::range::merge_base(path, &a, &b),
+            listing(&git, path, &range, None, ignore_whitespace),
+            log(&git, path, Some(&a), &b)
+        );
+        let (files, truncated) = listed?;
+        Some(LocalStat {
+            files,
+            commits,
+            truncated,
+            base: Some(from?),
+            head: b,
+        })
+    };
+    tokio::time::timeout(super::range::TIMEOUT, all)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// The files `base`..`head` changes at the checkout `path`, without their
@@ -296,35 +406,22 @@ pub async fn stat(
     ignore_whitespace: bool,
 ) -> Option<LocalStat> {
     let all = async {
-        let (git, old, base, head) = ends(path, base, head).await?;
-        let mut command = git_read(&git, path);
-        command.args([
-            "-c",
-            "diff.autoRefreshIndex=false",
-            "diff",
-            "--no-ext-diff",
-            "--no-color",
-            "--no-textconv",
-            "-M",
-            "--raw",
-            "--numstat",
-            "-z",
-        ]);
-        if ignore_whitespace {
-            command.arg("-w");
-        }
-        command.args([old.as_str(), head.as_str(), "--"]);
-        let listing = async {
-            let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
-            Some((out, cut))
-        };
-        let (listing, commits) = tokio::join!(listing, log(&git, path, base.as_deref(), &head));
-        let (out, cut) = listing?;
-        let (files, cut_inside) = parse_stat(&out, cut);
+        let Ends {
+            git,
+            old,
+            new,
+            base,
+            head,
+        } = ends(path, base, head).await?;
+        let (listed, commits) = tokio::join!(
+            listing(&git, path, &old, Some(&new), ignore_whitespace),
+            log(&git, path, base.as_deref(), &head)
+        );
+        let (files, truncated) = listed?;
         Some(LocalStat {
             files,
             commits,
-            truncated: cut || cut_inside,
+            truncated,
             base,
             head,
         })
@@ -597,7 +694,7 @@ pub async fn file(
     ignore_whitespace: bool,
 ) -> Option<Option<DiffFile>> {
     let all = async {
-        let (git, old, _, head) = ends(repo, base, head).await?;
+        let Ends { git, old, new, .. } = ends(repo, base, head).await?;
         let mut command = git_read(&git, repo);
         command.args([
             "-c",
@@ -615,7 +712,7 @@ pub async fn file(
         }
         // Literal paths: a name is the file's, never a pattern.
         command.env("GIT_LITERAL_PATHSPECS", "1");
-        command.args([old.as_str(), head.as_str(), "--", path]);
+        command.args([old.as_str(), new.as_str(), "--", path]);
         if let Some(old_path) = old_path.filter(|o| *o != path) {
             command.arg(old_path);
         }
@@ -853,6 +950,45 @@ mod tests {
         assert!(listed.files.iter().any(|f| f.path == "run.sh"
             && f.new_mode.as_deref() == Some("100755")
             && f.blob.is_none()));
+    }
+
+    #[tokio::test]
+    async fn two_tips_list_what_their_three_dot_compare_changes_with_its_commits() {
+        let (dir, base, head) = repo();
+        let p = dir.path();
+        // `main` moves on beside the branch: the compare is from where they parted.
+        git(p, &["checkout", "-q", "-b", "side", &base]);
+        std::fs::write(p.join("side.txt"), "only on main\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "main moves on"]);
+        let tip = git(p, &["rev-parse", "HEAD"]);
+        let listed = stat_between(p, &tip, &head, false)
+            .await
+            .expect("the checkout answers");
+        assert_eq!(
+            listed.base.as_deref(),
+            Some(base.as_str()),
+            "the merge base"
+        );
+        let less: Vec<DiffFile> = whole(p, &base, &head).iter().map(super::listed).collect();
+        assert_eq!(listed.files, less);
+        assert!(listed.files.iter().all(|f| f.path != "side.txt"));
+        assert_eq!(
+            listed
+                .commits
+                .iter()
+                .map(|c| c.title.as_str())
+                .collect::<Vec<_>>(),
+            ["head"]
+        );
+        assert_eq!(listed.commits[0].sha, head);
+        // An end the checkout does not hold is no answer, so the source is asked.
+        assert!(
+            stat_between(p, &"a".repeat(40), &head, false)
+                .await
+                .is_none()
+        );
+        assert!(stat(p, &"b".repeat(40), &head, false).await.is_none());
     }
 
     #[tokio::test]

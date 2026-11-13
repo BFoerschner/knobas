@@ -215,9 +215,9 @@ for (const rate of throttles) {
     writeFileSync(out, JSON.stringify(results, null, 1));
   }
 }
-await cpu(1);
+// Not `cpu(1)` first: a page frozen on the last step answers no command, and the browser goes anyway.
 writeFileSync(out, JSON.stringify(results, null, 1));
 console.log("wrote", out);
-c.close();
+try { c.close(); } catch {}
 browser.stop();
 process.exit(0);
