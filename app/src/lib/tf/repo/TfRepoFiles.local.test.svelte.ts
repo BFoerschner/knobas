@@ -212,7 +212,7 @@ test("with no checkout's copy the tab waits on the source, as before", async () 
  * a later open it beat `git ls-tree`, and every file was then read on the forge. Where the top stands at the checkout's
  * commit, the checkout's tree takes over and the file is read there; at another commit the source's tree stands.
  */
-test("a checkout's tree that lands after the source's top at the same commit draws the tree, and its files are read there", async () => {
+test("a checkout's tree that lands after the source's top at the same commit draws the tree, and the file drawn at that commit stands", async () => {
   let release!: (tree: LocalTree) => void;
   const late = new Promise<LocalTree>((resolve) => (release = resolve));
   const ports = {
@@ -240,7 +240,53 @@ test("a checkout's tree that lands after the source's top at the same commit dra
   release(localTree(FILES));
   await settle();
   expect(target.querySelector(".tf-local, .tf-fromclone, .tf-heldnote") !== null || text(target).includes("From your clone")).toBe(true);
-  expect(localReads.length, "the README is read at the checkout").toBeGreaterThan(0);
+  // The README the source drew at that commit is the same file: it stays as drawn, not read again (the big-folder pass).
+  expect(localReads).toEqual([]);
+  expect(target.querySelector(".tf-fileview [aria-busy='true']")).toBeNull();
+});
+
+test("a fetch that lands after the source drew at the same commit hands the tree to the clone: a folder then reads nothing from the source", async () => {
+  let fetched: ((event: { payload: unknown }) => void) | null = null;
+  let held: LocalTree | null = null;
+  const ports = {
+    entityView: async (_at: string, section: string | null) => {
+      asked.push({ section: section ?? "", release: () => {} });
+      return sourceAnswer(FILES, section ?? "", TIP, "b10b");
+    },
+    // Behind at first: the checkout lacks the mirror's commit until the fetch behind the read lands.
+    localTree: async () => held,
+    localFile: async (_at: string, commit: string, path: string) => {
+      localReads.push(`${commit.slice(0, 7)}:${path}`);
+      const text = FILES[path];
+      return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+    },
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+    listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "checkout:fetched") fetched = handler;
+      return () => {};
+    },
+  };
+  view = mount(TfRepoFiles, {
+    target,
+    props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" } },
+  });
+  await settle();
+  expect(tree()).toEqual(["src", "README.md"]);
+  expect(text(target)).not.toContain("From your clone");
+  held = localTree(FILES);
+  fetched!({ payload: { entity_id: REPO, commit: TIP } });
+  await settle();
+  expect(text(target)).toContain("From your clone at c0ffee0, the same as on");
+  // The rows stand as drawn, and the README drawn at that commit is not read again.
+  expect(tree()).toEqual(["src", "README.md"]);
+  expect(localReads).toEqual([]);
+  const reads = sourceReads().length;
+  (target.querySelector('.tf-ftree [data-path="src"]') as HTMLElement).click();
+  await settle();
+  expect(tree()).toEqual(["src", "lib.rs", "README.md"]);
+  expect(sourceReads().length, "the folder came from the clone").toBe(reads);
 });
 
 test("a checkout's tree that lands after the source's top at another commit leaves the source's tree", async () => {

@@ -472,7 +472,9 @@
     });
   });
 
-  // A fetch behind the checkout's read landed (ADR-0041): where the source has not drawn the tree yet, the checkout can now.
+  // A fetch behind the checkout's read landed (ADR-0041): the checkout can draw the tree now, and where the source drew it
+  // first at the same commit, it takes over, so the next folder opens from the clone and not from the forge (the
+  // big-folder pass, 2026-11-13: a page opened while the clone was behind kept reading every folder from the forge).
   $effect(() => {
     const where = at;
     const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
@@ -480,7 +482,7 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.checkoutFetched, ({ payload }) => {
       const fetched = payload as Fetched;
-      if (live && fetched.entity_id === where && untrack(() => listings[""]) === undefined) readLocal(where, generation);
+      if (live && fetched.entity_id === where && untrack(() => local) === null) readLocal(where, generation);
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;
@@ -597,7 +599,16 @@
   $effect(() => {
     const section = fileSection;
     const where = at;
-    // Drawn already, by a deep link's early read or before a step away and back.
+    // Drawn already, by a deep link's early read or before a step away and back; or the checkout's tree took over from
+    // the source's at the commit the file was read at, so it is the same file (the big-folder pass, 2026-11-13).
+    const named = section?.startsWith(LOCAL) ? parseLocal(section) : null;
+    const held = untrack(() => file);
+    if (named !== null && named.kind === "file" && held !== null && held.path === named.full && held.commit === named.commit) {
+      drawnSection = section;
+      fileReading = false;
+      fileFailed = null;
+      return;
+    }
     if (section !== null && section === untrack(() => drawnSection) && untrack(() => file) !== null) {
       fileReading = false;
       fileFailed = null;
