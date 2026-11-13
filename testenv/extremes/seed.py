@@ -28,6 +28,8 @@ def main():
     ap.add_argument("--state", required=True)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--remove", action="store_true", help="delete the product's extremes scope")
+    ap.add_argument("--parts", help="the parts to make, comma-separated (gitea: branches,prs,comments; teamcity: "
+                                    "artifacts,repo); all by default")
     a = ap.parse_args()
     with open(a.state) as f:
         state = json.load(f)
@@ -43,7 +45,7 @@ def main():
     if a.remove:
         mod.remove(state)
     else:
-        mod.seed(state, a.workers)
+        mod.seed(state, a.workers, a.parts.split(",") if a.parts else None)
     print(f"seed-extremes {a.product}: {'removed' if a.remove else 'finished'} in {time.time() - t0:.0f} s", flush=True)
 
 

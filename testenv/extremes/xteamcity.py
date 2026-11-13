@@ -15,6 +15,9 @@ from common import Http, HttpError, die, say
 P = "teamcity"
 PROJECT = "Extremes"
 CONFIG = "Extremes_Everything"
+# The configuration that builds the extreme repository, and the branches it builds.
+REPO_CONFIG = "Extremes_BuildsEverything"
+REPO_BRANCHES = ["main"] + [f"many/b-{b:04d}" for b in (5000, 4999, 4998, 4500, 4000, 3000, 2000, 1500, 1000, 500, 2, 1)]
 MAX_CONFIGS = 100
 MAIN_CONFIG = "/data/teamcity_server/datadir/config/main-config.xml"
 # `%%` is a literal percent sign: TeamCity reads a word between two single ones as a parameter.
@@ -50,6 +53,7 @@ class TeamCity:
     def __init__(self, state):
         t = state.get("teamcity") or die(P, "seed-state.json has no teamcity block: just live-up teamcity first")
         self.h = Http(t["url"], headers={"Authorization": f"Bearer {t['token']}"})
+        self.gitea_token = (state.get("gitea") or {}).get("token", "")
 
     def run(self):
         try:
@@ -132,6 +136,72 @@ class TeamCity:
                 n += 1
         return n
 
+    def repo(self):
+        """A configuration that builds the extreme Gitea repository (its own Git root, nothing checked out) on `main`
+        and on a dozen of its branches, a few of them failing: what a repository's Builds tab draws a rail of
+        thousands of branches beside (the extremes pass, 2026-11-13)."""
+        self.ensure_project()
+        root = f"{PROJECT}_Git"
+        try:
+            self.h.get(f"/app/rest/vcs-roots/id:{root}")
+        except HttpError as e:
+            if e.status != 404:
+                raise
+            self.h.post("/app/rest/vcs-roots", {
+                "id": root, "name": "knobas-extremes/everything", "vcsName": "jetbrains.git", "project": {"id": PROJECT},
+                "properties": {"property": [
+                    {"name": "url", "value": "http://gitea:3000/knobas-extremes/everything.git"},
+                    {"name": "branch", "value": "refs/heads/main"},
+                    {"name": "teamcity:branchSpec", "value": "+:refs/heads/*"},
+                    {"name": "authMethod", "value": "PASSWORD"},
+                    {"name": "username", "value": "knobas"},
+                    {"name": "secure:password", "value": self.gitea_token}]}})
+            say(P, "created the Git root of knobas-extremes/everything")
+        try:
+            self.h.get(f"/app/rest/buildTypes/id:{REPO_CONFIG}")
+        except HttpError as e:
+            if e.status != 404:
+                raise
+            n = self.h.get("/app/rest/buildTypes?locator=count:1000&fields=count")["count"]
+            if n >= MAX_CONFIGS:
+                die(P, f"the server holds {n} configurations; the licence stops at {MAX_CONFIGS}")
+            self.h.post("/app/rest/buildTypes", {"id": REPO_CONFIG, "name": "Builds everything", "project": {"id": PROJECT}})
+            self.h.post(f"/app/rest/buildTypes/id:{REPO_CONFIG}/vcs-root-entries", {"vcs-root": {"id": root}})
+            self.h.put(f"/app/rest/buildTypes/id:{REPO_CONFIG}/settings/checkoutMode", raw=b"MANUAL",
+                       headers={"Content-Type": "text/plain", "Accept": "text/plain"}, ok=(200,))
+            self.h.post(f"/app/rest/buildTypes/id:{REPO_CONFIG}/steps", {
+                "name": "check", "type": "simpleRunner", "properties": {"property": [
+                    {"name": "use.custom.script", "value": "true"},
+                    {"name": "script.content", "value": 'echo "checking %teamcity.build.branch%"; exit "${XTRM_EXIT:-0}"'}]}})
+            say(P, f"created configuration {REPO_CONFIG}")
+        have = self.h.get(f"/app/rest/builds?locator=buildType:(id:{REPO_CONFIG}),defaultFilter:false,branch:default:any,count:100&fields=build(id)")
+        if len(have.get("build", [])) >= len(REPO_BRANCHES):
+            say(P, f"{REPO_CONFIG} has its builds")
+            return
+        ids = []
+        for k, branch in enumerate(REPO_BRANCHES):
+            body = {"buildType": {"id": REPO_CONFIG}, "comment": {"text": "testenv/seed-extremes.sh"},
+                    "properties": {"property": [{"name": "env.XTRM_EXIT", "value": "1" if k % 4 == 3 else "0"}]}}
+            if branch != "main":
+                body["branchName"] = f"refs/heads/{branch}"
+            ids.append(self.h.post("/app/rest/buildQueue", body)["id"])
+        for _ in range(360):
+            got = self.h.get(f"/app/rest/builds?locator=buildType:(id:{REPO_CONFIG}),defaultFilter:false,branch:default:any,"
+                             f"state:finished,count:100&fields=build(id)")
+            if len(got.get("build", [])) >= len(ids):
+                say(P, f"{REPO_CONFIG}: {len(ids)} builds finished")
+                return
+            time.sleep(5)
+        die(P, f"{REPO_CONFIG}'s builds not finished after 30 minutes")
+
+    def ensure_project(self):
+        try:
+            self.h.get(f"/app/rest/projects/id:{PROJECT}")
+        except HttpError as e:
+            if e.status != 404:
+                raise
+            self.h.post("/app/rest/projects", {"id": PROJECT, "name": "Extreme shapes", "parentProject": {"id": "_Root"}})
+
     def remove(self):
         try:
             self.h.get(f"/app/rest/projects/id:{PROJECT}")
@@ -146,8 +216,12 @@ class TeamCity:
         say(P, f"deleted project {PROJECT} and its builds")
 
 
-def seed(state, workers):
-    TeamCity(state).run()
+def seed(state, workers, parts=None):
+    t = TeamCity(state)
+    if parts is None or "artifacts" in parts:
+        t.run()
+    if parts is None or "repo" in parts:
+        t.repo()
 
 
 def remove(state):

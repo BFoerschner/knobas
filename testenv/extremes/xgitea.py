@@ -83,7 +83,8 @@ def git(args):
 
 
 class Forge:
-    def __init__(self, state, workers):
+    def __init__(self, state, workers, parts=None):
+        self.parts = set(parts or ["branches", "prs", "comments"])
         g = state.get("gitea") or die(P, "no gitea block in seed-state.json: just live-up gitea first")
         self.url = g["url"].rstrip("/")
         self.h = Http(self.url, user="knobas", password="knobas-dev")
@@ -119,9 +120,11 @@ class Forge:
             say(P, f"created {ORG}/{REPO}")
         self.push()
         self.wait_branches()
-        self.pulls()
-        self.comments()
-        self.report()
+        if "prs" in self.parts:
+            self.pulls()
+        if "comments" in self.parts:
+            self.comments()
+            self.report()
 
     def push(self):
         have = {b["name"] for b in self.paged(f"{self.base}/branches")} if self.has_branches() else set()
@@ -227,8 +230,8 @@ class Forge:
         say(P, f"deleted {ORG}/{REPO} and the org")
 
 
-def seed(state, workers):
-    Forge(state, workers).run()
+def seed(state, workers, parts=None):
+    Forge(state, workers, parts).run()
 
 
 def remove(state):

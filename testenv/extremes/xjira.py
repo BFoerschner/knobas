@@ -242,7 +242,7 @@ NAMES = ["Abernathy", "Brandt", "Castellanos", "Dimitrov", "Eriksen", "Fontaine"
          "Schmidt", "Takahashi", "Underwood", "Vasquez", "Whitfield", "Xiong", "Yilmaz", "Zielinski"]
 
 
-def seed(state, workers):
+def seed(state, workers, parts=None):
     Jira(state, workers).run()
 
 

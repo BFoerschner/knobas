@@ -175,7 +175,7 @@ class Confluence:
         die(P, f"space {KEY} still there 30 minutes after its delete ({task})")
 
 
-def seed(state, workers):
+def seed(state, workers, parts=None):
     Confluence(state, workers).run()
 
 
