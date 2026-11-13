@@ -25,6 +25,7 @@
   *queued* at once (R-9.8).
 -->
 <script lang="ts">
+  import { Windowed } from "../../shell/windowed.svelte";
   import { onMount, untrack } from "svelte";
   import TfKey from "../TfKey.svelte";
 
@@ -190,6 +191,11 @@
   let open = $state(false);
   let active = $state(0);
   const shown = $derived(matchingBranches(choices, branch));
+  /**
+   * A pipeline's thousands of branches draw only the options near the list's scroll (the extremes pass, 2026-11-13);
+   * ↑ and ↓ bring the active one into it.
+   */
+  const optWin = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.name, estimate: 30, scrolls: true });
   const listId = `tf-run-branches-${uid}`;
 
   function choose(name: string) {
@@ -201,9 +207,11 @@
     if (event.key === "ArrowDown") {
       open = true;
       active = Math.min(active + 1, shown.length - 1);
+      optWin.reveal(active);
       event.preventDefault();
     } else if (event.key === "ArrowUp") {
       active = Math.max(active - 1, 0);
+      optWin.reveal(active);
       event.preventDefault();
     } else if (event.key === "Enter" && open && shown[active] !== undefined) {
       choose(shown[active]!.name);
@@ -271,14 +279,17 @@
           onkeydown={onBranchKey}
         />
         {#if open && shown.length > 0}
-          <div class="tf-opts" id={listId} role="listbox" aria-label="Branches">
-            {#each shown as choice, at (choice.name)}
+          <div class="tf-opts" id={listId} role="listbox" aria-label="Branches" {@attach optWin.list}>
+            {#if optWin.before > 0}<div class="tf-wgap" aria-hidden="true" {@attach optWin.room("before")}></div>{/if}
+            {#each optWin.slice(shown) as choice, i (choice.name)}
+              {@const at = optWin.start + i}
               <div
                 id={`${listId}-${at}`}
                 role="option"
                 tabindex="-1"
                 aria-selected={at === active}
                 class:tf-act={at === active}
+                {@attach optWin.row(choice.name)}
                 onmousedown={(event) => {
                   event.preventDefault();
                   choose(choice.name);
@@ -287,6 +298,7 @@
                 <span>{choice.name}</span>{#if choice.note !== null}<span class="tf-dim">{choice.note}</span>{/if}
               </div>
             {/each}
+            {#if optWin.after > 0}<div class="tf-wgap" aria-hidden="true" {@attach optWin.room("after")}></div>{/if}
           </div>
         {/if}
       </div>

@@ -233,7 +233,7 @@ test("the thread is drawn whole with no fold and no filter, marks the last visit
   expect([...target.querySelectorAll(".tf-who b")].map((b) => b.textContent)).toContain("You");
 
   // The conversation is the comments (#2163): every entry drawn is one.
-  const drawnEntries = [...target.querySelectorAll(".tf-convo > .tf-msg")];
+  const drawnEntries = [...target.querySelectorAll(".tf-convo-rows > .tf-msg, .tf-convo > .tf-msg")];
   expect(drawnEntries).toHaveLength(11);
   expect(drawnEntries.every((entry) => entry.tagName === "ARTICLE")).toBe(true);
 });

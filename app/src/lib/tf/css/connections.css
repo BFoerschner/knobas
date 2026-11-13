@@ -3,6 +3,8 @@
 .tf-convo { display: flex; flex-direction: column; gap: 10px; max-width: 820px; }
 /* A pull request's conversation runs its column, as its other tabs do. */
 .tf-convo.tf-convo-full { max-width: none; }
+/* A windowed thread's comments (the extremes pass, 2026-11-13): a column of their own, so the room for undrawn ones is above and below them, never under the box. */
+.tf-convo-rows { display: flex; flex-direction: column; gap: 10px; }
 .tf-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
 /* A comment on its way (#1424): muted until the thread holds it. */
 .tf-msg.tf-queued .tf-msg-body p { color: var(--muted); }

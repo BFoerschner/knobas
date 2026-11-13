@@ -647,14 +647,24 @@
    * The branches the page offers: the list's, then each one this session made that no read holds yet (`withMade`), so a
    * branch knobas made is in the header, Compare and *New pull request* at once. `null` while the list has not answered.
    */
-  const known = $derived(branches === null || repoId === null ? branches : withMade(branches, echoesOn(repoId, MADE)));
+  const listed = $derived(branches === null || repoId === null ? branches : withMade(branches, echoesOn(repoId, MADE)));
+  /**
+   * With the mirror's default first where the list names none: a source cuts a listing of thousands of branches at a
+   * page of the newest (Gitea's 1,000), and a default branch older than all of them was in no list, so no tab drew at
+   * all (the extremes pass, 2026-11-13: 5,000 branches, `main` at the root commit).
+   */
+  const known = $derived(
+    listed === null || listed.some((option) => option.isDefault) || mirrorDefault(detail) === null
+      ? listed
+      : [{ name: mirrorDefault(detail)!, entityId: null, isDefault: true }, ...listed.filter((option) => option.name !== mirrorDefault(detail))],
+  );
   /**
    * The default branch: the live list's, else the mirror's (#2243), `null` while neither has said. A list that failed, or
    * one that names no default, falls back to the mirror's too: with the source down the page drew no tab at all (the
    * inner-pages pass, 2026-11-12).
    */
   const defaultBranch = $derived<BranchOption | null>(
-    branches?.find((option) => option.isDefault) ??
+    known?.find((option) => option.isDefault) ??
       ((branches === null || branchesFailed) && mirrorDefault(detail) !== null
         ? { name: mirrorDefault(detail)!, entityId: null, isDefault: true }
         : null),

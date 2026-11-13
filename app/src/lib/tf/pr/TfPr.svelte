@@ -99,7 +99,6 @@
   import { actionName } from "../../detail/view/actions";
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
-  import { commitLine } from "../repo/file-tree";
   import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
   import { drafts } from "../drafts.svelte";
   import { inlineEditor, sendKey } from "../inline-editor";
@@ -149,6 +148,9 @@
   import { diffOf, rangeOf } from "./files";
   import { BY_POINTER_MS } from "../press-guard";
   import TfPrFiles from "./TfPrFiles.svelte";
+  import TfPrCommitRows from "./TfPrCommitRows.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
+  import { textHeight } from "../../shell/windowed";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -201,7 +203,8 @@
   /** Bumped by *Try again*. */
   let attempt = $state(0);
   /** `undefined` while the view has not answered; `null` for a source with none. */
-  let view = $state<ShownView | SourceView | null | undefined>(undefined);
+  // Raw: replaced whole on each read, never changed in place (the extremes pass, 2026-11-13: deep state proxied every comment).
+  let view = $state.raw<ShownView | SourceView | null | undefined>(undefined);
   /** Why the source did not answer the read behind a view drawn from what knobas held (ADR-0042). */
   let heldFailed = $state<string | null>(null);
   let viewFailed = $state<string | null>(null);
@@ -448,6 +451,20 @@
   const conversation = $derived(conversationParts(view ?? null));
   const overview = $derived(overviewParts(view ?? null));
   const commitList = $derived(commitParts(view ?? null));
+  /**
+   * A long conversation draws only the comments near the viewport (the extremes pass, 2026-11-13: 300 comments, one
+   * of 300 KB, were built whole as the tab opened). By place: the thread only grows at its end.
+   */
+  const convoWin = new Windowed({
+    count: () => conversation.length,
+    key: (i) => i,
+    estimate: 76,
+    gap: 10,
+    estimateOf: (i) => {
+      const part = conversation[i];
+      return part === undefined || "line" in part ? 22 : textHeight(part.message.body, { base: 46, line: 21, chars: 110 });
+    },
+  });
   const actions = $derived(view?.actions ?? []);
   const name = $derived(number === null ? "PR" : `PR ${number}`);
   // Its last part is what *Back to <name>* calls this page once it is left (spec #2227).
@@ -904,7 +921,8 @@
         />
       {:else}
         <div>
-          <TfFindBar root={() => pageEl} />
+          <!-- A long conversation holds comments back from the drawn text: the count is a floor there. -->
+          <TfFindBar root={() => pageEl} more={() => tab === "conversation" && convoWin.before + convoWin.after > 0} />
           {#if view}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={detail?.source?.display_name ?? "the source"} failed={heldFailed} />{/if}
           {#if viewFailed !== null}
             <p class="tf-cfail">Could not read the pull request: {viewFailed}</p>
@@ -941,13 +959,16 @@
             {/each}
           {:else if tab === "conversation"}
             <div class="tf-convo tf-convo-full">
-              {#each conversation as part, n (n)}
+              {#if conversation.length > 0}
+              <div class="tf-convo-rows" {@attach convoWin.list}>
+              {#each convoWin.slice(conversation) as part, at (convoWin.start + at)}
+                {@const n = convoWin.start + at}
                 {#if "line" in part}
-                  {@render mutedLine(part.line)}
+                  <div {@attach convoWin.row(n)}>{@render mutedLine(part.line)}</div>
                 {:else}
                 {@const message = part.message}
                 {@const own = me !== null && message.account === me}
-                <article class="tf-msg">
+                <article class="tf-msg" {@attach convoWin.row(n)}>
                   <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(message.who)}</span>
                   <div class="tf-msg-body">
                     <div class="tf-who">
@@ -959,6 +980,8 @@
                 </article>
                 {/if}
               {/each}
+              </div>
+              {/if}
               {#each queuedComments as echo, n (n)}
                 <article class="tf-msg tf-queued">
                   <span class="tf-av tf-me" aria-hidden="true">{initials(me)}</span>
@@ -998,20 +1021,7 @@
               {#if "line" in part}
                 {@render mutedLine(part.line)}
               {:else}
-                <table class="tf-tbl tf-rcommits">
-                  <tbody>
-                    {#each part.commits as row, n (n)}
-                      {@const opens = row.entity_id !== null && repo !== null}
-                      <tr class:tf-row={opens} onclick={(event) => openCommit(event, row)}>
-                        <td class="tf-mono"
-                          >{#if opens}<a href={commitHash(repo!.entity_id, row.entity_id!)}>{row.chip ?? ""}</a>{:else}{row.chip ?? ""}{/if}</td
-                        >
-                        <td class:tf-dim={row.chip === null}>{row.title}</td>
-                        <td class="tf-dim tf-nowrap">{commitLine(row, row.entity_id !== null && myCommits.has(row.entity_id))}</td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
+                <TfPrCommitRows commits={part.commits} repoId={repo?.entity_id ?? null} mine={myCommits} onopen={openCommit} />
               {/if}
             {:else}
               <div class="tf-empty">No commits.</div>

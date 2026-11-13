@@ -76,6 +76,7 @@
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     ports,
@@ -188,23 +189,10 @@
             },
             () => {},
           );
-        const ids = read.flatMap((row) => {
-          const at = row.entity_id ?? unsynced.get(row.title) ?? null;
-          return at === null || row.chip === "default" ? [] : [at];
-        });
-        let next = 0;
-        const worker = async () => {
-          while (alive() && next < ids.length) {
-            const branchId = ids[next++]!;
-            try {
-              const standing = branchStanding(await ports.entityView(branchId, null));
-              if (alive()) standings[branchId] = standing;
-            } catch {
-              // A branch whose view fails draws without its standing.
-            }
-          }
-        };
-        return Promise.all(Array.from({ length: AT_ONCE }, worker));
+        // Each standing is read where it is wanted (`want`): the rows drawn, and every row while a filter asks for
+        // standings. A read again reads them again as they are wanted.
+        reads = { alive, asked: new Set() };
+        return want(drawnIds);
       },
       (error) => {
         if (!alive() || mine !== readNo) return;
@@ -213,6 +201,46 @@
       },
     );
   }
+
+  /**
+   * The branches whose standing is read, and those asked for since the listing was read. A repository of thousands
+   * of branches reads the standing of the rows it draws, not of every branch at once (the extremes pass, 2026-11-13:
+   * 5,000 branches were 5,000 reads of the forge as the tab opened).
+   */
+  let reads: { alive: () => boolean; asked: Set<string> } | null = null;
+  const queue: string[] = [];
+  let workers = 0;
+
+  /** Reads the standings of `ids` not asked for yet, these first, `AT_ONCE` at a time. */
+  function want(ids: readonly string[]): Promise<unknown> {
+    const now = reads;
+    if (now === null) return Promise.resolve();
+    const fresh = ids.filter((id) => !now.asked.has(id));
+    for (const id of fresh) now.asked.add(id);
+    queue.unshift(...fresh);
+    const worker = async () => {
+      workers++;
+      try {
+        while (queue.length > 0) {
+          const branchId = queue.shift()!;
+          const at = reads;
+          if (at === null || !at.alive() || !at.asked.has(branchId)) continue;
+          try {
+            const standing = branchStanding(await ports.entityView(branchId, null));
+            if (at.alive()) standings[branchId] = standing;
+          } catch {
+            // A branch whose view fails draws without its standing.
+          }
+        }
+      } finally {
+        workers--;
+      }
+    };
+    return Promise.all(Array.from({ length: Math.max(0, AT_ONCE - workers) }, worker));
+  }
+
+  /** Where a row's standing is read: its id, or the id the source named for one not synced; none for the default. */
+  const standingId = (row: BranchRow) => (row.isDefault ? null : (row.entityId ?? unsynced.get(row.name) ?? null));
 
   /** A branch's row, or the note a cut listing ends on (no id, no line). */
   const isNote = (row: ViewRow) => row.entity_id === null && row.meta === null && row.chip !== "default";
@@ -263,6 +291,15 @@
     chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged"].map((value) => ({ value, label: value })) }],
   });
   const shown = $derived(visibleBranches(rows, filter.chips["show"] ?? [], filter.text));
+  /** Thousands of branches draw only the rows near the viewport (the extremes pass, 2026-11-13); a row is 41 px. */
+  const win = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.name, estimate: 41 });
+  const drawnIds = $derived(win.slice(shown).flatMap((row) => standingId(row) ?? []));
+  /** *No PR* and *Merged* filter by standing, so they ask for every branch's. */
+  const needsAll = $derived((filter.chips["show"] ?? []).some((chip) => chip === "No PR" || chip === "Merged"));
+  $effect(() => {
+    const ids = needsAll ? rows.flatMap((row) => standingId(row) ?? []) : drawnIds;
+    untrack(() => void want(ids));
+  });
 
   function against(standing: BranchStanding | null): string {
     if (standing === null || standing.ahead === null) return "";
@@ -308,11 +345,12 @@
     <thead>
       <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Updated</th><th></th></tr>
     </thead>
-    <tbody>
-      {#each shown as row (row.name)}
+    <tbody {@attach win.list}>
+      {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="6" {@attach win.room("before")}></td></tr>{/if}
+      {#each win.slice(shown) as row (row.name)}
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
-        <tr data-place>
+        <tr data-place {@attach win.row(row.name)}>
           <td title={row.name}
             ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
@@ -347,6 +385,7 @@
           >
         </tr>
       {/each}
+      {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="6" {@attach win.room("after")}></td></tr>{/if}
     </tbody>
   </table>
 {/if}

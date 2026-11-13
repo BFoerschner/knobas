@@ -24,7 +24,7 @@
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
-  import { tick, untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
 
   import type { Attachment, Thread } from "../../ipc/entity";
   import type { AttachmentImages } from "../../render/markdown";
@@ -36,6 +36,8 @@
   import { takeAgain, type Echo } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
   import { firstName, mentionRuns, since, stamp, wholeThread } from "./conversation";
+  import { Windowed } from "../../shell/windowed.svelte";
+  import { textHeight } from "../../shell/windowed";
 
   let {
     jobKey,
@@ -95,6 +97,31 @@
   const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? selfName ?? thread?.me[0] ?? null);
   const drawn = $derived(thread === null ? null : wholeThread(thread, lastVisit));
 
+  /** What the thread draws, in order: each comment, and the *New since your last visit* rule before the first new one. */
+  type Row = { key: string; entry: (NonNullable<typeof drawn>["entries"])[number] } | { key: "new"; entry: null };
+  const rows = $derived.by((): Row[] => {
+    if (drawn === null) return [];
+    const out: Row[] = [];
+    drawn.entries.forEach((entry, index) => {
+      if (index === drawn.newAt && lastVisit !== null) out.push({ key: "new", entry: null });
+      out.push({ key: String(index), entry });
+    });
+    return out;
+  });
+  /**
+   * A long thread draws only the comments near the viewport (the extremes pass, 2026-11-13: 500 comments were built
+   * whole as the ticket opened). By place: a thread only grows at its end.
+   */
+  const win = new Windowed({
+    count: () => rows.length,
+    key: (i) => rows[i]!.key,
+    estimate: 76,
+    gap: 10,
+    estimateOf: (key) => estimates.get(key) ?? 76,
+  });
+  /** Each row's room before it is drawn: a comment's by its length. */
+  const estimates = $derived(new Map(rows.map((row) => [row.key, row.entry ? textHeight(row.entry.comment.body, { base: 46, line: 21, chars: 100 }) : 18])));
+
   let convo = $state<HTMLDivElement | null>(null);
   /** Whether this opening has been brought to its mention: once a thread, so a re-read does not scroll again. */
   let broughtTo = $state(false);
@@ -108,11 +135,17 @@
       return;
     }
     if (drawn === null || convo === null || untrack(() => broughtTo)) return;
-    const mentions = convo.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
-    const newest = mentions[mentions.length - 1];
-    if (newest === undefined) return;
+    // The newest mention may be a comment the thread holds back: brought into the drawn rows first.
+    const at = untrack(() => {
+      for (let i = rows.length - 1; i >= 0; i--) if (rows[i]!.entry?.comment.mentions_me === true) return i;
+      return -1;
+    });
+    if (at < 0) return;
     broughtTo = true;
-    newest.scrollIntoView?.({ block: "center" });
+    untrack(() => win.reveal(at));
+    flushSync();
+    const mentions = convo.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
+    mentions[mentions.length - 1]?.scrollIntoView?.({ block: "center" });
   });
 
   async function send() {
@@ -138,13 +171,16 @@
   {:else if thread === null || drawn === null}
     <p class="tf-dim">Reading the conversation…</p>
   {:else}
-    {#each drawn.entries as entry, index (index)}
+    {#if rows.length > 0}
+    <div class="tf-convo-rows" {@attach win.list}>
+    {#each win.slice(rows) as row (row.key)}
+      {#if row.entry === null}
+        <div class="tf-newline" {@attach win.row(row.key)}>New since your last visit, {since(lastVisit ?? "", now)}</div>
+      {:else}
+      {@const entry = row.entry}
       {@const comment = entry.comment}
       {@const markdown = proseMarkdown(comment.body, comment.markup, attachments)}
-      {#if index === drawn.newAt && lastVisit !== null}
-        <div class="tf-newline">New since your last visit, {since(lastVisit, now)}</div>
-      {/if}
-      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me}>
+      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me} {@attach win.row(row.key)}>
         <span class="tf-av" class:tf-me={comment.mine} aria-hidden="true">{initials(comment.author)}</span>
         <div class="tf-msg-body">
           <div class="tf-who">
@@ -160,7 +196,10 @@
           {/if}
         </div>
       </article>
+      {/if}
     {/each}
+    </div>
+    {/if}
     {#if drawn.entries.length === 0 && queued.length === 0}
       <p class="tf-dim">No comments yet.</p>
     {/if}

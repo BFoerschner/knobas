@@ -27,6 +27,7 @@
   import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     ports,
@@ -107,6 +108,8 @@
     chips: [{ key: "state", label: "State", options: PR_STATES.map((value) => ({ value, label: value })) }],
   });
   const shown = $derived(rows === null ? [] : visibleRepoPrs(rows, filter.chips["state"] ?? [], filter.text));
+  /** A repository of thousands of pull requests draws only the rows near the viewport (the extremes pass, 2026-11-13); Code's row is 51 px. */
+  const win = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.entity_id, estimate: 51 });
 
   function open(event: MouseEvent, href: string) {
     if ((event.target as Element | null)?.closest("a")) return;
@@ -133,6 +136,7 @@
   <!-- Code's row and Code's columns: one list of pull requests, drawn one way. -->
   <table class="tf-tbl tf-rprs tf-cprs">
     <colgroup><col class="tf-cp-no" /><col /><col class="tf-cp-state" /><col class="tf-cp-job" /><col class="tf-cp-at" /></colgroup>
+    <!-- The queued ones in a body of their own, so the windowed rows' first sits at its body's top. -->
     <tbody>
       {#each sent as echo (echo.write ?? echo.text)}
         <tr class="tf-rsent" data-place>
@@ -143,10 +147,13 @@
           <td></td>
         </tr>
       {/each}
-      {#each shown as row (row.entity_id)}
+    </tbody>
+    <tbody {@attach win.list}>
+      {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
+      {#each win.slice(shown) as row (row.entity_id)}
         {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
         {@const author = authors.get(row.entity_id)}
-        <tr class="tf-row" data-place onclick={(event) => open(event, itemHash(row))}>
+        <tr class="tf-row" data-place onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
           <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td
             ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a><!-- The author's line is held while `code_facts` reads, so a row is as tall from its first draw (the still-rows pass, 2026-11-11). --><span class="tf-sub tf-oneline">{#if author}<Marked text={author} typed={filter.text} />{:else}&nbsp;{/if}</span></td
@@ -156,6 +163,7 @@
           <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
         </tr>
       {/each}
+      {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("after")}></td></tr>{/if}
     </tbody>
   </table>
 {/if}

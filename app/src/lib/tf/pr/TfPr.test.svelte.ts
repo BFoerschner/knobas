@@ -621,7 +621,8 @@ test("Conversation opens on the source's line where it cannot read the comments,
     { type: "facts", facts: [fact("priya.nair", "2026-08-22 09:30"), fact("Review", "approved", "ok")] },
   ]);
   await draw([PR, "conversation"], ports({ pr }));
-  const convo = [...target.querySelectorAll(".tf-convo > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
+  // The thread's parts are the windowed column's rows (the extremes pass, 2026-11-13).
+  const convo = [...target.querySelectorAll(".tf-convo-rows > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
   expect(convo[0]).toBe(UNREAD);
   expect(convo[1]).toBe(`PR priya.nair${stampLabel("2026-08-22T09:30:00")} Approved`);
   expect(target.querySelector(".tf-convo .tf-prline")!.classList.contains("tf-dim")).toBe(true);
