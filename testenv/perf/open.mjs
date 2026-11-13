@@ -52,7 +52,15 @@ const lines = opt("--lines") ?? "real";
 const set = opt("--set") ?? "nav";
 const items = JSON.parse(readFileSync(opt("--items") ?? new URL("./inner-items.json", import.meta.url), "utf8"));
 if (!app) { console.log("open.mjs: --app <url> is required"); process.exit(2); }
-const downAll = () => Promise.all([bigFolders.down(), bigCompare.down(), extremes.down()]);
+// Taken away in the reverse of the order they were made: each puts back the Gitea source's owners and the clones root it
+// found, and the big compares found the big folders' (the WSL block, 2026-11-13: both at once could leave the source
+// owning a deleted org). One handler for a signal, so a stopped run takes them away once, in that order.
+const downAll = async () => {
+  await bigCompare.down();
+  await bigFolders.down();
+  await extremes.down();
+};
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void downAll().finally(() => process.exit(130)));
 setTimeout(() => { console.log("watchdog: gave up"); void downAll().finally(() => process.exit(3)); }, Number(opt("--max-minutes", set === "extremes" ? "180" : "45")) * 60000).unref();
 const withBig = set === "inner" && !args.includes("--no-big-folders");
 // The big compares (the compare pass, 2026-11-13): branches of 300, 3,000 and 10,000 changed files, with a clone and without.
@@ -129,7 +137,7 @@ function innerPlaces(i) {
     { name: "pr-files", start: PR, press: prTab(i.pr, "diff"), hash: `${PR}/diff`, useful: [diff], away: prOverview },
     { name: "pr-commits", start: PR, press: prTab(i.pr, "commits"), hash: `${PR}/commits`, useful: [[`${shown} .tf-pr tr, ${shown} .tf-pr .tf-row`, 1]], away: prOverview },
     { name: "pr-files-large", start: `#/pr/${enc(i.prLarge)}`, press: prTab(i.prLarge, "diff"), hash: `#/pr/${enc(i.prLarge)}/diff`, useful: [[`${shown} .tf-diff`, 1]], away: `${shown} .tf-tabs a[href="#/pr/${enc(i.prLarge)}"]` },
-    { name: "run-log", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/log"]`, hash: `${RUN}/log`, useful: [[`${shown} .tf-logv .tf-l, ${shown} .tf-runbody p.tf-dim, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
+    { name: "run-log", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/log"]`, hash: `${RUN}/log`, useful: [[`${shown} .tf-logv .tf-ll, ${shown} .tf-runbody p.tf-dim, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
     { name: "run-tests", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/tests"]`, hash: `${RUN}/tests`, useful: [[`${shown} .tf-trow, ${shown} .tf-bv .tf-empty, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
     { name: "run-artifacts", start: RUN, press: `${shown} .tf-tabs a[href="${RUN}/artifacts"]`, hash: `${RUN}/artifacts`, useful: [[`${shown} .tf-atree, ${shown} .tf-bv p.tf-dim`, 1, false, "^Reading"]], away: `${shown} .tf-tabs a[href="${RUN}"]` },
   ].map((p) => ({ ...p, inner: true }));
@@ -148,7 +156,6 @@ const picked = (p) => !only || only.some((w) => p.name === w || p.name.startsWit
 if (withBig && placesAt(1).filter(picked).some((p) => /^(forge-)?folder-/.test(p.name))) {
   const port = Number(new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real"));
   const dir = resolve(dirname(out), "big-folders");
-  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void bigFolders.down().finally(() => process.exit(130)));
   try {
     console.log("big-folders: making the repositories, their source and the clone");
     await bigFolders.up({ port, dir });
@@ -162,7 +169,6 @@ if (withBig && placesAt(1).filter(picked).some((p) => /^(forge-)?folder-/.test(p
 if (withCompares && placesAt(1).filter(picked).some((p) => /^(forge-)?compare-\d/.test(p.name))) {
   const port = Number(new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real"));
   const dir = resolve(dirname(out), "big-compare");
-  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void bigCompare.down().finally(() => process.exit(130)));
   try {
     console.log("big-compare: making the repositories, their branches, their source and the clone");
     await bigCompare.up({ port, dir });
@@ -175,7 +181,6 @@ if (withCompares && placesAt(1).filter(picked).some((p) => /^(forge-)?compare-\d
 // The extremes are seeded and synced for the run, and taken away after it.
 if (set === "extremes") {
   const port = Number(new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real"));
-  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void extremes.down().finally(() => process.exit(130)));
   try {
     if (!args.includes("--no-seed")) {
       await extremes.up({ port, seed: true, keep: args.includes("--keep-extremes"), wait: [] });

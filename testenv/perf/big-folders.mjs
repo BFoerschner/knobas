@@ -103,14 +103,16 @@ export async function up({ port, dir }) {
   source = live.id;
   await call(port, "update_source", { id: live.id, patch: { config: { ...live.config, owners: [...owners, ORG] } } });
   await call(port, "sync_now", { sourceId: live.id }).catch(() => {});
-  for (let i = 0; i < 240; i++) {
+  // Ten minutes: a new owner makes the source's next run walk the whole scale estate, five minutes on the WSL box
+  // (the WSL block, 2026-11-13; four timed out a run).
+  for (let i = 0; i < 600; i++) {
     // Each repository and its `main`: the clone's tree is read at the commit the mirror names for the branch, and a
     // source with many repositories may store a new repository's branches in a later run than the repository.
     const ids = [cloned(), forge(), `${cloned()}@refs/heads/main`, `${forge()}@refs/heads/main`];
     const briefs = await call(port, "entity_briefs", { entityIds: ids }).catch(() => []);
     const status = (await call(port, "sync_status")).find((s) => s.source_id === live.id);
     if (briefs.length === ids.length && status && !status.running) break;
-    if (i === 239) throw new Error("big-folders: the source never synced the two repositories and their branches");
+    if (i === 599) throw new Error("big-folders: the source never synced the two repositories and their branches");
     // A run under way when the owners changed read the old ones: ask for the next.
     if (status && !status.running && i % 10 === 9) await call(port, "sync_now", { sourceId: live.id }).catch(() => {});
     await sleep(1000);
@@ -120,7 +122,14 @@ export async function up({ port, dir }) {
   await call(port, "set_clones_root", { path: join(dir, "clones") });
   await call(port, "clone_repo", { entityId: cloned() });
   for (let i = 0; i < 180; i++) {
-    if (await call(port, "entity_local_tree", { entityId: cloned() }).catch(() => null)) return;
+    if (await call(port, "entity_local_tree", { entityId: cloned() }).catch(() => null)) {
+      // Pinned as the repository's checkout, so the next rig's clones root of its own does not hide it (the WSL block,
+      // 2026-11-13: the big compares' root left this clone unread, and every folder was read from the forge).
+      const { path } = await call(port, "entity_checkout", { entityId: cloned() });
+      await call(port, "set_checkout_override", { entityId: cloned(), path });
+      made.pinned = true;
+      return;
+    }
     await sleep(1000);
   }
   throw new Error("big-folders: the clone never answered its tree");
@@ -133,6 +142,7 @@ export async function up({ port, dir }) {
 export async function down() {
   if (made === null) return;
   const { port, g, root, source } = made;
+  if (made.pinned) await call(port, "set_checkout_override", { entityId: cloned(), path: null }).catch((e) => console.log(`big-folders: ${e.message}`));
   made = null;
   if (source) await call(port, "update_source", { id: source.id, patch: { config: source.config } }).catch((e) => console.log(`big-folders: ${e.message}`));
   if (root !== undefined) await call(port, "set_clones_root", { path: root }).catch((e) => console.log(`big-folders: ${e.message}`));
