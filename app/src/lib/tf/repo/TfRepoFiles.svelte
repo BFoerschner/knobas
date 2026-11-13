@@ -216,8 +216,12 @@
     if (listings[""] !== undefined || treeFailed !== null) untrack(() => ondrew?.());
   });
 
-  /** Each directory read so far at `at`, by its path (`""` the top). */
-  let listings = $state<Record<string, TreeEntry[]>>({});
+  /**
+   * Each directory read so far at `at`, by its path (`""` the top). Replaced whole, never written into: a clone's tree
+   * is every directory at once, and a deep proxy over ten thousand entries cost a folder's press more than its rows
+   * (the big-folder pass, 2026-11-13).
+   */
+  let listings = $state.raw<Record<string, TreeEntry[]>>({});
   /**
    * The tree as the checkout holds it at the mirror's tip (ADR-0041), while the
    * listings are its; `checked` once the source's top stood at the same commit.
@@ -258,6 +262,9 @@
    */
   let early = new Map<string, Promise<ViewSection | undefined>>();
   let generation = 0;
+
+  /** A tree of more rows than this draws only the rows near the view (the big-folder pass, 2026-11-13). */
+  const TREE_WINDOW_FROM = 120;
 
   const join = (dir: string, name: string) => (dir === "" ? name : `${dir}/${name}`);
   const parentOf = (full: string) => (full.includes("/") ? full.slice(0, full.lastIndexOf("/")) : "");
@@ -436,7 +443,7 @@
         const block = read?.blocks[0];
         if (dir === "" && block?.type === "tree") sourceTop = block.commit ?? null;
         if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
-        listings[dir] = block?.type === "tree" ? block.entries : [];
+        listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
         if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
       },
       (error) => {
@@ -1107,7 +1114,7 @@
       const read = readSection(section).then(
         (read) => {
           const block = read?.blocks[0];
-          if (mine === generation && block?.type === "tree") listings[dir] = block.entries;
+          if (mine === generation && block?.type === "tree") listings = { ...listings, [dir]: block.entries };
         },
         // The directory keeps what it drew.
         () => {},
@@ -1221,18 +1228,50 @@
       else links[event.key === "ArrowDown" ? Math.min(links.length - 1, here + 1) : here - 1]?.focus();
       return;
     }
-    const from = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? null) : null;
-    const move = treeKey(treeRows(listings, open), from, event.key);
+    // On the tree itself: the row that had focus left the window, and the keys go on from it.
+    const from =
+      event.target === tree ? focusedPath : event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? null) : null;
+    const move = treeKey(rows, from, event.key);
     if (move === null) return;
     event.preventDefault();
     if ("fold" in move) open.delete(move.fold);
     else if ("unfold" in move) open.add(move.unfold);
     else {
+      // A row past the window is drawn first.
+      treeWin.reveal(rows.findIndex((row) => row.path === move.focus));
+      flushSync();
       const row = [...(tree?.querySelectorAll<HTMLElement>("[data-path]") ?? [])].find((el) => el.dataset["path"] === move.focus);
       row?.focus();
       row?.scrollIntoView?.({ block: "nearest" });
     }
   }
+
+  /**
+   * The tree's rows, flat (every listing read, an open directory's entries after it), drawn through a windowed list
+   * (the big-folder pass, 2026-11-13): the rows in view and a screenful each side, the rest room above and below, so
+   * a folder of ten thousand entries opens in a frame. A row is 24 px (`code.css`, `.tf-ftree a`).
+   */
+  const rows = $derived(treeRows(listings, open));
+  const treeWin = new Windowed<string>({ count: () => (going ? 0 : rows.length), key: (i) => rows[i]!.path, estimate: 24, from: TREE_WINDOW_FROM });
+  /** The row that last had focus, while focus is in the tree. */
+  let focusedPath: string | null = null;
+  function treeFocus(event: FocusEvent) {
+    focusedPath = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? focusedPath) : focusedPath;
+  }
+  function treeBlur(event: FocusEvent) {
+    // Focus left the tree; a row the window took out of the DOM keeps it (`treeRow`).
+    const to = event.relatedTarget;
+    if (!(to instanceof Node && tree?.contains(to)) && event.target instanceof Node && event.target.isConnected) focusedPath = null;
+  }
+  /** On each drawn row: measured by the window, and where it held focus when the window took it, the tree keeps focus. */
+  const treeRow = (path: string) => (node: HTMLElement) => {
+    const measured = treeWin.row(path)(node);
+    return () => {
+      measured();
+      // The DOM goes before the teardown, so focus has fallen to the body.
+      if (focusedPath === path && document.activeElement === document.body && tree?.isConnected) tree.focus({ preventScroll: true });
+    };
+  };
 
   // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says; never while typing.
   $effect(() => {
@@ -1260,37 +1299,38 @@
   >
 {/snippet}
 
-{#snippet listing(dir: string, depth: number)}
-  {#each listings[dir] ?? [] as entry (entry.name)}
-    {@const full = join(dir, entry.name)}
-    {#if entry.kind === "dir"}
-      <button
-        type="button"
-        class="tf-fdir tf-d{Math.min(depth, 8)}"
-        data-path={full}
-        aria-expanded={open.has(full)}
-        onpointerenter={() => restOn(full, entry.section, "dir")}
-        onpointerleave={unrest}
-        onclick={() => toggle(full)}>{@render icon(open.has(full) ? "open" : "dir")}{entry.name}</button
-      >
-      {#if open.has(full)}
-        {@render listing(full, depth + 1)}
+{#snippet listing()}
+  <div class="tf-ftrows" {@attach treeWin.list}>
+    {#each treeWin.slice(rows) as row (row.path)}
+      {@const full = row.path}
+      {#if row.kind === "dir"}
+        <button
+          type="button"
+          class="tf-fdir tf-d{Math.min(row.depth, 8)}"
+          data-path={full}
+          aria-expanded={row.open}
+          onpointerenter={() => restOn(full, row.section, "dir")}
+          onpointerleave={unrest}
+          onclick={() => toggle(full)}
+          {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
+        >
+      {:else if row.kind === "file"}
+        <a
+          href={fileHash(repoId, full)}
+          data-path={full}
+          class="tf-d{Math.min(row.depth, 8)}"
+          class:tf-changed={changed.has(full)}
+          aria-current={full === shown ? "true" : undefined}
+          onpointerenter={() => restOn(full, row.section, "file")}
+          onpointerleave={unrest}
+          title={changed.has(full) ? "Changed in your checkout" : undefined}
+          {@attach treeRow(full)}>{@render icon("file")}{row.name}</a
+        >
+      {:else}
+        <span class="tf-fsub tf-d{Math.min(row.depth, 8)}" data-path={full} tabindex="-1" {@attach treeRow(full)}>{@render icon("file")}{row.name}</span>
       {/if}
-    {:else if entry.section !== null}
-      <a
-        href={fileHash(repoId, full)}
-        data-path={full}
-        class="tf-d{Math.min(depth, 8)}"
-        class:tf-changed={changed.has(full)}
-        aria-current={full === shown ? "true" : undefined}
-        onpointerenter={() => restOn(full, entry.section, "file")}
-        onpointerleave={unrest}
-        title={changed.has(full) ? "Changed in your checkout" : undefined}>{@render icon("file")}{entry.name}</a
-      >
-    {:else}
-      <span class="tf-fsub tf-d{Math.min(depth, 8)}" data-path={full} tabindex="-1">{@render icon("file")}{entry.name}</span>
-    {/if}
-  {/each}
+    {/each}
+  </div>
 {/snippet}
 
 <div class="tf-repo">
@@ -1320,7 +1360,7 @@
     </header>
     <!-- The rows are the links and buttons; the arrow keys move between them (#2311). -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <nav class="tf-ftree" aria-label="Files" bind:this={tree} onkeydown={treeKeys}>
+    <nav class="tf-ftree" aria-label="Files" tabindex="-1" bind:this={tree} onkeydown={treeKeys} onfocusin={treeFocus} onfocusout={treeBlur}>
       {#if going}
         <!-- Go to file's answer in the rows' place (#2311): every path at the commit that holds what is typed. -->
         {#each goFound as found (found)}
@@ -1347,7 +1387,7 @@
           <p class="tf-cfail">{treeFailed}</p>
         {/if}
         <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
-          {@render listing("", 0)}
+          {@render listing()}
         </TfWaiting>
       {/if}
     </nav>

@@ -40,13 +40,21 @@ export function goToFile(paths: readonly string[], typed: string, limit = GO_TO_
 /** One row of the tree as drawn: a directory (folded or not), a file, or what opens nothing (a submodule). */
 export interface TreeRow {
   path: string;
+  /** The entry's name, as its row reads. */
+  name: string;
   kind: "dir" | "file" | "other";
   depth: number;
   /** A directory drawn unfolded. */
   open: boolean;
+  /** The section that opens it, as its listing named it; `null` for what opens nothing. */
+  section: string | null;
 }
 
-/** The rows the tree draws, in order: each listing read, an open directory's entries after it. */
+/**
+ * The rows the tree draws, in order: each listing read, an open directory's entries after it. The tree draws this
+ * flat list through a windowed list (the big-folder pass, 2026-11-13), so a folder of ten thousand entries mounts the
+ * rows in view, not ten thousand.
+ */
 export function treeRows(listings: Readonly<Record<string, readonly TreeEntry[]>>, open: ReadonlySet<string>): TreeRow[] {
   const rows: TreeRow[] = [];
   const walk = (dir: string, depth: number) => {
@@ -54,7 +62,7 @@ export function treeRows(listings: Readonly<Record<string, readonly TreeEntry[]>
       const path = dir === "" ? entry.name : `${dir}/${entry.name}`;
       const kind = entry.kind === "dir" ? "dir" : entry.section === null ? "other" : "file";
       const unfolded = kind === "dir" && open.has(path);
-      rows.push({ path, kind, depth, open: unfolded });
+      rows.push({ path, name: entry.name, kind, depth, open: unfolded, section: entry.section });
       if (unfolded) walk(path, depth + 1);
     }
   };
