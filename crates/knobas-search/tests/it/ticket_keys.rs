@@ -231,7 +231,11 @@ async fn each_scalar_key_matches_its_field_any_value_and_negates() {
 /// The tickets differ in every field a key reads, one has no priority and no
 /// labels, and one has lost its stored card, as a ticket the fill has not
 /// reached: its card keys walk the payload again. Each query is asked alone,
-/// left out, and beside a word.
+/// left out, and beside a word, under the declarations the database stored
+/// and under ones it never stored (a candidate added after the stored ones,
+/// which no payload holds), where each stored key walks the payload instead
+/// (the broad-filters pass, 2026-11-13, which asks `fsu` per source and
+/// kind where the key asked each row's candidates).
 #[tokio::test]
 async fn a_key_asked_as_a_set_admits_what_its_row_by_row_read_did() {
     use knobas_search::query;
@@ -342,9 +346,36 @@ async fn a_key_asked_as_a_set_admits_what_its_row_by_row_read_did() {
             "-issuetype:Bug label:backend",
         ),
     ];
+    // The same declarations with one more candidate for each stored field:
+    // the same values resolve, under candidates no stored row was written by.
+    let stored_declarations = vocab.declarations.clone();
+    let unstored = {
+        let extra = knobas_core::payload::PayloadPath::of(["fields", "never-sent"]);
+        let kinds = stored_declarations
+            .of_source("jira")
+            .cloned()
+            .map(|mut kind| {
+                for paths in [
+                    &mut kind.status_name,
+                    &mut kind.assignee,
+                    &mut kind.project_key,
+                    &mut kind.project_name,
+                ] {
+                    if !paths.is_empty() {
+                        paths.push(extra.clone());
+                    }
+                }
+                kind
+            })
+            .collect();
+        knobas_core::payload::Declarations::empty().with("jira", kinds)
+    };
     let mut asked = 0;
     let mut admitted = 0;
-    for (key, left_out) in keys {
+    for (declarations, key, left_out) in [&stored_declarations, &unstored]
+        .into_iter()
+        .flat_map(|declarations| keys.iter().map(move |(key, left_out)| (declarations, *key, *left_out)))
+    {
         // The word is the project's key, which every one of its tickets
         // holds in its own.
         for raw in [
@@ -361,6 +392,7 @@ async fn a_key_asked_as_a_set_admits_what_its_row_by_row_read_did() {
             );
             let mut filters = query::merge(&parsed, &SearchFilters::default());
             filters.kinds = vec!["ticket".to_owned()];
+            filters.declarations = declarations.clone();
             let words = query::word_alternatives(&parsed.query.text);
             let now: Vec<(String,)> = query_as_with(ids_sql(&words, &filters))
                 .fetch_all(&pool)

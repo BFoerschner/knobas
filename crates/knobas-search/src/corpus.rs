@@ -313,6 +313,17 @@ macro_rules! field_paths_ctes {
                                           else '{}'::jsonb end) as s(source_id, kinds) \
                cross join lateral jsonb_object_keys(case when jsonb_typeof(s.kinds) = 'object' \
                                           then s.kinds else '{}'::jsonb end) as k(kind)),\n",
+            // Each declared source and kind whose field the database stores,
+            // with the candidates it stores it under: `knobas_core::stored_under!`
+            // asked once a pair, not once a row ([`stored_field_in!`]).
+            "fsu as materialized (select fk.source_id, fk.kind, x.field, \
+                    fk.d #> array[fk.source_id, fk.kind, x.field] as paths \
+               from fk cross join (values ('project_key'), ('project_name'), ('status_name'), ('assignee')) as x(field) \
+              where (fk.kind, fk.d #> array[fk.source_id, fk.kind, x.field]) in \
+                    (select kp.p->>'kind', kp.p->x.field from sync.parent_declaration spd \
+                      cross join lateral jsonb_array_elements(case when jsonb_typeof(spd.payload_paths) = 'array' \
+                                                                   then spd.payload_paths else '[]'::jsonb end) as kp(p) \
+                      where jsonb_typeof(kp.p->x.field) = 'array' and jsonb_array_length(kp.p->x.field) > 0)),\n",
             "fp as materialized (",
             $crate::corpus::field_paths!("project_key"),
             " union all ",
@@ -389,21 +400,33 @@ macro_rules! stored_field_of {
 /// 23,176 probes and 61 ms for `status:` on 20,000 Jira tickets, 242 ms for
 /// `project:`).
 ///
-/// **The same answer.** `$paths` is the candidates the statement's
-/// declarations give the row's source and kind for the field, spelled out
-/// because [`knobas_core::stored_under!`] takes a literal. Where the stored
-/// declarations hold those candidates the database keeps a row for the item
-/// under them (`stored_under!` says why), so membership in the set is the
-/// stored value's test. Where they do not, nothing is stored and the row
-/// walks its payload, as [`stored_field_of!`] did.
+/// **The same answer.** The candidates the statement's declarations give
+/// the row's source and kind for the field are `fsu`'s `paths` for that
+/// pair ([`field_paths_ctes!`]), and `fsu` holds exactly the pairs whose
+/// candidates the stored declarations hold ([`knobas_core::stored_under!`]'s
+/// test, asked of each pair once). For such a row the database keeps a row
+/// under those candidates (`stored_under!` says why), so membership in the
+/// set is the stored value's test: the set pairs each stored row with the
+/// source and kind whose candidates it was stored under. Where the pair is
+/// not in `fsu`, nothing is stored and the row walks its payload, as
+/// [`stored_field_of!`] did.
+///
+/// **Asked of the pair, not of the row's paths** (the broad-filters pass,
+/// 2026-11-13): the test was `(i.kind, <paths>) in (...)` and then
+/// `(i.entity_id, <paths>) in (...)`, a record holding a jsonb hashed per
+/// row and per test, about 18 ms of each over 23,000 tickets. `-project:`
+/// asks four of them: 51 ms to 26 for its statement, the same rows.
+/// `tests/it/ticket_keys.rs` holds it to the row-by-row read under stored
+/// declarations and under ones the database never stored.
 macro_rules! stored_field_in {
     ($field:literal, $paths:literal) => {
         concat!(
-            "(case when ",
-            knobas_core::stored_under!($field, $paths),
-            " then (i.entity_id, ",
-            $paths,
-            ") in (select f.entity_id, f.paths from sync.item_field f where f.field = '",
+            "(case when (i.source_id, i.kind) in (select su.source_id, su.kind from fsu su where su.field = '",
+            $field,
+            "') then (i.entity_id, i.source_id, i.kind) in (select f.entity_id, su.source_id, su.kind \
+               from sync.item_field f join fsu su on su.field = '",
+            $field,
+            "' and su.paths = f.paths where f.field = '",
             $field,
             "' and lower(f.value) = any(fd.v)) else lower(",
             $crate::corpus::field_of!($field),
