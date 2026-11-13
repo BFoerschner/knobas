@@ -243,6 +243,9 @@
 .tf-bd-R { background: var(--info-bg); color: var(--info); }
 .tf-diff .tf-dfwhy { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font: var(--t-sm) var(--sans); color: var(--ink-2); }
 .tf-diff .tf-dfwhy .tf-btn { margin-left: auto; }
+/* A file whose lines are being read holds their room (the compare pass, 2026-11-13): the skeleton at the code's line rhythm. */
+.tf-diff .tf-dwait { box-sizing: border-box; overflow: hidden; }
+.tf-diff .tf-dmore { box-sizing: border-box; height: 42px; overflow: hidden; }
 .tf-dcut { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; background: var(--warn-bg); color: var(--ink); font-size: var(--t-sm); }
 .tf-srow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .tf-srow > .tf-ln + .tf-ln { border-left: 1px solid var(--rule); }

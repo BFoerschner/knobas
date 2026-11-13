@@ -25,7 +25,10 @@ export function treeOf(files: readonly DrawnFile[]): TreeRow[] {
   const byDir = new Map<string, DrawnFile[]>();
   for (const file of files) {
     const dir = dirOf(keyOf(file));
-    byDir.set(dir, [...(byDir.get(dir) ?? []), file]);
+    // Pushed, not copied: a folder of thousands of files was a copy of its list per file (the compare pass, 2026-11-13).
+    const into = byDir.get(dir);
+    if (into === undefined) byDir.set(dir, [file]);
+    else into.push(file);
   }
   const rows: TreeRow[] = [];
   for (const dir of [...byDir.keys()].sort()) {

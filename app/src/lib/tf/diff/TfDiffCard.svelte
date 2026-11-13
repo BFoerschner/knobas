@@ -70,7 +70,7 @@
   import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { placeThreads, targetOf } from "../pr/files";
-  import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
+  import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, waitingRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
   import type { DiffTalk } from "./talk";
   import { badgeOf, isGenerated, isLock, LOAD_OVER, needsLoad } from "./tree";
   import { marked, type Range } from "./words";
@@ -106,6 +106,11 @@
     pipeline = null,
     onpipeline = () => {},
     place = null,
+    waiting = false,
+    more = null,
+    onmore = () => {},
+    failedLines = null,
+    onretry = () => {},
   }: {
     file: DrawnFile;
     split: boolean;
@@ -144,7 +149,28 @@
     onpipeline?: (on: boolean) => void;
     /** On the card's box: a windowed list of files measures and places it there (`TfDiffView`). */
     place?: Attachment<HTMLDivElement> | null;
+    /** Its lines are being read (the view's `fill`): the card holds their room until they come. */
+    waiting?: boolean;
+    /** Where the next page of its lines starts, while one is still to be read; `onmore` reads it, as the card's end nears the view. */
+    more?: number | null;
+    onmore?: () => void;
+    /** Why reading its lines failed; `onretry` reads them again. */
+    failedLines?: string | null;
+    onretry?: () => void;
   } = $props();
+
+  /** Calls `go` as the box comes within a screen of the view of the page that scrolls it. */
+  function near(go: () => void): Attachment<HTMLElement> {
+    return (node) => {
+      if (typeof IntersectionObserver === "undefined") return;
+      const watch = new IntersectionObserver((seen) => seen.some((one) => one.isIntersecting) && go(), {
+        root: node.closest(".tf-main, .tf-bmain"),
+        rootMargin: "100% 0px",
+      });
+      watch.observe(node);
+      return () => watch.disconnect();
+    };
+  }
 
   /** The sides a rendered diff draws: the plan's, less one the reader found no file on. */
   const sides = $derived(rendered ? rendered.sides.filter((side) => sideOf(side)?.kind !== "absent") : []);
@@ -505,6 +531,16 @@
         <span>{chip === "generated" ? "Generated, and over" : "Over"} {n(LOAD_OVER)} lines ({n(changed)} changed): not loaded until you ask; nothing is cut.</span>
         <button type="button" class="tf-btn tf-sm" onclick={onload}>Load diff</button>
       </div>
+    {:else if failedLines !== null && file.hunks.length === 0}
+      <div class="tf-dfwhy">
+        <span>Could not read its lines: {failedLines}</span>
+        <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
+      </div>
+    {:else if waiting}
+      <!-- Its lines are being read: their room, held, so nothing below moves much when they come. -->
+      <div class="tf-dwait tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading {keyOf(file)}'s lines" style:height="{waitingRows(file) * 21}px">
+        {#each { length: Math.min(waitingRows(file), 6) }, k (k)}<span class="tf-skel-bar"></span>{/each}
+      </div>
     {:else if file.hunks.length === 0 && file.old_mode && file.new_mode && file.old_mode !== file.new_mode}
       <div class="tf-dfwhy">File mode changed from <span class="tf-mono">{file.old_mode}</span> to <span class="tf-mono">{file.new_mode}</span>. No content change.</div>
     {:else if file.hunks.length === 0 && file.change === "renamed"}
@@ -513,6 +549,19 @@
       <div class="tf-dbody" {@attach win.list}>
         {#each win.slice(items) as it (it.key)}{@render item(it)}{/each}
       </div>
+      {#if more !== null}
+        <!-- The rest of a long file: read as the reader reaches it. -->
+        {#if failedLines !== null}
+          <div class="tf-dfwhy">
+            <span>Could not read the rest of its lines: {failedLines}</span>
+            <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
+          </div>
+        {:else}
+          <div class="tf-dmore tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading more of {keyOf(file)}'s lines" {@attach near(onmore)}>
+            <span class="tf-skel-bar"></span><span class="tf-skel-bar"></span>
+          </div>
+        {/if}
+      {/if}
     {/if}
     {#if drawsLines && file.truncated}
       <div class="tf-hunk">Cut here at the {n(DIFF_CEILING)}-line ceiling: the rest of this file's change is at the source.</div>

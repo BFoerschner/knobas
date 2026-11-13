@@ -72,9 +72,11 @@
     EXPAND_STEP,
     hiddenBefore,
     keyOf,
+    waitingRows,
     shownLayout,
     sidesOf,
     type DiffContext,
+    type DiffFill,
     type DiffReview,
     type DiffViewed,
     type DrawnFile,
@@ -119,6 +121,7 @@
     piping = diffPipelines,
     tools = null,
     me = null,
+    fill = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -152,6 +155,12 @@
     tools?: Snippet | null;
     /** The reader's name at the source: a thread's comments by that name read *You*, as Conversation's do. None, each keeps its name. */
     me?: string | null;
+    /**
+     * Reads a file's lines a page at a time (the compare pass, 2026-11-13): `files` then carry none (`hunks` empty, the
+     * list `entity_range_files` answers), and a file's lines are read as its card comes near the view, the next page as
+     * its end does. None: `files` carry their lines.
+     */
+    fill?: DiffFill | null;
   } = $props();
 
   let filter = $state("");
@@ -178,7 +187,9 @@
     watch.observe(node);
     return () => watch.disconnect();
   }
-  const isViewed = (path: string) => viewed?.paths.includes(path) ?? false;
+  /** As a set: a pull request of thousands of files asks it of every file, many times. */
+  const viewedSet = $derived(new Set(viewed?.paths ?? []));
+  const isViewed = (path: string) => viewedSet.has(path);
 
   /** Each file's whole texts, once expanded context read them (by `keyOf`), and the read in flight. */
   let wholes = $state.raw<Record<string, WholeTexts>>({});
@@ -273,7 +284,8 @@
     });
   }
   $effect(() => {
-    for (const file of files) {
+    // The files drawn: a change of thousands runs the pipelines of those near the view.
+    for (const file of fileWin.slice(drawn)) {
       const pipe = pipes.get(keyOf(file));
       if (pipe && pipeOn(keyOf(file))) untrack(() => runPipe(file, pipe));
     }
@@ -303,9 +315,11 @@
    * tokens and starts no job; a side whose text changed (a file read whole for its context) drops
    * its tokens and is highlighted anew.
    */
-  const sides = $derived(
+  const sides = $derived.by(() =>
     new Map(
-      files.map((file) => {
+      // The files drawn, with their lines: a change of thousands of files highlights what is near the view.
+      fileWin.slice(drawn).map((listed) => {
+        const file = lineOf(listed);
         const piped = pipedOf(file);
         if (piped === null) return [keyOf(file), sidesOf(file, wholes[keyOf(file)])] as const;
         // A piped diff is highlighted as its output: `events.json.b64` decoded is JSON.
@@ -323,7 +337,8 @@
     const had = untrack(() => tokens);
     const kept: Record<string, (LineTokens | undefined)[]> = {};
     for (const [name, made] of jobs) {
-      if (want.get(name)?.text === made.text && made.port === port) {
+      // A file that left the view keeps its tokens for its return; one whose text changed is highlighted anew.
+      if ((want.get(name)?.text ?? made.text) === made.text && made.port === port) {
         if (had[name]) kept[name] = had[name];
       } else {
         made.job.cancel();
@@ -360,14 +375,22 @@
   };
 
   /** Each file's rendered mode, where its renderer draws diffs and the sides can be read (by `keyOf`). */
-  const plans = $derived(
-    new Map(
-      files.map((file) => {
-        const opened = openWith({ path: file.path, binary: file.change === "binary" }, allRenderers(), defaults.list);
-        return [keyOf(file), renderedPlan(file, opened.renderer, { whole: context !== null, bytes: typeof context?.bytes === "function" })] as const;
-      }),
-    ),
-  );
+  const plans = $derived.by(() => {
+    // Worked out per file as it is drawn, not for every file of a change of thousands as it opens.
+    const can = { whole: context !== null, bytes: typeof context?.bytes === "function" };
+    const list = defaults.list;
+    // By the file as drawn: one whose lines came is planned again with them.
+    const made = new WeakMap<DrawnFile, ReturnType<typeof renderedPlan>>();
+    return {
+      get(key: string) {
+        const listed = byKey.get(key);
+        if (listed === undefined) return null;
+        const file = lineOf(listed);
+        if (!made.has(file)) made.set(file, renderedPlan(file, openWith({ path: file.path, binary: file.change === "binary" }, allRenderers(), list).renderer, can));
+        return made.get(file) ?? null;
+      },
+    };
+  });
   /** The mode the reader picked per file; a binary file with a rendered mode opens in it (it has no lines). */
   let modes = $state.raw<Record<string, DiffMode>>({});
   const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? (plans.get(keyOf(file)) && file.change === "binary" ? "rendered" : "lines");
@@ -382,7 +405,8 @@
     if (asked.has(name)) return;
     asked.add(name);
     const read = async (): Promise<SideGot> => {
-      const hunk = hunkText(file, side);
+      // A file whose lines are still to be read has no hunk text yet: its side is read whole.
+      const hunk = waits(file) ? null : hunkText(lineOf(file), side);
       if (hunk !== null) return { kind: "drawn", content: hunk };
       if (reader === null) return { kind: "failed", why: "nothing reads this diff's files" };
       if (file.change === "binary") {
@@ -411,6 +435,88 @@
     folds[keyOf(file)] ?? (isViewed(file.path) || (collapsedAtFirst(file.path) && (isLock(file.path) || !needsLoad(file))));
   /** Files over the *Load diff* limit the reader loaded. */
   let loads = $state<Record<string, true>>({});
+  /** Each file by its key. */
+  const byKey = $derived(new Map(files.map((file) => [keyOf(file), file] as const)));
+
+  /**
+   * The lines `fill` read (the compare pass, 2026-11-13), by file: the file with the pages read so far, where the next
+   * page starts, and why a read failed. A file of a change `fill` reads has none until its card comes near the view.
+   */
+  let lined = $state.raw<Record<string, { file: DrawnFile; next: number | null; failed: string | null }>>({});
+  /** The reads in flight, by file, each under the name `cancelRead` calls it off by; and the files waiting for a turn. */
+  const filling = new Map<string, string>();
+  const queued: { key: string; from: number }[] = [];
+  /** At most this many files' lines are read at once, the ones nearest the view first. */
+  const AT_ONCE = 4;
+  let fills = 0;
+  const readName = () => `diff-${uid}-${++fills}`;
+  /** The file with the lines read so far; `file` itself where nothing is read for it. */
+  const lineOf = (file: DrawnFile): DrawnFile => lined[keyOf(file)]?.file ?? file;
+  /** Its lines are still to be read: the card holds their room. */
+  const waits = (file: DrawnFile) => fill !== null && lined[keyOf(file)] === undefined && file.additions + file.deletions > 0 && file.change !== "binary";
+  /** Lines the card would draw now, were they here: open, as lines, not held behind *Load diff*. */
+  const wantsLines = (file: DrawnFile) =>
+    !isClosed(file) && modeOf(file) === "lines" && file.change !== "binary" && (loads[keyOf(file)] === true || !needsLoad(file));
+
+  function ask(key: string, from: number) {
+    if (fill === null || filling.has(key) || queued.some((q) => q.key === key)) return;
+    queued.push({ key, from });
+    pump();
+  }
+
+  function pump() {
+    const port = fill;
+    while (port !== null && filling.size < AT_ONCE && queued.length > 0) {
+      const { key, from } = queued.shift()!;
+      const file = byKey.get(key);
+      if (file === undefined) continue;
+      const name = readName();
+      filling.set(key, name);
+      void port.page(file, from, name).then(
+        (page) => {
+          if (filling.get(key) !== name) return;
+          const had = lined[key];
+          const hunks = from === 0 || had === undefined ? page.hunks : [...had.file.hunks];
+          if (from > 0 && had !== undefined) {
+            const more = [...page.hunks];
+            if (page.continues && more.length > 0 && hunks.length > 0) {
+              const last = hunks.at(-1)!;
+              hunks[hunks.length - 1] = { ...last, lines: [...last.lines, ...more.shift()!.lines] };
+            }
+            hunks.push(...more);
+          }
+          lined = { ...lined, [key]: { file: { ...file, hunks, truncated: page.truncated }, next: page.next, failed: null } };
+        },
+        (cause) => {
+          if (filling.get(key) !== name) return;
+          const had = lined[key];
+          lined = { ...lined, [key]: { file: had?.file ?? file, next: had?.next ?? null, failed: ipcErrorMessage(cause) } };
+        },
+      ).finally(() => {
+        if (filling.get(key) === name) filling.delete(key);
+        pump();
+      });
+    }
+  }
+
+  // The files near the view that would draw lines and have none read: theirs are asked, nearest first. A file whose
+  // card leaves before its turn comes is passed over.
+  $effect(() => {
+    if (fill === null) return;
+    const near = fileWin.slice(drawn).filter((file) => waits(file) && wantsLines(file)).map(keyOf);
+    untrack(() => {
+      const want = new Set(near);
+      for (let i = queued.length - 1; i >= 0; i--) if (!want.has(queued[i]!.key) && queued[i]!.from === 0) queued.splice(i, 1);
+      for (const key of near) ask(key, 0);
+    });
+  });
+  // A diff that goes (another branch picked, the page left) calls off the reads it started.
+  $effect(() => () => {
+    queued.length = 0;
+    const port = untrack(() => fill);
+    for (const name of filling.values()) port?.stop?.(name);
+    filling.clear();
+  });
 
   /**
    * A change of thousands of files draws only the files near the viewport, and the rail only the rows near its own
@@ -423,7 +529,7 @@
     new Map(
       drawn.map((file) => {
         const key = keyOf(file);
-        const lines = file.hunks.reduce((sum, hunk) => sum + hunk.lines.length + 1, 0);
+        const lines = waits(file) ? waitingRows(file) : lineOf(file).hunks.reduce((sum, hunk) => sum + hunk.lines.length + 1, 0);
         const shut = isClosed(file) || (needsLoad(file) && loads[key] !== true);
         return [key, shut ? 44 : 42 + Math.min(lines, 400_000) * 21];
       }),
@@ -837,9 +943,20 @@
     {#each fileWin.slice(drawn) as file (keyOf(file))}
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
+      {@const got = lined[key]}
       <TfDiffCard
         bind:this={cards[key]}
-        file={piped?.file ?? file}
+        file={piped?.file ?? lineOf(file)}
+        waiting={waits(file)}
+        more={got?.next ?? null}
+        onmore={() => {
+          if (got?.next != null) ask(key, got.next);
+        }}
+        failedLines={got?.failed ?? null}
+        onretry={() => {
+          const { [key]: _, ...rest } = lined;
+          lined = rest;
+        }}
         pipeline={pipeShown(file)}
         onpipeline={(on) => (pipeOne = { ...pipeOne, [key]: on })}
         {split}
@@ -859,7 +976,7 @@
         {commands}
         expandable={context !== null && piped === null}
         expanded={piped ? undefined : expandedOf(key)}
-        onexpand={(hunk, how) => void expand(file, hunk, how)}
+        onexpand={(hunk, how) => void expand(lineOf(file), hunk, how)}
         tokensOf={(side, cell) => tokensOf(file, side, cell)}
         talk={piped ? quiet : talk}
         {render}

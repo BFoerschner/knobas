@@ -17,7 +17,7 @@
  *   the file's old path, so a rename that changes the language highlights
  *   each side in its own.
  */
-import type { DiffFile, DiffLine, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
+import type { DiffFile, DiffLine, Hunk, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
 import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { wordMarks, type Range } from "./words";
 
@@ -46,6 +46,36 @@ export interface DiffContext {
    * that side. Absent: this diff runs no pipelines.
    */
   piped?(file: DiffFile, side: "old" | "new", steps: PipeStep[]): Promise<PipeRun | null>;
+}
+
+/**
+ * A diff read a file at a time (the compare pass, 2026-11-13; `entity_range_files`, `entity_range_file`): the view is
+ * handed the files without their lines, and asks each file's here, a page at a time, as its card comes near the view.
+ */
+export interface DiffFill {
+  /** Page `from` of `file`'s lines, read under the name `read`, which `cancelRead` calls off. */
+  page(file: DiffFile, from: number, read: string): Promise<FilePage>;
+  /** Calls off the read named `read` at the backend (`cancel_read`): the view went before it answered. */
+  stop?(read: string): void;
+}
+
+/** One page of one file's lines (`RangeFilePage`): `continues` puts its first hunk's lines at the end of the last page's last hunk. */
+export interface FilePage {
+  hunks: Hunk[];
+  continues: boolean;
+  next: number | null;
+  truncated: boolean;
+}
+
+/** The most lines one page of a file holds (`checkout::range_files::PAGE_LINES`). */
+export const FILL_PAGE = 2_000;
+
+/**
+ * How many rows a file whose lines are still to be read holds room for: its changed lines and a hunk's context, up to
+ * a page. Close to what it draws, so the files below it move little when its lines come.
+ */
+export function waitingRows(file: DiffFile): number {
+  return Math.min(file.additions + file.deletions + 7, FILL_PAGE);
 }
 
 /** *Viewed* per file: which are, and how to change one. */
