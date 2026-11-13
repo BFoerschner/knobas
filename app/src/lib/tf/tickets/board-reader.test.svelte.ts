@@ -106,6 +106,35 @@ test("the keys typed inside the typing pause are one read of the whole word, fif
   expect(reads[1]!.role).toBe("ticket-system");
 });
 
+test("the first key typed into a settled board reads at once; the keys typed within the pause after it wait (the broad-filters pass, 2026-11-13)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "p", words: true });
+  expect(asked().slice(1)).toEqual([{ perColumn: 50, query: "p" }]);
+  reads[1]!.answer(board(column("To Do", 3)));
+  await flush();
+  expect(reader.board?.columns[0]!.total).toBe(3);
+  // Typed 20 ms later, after "p" answered: within the pause, so it waits for the keys to stop.
+  await vi.advanceTimersByTimeAsync(20);
+  reader.setFilter({ query: "pa", words: true });
+  await vi.advanceTimersByTimeAsync(20);
+  reader.setFilter({ query: "pay", words: true });
+  expect(reads).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().slice(2)).toEqual([{ perColumn: 50, query: "pay" }]);
+  // A read still out holds the next key, however long ago the last was typed.
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads).toHaveLength(3);
+  reads[2]!.answer(board(column("To Do", 2)));
+  await flush();
+  expect(asked().slice(3)).toEqual([{ perColumn: 50, query: "payo" }]);
+});
+
 test("an older answer never lands: not one a later read overtook, nor one out when the next key was typed", async () => {
   const { reader, reads } = fakes();
   reader.open(ALL, NO_WORDS);

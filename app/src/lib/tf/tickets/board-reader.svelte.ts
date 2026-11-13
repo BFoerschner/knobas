@@ -272,8 +272,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   let queued: (() => void) | null = null;
   /** The list's whole read after its quick one, once the keys have paused ({@link LIST_SETTLE_MS}). */
   let settling: ReturnType<typeof setTimeout> | undefined;
-  /** When the last board read was sent (`Date.now()`). */
+  /** When the last board read was sent, and the last filter change made (`Date.now()`). */
   let sentAt = 0;
+  let keyAt = 0;
   /** The ticket previewed, and the generation its answers carry. */
   let previewing: string | null = null;
   let previewed = 0;
@@ -451,9 +452,12 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       if (scope.base !== null) read();
     },
     /**
-     * The read waits until the keys pause for `typingPause`, so a word typed
-     * at speed is one read and not one a letter, and an answer still out for
-     * the text before it is never drawn (#897). While a read is out the next
+     * A key reads at once when no read is out and the last was sent at least
+     * `typingPause` ago: the first key typed into a settled board (the
+     * broad-filters pass, 2026-11-13). Any other read waits until the keys
+     * pause for `typingPause`, so the rest of a word typed at speed is one
+     * read and not one a letter, and an answer still out for the text before
+     * it is never drawn (#897). While a read is out the next
      * waits for its answer and then reads the words as they are by then: at
      * 20,000 tickets a typed read takes 160 to 240 ms, so a key every 150 ms
      * had two or three running against each other, each slower for it
@@ -471,6 +475,16 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         read(quick);
         if (quick) settling = setTimeout(() => read(), LIST_SETTLE_MS);
       };
+      // The first key after the board settled reads at once: the pause made every first key wait 90 ms for keys that
+      // were not coming (the broad-filters pass, 2026-11-13). A key typed within the pause of the last key or read
+      // waits, so a word typed at speed is still one read after its first letter.
+      const at = Date.now();
+      const settled = out === 0 && at - Math.max(sentAt, keyAt) >= typingPause;
+      keyAt = at;
+      if (settled) {
+        queued = null;
+        return go();
+      }
       pausing = setTimeout(() => {
         const waited = Date.now() - sentAt;
         if (out === 0 || waited >= TYPED_WAIT_MOST) return go();

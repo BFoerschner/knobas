@@ -4,7 +4,8 @@
  * Everything here is a rule that a component cannot be trusted to reproduce by
  * hand, and every one of them is a bug somebody has shipped before:
  *
- * - **90 ms debounce**, so a five-letter word is one query and not five.
+ * - **90 ms debounce**, so a five-letter word is two queries and not five: the first key after the box settled is
+ *   asked at once, and the keys typed within 90 ms of a query, or while it is out, wait until they pause.
  * - **A monotonic request id**, so a slow query that lands *after* a faster,
  *   newer one is dropped rather than applied. Without it the rows under the
  *   cursor change to an older answer and the box reads as "jumping" — the
@@ -118,6 +119,9 @@ export class Session {
   #debounceMs: number;
   #titles: () => boolean;
   #timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the last query was sent and the last key typed (`Date.now()`), so a key typed long after both reads at once. */
+  #sentAt = 0;
+  #keyAt = 0;
 
   /**
    * The last id handed out, and the newest id whose answer has been applied.
@@ -435,6 +439,7 @@ export class Session {
    * neither text nor a filter is one the engine refuses anyway.
    */
   async run(): Promise<void> {
+    this.#sentAt = Date.now();
     if (this.raw.trim() === "") {
       // The clear is the newest answer (#1668): a search still in flight for
       // the text just cleared is older than it, so when it lands it is
@@ -581,6 +586,16 @@ export class Session {
 
   #schedule(): void {
     this.#cancel();
+    // The first key after the box settled is asked at once (the broad-filters pass, 2026-11-13): the debounce made it
+    // wait 90 ms for keys that were not coming. One typed within the debounce of the last query, or while one is out,
+    // waits as before, so the rest of a word typed at speed is one query.
+    const at = Date.now();
+    const settled = !this.pending && at - Math.max(this.#sentAt, this.#keyAt) >= this.#debounceMs;
+    this.#keyAt = at;
+    if (settled) {
+      void this.run();
+      return;
+    }
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
       void this.run();

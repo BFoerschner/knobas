@@ -66,20 +66,42 @@ function ports(search: (q: SearchQuery) => Promise<SearchResponse>) {
   return { search, launcherHome: async () => EMPTY_HOME };
 }
 
-test("a word typed one letter at a time is one query, not five", async () => {
+test("a word typed one letter at a time is two queries, not five: its first key at once, the rest when the keys pause", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
 
-  for (const raw of ["s", "se", "sep", "sepa"]) {
+  // The first key of a settled box is asked at once (the broad-filters pass, 2026-11-13).
+  session.type("s");
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s"]);
+  await vi.advanceTimersByTimeAsync(20);
+  for (const raw of ["se", "sep", "sepa"]) {
     session.type(raw);
-    // Four keystrokes inside one debounce window.
+    // Three more keystrokes inside one debounce window.
     await vi.advanceTimersByTimeAsync(20);
   }
-  expect(search).not.toHaveBeenCalled();
+  expect(search).toHaveBeenCalledTimes(1);
 
   await vi.advanceTimersByTimeAsync(90);
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s", "sepa"]);
+
+  // A key typed after the box settled again is asked at once.
+  await vi.advanceTimersByTimeAsync(200);
+  session.type("sepal");
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s", "sepa", "sepal"]);
+});
+
+test("a key typed while a query is out waits for the keys to pause", async () => {
+  let answerIt: () => void = () => {};
+  const search = vi.fn((q: SearchQuery) => new Promise<SearchResponse>((resolve) => (answerIt = () => resolve(answer(q.raw)))));
+  const session = new Session(ports(search));
+
+  session.type("p");
+  await vi.advanceTimersByTimeAsync(200);
+  session.type("pa");
   expect(search).toHaveBeenCalledTimes(1);
-  expect(search.mock.calls[0]?.[0]?.raw).toBe("sepa");
+  answerIt();
+  await vi.advanceTimersByTimeAsync(90);
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["p", "pa"]);
 });
 
 /**
@@ -232,10 +254,12 @@ test("closing the box cancels a keystroke that has not fired yet", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
 
+  // The first key is asked at once; the next, inside the debounce, waits and is cancelled with the box.
+  session.type("se");
   session.type("sep");
   session.dispose();
   await vi.advanceTimersByTimeAsync(500);
-  expect(search).not.toHaveBeenCalled();
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["se"]);
 });
 
 /**
