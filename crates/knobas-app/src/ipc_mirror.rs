@@ -195,6 +195,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::DiffReadAt::export_all(cfg)?;
     crate::checkout::RangeDiff::export_all(cfg)?;
     crate::checkout::MirrorTip::export_all(cfg)?;
+    crate::checkout::range_files::RangeFiles::export_all(cfg)?;
+    crate::checkout::range_files::RangeFilePage::export_all(cfg)?;
     crate::checkout::local::LocalTree::export_all(cfg)?;
     crate::checkout::local::LocalDir::export_all(cfg)?;
     crate::checkout::local::LocalPaths::export_all(cfg)?;

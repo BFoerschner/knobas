@@ -410,6 +410,141 @@ pub async fn entity_source_range_diff<R: tauri::Runtime>(
     .await
 }
 
+/// The files `base`...`head` of the repository `entity_id` changes, without
+/// their lines (the compare pass of PR #2479, 2026-11-13): read where
+/// [`entity_range_diff`] reads the whole diff, and answered in a fraction of
+/// its bytes, so a page lists a range of thousands of files at once and reads
+/// each file's lines with [`entity_range_file`] as it reaches it.
+///
+/// `read` names the read for [`cancel_read`], which calls it off.
+///
+/// # Errors
+///
+/// As [`entity_range_diff`];
+/// [`Conflict`](crate::IpcErrorCode::Conflict) for a read called off.
+#[tauri::command]
+pub async fn entity_range_files<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    ignore_whitespace: bool,
+    read: Option<String>,
+) -> Result<crate::checkout::range_files::RangeFiles, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::range_files(
+            &pool,
+            &secrets,
+            &registry,
+            &live,
+            &entity_id,
+            &base,
+            &head,
+            ignore_whitespace,
+        )
+        .await
+    })
+    .await
+}
+
+/// One page of one file's lines in `base`...`head` of the repository
+/// `entity_id` (the compare pass of PR #2479): the ends are the `range`
+/// [`entity_range_files`] answered (the names it was asked by where it
+/// settled none), `path` and `old_path` the file as it listed it, `from` the
+/// line the page starts at (`0`, then each page's `next`).
+///
+/// # Errors
+///
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a file the diff does not
+/// hold; otherwise as [`entity_range_files`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn entity_range_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    path: String,
+    old_path: Option<String>,
+    ignore_whitespace: bool,
+    from: u32,
+    read: Option<String>,
+) -> Result<crate::checkout::range_files::RangeFilePage, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::range_file(
+            &pool,
+            &secrets,
+            &registry,
+            &live,
+            &entity_id,
+            &base,
+            &head,
+            &path,
+            old_path.as_deref(),
+            ignore_whitespace,
+            from,
+        )
+        .await
+    })
+    .await
+}
+
+/// The files `base`...`head` changes as the source's compare answers it now,
+/// never local, without their lines: what a page that drew
+/// [`entity_range_files`]' predicted answer asks behind it (ADR-0041), as
+/// [`entity_source_range_diff`] for the whole diff. `read` as there.
+///
+/// # Errors
+///
+/// As [`entity_source_range_diff`];
+/// [`Conflict`](crate::IpcErrorCode::Conflict) for a read called off.
+#[tauri::command]
+pub async fn entity_source_range_files<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    read: Option<String>,
+) -> Result<crate::checkout::range_files::RangeFiles, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::source_range_files(
+            &pool, &secrets, &registry, &live, &entity_id, &base, &head,
+        )
+        .await
+    })
+    .await
+}
+
+/// Call off the read the page named `read` (`entity_range_files`,
+/// `entity_range_file`): its work stops where it stands, a request to the
+/// source abandoned and a `git` it started killed. Whether it was still
+/// running.
+#[tauri::command]
+pub fn cancel_read(read: String) -> bool {
+    crate::reads::cancel(&read)
+}
+
 /// The change commit `commit_id` (whole or short `sha`) made, for the
 /// commit tab (#2319, story 78): read by local read-only git when the
 /// checkout of repository `entity_id` holds it, with whitespace ignored when

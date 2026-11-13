@@ -55,6 +55,7 @@ pub mod fetch;
 pub mod local;
 pub mod open;
 pub mod range;
+pub mod range_files;
 pub mod stamp;
 pub mod uncommitted;
 pub mod working_tree;

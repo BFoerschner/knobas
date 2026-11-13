@@ -252,7 +252,7 @@ pub(super) async fn commit(git: &Path, path: &Path, name: &str) -> Option<String
 /// The empty tree's name in this repository's object format, unless the
 /// repository is shallow: there a commit with no parent here may well have
 /// one, and the source is asked instead.
-async fn empty_tree_if_whole(git: &Path, path: &Path) -> Option<String> {
+pub(super) async fn empty_tree_if_whole(git: &Path, path: &Path) -> Option<String> {
     let mut command = git_read(git, path);
     command.args([
         "rev-parse",

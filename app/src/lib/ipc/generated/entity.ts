@@ -3769,6 +3769,57 @@ read_at: DiffReadAt,
 predicted_at?: string, };
 
 /**
+ * One page of one file's lines.
+ */
+export type RangeFilePage = { 
+/**
+ * The file as the whole read parses it, `hunks` holding this page's
+ * lines only.
+ */
+file: DiffFile, 
+/**
+ * The line this page starts at, counted over all the file's hunks.
+ */
+from: number, 
+/**
+ * The page's first hunk goes on from the last page's last one: its
+ * lines belong at the end of that hunk, under no header of their own.
+ */
+continues: boolean, 
+/**
+ * Where the next page starts; `None` on the last.
+ */
+next: number | null, };
+
+/**
+ * The files a range changes, without their lines: what Compare, *Open as
+ * diff* and a pull request's *Files changed* list first.
+ */
+export type RangeFiles = { 
+/**
+ * Each file as the whole read parses it, with `hunks` empty: its paths,
+ * change, counts, modes and blob.
+ */
+files: Array<DiffFile>, 
+/**
+ * The list was cut (past 16 MiB of git's listing; the source's ceiling).
+ */
+truncated: boolean, 
+/**
+ * As [`RangeDiff::range`]: the two whole shas a file's lines are read
+ * between ([`range_file`]).
+ */
+range: DiffRange | null, 
+/**
+ * As [`RangeDiff::read_at`].
+ */
+read_at: DiffReadAt, 
+/**
+ * As [`RangeDiff::predicted_at`].
+ */
+predicted_at?: string, };
+
+/**
  * Where a reached entity's path came from.
  *
  * Tagged on `kind`; #866's link sets joined as the third arm without

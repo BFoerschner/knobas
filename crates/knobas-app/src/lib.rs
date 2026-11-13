@@ -50,6 +50,7 @@ pub mod notes_export;
 pub mod notify;
 mod profile;
 pub mod protocol;
+pub mod reads;
 pub mod renderers;
 pub mod run_presets;
 pub mod settings;
@@ -785,6 +786,12 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_local_paths,
         commands::entity::entity_local_file,
         commands::entity::entity_source_range_diff,
+        // The compare pass (PR #2479, 2026-11-13): a range's files first, each file's lines as it is reached,
+        // and a read the page no longer wants called off.
+        commands::entity::entity_range_files,
+        commands::entity::entity_range_file,
+        commands::entity::entity_source_range_files,
+        commands::entity::cancel_read,
         commands::entity::clone_all_plan,
         commands::entity::clone_all,
         commands::entity::clone_all_state,

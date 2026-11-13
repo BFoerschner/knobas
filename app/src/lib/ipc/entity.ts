@@ -78,6 +78,8 @@ import type {
   PublishTarget,
   PullRequestWorktree,
   RangeDiff,
+  RangeFilePage,
+  RangeFiles,
   Reached,
   RefusedWrite,
   RuleTicket,
@@ -267,6 +269,8 @@ export type {
   PullRequestWorktree,
   RangeCommit,
   RangeDiff,
+  RangeFilePage,
+  RangeFiles,
   ReachOrigin,
   Reached,
   RefusedWrite,
@@ -1641,6 +1645,45 @@ export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
  */
 export function entityRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
   return invoke<RangeDiff>("entity_range_diff", { entityId, base, head, ignoreWhitespace });
+}
+
+/**
+ * The files `base`...`head` of a repository changes, without their lines — `entity_range_files` (the compare pass,
+ * 2026-11-13): read where {@link entityRangeDiff} reads the whole diff, so a range of thousands of files lists at once;
+ * each file's lines follow with {@link entityRangeFile}. `read` names it for {@link cancelRead}.
+ */
+export function entityRangeFiles(entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string | null = null): Promise<RangeFiles> {
+  return invoke<RangeFiles>("entity_range_files", { entityId, base, head, ignoreWhitespace, read });
+}
+
+/**
+ * One page of one file's lines — `entity_range_file` (the compare pass): `base` and `head` as the list's `range` names
+ * them (the names it was asked by where it settled none), `from` the line the page starts at (`0`, then each `next`).
+ */
+export function entityRangeFile(
+  entityId: string,
+  base: string,
+  head: string,
+  path: string,
+  oldPath: string | null,
+  ignoreWhitespace: boolean,
+  from: number,
+  read: string | null = null,
+): Promise<RangeFilePage> {
+  return invoke<RangeFilePage>("entity_range_file", { entityId, base, head, path, oldPath, ignoreWhitespace, from, read });
+}
+
+/**
+ * The files `base`...`head` changes as the source's compare answers it now, never local, without their lines —
+ * `entity_source_range_files` (the compare pass): what a page that drew a predicted {@link entityRangeFiles} asks behind it.
+ */
+export function entitySourceRangeFiles(entityId: string, base: string, head: string, read: string | null = null): Promise<RangeFiles> {
+  return invoke<RangeFiles>("entity_source_range_files", { entityId, base, head, read });
+}
+
+/** Call off the read named `read` — `cancel_read` (the compare pass): its work at the backend stops where it stands. Whether it was running. */
+export function cancelRead(read: string): Promise<boolean> {
+  return invoke<boolean>("cancel_read", { read });
 }
 
 /**
