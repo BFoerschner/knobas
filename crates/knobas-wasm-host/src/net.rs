@@ -375,15 +375,20 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
     let request = reqwest::Request::try_from(http::Request::from_parts(parts, body))
         .map_err(|_| HttpError::HttpRequestUriInvalid)?;
     // Last before the wire, so the quota is spent on a request that leaves.
-    if for_instance && let Some(limiter) = &policy.limiter {
-        limiter
-            .until_ready_within(bounds.pacing_wait)
-            .await
-            .map_err(|quota| {
-                tracing::warn!(source = %policy.source_id, "{quota}");
-                HttpError::ConnectionLimitReached
-            })?;
-    }
+    // A person's request keeps its place among the origin's until its head
+    // is in, so a sync stands aside for the whole of it (the priority lane).
+    let sending = match (&policy.limiter, for_instance) {
+        (Some(limiter), true) => Some(
+            limiter
+                .until_ready_sending(bounds.pacing_wait)
+                .await
+                .map_err(|quota| {
+                    tracing::warn!(source = %policy.source_id, "{quota}");
+                    HttpError::ConnectionLimitReached
+                })?,
+        ),
+        _ => None,
+    };
     let sent = client(guarded)?.execute(request);
     let sent = match bounds.head {
         None => sent.await,
@@ -391,6 +396,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
             .await
             .map_err(|_| HttpError::ConnectionReadTimeout)?,
     };
+    drop(sending);
     let response = sent.map_err(|error| {
         tracing::debug!(source = %policy.source_id, %error, "an external adapter's request failed");
         transport_error(&error)
