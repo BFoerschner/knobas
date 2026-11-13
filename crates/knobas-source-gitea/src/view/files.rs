@@ -328,14 +328,18 @@ struct Listed {
 }
 
 /// A directory's listing at `at` (the big-folder pass of PR #2479,
-/// 2026-11-13): drawn from the whole tree at the commit ([`whole`], read once
-/// and kept by its sha, the read *Go to file* filters), not from Gitea's
-/// `contents`, which works out each entry's last commit and took 9 s for a
-/// folder of 3,000 entries and never answered one of 12,000. The tree draws
-/// no last commit, so nothing the listing drew is lost. A directory the whole
-/// tree's cut left out is read on its own, level by level by the sha of each
-/// tree ([`walk`]), as fast, and says so (`read_alone`). Where Gitea answers no
-/// tree at all, `contents` reads it, as before.
+/// 2026-11-13), not from Gitea's `contents`, which works out each entry's
+/// last commit and took 9 s for a folder of 3,000 entries and never answered
+/// one of 12,000. Where the whole tree at the commit is kept (*Go to file*
+/// read it, [`whole`]) and holds the folder, it is drawn from it with no
+/// request. Otherwise it is the folder's own level of the tree, read by its
+/// tree's sha (`git/trees/{sha}`, a request a thousand entries, kept by that
+/// sha, which cannot change), found from the folders read before it, the
+/// whole tree, or level by level from the top ([`walk`]): the whole tree is
+/// not waited for, at the repository's quota eighteen requests for 16,000
+/// entries. A tree draws no last commit, so nothing the listing drew is lost.
+/// One past the kept whole tree's cut says so (`read_alone`). Where Gitea
+/// answers no tree, `contents` reads it, as before.
 async fn directory(
     source: &GiteaSource,
     owner: &str,
@@ -343,10 +347,14 @@ async fn directory(
     at: &At<'_>,
     dir: &str,
 ) -> Result<Block, SourceError> {
-    let Ok(whole) = whole(source, owner, repo, at.sha).await else {
-        return listed(source, owner, repo, at, dir).await;
-    };
-    if whole.holds(dir) {
+    let key: WholeKey = (
+        source.viewer_key(),
+        owner.to_owned(),
+        repo.to_owned(),
+        at.sha.to_owned(),
+    );
+    let kept = kept_whole(&key);
+    if let Some(whole) = kept.as_ref().filter(|whole| whole.holds(dir)) {
         return Ok(listing(
             at,
             dir,
@@ -355,10 +363,21 @@ async fn directory(
             false,
         ));
     }
-    match walk(source, owner, repo, at.sha, &whole, dir).await? {
-        Some(entries) => Ok(listing(at, dir, entries, whole.web(at.sha, dir), true)),
-        // No such directory along the way: `contents` says so as Gitea does.
-        None => listed(source, owner, repo, at, dir).await,
+    let past_cut = kept.as_ref().is_some_and(|whole| whole.truncated);
+    let (walked, html) = tokio::join!(
+        walk(source, &key, kept.as_deref(), dir),
+        html(source, owner, repo)
+    );
+    match walked {
+        Ok(Some(entries)) => Ok(listing(
+            at,
+            dir,
+            entries,
+            web(html.as_deref(), at.sha, dir),
+            past_cut,
+        )),
+        // No tree from Gitea, or no such folder on the way: `contents` answers, or says so as Gitea does.
+        Ok(None) | Err(_) => listed(source, owner, repo, at, dir).await,
     }
 }
 
@@ -577,17 +596,22 @@ impl Whole {
         })
     }
 
-    /// The directory's page at the commit, as `contents` names an entry's
-    /// (`{repo}/src/commit/{sha}/{dir}`), path segments escaped as Gitea
-    /// escapes them.
+    /// The directory's page at the commit ([`web`]).
     fn web(&self, sha: &str, dir: &str) -> Option<String> {
-        let html = self.html.as_deref()?.trim_end_matches('/');
-        if dir.is_empty() {
-            return Some(format!("{html}/src/commit/{sha}"));
-        }
-        let path: Vec<String> = dir.split('/').map(escape_segment).collect();
-        Some(format!("{html}/src/commit/{sha}/{}", path.join("/")))
+        web(self.html.as_deref(), sha, dir)
     }
+}
+
+/// A directory's page at the commit, as `contents` names an entry's
+/// (`{repo}/src/commit/{sha}/{dir}`), path segments escaped as Gitea
+/// escapes them; `html` is the repository's page.
+fn web(html: Option<&str>, sha: &str, dir: &str) -> Option<String> {
+    let html = html?.trim_end_matches('/');
+    if dir.is_empty() {
+        return Some(format!("{html}/src/commit/{sha}"));
+    }
+    let path: Vec<String> = dir.split('/').map(escape_segment).collect();
+    Some(format!("{html}/src/commit/{sha}/{}", path.join("/")))
 }
 
 /// A path segment as Go's `url.PathEscape` writes it, which Gitea's
@@ -686,8 +710,7 @@ async fn read_whole(
             .client
             .git_tree_as::<GitTree>(owner, repo, sha, page, TREE_PAGE)
     };
-    let (first, record) = tokio::join!(page(1), source.client.repo_as::<RepoRecord>(owner, repo));
-    let html = record.ok().and_then(|record| record.repo.html_url);
+    let (first, html) = tokio::join!(page(1), html(source, owner, repo));
     let (entries, truncated) = pages(first?, TREE_PAGES, page).await?;
     Ok(Whole::new(entries, truncated, html))
 }
@@ -742,37 +765,146 @@ where
 /// twenty thousand entries, as the whole tree.
 const LEVEL_PAGES: u32 = TREE_PAGES;
 
-/// `dir`'s entries, read past the whole tree's cut: from the deepest of its
-/// directories the whole tree holds (the top at worst, by the commit's sha),
-/// one level at a time by each tree's sha, down to `dir`. `None` where a
-/// directory on the way is not there.
+/// What a level of a tree is kept under: the token and server, the
+/// repository and the tree's sha.
+type LevelKey = (u64, String, String, String);
+
+/// How many levels are kept, and how many commits' folder shas.
+const LEVELS_KEPT: usize = 64;
+const SHAS_KEPT: usize = 16;
+
+/// The levels read, and each commit's folders' tree shas as the levels
+/// named them, for the life of the process.
+#[derive(Default)]
+struct Levels {
+    kept: VecDeque<(LevelKey, Arc<Vec<GitEntry>>)>,
+    shas: VecDeque<(WholeKey, HashMap<String, String>)>,
+    /// Each repository's page, by token and server and repository.
+    html: HashMap<(u64, String, String), Option<String>>,
+}
+
+fn levels() -> &'static Mutex<Levels> {
+    static LEVELS: OnceLock<Mutex<Levels>> = OnceLock::new();
+    LEVELS.get_or_init(Default::default)
+}
+
+/// The repository's page (its record's `html_url`), read once.
+async fn html(source: &GiteaSource, owner: &str, repo: &str) -> Option<String> {
+    let key = (source.viewer_key(), owner.to_owned(), repo.to_owned());
+    if let Some(html) = levels()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .html
+        .get(&key)
+    {
+        return html.clone();
+    }
+    let record = source
+        .client
+        .repo_as::<RepoRecord>(owner, repo)
+        .await
+        .ok()?;
+    let html = record.repo.html_url;
+    levels()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .html
+        .insert(key, html.clone());
+    html
+}
+
+/// The tree sha of `dir` at the commit `key` names, as a level read before
+/// named it.
+fn known_sha(key: &WholeKey, dir: &str) -> Option<String> {
+    let held = levels().lock().unwrap_or_else(PoisonError::into_inner);
+    held.shas
+        .iter()
+        .find(|(at, _)| at == key)
+        .and_then(|(_, shas)| shas.get(dir).cloned())
+}
+
+/// One level of a tree, by its sha, kept by it; the folders it holds are
+/// noted under `dir` at the commit `key` names.
+async fn level(
+    source: &GiteaSource,
+    key: &WholeKey,
+    tree: &str,
+    dir: &str,
+) -> Result<Arc<Vec<GitEntry>>, SourceError> {
+    let (viewer, owner, repo, _) = key;
+    let at: LevelKey = (*viewer, owner.clone(), repo.clone(), tree.to_owned());
+    let kept = levels()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .kept
+        .iter()
+        .find(|(k, _)| *k == at)
+        .map(|(_, entries)| Arc::clone(entries));
+    let entries = match kept {
+        Some(entries) => entries,
+        None => {
+            let page = |page| {
+                source
+                    .client
+                    .git_tree_level_as::<GitTree>(owner, repo, tree, page, TREE_PAGE)
+            };
+            let (entries, _) = pages(page(1).await?, LEVEL_PAGES, page).await?;
+            let entries = Arc::new(entries);
+            let mut held = levels().lock().unwrap_or_else(PoisonError::into_inner);
+            held.kept.push_back((at, Arc::clone(&entries)));
+            while held.kept.len() > LEVELS_KEPT {
+                held.kept.pop_front();
+            }
+            entries
+        }
+    };
+    let mut held = levels().lock().unwrap_or_else(PoisonError::into_inner);
+    if !held.shas.iter().any(|(k, _)| k == key) {
+        held.shas.push_back((key.clone(), HashMap::new()));
+        while held.shas.len() > SHAS_KEPT {
+            held.shas.pop_front();
+        }
+    }
+    if let Some((_, shas)) = held.shas.iter_mut().find(|(k, _)| k == key) {
+        for entry in entries.iter().filter(|e| e.kind() == EntryKind::Dir) {
+            let path = if dir.is_empty() {
+                entry.path.clone()
+            } else {
+                format!("{dir}/{}", entry.path)
+            };
+            shas.insert(path, entry.sha.clone());
+        }
+    }
+    Ok(entries)
+}
+
+/// `dir`'s entries, its own level of the tree: from the deepest of its
+/// folders whose tree sha a level read before or the kept whole tree names
+/// (the top at worst, by the commit's sha), one level at a time down to
+/// `dir`. `None` where a folder on the way is not there.
 async fn walk(
     source: &GiteaSource,
-    owner: &str,
-    repo: &str,
-    sha: &str,
-    whole: &Whole,
+    key: &WholeKey,
+    whole: Option<&Whole>,
     dir: &str,
 ) -> Result<Option<Vec<(String, EntryKind, u64)>>, SourceError> {
     let parts: Vec<&str> = dir.split('/').filter(|part| !part.is_empty()).collect();
-    // The deepest directory on the way whose tree the whole tree names.
     let mut depth = parts.len();
     let mut tree = loop {
         if depth == 0 {
-            break sha.to_owned();
+            break key.3.clone();
         }
-        if let Some(found) = whole.tree_sha(&parts[..depth].join("/")) {
-            break found.to_owned();
+        let at = parts[..depth].join("/");
+        if let Some(found) =
+            known_sha(key, &at).or_else(|| whole.and_then(|w| w.tree_sha(&at)).map(str::to_owned))
+        {
+            break found;
         }
         depth -= 1;
     };
     loop {
-        let level = |page| {
-            source
-                .client
-                .git_tree_level_as::<GitTree>(owner, repo, &tree, page, TREE_PAGE)
-        };
-        let (entries, _) = pages(level(1).await?, LEVEL_PAGES, level).await?;
+        let here = parts[..depth].join("/");
+        let entries = level(source, key, &tree, &here).await?;
         if depth == parts.len() {
             return Ok(Some(
                 entries

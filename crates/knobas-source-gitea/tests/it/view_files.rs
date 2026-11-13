@@ -1437,18 +1437,21 @@ fn drawn(section: &ViewSection) -> Value {
     serde_json::to_value(&section.blocks).unwrap()
 }
 
-/// A directory is drawn from the whole tree at the commit (the big-folder pass, 2026-11-13), and what it
-/// draws is what Gitea's `contents` drew: the same entries in the same order, with the same kinds, sizes
-/// and sections, and the same page. `contents` is not asked.
+/// A directory is drawn from Gitea's tree, not its `contents` (the big-folder pass, 2026-11-13), and what it draws is
+/// what `contents` drew: the same entries in the same order, with the same kinds, sizes and sections, and the same
+/// page. A folder is its own level of the tree, read by its tree's sha (the top by the commit's): a folder below one
+/// read costs its own level alone, and one read before costs nothing. Once *Go to file* has read the whole tree, a
+/// folder is drawn from it with no request.
 #[tokio::test]
-async fn a_directory_is_drawn_from_the_whole_tree_as_contents_drew_it() {
+async fn a_directory_is_drawn_from_the_tree_as_contents_drew_it() {
     let sha = tip("main");
+    let (src, lib) = ("2".repeat(40), "5".repeat(40));
     let tree = vec![
         git_object("README.md", "blob", "100644", 10, &"1".repeat(40)),
-        git_object("src", "tree", "040000", 0, &"2".repeat(40)),
+        git_object("src", "tree", "040000", 0, &src),
         git_object("src/Zeta.rs", "blob", "100644", 7, &"3".repeat(40)),
         git_object("src/alpha.rs", "blob", "100755", 5, &"4".repeat(40)),
-        git_object("src/lib", "tree", "040000", 0, &"5".repeat(40)),
+        git_object("src/lib", "tree", "040000", 0, &lib),
         git_object("src/lib/x.rs", "blob", "100644", 1, &"6".repeat(40)),
         git_object("src/link", "blob", "120000", 9, &"7".repeat(40)),
         git_object("src/vendor", "commit", "160000", 0, &"8".repeat(40)),
@@ -1461,53 +1464,67 @@ async fn a_directory_is_drawn_from_the_whole_tree_as_contents_drew_it() {
         entry("vendor", "src/vendor", "submodule", 0),
     ]);
     let id = format!("files@{sha}:src");
-
     // As `contents` drew it: a server with no tree to read.
     let before = gitea().await;
     listing(&before, "src", "main", contents.clone()).await;
     let was = drawn(&read(&before, ENTITY, &id).await);
 
     let now = gitea().await;
-    git_tree(&now, &sha, 1, tree, 8).await;
+    mount_levels(&now, &sha, &src, &lib).await;
     let section = read(&now, ENTITY, &id).await;
     assert_eq!(
         drawn(&section),
         was,
         "the same listing, drawn from the tree"
     );
-    let asked: Vec<String> = now
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r.url.path().to_owned())
-        .collect();
+    let asked = asked_paths(&now).await;
     assert!(asked.iter().all(|p| !p.contains("/contents")), "{asked:?}");
+    assert_eq!(
+        asked.iter().filter(|p| p.contains("/git/trees/")).count(),
+        2,
+        "the top's level, then the folder's: {asked:?}"
+    );
 
-    // Another directory of the same commit is drawn from the tree read once.
-    let lib = read(&now, ENTITY, &format!("files@{sha}:src/lib")).await;
-    let (_, entries) = tree_of(&lib);
+    // A folder below it costs its own level; one read before costs nothing.
+    let below = read(&now, ENTITY, &format!("files@{sha}:src/lib")).await;
+    let (_, entries) = tree_of(&below);
     assert_eq!(
         entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
         ["x.rs"]
     );
-    let trees = now
-        .received_requests()
+    let _ = read(&now, ENTITY, &id).await;
+    let trees = asked_paths(&now)
         .await
-        .unwrap()
         .iter()
-        .filter(|r| r.url.path().contains("/git/trees/"))
+        .filter(|p| p.contains("/git/trees/"))
         .count();
-    assert_eq!(trees, 1, "the tree at a commit is read once and kept");
+    assert_eq!(trees, 3, "one level each, kept by its sha");
+
+    // After *Go to file* read the whole tree, a folder is drawn from it with no request.
+    let whole = gitea().await;
+    git_tree(&whole, &sha, 1, tree, 8).await;
+    let _ = read(&whole, ENTITY, &format!("paths@{sha}")).await;
+    let reads = whole.received_requests().await.unwrap().len();
+    let section = read(&whole, ENTITY, &id).await;
+    assert_eq!(
+        drawn(&section),
+        was,
+        "the same listing, drawn from the whole tree"
+    );
+    assert_eq!(
+        whole.received_requests().await.unwrap().len(),
+        reads,
+        "no request"
+    );
 }
 
 fn tree_of(section: &ViewSection) -> (&[Crumb], &[TreeEntry]) {
     tree(section)
 }
 
-/// A directory the whole tree's cut left out is read on its own, a level at a time by each tree's sha from
-/// the deepest of its directories the tree holds, and says so (`read_alone`); `contents` is not asked. One
-/// the tree holds whole, before the cut, is drawn from it.
+/// A directory the kept whole tree's cut left out is read on its own, a level at a time by each tree's sha from
+/// the deepest of its directories the tree holds (the top at worst), and says so (`read_alone`); `contents` is not
+/// asked. One the tree holds whole, before the cut, is drawn from it with no request.
 #[tokio::test]
 async fn a_directory_past_the_whole_trees_cut_is_read_level_by_level_and_says_so() {
     let server = gitea().await;
@@ -1569,6 +1586,13 @@ async fn a_directory_past_the_whole_trees_cut_is_read_level_by_level_and_says_so
     git_level(&server, &zz, 1, page(0, 1000), 1_500).await;
     git_level(&server, &zz, 2, page(1000, 1500), 1_500).await;
 
+    // *Go to file* read the whole tree, cut at twenty pages.
+    let every = read(&server, ENTITY, &format!("paths@{sha}")).await;
+    let [Block::Tree { truncated, .. }] = every.blocks.as_slice() else {
+        panic!("one tree block");
+    };
+    assert!(*truncated);
+
     let section = read(&server, ENTITY, &format!("files@{sha}:zz")).await;
     let [
         Block::Tree {
@@ -1601,7 +1625,8 @@ async fn a_directory_past_the_whole_trees_cut_is_read_level_by_level_and_says_so
         .collect();
     assert!(asked.iter().all(|p| !p.contains("/contents")), "{asked:?}");
 
-    // A directory before the cut, held whole: drawn from the tree, not on its own.
+    // A directory before the cut, held whole: drawn from the tree, with no request.
+    let reads = server.received_requests().await.unwrap().len();
     let held = read(&server, ENTITY, &format!("files@{sha}:a-bulk/p03")).await;
     let [
         Block::Tree {
@@ -1615,4 +1640,54 @@ async fn a_directory_past_the_whole_trees_cut_is_read_level_by_level_and_says_so
     };
     assert_eq!(entries.len(), 1_000);
     assert_eq!(*read_alone, None);
+    assert_eq!(server.received_requests().await.unwrap().len(), reads);
+}
+
+/// What `server` was asked, by path.
+async fn asked_paths(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect()
+}
+
+/// The levels of the tree [`a_directory_is_drawn_from_the_tree_as_contents_drew_it`] reads, as Gitea answers
+/// them: entries by name.
+async fn mount_levels(server: &MockServer, sha: &str, src: &str, lib: &str) {
+    git_level(
+        server,
+        sha,
+        1,
+        vec![
+            git_object("README.md", "blob", "100644", 10, &"1".repeat(40)),
+            git_object("src", "tree", "040000", 0, src),
+        ],
+        2,
+    )
+    .await;
+    git_level(
+        server,
+        src,
+        1,
+        vec![
+            git_object("Zeta.rs", "blob", "100644", 7, &"3".repeat(40)),
+            git_object("alpha.rs", "blob", "100755", 5, &"4".repeat(40)),
+            git_object("lib", "tree", "040000", 0, lib),
+            git_object("link", "blob", "120000", 9, &"7".repeat(40)),
+            git_object("vendor", "commit", "160000", 0, &"8".repeat(40)),
+        ],
+        5,
+    )
+    .await;
+    git_level(
+        server,
+        lib,
+        1,
+        vec![git_object("x.rs", "blob", "100644", 1, &"6".repeat(40))],
+        1,
+    )
+    .await;
 }
