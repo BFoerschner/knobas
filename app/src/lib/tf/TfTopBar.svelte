@@ -41,14 +41,14 @@
     ontheme: () => void;
     /** Where a nav entry goes: the section as it was left; its own page when left out. */
     navHref?: (section: NavSection) => string;
-    /** A plain press on a nav entry, which the shell makes; a plain link when left out. */
-    onnav?: (section: NavSection, href: string) => void;
+    /** A plain press on a nav entry, which the shell makes, and whether a person made it; a plain link when left out. */
+    onnav?: (section: NavSection, href: string, person: boolean) => void;
   } = $props();
 
   function press(event: MouseEvent, section: NavSection) {
     if (onnav === undefined || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    onnav(section, navHref(section));
+    onnav(section, navHref(section), event.isTrusted);
   }
 
   /** A badge's number and tone, or `null` where none is drawn. */
@@ -96,7 +96,8 @@
   <nav class="tf-nav" aria-label="Main" {@attach keepCurrentInView}>
     {#each NAV as section (section)}
       {@const count = badge(section)}
-      <a href={navHref(section)} aria-current={section === current ? "page" : undefined} onclick={(event) => press(event, section)}>
+      <!-- `data-section` names the entry whatever place its link holds: what the speed checks press. -->
+      <a href={navHref(section)} data-section={section} aria-current={section === current ? "page" : undefined} onclick={(event) => press(event, section)}>
         {SECTION_NAME[section]}
         {#if count}
           <span class="tf-count {count.err ? 'tf-err' : ''}">{count.n}</span>

@@ -724,8 +724,12 @@ test("a row brings back the run left by a nav press, once, on one entry; Esc goe
   };
   await at("#/builds");
   await at("#/build/p/1/log");
+  // From another section the entry comes back to the run itself (2026-11-13); pressed on the run, to the list.
   entry("Docs").click();
   await settle();
+  entry("Builds").click();
+  await settle();
+  expect(location.hash).toBe("#/build/p/1/log");
   entry("Builds").click();
   await settle();
   expect(location.hash).toBe("#/builds");
@@ -745,10 +749,8 @@ test("a row brings back the run left by a nav press, once, on one entry; Esc goe
   await row("#/build/p/1");
   expect(location.hash).toBe("#/build/p/1");
 
-  // The way the plan draws it: left on the Log, back by the entry, its row.
+  // The way the plan draws it: left on the Log by the entry, its row.
   await at("#/build/p/1/log");
-  entry("Docs").click();
-  await settle();
   entry("Builds").click();
   await settle();
   const steps = history.length;
@@ -784,7 +786,7 @@ test("a link from another section, and a jump by address, open the item left at 
   expect(location.hash, "no press on the page asked for it").toBe("#/pr/9");
 });
 
-test("the cog and ⌘, come back to the section of Settings, keep their opener, and from a source's page go to Sources (F-661, F-076)", async () => {
+test("the cog and ⌘, come back to the section of Settings, keep their opener, and on a source's page go to Sources (F-661, F-076)", async () => {
   start({ nav: windowNav });
   const cog = () => target.querySelector<HTMLAnchorElement>(".tf-top [aria-label='Settings']")!;
   await at("#/settings/appearance");
@@ -806,23 +808,112 @@ test("the cog and ⌘, come back to the section of Settings, keep their opener, 
   await settle();
   expect(location.hash).toBe("#/settings/appearance");
   await at("#/settings/source/jira");
+  expect(cog().getAttribute("href"), "on a source's page the cog goes to Sources").toBe("#/settings/sources");
   await at("#/inbox");
-  expect(cog().getAttribute("href")).toBe("#/settings/sources");
+  expect(cog().getAttribute("href"), "and from elsewhere back to the source's page (2026-11-13)").toBe("#/settings/source/jira");
   await at("#/settings");
   await at("#/inbox");
   expect(cog().getAttribute("href"), "the status bar's Sources is a section like any").toBe("#/settings");
 });
 
-test("a nav entry brings back a Docs search and not a space or a page", async () => {
+/** A nav entry by its name, as drawn. */
+const navEntry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+
+test("Docs' entry from another section comes back to the page left, and pressed in Docs goes to Docs' own page (2026-11-13)", async () => {
   start({ nav: windowNav });
-  const docs = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Docs")!;
   await at("#/docs/search/retry");
   await at("#/page/4711");
-  expect(docs().getAttribute("href")).toBe("#/docs/search/retry");
+  expect(navEntry("Docs").getAttribute("href"), "in Docs, the entry is the way to its own page").toBe("#/docs/search/retry");
+  await at("#/inbox");
+  expect(navEntry("Docs").getAttribute("href")).toBe("#/page/4711");
+  navEntry("Docs").click();
+  await settle();
+  expect(location.hash).toBe("#/page/4711");
+  navEntry("Docs").click();
+  await settle();
+  expect(location.hash, "a second press goes to the start").toBe("#/docs/search/retry");
   await at("#/docs/space/ENG");
-  expect(docs().getAttribute("href")).toBe("#/docs/search/retry");
+  await at("#/code");
+  expect(navEntry("Docs").getAttribute("href"), "a space is a place too").toBe("#/docs/space/ENG");
   await at("#/docs");
-  expect(docs().getAttribute("href")).toBe("#/docs");
+  await at("#/code");
+  expect(navEntry("Docs").getAttribute("href")).toBe("#/docs");
+});
+
+test("a Docs page come back to by its entry is the kept page, at the scroll it was left at (2026-11-13)", async () => {
+  start({ nav: windowNav });
+  await at("#/page/4711");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const page = target.querySelector<HTMLElement>(".tf-kept:not([hidden])")!;
+  const filler = page.appendChild(document.createElement("div"));
+  filler.style.height = "4000px";
+  main.scrollTop = 240;
+  navEntry("Inbox").click();
+  await settle();
+  navEntry("Docs").click();
+  await settle();
+  expect(location.hash).toBe("#/page/4711");
+  expect(target.querySelector(".tf-kept:not([hidden])"), "the same page, not one mounted again").toBe(page);
+  await vi.waitFor(() => expect(main.scrollTop).toBe(240));
+  filler.remove();
+});
+
+// Time came back to its week, day or standup before 2026-11-13: they are its tabs, so a press on one moves nothing (F-077).
+test.each([
+  ["Tickets", "#/tickets/mine", "#/ticket/jira%3APAY-231", "#/tickets/mine"],
+  ["Code", "#/code/prs", "#/pr/9/files", "#/code/prs"],
+  ["Code", "#/code/repos", "#/repo/gitea%3Aacme%2Fpay/branches", "#/code/repos"],
+  ["Builds", "#/builds/pipe%3Aa", "#/build/pipe%3Aa/run-1/log", "#/builds/pipe%3Aa"],
+  ["Monitors", "#/monitors", "#/monitors/at/kuma%3A7", "#/monitors"],
+  ["Link sets", "#/sets", "#/sets/set-1", "#/sets"],
+  ["Time", "#/time", "#/time/week/2026-11-02", "#/time/week/2026-11-02"],
+])("%s's entry from another section comes back to where you were in it, and pressed there goes to the section's page (after %s, at %s; 2026-11-13)", async (name, top, deep, again) => {
+  start({ nav: windowNav });
+  const last = sessionValue("builds-last-pipeline");
+  last.value = "pipe:a";
+  await at(top);
+  await at(deep);
+  await at("#/inbox");
+  expect(navEntry(name).getAttribute("href")).toBe(deep);
+  navEntry(name).click();
+  await settle();
+  expect(location.hash).toBe(deep);
+  expect(escHint(), "a return opens nothing, so no Back to Inbox").not.toBe("Back to Inbox Esc");
+  navEntry(name).click();
+  await settle();
+  expect(location.hash, "pressed again, the section's own page").toBe(again);
+  last.value = null;
+});
+
+test("the cog from another section comes back to a source's page left; on it, to Sources (2026-11-13)", async () => {
+  start({ nav: windowNav });
+  const cog = () => target.querySelector<HTMLAnchorElement>(".tf-top [aria-label='Settings']")!;
+  await at("#/settings/appearance");
+  await at("#/settings/source/jira");
+  expect(cog().getAttribute("href")).toBe("#/settings/sources");
+  await at("#/inbox");
+  expect(cog().getAttribute("href")).toBe("#/settings/source/jira");
+  press(",", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/settings/source/jira");
+});
+
+test("a card row's narrowing and a tab the page does not have are not where an entry comes back to (2026-11-13)", async () => {
+  start({ nav: windowNav });
+  await at("#/pr/9");
+  await at("#/code/nope");
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  await at("#/repo/gh:repo-1");
+  navEntry("Inbox").click();
+  await settle();
+  expect(scopedTicket.section).toBeNull();
+  expect(navEntry("Code").getAttribute("href")).toBe("#/pr/9");
+  await at("#/tickets");
+  await at("#/job");
+  await at("#/inbox");
+  expect(navEntry("Tickets").getAttribute("href"), "home is not a place in Tickets").toBe("#/tickets");
 });
 
 test("a nav press is a return: the page's scroll comes back through its read, focus stays on the entry, and the first page drawn counts (F-370, F-071)", async () => {

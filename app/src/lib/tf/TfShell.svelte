@@ -90,6 +90,7 @@
   import { installPlainTyping } from "./plain-typing";
   import { installExternalLinks } from "../shell/external-links";
   import { installPressGuard } from "./press-guard";
+  import { PressHold } from "./press-hold.svelte";
   import { isTopPage, itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
@@ -375,15 +376,49 @@
     if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
     sectionTabs[section] = hash;
   });
-  const navHref = (section: Exclude<Section, "job">) => sectionTabs[section] ?? sectionHash(section);
+  /**
+   * The address each section was last stood on, at any depth: a Docs page or space, a ticket, a pull request or a
+   * repository at its tab, a run at its tab, a marked monitor, a link set, a source's page (2026-11-13, Björn: "when i
+   * select a page in docs, then go somewhere else and then return to docs my selected page isn't shown"). Not a card
+   * row's narrowing, not home (`#/job` lights Tickets and is no place in it), not a tab the page does not have, and on
+   * Builds not a pipeline it does not hold.
+   */
+  const sectionPlaces = $state<Partial<Record<Section, string>>>({});
+  $effect(() => {
+    const section = sectionOf(route);
+    if (section === null || route.view === "job" || untrack(() => scopedTicket.section) === section) return;
+    if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
+    if (route.view === "full" && route.head === "builds" && route.rest[0] !== undefined && route.rest[0] !== lastPipeline.value) return;
+    sectionPlaces[section] = hash;
+  });
+  /**
+   * Where a nav entry goes: from another section, back to where you were in it; inside it, to the section's own page as
+   * it was left (its tab, view, pipeline or search), which a press there moves nothing on.
+   */
+  const navHref = (section: Exclude<Section, "job">) => {
+    const own = sectionTabs[section] ?? sectionHash(section);
+    return sectionOf(route) === section ? own : (sectionPlaces[section] ?? own);
+  };
+
+  /**
+   * The press rule's hold on an entry that just moved the address (`press-hold.svelte.ts`): a second press of it by a
+   * person, a double click or a second `Enter`, lands on the page it came back to and does nothing, rather than going on
+   * to the section's own page. Only while that page is the one shown: an address moved since makes the next press a new
+   * one. A script's press is no person's and goes through, as the press guard lets it.
+   */
+  const navHold = new PressHold();
+  /** The entry the hold is on, and the address its press went to. */
+  let navHeld: { section: Section; on: string } | null = null;
 
   /**
    * A press on a nav entry: the section as it was left, each scroller included, opened by nothing, so `Esc` never jumps from
    * one section to another by way of a tab. It ends a card row's narrowing, wherever that was: a nav entry starts a new trip.
    * The cog and `⌘,` return the same way and keep their opener, since `Esc` leaves Settings for the page they were pressed on.
+   * `person` says a person pressed it, whose second press within the hold is the same press.
    */
-  function onnav(section: Exclude<Section, "job">, target: string) {
+  function onnav(section: Exclude<Section, "job">, target: string, person = false) {
     const gear = section === "settings";
+    if (person && navHold.held() && navHeld?.section === section && location.hash === navHeld.on) return;
     if (location.hash === target) {
       if (gear) return;
       here = { ...NOT_OPENED, prev: here.prev };
@@ -394,6 +429,10 @@
     const from = sectionOf(route);
     if (from !== null && itemOf(route) !== null) leftItems[from] = location.hash;
     navTo = target;
+    if (person) {
+      navHold.hold();
+      navHeld = { section, on: target };
+    }
     if (gear) go(target);
     else goWithoutOpener(target);
   }
@@ -667,7 +706,7 @@
     }
     if (mod && event.key === ",") {
       event.preventDefault();
-      if (!dialogOpen()) onnav("settings", navHref("settings"));
+      if (!dialogOpen()) onnav("settings", navHref("settings"), event.isTrusted);
       return;
     }
     // A saved list's chord (#2429): search on the list, from any page and in
