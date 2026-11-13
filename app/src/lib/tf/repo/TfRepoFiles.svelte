@@ -1284,17 +1284,24 @@
     focusedPath = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? focusedPath) : focusedPath;
   }
   function treeBlur(event: FocusEvent) {
-    // Focus left the tree; a row the window took out of the DOM keeps it (`treeRow`).
+    // Focus left the tree; a row the window took out of the DOM keeps it (`treeRow`). Chrome tells a focused row's removal
+    // as a `focusout` while it is still connected, so whether it went is asked once this task's DOM work is over.
     const to = event.relatedTarget;
-    if (!(to instanceof Node && tree?.contains(to)) && event.target instanceof Node && event.target.isConnected) focusedPath = null;
+    const from = event.target;
+    if (to instanceof Node && tree?.contains(to)) return;
+    queueMicrotask(() => {
+      if (from instanceof Node && from.isConnected && !(document.activeElement !== null && tree?.contains(document.activeElement))) focusedPath = null;
+    });
   }
   /** On each drawn row: measured by the window, and where it held focus when the window took it, the tree keeps focus. */
   const treeRow = (path: string) => (node: HTMLElement) => {
     const measured = treeWin.row(path)(node);
     return () => {
       measured();
-      // The DOM goes before the teardown, so focus has fallen to the body.
-      if (focusedPath === path && document.activeElement === document.body && tree?.isConnected) tree.focus({ preventScroll: true });
+      // The DOM goes before the teardown. Chrome fixes focus up only at its next rendering update, so the row may still
+      // be the active element here; jsdom has dropped it to the body already.
+      const active = document.activeElement;
+      if (focusedPath === path && (active === node || active === document.body) && tree?.isConnected) tree.focus({ preventScroll: true });
     };
   };
 
