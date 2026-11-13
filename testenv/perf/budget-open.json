@@ -1167,6 +1167,18 @@
     "firstUsefulMs": 8000,
     "moved": 0
    }
+  },
+  "x-repo-builds": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
   }
  }
 }

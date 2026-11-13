@@ -137,6 +137,7 @@ export function places(i, shown) {
     { name: "x-pr-commits", start: PR, press: tab(PR, "commits"), hash: `${PR}/commits`, useful: [[`${shown} .tf-rcommits tr`, 10]], away: home(PR) },
     { name: "x-repo-branches", start: R, press: tab(R, "branches"), hash: `${R}/branches`, useful: [[`${shown} .tf-rbranches tbody tr`, 10]], away: tab(R, "files") },
     { name: "x-repo-prs", start: R, press: tab(R, "prs"), hash: `${R}/prs`, useful: [[`${shown} .tf-rprs tr.tf-row`, 10]], away: tab(R, "files") },
+    { name: "x-repo-builds", start: R, press: tab(R, "builds"), hash: `${R}/builds`, useful: [[`${shown} .tf-rbrail .tf-rbr`, 10]], away: tab(R, "files") },
     { name: "x-repo-compare", start: R, press: tab(R, "compare"), hash: `${R}/compare`, useful: [[`${shown} .tf-cform`, 1]], away: tab(R, "files") },
     { name: "x-docs-page", start: `#/docs/space/XTRM`, go: `#/page/${enc(i.page)}`, hash: `#/page/`, useful: [[`${shown} .tf-rd-main h1`, 1], [`${shown} .tf-rd-main td`, 10]], marks: { comments: [[`${shown} .tf-cmts .tf-msg`, 1, true]] }, awayGo: `#/docs/space/XTRM` },
     { name: "x-docs-huge", start: `#/docs/space/XTRM`, go: `#/page/${enc(i.hugePage)}`, hash: `#/page/`, useful: [[`${shown} .tf-rd-main h1`, 1], [`${shown} .tf-rd-main p`, 1]], awayGo: `#/docs/space/XTRM` },

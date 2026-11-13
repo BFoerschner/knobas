@@ -111,6 +111,7 @@ SCROLL.push(
   { name: "x-pr-conversation", setup: `await __s.go(${JSON.stringify(`${XPR}/conversation`)}, 4000); return "main.tf-main";` },
   { name: "x-pr-files", setup: `await __s.go(${JSON.stringify(`${XPR}/diff`)}, 6000); return "main.tf-main";` },
   { name: "x-repo-branches", setup: `await __s.go(${JSON.stringify(`${XREPO}/branches`)}, 4000); return "main.tf-main";` },
+  { name: "x-repo-builds", setup: `await __s.go(${JSON.stringify(`${XREPO}/builds`)}, 4000); return ".tf-rbrail .tf-pl-list";` },
   { name: "x-repo-prs", setup: `await __s.go(${JSON.stringify(`${XREPO}/prs`)}, 4000); return "main.tf-main";` },
   ...(XIDS.page ? [{ name: "x-docs-page", setup: `await __s.go(${JSON.stringify(`#/page/${xenc(XIDS.page)}`)}, 4000); return ".tf-rd-main";` }] : []),
   ...(XIDS.hugePage ? [{ name: "x-docs-huge", setup: `await __s.go(${JSON.stringify(`#/page/${xenc(XIDS.hugePage)}`)}, 5000); return ".tf-rd-main";` }] : []),
