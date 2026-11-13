@@ -611,6 +611,110 @@ async fn the_reads_answer_the_same_with_every_card_some_or_none() {
     }
 }
 
+/// The board without lanes reads what the board in lanes reads when it is
+/// asked for none (the broad-filters pass, 2026-11-13): every row, every
+/// column, in the same order, on one snapshot, with every ticket's card
+/// stored, half and none, cut to one a column and to none, narrowed to a set
+/// of ids and not, over tickets whose dates tie and one withdrawn.
+#[tokio::test]
+async fn the_board_without_lanes_is_the_board_in_lanes_asked_for_none() {
+    let pool = pool().await;
+    let jira = source(&pool, "jira").await;
+    let gitea = source(&pool, "gitea").await;
+    upsert(&pool, &jira, &jira_tickets()).await;
+    upsert(&pool, &gitea, &gitea_tickets()).await;
+    // Twelve more in two statuses, dated in pairs: ties the cut must break by id.
+    let more: Vec<(String, String, Value)> = (10..22)
+        .map(|n| {
+            let key = format!("PAY-{n}");
+            let status = if n % 3 == 0 { "Done" } else { "To Do" };
+            let payload = json!({ "key": key, "fields": { "status": { "name": status } } });
+            (key.clone(), format!("Ticket {n}"), payload)
+        })
+        .collect();
+    let rows: Vec<(&str, &str, Value)> = more
+        .iter()
+        .map(|(k, t, p)| (k.as_str(), t.as_str(), p.clone()))
+        .collect();
+    upsert(&pool, &jira, &rows).await;
+    sqlx::query(
+        "update sync.item set item_updated_at = timestamptz '2026-11-01' + ((right(entity_id, 2)::int / 2) || ' hours')::interval
+          where source_id = $1 and entity_id ~ 'PAY-1[0-9]$|PAY-2[01]$'",
+    )
+    .bind(&jira)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("{jira}:PAY-11"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let sources = vec![jira.clone(), gitea.clone()];
+    let ids: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.item where source_id = any($1) order by entity_id",
+    )
+    .bind(&sources)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let declared = declarations(&pool).await.as_param();
+    let narrowed: Vec<String> = ids.iter().step_by(2).cloned().collect();
+
+    let read = async |when: &str| {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("set transaction isolation level repeatable read")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        for only in [None, Some(&narrowed)] {
+            for per_column in [None, Some(1_i64), Some(3)] {
+                let mut answers = Vec::new();
+                for statement in [
+                    knobas_core::mini_board::planned_statement(),
+                    knobas_core::mini_board::planned_statement_unlaned(),
+                ] {
+                    let rows: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                        "select t::text from ({statement}) t"
+                    )))
+                    .bind(only)
+                    .bind(&sources)
+                    .bind(None::<String>)
+                    .bind(&declared)
+                    .bind(per_column)
+                    .bind(None::<String>)
+                    .bind(None::<i64>)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .unwrap();
+                    answers.push(rows);
+                }
+                assert!(!answers[0].is_empty(), "{when}: {only:?} {per_column:?}");
+                assert_eq!(
+                    answers[1],
+                    answers[0],
+                    "{when}: narrowed {} cut {per_column:?}",
+                    only.is_some()
+                );
+            }
+        }
+    };
+    read("every card stored").await;
+    let half: Vec<&String> = ids.iter().step_by(2).collect();
+    sqlx::query("delete from sync.item_card where entity_id = any($1)")
+        .bind(&half)
+        .execute(&pool)
+        .await
+        .unwrap();
+    read("half the cards stored").await;
+    sqlx::query("delete from sync.item_card where entity_id = any($1)")
+        .bind(&ids)
+        .execute(&pool)
+        .await
+        .unwrap();
+    read("no card stored").await;
+}
+
 /// `(source, status)` as `statement` answers for `among`, in one order, on
 /// `conn`.
 async fn statuses(

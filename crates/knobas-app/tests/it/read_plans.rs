@@ -410,7 +410,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         RESHAPED_RULES.len(),
         "every reshaped rule was planned"
     );
-    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
+    let plan = explain(&pool, knobas_core::mini_board::planned_statement_unlaned(), |q| {
         q.bind(None::<Vec<String>>)
             .bind(None::<Vec<String>>)
             .bind(None::<String>)
@@ -443,7 +443,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     .await
     .unwrap();
     assert!(matched.len() > 1_000, "{} tickets matched", matched.len());
-    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
+    let plan = explain(&pool, knobas_core::mini_board::planned_statement_unlaned(), |q| {
         q.bind(Some(matched.clone()))
             .bind(None::<Vec<String>>)
             .bind(None::<String>)

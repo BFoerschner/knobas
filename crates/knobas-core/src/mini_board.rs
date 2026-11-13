@@ -325,7 +325,18 @@ macro_rules! priority_read {
 /// first `$7` lanes' rows (`null` for all), and every row carries how many
 /// lanes there are and, laned, every status's count over the whole board
 /// (`column_totals`), which the lanes not kept still stand in.
-const CARDS: &str = concat!(
+///
+/// **The cut sorts what it ranks by** (the broad-filters pass, 2026-11-13):
+/// `scoped` holds a ticket's id, source, date, status and lane, and the title
+/// and the date sent are read for the kept cards alone. Sorting 23,000 rows
+/// that each carried a title was 23 ms of a broad filter's statement; 8 ms
+/// of it went with the title.
+///
+/// `$ranked` is the `ranked` CTE: [`CARDS`] in lanes, [`CARDS_UNLANED`]
+/// without.
+macro_rules! cards {
+    ($ranked:literal) => {
+        concat!(
     "with ",
     status_paths!("$4"),
     ", ",
@@ -334,7 +345,7 @@ const CARDS: &str = concat!(
     crate::card_keys!("$4"),
     ",
      scoped as materialized (
-       select i.entity_id, i.source_id, i.title, i.item_updated_at,
+       select i.entity_id, i.source_id,
               coalesce(i.item_updated_at,
                 (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, ",
     status_of_ticket!("$4"),
@@ -354,24 +365,9 @@ const CARDS: &str = concat!(
     crate::project_key_read!("$4"),
     " = $3)
      ),
-     lanes as (
-       select s.lane, count(*) as n,
-              row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
-              count(*) over () as lanes
-         from scoped s group by s.lane
-     ),
-     ranked as (
-       select s.entity_id, s.source_id, s.title, s.item_updated_at, s.at, s.status, s.lane,
-              l.n as lane_count, l.place, l.lanes,
-              row_number() over (partition by l.place, array_position(
-                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
-                                 order by s.at desc, s.entity_id) as rn,
-              count(*) over (partition by l.place, array_position(
-                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
-         from scoped s join lanes l on l.lane = s.lane
-        where $7::bigint is null or l.place <= $7
-     )
-     select r.entity_id, r.source_id, r.title, r.status, r.lane, r.lane_count, r.place,
+",
+    $ranked,
+    "     select r.entity_id, r.source_id, ti.title, r.status, r.lane, r.lane_count, r.place,
             r.lanes, case when $6::text is null then null else
               (select jsonb_agg(jsonb_build_array(c.status, c.n))
                  from (select s.status, count(*) as n from scoped s group by s.status) c)
@@ -409,8 +405,10 @@ const CARDS: &str = concat!(
                           else par.name in (select n.name from sync.item i cross join lateral ",
     crate::declared_names_as_parent!("$4"),
     " n where i.entity_id = pi.entity_id) end)) as parent_title,
-            r.item_updated_at as updated_at, r.total
+            ti.item_updated_at as updated_at, r.total
        from ranked r
+       join lateral (select t.title, t.item_updated_at from sync.item t
+                      where t.entity_id = r.entity_id offset 0) ti on true
        left join lateral (select c.* from sync.item_card c
                            where c.entity_id = r.entity_id
                              and c.paths_key = (select k.k from card_keys k where k.source_id = r.source_id)
@@ -428,6 +426,50 @@ const CARDS: &str = concat!(
     " pn where i.entity_id is not null order by pn.pos desc, pn.name_ord limit 1)) par on true
       where $5::bigint is null or r.rn <= $5
       order by r.at desc, r.entity_id"
+        )
+    };
+}
+
+/// The board's cards in lanes: [`cards!`] with the lanes ranked and each
+/// lane's columns cut and counted on their own.
+const CARDS: &str = cards!(
+    "     lanes as (
+       select s.lane, count(*) as n,
+              row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
+              count(*) over () as lanes
+         from scoped s group by s.lane
+     ),
+     ranked as (
+       select s.entity_id, s.source_id, s.at, s.status, s.lane,
+              l.n as lane_count, l.place, l.lanes,
+              row_number() over (partition by l.place, array_position(
+                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
+                                 order by s.at desc, s.entity_id) as rn,
+              count(*) over (partition by l.place, array_position(
+                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
+         from scoped s join lanes l on l.lane = s.lane
+        where $7::bigint is null or l.place <= $7
+     )
+"
+);
+
+/// The board's cards without lanes, `$6` and `$7` null: [`CARDS`]' one lane
+/// spelled out, every row its place and the board its only lane (the
+/// broad-filters pass, 2026-11-13). Grouping 23,000 tickets by a lane they
+/// all share and joining it back to each was 10 ms of a broad filter's 60,
+/// for the same rows, `tests/it/item_card.rs` holding the two together.
+const CARDS_UNLANED: &str = cards!(
+    "     ranked as (
+       select s.entity_id, s.source_id, s.at, s.status, s.lane,
+              count(*) over () as lane_count, 1::bigint as place, 1::bigint as lanes,
+              row_number() over (partition by array_position(
+                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
+                                 order by s.at desc, s.entity_id) as rn,
+              count(*) over (partition by array_position(
+                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
+         from scoped s
+     )
+"
 );
 
 /// The signals of the cards a board keeps (#815): [`crate::signals`]' reader
@@ -461,6 +503,14 @@ pub fn planned_signals() -> &'static str {
 #[must_use]
 pub fn planned_statement() -> &'static str {
     CARDS
+}
+
+/// The board's card statement without lanes, for the same plan test: what
+/// [`read_scoped`] reads when no lanes are asked for.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_unlaned() -> &'static str {
+    CARDS_UNLANED
 }
 
 /// The board's status statement, for `knobas-app`'s plan test. It binds
@@ -985,21 +1035,25 @@ pub async fn read_scoped(
         // Planned for its parameters every time (#753): reused, the statement
         // went to PostgreSQL's generic plan on its sixth execution and an All
         // room of 15,000 tickets took 6 s where its own plan takes 0.1 s.
-        let rows: Vec<CardRow> = sqlx::query_as(CARDS)
-            .persistent(false)
-            .bind(&members)
-            .bind(&scope)
-            .bind(project)
-            .bind(&declared)
-            .bind(per_column.map(i64::from))
-            .bind(lanes.map(|lanes| lanes.by.as_str()))
-            .bind(
-                lanes
-                    .and_then(|lanes| lanes.first)
-                    .map(|first| i64::from(first.max(1))),
-            )
-            .fetch_all(pool)
-            .await?;
+        let rows: Vec<CardRow> = sqlx::query_as(if lanes.is_some() {
+            CARDS
+        } else {
+            CARDS_UNLANED
+        })
+        .persistent(false)
+        .bind(&members)
+        .bind(&scope)
+        .bind(project)
+        .bind(&declared)
+        .bind(per_column.map(i64::from))
+        .bind(lanes.map(|lanes| lanes.by.as_str()))
+        .bind(
+            lanes
+                .and_then(|lanes| lanes.first)
+                .map(|first| i64::from(first.max(1))),
+        )
+        .fetch_all(pool)
+        .await?;
         let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
         let signals = signals_of(pool, &kept, &declared, identity).await?;
         Ok::<_, CoreError>((rows, signals))
