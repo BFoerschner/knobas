@@ -55,6 +55,7 @@
 </script>
 
 <script lang="ts">
+  import type { Attachment } from "svelte/attachments";
   import TfStateChip from "../TfStateChip.svelte";
   import { flushSync } from "svelte";
   import { pageVisible } from "../kept-pages.svelte";
@@ -104,6 +105,7 @@
     repository = null,
     pipeline = null,
     onpipeline = () => {},
+    place = null,
   }: {
     file: DrawnFile;
     split: boolean;
@@ -140,6 +142,8 @@
     /** The file's pipeline, or `null` where it has none; `onpipeline` turns it on or off for this file. */
     pipeline?: CardPipeline | null;
     onpipeline?: (on: boolean) => void;
+    /** On the card's box: a windowed list of files measures and places it there (`TfDiffView`). */
+    place?: Attachment<HTMLDivElement> | null;
   } = $props();
 
   /** The sides a rendered diff draws: the plan's, less one the reader found no file on. */
@@ -439,7 +443,7 @@
   {/if}
 {/snippet}
 
-<div class="tf-diff" data-file={keyOf(file)} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root}>
+<div class="tf-diff" data-file={keyOf(file)} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root} {@attach place}>
   <div class="tf-fh">
     <button type="button" class="tf-fh-caret" aria-expanded={!closed} aria-label="{closed ? 'Expand' : 'Collapse'} {keyOf(file)}" onclick={ontoggle}
       ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d={closed ? "m6 4 4 4-4 4" : "m4 6 4 4 4-4"} /></svg></button

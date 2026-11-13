@@ -98,6 +98,7 @@
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
   import TfWrittenAt from "./TfWrittenAt.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     files,
@@ -411,6 +412,37 @@
   /** Files over the *Load diff* limit the reader loaded. */
   let loads = $state<Record<string, true>>({});
 
+  /**
+   * A change of thousands of files draws only the files near the viewport, and the rail only the rows near its own
+   * scroll (the extremes pass, 2026-11-13: a pull request of 3,000 files built every card and rail row as the tab
+   * opened). A file's room before it is drawn is its lines', or its header's while it is collapsed or waits for *Load
+   * diff*; each card's own lines are windowed as before.
+   */
+  const fileWin = new Windowed({ count: () => drawn.length, key: (i) => keyOf(drawn[i]!), estimate: 120, gap: 12, estimateOf: (key) => fileRoom.get(key) ?? 120 });
+  const fileRoom = $derived(
+    new Map(
+      drawn.map((file) => {
+        const key = keyOf(file);
+        const lines = file.hunks.reduce((sum, hunk) => sum + hunk.lines.length + 1, 0);
+        const shut = isClosed(file) || (needsLoad(file) && loads[key] !== true);
+        return [key, shut ? 44 : 42 + Math.min(lines, 400_000) * 21];
+      }),
+    ),
+  );
+  const treeKey = (row: (typeof tree)[number]) => (row.kind === "dir" ? `dir\n${row.path}` : keyOf(row.file));
+  const railWin = new Windowed({ count: () => tree.length, key: (i) => treeKey(tree[i]!), estimate: 31, scrolls: true });
+
+  /** File `key`'s card, drawn first where the list holds it back. */
+  function cardFor(key: string): Card | undefined {
+    if (cards[key] === undefined) {
+      const at = drawn.findIndex((file) => keyOf(file) === key);
+      if (at < 0) return undefined;
+      fileWin.reveal(at);
+      flushSync();
+    }
+    return cards[key];
+  }
+
   /** The line whose comment box is open: its file and its place. */
   let open = $state<{ path: string; side: "old" | "new"; line: number } | null>(null);
   let draft = $state("");
@@ -551,7 +583,7 @@
 
   function go(key: string) {
     current = key;
-    cards[key]?.scrollTo();
+    cardFor(key)?.scrollTo();
     hold();
   }
 
@@ -583,14 +615,15 @@
       }
       const top = found.getBoundingClientRect().top + 8;
       let at: string | null = null;
-      for (const file of drawn) {
+      // The files drawn are the ones near the view: the one at its top is among them.
+      for (const file of fileWin.slice(drawn)) {
         const key = keyOf(file);
         const card = host.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`);
         if (card === null) continue;
         if (card.getBoundingClientRect().top > top) break;
         at = key;
       }
-      const first = drawn[0];
+      const first = fileWin.slice(drawn)[0];
       current = at ?? (first === undefined ? null : keyOf(first));
     };
     read();
@@ -618,7 +651,7 @@
         const step = event.key === "n" ? 1 : -1;
         const from = Math.max(0, at);
         for (let i = from; i >= 0 && i < keys.length; i += step) {
-          if (!cards[keys[i]!]?.nextHunk(step, i !== from)) continue;
+          if (!cardFor(keys[i]!)?.nextHunk(step, i !== from)) continue;
           current = keys[i]!;
           hold();
           break;
@@ -634,7 +667,7 @@
         if (!review) return;
         // The file `j` or `n` reached, else the next one with lines to comment on: a collapsed file has none.
         const from = Math.max(0, at);
-        const taker = [...keys.slice(from), ...keys.slice(0, from)].find((key) => cards[key]?.comment());
+        const taker = [...keys.slice(from), ...keys.slice(0, from)].find((key) => cardFor(key)?.comment());
         if (taker === undefined) {
           push({ text: "No open file takes a comment here. Open one, or show its raw diff, then press c." });
           break;
@@ -666,7 +699,9 @@
 
   let filesHost = $state<HTMLElement | null>(null);
   /** A windowed file is holding rows back: it pads for them (`Windowed`), and the find bar finds only what is drawn. */
-  const heldBack = () => [...(filesHost?.querySelectorAll<HTMLElement>(".tf-dbody") ?? [])].some((lines) => lines.style.paddingTop !== "" || lines.style.paddingBottom !== "");
+  const heldBack = () =>
+    fileWin.before + fileWin.after > 0 ||
+    [...(filesHost?.querySelectorAll<HTMLElement>(".tf-dbody") ?? [])].some((lines) => lines.style.paddingTop !== "" || lines.style.paddingBottom !== "");
   const cardOf = (key: string) => filesHost?.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`) ?? null;
   /** The file a mark is changing, and where its head stands on screen. */
   let marking: { key: string; path: string; on: boolean; top: number } | null = null;
@@ -763,10 +798,11 @@
           <button type="button" class="tf-btn tf-sm" onclick={() => (filter = "")}>Clear the filter</button>
         </div>
       {:else}
-      <nav class="tf-flist" aria-label="Changed files">
-        {#each tree as row (row.kind === "dir" ? `dir\n${row.path}` : keyOf(row.file))}
+      <nav class="tf-flist" aria-label="Changed files" {@attach railWin.list}>
+        {#if railWin.before > 0}<div class="tf-wgap" aria-hidden="true" {@attach railWin.room("before")}></div>{/if}
+        {#each railWin.slice(tree) as row (treeKey(row))}
           {#if row.kind === "dir"}
-            <div class="tf-fdir">{row.path}</div>
+            <div class="tf-fdir" {@attach railWin.row(treeKey(row))}>{row.path}</div>
           {:else}
             {@const file = row.file}
             {@const done = isViewed(file.path)}
@@ -779,12 +815,14 @@
               aria-current={current === keyOf(file) ? "true" : undefined}
               title={keyOf(file)}
               onclick={() => pick(file)}
+              {@attach railWin.row(treeKey(row))}
               ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
                 >{#if file.change !== "binary"}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button
             >
           {/if}
         {/each}
+        {#if railWin.after > 0}<div class="tf-wgap" aria-hidden="true" {@attach railWin.room("after")}></div>{/if}
       </nav>
       {/if}
       <p class="tf-dkeys tf-dim">
@@ -795,7 +833,8 @@
     </div>
   {/if}
   <div class="tf-dfiles" {@attach spy} {@attach measure}>
-    {#each drawn as file (keyOf(file))}
+    <div class="tf-dcards" {@attach fileWin.list}>
+    {#each fileWin.slice(drawn) as file (keyOf(file))}
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
       <TfDiffCard
@@ -826,8 +865,10 @@
         {render}
         {openAt}
         {repository}
+        place={fileWin.row(key)}
       />
     {/each}
+    </div>
     <!-- A filter that matches nothing says so once, in the file list beside its box, with its way off. -->
     {#if (filter.trim() === "" || drawn.length > 0) && (gone.length > 0 || homeless.length > 0)}
       <details class="tf-outdated tf-gone">

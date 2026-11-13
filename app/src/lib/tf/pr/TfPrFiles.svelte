@@ -118,12 +118,14 @@
   const SURFACE = "pr-files";
 
   /** `undefined` while the *Files* read has not answered. */
-  let view = $state<ShownView | SourceView | null | undefined>(undefined);
+  // Raw: a pull request of thousands of files is megabytes of view, replaced whole on each read, never changed in place;
+  // deep state put a proxy on every line of it, which every read of a file went through (the extremes pass, 2026-11-13).
+  let view = $state.raw<ShownView | SourceView | null | undefined>(undefined);
   let failed = $state<string | null>(null);
   /** Why the source did not answer the read behind files drawn from what knobas held (ADR-0042). */
   let heldFailed = $state<string | null>(null);
   /** The diff read from the clone while the source's *Files* is out, as a view of one diff block; `null` once it answers. */
-  let predicted = $state<SourceView | null>(null);
+  let predicted = $state.raw<SourceView | null>(null);
   let viewed = $state<string[]>([]);
 
   /** The blob each file holds in `answer`'s diff, by path (#2276): what *Viewed* is kept by. */
@@ -236,7 +238,7 @@
   const ends = $derived(range === null ? null : pickedEnds(range, choice));
   const section = $derived(ends === null ? null : compareSection(ends.base, ends.head));
   /** `undefined` while the pick's diff has not answered; local-first, as every diff between two shas (ADR-0036). */
-  let picked = $state<RangeDiff | undefined>(undefined);
+  let picked = $state.raw<RangeDiff | undefined>(undefined);
   let pickFailed = $state<string | null>(null);
 
   $effect(() => {
