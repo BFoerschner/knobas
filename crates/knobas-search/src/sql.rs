@@ -1576,10 +1576,23 @@ const MATCHED_PLANNING: &str = "select set_config('enable_seqscan', 'off', true)
      set_config('parallel_setup_cost', '850', true), \
      set_config('max_parallel_workers_per_gather', '3', true)";
 
-/// [`MATCHED_PLANNING`] with sequential scans left on:
-/// [`fetch_matched_by_a_letter`]'s.
+/// [`fetch_matched_by_a_letter`]'s: sequential scans left on, and **no
+/// start-up charge for workers**, so one letter is always ranked on four
+/// processes.
+///
+/// One letter matches broadly by its nature (a prefix), but the planner reads
+/// a prefix's share of the table from its word statistics and guesses low:
+/// `r` was estimated at 7,858 rows of Björn's 39,770 and matched 29,139. At
+/// [`MATCHED_PLANNING`]'s charge of 850 the choice between one process and
+/// four then hung on a few points of cost: the Mac's planner split `r` (41
+/// ms) and the Windows PC's, on the same table and settings, did not (157 ms;
+/// the Windows pass, 2026-11-14). On that PC a worker costs 31 to 37 ms to
+/// start (2 on the Mac), and split anyway the letters measured, as executed
+/// on its PostgreSQL: `r` 157 to 94 ms, `p` 129 to 86, `q` 80 to 71, `g` 42
+/// to 55, `x` 7 to 46. The broad letters were the ones over 100 ms a key; a
+/// rare one pays a worker's start and stays far under it.
 const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', true), \
-     set_config('parallel_setup_cost', '850', true), \
+     set_config('parallel_setup_cost', '0', true), \
      set_config('max_parallel_workers_per_gather', '3', true)";
 
 /// What the mirror and the estate say of each typed `under:` value, by its
@@ -1692,6 +1705,29 @@ pub async fn parent_positions(
 pub async fn explain_matched(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query(MATCHED_PLANNING).execute(&mut *tx).await?;
+    let plan = explain_on(&mut tx, built).await?;
+    tx.commit().await?;
+    Ok(plan)
+}
+
+/// The plan [`fetch_matched_by_a_letter`] runs a statement under, with the
+/// server's own size rule for workers left out (`min_parallel_table_scan_size`
+/// 0), so a test's small mirror is planned as Björn's 74 MB table is: no
+/// table under 8 MB is ever given a worker.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain_by_a_letter_at_any_size(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+) -> Result<String, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(LETTER_PLANNING).execute(&mut *tx).await?;
+    sqlx::query("select set_config('min_parallel_table_scan_size', '0', true)")
+        .execute(&mut *tx)
+        .await?;
     let plan = explain_on(&mut tx, built).await?;
     tx.commit().await?;
     Ok(plan)

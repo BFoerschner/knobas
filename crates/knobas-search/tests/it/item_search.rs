@@ -23,7 +23,8 @@
 use knobas_search::corpus::{self, LIVE_ITEM, LIVE_ITEM_FILLED, LIVE_ITEM_UNSTORED};
 use knobas_search::query::EffectiveFilters;
 use knobas_search::sql::{
-    explain_matched, fetch_matched, fetch_matched_by_a_letter, query_as_with, search_sql,
+    explain_by_a_letter_at_any_size, explain_matched, fetch_matched, fetch_matched_by_a_letter,
+    query_as_with, search_sql,
 };
 use knobas_search::{KindCatalog, RawHit, group};
 
@@ -1046,6 +1047,36 @@ async fn a_search_with_words_reads_through_the_narrow_tables_indexes() {
             plan.contains("item_search_fts_idx"),
             !titles,
             "titles {titles}:\n{plan}"
+        );
+    }
+}
+
+/// One letter is ranked on four processes whatever the planner guesses it
+/// matches (the Windows pass, 2026-11-14): a guess a few points of cost to
+/// either side kept `r` on one process on Björn's Windows PC (157 ms, over
+/// 100 a key) where the Mac split it (41 ms).
+#[tokio::test]
+async fn one_letter_is_ranked_on_four_processes() {
+    let pool = pool().await;
+    seed_scale_words(&pool, 300).await;
+    sqlx::query("analyze sync.item_search, sync.item, knobas.entity")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for letter in ["r", "x"] {
+        let built = search_sql(
+            &[&LIVE_ITEM_FILLED],
+            Some(letter),
+            true,
+            &EffectiveFilters::default(),
+            10,
+            40,
+        );
+        assert!(built.matches_narrowly());
+        let plan = explain_by_a_letter_at_any_size(&pool, built).await.unwrap();
+        assert!(
+            plan.contains("Workers Planned: 3"),
+            "{letter} on one process:\n{plan}"
         );
     }
 }
