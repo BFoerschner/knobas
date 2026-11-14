@@ -240,7 +240,7 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfInstalledAdapters.svelte  asked.changes": "a handful by what it is: what an adapter update changes",
   "tf/settings/TfInstalledAdapters.svelte  row.sources": "the profile's own settings, tens at most: one adapter's sources",
   "tf/settings/TfInstalledAdapters.svelte  rows": "the profile's own settings, tens at most: the installed adapters",
-  "tf/settings/TfKeyboardSection.svelte  chord.split(\" \")": "the runs of one line's or one name's words: one chord's keys",
+  "tf/settings/TfKeyboardSection.svelte  chord.split(\" \").filter((key) => onMac() || !MAC_ONLY.has(key))": "the runs of one line's or one name's words: one chord's keys",
   "tf/settings/TfKeyboardSection.svelte  keys.split(\", \")": "the runs of one line's or one name's words: one shortcut's chords",
   "tf/settings/TfNotesSection.svelte  keyCaps(view.accelerator)": "the runs of one line's or one name's words: one shortcut's keys",
   "tf/settings/TfPipelinesSettings.svelte  pipelines.list": "the profile's own settings, tens at most: the reader's file pipelines",

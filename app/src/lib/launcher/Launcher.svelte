@@ -79,6 +79,7 @@
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
+  import { keyHint } from "../shell/platform";
   import {
     addFavourite as defaultAddFavourite,
     createSmartList as defaultCreateSmartList,
@@ -1109,7 +1110,7 @@
 {#snippet keysAndSave()}
   <!-- Only what a key does here. The band is gone when it has nothing to say. -->
   {#each footerKeys as [key, what, title] (key)}
-    <span {title}><kbd>{key}</kbd> {what}</span>
+    <span {title}><kbd>{keyHint(key)}</kbd> {what}</span>
   {/each}
   {#if saveShown}
     <!--
@@ -1179,7 +1180,7 @@
               <span class="tf-fchips tf-ln-scope">
                 <button
                   type="button"
-                  title={scope.titles ? "Titles and keys only. ⌘D searches everything" : "Bodies too. ⌘D searches titles only"}
+                  title={keyHint(scope.titles ? "Titles and keys only. ⌘D searches everything" : "Bodies too. ⌘D searches titles only")}
                   onclick={() => {
                     toggleScope();
                     box?.focus();

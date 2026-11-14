@@ -17,6 +17,7 @@
   import { kindTag } from "../assets/tree";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindLabel, kindMonogram } from "../shell/kinds";
+  import { keyHint } from "../shell/platform";
   import { aimed } from "./aim";
   import type { LegendLine } from "./legend";
   import type { LauncherRow } from "./rows";
@@ -70,7 +71,7 @@
 {#if keys.length > 0}
   <div class="tf-ln-keys" aria-label="Keys">
     {#each keys as [key, what] (key)}
-      <span><kbd>{key}</kbd> {what}</span>
+      <span><kbd>{keyHint(key)}</kbd> {what}</span>
     {/each}
   </div>
 {/if}

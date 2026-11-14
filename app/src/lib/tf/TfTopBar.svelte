@@ -11,6 +11,7 @@
   import type { Inbox } from "../inbox/inbox.svelte";
   import type { Timer } from "../shell/timer.svelte";
   import { targetReading } from "../shell/timer";
+  import { keyHint } from "../shell/platform";
   import type { Badges } from "./badges.svelte";
   import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
 
@@ -110,12 +111,12 @@
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
       <circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" />
     </svg>
-    <span class="tf-label">Search</span><kbd>⌘/</kbd>
+    <span class="tf-label">Search</span><kbd>{keyHint("⌘/")}</kbd>
   </button>
   {#if clockOn !== null}
     <button
       class="tf-timer tf-card"
-      title="Timer (⌘T)"
+      title={keyHint("Timer (⌘T)")}
       aria-label="Timer on {clockOn}, {clock}. Stop and log…"
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
@@ -127,7 +128,7 @@
   {:else}
     <button
       class="tf-timer tf-off"
-      title={job === null ? "Timer (⌘T)" : `Start the timer on ${job} (⌘T)`}
+      title={keyHint(job === null ? "Timer (⌘T)" : `Start the timer on ${job} (⌘T)`)}
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
     >
@@ -139,7 +140,7 @@
     class="tf-iconbtn"
     href={navHref("settings")}
     aria-label="Settings"
-    title="Settings (⌘,)"
+    title={keyHint("Settings (⌘,)")}
     aria-current={current === "settings" ? "page" : undefined}
     onclick={(event) => press(event, "settings")}
   >

@@ -112,7 +112,10 @@ export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
   { id: "alert", label: "A monitor goes down" },
 ];
 
-/** Keyboard: requirements §14, in prototype-6's words, and what has joined since (F-062, F-633). */
+/**
+ * Keyboard: requirements §14, in prototype-6's words, and what has joined since (F-062, F-633). Written as the Mac
+ * spells them, ⌘ for ⌘ or Ctrl; `keyHint` writes them as the platform does (the Windows pass, 2026-11-14).
+ */
 export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: string])[] = [
   ["⌘K", "Anywhere", "Search, from an empty box"],
   ["⌘T", "Anywhere", "Stop or start the timer"],
@@ -138,3 +141,6 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["S", "A diff", "Split or unified"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];
+
+/** Keys only the Mac has: history's arrows go with ⌘ alone (`historyStep`), which off the Mac is the Windows key's. */
+export const MAC_ONLY: ReadonlySet<string> = new Set(["⌘←", "⌘→"]);

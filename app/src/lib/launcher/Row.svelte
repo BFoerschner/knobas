@@ -16,6 +16,7 @@
 <script lang="ts">
   import { kindTag } from "../assets/tree";
   import { aimed } from "./aim";
+  import { chordLabel } from "../shell/platform";
   import { shortKey } from "../tf/tickets/tickets";
   import type { Tone } from "../ipc/entity";
 
@@ -70,5 +71,5 @@
   <span class="tf-ln-k" class:tf-ln-mono={mono} title={mono && shortKey(cell) !== cell ? cell : undefined}>{mono ? shortKey(cell) : cell}</span>
   <span class="tf-ln-t">{title}</span>
   {#if source}<span class="tf-ln-src" title={source}>{source}</span>{/if}
-  {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}
+  {#if chord}<kbd class="tf-ln-chord" title="Its key">{chordLabel(chord)}</kbd>{/if}
 </button>

@@ -100,6 +100,7 @@
 
 <script lang="ts">
   import { Channel } from "@tauri-apps/api/core";
+  import { keyHint } from "../shell/platform";
   import { walkAfter, walkMax, type Walk } from "./walk";
 
   import { ipcErrorMessage } from "../ipc";
@@ -596,7 +597,7 @@
               is only claimed when there is one (#137).
             -->
             knobas mirrored {#if mirrored === null}your items{:else}<b>{mirrored}</b> items{/if}. Press
-            <kbd>⌘K</kbd> to search everything you just synced.
+            <kbd>{keyHint("⌘K")}</kbd> to search everything you just synced.
           </p>
           <div class="tf-fr-acts">
             <button class="tf-btn tf-primary" disabled={finishing} onclick={() => void finish("tickets")}>
