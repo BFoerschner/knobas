@@ -444,14 +444,36 @@ export function sectionKind(number: number): string {
   return `section ${number}`;
 }
 
-/** *N min read*: 220 words a minute, never less than one (prototype-6). */
+/**
+ * *N min read*: 220 words a minute, never less than one (prototype-6). Counted block by block, never as one string
+ * of the whole page: a 5 MB page's words joined and split took 56 ms of a quarter-speed main thread at its open (the
+ * render-cost pass, 2026-11-14). Blocks are apart by a space, so the count is the same.
+ */
 export function readingMinutes(page: DocPage): number {
-  const words = page.blocks
-    .map(blockWords)
-    .join(" ")
-    .split(/\s+/)
-    .filter(Boolean).length;
+  let words = 0;
+  for (const block of page.blocks) words += wordCount(blockWords(block));
   return Math.max(1, Math.round(words / 220));
+}
+
+/** How many words `text` holds, split as `/\s+/` splits it, without making the words. */
+export function wordCount(text: string): number {
+  let n = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const space = isSpace(text.charCodeAt(i));
+    if (!space && !inWord) n += 1;
+    inWord = !space;
+  }
+  return n;
+}
+
+/** What `\s` matches: ECMAScript's white space and line terminators. */
+function isSpace(c: number): boolean {
+  if (c <= 0x20) return c === 0x20 || (c >= 0x09 && c <= 0x0d);
+  if (c < 0xa0) return false;
+  return (
+    c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a) || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff
+  );
 }
 
 /** How a mention reads: `@` and the display name's first word, else the account. */

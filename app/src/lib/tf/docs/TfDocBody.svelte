@@ -75,14 +75,18 @@
   const FIRST = 24_000;
   const MORE = 16_000;
   const all = $derived(sectionsOf(blocks));
-  const weights = $derived(all.map((section) => firstDrawWeight(section.blocks) + 64));
+  // Each section's weight is worked out when the draw first reaches it, not for every section of the page at once:
+  // a 5 MB page's thousand sections cost 19 ms of a quarter-speed main thread to weigh at its open, for the few the
+  // first piece draws (the render-cost pass, 2026-11-14).
+  const weights = $derived(new Array<number | undefined>(all.length));
+  const weightOf = (n: number): number => (weights[n] ??= firstDrawWeight(all[n]!.blocks) + 64);
   /** How much of this page's body to draw now; a page drawn whole stays whole when it is read again. */
   let grown = $state<{ id: string; budget: number }>({ id: "", budget: FIRST });
   const budget = $derived(grown.id === entityId ? grown.budget : FIRST);
   const shown = $derived.by(() => {
     let used = 0;
     let n = 0;
-    while (n < all.length && (n === 0 || used + weights[n]! <= budget)) used += weights[n++]!;
+    while (n < all.length && (n === 0 || used + weightOf(n) <= budget)) used += weightOf(n++);
     return n === all.length ? all : all.slice(0, n);
   });
   /** Draws the next piece, while the end of what is drawn nears the view (`whileNear`); `false` once all is drawn. */

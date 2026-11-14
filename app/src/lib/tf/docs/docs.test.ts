@@ -15,7 +15,9 @@ import {
   pagesByLevel,
   pagesByPath,
   placeOf,
+  blockWords,
   readingMinutes,
+  wordCount,
   sectionsOf,
   spaceHash,
   spaceId,
@@ -187,6 +189,23 @@ test("reading time is 220 words a minute and never under one", () => {
     }) as DocPage;
   expect(readingMinutes(words(10))).toBe(1);
   expect(readingMinutes(words(660))).toBe(3);
+});
+
+test("words are counted as a split on white space counts them, across blocks, without joining the page", () => {
+  const split = (text: string) => text.split(/\s+/).filter(Boolean).length;
+  for (const text of ["", " ", "one", " two  words ", "tab\tnew\nline\r\nend", "nb\u00a0sp\u2003em\u3000ideo\ufeffbom", "\u2028a\u2029b\u202fc\u205fd\u1680e", "x\u200by"])
+    expect(wordCount(text), JSON.stringify(text)).toBe(split(text));
+  const run = (text: string) => ({ type: "text", text, strong: false, emphasis: false, code: false });
+  const page = {
+    blocks: [
+      { type: "paragraph", text: [run("half"), run("word "), run("and more")] },
+      { type: "code", code: "let x = 1;\nlet y = 2;" },
+      { type: "heading", level: 2, text: [run("A heading")] },
+    ],
+  } as unknown as DocPage;
+  const joined = page.blocks.map(blockWords).join(" ").split(/\s+/).filter(Boolean).length;
+  expect(joined).toBe(13);
+  expect(readingMinutes({ blocks: Array.from({ length: 50 }, () => page.blocks).flat() } as DocPage)).toBe(Math.round((50 * joined) / 220));
 });
 
 test("a mention reads as the first name, else the account, else someone", () => {
