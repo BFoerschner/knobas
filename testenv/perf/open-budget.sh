@@ -76,6 +76,9 @@ if [ -n "$syncing" ]; then
 fi
 if [ -n "$forge" ]; then
   lines=forge
+  # Every first read waits the forge's delay a request: the whole run takes past open.mjs's 45 minutes (the WSL block,
+  # 2026-11-14: its watchdog stopped a 1,000 ms run at the 4x big compares).
+  set_args+=(--max-minutes 120)
   node "$here/slow-forge.mjs" --listen 3900 --upstream 127.0.0.1:3443 --delay "$forge" > "$out/slow-forge.log" 2>&1 &
   proxy=$!
   sleep 1

@@ -24,18 +24,32 @@ let requests = 0;
 net.createServer((client) => {
   const server = net.connect(Number(port), host);
   let fresh = true;
-  let chain = Promise.resolve();
+  // Each chunk goes on at its due time, in the order it came. A held chunk is due `delay` after it came, as over a far
+  // network, so holds overlap rather than queue: requests multiplexed on one connection (knobas speaks HTTP/2 to the
+  // front) each wait the delay once, not every hold before theirs as well. The WSL block (2026-11-14) measured the old
+  // chain: three reads sent together took 5 to 7 s and 16 holds, which one at a time took 2 to 3 s and 8 requests.
+  const queue = [];
+  let due = 0;
+  let timer = null;
+  const pump = () => {
+    timer = null;
+    while (queue.length && queue[0].due <= Date.now()) queue.shift().go();
+    if (queue.length) timer = setTimeout(pump, queue[0].due - Date.now());
+  };
+  const later = (hold, go) => {
+    due = Math.max(due, Date.now() + hold);
+    queue.push({ due, go });
+    if (timer === null) pump();
+  };
   client.on("data", (chunk) => {
     const first = fresh;
     fresh = false;
     if (first) requests++;
-    const hold = first && delay > 0 ? delay : 0;
-    client.pause();
-    chain = chain.then(() => new Promise((res) => setTimeout(res, hold))).then(() => { server.write(chunk); client.resume(); });
+    later(first && delay > 0 ? delay : 0, () => server.write(chunk));
   });
   server.on("data", (chunk) => { fresh = true; client.write(chunk); });
   const end = () => { client.destroy(); server.destroy(); };
-  client.on("end", () => server.end());
+  client.on("end", () => later(0, () => server.end()));
   server.on("end", () => client.end());
   client.on("error", end);
   server.on("error", end);

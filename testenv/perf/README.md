@@ -118,7 +118,9 @@ just open-budget --real 5411 --inner --forge 1000   # every request held 1 s: `f
   `dev-secrets.json` (`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo build --release ... --target-dir <scratch>`,
   a target of its own so the shared one keeps its cache).
 - **`slow-forge.mjs`** forwards bytes between knobas and the https front (`127.0.0.1:3443`) and holds the first chunk
-  of each request `--delay` ms, as `crates/knobas-app/tests/slow_proxy` does for the Rust rigs; `--control <port>`
+  of each request `--delay` ms from when it came, as `crates/knobas-app/tests/slow_proxy` does for the Rust rigs; holds
+  overlap, so requests sent together on knobas's one HTTP/2 connection each wait the delay once (until the WSL block of
+  2026-11-14 they queued, each behind every hold before it); `--control <port>`
   takes `POST /delay?ms=` and answers `GET /count`. Over TLS a new connection's handshake is held too, as a far
   network would.
 - **The items** are `inner-items.json`: one repository, files, a commit, a branch and pull requests per throttle, so
