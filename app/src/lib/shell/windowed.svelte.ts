@@ -42,6 +42,10 @@
  *   then focus or `scrollIntoView` it as for any row (`j`/`k` past the window).
  * - Under `from` rows (300) everything draws and `before`/`after` are 0, so a
  *   short list is the DOM it always was.
+ * - A list reads where it sits only once it windows, and in the same task as
+ *   every other list attached in that update (`placeWindowsNow` reads them at
+ *   once, as `reveal` and `topOf` do first), so a page's first open lays itself
+ *   out once for all its lists. Until then a list draws its overscan's rows.
  *
  * A folding list windows its flattened visible rows (headers of open folds
  * and their rows) with one key per row.
@@ -106,9 +110,14 @@ const shared: {
 export class Windowed<K = string> {
   readonly #options: Required<WindowedOptions<K>>;
   readonly #heights: Heights<K>;
-  /** The viewport, in the list's pixels: its top (negative while the list starts below it), and its height. */
+  /**
+   * The viewport, in the list's pixels: its top (negative while the list starts below it), and its height. None until
+   * `list` reads it: a list half way down the screen (a pipeline's runs under its chart) that first drew a screenful
+   * from the top held fifteen rows more than it shows, since rows that cover the view stay (the Windows pass,
+   * 2026-11-14). The first draw is the overscan's rows, and the read in the same flush draws the rest.
+   */
   #viewTop = $state(0);
-  #viewHeight = $state(typeof window === "undefined" ? 0 : window.innerHeight);
+  #viewHeight = $state(0);
   /** Bumped when a measurement moves a row, so the span is worked out again. */
   #remeasured = $state(0);
   /** The list's ancestors that clip it, nearest first. */
@@ -136,6 +145,8 @@ export class Windowed<K = string> {
 
   /** The rows drawn last, while the view stays inside them with the margin to spare. */
   #held: { keys: readonly K[]; start: number; end: number } | null = null;
+  /** Whether `list` has read where the list sits: rows drawn before that are the overscan's, and none are held. */
+  #placed = false;
 
   readonly #span = $derived.by((): Span & { on: boolean } => {
     const keys = this.#keys;
@@ -150,7 +161,7 @@ export class Windowed<K = string> {
     if (held !== null && held.keys === keys && this.#heights.covers(held.start, held.end, this.#viewTop, this.#viewHeight, margin))
       return { ...this.#heights.around(held.start, held.end), on: true };
     const span = this.#heights.span(this.#viewTop, this.#viewHeight, overscan);
-    this.#held = { keys, start: span.start, end: span.end };
+    this.#held = this.#placed ? { keys, start: span.start, end: span.end } : null;
     return { ...span, on: true };
   });
 
@@ -186,16 +197,11 @@ export class Windowed<K = string> {
 
   /** On the element that holds the rows. */
   list = (node: HTMLElement) => {
-    // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
-    const style = getComputedStyle(node);
     const own = this.#options.scrolls;
-    const clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
-    this.#clips = clips;
-    // The list's own padding: row 0 sits under it, and the room is inside it.
-    const base = {
-      top: parseFloat(style.paddingTop) || 0,
-      bottom: parseFloat(style.paddingBottom) || 0,
-    };
+    // The ancestors that clip the list, and its own padding (row 0 sits under it, and the room is inside it): read
+    // with every other list attached in this flush (`placeSoon`), then the viewport.
+    let clips: HTMLElement[] = [];
+    const base = $state({ top: 0, bottom: 0, read: false });
     // The browser's own scroll anchoring would correct a row's height a second time.
     $effect(() => {
       node.style.overflowAnchor = this.on ? "none" : "";
@@ -205,6 +211,8 @@ export class Windowed<K = string> {
     // smaller than its padding, so padded it would grow to the whole list.
     if (!(node instanceof HTMLTableSectionElement) && !own)
       $effect(() => {
+        // Not before the list's own padding is read, which would then be read with the room in it.
+        if (!base.read) return;
         pad(node, "padding-top", this.before && base.top + this.before);
         pad(node, "padding-bottom", this.after && base.bottom + this.after);
       });
@@ -224,8 +232,10 @@ export class Windowed<K = string> {
       $effect(() => {
         void heading;
         if (!this.on) return;
-        const width = table.getBoundingClientRect().width;
         const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
+        // A table that declares its columns (a `colgroup`) has its widths already, and needs no layout read for them.
+        if (heads.length === 0 && table.querySelector(":scope > colgroup")) return;
+        const width = table.getBoundingClientRect().width;
         if (width === 0) return;
         if (heads.length === 0) return freezeCols(table, body, width);
         const shares = heads.map(
@@ -248,6 +258,7 @@ export class Windowed<K = string> {
       (own ? node.clientTop - node.scrollTop : 0);
     this.#origin = origin;
     const read = (event?: Event) => {
+      if (!placed) return;
       let top = 0;
       let bottom = window.innerHeight;
       for (const clip of clips) {
@@ -270,7 +281,40 @@ export class Windowed<K = string> {
       if (event?.type === "scroll" && !this.#selfScroll(event))
         this.#pin(top, bottom, event);
     };
-    read();
+    // Reading where a list sits lays the page out. A page that opens with several windowed lists (Builds' rail, its
+    // days and each day's runs) read each as it was attached, after the one before had drawn its rows: a layout of
+    // the whole new page each, six of them and 62 ms of a quarter-speed main thread (the Windows pass, 2026-11-14).
+    // Read together, once every list of the flush is attached, they lay it out once.
+    const resized =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => read());
+    /** Whether the list's place is read (`place`), and whether that read waits for the flush to end. */
+    let placed = false;
+    let queued = false;
+    const place = () => {
+      queued = false;
+      if (!node.isConnected) return;
+      placed = true;
+      this.#placed = true;
+      // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
+      clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
+      this.#clips = clips;
+      const style = getComputedStyle(node);
+      base.top = parseFloat(style.paddingTop) || 0;
+      base.bottom = parseFloat(style.paddingBottom) || 0;
+      base.read = true;
+      read();
+      resized?.observe(node);
+      for (const clip of clips) resized?.observe(clip);
+    };
+    // A list too short to window draws every row wherever it sits, so it reads nothing until it windows: a first
+    // open of a short list lays nothing out for it.
+    $effect(() => {
+      if (!this.on || placed || queued) return;
+      queued = true;
+      placeSoon(place);
+    });
     // Focus in a row is noted, so a row the window takes out keeps it on the list (`row`) and gets it back when drawn.
     this.#listNode = node;
     const focusIn = (event: FocusEvent) => {
@@ -300,13 +344,8 @@ export class Windowed<K = string> {
     // Scroll events do not bubble; a capturing listener hears every box's.
     document.addEventListener("scroll", read, { capture: true, passive: true });
     window.addEventListener("resize", read, { passive: true });
-    const resized =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => read());
-    resized?.observe(node);
-    for (const clip of clips) resized?.observe(clip);
     return () => {
+      if (queued) unplaced.delete(place);
       node.removeEventListener("focusin", focusIn);
       node.removeEventListener("focusout", focusOut);
       if (this.#listNode === node) this.#listNode = null;
@@ -366,6 +405,7 @@ export class Windowed<K = string> {
 
   /** Brings row `index` into the drawn rows, scrolling as little as it can. */
   reveal(index: number) {
+    placeWindowsNow();
     if (!this.on || index < 0 || index >= this.#keys.length) return;
     this.#sync(this.#keys);
     const top = this.#heights.reveal(index, this.#viewTop, this.#viewHeight);
@@ -378,6 +418,7 @@ export class Windowed<K = string> {
 
   /** Row `index`'s top on screen (client pixels), drawn or not: where a line to an undrawn row points. */
   topOf(index: number): number {
+    placeWindowsNow();
     this.#sync(this.#keys);
     return this.#origin() + this.#heights.offsetOf(index);
   }
@@ -504,6 +545,25 @@ function freezeCols(
     cols.remove();
     table.style.tableLayout = "";
   };
+}
+
+/** The lists attached in this flush that have not read where they sit yet (`list`). */
+const unplaced = new Set<() => void>();
+
+/**
+ * Reads where `place`'s list sits once the flush that attached it is over, with every other list attached in it: the
+ * first read lays the page out, and the rest find it laid out. Before that read a list draws its overscan's rows.
+ */
+function placeSoon(place: () => void) {
+  if (unplaced.size === 0) queueMicrotask(placeWindowsNow);
+  unplaced.add(place);
+}
+
+/** Reads now where every list attached and not yet placed sits: before a list's place is asked of it, and in tests. */
+export function placeWindowsNow() {
+  const all = [...unplaced];
+  unplaced.clear();
+  for (const each of all) each();
 }
 
 /** Sets `px` of room through the CSSOM (CSP refuses inline styles in markup), none when 0. */

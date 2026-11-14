@@ -677,7 +677,7 @@ test("Esc in an empty box closes it at once, and ⌘↩ adds what is typed", () 
   expect(pending.of("pr").map((comment) => comment.body)).toEqual(["looks off"]);
 });
 
-test("a 3,000-line file shows Load diff, and loading it shows its lines", () => {
+test("a 3,000-line file shows Load diff, and loading it shows its lines", async () => {
   const lines = Array.from({ length: 3_000 }, (_, n) => add(n + 1, `row ${n + 1}`));
   const big = file("src/big.rs", { change: "added", additions: 3_000, deletions: 0, hunks: [{ header: "@@ -0,0 +1,3000 @@", lines }] });
   draw({ files: [big], layout: createDiffLayout(() => null) });
@@ -685,6 +685,9 @@ test("a 3,000-line file shows Load diff, and loading it shows its lines", () => 
   expect(card.querySelectorAll(".tf-ln")).toHaveLength(0);
   expect(squash(card.querySelector(".tf-dfwhy"))).toBe("Over 1,500 lines (3,000 changed): not loaded until you ask; nothing is cut. Load diff");
   card.querySelector<HTMLButtonElement>(".tf-dfwhy button")!.click();
+  flushSync();
+  // The window reads where it sits once the flush that drew it is over (the Windows pass, 2026-11-14).
+  await Promise.resolve();
   flushSync();
   expect(card.querySelector(".tf-dfwhy")).toBeNull();
   // Windowed: the first lines are drawn, and the rest is room below them, not cut.

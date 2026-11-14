@@ -19,6 +19,8 @@
 
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
+  // The windowed lists waiting to read where they sit (the Windows pass, 2026-11-14): a test's are read, or let go once unmounted.
+  "shell/windowed.svelte.ts#unplaced": async () => (await import("./windowed.svelte")).placeWindowsNow(),
   // How many dialogs are open (PR #2479): a test that left one drawn would keep the toasts lowered for the next.
   "tf/modals.svelte.ts#modals": async () => {
     (await import("../tf/modals.svelte")).modals.open = 0;

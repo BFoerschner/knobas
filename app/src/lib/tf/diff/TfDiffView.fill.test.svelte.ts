@@ -105,6 +105,9 @@ test("only the files near the view are read, at most a few at a time", async () 
   const { fill, asked } = fakeFill();
   const files = Array.from({ length: 3000 }, (_, i) => listed(`pkg/f${String(i).padStart(4, "0")}.ts`, 4));
   draw({ files, fill });
+  // The window reads where it sits once the flush that drew it is over (the Windows pass, 2026-11-14).
+  await Promise.resolve();
+  flushSync();
   expect(target.querySelectorAll(".tf-diff").length).toBeLessThan(100);
   expect(asked.length).toBe(4);
 });

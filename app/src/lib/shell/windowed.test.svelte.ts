@@ -1,7 +1,14 @@
 import { flushSync } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { Windowed } from "./windowed.svelte";
+import { placeWindowsNow, Windowed } from "./windowed.svelte";
+
+/** Draws, then reads where each windowed list sits, as the end of the flush that attached it does, and draws again. */
+function placed() {
+  flushSync();
+  placeWindowsNow();
+  flushSync();
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -35,7 +42,7 @@ test("a windowed table freezes its columns again when its header cells change (#
   const stop = $effect.root(() => {
     win.list(table.tBodies[0]!);
   });
-  flushSync();
+  placed();
   expect(table.style.tableLayout).toBe("fixed");
   expect(widths()).toEqual(["25%", "25%"]);
 
@@ -79,7 +86,7 @@ test("a windowed table with no header row freezes its columns at its first drawn
   const stop = $effect.root(() => {
     win.list(table.tBodies[0]!);
   });
-  flushSync();
+  placed();
   expect(table.style.tableLayout).toBe("fixed");
   expect(
     [...table.querySelectorAll("colgroup > col")].map(
@@ -133,7 +140,7 @@ test("a list that scrolls itself reads the viewport from its own scroll, keeps i
     win.room("before")(list.querySelector<HTMLElement>(".before")!);
     win.room("after")(list.querySelector<HTMLElement>(".after")!);
   });
-  flushSync();
+  placed();
   // Its 6 px of padding sit above row 0, so 294 px of rows show: 14 of them (#2269).
   expect([win.start, win.end]).toEqual([0, 14]);
 
@@ -185,7 +192,7 @@ test("a list that only clips sideways (the run log's `overflow: auto`, #2211) st
   const stop = $effect.root(() => {
     win.list(list);
   });
-  flushSync();
+  placed();
   expect(win.after).toBeGreaterThan(0);
   expect(list.style.paddingBottom).toBe(`${win.after}px`);
   stop();
@@ -204,7 +211,7 @@ test("a list that starts far below the viewport draws one row, and one partway d
   const stop = $effect.root(() => {
     win.list(list);
   });
-  flushSync();
+  placed();
   // A diff's card 4,000 px under the screen: nothing of it is near.
   expect(win.end - win.start).toBe(1);
   // Its top 600 px down the screen: 400 px of it show, 100 px more drawn.
@@ -227,7 +234,7 @@ test("a list inside a box that clips it (a diff's file card), the box below the 
   const stop = $effect.root(() => {
     win.list(list);
   });
-  flushSync();
+  placed();
   expect(win.end - win.start).toBe(1);
   stop();
 });
@@ -269,7 +276,7 @@ test("a row held on a page keep-alive hid does not scroll the page shown after i
     b.list(document.querySelector(".lb")!);
     b.row(0)(document.querySelector(".rb")!);
   });
-  flushSync();
+  placed();
   // The reader scrolls page A: its row is held.
   main.dispatchEvent(new Event("scroll"));
   // Page B is shown instead, and its row comes out 30 px, not 20.
@@ -305,7 +312,7 @@ test("the drawn rows hold still while the view moves inside them, and move to it
     flushSync();
     return [win.start, win.end];
   };
-  flushSync();
+  placed();
   expect([win.start, win.end]).toEqual([0, 25]);
   // Every 20 px a row would come and go; the drawn rows (0 to 500 px) still hold the view and 100 px below it.
   expect(scrollTo(20)).toEqual([0, 25]);
@@ -334,7 +341,7 @@ test("a row the window takes out while it holds focus leaves focus on the list, 
     win.list(list);
     undraw = win.row(390)(first);
   });
-  flushSync();
+  placed();
   first.querySelector("button")!.focus();
   expect(document.activeElement?.textContent).toBe("b");
 
@@ -351,5 +358,48 @@ test("a row the window takes out while it holds focus leaves focus on the list, 
   await Promise.resolve();
   expect(document.activeElement).toBe(again.querySelector("button"));
   expect(list.dataset["heldFocus"]).toBeUndefined();
+  stop();
+});
+
+// The Windows pass (2026-11-14): a pipeline's runs, half way down the screen under its chart, drew a screenful from the
+// top before the list read where it sat, and kept those rows, since rows that cover the view stay.
+test("rows drawn before a list reads where it sits are not held: a list half way down draws only what reaches the screen", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 20_000, top: 500, bottom: 20_500, left: 0, right: 200, x: 0, y: 500, toJSON: () => ({}) }) as DOMRect,
+  );
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1_000);
+  document.body.innerHTML = "<div></div>";
+  const list = document.querySelector("div")!;
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 100 });
+  const stop = $effect.root(() => {
+    // The page draws its rows before the list is attached.
+    void win.end;
+    win.list(list);
+  });
+  placed();
+  // 500 px of it show, 100 px more drawn: 30 rows, not the 55 a screen from the top would hold.
+  expect([win.start, win.end]).toEqual([0, 30]);
+  stop();
+});
+
+test("a list too short to window reads nothing of the page; lists that window read where they sit together, after the update that attached them", async () => {
+  const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  document.body.innerHTML = '<div class="a"></div><div class="b"></div><div class="c"></div>';
+  const short = new Windowed({ count: () => 10, key: (i) => i, estimate: 20 });
+  const a = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const b = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    short.list(document.querySelector<HTMLElement>(".c")!);
+    a.list(document.querySelector<HTMLElement>(".a")!);
+    b.list(document.querySelector<HTMLElement>(".b")!);
+  });
+  flushSync();
+  expect(rect).not.toHaveBeenCalled();
+  await Promise.resolve();
+  flushSync();
+  const read = rect.mock.contexts.map((el) => (el as HTMLElement).className);
+  expect(read).toContain("a");
+  expect(read).toContain("b");
+  expect(read).not.toContain("c");
   stop();
 });
