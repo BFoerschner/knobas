@@ -31,7 +31,9 @@ fn main() {
             "--passes" => passes = args.next().and_then(|n| n.parse().ok()).unwrap_or(1),
             "--until-done" => until_done = true,
             _ => {
-                eprintln!("usage: stored_trees_fill --db <url> --source <id> [--base-url <url>] [--passes <n>] [--until-done]");
+                eprintln!(
+                    "usage: stored_trees_fill --db <url> --source <id> [--base-url <url>] [--passes <n>] [--until-done]"
+                );
                 std::process::exit(2);
             }
         }
@@ -93,6 +95,8 @@ fn main() {
                     "stored_levels": rows, "stored_entries": entries,
                 })
             );
+            // A line a pass as it ends, also into a file.
+            let _ = std::io::Write::flush(&mut std::io::stdout());
             let done = filled.left == 0;
             if (until_done && done) || (!until_done && pass >= passes) {
                 break;

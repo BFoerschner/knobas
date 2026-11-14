@@ -195,6 +195,27 @@ node testenv/perf/compare-open.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-h
   branch's compare by address; run it again on a restarted backend for a second session. The address rows include
   the app's own start.
 
+### Every branch's tree: `stored-trees.mjs`, `stored_trees_fill`
+
+From the stored-trees pass (2026-11-14, `docs/decisions/2026-11-14-every-branchs-tree-is-stored.md`), on the Mac with
+the stand-in. A scratch copy of a saved home with every source off, Gitea at the stand-in, and each Gitea branch of the
+mirror at a commit of a local repository named by its per-repository alias (`standin-forge.mjs --distinct`: two
+repositories share no object, as two real ones do not; `--tips` names each branch's tip for `branches/{name}`).
+
+```sh
+node testenv/perf/standin-forge.mjs --listen 3911 --delay 50 --git <local repo> --distinct --tips tips.json --control 3912 &
+cargo run --release -p knobas-app --example stored_trees_fill -- --db <the copy's database url> --source live-gitea --until-done
+node testenv/perf/stored-trees.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-hooks&fake-real=<port>#/time" \
+  --repo live-gitea:<owner>/<name> --deep <a/b/c> --find <file name> --throttle 1
+```
+
+- **`stored_trees_fill`** runs the pass alone, on the background lane and at the adapter's quota, against the copy's
+  database: one JSON line a pass (requests, time, branches and levels stored, branches left, the store's bytes).
+- **`stored-trees.mjs`** times a repository's Files tab with no clone: its first open from Code to the tree's rows, a
+  deep folder's first press (the folders above it opened first), and *Go to file*'s first use to the frame listing the
+  file with nothing left reading. Each is a read the backend has not made, so start a fresh backend (and a fresh copy)
+  for each throttle.
+
 ### The extremes: `just open-budget --real <port> --extremes`
 
 The worst shapes a real team's data has (the extremes pass, 2026-11-13,
