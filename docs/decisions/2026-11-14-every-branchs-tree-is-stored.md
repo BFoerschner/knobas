@@ -244,7 +244,8 @@ the run's three tabs at each throttle had nothing to press (TeamCity is down on 
 cloned big compares' first open, `compare-3000` 118 and `compare-10000` 204 ms at 1x (line 100), 244 and 324 at 4x (line
 200), measured live for the first time: the page waits for the clone's own list of the changed files (70 and 145 ms of
 backend time at 1x) and then the first file's lines. Nothing in this pass changes that path; it is left for a pass of
-its own.
+its own. That pass (`2026-11-14-a-compare-lists-its-names-first.md`) weighed drawing the list from these stored trees
+and drew it from the clone's names instead: the store cannot name the merge base a compare is against.
 
 ## Reversing it
 

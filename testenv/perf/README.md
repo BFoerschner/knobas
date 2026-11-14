@@ -221,6 +221,33 @@ node testenv/perf/stored-trees.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-h
   file with nothing left reading. Each is a read the backend has not made, so start a fresh backend (and a fresh copy)
   for each throttle.
 
+### Big compares on the Mac: `compare.mjs` against the stand-in
+
+From the stored-compare pass (2026-11-14, `docs/decisions/2026-11-14-a-compare-lists-its-names-first.md`), with the live
+products out of reach: `big-compare.mjs`'s repository made locally (its `stream()` through `git fast-import`, plus a
+`trunk` two commits past `main` and `topic-3000` forked from the first of them), put into a scratch copy's mirror
+under `live-gitea` as `knobas-perf-big-compare/cloned` and `/forge` (a repository row and a branch row per ref, each at
+the local tip), its trees stored with `stored_trees_fill`, and `cloned` pinned to a local clone with
+`set_checkout_override`. The Gitea source points at the stand-in and **stays on**: the mirror's rows of a source turned
+off are left out of `sync.live_item`, and Compare then predicts nothing at the clone (the first try of this rig measured
+the forge at 0 ms as "with a clone").
+
+```sh
+node testenv/perf/standin-forge.mjs --listen 3931 --delay 0 --git <local repo> --real-compare --refuse-rest --control 3932 &
+node testenv/perf/compare.mjs --app "http://127.0.0.1:<app>/?fake-ipc&fake-hooks&fake-real=<port>#/time" \
+  --repo live-gitea:knobas-perf-big-compare/cloned --throttle 1 --twins 0 --moved
+```
+
+- `--real-compare` answers the compare as Gitea does from the local repository (the three-dot diff, the commits with
+  their parents); `--refuse-rest` answers every other route 503, so the source's scheduled run fails as unreachable and
+  sweeps nothing.
+- `--moved` adds two steps: `files-10000` into `trunk`, and `topic-3000` from `trunk`, whose merge base is no branch's
+  head.
+- One throttle a fresh copy and backend (`--twins 0`): each step's first pick is then a read the backend never made.
+  Run the cells with a clone at a forge delay of 0: with the forge slowed, headless Chrome's six connections are held by
+  the page's forge reads and the clone's answer queues behind them, which Tauri's IPC does not do. The steps' times move
+  by about 30 ms run to run on a loaded Mac: take the median of three.
+
 ### The extremes: `just open-budget --real <port> --extremes`
 
 The worst shapes a real team's data has (the extremes pass, 2026-11-13,

@@ -135,6 +135,9 @@ No row of the file list moved after it drew in any step, before or after. After,
   before is within it at 1x (30 to 63 ms). Next steps, not taken: the list's names first and its counts behind (`--raw`
   alone is 30 to 40 ms; the cards' room depends on the counts, so they would wait for them), and a slimmer list on the
   wire.
+- **Taken 2026-11-14** (`2026-11-14-a-compare-lists-its-names-first.md`): the list's names first, read alone at the
+  clone (`git diff --raw -M`, no counts) beside the counted list, which fills them in place; the cards hold a small
+  room until the counts or the lines come, and the names travel compact.
 - **The first file's lines** follow the list by 80 to 250 ms: one git per file, four at a time, on a busy Mac 30 to 90
   ms each.
 - **Without a clone, the list is Gitea's whole compare**, read and parsed on the backend (0.18 to 0.87 s for 300 to
