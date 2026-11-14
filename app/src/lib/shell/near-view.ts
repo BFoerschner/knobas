@@ -36,15 +36,20 @@ export function whileNear(grow: () => boolean, margin = 1600) {
       seen.observe(mark);
     };
     // Which box scrolls the mark is read off its ancestors' computed overflow, which inside a size container lays the
-    // page out. Attached as a page is built, that read laid out the page half built, and the frame laid it out again
-    // (the render-cost pass, 2026-11-14: 56 to 74 ms of a quarter-speed main thread on a long Docs page's open). So it
-    // is read once the mark's first layout is done, where a resize observer is called, when it costs nothing; the
-    // intersection observer made there reports in the same frame.
+    // page out. Attached as a page is built, that read laid the page out half built, in the task that built it (the
+    // render-cost pass, 2026-11-14: 56 to 74 ms of a quarter-speed main thread on a long Docs page's open). So it is
+    // read once the mark's first layout is done, where a resize observer is called, when it costs nothing; the
+    // intersection observer made there reports in the same frame. A mark of no size is never reported to a resize
+    // observer, so the frame after this one reads it too, whichever comes first.
     const laidOut = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => (laidOut?.disconnect(), watch()));
+    let late: ReturnType<typeof setTimeout> | undefined;
+    const frame = typeof requestAnimationFrame === "undefined" ? 0 : requestAnimationFrame(() => (late = setTimeout(watch, 0)));
     if (laidOut === null) watch();
     else laidOut.observe(mark);
     return () => {
       gone = true;
+      if (typeof cancelAnimationFrame !== "undefined") cancelAnimationFrame(frame);
+      clearTimeout(late);
       laidOut?.disconnect();
       seen?.disconnect();
       clearTimeout(timer);
