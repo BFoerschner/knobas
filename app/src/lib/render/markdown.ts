@@ -197,9 +197,67 @@ export function markdownFragment(text: string, links: MarkdownLinks): DocumentFr
   return fragment;
 }
 
-function finish(root: DocumentFragment, links: MarkdownLinks) {
-  const doc = root.ownerDocument;
+/**
+ * A long text's fragment a piece at a time (the render-cost pass, 2026-11-14): parsed whole, so a reference, a list's
+ * numbering and a task box come out as in {@link markdownFragment}, then rendered and sanitized a run of top-level
+ * blocks at a time, about `budget` characters of the text each, with heading ids counted across the pieces. Sanitizing
+ * a 300 KB comment whole was most of a 194 ms task on a quarter-speed main thread before any of it could draw. A piece
+ * never ends inside raw HTML that one block opens and a later one closes.
+ */
+export function markdownPieces(text: string, links: MarkdownLinks): { next(budget: number): DocumentFragment | null; done(): boolean } {
+  const env = {};
+  const tokens = engine.parse(text, env);
+  // Cut only between top-level blocks, and never inside raw HTML a block opened and a later one closes (a `<details>`
+  // around paragraphs), which sanitized apart would close early.
+  const blocks: [number, number][] = [];
+  let start = 0;
+  let open = 0;
+  tokens.forEach((token, i) => {
+    if (token.type === "html_block") open = Math.max(0, open + htmlDepth(token.content));
+    for (const child of token.children ?? []) if (child.type === "html_inline") open = Math.max(0, open + htmlDepth(child.content));
+    if (token.level === 0 && token.nesting <= 0 && open === 0) {
+      blocks.push([start, i + 1]);
+      start = i + 1;
+    }
+  });
+  if (start < tokens.length) blocks.push([start, tokens.length]);
   const seen = new Map<string, number>();
+  let at = 0;
+  return {
+    next(budget) {
+      if (at >= blocks.length) return null;
+      const from = blocks[at]![0];
+      let to = from;
+      let size = 0;
+      while (at < blocks.length && (to === from || size < budget)) {
+        const [a, b] = blocks[at++]!;
+        for (let i = a; i < b; i++) size += tokens[i]!.content.length;
+        to = b;
+      }
+      const html = engine.renderer.render(tokens.slice(from, to), engine.options, env);
+      const fragment = DOMPurify.sanitize(html, { ...SANITIZE, RETURN_DOM_FRAGMENT: true });
+      finish(fragment, links, seen);
+      return fragment;
+    },
+    done: () => at >= blocks.length,
+  };
+}
+
+/** Elements HTML never closes. */
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+
+/** How many elements raw HTML `html` leaves open: its opening tags less its closing ones. */
+function htmlDepth(html: string): number {
+  let depth = 0;
+  for (const [, close, name, self] of html.matchAll(/<(\/?)([a-zA-Z][\w-]*)[^<>]*?(\/?)>/g)) {
+    if (VOID.has(name!.toLowerCase()) || self === "/") continue;
+    depth += close === "/" ? -1 : 1;
+  }
+  return depth;
+}
+
+function finish(root: DocumentFragment, links: MarkdownLinks, seen = new Map<string, number>()) {
+  const doc = root.ownerDocument;
   for (const heading of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
     const base = slug(heading.textContent);
     const count = seen.get(base) ?? 0;
@@ -297,12 +355,30 @@ export function fenceCode(fence: Element): string {
   return fence.querySelector("pre code")?.textContent ?? "";
 }
 
+/** Where a drawing looks for what to draw: an element, a fragment, or the nodes one piece of a long text added. */
+export type Scope = { querySelectorAll<E extends Element = Element>(selectors: string): Iterable<E> };
+
+/** The nodes `nodes` and everything under them, as one place to look in (a long text drawn a piece at a time). */
+export function nodesScope(nodes: readonly Node[]): Scope {
+  return {
+    querySelectorAll<E extends Element = Element>(selectors: string): E[] {
+      const found: E[] = [];
+      for (const node of nodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches(selectors)) found.push(node as E);
+        found.push(...node.querySelectorAll<E>(selectors));
+      }
+      return found;
+    },
+  };
+}
+
 /**
  * Draws every `.tf-fence` under `root`: by the first renderer for its language
  * with a drawer, else highlighted (a fence with no language stays plain).
  * Returns how to stop every drawing still going.
  */
-export function drawFences(root: ParentNode, port: RenderPort): () => void {
+export function drawFences(root: Scope, port: RenderPort): () => void {
   const stops: (() => void)[] = [];
   for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
     const lang = block.dataset["lang"] ?? "";

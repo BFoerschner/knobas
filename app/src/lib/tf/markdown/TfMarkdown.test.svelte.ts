@@ -571,3 +571,65 @@ test("where the port has no diagram engine the fence stays its source", async ()
   expect(md().querySelector(".tf-fence pre code")?.textContent).toBe("flowchart LR\n  a --> b");
   expect(md().querySelector("iframe")).toBeNull();
 });
+
+/** A long text: `parts` sections of a heading, a paragraph of about 1,000 characters and a fence each. */
+function long(parts: number): string {
+  const words = "rollback weekly trace region dashboard retries window payout index primary ".repeat(13);
+  return Array.from({ length: parts }, (_, i) => `## Part ${i}\n\n${words}\n\n\`\`\`ts\nconst part${i} = ${i};\n\`\`\``).join("\n\n");
+}
+
+/** An intersection observer that finds every mark near the view, as a reader scrolled to it does. */
+class NearObserver {
+  constructor(private readonly said: (entries: { isIntersecting: boolean }[]) => void) {}
+  observe() {
+    queueMicrotask(() => this.said([{ isIntersecting: true }]));
+  }
+  disconnect() {}
+}
+
+test("a long text draws its first blocks, the rest a piece a task as its end nears the view, and its fences as each piece lands", async () => {
+  const asked: HighlightRequest[] = [];
+  const was = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = NearObserver as unknown as typeof IntersectionObserver;
+  try {
+    draw(long(120), { render: keywordPort(asked) });
+  } finally {
+    globalThis.IntersectionObserver = was;
+  }
+  const first = md().querySelectorAll("h2").length;
+  expect(first).toBeGreaterThan(0);
+  expect(first).toBeLessThan(120);
+  expect(md().hasAttribute("data-md-held")).toBe(true);
+  expect(md().lastElementChild?.classList.contains("tf-md-more")).toBe(true);
+  expect(asked.length).toBe(md().querySelectorAll(".tf-fence").length);
+  expect(asked.length).toBeLessThan(120);
+  for (let round = 0; round < 40 && md().hasAttribute("data-md-held"); round += 1) await settle();
+  expect(md().querySelectorAll("h2").length).toBe(120);
+  expect(md().querySelector(".tf-md-more")).toBeNull();
+  expect(md().hasAttribute("data-md-held")).toBe(false);
+  expect(asked.map((request) => request.text)).toEqual(Array.from({ length: 120 }, (_, i) => `const part${i} = ${i};`));
+  expect(md().querySelectorAll(".tf-hl-kw").length).toBe(120);
+});
+
+test("a short text draws whole at once, and an anchor in a long one draws the rest before it scrolls", () => {
+  draw("## One\n\nshort");
+  expect(md().hasAttribute("data-md-held")).toBe(false);
+  expect(md().querySelector(".tf-md-more")).toBeNull();
+  unmount(view!);
+  view = null;
+  draw(`[to the end](#part-119)\n\n${long(120)}`);
+  expect(md().querySelector("#user-content-part-119")).toBeNull();
+  let scrolled: Element | null = null;
+  const proto = Element.prototype as Element & { scrollIntoView: (arg?: unknown) => void };
+  const was = proto.scrollIntoView;
+  proto.scrollIntoView = function (this: Element) {
+    scrolled = this;
+  };
+  try {
+    md().querySelector("a")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  } finally {
+    proto.scrollIntoView = was;
+  }
+  expect(scrolled).toBe(md().querySelector("#user-content-part-119"));
+  expect(md().hasAttribute("data-md-held")).toBe(false);
+});

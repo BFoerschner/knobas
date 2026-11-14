@@ -5,8 +5,9 @@
 
   It stands at the top of the page's scroller and takes no room there, so nothing moves as it opens, and it is on screen
   wherever on the page it is mounted. It finds what is drawn (`find-text.ts`) and finds again as more is drawn, which is what a
-  windowed file does as you scroll. So it stops at what isn't drawn: a collapsed file, and a windowed file's far rows. `more`
-  says some of those are there, and the count reads *12+*.
+  windowed file does as you scroll. So it stops at what isn't drawn: a collapsed file, a windowed file's far rows, and the
+  pieces a long Markdown body holds back until they near the view (`data-md-held`). `more` says some rows are there, a held
+  body says so itself, and the count reads *12+*.
 
   A page keep-alive hides closes its bar, so one bar at most is live.
 -->
@@ -103,11 +104,14 @@
     place.landed = topOf();
   }
 
+  /** Whether a long Markdown body under `el` holds pieces back until they near the view (`TfMarkdown`). */
+  const bodyHeld = (el: Element | null): boolean => el?.querySelector("[data-md-held]") != null;
+
   function search(seed: Range | null = null): void {
     const el = root();
     matches = el === null ? [] : findIn(el, words);
     count = matches.length;
-    floor = more();
+    floor = more() || bodyHeld(el);
     if (count > 0) land(seed);
     else {
       at = -1;
@@ -135,7 +139,7 @@
     const held = matches[at];
     matches = findIn(el, words);
     count = matches.length;
-    floor = more();
+    floor = more() || bodyHeld(el);
     if (count === 0) {
       at = -1;
       clearMatches();

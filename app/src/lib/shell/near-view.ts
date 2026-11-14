@@ -22,16 +22,31 @@ export function whileNear(grow: () => boolean, margin = 1600) {
       step();
       return () => clearTimeout(timer);
     }
-    const seen = new IntersectionObserver(
-      (entries) => {
-        near = entries.some((entry) => entry.isIntersecting);
-        if (near) step();
-      },
-      { root: scrollerOf(mark), rootMargin: `${margin}px 0px` },
-    );
-    seen.observe(mark);
+    let seen: IntersectionObserver | null = null;
+    let gone = false;
+    const watch = () => {
+      if (gone || seen !== null) return;
+      seen = new IntersectionObserver(
+        (entries) => {
+          near = entries.some((entry) => entry.isIntersecting);
+          if (near) step();
+        },
+        { root: scrollerOf(mark), rootMargin: `${margin}px 0px` },
+      );
+      seen.observe(mark);
+    };
+    // Which box scrolls the mark is read off its ancestors' computed overflow, which inside a size container lays the
+    // page out. Attached as a page is built, that read laid out the page half built, and the frame laid it out again
+    // (the render-cost pass, 2026-11-14: 56 to 74 ms of a quarter-speed main thread on a long Docs page's open). So it
+    // is read once the mark's first layout is done, where a resize observer is called, when it costs nothing; the
+    // intersection observer made there reports in the same frame.
+    const laidOut = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => (laidOut?.disconnect(), watch()));
+    if (laidOut === null) watch();
+    else laidOut.observe(mark);
     return () => {
-      seen.disconnect();
+      gone = true;
+      laidOut?.disconnect();
+      seen?.disconnect();
       clearTimeout(timer);
     };
   };

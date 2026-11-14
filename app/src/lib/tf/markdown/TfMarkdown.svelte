@@ -18,17 +18,29 @@
     attachment link (the wiki's `[^name]`) and an attachment image are links
     that open the preview; elsewhere the link is its text;
   - fences are drawn by the renderer registry, highlighted where no renderer
-    claims them, and stopped when the text changes or the component goes.
+    claims them, and stopped when the text changes or the component goes;
+  - a long text (over `LONG` characters) draws its first blocks, then a piece
+    of `PIECE` characters a task while the end of what is drawn is near the
+    view (`whileNear`), as a Docs page's body does; an in-page anchor draws the
+    rest first. Until it is whole the body carries `data-md-held`, so a find
+    bar counts its matches as a floor (the render-cost pass, 2026-11-14: a
+    300 KB comment built and laid out whole took 0.3 to 0.75 s of a
+    quarter-speed main thread, and every fence's colours landing laid all of
+    it out again).
 -->
 <script lang="ts">
   import {
     drawFences,
     fenceCode,
     markdownFragment,
+    markdownPieces,
+    nodesScope,
     resolveLink,
     type AttachmentImages,
     type MarkdownLinks,
+    type Scope,
   } from "../../render/markdown";
+  import { whileNear } from "../../shell/near-view";
   import { imageBlob } from "../../render/image";
   import { renderPort, type RenderPort } from "../../render/port";
   import { ipcErrorMessage } from "../../ipc";
@@ -66,16 +78,57 @@
     attachments?: AttachmentImages | null;
   } = $props();
 
+  /** A text longer than this, in characters of Markdown, draws in pieces. */
+  const LONG = 24_000;
+  /** About how many characters of the text each piece of a long text adds. */
+  const PIECE = 12_000;
+
+  /** The rest of a long text, drawn now: an in-page anchor needs its heading on the page. */
+  let drawRest = () => {};
+
   /** Draws the text; again whenever it, its base, its links or its image read change. */
   function paint(node: HTMLElement) {
-    node.replaceChildren(markdownFragment(text, { base, fileLink }));
-    const stopFences = drawFences(node, render);
-    const stopImages = image === null ? () => {} : drawImages(node, image);
-    const stopAttachments = attachments === null ? () => {} : drawAttachments(node, attachments);
+    const stops: (() => void)[] = [];
+    const wire = (scope: Scope) => {
+      stops.push(drawFences(scope, render));
+      if (image !== null) stops.push(drawImages(scope, image));
+      if (attachments !== null) stops.push(drawAttachments(scope, attachments));
+    };
+    const stop = () => stops.forEach((each) => each());
+    if (text.length <= LONG) {
+      node.replaceChildren(markdownFragment(text, { base, fileLink }));
+      wire(node);
+      return stop;
+    }
+    // A long text: parsed whole, drawn a piece of its top-level blocks at a time before an empty mark, whose nearing
+    // the view draws the next.
+    const pieces = markdownPieces(text, { base, fileLink });
+    const mark = document.createElement("div");
+    mark.className = "tf-md-more";
+    mark.setAttribute("aria-hidden", "true");
+    node.replaceChildren(mark);
+    node.dataset["mdHeld"] = "";
+    const grow = (budget: number): boolean => {
+      const piece = pieces.next(budget);
+      if (piece !== null) {
+        const added = [...piece.childNodes];
+        mark.before(piece);
+        wire(nodesScope(added));
+      }
+      if (!pieces.done()) return true;
+      mark.remove();
+      delete node.dataset["mdHeld"];
+      return false;
+    };
+    grow(PIECE);
+    const stopNear = pieces.done() ? null : whileNear(() => grow(PIECE))(mark);
+    drawRest = () => {
+      if (!pieces.done()) grow(Infinity);
+    };
     return () => {
-      stopFences();
-      stopImages();
-      stopAttachments();
+      stopNear?.();
+      drawRest = () => {};
+      stop();
     };
   }
 
@@ -84,7 +137,7 @@
    * `data:image/…` URL; anything else, or a refusal, makes the image the
    * placeholder the surface words. Returns how to stop: answers after it are dropped.
    */
-  function drawAttachments(node: HTMLElement, read: AttachmentImages) {
+  function drawAttachments(node: Scope, read: AttachmentImages) {
     let live = true;
     const watches: (() => void)[] = [];
     if (read.open) for (const link of node.querySelectorAll<HTMLAnchorElement>("a[data-md-attachment]")) link.setAttribute("href", "#");
@@ -138,7 +191,7 @@
    * refuses becomes its alt text and the reason. Returns how to stop: answers
    * after it are dropped, and every URL made is revoked.
    */
-  function drawImages(node: HTMLElement, read: (path: string) => Promise<Uint8Array>) {
+  function drawImages(node: Scope, read: (path: string) => Promise<Uint8Array>) {
     let live = true;
     const urls: string[] = [];
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-path]")) {
@@ -183,6 +236,7 @@
         attachments?.open?.(file);
       } else if (anchor !== undefined) {
         event.preventDefault();
+        drawRest();
         [...node.querySelectorAll("[id]")].find((el) => el.id === `user-content-${anchor}`)?.scrollIntoView?.({ block: "start" });
       } else if (link.classList.contains("tf-ext")) {
         event.preventDefault();
