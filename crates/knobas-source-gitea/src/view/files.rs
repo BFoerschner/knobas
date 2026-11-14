@@ -1237,9 +1237,9 @@ impl GitEntry {
 ///   it whose sha is not held, side by side. A branch pushed with one file
 ///   changed five folders down costs six requests, and one whose root is
 ///   held already (a push that changed nothing, a branch made from
-///   another) costs one. A walk that finds more new levels than the whole
-///   tree has pages (by the repository's last tree, `held.estimate()`)
-///   reads the whole tree instead.
+///   another) costs one. A walk that knows of as many new levels still to
+///   read as the whole tree has pages (by the repository's largest stored
+///   tree, `held.estimate()`) reads the whole tree instead.
 ///
 /// A tree of more than `cap` entries in all (each directory counted, as
 /// Gitea's `total_count` counts) reads no further and says so.
@@ -1287,8 +1287,9 @@ pub(super) async fn read_tree(
             requests: sent.load(Ordering::Relaxed),
         });
     }
-    // The levels a walk may read before the whole tree is cheaper.
-    let budget = estimate.div_ceil(TREE_PAGE as u64) + 1;
+    // The pages the whole tree would cost: a walk that knows of as many new
+    // levels still to read is no cheaper, and reads the whole tree instead.
+    let whole_pages = estimate.div_ceil(TREE_PAGE as u64).max(1);
     let mut total = entries.len() as u64;
     let mut levels = vec![knobas_source::tree::TreeLevel {
         sha: root.clone(),
@@ -1312,7 +1313,6 @@ pub(super) async fn read_tree(
         }
     };
     note(&levels[0].entries, &mut owed, &mut total);
-    let mut walked: u64 = 0;
     while !owed.is_empty() {
         if total > cap {
             return Ok(TreeRead::TooLarge {
@@ -1320,13 +1320,12 @@ pub(super) async fn read_tree(
                 requests: sent.load(Ordering::Relaxed),
             });
         }
-        if walked + owed.len().min(TREE_READS_AT_ONCE) as u64 > budget {
+        if owed.len() as u64 >= whole_pages {
             return whole_levels(source, owner, repo, commit, held, cap, &sent).await;
         }
         let some: Vec<String> = (0..TREE_READS_AT_ONCE)
             .filter_map(|_| owed.pop_front())
             .collect();
-        walked += some.len() as u64;
         let reads = some
             .iter()
             .map(|sha| async {
