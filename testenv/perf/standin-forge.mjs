@@ -10,6 +10,13 @@
 // and every other route 404 at once.
 //
 //   node testenv/perf/standin-forge.mjs --listen 3911 [--delay 650] [--files 300] [--git <dir>] [--control 3912]
+//                                       [--distinct] [--tips <file.json>]
+//
+// `--distinct` (the stored-trees pass, 2026-11-14) gives each repository objects of its own: every sha the stand-in
+// answers for repository `o/r` is `alias("o/r", sha)`, the first 40 hex digits of SHA-256 of `o/r:<sha>`, so two
+// repositories served from the one local repository share no tree, as two real ones do not. A commit is asked for by
+// its alias (the profile's mirror rewritten to name them). `--tips` names each branch's tip, `{"o/r/branch": alias}`,
+// for `branches/{name}`.
 //
 // Point a scratch profile's Gitea source at it (`base_url` http://127.0.0.1:3911). `--control` takes
 // `POST /delay?ms=<n>` and `POST /files?n=<n>`, and answers `GET /count` with the requests answered so far, by kind,
@@ -17,6 +24,7 @@
 // Nothing is written anywhere.
 import http from "node:http";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
@@ -26,6 +34,21 @@ let delay = Number(opt("--delay", "650"));
 let filesPerCompare = Number(opt("--files", "300"));
 const control = opt("--control");
 const gitDir = opt("--git");
+const distinct = args.includes("--distinct");
+const tips = opt("--tips") ? JSON.parse(readFileSync(opt("--tips"), "utf8")) : {};
+/** Each alias the stand-in answered or can be asked by, to its object in the local repository. */
+const back = new Map();
+const aliased = new Set();
+const alias = (repo, object) => (distinct ? createHash("sha256").update(`${repo}:${object}`).digest("hex").slice(0, 40) : object);
+/** The local object an alias of `repo` names: its commits are known before any is asked for. */
+function real(repo, object) {
+  if (!distinct) return object;
+  if (!aliased.has(repo)) {
+    aliased.add(repo);
+    for (const commit of git("rev-list", "--all").toString().split("\n").filter(Boolean)) back.set(alias(repo, commit), commit);
+  }
+  return back.get(object) ?? object;
+}
 const counts = {};
 /** The trees answered, by sha: a read behind the app's kept top has landed once its commit's tree has been answered. */
 const treesAnswered = new Set();
@@ -94,12 +117,20 @@ async function files(url, res) {
     const branch = decodeURIComponent(m[1]);
     count("branch");
     await sleep(delay);
-    const sha = git("rev-parse", "--verify", "-q", `refs/heads/${branch}`).toString().trim();
-    json(res, { name: branch, commit: { id: sha, message: git("log", "-1", "--format=%s", sha).toString().trim() } });
+    const tip = tips[`${owner}/${name}/${branch}`];
+    const sha = tip ?? git("rev-parse", "--verify", "-q", `refs/heads/${branch}`).toString().trim();
+    json(res, { name: branch, commit: { id: sha, message: git("log", "-1", "--format=%s", real(`${owner}/${name}`, sha)).toString().trim() } });
   } else if ((m = rest.match(/^\/git\/trees\/([0-9a-f]+)$/))) {
-    count("tree");
+    const recursive = url.searchParams.get("recursive") === "true";
+    count(recursive ? "tree" : "level");
     await sleep(delay);
-    const all = treeEntries(m[1], url.searchParams.get("recursive") === "true");
+    const repoName = `${owner}/${name}`;
+    const all = treeEntries(real(repoName, m[1]), recursive).map((entry) => {
+      if (!distinct) return entry;
+      const named = alias(repoName, entry.sha);
+      back.set(named, entry.sha);
+      return { ...entry, sha: named };
+    });
     const page = Number(url.searchParams.get("page") ?? "1");
     const per = Number(url.searchParams.get("per_page") ?? "1000");
     json(res, { sha: m[1], tree: all.slice((page - 1) * per, page * per), total_count: all.length, truncated: false });
@@ -108,14 +139,14 @@ async function files(url, res) {
     const path = decodeURIComponent(m[1]);
     count("entry");
     await sleep(delay);
-    const [row] = treeEntries(`${ref}:${path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}`, false).filter((e) => e.path === path.slice(path.lastIndexOf("/") + 1));
+    const [row] = treeEntries(`${real(`${owner}/${name}`, ref)}:${path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}`, false).filter((e) => e.path === path.slice(path.lastIndexOf("/") + 1));
     if (row === undefined) return missing(res), true;
-    json(res, { file_contents: { name: row.path, type: "file", size: row.size, sha: row.sha, html_url: null } });
+    json(res, { file_contents: { name: row.path, type: "file", size: row.size, sha: alias(`${owner}/${name}`, row.sha), html_url: null } });
   } else if ((m = rest.match(/^\/raw\/(.+)$/)) && ref !== null) {
     const path = decodeURIComponent(m[1]);
     count("raw");
     await sleep(delay);
-    const bytes = git("cat-file", "blob", `${ref}:${path}`);
+    const bytes = git("cat-file", "blob", `${real(`${owner}/${name}`, ref)}:${path}`);
     res.writeHead(200, { "content-type": "application/octet-stream", "content-length": bytes.length });
     res.end(bytes);
   } else return false;
