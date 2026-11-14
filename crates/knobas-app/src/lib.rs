@@ -790,6 +790,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The compare pass (PR #2479, 2026-11-13): a range's files first, each file's lines as it is reached,
         // and a read the page no longer wants called off.
         commands::entity::entity_range_files,
+        commands::entity::entity_range_names,
         commands::entity::entity_range_file,
         commands::entity::entity_source_range_files,
         commands::entity::cancel_read,

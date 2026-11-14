@@ -75,6 +75,68 @@ pub struct RangeFiles {
     pub held_at: Option<String>,
 }
 
+/// The names of the files a range changes, without their counts (the
+/// stored-compare pass, 2026-11-14, [`range_names`]): what Compare draws
+/// while the list with counts is read beside it. Compact on the wire, a
+/// tenth of [`RangeFiles`]' bytes per file at 10,000 files, since the page
+/// draws it on the way to its first frame: the page makes each file of it
+/// as the list with counts names it, `additions` and `deletions` `0`, no
+/// file `binary` and no blob.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RangeNames {
+    /// Each file's path (where it is after the change), in the list's order.
+    pub paths: Vec<String>,
+    /// Each file's change, one letter a file in the same order: `A` added,
+    /// `D` deleted, `M` modified, `R` renamed.
+    pub changes: String,
+    /// Each renamed file: its place in `paths`, where it was, and how alike
+    /// the two sides are in percent.
+    pub renamed: Vec<(u32, String, Option<u8>)>,
+    /// Each file whose mode changed: its place in `paths`, and the mode
+    /// before and after.
+    pub modes: Vec<(u32, String, String)>,
+    /// The listing was cut (past 16 MiB of git's listing).
+    pub truncated: bool,
+    /// The two commits the files' lines are read between: the merge base
+    /// and the head, as [`RangeFiles::range`] names them.
+    pub range: knobas_source::view::DiffRange,
+    /// As [`RangeFiles::predicted_at`]: when the mirror last stored the two
+    /// tips the names were read between.
+    pub predicted_at: String,
+}
+
+impl RangeNames {
+    fn of(files: &[DiffFile], truncated: bool, range: knobas_source::view::DiffRange, predicted_at: String) -> Self {
+        let mut names = RangeNames {
+            paths: Vec::with_capacity(files.len()),
+            changes: String::with_capacity(files.len()),
+            renamed: Vec::new(),
+            modes: Vec::new(),
+            truncated,
+            range,
+            predicted_at,
+        };
+        for (at, file) in files.iter().enumerate() {
+            let at = u32::try_from(at).unwrap_or(u32::MAX);
+            names.paths.push(file.path.clone());
+            names.changes.push(match file.change {
+                DiffChange::Added => 'A',
+                DiffChange::Deleted => 'D',
+                DiffChange::Renamed => 'R',
+                DiffChange::Modified | DiffChange::Binary => 'M',
+            });
+            if let Some(old) = &file.old_path {
+                names.renamed.push((at, old.clone(), file.similarity));
+            }
+            if let (Some(old), Some(new)) = (&file.old_mode, &file.new_mode) {
+                names.modes.push((at, old.clone(), new.clone()));
+            }
+        }
+        names
+    }
+}
+
 /// One page of one file's lines.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
@@ -418,6 +480,134 @@ async fn predicted_files(
     Some(local.answer(&repo, Some(predicted_at.unwrap_or_default())))
 }
 
+/// The names of the files `base`...`head` changes, between two branch
+/// names, at the checkout of the repository `entity_id` and the tips the
+/// mirror holds for them, as [`predicted_files`] reads them less the counts
+/// (the stored-compare pass, 2026-11-14): `git diff --raw -z -M A...B`, which
+/// pairs renames as the counted read does but reads no file's lines (25 ms
+/// for 10,000 files where `--numstat` took 100), with `git merge-base` beside
+/// it for the two commits each file's lines are read between. The page draws
+/// it while [`range_files`], read beside it, brings the counts.
+///
+/// `None` where the checkout cannot answer, or where the counted list is
+/// kept already (it answers as fast).
+pub async fn range_names(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) -> Option<RangeNames> {
+    let repo = repo_of(pool, entity_id).await.ok()?.entity_id?;
+    let path = resolve(pool, &repo).await.ok()?.path?;
+    let (base_tip, head_tip) = tokio::join!(
+        branch_tip(pool, registry, &repo, base),
+        branch_tip(pool, registry, &repo, head)
+    );
+    let (base_tip, head_tip) = (base_tip.ok()??, head_tip.ok()??);
+    let (a, b) = (base_tip.commit.to_ascii_lowercase(), head_tip.commit.to_ascii_lowercase());
+    if !whole(&a) || !whole(&b) {
+        return None;
+    }
+    let path = Path::new(&path);
+    if kept_lists().has(&listed_key(path, &format!("{a}..."), &b, false)) {
+        return None;
+    }
+    let all = async {
+        let git = git_at_checkout(path).await?;
+        let range = format!("{a}^{{commit}}...{b}^{{commit}}");
+        let (from, named) = tokio::join!(
+            super::range::merge_base(path, &a, &b),
+            names(&git, path, &range)
+        );
+        Some((from?, named?))
+    };
+    let (from, (files, truncated)) = tokio::time::timeout(super::range::TIMEOUT, all).await.ok().flatten()?;
+    let predicted_at = match (base_tip.as_of, head_tip.as_of) {
+        (Some(x), Some(y)) => Some(x.max(y)),
+        (x, y) => x.or(y),
+    };
+    Some(RangeNames::of(
+        &files,
+        truncated,
+        knobas_source::view::DiffRange {
+            repository: repo,
+            base: from,
+            head: b,
+            commits: Vec::new(),
+            reviewed: None,
+        },
+        predicted_at.unwrap_or_default(),
+    ))
+}
+
+/// `git diff --raw -z -M <range>`, parsed: the files [`listing`] reads, in
+/// its order, with no counts.
+async fn names(git: &Path, path: &Path, range: &str) -> Option<(Vec<DiffFile>, bool)> {
+    let mut command = git_read(git, path);
+    command.args([
+        "-c",
+        "diff.autoRefreshIndex=false",
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        "--no-textconv",
+        "-M",
+        "--raw",
+        "-z",
+        range,
+        "--",
+    ]);
+    let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
+    Some(parse_raw(&out, cut))
+}
+
+/// `git diff --raw -z` output as [`parse_stat`] draws the same files, less
+/// their counts: no file is `binary`, since only the counts say so.
+pub fn parse_raw(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
+    let text = String::from_utf8_lossy(out);
+    let mut tokens = text.split('\0').map(|t| t.trim_start_matches('\n'));
+    let mut files = Vec::new();
+    let mut dropped = false;
+    while let Some(token) = tokens.next() {
+        let Some(meta) = token.strip_prefix(':') else {
+            continue;
+        };
+        let mut parts = meta.split(' ');
+        let (Some(old_mode), Some(new_mode), Some(old_blob), Some(new_blob), Some(status)) =
+            (parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            dropped = true;
+            break;
+        };
+        let letter = status.bytes().next().unwrap_or(b'M');
+        let n = if matches!(letter, b'R' | b'C') { 2 } else { 1 };
+        let paths: Vec<String> = tokens.by_ref().take(n).map(str::to_owned).collect();
+        if paths.len() < n {
+            dropped = true;
+            break;
+        }
+        files.push(file_of(
+            Raw {
+                old_mode: old_mode.to_owned(),
+                new_mode: new_mode.to_owned(),
+                old_blob: old_blob.to_owned(),
+                new_blob: new_blob.to_owned(),
+                status: letter,
+                score: status.get(1..).and_then(|s| s.parse::<u8>().ok()),
+                paths,
+            },
+            Some(0),
+            Some(0),
+        ));
+    }
+    // A cut read may have stopped inside the last record's last path.
+    if cut && files.pop().is_some() {
+        dropped = true;
+    }
+    (files, dropped || cut)
+}
+
 async fn checkout_path(pool: &PgPool, entity_id: &str) -> Option<std::path::PathBuf> {
     resolve(pool, entity_id)
         .await
@@ -636,6 +826,10 @@ fn listed_key(path: &Path, base: &str, head: &str, ignore_whitespace: bool) -> S
 }
 
 impl Listed {
+    fn has(&self, key: &str) -> bool {
+        self.0.lock().expect("the kept lists").iter().any(|(k, _)| k == key)
+    }
+
     fn get(&self, key: &str) -> Option<LocalStat> {
         let mut all = self.0.lock().expect("the kept lists");
         let at = all.iter().position(|(k, _)| k == key)?;
@@ -1336,6 +1530,68 @@ mod tests {
             page(&big, PAGE_LINES).continues,
             "the one hunk of big.txt goes on"
         );
+    }
+
+    /// The names drawn first are the counted list less its counts, in its
+    /// order (the stored-compare pass): renames paired as the counted read
+    /// pairs them, so no row comes or goes when the counts land.
+    #[tokio::test]
+    async fn the_names_are_the_counted_list_less_its_counts_in_its_order() {
+        let (dir, base, head) = repo();
+        let p = dir.path();
+        let git = git_at_checkout(p).await.expect("git");
+        let range = format!("{base}...{head}");
+        let (named, cut) = names(&git, p, &range).await.expect("the clone answers");
+        assert!(!cut);
+        let (counted, _) = listing(&git, p, &range, None, false).await.expect("the clone answers");
+        let less = |f: &DiffFile| DiffFile {
+            additions: 0,
+            deletions: 0,
+            // Only the counts say a file is binary: its change as the raw record names it.
+            change: if f.change == DiffChange::Binary { DiffChange::Modified } else { f.change },
+            ..f.clone()
+        };
+        assert_eq!(named, counted.iter().map(less).collect::<Vec<_>>());
+        // And on the wire, as the page makes each file of it again (`names.ts`): the counted list less its counts and blobs.
+        let range = knobas_source::view::DiffRange { repository: "r".into(), base: base.clone(), head: head.clone(), commits: Vec::new(), reviewed: None };
+        let wire = RangeNames::of(&named, false, range, String::new());
+        let made: Vec<DiffFile> = wire
+            .paths
+            .iter()
+            .zip(wire.changes.chars())
+            .enumerate()
+            .map(|(at, (path, letter))| {
+                let at = u32::try_from(at).unwrap();
+                let moved = wire.renamed.iter().find(|r| r.0 == at);
+                let mode = wire.modes.iter().find(|m| m.0 == at);
+                DiffFile {
+                    path: path.clone(),
+                    old_path: moved.map(|r| r.1.clone()),
+                    change: match letter {
+                        'A' => DiffChange::Added,
+                        'D' => DiffChange::Deleted,
+                        'R' => DiffChange::Renamed,
+                        _ => DiffChange::Modified,
+                    },
+                    additions: 0,
+                    deletions: 0,
+                    hunks: Vec::new(),
+                    truncated: false,
+                    similarity: moved.and_then(|r| r.2),
+                    old_mode: mode.map(|m| m.1.clone()),
+                    new_mode: mode.map(|m| m.2.clone()),
+                    threads: Vec::new(),
+                    blob: None,
+                }
+            })
+            .collect();
+        assert_eq!(made, counted.iter().map(|f| DiffFile { blob: None, ..less(f) }).collect::<Vec<_>>());
+        assert!(named.iter().any(|f| f.change == DiffChange::Renamed && f.similarity.is_some_and(|s| s < 100)), "an edited rename is paired too");
+        // A cut read drops the record it may have stopped inside.
+        let out = b":100644 100644 aaaaaaa bbbbbbb M\0a.txt\0:100644 100644 ccccccc ddddddd M\0b.t";
+        let (files, dropped) = parse_raw(out, true);
+        assert!(dropped);
+        assert_eq!(files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["a.txt"]);
     }
 
     #[test]

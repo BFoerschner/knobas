@@ -454,6 +454,35 @@ pub async fn entity_range_files<R: tauri::Runtime>(
     .await
 }
 
+/// The names of the files `base`...`head` of the repository `entity_id`
+/// changes, without their counts (the stored-compare pass of PR #2479,
+/// 2026-11-14): at the checkout, between the tips the mirror holds for two
+/// branch names, as [`entity_range_files`] predicts there, in one `git diff
+/// --raw -M` that reads no file's content. `None` where the checkout cannot
+/// answer, or [`entity_range_files`] holds the list already. A page draws it
+/// while that list, read beside it, brings the counts.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn entity_range_names<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+) -> Result<Option<crate::checkout::range_files::RangeNames>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    Ok(crate::checkout::range_files::range_names(
+        &state.pool,
+        state.registry.as_ref(),
+        &entity_id,
+        &base,
+        &head,
+    )
+    .await)
+}
+
 /// One page of one file's lines in `base`...`head` of the repository
 /// `entity_id` (the compare pass of PR #2479): the ends are the `range`
 /// [`entity_range_files`] answered (the names it was asked by where it
