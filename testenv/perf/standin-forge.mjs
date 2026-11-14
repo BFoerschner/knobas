@@ -10,7 +10,13 @@
 // and every other route 404 at once.
 //
 //   node testenv/perf/standin-forge.mjs --listen 3911 [--delay 650] [--files 300] [--git <dir>] [--control 3912]
-//                                       [--distinct] [--tips <file.json>]
+//                                       [--distinct] [--tips <file.json>] [--real-compare]
+//
+// `--real-compare` (the stored-compare pass, 2026-11-14) answers the compare from the `--git` repository itself, as
+// Gitea does: the diff is `git diff -M <base>...<head>` and the commits `git log <base>..<head>` with their parents, so
+// a list knobas draws first can be checked against the one the forge settles. `--refuse-rest` answers every other route
+// 503, so a profile whose Gitea source stays on (the mirror's rows of a source turned off are not read) syncs nothing:
+// each run fails as the forge not answering, and sweeps nothing.
 //
 // `--distinct` (the stored-trees pass, 2026-11-14) gives each repository objects of its own: every sha the stand-in
 // answers for repository `o/r` is `alias("o/r", sha)`, the first 40 hex digits of SHA-256 of `o/r:<sha>`, so two
@@ -35,6 +41,8 @@ let filesPerCompare = Number(opt("--files", "300"));
 const control = opt("--control");
 const gitDir = opt("--git");
 const distinct = args.includes("--distinct");
+const realCompare = args.includes("--real-compare");
+const refuseRest = args.includes("--refuse-rest");
 const tips = opt("--tips") ? JSON.parse(readFileSync(opt("--tips"), "utf8")) : {};
 /** Each alias the stand-in answered or can be asked by, to its object in the local repository. */
 const back = new Map();
@@ -82,13 +90,27 @@ function commits(base, head) {
   return { total_commits: 3, commits: listed };
 }
 
+/** The commits `head` has that `base` lacks, newest first, with their parents, as Gitea lists a compare's. */
+function realCommits(base, head) {
+  const listed = git("log", "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1e", `${base}..${head}`, "--")
+    .toString("utf8")
+    .split("\x1e")
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [sha, parents, name, date, subject] = record.split("\x1f");
+      return { sha, html_url: null, created: date, commit: { message: subject, author: { name, date } }, parents: parents.split(" ").filter(Boolean).map((p) => ({ sha: p })) };
+    });
+  return { total_commits: listed.length, commits: listed };
+}
+
 const git = (...argv) => execFileSync("git", ["-C", gitDir, ...argv], { maxBuffer: 64 << 20 });
 const json = (res, value) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify(value));
 };
 const missing = (res) => {
-  res.writeHead(404, { "content-type": "application/json" });
+  res.writeHead(refuseRest ? 503 : 404, { "content-type": "application/json" });
   res.end('{"message":"not on the stand-in"}');
 };
 
@@ -171,6 +193,17 @@ http.createServer(async (req, res) => {
   const [base, head] = cut < 0 ? [ends, ends] : [ends.slice(0, cut), ends.slice(cut + 3)];
   count("compare");
   await sleep(delay);
+  if (realCompare && gitDir !== null) {
+    try {
+      if (url.searchParams.get("output") === "diff") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end(git("diff", "--no-color", "--no-ext-diff", "-M", `${base}...${head}`, "--"));
+      } else json(res, realCommits(base, head));
+    } catch {
+      missing(res);
+    }
+    return;
+  }
   if (url.searchParams.get("output") === "diff") {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end(diff(head, filesPerCompare));

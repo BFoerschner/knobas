@@ -7,6 +7,7 @@
 // --app    a built app on the windowless backend, `?fake-ipc&fake-real=<port>` (README, *On a real database*)
 // --repo   the repository's entity id (`live-gitea:knobas-perf-big-compare/cloned`)
 // --twins  the throttles that pick the `-b` twins, so each first pick at them is a read knobas never made (default 4)
+// --moved  two steps more, against a base that moved since the branch forked (the stored-compare rig)
 // --limit  seconds a step may take before it counts as frozen (default 60): the page's own thread answers nothing while
 //          it is frozen, so the browser is started again and the next step's start drawn anew; a step whose start does
 //          not draw within the limit either is not measured, and says so
@@ -26,6 +27,7 @@ const repo = opt("--repo");
 const throttles = (opt("--throttle") ?? "1,4").split(",").map(Number);
 const twins = (opt("--twins") ?? "4").split(",").map(Number);
 const out = opt("--out") ?? "compare.json";
+const moved = args.includes("--moved");
 const stepLimit = Number(opt("--limit", "60")) * 1000;
 if (!app || !repo) { console.log("compare.mjs: --app and --repo are required"); process.exit(2); }
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, Number(opt("--max-minutes", "40")) * 60000).unref();
@@ -171,6 +173,9 @@ for (const rate of throttles) {
     ["into", `files-10000${t}`, "main"],
     ["from", `files-300${t}`, "main"],
     ["from", `files-10000${t}`, "main"],
+    // `--moved` (the stored-compare pass, 2026-11-14): a base that moved since the branch forked, from the stored-compare
+    // rig's repository (`trunk`, and `topic-3000` forked from its first commit, so its merge base is no branch's head).
+    ...(moved ? [["into", `files-10000${t}`, "trunk"], ["from", `topic-3000${t}`, "trunk"]] : []),
   ];
   await start();
   await cpu(1);
