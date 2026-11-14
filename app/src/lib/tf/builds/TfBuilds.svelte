@@ -346,8 +346,10 @@
       return foldsDrew.get(f.key)! || foldHolds(f, at);
     });
   });
-  // A pipeline or a fold is one 26 px line; headings are measured once drawn.
-  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 26 });
+  // A pipeline or a fold is one 26 px line; headings are measured once drawn. From 40 rows, not the default 300: the
+  // scale estate's 75 rows drawn whole were a third of Builds' first open, a 194 ms task at 4x with the runs beside them
+  // (the Windows pass, 2026-11-14), as the Inbox windows from 40.
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 26, from: 40, overscan: 300 });
   /** Whether any drawn fold is open: the tools' button then shuts them all, else opens them all. */
   const anyOpen = $derived(rows.some((row) => row.kind === "fold" && row.open));
 

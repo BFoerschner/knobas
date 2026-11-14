@@ -76,7 +76,6 @@ const SMALL: Record<string, string> = {
   "tf/TfToasts.svelte  toasts.items": "a handful by what it is: the toasts up at once",
   "tf/TfWorklogDraft.svelte  draft.candidates": "a handful by what it is: the tickets a draft's time could go to: the day's few",
   "tf/asset-tree/TfAssetTree.svelte  reached.list": "a handful by what it is: one asset's reach: what it runs on and what runs on it",
-  "tf/builds/TfPipeline.svelte  day.runs": "inside one drawn row: one day's runs, inside the windowed days",
   "tf/builds/TfPipeline.svelte  field.kind.options": "a handful by what it is: one parameter's choices",
   "tf/builds/TfPipeline.svelte  history": "capped where it is read or drawn: `historyOf`: the last `HISTORY` runs",
   "tf/builds/TfPipeline.svelte  repositories": "a handful by what it is: the repositories one pipeline builds",

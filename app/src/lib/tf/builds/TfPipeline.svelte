@@ -51,6 +51,7 @@
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
+  import TfWindowedRows from "../TfWindowedRows.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
@@ -535,6 +536,8 @@
    * them), so past thirty days only the days on screen and near it are drawn, a day at a time.
    */
   const dayWin = new Windowed({ count: () => days.length, key: (i) => days[i]!.key, estimate: 260, from: 30 });
+  /** A run's row before it is drawn: one 34 px line with its chips and *Log* (the Windows pass, 2026-11-14). */
+  const RUN_ROW_PX = 34;
 
   /**
    * A click anywhere on a run row opens the run (R-9.6, prototype-6's
@@ -753,10 +756,11 @@
             class="tf-run-dur"
           /><col class="tf-run-at" /><col class="tf-run-acts" /></colgroup
         >
-        <tbody>
-          {#each day.runs as run (run.entity_id)}
+        <!-- A day's runs window too (the Windows pass, 2026-11-14): the scale estate's TeamCity ran its builds on one day, and seventy-six of them drawn whole were 1,500 elements of Builds' first open. 150 px of overscan: a scroll draws a few rows at a time, each move at 4x a 15 ms frame where 300 px made it 18 and 600 px 25. -->
+        <TfWindowedRows rows={day.runs} key={(run) => run.entity_id} estimate={RUN_ROW_PX} colspan={7} overscan={150}>
+          {#snippet row(run, attach)}
             {@const tone = runTone(run)}
-            <tr class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
+            <tr {@attach attach} class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
                   <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
@@ -807,8 +811,8 @@
                 {/if}
               </td>
             </tr>
-          {/each}
-        </tbody>
+          {/snippet}
+        </TfWindowedRows>
       </table>
       </div>
     {/each}

@@ -673,6 +673,39 @@ test("a filter that opens every fold of a big CI draws only the rows near the vi
   running();
 });
 
+// The Windows pass (2026-11-14): Builds' first open on the scale estate built 2,200 elements in one task, 194 ms at 4x
+// in headless Chrome and drawn 466 ms after the press in WebView2: its 75 rail rows and one day's 76 runs drawn whole.
+test("a rail of a hundred pipelines draws the rows near the viewport, as the Inbox does from 40", async () => {
+  const many = Array.from({ length: 120 }, (_, i) => {
+    const name = `Flat_${String(i).padStart(3, "0")}`;
+    return pipeline(name, name, [run(`teamcity:build:${i}`, "ok")]);
+  });
+  page = mount(TfBuilds, {
+    target,
+    props: { ready: true, head: "builds", rest: [], job: null, ports: { pipelines: () => Promise.resolve(many), runs: () => Promise.resolve([]) } },
+  });
+  await settle();
+  expect(names().length).toBeGreaterThan(5);
+  expect(names().length).toBeLessThan(120);
+  expect(names()[0]).toBe("Flat_000");
+});
+
+test("a day of a hundred runs draws the runs near the viewport, with room for the rest", async () => {
+  const runs = Array.from({ length: 120 }, (_, i) => run(`teamcity:build:${5000 - i}`, "ok", { started: `2026-08-22T${String(11 - Math.floor(i / 60)).padStart(2, "0")}:${String(59 - (i % 60)).padStart(2, "0")}:00Z` }));
+  const busy = [pipeline("Busy_Build", "Busy_Build", runs)];
+  page = mount(TfBuilds, {
+    target,
+    props: { ready: true, head: "builds", rest: [busy[0]!.entity_id], job: null, ports: { pipelines: () => Promise.resolve(busy), runs: () => Promise.resolve(runs) } },
+  });
+  await settle();
+  const drawn = target.querySelectorAll(".tf-runtbl tr.tf-row").length;
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(120);
+  expect(target.querySelector(".tf-runtbl tr.tf-row a")?.textContent).toBe("#5000");
+  const room = target.querySelector<HTMLElement>(".tf-runtbl tr.tf-wgap td")!;
+  expect(room.style.height).toBe(`${(120 - drawn) * 34}px`);
+});
+
 test("By repository folds the pipelines by the repositories their runs built, those that built none last", async () => {
   const commit = (repo: string) => `git:${repo}@abc`;
   const at = (id: string, repo: string | null, failing = false): PipelineRow => ({
