@@ -186,8 +186,12 @@
   /** A key's hold, for as long as it stands. */
   const heldOf = (holds: readonly Hold[], key: string): Hold | undefined => holds.find((hold) => hold.entry.item.key === key);
 
-  /** Thousands of rows draw only those near the viewport (#2209); `.tf-ib` is 63 px, 84 wrapped, 6 apart. */
-  const win = new Windowed({ count: () => drawn.length, key: (i) => drawn[i]!.item.key, estimate: 63, gap: 6 });
+  /**
+   * Rows draw only those near the viewport (#2209); `.tf-ib` is 63 px, 84 wrapped, 6 apart. From 40 rows, not the
+   * default 300: a person's inbox of about a hundred drawn whole held its first open's rows back 231 ms in WebView2 at
+   * 4x, behind a 181 ms task; windowed, 89 ms (the Windows pass, 2026-11-14).
+   */
+  const win = new Windowed({ count: () => drawn.length, key: (i) => drawn[i]!.item.key, estimate: 63, gap: 6, from: 40 });
 
   function scrollerOf(node: Element): Element | null {
     for (let at = node.parentElement; at !== null; at = at.parentElement) {

@@ -971,9 +971,19 @@ test("a long inbox draws the rows near the viewport and keeps the room of the re
   expect(room("bottom")).toBe("");
 });
 
-test("an inbox under 300 rows draws every row, as before windowing (#2209)", async () => {
-  await open({ extra: many(250) });
-  expect(rows()).toHaveLength(254);
+// A person's inbox of about a hundred items (Björn's held 102) windows too: drawn whole it was a 181 ms task on its
+// first open in WebView2 at 4x, and its rows were drawn 231 ms after the press (the Windows pass, 2026-11-14).
+test("an inbox of a hundred rows draws the rows near the viewport, as Monitors and Code do from 100", async () => {
+  await open({ extra: many(100) });
+  const drawn = rows().length;
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(100);
+  expect(room("bottom")).toBe(`${(104 - drawn) * 69}px`);
+});
+
+test("an inbox under 40 rows draws every row, as before windowing (#2209)", async () => {
+  await open({ extra: many(35) });
+  expect(rows()).toHaveLength(39);
   expect(target.querySelector<HTMLElement>(".tf-inbox")!.getAttribute("style")).toBeNull();
 });
 
