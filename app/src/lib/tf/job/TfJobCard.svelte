@@ -47,7 +47,7 @@
   import { cardWidth, naturalWidth, SIDE_MAX, SIDE_MIN } from "./card-width.svelte";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
-  import { epicLine, initials } from "../tickets/tickets";
+  import { epicLine, initials, shortKey } from "../tickets/tickets";
   import { blockers, keyOf, loggedRow } from "./job";
 
   let {
@@ -89,6 +89,11 @@
   } = $props();
 
   const key = $derived(keyOf(detail.row.entity_id));
+  /**
+   * The key as a ticket card draws it: a forge's issue by its repository and number (*payout-service#37*), the whole key
+   * on hover, since its owner in a 32 px face cut a long one off at the card's edge (the Windows pass, 2026-11-14).
+   */
+  const shownKey = $derived(shortKey(key));
   const blockedBy = $derived(blockers(detail));
   const stacked = new MediaQuery("(max-width: 900px)");
   const epicId = $derived(parentOf(detail.row));
@@ -220,7 +225,7 @@
   {/if}
   <div>
     <div class="tf-tkhead">
-      <div class="tf-jobkey">{key}</div>
+      <div class="tf-jobkey" title={shownKey === key ? undefined : key}>{shownKey}</div>
       <button
         type="button"
         class="tf-iconbtn tf-sm tf-tkcopy"

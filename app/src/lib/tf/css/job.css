@@ -32,6 +32,9 @@
 /* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
 .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
 .tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* A key wider than the card (a forge repository's long name) wraps inside it, never past its edge: the copy button keeps
+   its place at the right (the Windows pass, 2026-11-14). A key that fits draws as before. */
+.tf-tkhead .tf-jobkey { min-width: 0; overflow-wrap: anywhere; }
 .tf-ticketcard .tf-tkcopy { color: var(--card-ink-2); }
 .tf-ticketcard .tf-tkcopy:hover { background: rgba(0,0,0,.08); color: var(--card-ink); }
 .tf-sheetcard .tf-tkcopy { color: var(--ink-2); }

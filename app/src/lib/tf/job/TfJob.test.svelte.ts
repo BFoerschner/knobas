@@ -215,6 +215,26 @@ function open(
   flushSync();
 }
 
+// The Windows pass (2026-11-14): a scratch Gitea issue's key, its owner and all, ran past the card's edge in the 32 px face.
+test("a forge issue's key draws as a ticket card draws it, its repository and number, with the whole key on hover", async () => {
+  const GID = "gitea:knobas-perf-big-folders/cloned#1";
+  const gitea = ticket({
+    row: { ...ticket().row, entity_id: GID, source_id: "gitea", title: "A scratch issue" },
+    source: { id: "gitea", display_name: "Gitea", adapter_kind: "gitea", enabled: true },
+  });
+  open(GID, { ports: ports({ getEntity: (id) => (id === GID ? Promise.resolve(gitea) : Promise.reject({ code: "not_found", message: id, source_id: null })) }) });
+  await settle();
+  const key = target.querySelector<HTMLElement>(".tf-jobkey")!;
+  expect(key.textContent).toBe("cloned#1");
+  expect(key.title).toBe("knobas-perf-big-folders/cloned#1");
+  // A key that is its own short form has no hover of its own.
+  unmount(job!);
+  job = null;
+  open();
+  await settle();
+  expect(target.querySelector<HTMLElement>(".tf-jobkey")!.hasAttribute("title")).toBe(false);
+});
+
 function text(): string {
   return target.textContent?.replace(/\s+/g, " ") ?? "";
 }
