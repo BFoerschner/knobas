@@ -135,6 +135,7 @@
     type TextPlace,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfHeldNote from "../TfHeldNote.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
@@ -231,6 +232,15 @@
   let local = $state<{ commit: string; checked: boolean; asOf: string | null } | null>(null);
   /** A folder the source listed past the whole tree it reads at once, one at a time (`read_alone`): the tree says so. */
   let readAlone = $state(false);
+  /**
+   * When knobas read the top the tree draws, where that was earlier than now (`held_at`: the sync's stored tree, or a
+   * read held from before), and why the read behind it failed: the held line over the tree (the stored-trees pass,
+   * 2026-11-14).
+   */
+  let topHeld = $state<string | null>(null);
+  let topFailed = $state<string | null>(null);
+  /** The branch's tree is past what knobas keeps (`tree_unkept`): how many entries it holds. */
+  let unkept = $state<number | null>(null);
   /** Folders the source cut at its cap, by path: how many entries it shows, and its page there. */
   let cutDirs = $state.raw<Record<string, { shown: number; url: string | null }>>({});
   /** The branch moved past the checkout's copy, and the file the reader had open changed with it. */
@@ -305,6 +315,7 @@
       readAtOf.set(read, held ?? new Date().toISOString());
       if (held !== null) heldReads.add(read);
     }
+    if (where === at && view !== null && "tree_unkept" in view && typeof view.tree_unkept === "number") unkept = view.tree_unkept;
     return read;
   }
 
@@ -552,6 +563,8 @@
         if (dir === "" && block?.type === "tree") {
           sourceTop = block.commit ?? null;
           sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
+          topHeld = sourceTopHeld;
+          topFailed = null;
         }
         if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
         listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
@@ -572,6 +585,9 @@
     generation += 1;
     sourceTop = null;
     sourceTopHeld = null;
+    topHeld = null;
+    topFailed = null;
+    unkept = null;
     fileBehind = null;
     asked = new Set();
     early = new Map();
@@ -1239,6 +1255,8 @@
         const was = sourceTop;
         sourceTop = block.commit ?? null;
         sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
+        topHeld = sourceTopHeld;
+        topFailed = null;
         if (settleLocal(block)) return;
         const before = (listings[""] ?? []).map((entry) => entry.section).join("\u0000");
         if (block.entries.map((entry) => entry.section).join("\u0000") !== before) {
@@ -1264,7 +1282,9 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
       const fresh = payload as ViewFresh;
-      if (live && fresh.entity_id === where && fresh.section === "files" && !fresh.failed) void rereadTop();
+      if (!live || fresh.entity_id !== where || fresh.section !== "files") return;
+      if (fresh.failed) topFailed = fresh.failed;
+      else void rereadTop();
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;
@@ -1540,6 +1560,8 @@
         ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3" /></svg></button
       >
     </header>
+    <!-- A tree drawn from what knobas holds (the sync's stored tree, a read held from before) says from when (ADR-0042). -->
+    {#if local === null && !going}<TfHeldNote heldAt={topHeld} source={sourceName(source)} failed={topFailed} />{/if}
     <!-- The rows are the links and buttons; the arrow keys move between them (#2311). -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <nav class="tf-ftree" aria-label="Files" tabindex="-1" bind:this={tree} onkeydown={treeKeys} onfocusin={treeFocus} onfocusout={treeBlur}>
@@ -1579,6 +1601,9 @@
       </p>
     {/if}
     <!-- What the source could not list at once says so under the tree, never among its rows (the big-folder pass, 2026-11-13). -->
+    {#if unkept !== null && local === null && !going}
+      <p class="tf-gonote">This branch holds {unkept.toLocaleString("en-US")} entries, more than knobas keeps: its folders are read from {sourceName(source)} as they open.</p>
+    {/if}
     {#if readAlone && local === null && !going}
       <p class="tf-gonote">Folders past this repository's first 20,000 entries are read one at a time.</p>
     {/if}
