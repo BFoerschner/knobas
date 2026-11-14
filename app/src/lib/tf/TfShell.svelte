@@ -86,6 +86,7 @@
   import { capturePlace, pressOpens, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
   import { installFocusKeep, installKeysHere } from "./focus-keep";
+  import { loadEveryFace } from "../shell/faces";
   import { installFindKey } from "./filter-keys";
   import { installPlainTyping } from "./plain-typing";
   import { installExternalLinks } from "../shell/external-links";
@@ -808,6 +809,8 @@
   onMount(() => installExternalLinks());
   onMount(() => installFocusKeep());
   onMount(() => installKeysHere());
+  // So no page's first draw waits on a face and lays itself out again when it lands (the render-cost pass, 2026-11-14).
+  onMount(() => loadEveryFace());
   onMount(() => {
     const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);
