@@ -40,7 +40,8 @@ export function rangeFill(read: RangeFileRead, entityId: string, at: { base: str
   };
 }
 
-const CHANGES = { A: "added", D: "deleted", R: "renamed", M: "modified" } as const;
+/** Each change letter's change; a letter the backend added later reads as a modification. */
+const CHANGES: Readonly<Record<string, DiffFile["change"] | undefined>> = { A: "added", D: "deleted", R: "renamed", M: "modified" };
 
 /**
  * A compare's names (`entity_range_names`, the stored-compare pass, 2026-11-14) as the list the page draws: each file as
@@ -56,7 +57,7 @@ export function namesList(names: RangeNames): RangeFiles {
     return {
       path,
       old_path: rename?.old ?? null,
-      change: CHANGES[names.changes[at] as keyof typeof CHANGES] ?? "modified",
+      change: CHANGES[names.changes.charAt(at)] ?? "modified",
       additions: 0,
       deletions: 0,
       hunks: [],
