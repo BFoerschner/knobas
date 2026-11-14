@@ -432,35 +432,81 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
   expect(input.value).toBe("s epa");
 });
 
-test("a typed filter reads and draws fifty a column under its total, and Show N more reads the rest (#1024)", async () => {
-  const bulk = (status: string, n: number, word: string) =>
-    Array.from({ length: n }, (_, i) => ({ status, card: card(`BLK-${status[0]}${i + 1}`, `${word} ${i + 1}`) }));
+const bulk = (status: string, n: number, word: string) =>
+  Array.from({ length: n }, (_, i) => ({ status, card: card(`BLK-${status[0]}${i + 1}`, `${word} ${i + 1}`) }));
+/** A column's cards box: the drawn cards' count, and the room it holds for the rest below them. */
+const stacks = () =>
+  [...target.querySelectorAll<HTMLElement>(".tf-cards")].map((box) => ({
+    cards: box.querySelectorAll(".tf-tcard").length,
+    room: box.style.paddingBottom,
+  }));
+
+// The Windows pass (2026-11-14): columns a filter's words or *Show more* made long drew every card, and each key drew
+// all of them again (1,243 cards, 248 to 732 ms a key in WebView2 at 4x). A column of 24 or more draws the screen's.
+test("a typed filter reads fifty a column under its total, a long column draws the cards near the screen, and Show N more reads the rest (#1024)", async () => {
   const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
   await open(h);
   for (const char of "bulk") type(field(), char);
   await settle();
-  // The frame the answer lands in draws a growing column's first sixteen, and the next frame the rest below them
-  // (the broad-filters pass, 2026-11-13).
+  const drawn = stacks()[0]!.cards;
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(24);
+  // Every undrawn card's room, at its 130 px estimate and the 6 px between cards, under the drawn ones.
+  expect(stacks()).toEqual([
+    { cards: drawn, room: `${(50 - drawn) * 136}px` },
+    { cards: drawn, room: `${(50 - drawn) * 136}px` },
+  ]);
   expect(columns()).toEqual([
-    { head: "To do 60", cards: 16, more: "Show 10 more" },
-    { head: "Done 55", cards: 16, more: "Show 5 more done" },
+    { head: "To do 60", cards: drawn, more: "Show 10 more" },
+    { head: "Done 55", cards: drawn, more: "Show 5 more done" },
   ]);
   const firstCards = [...target.querySelectorAll(".tf-tcard")];
   await nextFrame();
-  expect(columns()).toEqual([
-    { head: "To do 60", cards: 50, more: "Show 10 more" },
-    { head: "Done 55", cards: 50, more: "Show 5 more done" },
-  ]);
+  expect(stacks()[0]!.cards).toBe(drawn);
   expect(firstCards.every((card) => card.isConnected)).toBe(true);
   expect(count()).toBe("115 of 133 tickets");
+  // The column's *Show more* stands below the room, not after the last card drawn.
+  expect(target.querySelector(".tf-cards + .tf-more")).not.toBeNull();
 
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
-  // A column that drew fifty draws all it holds at once.
   expect(columns()).toEqual([
-    { head: "To do 60", cards: 60, more: null },
-    { head: "Done 55", cards: 50, more: "Show 5 more done" },
+    { head: "To do 60", cards: drawn, more: null },
+    { head: "Done 55", cards: drawn, more: "Show 5 more done" },
   ]);
+  expect(stacks()[0]!.room).toBe(`${(60 - drawn) * 136}px`);
+});
+
+test("a column a filter grows under 24 cards draws its first sixteen in the frame the answer lands, the rest the frame after (the broad-filters pass, 2026-11-13)", async () => {
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 20, "Bulk")]);
+  await open(h);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 16, more: null }]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  await nextFrame();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
+  expect(stacks()).toEqual([{ cards: 20, room: "" }]);
+});
+
+test("j walks down a long column past the cards it drew, drawing and focusing each card it reaches, and k back up", async () => {
+  const h = harness([], [], bulk("To Do", 50, "Bulk"));
+  await open(h);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  field().blur();
+  const drawn = () => [...target.querySelectorAll(".tf-tcard")].map((el) => el.getAttribute("data-entity"));
+  const first = drawn();
+  expect(first.length).toBeLessThan(24);
+  for (let step = 0; step < first.length + 10; step += 1) press("j");
+  const at = `BLK-T${first.length + 11}`;
+  expect(selectedKey()).toBe(at);
+  expect(document.activeElement?.getAttribute("data-entity")).toBe(`jira:${at}`);
+  expect(drawn()).not.toContain("jira:BLK-T1");
+  for (let step = 0; step < first.length + 10; step += 1) press("k");
+  expect(selectedKey()).toBe("BLK-T1");
+  expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:BLK-T1");
 });
 
 test("no match says so and offers to clear the filter", async () => {

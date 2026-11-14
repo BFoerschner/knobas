@@ -14,6 +14,7 @@
   `fields` names them; without it the card shows what it always has.
 -->
 <script lang="ts">
+  import type { Attachment } from "svelte/attachments";
   import type { MiniBoardCard } from "../../ipc/entity";
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
@@ -30,6 +31,7 @@
     onopen,
     fields = null,
     source = null,
+    row,
   }: {
     card: MiniBoardCard;
     needles: readonly string[];
@@ -43,6 +45,8 @@
     fields?: CardField[] | null;
     /** The source's name, when another source holds the same key (#1476); `null` draws none. */
     source?: string | null;
+    /** On the card itself: its column's window measures it and holds it still (`TicketStack`). */
+    row?: Attachment<HTMLElement>;
   } = $props();
 
   const shows = (field: CardField) => fields === null || fields.includes(field);
@@ -63,6 +67,7 @@
   data-entity={card.entity_id}
   onclick={onselect}
   ondblclick={onopen}
+  {@attach row}
 >
   <span class="tf-thead">
     <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>

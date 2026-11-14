@@ -1,7 +1,9 @@
 // The keystroke probe (the broad-filters pass of PR #2479, 2026-11-13): how long one key takes, with real input, to
 // show the rows it asks for, at each throttle. For the keys that keep most of what a page holds, which are the dear
 // ones: the first letter typed into Tickets' filter, a `-project:` that leaves one project out, a `-priority:` that
-// leaves one out, and the first letter under Everything in the launcher.
+// leaves one out, and the first letter under Everything in the launcher. The `tickets-expanded-*` cases press the same
+// on a board whose every column had its *Show more* pressed four times (`EXPAND_PAGES`): 1,243 cards on the scale
+// database, the board the Windows pass measured (2026-11-14).
 //
 //   node testenv/perf/keys.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--repeat 5]
 //                              [--check budget.json --lines real]
@@ -133,6 +135,28 @@ const ticketsBoard = (before) => `
   box.focus();
   return true;`;
 
+/** Each column's *Show more* pressed this many times: 208 cards a column, 203 for done, on the scale database. */
+const EXPAND_PAGES = 4;
+
+/**
+ * {@link ticketsBoard} with every column's *Show more* pressed {@link EXPAND_PAGES} times, once a load: the pages a
+ * column has are the session's, which each case's fresh load forgets.
+ */
+const expandedBoard = (before) => `
+  if (location.hash !== "#/tickets") location.hash = "#/tickets";
+  ${until(vis(".tf-cols .tf-tcard"))}
+  if (!window.__expanded) {
+    const box = document.querySelector(${JSON.stringify(FILTER)});
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    if (box.value !== "") { set.call(box, ""); box.dispatchEvent(new InputEvent("input", { bubbles: true })); ${sleepIn(1500)} }
+    for (let page = 0; page < ${EXPAND_PAGES}; page++) {
+      for (const more of document.querySelectorAll(".tf-col .tf-more:not(.tf-more-list)")) more.click();
+      ${sleepIn(2500)}
+    }
+    window.__expanded = true;
+  }
+` + ticketsBoard(before);
+
 /** The launcher over Everything, its box focused and empty. */
 const launcher = `
   if (location.hash !== "#/tickets") location.hash = "#/tickets";
@@ -154,6 +178,8 @@ const CASES = [
   { name: "tickets-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-priority", presses: [["-priority:Hig", "h"], ["-priority:Lo", "w"], ["-priority:Mediu", "m"], ["-priority:Highes", "t"], ["-priority:Lowes", "t"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
+  { name: "tickets-expanded-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: expandedBoard, root: ".tf-board-wrap", reads: BOARD },
+  { name: "tickets-expanded-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: expandedBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "everything-letter", presses: [["", "p"], ["", "r"], ["", "c"], ["", "b"], ["", "l"], ["", "g"], ["", "w"]], setup: () => launcher, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));

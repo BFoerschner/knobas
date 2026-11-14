@@ -264,7 +264,6 @@ const SMALL: Record<string, string> = {
   "tf/tickets/Signals.svelte  signals": "on one ticket, page or pull request: one ticket's signals",
   "tf/tickets/TicketCard.svelte  labels": "inside one drawn row: one card's labels, inside the windowed board",
   "tf/tickets/TicketsPage.svelte  columnsOf(lane)": "a handful by what it is: one lane's status columns",
-  "tf/tickets/TicketsPage.svelte  drawnNow(placeAt(lane, column), heldCards.get(placeAt(lane, column)) ?? [])": "capped where it is read or drawn: a column's cards, drawn as the board scrolls (`drawnNow`)",
   "tf/tickets/TicketsPage.svelte  group.views": "the profile's own settings, tens at most: the reader's saved views",
   "tf/tickets/TicketsPage.svelte  groups": "the profile's own settings, tens at most: the saved views' groups",
   "tf/tickets/TicketsPage.svelte  hidden": "the profile's own settings, tens at most: the saved views the reader hid",

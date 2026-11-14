@@ -54,14 +54,11 @@
 .tf-list .tf-tbl th { position: sticky; top: var(--tf-fbar-h, 47px); z-index: 3; }
 /* Focus on the chosen job's card keeps a second ring where the card's ink would melt into the dark page. */
 .tf-tcard.tf-card:focus-visible { box-shadow: 0 0 0 4px var(--sel-halo); }
-/* A card past a column's first page is not laid out while it is off the screen (PR #2479): with *Show more* pressed a
-   board holds over a thousand cards, and a filter key laid them all out again, 152 ms of a quarter-speed main thread.
-   It draws before it reaches the screen and keeps the height it drew at; until then it stands at about a two-line
-   card's. The first page's twelve are left alone, so a board as it first draws is the board it always was: with all of
-   them skipped, a card on screen at the first draw changed height (the `board-rows-still` trip). */
-.tf-stack > .tf-tcard:nth-child(n+13) { content-visibility: auto; contain-intrinsic-size: auto 112px; }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
 .tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px; background: var(--sheet-2); border-radius: 6px; }
+/* A column's cards (`TicketStack`), its *Show more* below them: a long column draws only the cards near the screen and
+   pads this box with the room of the rest (the Windows pass, 2026-11-14), so the button stays under the last card. */
+.tf-cards { display: flex; flex-direction: column; gap: 6px; }
 .tf-nothing { font-size: var(--t-sm); padding: 6px; }
 .tf-more {
   border: 1px dashed var(--rule); background: none; border-radius: 4px; padding: 5px; cursor: pointer;

@@ -29,8 +29,9 @@
   cards on screen in reading order (lane by lane, column by column, top to
   bottom; the list's rows as sorted), and focus the card. `Enter` and a
   double click open the ticket page (`#/ticket/<id>`, spec #2227); only the
-  preview's primary button opens the job. A long list draws only the rows near the
-  viewport (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
+  preview's primary button opens the job. A long list, and a board column of
+  24 cards or more (`TicketStack`), draw only the rows near the viewport
+  (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
 
   **The *Board / List* and *Lanes* switches hold for the session** (R-3.3):
   module state, never written anywhere, so a restart forgets them. Each view
@@ -145,6 +146,7 @@
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import { needles as readNeedles } from "./needles";
   import TicketCard from "./TicketCard.svelte";
+  import TicketStack from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
   import { assigneeName, assigneeOptions, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
@@ -568,7 +570,9 @@
     const by = new Map<string, MiniBoardCard[]>();
     for (const entry of heldBoard.rows) {
       const at = boardHold.tagOf(entry);
-      by.set(at, [...(by.get(at) ?? []), entry.card]);
+      const column = by.get(at);
+      if (column === undefined) by.set(at, [entry.card]);
+      else column.push(entry.card);
     }
     return by;
   });
@@ -631,6 +635,12 @@
     untrack(() => (lanesDrawn += 1));
     return () => untrack(() => (lanesDrawn -= 1));
   }
+  /** Each board column's window, by its place, while it is drawn (`TicketStack`): `j`/`k` draws a card before focusing it. */
+  const stackWins = new Map<string, Windowed>();
+  const holdWin = (place: string) => (stacked: Windowed | null) => {
+    if (stacked === null) stackWins.delete(place);
+    else stackWins.set(place, stacked);
+  };
   /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
   const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
@@ -649,11 +659,14 @@
   const listRest = $derived(
     boardColumns.reduce((all, column) => all + column.total - column.cards.length, 0),
   );
-  /** What is on screen, in reading order: the first is selected when the selection is not. */
-  const visible = $derived(
+  /** What is on screen, in reading order: the first is selected when the selection is not. A card says its column and place in it. */
+  const visible: { card: MiniBoardCard; place?: string; at?: number }[] = $derived(
     showing.layout === "board"
       ? reader.bands.flatMap(({ lane }) =>
-          columnsOf(lane).flatMap(({ column }) => (heldCards.get(placeAt(lane, column)) ?? []).map((card) => ({ card }))),
+          columnsOf(lane).flatMap(({ column }) => {
+            const place = placeAt(lane, column);
+            return (heldCards.get(place) ?? []).map((card, at) => ({ card, place, at }));
+          }),
         )
       : listRows,
   );
@@ -783,8 +796,11 @@
     const to = seen ?? Math.min(visible.length - 1, Math.max(0, at + by));
     const next = visible[to]!;
     session.selected = next.card.entity_id;
-    // A list row past the drawn ones is drawn first; the board's cards are all drawn, and so is a row in view.
-    if (showing.layout !== "board" && seen === null) win.reveal(to);
+    // A row or card past the drawn ones is drawn first, in its column's window on the board; a row in view is drawn.
+    if (seen === null) {
+      if (showing.layout !== "board") win.reveal(to);
+      else if (next.place !== undefined && next.at !== undefined) stackWins.get(next.place)?.reveal(next.at);
+    }
     flushSync();
     const element = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(next.card.entity_id)}"]`);
     element?.focus();
@@ -1036,6 +1052,7 @@
               {@const more = moreLine(column, cards.length, done)}
               {@const pointer = listPointer(column, cards.length)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
+              {@const place = placeAt(lane, column)}
               <div class="tf-col">
                 <h3>
                   {columnHead(column.status, view?.columns ?? [])}
@@ -1047,20 +1064,21 @@
                   >
                 </h3>
                 <div class="tf-stack">
-                  {#each drawnNow(placeAt(lane, column), heldCards.get(placeAt(lane, column)) ?? []) as card (card.entity_id)}
-                    <TicketCard
-                      {card}
-                      fields={view?.card_fields ?? null}
-                      source={sourceOf(card)}
-                      {needles}
-                      selected={current?.card.entity_id === card.entity_id}
-                      chosen={chosenJob.id === card.entity_id}
-                      onselect={() => clicked(card)}
-                      onopen={() => openTicket(card)}
-                    />
-                  {:else}
-                    <span class="tf-dim tf-nothing">Nothing here</span>
-                  {/each}
+                  <TicketStack cards={heldCards.get(place) ?? []} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)}>
+                    {#snippet card(card, row)}
+                      <TicketCard
+                        {card}
+                        {row}
+                        fields={view?.card_fields ?? null}
+                        source={sourceOf(card)}
+                        {needles}
+                        selected={current?.card.entity_id === card.entity_id}
+                        chosen={chosenJob.id === card.entity_id}
+                        onselect={() => clicked(card)}
+                        onopen={() => openTicket(card)}
+                      />
+                    {/snippet}
+                  </TicketStack>
                   {#if more}
                     <button type="button" class="tf-more" onclick={() => reader.expand(lane, column)}>{more}</button>
                   {/if}
