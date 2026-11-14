@@ -141,6 +141,36 @@ pub async fn read_with(
     tokio::time::timeout(TIMEOUT, all).await.ok().flatten()
 }
 
+/// The best common ancestor of `a` and `b` at the checkout `path` (`git
+/// merge-base`, read-only), each a checked sha the checkout holds: what a
+/// source's three-dot compare diffs from (ADR-0041). `None` when it cannot
+/// be read here, or the two share no history.
+pub async fn merge_base(path: &Path, a: &str, b: &str) -> Option<String> {
+    if !is_sha(a) || !is_sha(b) {
+        return None;
+    }
+    let search = std::env::var_os("PATH").unwrap_or_default();
+    let git = locate(
+        &search,
+        Path::new(APPLE_SHIM),
+        command_line_tools_installed,
+        TIMEOUT,
+    )
+    .await
+    .ok()?;
+    if !is_dir_off_runtime(path).await {
+        return None;
+    }
+    let read = async {
+        let mut command = git_read(&git, path);
+        command.args(["merge-base", "--end-of-options", a, b]);
+        let (out, cut) = run_capped(command, 2, 1024).await.ok()?;
+        let sha = String::from_utf8_lossy(&out).trim().to_owned();
+        (!cut && is_sha(&sha)).then_some(sha)
+    };
+    tokio::time::timeout(TIMEOUT, read).await.ok().flatten()
+}
+
 /// Whether the checkout at `path` holds every one of `ends` as a commit:
 /// each a checked sha (ADR-0034), which may end in one `^` for its parent,
 /// that `rev-parse` resolves locally, never fetched. What *Diff tool*
@@ -190,7 +220,7 @@ pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> b
 /// git looks for the repository at `path` and no higher
 /// (`GIT_CEILING_DIRECTORIES` is its parent): a checkout whose `.git` is
 /// gone is no repository, never the one some folder above it belongs to.
-fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
+pub(super) fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
     let mut command = git_at(git, path);
     command
         .args(["-c", "protocol.allow=never"])
@@ -210,7 +240,7 @@ fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
 
 /// The whole sha of the commit `name` names at the checkout, if it holds it.
 /// `name` is a checked sha, or one with a `^`.
-async fn commit(git: &Path, path: &Path, name: &str) -> Option<String> {
+pub(super) async fn commit(git: &Path, path: &Path, name: &str) -> Option<String> {
     let mut command = git_read(git, path);
     command.args(["rev-parse", "--verify", "--quiet", "--end-of-options"]);
     command.arg(format!("{name}^{{commit}}"));
@@ -222,7 +252,7 @@ async fn commit(git: &Path, path: &Path, name: &str) -> Option<String> {
 /// The empty tree's name in this repository's object format, unless the
 /// repository is shallow: there a commit with no parent here may well have
 /// one, and the source is asked instead.
-async fn empty_tree_if_whole(git: &Path, path: &Path) -> Option<String> {
+pub(super) async fn empty_tree_if_whole(git: &Path, path: &Path) -> Option<String> {
     let mut command = git_read(git, path);
     command.args([
         "rev-parse",

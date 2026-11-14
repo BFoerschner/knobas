@@ -409,6 +409,7 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
       // real state (nothing laid out yet) and is what every test that is not
       // about the collapse leaves it in.
       ...(over.stripWidth === undefined ? {} : { stripWidth: () => over.stripWidth ?? 0 }),
+      ...(over.marks === undefined ? {} : { marks: over.marks }),
       ports: {
         // #429's type table. This file is about the *read*, and nothing here
         // creates -- but the view asks for the table on mount, so a port left
@@ -474,6 +475,8 @@ interface Over {
   stripWidth?: number;
   /** A search answer of the test's own, for the shapes `matchesFor` cannot make. */
   answer?: SearchResponse;
+  /** What a ticket's *Assets* row marks. */
+  marks?: { assets: ReadonlySet<string>; holders: ReadonlySet<string>; key: string };
 }
 
 /**
@@ -589,6 +592,11 @@ function text(): string {
   return (target.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** Where the pane says its asset sits: its heading's title, since the columns draw the path. */
+function panePath(): string {
+  return target.querySelector(".pane-h h2")?.getAttribute("title") ?? "";
+}
+
 /** Each column's row labels, left to right. */
 function columns(): string[][] {
   return [...target.querySelectorAll("ol.col")].map((column) =>
@@ -687,8 +695,9 @@ test("an asset's address draws its whole path and its pane", async () => {
   expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]);
 
   const pane = text();
-  // The held-by line ends at the asset: it is *where this thing is*.
-  expect(pane).toContain("hel1 / vm-db-01 / postgres");
+  // The path is the columns', so the pane's heading only holds it in its title (*where this thing is*).
+  expect(panePath()).toContain("hel1 / vm-db-01 / postgres");
+  expect(pane).not.toContain("hel1 / vm-db-01 / postgres");
   expect(pane).toContain("Image postgres:18");
   // Declared and unfilled: an em dash, never the word "null".
   expect(pane).toContain("Ports —");
@@ -727,7 +736,7 @@ test("selecting an asset that holds something opens the next column", async () =
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-db-01", null]);
-  expect(text()).toContain("hel1 / vm-db-01");
+  expect(panePath()).toContain("hel1 / vm-db-01");
 });
 
 /**
@@ -752,13 +761,13 @@ test("an empty estate is told apart from a read that has not landed", async () =
  */
 test("a deep link to an asset that is gone says so instead of showing the last one", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(panePath()).toContain("hel1 / vm-db-01 / postgres"));
 
   nav.go("#/asset/asset:nobody");
   flushSync();
 
-  await waitFor(() => expect(text()).toContain("no asset asset:nobody"));
-  expect(text()).not.toContain("hel1 / vm-db-01 / postgres");
+  await waitFor(() => expect(text()).toContain("knobas does not hold this asset."));
+  expect(panePath()).not.toContain("hel1 / vm-db-01 / postgres");
   expect(columns()).toEqual([]);
 });
 
@@ -774,14 +783,14 @@ test("a deep link to an asset that is gone says so instead of showing the last o
  */
 test("an inherited value names the ancestor it came from and links to it", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(panePath()).toContain("hel1 / vm-db-01 / postgres"));
 
   const pane = text();
   expect(pane).toContain("Environment prod inherited from hel1");
   expect(pane).toContain("Owner Björn inherited from hel1");
   // Health is the worst of this asset and everything under it. Here they are
   // the same, so the pane does not repeat the own status.
-  expect(pane).toContain("Health warn");
+  expect(pane).toContain("Health Warning");
   expect(pane).not.toContain("own status");
 
   const note = [
@@ -814,7 +823,7 @@ test("a value set on the asset itself says so and offers no link", async () => {
   expect(target.querySelectorAll("aside.pane button.src")).toHaveLength(0);
   // The site is rated by nobody and still reads `warn`, because the container
   // two levels down is — that is the rollup, in the pane.
-  expect(text()).toContain("Health warn own status none");
+  expect(text()).toContain("Health Warning Own status None");
 });
 
 /**
@@ -940,7 +949,7 @@ test("the arrows and enter walk three levels, and the pane follows", async () =>
 
   press("Enter");
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
-  expect(text()).toContain("hel1 / vm-db-01 / postgres");
+  expect(panePath()).toContain("hel1 / vm-db-01 / postgres");
   // The container holds nothing: `Enter` on it opens no column and moves
   // nothing, rather than selecting out of an empty one.
   press("Enter");
@@ -1006,37 +1015,25 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
 });
 
 /**
- * **Escape unwinds one step per press, and the press it has no step for is
- * handed on.**
- *
- * The rung above the top of the estate is the bare tree; above that the Tree
- * has nothing to unwind, and the key belongs to the shell's ladder
- * (`shell/keys.ts` rung 3, *back to the room*). A view that consumed it
- * anyway would be the one surface a reader cannot leave with the keyboard —
- * so the last press is asserted **not** to be consumed.
+ * **`Esc` is the shell's, whatever has focus (the return contract).** The bar says
+ * where the key goes, so the Tree does not answer it: `←` walks up the columns.
  */
-test("escape unwinds the path one level at a time and then falls through", async () => {
+test("the view leaves Esc to the shell, and left arrow walks up the path", async () => {
   const { nav } = render("#/asset/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  expect(press("Escape").defaultPrevented).toBe(true);
+  const here = nav.route;
+  expect(press("Escape").defaultPrevented).toBe(false);
+  expect(nav.route).toEqual(here);
+
+  expect(press("ArrowLeft").defaultPrevented).toBe(true);
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
-  // Waited out between presses, and that is a statement about the view rather
-  // than about the test: the layout is derived from the pane's answer, so the
-  // rung a press lands on is the one the *drawn* path offers.
+  // Waited out between presses: the layout is derived from the pane's answer,
+  // so the rung a press lands on is the one the *drawn* path offers.
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
 
-  press("Escape");
+  press("ArrowLeft");
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
-  await waitFor(() => expect(marked()).toEqual(["hel1", null]));
-
-  press("Escape");
-  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
-  await waitFor(() => expect(marked()).toEqual([null]));
-
-  const last = press("Escape");
-  expect(last.defaultPrevented).toBe(false);
-  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
 });
 
 /**
@@ -1060,7 +1057,7 @@ test("a path too deep for the window collapses its oldest columns to spines", as
   await waitFor(() => expect(spines()).toEqual(["hel1"]));
   expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
   expect(marked()).toEqual(["vm-app-02", "gitea", "gitea-db"]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 
   target.querySelector<HTMLButtonElement>("button.spine")?.click();
   flushSync();
@@ -1070,7 +1067,162 @@ test("a path too deep for the window collapses its oldest columns to spines", as
   // selected in it.
   await waitFor(() => expect(spines()).toEqual(["gitea-db"]));
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+});
+
+/** F-556: walking a column holds the strip still, and the level that doesn't fit waits for `→` or a press. */
+const LEAF = row({ id: "asset:a-leaf", parent_id: SITE.id, type_id: "vm", monogram: "VM", name: "a-leaf", has_children: false });
+
+test("↓ onto a holder keeps the fold, its column waits, and → opens it as ever", async () => {
+  // 500 holds two columns, and a third would fold the site to a spine.
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+
+  press("ArrowDown");
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  expect(spines()).toEqual([]);
+  expect(columns()).toHaveLength(2);
+
+  press("ArrowUp");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  expect(spines()).toEqual([]);
+
+  press("ArrowDown");
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  press("ArrowRight");
+  await waitFor(() => expect(spines()[0]).toBe("hel1"));
+});
+
+test("a press on the holder a walk stopped on opens its column", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  expect(spines()).toEqual([]);
+
+  target.querySelector<HTMLButtonElement>("button.row[aria-current='true'].tip")!.click();
+  flushSync();
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
+  expect(columns()).toHaveLength(2);
+});
+
+test("a walk ends once the selection goes elsewhere, so coming back folds as ever", async () => {
+  const { nav } = render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  expect(spines()).toEqual([]);
+  const held = location.hash;
+
+  nav.go(`#/asset/${SITE.id}`);
+  await waitFor(() => expect(marked()[0]).toBe("hel1"));
+  nav.go(held);
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
+});
+
+test("a walk's next level that fits still draws beside the strip", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  await waitFor(() => expect(columns()).toHaveLength(3));
+  expect(spines()).toEqual([]);
+});
+
+/** F-560: a press in the selection's own column holds the strip as `↓` does. */
+const rowNamed = (name: string) =>
+  [...target.querySelectorAll<HTMLButtonElement>("button.row")].find((one) => one.querySelector("span.nm")?.textContent?.trim() === name)!;
+
+test("a press on a plain row keeps the fold, and a press on a holder that doesn't fit folds once", async () => {
+  const OTHER = row({ id: "asset:b-leaf", parent_id: SITE.id, type_id: "vm", monogram: "VM", name: "b-leaf", has_children: false });
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF, OTHER], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+
+  rowNamed("b-leaf").click();
+  await waitFor(() => expect(marked()).toEqual(["hel1", "b-leaf"]));
+  expect(spines()).toEqual([]);
+
+  // A holder's next level needs a third column, so the strip folds once.
+  const holder = columns()[1]!.find((name) => name !== "a-leaf" && name !== "b-leaf")!;
+  rowNamed(holder).click();
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
+  await waitFor(() => expect(marked()[0]).toBe(holder));
+
+  // Back on a plain row, the fold stands, where it used to come undone.
+  rowNamed("a-leaf").click();
+  flushSync();
+  expect(spines()).toEqual(["hel1"]);
+  await waitFor(() => expect(marked()).toEqual(["a-leaf"]));
+  expect(spines()).toEqual(["hel1"]);
+});
+
+test("a press on the row already selected moves nothing", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  press("ArrowUp");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+
+  rowNamed("a-leaf").click();
+  flushSync();
+  expect(spines()).toEqual([]);
+  expect(columns()).toHaveLength(2);
+});
+
+/** F-562: arriving leaves focus on nothing, and `↑` and `↓` walk from there. */
+test("↓ walks from the selected row with focus on nothing, and takes focus to the row", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  (document.activeElement as HTMLElement | null)?.blur();
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+
+  const event = press("ArrowDown", document.body);
+  expect(event.defaultPrevented).toBe(true);
+  await waitFor(() => expect(marked().slice(0, 2)).toEqual(["hel1", next]));
+  await waitFor(() => expect(document.activeElement?.closest("button.row")?.querySelector("span.nm")?.textContent?.trim()).toBe(next));
+});
+
+test("↓ with nowhere to walk still brings focus to the selected row, as under an estate's one root", async () => {
+  render(`#/asset/${SITE.id}`, ESTATE, { stripWidth: 1400 });
+  await waitFor(() => expect(marked()[0]).toBe("hel1"));
+  (document.activeElement as HTMLElement | null)?.blur();
+  const start = location.hash;
+
+  press("ArrowDown", document.body);
+  await waitFor(() => expect(document.activeElement?.closest("button.row")?.querySelector("span.nm")?.textContent?.trim()).toBe("hel1"));
+  expect(location.hash).toBe(start);
+});
+
+test("from outside the view, ↓ leaves a field and an open dialog alone", async () => {
+  const { nav } = render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  const start = nav.route;
+
+  const outside = document.createElement("input");
+  document.body.appendChild(outside);
+  outside.focus();
+  expect(press("ArrowDown", outside).defaultPrevented).toBe(false);
+  outside.remove();
+
+  const dialog = document.createElement("div");
+  dialog.className = "tf-dialog";
+  dialog.tabIndex = -1;
+  document.body.appendChild(dialog);
+  dialog.focus();
+  expect(press("ArrowDown", dialog).defaultPrevented).toBe(false);
+  dialog.remove();
+
+  expect(nav.route).toEqual(start);
+  expect(marked()).toEqual(["hel1", "a-leaf"]);
 });
 
 /** A window with room for every column draws no spine at all. */
@@ -1108,7 +1260,7 @@ test("typing a name opens the path to the first match and selects it", async () 
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", "gitea-db"]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 });
 
 /**
@@ -1236,7 +1388,7 @@ test("the pane draws what an asset exposes and what reaches it", async () => {
   expect(exposing).toContain("Gitea");
   expect(exposing).toContain("http://127.0.0.1:3000/");
   // A public route says so; an internal one is the unmarked default.
-  expect(exposing).toContain("public");
+  expect(exposing).toContain("Public");
   expect(exposing).toContain("Traefik dashboard");
   expect(exposing).toContain("lands on nothing knobas knows");
   // A route's properties are the reader's own and are drawn as they are.
@@ -1530,7 +1682,7 @@ test("the pane lists the monitors watching the asset, with their state", async (
     (row.textContent ?? "").replace(/\s+/g, " ").trim(),
   );
   expect(rows).toEqual([
-    "postgres-check down Open in Kuma",
+    "postgres-check Down Open in Kuma",
     "postgres-slow-query Paused or gone from Kuma",
     "postgres-wal no reading Open in Kuma",
   ]);
@@ -1541,7 +1693,7 @@ test("the pane lists the monitors watching the asset, with their state", async (
  * hands the nav `entityAddress`'s address, not a rooms `#/monitor/<id>`
  * that the shell would have to rewrite on arrival (#1092).
  */
-test("a monitor's name goes to the Monitors page, not a rooms address", async () => {
+test("a monitor's name goes to the Monitors page at its row, not a rooms address", async () => {
   const { nav } = render(`#/asset/${CONTAINER.id}`);
   await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
   const goes: string[] = [];
@@ -1557,7 +1709,7 @@ test("a monitor's name goes to the Monitors page, not a rooms address", async ()
   expect(name).toBeDefined();
   name!.click();
 
-  await waitFor(() => expect(goes).toEqual(["#/monitors"]));
+  await waitFor(() => expect(goes[0]).toMatch(/^#\/monitors\/at\//));
 });
 
 /**
@@ -1647,4 +1799,50 @@ test("a pane that holds thousands draws the Holds lines near the viewport (#2210
   const holds = [...target.querySelectorAll("aside.pane section.grp")].find((group) => group.querySelector("h3")?.textContent?.trim() === "Holds")!;
   expect(holds.querySelectorAll("li").length).toBeGreaterThan(5);
   expect(holds.querySelectorAll("li").length).toBeLessThan(100);
+});
+
+/**
+ * **One tab stop per column** (F-530): `Tab` reaches a column by the row on the path, or its first, and the arrows walk from
+ * the column the press was made in. Every row a stop was 27 presses from the crumb to the pane.
+ */
+test("a column has one tab stop, and the arrows walk the column they are pressed in", async () => {
+  const { nav } = render(`#/asset/${CONTAINER.id}`);
+  await waitFor(() => expect(marked().at(-1)).toBe("postgres"));
+
+  const stops = [...target.querySelectorAll("ol.col")].map((column) => column.querySelectorAll('button.row[tabindex="0"]').length);
+  expect(stops.every((count) => count === 1)).toBe(true);
+  const stop = target.querySelector<HTMLButtonElement>('ol.col[data-col="1"] button.row[tabindex="0"]')!;
+  expect(stop.getAttribute("aria-current")).toBe("true");
+
+  // `↓` on the VMs' column moves in that column, whatever is selected deeper.
+  stop.focus();
+  press("ArrowUp", stop);
+  await waitFor(() => expect(nav.route.view === "assets" && nav.route.assetId).toBe("asset:vm-app-02"));
+});
+
+test("Enter on a row Tab reached selects that row, and so does → on one with nothing selected in its column", async () => {
+  const { nav } = render("#/assets/tree");
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  const first = target.querySelector<HTMLButtonElement>('ol.col[data-col="0"] button.row[tabindex="0"]')!;
+  first.focus();
+  press("ArrowRight", first);
+  await waitFor(() => expect(nav.route.view === "assets" && nav.route.assetId).toBe(SITE.id));
+
+  await waitFor(() => expect(marked().at(0)).toBe("hel1"));
+  const vm = target.querySelector<HTMLButtonElement>('ol.col[data-col="1"] button.row[tabindex="0"]')!;
+  press("Enter", vm);
+  await waitFor(() => expect(nav.route.view === "assets" && nav.route.assetId).toBe(vm.dataset["asset"]));
+});
+
+test("the pane's heading holds the path in its title, and a mark keeps a row's name whole", async () => {
+  render(`#/asset/${CONTAINER.id}`, ESTATE, { marks: { assets: new Set([CONTAINER.id]), holders: new Set([VM.id]), key: "PAY-231" } });
+  await waitFor(() => expect(marked().at(-1)).toBe("postgres"));
+
+  expect(panePath()).toBe("hel1 / vm-db-01 / postgres");
+  expect(target.querySelector(".pane .crumb")).toBeNull();
+  // A small mark and not the ticket's chip: the line under the bar names the ticket.
+  const row = target.querySelector(`button.row[data-asset="${CONTAINER.id}"]`)!;
+  expect(row.querySelector(".mark")?.getAttribute("aria-label")).toBe("PAY-231 reaches this asset");
+  expect(row.querySelector(".tf-chip")).toBeNull();
+  expect(target.querySelector(`button.row[data-asset="${VM.id}"] .holds`)).not.toBeNull();
 });

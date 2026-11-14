@@ -127,7 +127,7 @@ test("an action's name is its label without the dialog's ellipsis", () => {
   expect(actionName("Rerun")).toBe("Rerun");
 });
 
-test("a dialog starts from the declared values: a choice's first option unless one is named, a flag unchecked unless true", () => {
+test("a dialog starts from the declared values: no choice unless one is named or only one is offered, a flag unchecked unless true (F-028)", () => {
   const form = action("x", "X", {
     fields: [
       field("title", { type: "text", suggestions: [] }, { value: "PAY-231: retry" }),
@@ -139,17 +139,29 @@ test("a dialog starts from the declared values: a choice's first option unless o
       field("delete_branch", { type: "flag" }, { value: "true" }),
       field("force", { type: "flag" }),
       field("ghost", { type: "choice", options: [] }),
+      field("only", { type: "choice", options: [{ value: "one", label: "One" }] }),
     ],
   });
   expect(initialValues(form)).toEqual({
     title: "PAY-231: retry",
     body: "",
-    style: "a",
+    style: "",
     base: "dev",
     delete_branch: "true",
     force: "false",
     ghost: "",
+    only: "one",
   });
+});
+
+test("a merge keeps the source's first style and never starts deleting the branch; Update branch never starts on a rebase (F-028)", () => {
+  const styles = { type: "choice" as const, options: [{ value: "merge", label: "Merge" }, { value: "rebase", label: "Rebase" }] };
+  const merge = action("merge_pull_request", "Merge…", { fields: [field("style", styles), field("delete_branch", { type: "flag" }, { value: "true" })] });
+  expect(initialValues(merge)).toEqual({ style: "merge", delete_branch: "false" });
+  const update = action("update_pull_request_branch", "Update branch…", {
+    fields: [field("style", { type: "choice", options: [{ value: "rebase", label: "Rebase" }, { value: "merge", label: "Merge" }] }, { value: "rebase" })],
+  });
+  expect(initialValues(update)).toEqual({ style: "merge" });
 });
 
 test("a required field is missing while blank, unpicked or unchecked; an optional one never", () => {

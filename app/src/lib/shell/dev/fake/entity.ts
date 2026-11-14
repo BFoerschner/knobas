@@ -6,8 +6,11 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
-import { CORPUS, bodyShown, fakeEpicEntry, mirrorRow } from "./corpus";
+import { CORPUS, bodyShown, fakeEpicEntry, fakePersonName, mirrorRow } from "./corpus";
+import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
+import { fakeStateOf } from "./link-sets";
+import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
@@ -140,7 +143,7 @@ function linkEnd(id: string): { kind: string; title: string; deleted_at: string 
   const entity = CORPUS.find((candidate) => candidate.entity_id === id);
   if (entity) return entity;
   const asset = FIXTURE_ESTATE.find((candidate) => candidate.id === id);
-  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : null;
+  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : docPageEnd(id);
 }
 
 /** One link's far end from `id`, resolved against the corpus and the estate. */
@@ -148,7 +151,17 @@ function entryFor(id: string, link: LinkRow): LinkEntry | null {
   const otherId = link.from_id === id ? link.to_id : link.from_id;
   const other = linkEnd(otherId);
   if (!other) return null;
-  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at } };
+  const state = fakeStateOf(otherId);
+  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at, ...(state === null ? {} : { state }) } };
+}
+
+/** The tickets linked to `id`, for a page's *Work it belongs to*. */
+export function linkedTickets(id: string): { entity_id: string; key: string; title: string; status: string | null }[] {
+  return linksOf(id).flatMap(({ other }) =>
+    other.kind === "ticket"
+      ? [{ entity_id: other.entity_id, key: keyOf(other.entity_id), title: other.title, status: null }]
+      : [],
+  );
 }
 
 /** The confirmed links on an entity, newest first, from either end. */
@@ -267,6 +280,8 @@ function getEntity(args: Record<string, unknown>) {
     kind_info: null,
     body_text: bodyShown(entry.body_text),
     author: entry.author,
+    // The name the source keeps beside the account, on a ticket (F-107).
+    ...(entry.kind === "ticket" && fakePersonName(entry.author) !== null ? { author_name: fakePersonName(entry.author)! } : {}),
     payload: entry.payload,
     web_url: entry.web_url,
     deleted_at: entry.deleted_at,
@@ -320,7 +335,7 @@ function fakeLabels(value: unknown): Pick<EntityDetail, "labels"> {
 }
 
 /** The card's Reporter and Logged facts (#2403) from the mock's flat record: the worklog summed per author, by author. */
-function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "created" | "time_spent_seconds" | "logged_by"> {
+function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "reporter_name" | "created" | "time_spent_seconds" | "logged_by"> {
   const reporter = fakeText(payload["reporter"]);
   const created = fakeText(payload["created"]);
   const spent = payload["time_spent_seconds"];
@@ -331,6 +346,7 @@ function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "repor
   }
   return {
     ...(reporter === null ? {} : { reporter }),
+    ...(fakePersonName(reporter) === null ? {} : { reporter_name: fakePersonName(reporter)! }),
     ...(created === null ? {} : { created }),
     ...(typeof spent === "number" ? { time_spent_seconds: spent } : {}),
     ...(entries === null ? {} : { logged_by: [...byAuthor].sort(([a], [b]) => a.localeCompare(b)).map(([author, seconds]) => ({ author, seconds })) }),
@@ -570,6 +586,7 @@ function visitEntity(args: Record<string, unknown>): string | null {
 export function handlers(): Handlers {
   return {
     get_entity: (args) => getEntity(args),
+    entity_head: (args) => ({ ...getEntity(args), body_text: "", payload: null }),
     refresh_entity: (args) => refreshEntity(args),
     // A reload starts the fixture over, so nothing filed before it is owed (#1953).
     owed_tickets: () => [],

@@ -5,8 +5,8 @@
  */
 import { expect, test } from "vitest";
 
-import type { TreeEntry, ViewRow } from "../../ipc/entity";
-import { authorOf, fileMeta, goToFile, initials, treeKey, treeRows } from "./file-tree";
+import type { LocalEntry, TreeEntry, ViewRow } from "../../ipc/entity";
+import { authorOf, checkoutListing, commitLine, fileMeta, goToFile, initials, treeKey, treeRows } from "./file-tree";
 
 const dir = (name: string): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${name}` });
 const file = (name: string): TreeEntry => ({ name, kind: "file", size: 1, section: `file:${name}` });
@@ -95,6 +95,62 @@ test("a commit row's author is drawn apart from when, which is the rest of its m
 
 test("an author's initials are the first letters of two parts of the name", () => {
   expect(initials("Mara Lindqvist")).toBe("ML");
-  expect(initials("jonas.becker")).toBe("JB");
+  expect(initials("jonas.becker")).toBe("JO");
   expect(initials("mara")).toBe("MA");
+});
+
+const commit = (meta: string | null, author?: string): ViewRow => ({ entity_id: null, title: "t", meta, tone: null, chip: "abc", url: null, ...(author === undefined ? {} : { author }) });
+
+test("a commit's line says You on the reader's own and keeps its age", () => {
+  expect(commitLine(commit("mara · 3 h ago", "mara"), true)).toBe("You · 3 h ago");
+  expect(commitLine(commit("mara", "mara"), true)).toBe("You");
+});
+
+test("a commit's line stays the source's on anybody else's, and where it names no author", () => {
+  expect(commitLine(commit("jonas · 2026-08-21", "jonas"), false)).toBe("jonas · 2026-08-21");
+  expect(commitLine(commit("3 h ago"), true)).toBe("3 h ago");
+  expect(commitLine(commit(null), false)).toBe("");
+});
+
+/**
+ * The big-folder pass (2026-11-13): the tab reads a checkout's tree a folder at a time, and each folder's listing is
+ * the one it drew from the whole tree before, folder by folder: the same entries, order and sections.
+ */
+test("a checkout's folder is listed as the whole tree listed it", () => {
+  const entries: LocalEntry[] = [
+    { path: "README.md", kind: "file", size: 9 },
+    { path: "src", kind: "dir", size: null },
+    { path: "src/Zeta.rs", kind: "file", size: 3 },
+    { path: "src/alpha.rs", kind: "file", size: 4 },
+    { path: "src/lib", kind: "dir", size: null },
+    { path: "src/lib/x.rs", kind: "file", size: 1 },
+    { path: "src/link", kind: "symlink", size: 7 },
+    { path: "src/vendor", kind: "submodule", size: null },
+    { path: "Ab", kind: "file", size: 1 },
+    { path: "ab", kind: "file", size: 1 },
+  ];
+  const sectionOf = (kind: "dir" | "file", full: string) => `${kind}:${full}`;
+  // As the tab built every listing at once before (`localListings`, PR #2479's first big-folder commit).
+  const parentOf = (full: string) => (full.includes("/") ? full.slice(0, full.lastIndexOf("/")) : "");
+  const before: Record<string, TreeEntry[]> = { "": [] };
+  for (const entry of entries) {
+    if (entry.kind === "dir") before[entry.path] ??= [];
+    (before[parentOf(entry.path)] ??= []).push({
+      name: entry.path.slice(entry.path.lastIndexOf("/") + 1),
+      kind: entry.kind,
+      size: entry.size,
+      section: entry.kind === "submodule" ? null : sectionOf(entry.kind === "dir" ? "dir" : "file", entry.path),
+    });
+  }
+  for (const list of Object.values(before))
+    list.sort(
+      (a, b) =>
+        Number(b.kind === "dir") - Number(a.kind === "dir") ||
+        a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    );
+  for (const [dir, list] of Object.entries(before)) {
+    const own = entries.filter((entry) => parentOf(entry.path) === dir);
+    expect(checkoutListing(own, sectionOf), dir || "the top").toEqual(list);
+  }
 });

@@ -68,6 +68,14 @@ export const EVENTS = {
    * A page showing that view reads it again.
    */
   viewFresh: "view:fresh",
+  /**
+   * `Fetched` — a branch's tip, fetched into its checkout behind a local read
+   * that found it missing, landed (ADR-0041): a page showing that tree reads
+   * it again at the checkout.
+   */
+  checkoutFetched: "checkout:fetched",
+  /** `CloneAllState` — where *Clone all* is: each clone's start and end, and the run's. */
+  cloneAll: "clone:all",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

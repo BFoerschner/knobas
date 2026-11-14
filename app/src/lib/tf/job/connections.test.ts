@@ -62,3 +62,18 @@ test("the parent's group heading opens the parent's ticket page, not its job (sp
   expect(group.href).toBe("#/ticket/gitea%3Aacme%2Fpayouts%23144");
   expect(parseTfHash(group.href!)).toEqual({ view: "ticket", id: "gitea:acme/payouts#144", tab: null });
 });
+
+test("a group's row carries its entity's state for the dot (F-036)", () => {
+  const member = { kind: "repo" as const, entity_id: "gitea:x/psp-client", entity_kind: "repo", title: "psp-client", hidden: false };
+  const state = { text: "down", tone: "err" as const };
+  const set = { id: "s", name: "S", via: { kind: "epic" as const, value: "jira:PAY-200", title: null }, members: [{ ...member, state }, { ...member, entity_id: "gitea:x/other" }] };
+  const rows = groupsOf({ sets: [set], parent: null })[0]!.rows;
+  expect(rows.map((row) => row.state)).toEqual([state, null]);
+});
+
+test("a member knobas has no row for reads by its name, as Save as a link set offered it, not its id (F-561)", () => {
+  const member = { kind: "repo" as const, entity_id: "mock:payout-service", entity_kind: "repo", title: null, hidden: false };
+  const read = { sets: [{ id: "s", name: "S", via: { kind: "manual" as const, value: "jira:PAY-1", title: null }, members: [member] }], parent: null };
+  expect(groupsOf(read)[0]!.rows[0]!.title).toBe("payout-service");
+  expect(hiddenOf({ sets: [{ ...read.sets[0]!, members: [{ ...member, hidden: true }] }], parent: null })[0]!.title).toBe("payout-service");
+});

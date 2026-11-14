@@ -25,7 +25,7 @@ use knobas_source::{
     AuthMethod, Capability, ConnectionInfo, Cursor, KindInfo, RefreshAnswer, Sink, Source,
     SourceDescriptor, SourceError, SyncItem, WriteOp, WriteReceipt,
 };
-use knobas_sync::refresh::{RefreshError, RefreshOutcome};
+use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::{
     AdapterRegistry, RefreshEnd, RefreshEnded, RunConnections, SchedulerDeps, SchedulerTiming,
     SyncEvents,
@@ -534,7 +534,7 @@ async fn a_refresh_writes_no_activity_line_and_leaves_the_cursor() {
         .await
         .unwrap();
 
-    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None).await;
+    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait).await;
     assert!(
         matches!(outcome, Ok(RefreshOutcome::Refreshed)),
         "{outcome:?}"
@@ -575,7 +575,7 @@ async fn a_refresh_writes_no_activity_line_and_leaves_the_cursor() {
 #[tokio::test(flavor = "multi_thread")]
 async fn gone_tombstones_the_item_and_an_answer_brings_it_back() {
     let f = fixture("refresh_gone").await;
-    let refreshed = |_: ()| refresh::refresh(&f.state.scheduler, TICKET, None);
+    let refreshed = |_: ()| refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait);
 
     assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Refreshed)));
     assert!(live_title(&f.state.pool, TICKET).await.is_some());
@@ -621,7 +621,7 @@ async fn a_turned_off_sources_item_is_refused_and_nothing_is_read() {
         .await
         .unwrap();
 
-    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None).await;
+    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait).await;
     assert!(
         matches!(&outcome, Err(RefreshError::TurnedOff(id)) if id == SOURCE),
         "{outcome:?}"
@@ -1051,4 +1051,55 @@ async fn a_landed_write_on_a_1_3_0_external_source_gets_the_run_alone() {
     );
     assert!(heard.0.lock().unwrap().is_empty(), "no refresh happened");
     state.scheduler.shutdown().await;
+}
+
+/// **The reader's *Refresh* does not wait behind a run** (the query audit of
+/// PR #2479, 2026-11-12). A run holds its source's lock for the whole run,
+/// network included, and the button said *Refreshing…* all that while. With
+/// the lock held, the reader's refresh answers *a run is in flight* at once:
+/// nothing is read from the source, nothing written, nobody told. Once the
+/// run commits, the same press refreshes the item.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_readers_refresh_says_a_run_is_in_flight_instead_of_waiting() {
+    let f = fixture("refresh_run_in_flight").await;
+    let mut run = f.state.pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(SOURCE)
+        .execute(&mut *run)
+        .await
+        .unwrap();
+
+    let asked = std::time::Instant::now();
+    let answer = refresh::of_reader(&f.state.scheduler, TICKET).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::RunInFlight)),
+        "{answer:?}"
+    );
+    assert!(
+        asked.elapsed() < std::time::Duration::from_secs(5),
+        "answered without waiting for the run: {:?}",
+        asked.elapsed()
+    );
+    assert_eq!(f.remote.refreshes.load(Ordering::SeqCst), 0, "nothing read");
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await,
+        None,
+        "nothing written"
+    );
+    assert!(
+        f.heard().is_empty(),
+        "a refresh held off is no refresh that ended"
+    );
+
+    run.rollback().await.unwrap();
+    let again = refresh::of_reader(&f.state.scheduler, TICKET).await;
+    assert!(
+        matches!(again, Ok(refresh::EntityRefresh::Refreshed)),
+        "{again:?}"
+    );
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await.as_deref(),
+        Some("before")
+    );
+    f.state.scheduler.shutdown().await;
 }

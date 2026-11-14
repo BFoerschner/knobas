@@ -31,7 +31,7 @@
 //! with q as (...),                 -- the tsquery, computed once
 //!      m as materialized (...),    -- one narrow row per *match*
 //!      totals as (...),            -- per-kind counts, over every match
-//!      top as (...),               -- rank within kind
+//!      top as (...),               -- each kind's best rows
 //!      picked as (...),            -- the page
 //!      detail as (...)             -- titles and excerpts, page only
 //! select ... from totals left join detail ...
@@ -45,6 +45,10 @@
 //!   bodies through it is what turns a 20 ms search into a 200 ms one.
 //! * **Exactly one match scan.** `m` is `materialized` because both `totals`
 //!   and `top` read it, and the alternative is scanning the index twice.
+//! * **No sort of every match.** `top` reads each kind's matches through a
+//!   bounded heap (`order by ... limit`, once a kind `totals` counted), where
+//!   a `row_number()` over the whole set sorted it all to keep ten a kind
+//!   (`KindCut`).
 //! * **`totals` LEFT JOIN `detail`**, so every matching kind comes back even
 //!   when the global `limit` left it no row: `ResultGroup.total` is then a true
 //!   count and not a page size. A kind with `total > 0` and no hit is a
@@ -99,6 +103,11 @@ pub(crate) enum Bind {
     /// `jsonb` through `Declarations::as_param`, the one place that wraps
     /// them, as every path-driven read does.
     Json(sqlx::types::Json<serde_json::Value>),
+    /// A board's own binds ([`board_sql`]), each null where the board asks
+    /// for no such narrowing: a `text`, a `text[]` and a `bigint`.
+    MaybeText(Option<String>),
+    MaybeTexts(Option<Vec<String>>),
+    MaybeI64(Option<i64>),
 }
 
 /// A generated statement and the arguments that go with it.
@@ -113,6 +122,10 @@ pub(crate) enum Bind {
 pub struct SearchSql {
     sql: String,
     binds: Vec<Bind>,
+    /// Whether every mirror row the statement matches is read off a narrower
+    /// relation (`Corpus::matched`), and none off `sync.item`:
+    /// [`Self::matches_narrowly`].
+    narrowly: bool,
 }
 
 impl SearchSql {
@@ -126,6 +139,15 @@ impl SearchSql {
     #[must_use]
     pub fn bind_count(&self) -> usize {
         self.binds.len()
+    }
+
+    /// Whether the statement's match stage reads a corpus through its
+    /// narrower relation (`Corpus::matched`): the mirror off
+    /// `sync.item_search` alone, where a scan of the whole relation reads no
+    /// row of `sync.item` ([`fetch_matched_by_a_letter`]).
+    #[must_use]
+    pub fn matches_narrowly(&self) -> bool {
+        self.narrowly
     }
 }
 
@@ -150,6 +172,71 @@ pub fn search_sql(
     per_group: u32,
     limit: u32,
 ) -> SearchSql {
+    build_search_sql(
+        corpora,
+        text,
+        prefix_last,
+        filters,
+        per_group,
+        limit,
+        KindCut::Limit,
+    )
+}
+
+/// [`search_sql`] with each kind cut to its best rows by a window over every
+/// match, as the statement cut them before the stored-reads pass of
+/// 2026-11-12 ([`KindCut::Window`]): the reference
+/// `tests/it/item_search.rs` holds [`search_sql`]'s answers to.
+#[cfg(any(test, feature = "test-util"))]
+#[must_use]
+pub fn search_sql_windowed(
+    corpora: &[&Corpus],
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+) -> SearchSql {
+    build_search_sql(
+        corpora,
+        text,
+        prefix_last,
+        filters,
+        per_group,
+        limit,
+        KindCut::Window,
+    )
+}
+
+/// How the statement keeps each kind's best `per_group` rows (`top`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KindCut {
+    /// An ordered read of each kind's matches that stops at its last row:
+    /// for each kind `totals` counted, `order by ... limit per_group`, which
+    /// the server answers with a bounded heap over that kind's matches.
+    ///
+    /// The same rows as [`KindCut::Window`] keeps: a kind's first
+    /// `per_group` under one total order, which ends in the row's id.
+    Limit,
+    /// `row_number() over (partition by kind order by ...)` over every match
+    /// and `rn <= per_group`: one sort of the whole match set by kind and
+    /// rank to keep ten rows a kind. 34 ms of a common word's 106 on a
+    /// mirror of 39,770 items, where the word matched 22,394 (2026-11-12);
+    /// the bounded heaps take 5.
+    #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
+    Window,
+}
+
+/// [`search_sql`], cutting each kind as `cut` says.
+fn build_search_sql(
+    corpora: &[&Corpus],
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+    cut: KindCut,
+) -> SearchSql {
     let mut builder = Builder::default();
 
     // Binds are allocated in the order their placeholders first appear in the
@@ -159,7 +246,8 @@ pub fn search_sql(
     let bound = bind_filters(&mut builder, filters);
     let per_group = builder.param(Bind::I64(i64::from(per_group)));
     let limit = builder.param(Bind::I64(i64::from(limit)));
-    let headline_opts = text.map(|_| builder.param(Bind::Text(crate::snippet::headline_options())));
+    let headline_opts = (text.is_some() && filters.headline)
+        .then(|| builder.param(Bind::Text(crate::snippet::headline_options())));
     // Every row's path line reads the parent its kind declares (#596), so the
     // declarations are bound for every search -- once: an `under:` query has
     // already bound them, and the detail stage reads that same placeholder.
@@ -228,11 +316,22 @@ pub fn search_sql(
         _ => index,
     };
 
+    let mut narrowly = false;
     sql.push_str("m as materialized (\n");
     for (index, corpus) in corpora.iter().enumerate() {
         if index > 0 {
             sql.push_str("  union all\n");
         }
+        // The rows of this corpus, matched through its narrower relation
+        // where the query asks nothing that relation does not hold
+        // (`Corpus::matched`); the page's rows are drawn from `corpus` below.
+        let corpus: &Corpus = match corpus.matched {
+            Some(narrower) if text.is_some() && matched_narrowly(&bound) => {
+                narrowly = true;
+                narrower
+            }
+            _ => corpus,
+        };
         let rank = match (text.is_some(), prefix_last) {
             (true, true) => RANK_WHOLE.replace("{fts}", corpus.fts),
             (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
@@ -256,6 +355,7 @@ pub fn search_sql(
         if text.is_some() {
             sql.push_str(" cross join q");
         }
+        sql.push_str(&walk_probe(corpus, &bound));
         sql.push('\n');
 
         let predicates = corpus_predicates(corpus, text.is_some().then_some("q.tsq"), &bound);
@@ -274,17 +374,32 @@ pub fn search_sql(
     let ranked = text.is_some();
     let ordering = order_by("", ranked, false);
 
-    let _ = writeln!(
-        sql,
-        "top as (\n  select m.*, row_number() over (partition by m.kind order by {}) as rn\n    from m\n),",
-        order_by("m.", ranked, false)
-    );
-    // One kind cannot flood the box (rn), and the whole answer is bounded
+    // One kind cannot flood the box (`top`), and the whole answer is bounded
     // (limit) before anything expensive touches it.
-    let _ = writeln!(
-        sql,
-        "picked as (\n  select * from top where rn <= {per_group}\n   order by {ordering}\n   limit {limit}\n),"
-    );
+    match cut {
+        KindCut::Limit => {
+            let within = order_by("m.", ranked, false);
+            let _ = writeln!(
+                sql,
+                "top as (\n  select t.* from totals k\n   cross join lateral (select m.* from m where m.kind = k.kind\n                        order by {within}\n                        limit {per_group}) t\n),"
+            );
+            let _ = writeln!(
+                sql,
+                "picked as (\n  select * from top\n   order by {ordering}\n   limit {limit}\n),"
+            );
+        }
+        KindCut::Window => {
+            let _ = writeln!(
+                sql,
+                "top as (\n  select m.*, row_number() over (partition by m.kind order by {}) as rn\n    from m\n),",
+                order_by("m.", ranked, false)
+            );
+            let _ = writeln!(
+                sql,
+                "picked as (\n  select * from top where rn <= {per_group}\n   order by {ordering}\n   limit {limit}\n),"
+            );
+        }
+    }
 
     // Titles and excerpts, on the rows that survived and no others.
     sql.push_str("detail as (\n");
@@ -334,7 +449,8 @@ pub fn search_sql(
             sql,
             "    cross join (select {path_declarations}::jsonb as d) pd"
         );
-        if text.is_some() {
+        // `q` is read here by the headline and by nothing else.
+        if headline_opts.is_some() {
             sql.push_str("    cross join q\n");
         }
         // The discriminator, so two corpora that happen to share an entity id
@@ -355,6 +471,7 @@ pub fn search_sql(
     SearchSql {
         sql,
         binds: builder.binds,
+        narrowly,
     }
 }
 
@@ -376,10 +493,100 @@ pub fn search_sql(
 #[must_use]
 pub fn ids_sql(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> SearchSql {
     let mut builder = Builder::default();
-    let sql = ids_body(&mut builder, alternatives, filters);
+    let sql = ids_body(
+        &mut builder,
+        &crate::corpus::LIVE_ITEM,
+        alternatives,
+        filters,
+    );
     SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
+    }
+}
+
+/// [`ids_sql`] with each ticket key read row by row, as the keys read before
+/// they were asked as sets (`corpus::LIVE_ITEM_PROBED`): the reference
+/// `tests/it/ticket_key_sets.rs` compares [`ids_sql`]'s answers to.
+#[cfg(any(test, feature = "test-util"))]
+#[must_use]
+pub fn ids_sql_probed(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> SearchSql {
+    let mut builder = Builder::default();
+    let sql = ids_body(
+        &mut builder,
+        &crate::corpus::LIVE_ITEM_PROBED,
+        alternatives,
+        filters,
+    );
+    SearchSql {
+        sql,
+        binds: builder.binds,
+        narrowly: false,
+    }
+}
+
+/// What a query narrows a scan of the mirror's rows by: the pieces
+/// [`ids_sql`] reads the ids with and [`board_sql`] puts in a board's own
+/// scan. The row is `i`, a `sync.item` row, and with words `crd`, its stored
+/// card under the declarations `cards` binds.
+struct Narrow {
+    /// The CTEs the predicates read, each ending in `,\n`: a ticket key's
+    /// ([`field_paths`]) and `reach:`'s ([`reaches`]).
+    ctes: String,
+    /// What the predicates read beside `i`: `pd`, the declarations, with
+    /// words, and `o`, the row's id for a walk's probe ([`WALK_PROBE_OF_I`]),
+    /// with words or a ticket key.
+    joins: String,
+    /// The predicates, every one of which the row must meet.
+    predicates: Vec<String>,
+    /// With words or a key a card answers (`Corpus::fields_carded`), the
+    /// placeholder of the declarations whose stored card they read as `crd`
+    /// (`knobas_core::card_join!`).
+    cards: Option<String>,
+}
+
+/// [`Narrow`] of a query over `corpus`, its placeholders allocated on
+/// `builder` in the order [`ids_sql`]'s statement reads them: the keys and
+/// dimensions ([`bind_filters`]), the words' declarations, then each word.
+fn narrow(
+    builder: &mut Builder,
+    corpus: &Corpus,
+    alternatives: &[WordAlternative],
+    filters: &EffectiveFilters,
+) -> Narrow {
+    let mut bound = bind_filters(builder, filters);
+    // The row's card is joined for the words, and for a key it answers.
+    let card_key = bound.fields.iter().any(|field| {
+        corpus
+            .fields_carded
+            .iter()
+            .any(|(key, _)| *key == field.key)
+    });
+    let words = !alternatives.is_empty();
+    let cards = (words || card_key).then(|| match &bound.declarations {
+        Some(declarations) => declarations.clone(),
+        None => builder.declarations(filters),
+    });
+    bound.carded = cards.is_some();
+    let mut ctes = field_paths(&bound);
+    ctes.push_str(&reaches(&bound));
+    let mut predicates = corpus_predicates(corpus, None, &bound);
+    let mut joins = String::new();
+    if let (true, Some(declarations)) = (words, &cards) {
+        let _ = write!(joins, " cross join (select {declarations}::jsonb as d) pd");
+        predicates.push(words_predicate(builder, alternatives));
+    }
+    // `o.eid`: the row's id, for the walks' primary-key probes
+    // (`WALKED_ASSIGNEE`, a ticket key's `corpus::walked!`), which rebind `i`.
+    if words || !bound.fields.is_empty() {
+        joins.push_str(WALK_PROBE_OF_I);
+    }
+    Narrow {
+        ctes,
+        joins,
+        predicates,
+        cards,
     }
 }
 
@@ -387,19 +594,25 @@ pub fn ids_sql(alternatives: &[WordAlternative], filters: &EffectiveFilters) -> 
 /// several can share one statement ([`ids_counts_sql`]).
 fn ids_body(
     builder: &mut Builder,
+    corpus: &Corpus,
     alternatives: &[WordAlternative],
     filters: &EffectiveFilters,
 ) -> String {
-    let corpus = &crate::corpus::LIVE_ITEM;
-    let bound = bind_filters(builder, filters);
-    let word_declarations = (!alternatives.is_empty()).then(|| match &bound.declarations {
-        Some(declarations) => declarations.clone(),
-        None => builder.param(Bind::Json(filters.declarations.as_param())),
-    });
+    let narrow = narrow(builder, corpus, alternatives, filters);
 
     let mut sql = String::from("with\n");
-    sql.push_str(&field_paths(&bound));
-    sql.push_str(&reaches(&bound));
+    sql.push_str(&narrow.ctes);
+    if let Some(declarations) = &narrow.cards {
+        // The key each source's stored cards are read under (migration
+        // `0075`, `knobas_core::card_keys!`), for the words' and the keys'
+        // `crd`.
+        let _ = writeln!(
+            sql,
+            "card_keys as materialized (select d.source_id, sync.card_key({declarations}::jsonb -> d.source_id) as k \
+               from jsonb_object_keys(case when jsonb_typeof({declarations}::jsonb) = 'object' \
+                                           then {declarations}::jsonb else '{{}}'::jsonb end) as d(source_id)),"
+        );
+    }
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
     // The live mirror as the base table and two hashed exclusion sets, not
@@ -411,57 +624,122 @@ fn ids_body(
     // it). The exclusion sets are the view's two filters (`0002`, `0012`).
     let _ = write!(
         sql,
-        "select {} as entity_id from sync.item i",
-        corpus.entity_id
+        "select {} as entity_id from sync.item i{}",
+        corpus.entity_id, narrow.joins
     );
-    let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
-    predicates.extend(corpus_predicates(corpus, None, &bound));
-    if let Some(declarations) = &word_declarations {
-        let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
-        predicates.push(words_predicate(builder, alternatives));
+    if narrow.cards.is_some() {
+        // `crd`: the row's stored card under those declarations, null where
+        // it has none.
+        sql.push_str(knobas_core::card_join!("crd", "i"));
     }
     sql.push('\n');
-    if !predicates.is_empty() {
-        let _ = write!(sql, " where {}", predicates.join("\n   and "));
-    }
+    let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
+    predicates.extend(narrow.predicates);
+    let _ = write!(sql, " where {}", predicates.join("\n   and "));
     sql
+}
+
+/// A ticket board's cards statement with a query's narrowing in its own scan
+/// (the broad-keys pass, 2026-11-13): `statement`'s pieces
+/// (`knobas_core::mini_board::CardsStatement`) with [`ids_sql`]'s CTEs, joins
+/// and predicates between them, so the board ranks the rows the query keeps
+/// in the scan that reads them. `binds` are the statement's own `$1` to
+/// `$7`; the query's follow.
+///
+/// **The rows [`ids_sql`]'s ids would give the statement as `$1`.** Both
+/// read `sync.item i` and test liveness the same way
+/// (`knobas_core::live_by_exclusion!`), so a row kept here meets the board's
+/// `where` and every predicate [`ids_sql`] keeps a row by: the same
+/// predicates, from the same function ([`narrow`]), true where a `where`
+/// would have kept the row.
+///
+/// **Only under the declarations the query was parsed with.** The words read
+/// the row's stored card as `crd`, which in the statement is the card under
+/// its own declarations (`$4`), and the keys read `$4` where they bound the
+/// query's: the caller asks for this statement when the two are the same
+/// declarations and for the ids when they are not
+/// (`Narrowing`'s `CardsNarrowing`).
+#[must_use]
+pub(crate) fn board_sql(
+    statement: knobas_core::mini_board::CardsStatement,
+    binds: knobas_core::mini_board::CardsBinds<'_>,
+    alternatives: &[WordAlternative],
+    filters: &EffectiveFilters,
+) -> SearchSql {
+    let texts = |ids: Option<&[String]>| Bind::MaybeTexts(ids.map(<[String]>::to_vec));
+    let text = |value: Option<&str>| Bind::MaybeText(value.map(str::to_owned));
+    let mut builder = Builder {
+        binds: vec![
+            texts(binds.members),
+            texts(binds.sources),
+            text(binds.project),
+            Bind::Json(binds.declared.clone()),
+            Bind::MaybeI64(binds.per_column),
+            text(binds.lanes),
+            Bind::MaybeI64(binds.lanes_first),
+        ],
+        declarations: Some("$4".to_owned()),
+    };
+    let narrow = narrow(
+        &mut builder,
+        &crate::corpus::LIVE_ITEM,
+        alternatives,
+        filters,
+    );
+    let mut sql = String::with_capacity(statement.whole.len() + narrow.ctes.len() + 4096);
+    sql.push_str(statement.with);
+    sql.push_str(&narrow.ctes);
+    sql.push_str(statement.ctes);
+    // The predicate as a column of the board's scan, and the rows it keeps
+    // cut above it, behind `offset 0`: `CardsStatement` says why.
+    sql.push_str("select x.entity_id, x.source_id, x.at, x.status, x.lane from (\n       ");
+    sql.push_str(statement.select);
+    let _ = write!(
+        sql,
+        ",\n              (({})) as keep",
+        narrow.predicates.join(")\n               and (")
+    );
+    sql.push_str(statement.from);
+    sql.push_str(&narrow.joins);
+    sql.push_str(statement.filter);
+    sql.push_str("\n       offset 0) x where x.keep");
+    sql.push_str(statement.cut);
+    SearchSql {
+        sql,
+        binds: builder.binds,
+        narrowly: false,
+    }
 }
 
 /// [`ids_sql`]'s word filter: the row meets one of `alternatives`, holding
 /// every word it asks for and none it leaves out (#1889). An alternative's
-/// words bind as one array, those it leaves out as another, each word as
-/// typed and folded by the server's `lower()` ([`bind_lowered`], #1988). One with
+/// first word binds on its own ([`row_holds_first_word`]), its other words
+/// as one array and those it leaves out as another, each word as typed and
+/// folded by the server's `lower()` ([`bind_lowered`], #1988). One with
 /// neither admits every row, though `query::word_alternatives` never
 /// returns one.
 fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> String {
     debug_assert!(!alternatives.is_empty(), "no alternative is no word filter");
-    // Whether the row holds `w.word`. The key and the title first, each on
-    // its own, so a word either holds reads no payload (#897); the declared
-    // assignee, then the declared parents, only for a word they both miss.
-    // No word holds a space, so this matches what the three joined by
-    // spaces matched.
-    let row_holds_word = format!(
-        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), w.word) > 0 then true \
-              when strpos(lower(i.title), w.word) > 0 then true \
-              when strpos(lower(coalesce({}, '')), w.word) > 0 then true \
-              else exists (select 1 from sync.item_parent ip \
-                           where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0) end",
-        knobas_core::declared_string!("pd.d", "assignee")
-    );
     let predicates: Vec<String> = alternatives
         .iter()
         .map(|alternative| {
             let mut parts = Vec::new();
-            if !alternative.holds.is_empty() {
-                let holds_all = bind_lowered(builder, &alternative.holds);
-                parts.push(format!(
-                    "not exists (select 1 from unnest({holds_all}::text[]) w(word) where not ({row_holds_word}))"
-                ));
+            if let Some((first, rest)) = alternative.holds.split_first() {
+                let first = format!("lower({}::text)", builder.param(Bind::Text(first.clone())));
+                parts.push(row_holds_first_word(&first));
+                if !rest.is_empty() {
+                    let holds_rest = bind_lowered(builder, rest);
+                    parts.push(format!(
+                        "not exists (select 1 from unnest({holds_rest}::text[]) w(word) where not ({}))",
+                        row_holds_word("w.word")
+                    ));
+                }
             }
             if !alternative.lacks.is_empty() {
                 let lacks_all = bind_lowered(builder, &alternative.lacks);
                 parts.push(format!(
-                    "not exists (select 1 from unnest({lacks_all}::text[]) w(word) where {row_holds_word})"
+                    "not exists (select 1 from unnest({lacks_all}::text[]) w(word) where {})",
+                    row_holds_word("w.word")
                 ));
             }
             if parts.is_empty() {
@@ -477,6 +755,100 @@ fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> S
     }
 }
 
+/// The declared assignee of the row, walked: [`knobas_core::declared_string!`]
+/// over the row's payload, read through its primary key (the scale pass,
+/// 2026-11-10). In a probe, so the statement's own scan of the tickets reads
+/// no payload and can be an index-only scan (`item_ticket_brief_idx`,
+/// migration `0074`); it rebinds `i` to the same row, which is what the
+/// payload macros read, and `o.eid` is the row's id from [`ids_body`].
+const WALKED_ASSIGNEE: &str = concat!(
+    "(select ",
+    knobas_core::declared_string!("pd.d", "assignee"),
+    " from sync.item i where i.entity_id = o.eid)"
+);
+
+/// The row's declared names of its parents hold `word` (`sync.item_parent`).
+fn parents_hold(word: &str) -> String {
+    format!(
+        "exists (select 1 from sync.item_parent ip \
+                 where ip.entity_id = i.entity_id and strpos(lower(ip.name), {word}) > 0)"
+    )
+}
+
+/// Whether the row's stored card (`crd`, migration `0075`) holds `word`, a
+/// lowered text expression: in its assignee, or in the names
+/// `sync.item_parent` holds for the row, which the card keeps lowered and
+/// joined by U+001F (`parent_text`). A word without that character matches
+/// the joined names exactly where it matches one of them; one with it is
+/// held to the names one by one ([`parents_hold`]). So the answer is
+/// [`row_holds_word`]'s for the assignee and the parents, read once a row
+/// from the card rather than from two tables (the scale pass, 2026-11-11).
+fn card_holds(word: &str) -> String {
+    format!(
+        "(strpos(lower(coalesce(crd.assignee, '')), {word}) > 0 \
+          or (coalesce(strpos(crd.parent_text, {word}), 0) > 0 \
+              and (strpos({word}, chr(31)) = 0 or {})))",
+        parents_hold(word)
+    )
+}
+
+/// Whether the row holds `word`, a lowered text expression: in its key, its
+/// title, its declared assignee or the names of its declared parents. The key
+/// and the title first, each on its own, so a word either holds reads nothing
+/// more (#897); the assignee, then the parents, only for a word they both
+/// miss. No word holds a space, so this matches what the three joined by
+/// spaces matched. The assignee is the stored one (`sync.item_field`,
+/// #2184) where the database holds it for these declarations, one index
+/// probe a row, and the payload's walk where it does not: walked, it was 400
+/// of a typed word's 445 ms on 20,000 live Jira tickets (2026-11-10).
+fn row_holds_word(word: &str) -> String {
+    format!(
+        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 then true \
+              when strpos(lower(i.title), {word}) > 0 then true \
+              when crd.entity_id is not null then {} \
+              when strpos(lower(coalesce({}, '')), {word}) > 0 then true \
+              else {} end",
+        card_holds(word),
+        knobas_core::stored_string!(
+            "pd.d",
+            "assignee",
+            "(select ",
+            knobas_core::declared_string!("pd.d", "assignee"),
+            " from sync.item i where i.entity_id = o.eid)"
+        ),
+        parents_hold(word)
+    )
+}
+
+/// [`row_holds_word`] for an alternative's first word, `word` a bound
+/// parameter: the same answer, with the stored assignee tested against the
+/// set of stored assignees that hold the word, built once and hashed, rather
+/// than probed row by row (the scale pass, 2026-11-10). Where the stored
+/// declarations say no row is stored for the row's paths
+/// ([`knobas_core::stored_under!`]) it walks, as the probe would have. On
+/// 20,000 live Jira tickets the probe was 16,500 index lookups, about 40 of
+/// a word's 90 ms. Only the first word: each word's set is a scan of the
+/// stored assignees, and every row the first word misses is done with.
+fn row_holds_first_word(word: &str) -> String {
+    let paths = "(pd.d::jsonb #> array[i.source_id, i.kind, 'assignee'])";
+    format!(
+        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 then true \
+              when strpos(lower(i.title), {word}) > 0 then true \
+              when crd.entity_id is not null then {card} \
+              when {} then ((i.entity_id, {paths}) in (select f.entity_id, f.paths from sync.item_field f \
+                    where f.field = 'assignee' and strpos(lower(coalesce(f.value, '')), {word}) > 0) \
+                or {parents}) \
+              when strpos(lower(coalesce({WALKED_ASSIGNEE}, '')), {word}) > 0 then true \
+              else {parents} end",
+        knobas_core::stored_under!(
+            "assignee",
+            "(pd.d::jsonb #> array[i.source_id, i.kind, 'assignee'])"
+        ),
+        parents = parents_hold(word),
+        card = card_holds(word)
+    )
+}
+
 /// How many rows [`ids_sql`] would answer with, as one `bigint` (#812): a
 /// ticket view's count in the views pane, the same rows its board draws.
 #[must_use]
@@ -485,6 +857,7 @@ pub fn ids_count_sql(alternatives: &[WordAlternative], filters: &EffectiveFilter
     SearchSql {
         sql: format!("select count(*)::bigint from (\n{}\n) matched", ids.sql),
         binds: ids.binds,
+        narrowly: false,
     }
 }
 
@@ -503,7 +876,12 @@ pub fn ids_counts_sql(queries: &[(&[WordAlternative], &EffectiveFilters)]) -> Op
         if position > 0 {
             sql.push_str("union all\n");
         }
-        let body = ids_body(&mut builder, alternatives, filters);
+        let body = ids_body(
+            &mut builder,
+            &crate::corpus::LIVE_ITEM,
+            alternatives,
+            filters,
+        );
         let position = builder.param(Bind::I64(i64::try_from(position).unwrap_or(i64::MAX)));
         let _ = writeln!(
             sql,
@@ -513,6 +891,7 @@ pub fn ids_counts_sql(queries: &[(&[WordAlternative], &EffectiveFilters)]) -> Op
     Some(SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     })
 }
 
@@ -545,6 +924,10 @@ struct BoundFilters {
     pipelines: Option<String>,
     /// [`EffectiveFilters::hidden_kinds`]' placeholder (#2422).
     hidden: Option<String>,
+    /// Whether the statement joins each row's stored card as `crd`
+    /// ([`narrow`]): a key the card answers is then read off it
+    /// (`Corpus::fields_carded`).
+    carded: bool,
 }
 
 /// One ticket-key condition's placeholders.
@@ -558,22 +941,52 @@ struct BoundField {
     me: String,
 }
 
+/// `o (eid)`, the id of the mirror row `i`, joined beside it: what a walk
+/// made through the row's primary key reads the id from, since the probe
+/// rebinds `i` (`corpus::walked!`, [`WALKED_ASSIGNEE`]). One row a row and no
+/// plan node: the planner pulls it up.
+const WALK_PROBE_OF_I: &str = " cross join lateral (select i.entity_id as eid) o";
+
+/// [`WALK_PROBE_OF_I`]'s join for a corpus branch whose predicates hold a
+/// ticket key's fragment, and nothing for any other: a corpus with no such
+/// fragment answers each key with `false`, and a statement without a key
+/// reads no `o`.
+fn walk_probe(corpus: &Corpus, bound: &BoundFilters) -> String {
+    if bound.fields.is_empty() || corpus.fields.is_empty() {
+        String::new()
+    } else {
+        format!(" cross join lateral (select {} as eid) o", corpus.entity_id)
+    }
+}
+
+/// Whether a query asks only what a corpus's narrower match relation holds
+/// (`Corpus::matched`): the words, the scope, and the sources, kinds and
+/// dates. An author, a parent, a reach, a name glob or a ticket key reads the
+/// corpus's own row.
+fn matched_narrowly(bound: &BoundFilters) -> bool {
+    bound.authors.is_none()
+        && bound.under.is_none()
+        && bound.reach.is_none()
+        && bound.names.is_none()
+        && bound.fields.is_empty()
+}
+
 /// Allocate one statement's filter binds, in the order they are read.
 ///
 /// With a ticket key the declarations come first: the statement's
 /// `fdecl` CTE reads them before any predicate does (`crate::corpus::FIELD_PATHS`).
 fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilters {
-    let declarations = (!filters.fields.is_empty())
-        .then(|| builder.param(Bind::Json(filters.declarations.as_param())));
+    let declarations = (!filters.fields.is_empty()).then(|| builder.declarations(filters));
     let mut bound = bind_dimensions(builder, filters, declarations.as_ref());
     bound.declarations = declarations.or_else(|| bound.under.as_ref().map(|(d, _)| d.clone()));
     for filter in &filters.fields {
         // `has:`'s kinds before its user: its fragment reads them first,
         // to pick the links it walks (#939).
         // The six name keys and `assigned:`'s usernames bind as typed and
-        // are folded by the server (#1843, #1975); `has:` and `sprint:`
-        // read a spelling the parse already folded, which names a signal or
-        // `current`.
+        // are folded by the server (#1843, #1975); `has:` reads a spelling
+        // the parse already folded, which names a signal. `sprint:` binds
+        // nothing: its one value, `current`, is the fragment's own test,
+        // and a bind no fragment reads is one the server cannot type.
         use crate::query::FieldKey;
         let values = match filter.key {
             FieldKey::Project
@@ -583,7 +996,8 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
             | FieldKey::Assignee
             | FieldKey::Label
             | FieldKey::Assigned => bind_lowered(builder, &filter.values),
-            FieldKey::Sprint | FieldKey::Has => builder.param(Bind::Texts(filter.values.clone())),
+            FieldKey::Has => builder.param(Bind::Texts(filter.values.clone())),
+            FieldKey::Sprint => "null::text[]".to_owned(),
         };
         // `has:`'s usernames as configured, folded by the server as the
         // reviewers they meet are.
@@ -648,7 +1062,7 @@ fn bind_dimensions(
             (
                 declarations
                     .cloned()
-                    .unwrap_or_else(|| builder.param(Bind::Json(filters.declarations.as_param()))),
+                    .unwrap_or_else(|| builder.declarations(filters)),
                 bind_lowered(builder, &filters.under),
             )
         }),
@@ -660,6 +1074,7 @@ fn bind_dimensions(
         titles: filters.titles,
         pipelines,
         hidden,
+        carded: false,
     }
 }
 
@@ -697,18 +1112,33 @@ fn answered_kind(corpus: &Corpus, bound: &BoundFilters) -> String {
 fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -> Vec<String> {
     let mut predicates: Vec<String> = Vec::new();
     if let Some(fts) = fts {
-        predicates.push(format!("{} @@ {fts}", corpus.fts));
+        // *Titles* (#2430): every corpus indexes what a row shows -- its
+        // title, a ticket's key -- at weight A and its body below, so the
+        // words must match the A lexemes alone. Beside the match of the whole
+        // vector, never in its place: a word the query leaves out must be
+        // absent from the body too.
+        match (bound.titles, corpus.title_fts) {
+            // A stored, indexed title vector (`Corpus::title_fts`): its index
+            // finds the rows the words name, and the whole vector only has to
+            // agree. That half is wrapped so that it is a filter and nothing
+            // an index can answer: as a bare `@@` the planner was free to
+            // read every body match from the whole vector's index and filter
+            // for the titles, which is the cost the stored vector removes.
+            (true, Some(stored)) => {
+                predicates.push(format!("{stored} @@ {fts}"));
+                predicates.push(format!("coalesce({} @@ {fts}, false)", corpus.fts));
+            }
+            // No stored title vector: the GIN index answers the plain match
+            // and the weight filter keeps the rows it found.
+            (true, None) => {
+                predicates.push(format!("{} @@ {fts}", corpus.fts));
+                predicates.push(format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts));
+            }
+            (false, _) => predicates.push(format!("{} @@ {fts}", corpus.fts)),
+        }
         if let Some(unless) = corpus.unless {
             // The row another corpus answers for when it matches (#2431).
             predicates.push(format!("not ({unless} @@ {fts})"));
-        }
-        if bound.titles {
-            // *Titles* (#2430): every corpus indexes what a row shows -- its
-            // title, a ticket's key -- at weight A and its body below, so the
-            // words must match the A lexemes alone. Beside the plain match,
-            // never instead of it: that one is what the GIN index answers,
-            // and this filters the rows it found.
-            predicates.push(format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts));
         }
     }
     if let Some(scope) = corpus.scope {
@@ -773,23 +1203,33 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         // `fd` is the one row a fragment reads its binds from, as `ud` is for
         // `under:`. A fragment that misses yields null, and null is "does not
         // match": `coalesce` makes it false before a `not` can see it.
-        let matches = match corpus.fields.iter().find(|(key, _)| *key == field.key) {
-            // `has:` (#815) reads its binds in place rather than from `fd`:
-            // its fragment is a set (`in (select ...)`) that must be read
-            // once per statement, and a reference to `fd` would make it a
-            // subplan run once per row, the whole signal walk each time. The
-            // fragment's only `fd.` references are these two, by
-            // construction (`crate::corpus::LIVE_ITEM_FIELDS`).
-            Some((crate::query::FieldKey::Has, fragment)) => format!(
+        // Off the row's own card where the statement joins it, as the set
+        // beside it where it does not (`Corpus::fields_carded`).
+        let carded = bound
+            .carded
+            .then(|| {
+                corpus
+                    .fields_carded
+                    .iter()
+                    .find(|(key, _)| *key == field.key)
+            })
+            .flatten();
+        let asked = carded.or_else(|| corpus.fields.iter().find(|(key, _)| *key == field.key));
+        let matches = match asked {
+            // Every key reads its binds in place (`has:` since #815, the
+            // rest since the query audit of 2026-11-12): a fragment asks
+            // its values as a set (`in (select ...)`) that must be read once
+            // per statement, and a reference to a relation `fd` carrying the
+            // binds made it a subplan run once per row. A fragment's only
+            // `fd.` references are these three, by construction
+            // (`crate::corpus::LIVE_ITEM_FIELDS`); `fd.n` is a key's window
+            // in days where it has one, `null` where it has none.
+            Some((_, fragment)) => format!(
                 "coalesce({}, false)",
                 fragment
                     .replace("fd.v", &field.values)
                     .replace("fd.u", &field.me)
-            ),
-            Some((_, fragment)) => format!(
-                "coalesce((select {fragment} from (select {}::text[] as v, {}::int as n, \
-                 {}::text[] as u) fd), false)",
-                field.values, field.days, field.me
+                    .replace("fd.n", &format!("{}::int", field.days))
             ),
             // A corpus whose rows have no such field matches no value of it.
             None => "false".to_owned(),
@@ -971,8 +1411,10 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             }
             let _ = writeln!(
                 sql,
-                "  select {} as synced_at\n    from {}",
-                corpus.synced_at, corpus.relation
+                "  select {} as synced_at\n    from {}{}",
+                corpus.synced_at,
+                corpus.relation,
+                walk_probe(corpus, &bound)
             );
             let predicates = corpus_predicates(corpus, fts.as_deref(), &bound);
             if !predicates.is_empty() {
@@ -985,6 +1427,7 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
     Some(SearchSql {
         sql,
         binds: builder.binds,
+        narrowly: false,
     })
 }
 
@@ -998,7 +1441,7 @@ pub fn query_as_with<O>(built: SearchSql) -> QueryAs<'static, Postgres, O, PgArg
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
-    let SearchSql { sql, binds } = built;
+    let SearchSql { sql, binds, .. } = built;
     let mut query = sqlx::query_as::<Postgres, O>(sqlx::AssertSqlSafe(sql))
         // **Not a cached prepared statement, and this is a measured decision.**
         //
@@ -1029,10 +1472,115 @@ where
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
             Bind::Json(value) => query.bind(value),
+            Bind::MaybeText(value) => query.bind(value),
+            Bind::MaybeTexts(value) => query.bind(value),
+            Bind::MaybeI64(value) => query.bind(value),
         };
     }
     query
 }
+
+/// Run a statement [`search_sql`] built **with words** and collect its rows:
+/// [`query_as_with`], in a transaction that plans it with sequential scans
+/// off (`set local enable_seqscan = off`), as the similarity ranking is
+/// planned (`knobas_core::suggest`, #771).
+///
+/// The planner prices `fts @@ q` as one cheap operator a row and does not see
+/// that a stored vector is fetched and decompressed to evaluate it. For a
+/// word half the mirror holds it therefore chose to scan every row, 78 ms
+/// for `retry` over 39,770 items where the index answers in 10 (the query
+/// audit of 2026-11-12). Nothing a search with words reads is better scanned
+/// whole: each corpus matches through its index, and the corpora that have
+/// none (a reader's views, sets and saved lists, tens of rows) are scanned
+/// under either setting.
+///
+/// Not for a browse: with no words there is no match to index, and the
+/// planner's own choice is the one that was measured.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_matched<O>(pool: &sqlx::PgPool, built: SearchSql) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    fetch_planned(pool, built, MATCHED_PLANNING).await
+}
+
+/// [`fetch_matched`] for a statement whose words are **one character**, still
+/// being typed (the broad-keys pass, 2026-11-13): planned with sequential
+/// scans left on.
+///
+/// One letter matches every row that holds a word beginning with it, 35,232
+/// of 39,770 on Björn's scale. Through the index that is a list of nearly
+/// every row, built by one process while the others wait for it, 6 ms, and
+/// then every page of the table read anyway; read whole, every process
+/// starts at once: `p` 54 ms to 47. Since migration `0084` the narrow table
+/// holds its vectors in its rows, so the reason [`fetch_matched`] turns the
+/// scan off (a vector fetched from beside the table to be tested) is gone
+/// for it. Only for one character: a longer word the planner misjudged
+/// would read the whole table to find a few rows.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_matched_by_a_letter<O>(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    fetch_planned(pool, built, LETTER_PLANNING).await
+}
+
+/// `built`'s rows, planned under `planning` in a transaction of its own.
+async fn fetch_planned<O>(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    planning: &'static str,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    let mut tx = pool.begin().await?;
+    sqlx::query(planning).execute(&mut *tx).await?;
+    let rows = query_as_with::<O>(built).fetch_all(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(rows)
+}
+
+/// What a statement with words is planned under, set for its transaction
+/// alone (`set_config(..., true)` is `set local`), in one round trip.
+///
+/// * **`enable_seqscan` off**: [`fetch_matched`] says why.
+/// * **`parallel_tuple_cost` 0, `parallel_setup_cost` 850 and three
+///   workers** (the broad-keys pass, 2026-11-13). The planner prices
+///   `ts_rank_cd` as one cheap operator a row, where it is most of a broad
+///   word's work: 2 µs a match, 60 ms for the 35,000 rows one letter
+///   matches. So it saw nothing for more processes to share, and since the
+///   match stage reads the narrow table alone (migration `0084`) the
+///   statement looked cheap enough to run on one: `p` 97 ms. With no charge
+///   a row passed up, a start-up charge of 850 where the default is 1,000,
+///   and the three workers the server's own rule gives a table of this size
+///   where the default caps a statement at two, a word half the mirror
+///   holds is ranked on four processes (`p` 97 ms to 54, `pa` 73 to 44,
+///   `retry` 56 to 35, `deploy`, 19,273 rows, 50 to 33) and a rare one
+///   still on one, where starting workers costs more than they save
+///   (`iban`, 553 rows: 10 ms alone, 13 with workers). The charge is set
+///   between the two on Björn's scale: at 700 `iban` starts workers, at
+///   1,000 `deploy` no longer does. Where the line falls between them, and
+///   on another mirror, was not measured.
+const MATCHED_PLANNING: &str = "select set_config('enable_seqscan', 'off', true), \
+     set_config('parallel_tuple_cost', '0', true), \
+     set_config('parallel_setup_cost', '850', true), \
+     set_config('max_parallel_workers_per_gather', '3', true)";
+
+/// [`MATCHED_PLANNING`] with sequential scans left on:
+/// [`fetch_matched_by_a_letter`]'s.
+const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', true), \
+     set_config('parallel_setup_cost', '850', true), \
+     set_config('max_parallel_workers_per_gather', '3', true)";
 
 /// What the mirror and the estate say of each typed `under:` value, by its
 /// 1-based position among `values`, for `crate::under::report_unknown`
@@ -1134,6 +1682,21 @@ pub async fn parent_positions(
     Ok(positions)
 }
 
+/// The plan [`fetch_matched`] runs a statement under: [`explain`] with
+/// sequential scans off, in a transaction of its own.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain_matched(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(MATCHED_PLANNING).execute(&mut *tx).await?;
+    let plan = explain_on(&mut tx, built).await?;
+    tx.commit().await?;
+    Ok(plan)
+}
+
 /// The plan the launcher's own statement runs under.
 ///
 /// Behind `test-util` and living **here** because this is the module
@@ -1150,7 +1713,17 @@ pub async fn parent_positions(
 /// [`sqlx::Error`] if the statement cannot be planned.
 #[cfg(any(test, feature = "test-util"))]
 pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
-    let SearchSql { sql, binds } = built;
+    let mut conn = pool.acquire().await?;
+    explain_on(&mut conn, built).await
+}
+
+/// [`explain`], on a connection the caller holds.
+#[cfg(any(test, feature = "test-util"))]
+async fn explain_on(
+    conn: &mut sqlx::PgConnection,
+    built: SearchSql,
+) -> Result<String, sqlx::Error> {
+    let SearchSql { sql, binds, .. } = built;
     let mut query = sqlx::query_as::<Postgres, (String,)>(sqlx::AssertSqlSafe(format!(
         "explain (analyze, buffers, costs off)
 {sql}"
@@ -1162,10 +1735,13 @@ pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sq
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
             Bind::Json(value) => query.bind(value),
+            Bind::MaybeText(value) => query.bind(value),
+            Bind::MaybeTexts(value) => query.bind(value),
+            Bind::MaybeI64(value) => query.bind(value),
         };
     }
     Ok(query
-        .fetch_all(pool)
+        .fetch_all(conn)
         .await?
         .into_iter()
         .map(|(line,)| line)
@@ -1337,9 +1913,22 @@ fn order_by(prefix: &str, ranked: bool, nullable: bool) -> String {
 #[derive(Default)]
 struct Builder {
     binds: Vec<Bind>,
+    /// The placeholder the statement already binds the declarations at, for
+    /// one built around a statement that binds them itself ([`board_sql`]);
+    /// `None` and a filter that reads them binds its own.
+    declarations: Option<String>,
 }
 
 impl Builder {
+    /// The placeholder a filter reads the declarations from: the one the
+    /// statement already has, or a new bind of `filters`' own.
+    fn declarations(&mut self, filters: &EffectiveFilters) -> String {
+        match &self.declarations {
+            Some(placeholder) => placeholder.clone(),
+            None => self.param(Bind::Json(filters.declarations.as_param())),
+        }
+    }
+
     /// Push a value and get back the placeholder that reads it.
     ///
     /// The only way to add a bind, which is what makes it impossible for a
@@ -1454,6 +2043,13 @@ mod tests {
         "frame",
         "pipeline",
         "group_path",
+        // The key a drawn row's stored list row is read under
+        // (`knobas_core::row_key_of!`, `corpus::stored_row_or!`): the parts
+        // of a kind's declaration `sync.row_paths` names that no fragment
+        // above does.
+        "head",
+        "head_repo",
+        "default_branch",
     ];
 
     fn filters(
@@ -1691,7 +2287,7 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(built.binds.len(), 9, "{}", built.sql);
+        assert_eq!(built.binds.len(), 8, "{}", built.sql);
         assert_eq!(
             placeholders(&built.sql),
             (1..=built.binds.len()).collect::<Vec<_>>(),
@@ -1709,9 +2305,34 @@ mod tests {
         // The declarations every row's path line reads (#596), last because
         // the detail stage is the last to read anything.
         assert!(
-            matches!(built.binds[8], Bind::Json(_)),
+            matches!(built.binds[7], Bind::Json(_)),
             "{:?}",
-            built.binds[8]
+            built.binds[7]
+        );
+
+        // A statement asked for a headline binds its options ahead of the
+        // declarations, where the detail stage reads them.
+        let headlined = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            true,
+            &EffectiveFilters {
+                headline: true,
+                ..filters(&["jira"], &["ticket"], Some(7), &["mara"])
+            },
+            10,
+            50,
+        );
+        assert_eq!(headlined.binds.len(), 9, "{}", headlined.sql);
+        assert_eq!(
+            placeholders(&headlined.sql),
+            (1..=headlined.binds.len()).collect::<Vec<_>>(),
+            "{}",
+            headlined.sql
+        );
+        assert_eq!(
+            headlined.binds[7],
+            Bind::Text(crate::snippet::headline_options())
         );
     }
 
@@ -1753,8 +2374,8 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(built.binds.len(), 5);
-        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4, 5], "{}", built.sql);
+        assert_eq!(built.binds.len(), 4);
+        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4], "{}", built.sql);
     }
 
     #[test]
@@ -1775,8 +2396,8 @@ mod tests {
         );
         assert_eq!(
             typing.sql.matches("cross join q").count(),
-            2,
-            "and it is read as a FROM item by the match and by the headline: {}",
+            1,
+            "and it is read as a FROM item by the match: {}",
             typing.sql
         );
         assert!(typing.sql.contains("':*'"), "{}", typing.sql);
@@ -1796,7 +2417,7 @@ mod tests {
         // While a word may be a prefix, a row holding the words whole is
         // ranked by them (`RANK_WHOLE`, #611).
         assert!(
-            typing.sql.contains("ts_rank_cd(i.fts, q.whole)"),
+            typing.sql.contains("ts_rank_cd(sx.fts, q.whole)"),
             "{}",
             typing.sql
         );
@@ -1991,8 +2612,14 @@ mod tests {
             "the per-kind total is back on a window partition:\n{}",
             built.sql
         );
-        // One window function only: `row_number`, which is the per-kind cap.
-        assert_eq!(built.sql.matches(" over (").count(), 1, "{}", built.sql);
+        // No window function at all: the per-kind cap is an ordered limit
+        // a kind (`KindCut::Limit`), not a `row_number` over every match.
+        assert_eq!(built.sql.matches(" over (").count(), 0, "{}", built.sql);
+        assert!(
+            built.sql.contains("from m where m.kind = k.kind"),
+            "{}",
+            built.sql
+        );
         // And the match set is scanned once, for both readers of it.
         assert!(built.sql.contains("m as materialized ("), "{}", built.sql);
     }
@@ -2019,10 +2646,28 @@ mod tests {
     }
 
     /// `ts_headline` re-parses the document per row, so it must see the page
-    /// and not the match set.
+    /// and not the match set. Only a statement asked for one computes it.
     #[test]
     fn the_headline_runs_after_the_limit() {
         let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters {
+                headline: true,
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        // By `q`, which the detail stage then reads as well as the match.
+        assert_eq!(
+            built.sql.matches("cross join q").count(),
+            2,
+            "{}",
+            built.sql
+        );
+        let unasked = search_sql(
             &[&LIVE_ITEM],
             Some("sepa"),
             false,
@@ -2030,11 +2675,63 @@ mod tests {
             10,
             50,
         );
+        assert!(!unasked.sql.contains("ts_headline"), "{}", unasked.sql);
+        assert!(
+            unasked.sql.contains("null::text as snippet"),
+            "{}",
+            unasked.sql
+        );
         let limit = built.sql.find("limit $").expect("a limit");
         let headline = built.sql.find("ts_headline").expect("a headline");
         assert!(limit < headline, "{}", built.sql);
         // And it reads the page, not the corpus.
         assert!(built.sql.contains("from picked p"), "{}", built.sql);
+    }
+
+    /// *Titles* matches a row's weight-A lexemes: the mirror's stored and
+    /// indexed copy of them (migration `0077`), and for a corpus that keeps
+    /// none its vector filtered per match. Beside the match of the whole
+    /// vector, never in its place: a word the query leaves out must be
+    /// absent from the body too, as it was while both halves read one
+    /// vector. Over the stored copy that half is a filter no index answers.
+    #[test]
+    fn titles_reads_the_stored_title_vector_where_a_corpus_keeps_one() {
+        let built = search_sql(
+            &[&LIVE_ITEM, &crate::corpus::NOTE],
+            Some("sepa"),
+            true,
+            &EffectiveFilters {
+                titles: true,
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        assert!(
+            built
+                .sql
+                .contains("where sx.fts_a @@ q.tsq\n     and coalesce(sx.fts @@ q.tsq, false)"),
+            "{}",
+            built.sql
+        );
+        assert!(
+            built
+                .sql
+                .contains("where n.fts @@ q.tsq\n     and ts_filter(n.fts, '{a}') @@ q.tsq"),
+            "{}",
+            built.sql
+        );
+        assert!(!built.sql.contains("ts_filter(sx.fts"), "{}", built.sql);
+        // Everything matches the whole vector alone.
+        let everything = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            true,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert!(!everything.sql.contains("fts_a"), "{}", everything.sql);
     }
 
     /// A run log's hits are live pipelines, drawn by the mirror's detail
@@ -2107,15 +2804,18 @@ mod tests {
         // `fts` appears exactly twice, and both occurrences are accounted
         // for: ranked and matched against. Neither is a projection, which is
         // what would panic.
-        assert_eq!(built.sql.matches("i.fts").count(), 2, "{}", built.sql);
+        // The value read is the narrow table's copy (migration `0077`);
+        // the mirror's own column is not named at all.
+        assert_eq!(built.sql.matches("sx.fts").count(), 2, "{}", built.sql);
+        assert_eq!(built.sql.matches("i.fts").count(), 0, "{}", built.sql);
         assert_eq!(
-            built.sql.matches("ts_rank_cd(i.fts, q.tsq)").count(),
+            built.sql.matches("ts_rank_cd(sx.fts, q.tsq)").count(),
             1,
             "{}",
             built.sql
         );
         assert_eq!(
-            built.sql.matches("i.fts @@ q.tsq").count(),
+            built.sql.matches("sx.fts @@ q.tsq").count(),
             1,
             "{}",
             built.sql
@@ -2133,6 +2833,7 @@ mod tests {
             title: "o.title",
             named: None,
             fts: "o.fts",
+            title_fts: None,
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus
             // rather than be quietly dropped for it.
@@ -2149,6 +2850,8 @@ mod tests {
             scope: Some("o.archived is false"),
             under: None,
             fields: &[],
+            fields_carded: &[],
+            matched: None,
         };
         let built = search_sql(
             &[&LIVE_ITEM, &OTHER],
@@ -2160,7 +2863,7 @@ mod tests {
         );
         assert_eq!(built.sql.matches("union all").count(), 2, "{}", built.sql);
         // One bind per filter, shared by both branches -- not one per branch.
-        assert_eq!(built.binds.len(), 7, "{}", built.sql);
+        assert_eq!(built.binds.len(), 6, "{}", built.sql);
         assert_eq!(built.sql.matches("= any($2)").count(), 2, "{}", built.sql);
         // The scope travels with the corpus, into the match *and* the detail.
         assert_eq!(

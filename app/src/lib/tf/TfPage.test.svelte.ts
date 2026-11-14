@@ -22,6 +22,8 @@ let setting: KeptPagesSetting;
 const state = $state<{ route: TfRoute }>({ route: parseTfHash("#/inbox") });
 /** Moves a role's revision, as a run of *Sync now* ending does. */
 const roleRevision = $state({ n: 0 });
+/** Moves as a run of a source filling the role ends with something new, whoever started it. */
+const roleRan = $state({ n: 0 });
 /** Moves as the shell's does when the state colours change (spec #2463). */
 const stale = $state({ n: 0 });
 
@@ -71,6 +73,9 @@ beforeEach(() => {
         get revision() {
           return roleRevision.n;
         },
+        get ran() {
+          return roleRan.n;
+        },
       }),
     } as unknown as RoleSyncs,
   } as unknown as Omit<TfPageContext, "visible">;
@@ -113,7 +118,7 @@ test("visiting six pages and going back to the second shows it without remountin
   const reads = log.reads.length;
   go("#/builds");
   expect(count(log.mounts, "builds"), "no new instance").toBe(1);
-  expect(log.reads.length, "no initial read: it is the instance it was").toBe(reads + 1 /* the role view's re-read on return */);
+  expect(log.reads.length, "no read: it is the instance it was, and no run changed anything while it was hidden").toBe(reads);
   expect(shownPages()).toEqual(["builds"]);
   expect(held()).toHaveLength(6);
 });
@@ -165,14 +170,49 @@ test("two addresses drawing the same component are two kept pages", () => {
   expect(shownPages()).toEqual(["repo one"]);
 });
 
-test("a role view shown again re-reads, and one never left does not", () => {
+test("a role view shown again reads nothing when no run changed anything meanwhile (Björn, 2026-11-10), and after Sync now ends it reads", () => {
   go("#/builds");
   expect(count(log.reads, "builds")).toBe(1);
   go("#/inbox");
   go("#/builds");
-  expect(count(log.reads, "builds")).toBe(2);
+  expect(count(log.reads, "builds"), "a return to what nothing changed").toBe(1);
   go("#/builds/pipeline");
-  expect(count(log.reads, "builds"), "another address of the shown page is no return").toBe(2);
+  expect(count(log.reads, "builds"), "another address of the shown page is no return").toBe(1);
+  // *Sync now*'s runs ended: the shown view reads, as before.
+  roleRevision.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds")).toBe(2);
+  // Ended while it was hidden: read once on its return.
+  go("#/inbox");
+  roleRevision.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds"), "hidden").toBe(2);
+  go("#/builds");
+  expect(count(log.reads, "builds"), "its return").toBe(3);
+});
+
+test("a hidden role view's reads stay asleep while the reader moves elsewhere (2026-11-10: Code re-read on every leave)", () => {
+  log.wakes = [];
+  go("#/builds");
+  const woke = count(log.wakes, "builds");
+  for (const hash of ["#/inbox", "#/docs", "#/monitors", "#/sets"]) go(hash);
+  expect(count(log.wakes, "builds"), "no prop of a hidden page moved").toBe(woke);
+  expect(count(log.reads, "builds")).toBe(1);
+});
+
+test("a shown role view reads again when a run of its role's sources ends with something new; a hidden one waits for its return", () => {
+  go("#/builds");
+  expect(count(log.reads, "builds")).toBe(1);
+  roleRan.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds")).toBe(2);
+
+  go("#/inbox");
+  roleRan.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds"), "hidden: nothing read").toBe(2);
+  go("#/builds");
+  expect(count(log.reads, "builds"), "its return reads once").toBe(3);
 });
 
 test("an address with no page hides every kept page", () => {
@@ -180,7 +220,7 @@ test("an address with no page hides every kept page", () => {
   go("#/nowhere");
   expect(shownPages()).toEqual([]);
   expect(held()?.sort()).toEqual(["builds", "inbox"]);
-  expect(target.textContent).toContain("Nothing lives at");
+  expect(target.textContent).toContain("knobas has no such page.");
 });
 
 test("when what every page drew goes stale, the hidden pages are dropped and each mounts afresh on its return; the shown one stays", () => {

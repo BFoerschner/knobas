@@ -7,7 +7,9 @@ import { describe, expect, test } from "vitest";
 
 import type { AssetDetail, AssetProperty, MonitorRow, RouteRow, UnmonitoredAsset } from "../../ipc/assets";
 import { jobIndex } from "../job/open-jobs";
+import { stateWord } from "../state-word";
 import {
+  stripPaint,
   stateChip,
   gaps,
   hiddenFoldOpen,
@@ -18,6 +20,7 @@ import {
   segments,
   sorted,
   uptimeText,
+  STATE_CHIPS,
   visibleMonitors,
   type KeptMonitors,
 } from "./monitors";
@@ -76,28 +79,26 @@ describe("the state chip", () => {
     });
     const chip = stateChip(down, new Date(NOW));
     expect(chip.tone).toBe("err");
-    expect(chip.label).toMatch(/^down since \d\d:\d\d$/);
+    expect(chip.label).toBe("down");
+    expect(chip.since).toMatch(/^since \d\d:\d\d$/);
     const at = new Date(NOW - 60 * 60_000);
     const pad = (n: number) => String(n).padStart(2, "0");
-    expect(chip.label).toBe(`down since ${pad(at.getHours())}:${pad(at.getMinutes())}`);
+    expect(chip.since).toBe(`since ${pad(at.getHours())}:${pad(at.getMinutes())}`);
   });
 
   test("keeps the day on a monitor down since before today (#1986)", () => {
     const at = (day: number) => ({ taken_at: new Date(2026, 9, day, 12, 40).toISOString(), state: "down" });
     const now = new Date(2026, 9, 16, 9, 0);
-    expect(stateChip(row({ state: "down", samples: [at(15)] }), now).label).toBe("down since yesterday 12:40");
-    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).label).toBe("down since 2026-10-12 12:40");
+    expect(stateChip(row({ state: "down", samples: [at(15)] }), now).since).toBe("since yesterday 12:40");
+    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).since).toBe("since Mon 12:40");
   });
 
   test("says down alone when no sample says since when", () => {
     expect(stateChip(row({ state: "down" }))).toEqual({ label: "down", tone: "err" });
   });
 
-  test("says slow with the response on a warning", () => {
-    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({
-      label: "slow, 8\u00a0400 ms",
-      tone: "warn",
-    });
+  test("says slow on a warning with a response, whose time is the row's Response", () => {
+    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({ label: "slow", tone: "warn" });
   });
 
   test("says paused for a tombstone whatever its last reading", () => {
@@ -288,4 +289,42 @@ describe("Create monitor opens with", () => {
     expect(prefill(detail("vm", "vm-pay-01", [text("ip", "10.0.0.4")]))).toEqual({ name: "vm-pay-01", kind: "ping", target: "10.0.0.4" });
     expect(prefill(detail("vm", "vm-pay-01", [text("ip", "10.0.0.4"), text("hostname", "vm-pay-01.lan")])).target).toBe("vm-pay-01.lan");
   });
+});
+
+describe("the state pills read what the chips read", () => {
+  const NO_JOBS = jobIndex([]);
+  const states = ["down", "warn", "up", "pending", "maintenance"] as const;
+  test.each(states)("a %s row is kept by the pill its chip names, and by no other", (state) => {
+    const it = row({ state, response_time_ms: state === "warn" ? 8400 : 40 });
+    const word = stateWord(stateChip(it).label);
+    expect(STATE_CHIPS as readonly string[]).toContain(word);
+    for (const pill of STATE_CHIPS) {
+      const kept = visibleMonitors([it], { scope: "all", job: null, states: [pill], type: "", text: "" }, NO_JOBS).shown;
+      expect(kept.length).toBe(pill === word ? 1 : 0);
+    }
+  });
+
+  test("a paused monitor is kept by Paused whatever it last read, and slow needs no response to say so", () => {
+    const paused = row({ state: "up", tombstoned: true });
+    expect(visibleMonitors([paused], { scope: "all", job: null, states: ["Paused"], type: "", text: "" }, NO_JOBS).shown).toEqual([paused]);
+    expect(stateChip(row({ state: "warn", response_time_ms: null })).label).toBe("slow");
+  });
+});
+
+test("the strip paints each bar its state's colour, a pixel apart, as one background (PR #2479)", () => {
+  const bars = [
+    { state: "up" as const, at: 0, title: "" },
+    { state: "down" as const, at: 1, title: "" },
+    { state: "gap" as const, at: 2, title: "" },
+  ];
+  expect(stripPaint(bars, false)).toEqual({
+    image:
+      "linear-gradient(to right, color-mix(in srgb, var(--ok) 80%, transparent) 0px 2px, transparent 2px 3px, " +
+      "var(--err) 3px 5px, transparent 5px 6px, var(--sheet-2) 6px 8px, transparent 8px 9px)",
+    width: 8,
+    pitch: 3,
+  });
+  // Narrow, the hourly bars are 3 px.
+  expect(stripPaint(bars.slice(0, 1), true)).toMatchObject({ width: 3, pitch: 4 });
+  expect(stripPaint([], false)).toEqual({ image: "none", width: 0, pitch: 3 });
 });

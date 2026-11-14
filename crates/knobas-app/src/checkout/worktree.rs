@@ -153,7 +153,7 @@ async fn git() -> Result<PathBuf, IpcError> {
 /// git's first words on stderr. No terminal prompt, git's own English, and no
 /// inherited variable that points git at another repository or overrides the
 /// `protocol.*` flags.
-async fn run(
+pub(super) async fn run(
     git: &Path,
     args: Vec<std::ffi::OsString>,
     timeout: Duration,

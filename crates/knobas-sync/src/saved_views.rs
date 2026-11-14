@@ -157,20 +157,55 @@ delete from sync.saved_view v
    and not exists (select 1 from sync.live_item i
                     where i.entity_id = v.entity_id and i.kind = any($2))";
 
-const DROP_MEMBERS: &str = "
+/// The members a source's views hold now, read off their items: each key of
+/// a view's `keys`, in the source's order. `$1` is the source.
+macro_rules! wanted_members {
+    () => {
+        "select v.entity_id as view_id, $1 || ':' || k.key as entity_id, k.n::integer as rank
+           from sync.saved_view v
+           join sync.item i on i.entity_id = v.entity_id
+          cross join lateral jsonb_array_elements_text(
+                  case when jsonb_typeof(i.payload->'keys') = 'array'
+                       then i.payload->'keys' else '[]'::jsonb end) with ordinality as k(key, n)
+          where v.source_id = $1"
+    };
+}
+
+/// The members that no longer hold: a rank a view lost, or one that names
+/// another ticket now.
+///
+/// **Only what changed is written** (the query audit of 2026-11-12). Every
+/// run of a ticket system, and every Refresh of one of its items, deleted
+/// all of the source's members and inserted them again: 4,686 rows for 9
+/// views, 23 ms and 1.15 MB of write-ahead log a run that changed nothing,
+/// about 330 MB a day at a run every five minutes. This statement and
+/// [`INSERT_MISSING_MEMBERS`] leave the table as that rewrite left it, and
+/// touch no row of a view whose keys did not move.
+const DROP_STALE_MEMBERS: &str = concat!(
+    "
 delete from sync.saved_view_member m
  using sync.saved_view v
- where m.view_id = v.entity_id and v.source_id = $1";
+ where m.view_id = v.entity_id and v.source_id = $1
+   and not exists (
+         select 1 from (",
+    wanted_members!(),
+    ") w
+          where w.view_id = m.view_id and w.rank = m.rank and w.entity_id = m.entity_id)"
+);
 
-const INSERT_MEMBERS: &str = "
+/// The members not held yet. After [`DROP_STALE_MEMBERS`] a rank that is
+/// held names the ticket it should, so a missing rank is all there is to
+/// add.
+const INSERT_MISSING_MEMBERS: &str = concat!(
+    "
 insert into sync.saved_view_member (view_id, entity_id, rank)
-select v.entity_id, $1 || ':' || k.key, k.n::integer
-  from sync.saved_view v
-  join sync.item i on i.entity_id = v.entity_id
- cross join lateral jsonb_array_elements_text(
-         case when jsonb_typeof(i.payload->'keys') = 'array'
-              then i.payload->'keys' else '[]'::jsonb end) with ordinality as k(key, n)
- where v.source_id = $1";
+select w.view_id, w.entity_id, w.rank
+  from (",
+    wanted_members!(),
+    ") w
+ where not exists (select 1 from sync.saved_view_member m
+                    where m.view_id = w.view_id and m.rank = w.rank)"
+);
 
 const UPSERT_TICKET_VIEWS: &str = "
 with views as (
@@ -229,7 +264,7 @@ pub async fn project(
         .bind(&kinds)
         .execute(&mut **tx)
         .await?;
-    for statement in [DROP_MEMBERS, INSERT_MEMBERS] {
+    for statement in [DROP_STALE_MEMBERS, INSERT_MISSING_MEMBERS] {
         sqlx::query(statement)
             .bind(source_id)
             .execute(&mut **tx)

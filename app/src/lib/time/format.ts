@@ -30,10 +30,16 @@ export function minutesLabel(minutes: number): string {
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
-/** A length given in **seconds**, as a run's: `38 s`, `4 m 12 s`. */
+/**
+ * A length given in **seconds**, as a run's: `38s`, `4m 12s`, `4m`, and from an hour {@link minutesLabel}'s `1h 2m`, where
+ * the seconds stop mattering. One spelling with the timesheet's, so a run and a worklog read alike (design system, Words).
+ */
 export function secondsLabel(seconds: number): string {
-  if (seconds < 60) return `${seconds} s`;
-  return `${Math.floor(seconds / 60)} m ${String(seconds % 60).padStart(2, "0")} s`;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes >= 60) return minutesLabel(minutes);
+  const rest = seconds % 60;
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -48,33 +54,103 @@ function dayWord(at: Date, now: Date): "today" | "yesterday" | null {
   return dateOf(at) === dateOf(yesterday) ? "yesterday" : null;
 }
 
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAY_MS = 86_400_000;
+
+/** The one date form: `4 Nov`, and `4 Nov 2025` in another year than `now`'s. */
+function dateWords(at: Date, now: Date): string {
+  const date = `${at.getDate()} ${MONTHS[at.getMonth()]}`;
+  return at.getFullYear() === now.getFullYear() ? date : `${date} ${at.getFullYear()}`;
+}
+
 /**
- * An instant against `now`: `today 11:48`, `yesterday 16:05`, else the date.
+ * {@link dateWords} read in UTC, for a stamp that means the same on two machines: `ago` past a day, and the date a view's
+ * meta carries. `now`'s year is UTC's too, so a stamp at a new year's midnight names its year the same way everywhere.
+ */
+export function utcDateWords(at: Date, now: Date): string {
+  const inUtc = (day: Date) => new Date(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+  return dateWords(inUtc(at), inUtc(now));
+}
+
+const VIEW_DATE = /(^|\s)(\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * A view row's meta in the one date form: `knobas_source::view::ago` writes an ISO date past a day, alone
+ * (`2026-08-21`) or at the end of a line (`mara · 2026-08-21`), and the crate is a frozen surface, so the read says it
+ * here. Anything else, *5 h ago* or a branch's name, stays as the source wrote it (F-049, F-221).
+ */
+export function viewDate(meta: string, now: Date = new Date()): string {
+  return meta.replace(VIEW_DATE, (_, lead: string, iso: string) => {
+    const at = new Date(`${iso}T00:00:00Z`);
+    return Number.isNaN(at.getTime()) ? `${lead}${iso}` : `${lead}${utcDateWords(at, now)}`;
+  });
+}
+
+const VIEW_STAMP = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?: ([+-]\d{2}:\d{2}))?$/;
+
+/**
+ * A time a view writes to the minute (`2026-08-22 09:30 +02:00`, a pull request's conversation) on the ladder of
+ * {@link stampLabel}. Anything else stays as the source wrote it (F-221).
+ */
+export function viewStamp(value: string, now: Date = new Date()): string {
+  const found = VIEW_STAMP.exec(value);
+  if (found === null) return value;
+  return stampLabel(`${found[1]}T${found[2]}:00${found[3] ?? ""}`, now) || value;
+}
+
+/** Whether `at` fell in the six days before yesterday's end, so its weekday names one day only. */
+function thisPastWeek(at: Date, now: Date): boolean {
+  const midnight = (day: Date) => new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+  const days = Math.round((midnight(now) - midnight(at)) / DAY_MS);
+  return days > 0 && days < 7;
+}
+
+/**
+ * An instant against `now`, on the one ladder a row's date climbs (F-049): the
+ * time with its word, `today 11:48`, then `yesterday 16:05`, then the weekday
+ * for the week past, `Wed 14:32`, then the date, `4 Nov`.
  * `never` for a source that never said; `""` for an instant that is not one.
  *
  * `bare` drops the word on today (`11:48`) for a column that is only ever
  * read as recent. Yesterday is worded the same either way, so two surfaces
- * showing one instant never disagree about which day it was.
+ * showing one instant never disagree about which day it was. A row under a date
+ * heading says neither: {@link timeLabel}. An age in a sentence stays an age:
+ * {@link ageLabel}.
  */
 export function clockLabel(iso: string | null, now: Date = new Date(), bare = false): string {
   if (iso === null) return "never";
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "";
   const word = dayWord(at, now);
-  if (word === null) return dateOf(at);
-  return bare && word === "today" ? clockOf(at) : `${word} ${clockOf(at)}`;
+  if (word !== null) return bare && word === "today" ? clockOf(at) : `${word} ${clockOf(at)}`;
+  return thisPastWeek(at, now) ? `${DAYS[at.getDay()]} ${clockOf(at)}` : dateWords(at, now);
 }
 
 /**
  * {@link clockLabel} for a line that says when something was written or
  * taken (a comment, a backup, a sync run), where an older day keeps its
- * clock: `today 09:35`, `yesterday 17:41`, `2026-08-12 09:14`. `bare` drops
- * the word on today as there. `""` for an instant that is not one (#1986).
+ * clock: `today 09:35`, `yesterday 17:41`, `Wed 14:32`, `12 Aug 09:14`. `bare`
+ * drops the word on today as there. `""` for an instant that is not one (#1986).
  */
 export function stampLabel(iso: string, now: Date = new Date(), bare = false): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "";
-  return dayWord(at, now) === null ? `${dateOf(at)} ${clockOf(at)}` : clockLabel(iso, now, bare);
+  return dayWord(at, now) === null && !thisPastWeek(at, now) ? `${dateWords(at, now)} ${clockOf(at)}` : clockLabel(iso, now, bare);
+}
+
+/** The time alone, for a row under a heading that already names its day (F-049). `""` for an instant that is not one. */
+export function timeLabel(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? "" : clockOf(at);
+}
+
+/** A date heading over rows of one day: `Today`, `Yesterday`, else `Wed 4 Nov`. */
+export function dayHeadingLabel(at: Date, now: Date = new Date()): string {
+  const word = dayWord(at, now);
+  if (word === "today") return "Today";
+  if (word === "yesterday") return "Yesterday";
+  return `${DAYS[at.getDay()]} ${dateWords(at, now)}`;
 }
 
 /**

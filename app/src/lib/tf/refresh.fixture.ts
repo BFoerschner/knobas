@@ -82,7 +82,6 @@ export function refreshProbe(options: RefreshProbeOptions = {}): RefreshProbe {
     ports: {
       refreshEntity: (entityId) => (probe.refreshed.push(entityId), probe.answer()),
       syncs: createSourceSyncs({
-        syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
         syncNow: (sourceId) => (probe.synced.push(sourceId), probe.run()),
         syncStatus: () => hold<SourceSyncStatus[]>([]),
         listen: (_event, handler) => {
@@ -90,6 +89,7 @@ export function refreshProbe(options: RefreshProbeOptions = {}): RefreshProbe {
           return hold(() => void handlers.delete(handler));
         },
       }),
+      syncStatus: () => hold<SourceSyncStatus[]>([]),
     },
   };
   return probe;

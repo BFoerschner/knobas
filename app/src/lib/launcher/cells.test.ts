@@ -37,6 +37,13 @@ describe("cellsOf reads the engine's key cell first (#2452)", () => {
     expect(withCell(kind, "http", "Handbook › Payments")).toEqual({ cell: "http", mono: false, title: "owner/name" });
   });
 
+  it("a pull request's title starts with its number, read off its id (F-654)", () => {
+    const row = { kind: "pr", entity_id: "gitea:tidewater/payout-service#142", title: "Backoff" };
+    expect(cellsOf({ ...row, path: "tidewater/payout-service", cell: "payout-service" }, "Pull request")).toEqual({ cell: "payout-service", mono: false, title: "#142 Backoff" });
+    expect(cellsOf({ ...row, path: "tidewater/payout-service" }, "Pull request").title).toBe("#142 Backoff");
+    expect(cellsOf({ ...row, entity_id: "gitea:tidewater/payout-service", path: null }, "Pull request").title).toBe("Backoff");
+  });
+
   it("a ticket keeps its key and a repository its owner", () => {
     expect(withCell("ticket", "http")).toEqual({ cell: "PAY-7", mono: true, title: "owner/name" });
     expect(withCell("repo", "http")).toEqual({ cell: "owner", mono: false, title: "name" });

@@ -9,6 +9,8 @@ import type { DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewActio
 import {
   ancestors,
   branchOptions,
+  buildsHash,
+  withMade,
   readAllRows,
   branchStanding,
   type BranchRow,
@@ -47,7 +49,7 @@ import {
 const REPO = "gitea:tidewater/payout-service";
 
 test("an address names the repository, its tab and what the tab has selected", () => {
-  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null });
+  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null });
   expect(readRepoRoute([REPO, "files", "src", "sepa", "retry.rs"])).toMatchObject({ tab: "files", path: "src/sepa/retry.rs" });
   expect(readRepoRoute([REPO, "commits"])).toMatchObject({ tab: "commits", commit: null });
   expect(readRepoRoute([REPO, "commits", `${REPO}@c90d11`])).toMatchObject({ tab: "commits", commit: `${REPO}@c90d11` });
@@ -71,6 +73,7 @@ test("a link to a line of a file is the Files tab at that line (#2251)", () => {
     commit: null,
     branch: null,
     base: null,
+    pipeline: null,
   });
   expect(readRepoRoute([REPO, "files", "line", "7"])).toMatchObject({ path: "line/7", line: null });
   // No line number, or none worth one, is the file at its top.
@@ -138,6 +141,39 @@ test("the dropdown offers the default branch first and every branch the mirror h
   expect(branchOptions(section([{ entity_id: null, title: "main", chip: "default" }]))).toEqual([
     { name: "main", entityId: null, isDefault: true },
   ]);
+});
+
+test("a branch the source lists and the mirror has not synced is offered at the id the source named, the cut note still not", () => {
+  const listed = section([
+    { entity_id: `${REPO}@refs/heads/main`, title: "main", chip: "default", tone: "muted" },
+    { entity_id: null, title: "spike/y" },
+    { entity_id: null, title: "More branches on Gitea", tone: "muted" },
+  ]);
+  const unsynced = [
+    { section: "branches", title: "spike/y", entity_id: `${REPO}@refs/heads/spike/y` },
+    // Another section's row of the same name is not this list's.
+    { section: "overview", title: "More branches on Gitea", entity_id: `${REPO}@refs/heads/x` },
+  ];
+  expect(branchOptions(listed, unsynced)).toEqual([
+    { name: "main", entityId: `${REPO}@refs/heads/main`, isDefault: true },
+    { name: "spike/y", entityId: `${REPO}@refs/heads/spike/y`, isDefault: false, unsynced: true },
+  ]);
+});
+
+test("a branch this session made is offered after the listed ones until a read lists it, once per name", () => {
+  const listed = [
+    { name: "main", entityId: "m", isDefault: true },
+    { name: "feature/x", entityId: "x", isDefault: false },
+  ];
+  expect(
+    withMade(listed, [
+      { text: "feature/new", state: "queued" },
+      { text: "feature/x", state: "sent" },
+      // A commit to a new branch, then *New branch…* of the same name: one branch.
+      { text: "feature/new", state: "sent" },
+    ]),
+  ).toEqual([...listed, { name: "feature/new", entityId: null, isDefault: false, made: "queued" }]);
+  expect(withMade(listed, [])).toEqual(listed);
 });
 
 const file = (path: string, old_path: string | null = null): DiffFile => ({
@@ -551,4 +587,11 @@ test("readAllRows hands each page over as it arrives, the rows so far appended, 
   expect(handed[2]![2499]).toBe("o/r2499");
   // Whoever awaits the whole list still gets it in one piece.
   expect(rows.length).toBe(2500);
+});
+
+test("Builds' address names the branch and the pipeline, each one segment however many slashes it holds", () => {
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  const hash = buildsHash(REPO, "feature/x", "tc:buildType:Payout_Build");
+  expect(readRepoRoute(segments(hash))).toMatchObject({ tab: "builds", branch: "feature/x", pipeline: "tc:buildType:Payout_Build" });
+  expect(readRepoRoute(segments(buildsHash(REPO, "main")))).toMatchObject({ tab: "builds", branch: "main", pipeline: null });
 });

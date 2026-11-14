@@ -2,7 +2,8 @@
   The *Add…* picker of one set editor panel (#866, R-7.7), prototype-6's
   `openPicker`: a filterable multi-select over every item of that kind, where
   an item already in the set is ticked, disabled and says *already in*. *Add*
-  hands the picked ids back; the editor saves the set.
+  hands the picked ids back; the editor saves the set. `↓` goes from the filter
+  into the list and the arrows walk it, and `Enter` in the filter or on a row adds what is picked.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -10,8 +11,10 @@
   import { matchesAll } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import { intoList, withinList } from "./list-keys";
   import type { Candidate } from "./ports";
   import { KIND_LABEL } from "./sets";
+  import { filterKeys } from "../filter-keys";
 
   let {
     kind,
@@ -60,22 +63,47 @@
     picked = on ? [...picked, id] : picked.filter((held) => held !== id);
   }
 
-  function add() {
+  function add(event?: SubmitEvent) {
+    event?.preventDefault();
     const chosen = (all ?? []).filter((row) => picked.includes(row.entity_id));
     if (chosen.length > 0) onadd(chosen);
-    else onclose();
+  }
+
+  const uid = $props.id();
+  let filterEl = $state<HTMLInputElement | null>(null);
+  let listEl = $state<HTMLElement | null>(null);
+
+  /** `Enter` on a row adds what is ticked, as `Enter` in the filter does; with nothing ticked there is nothing to send. */
+  function listKey(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add();
+      return;
+    }
+    withinList(event, listEl, filterEl);
   }
 </script>
 
-<TfDialog title="Add {noun} to {setName}" {onclose}>
+<TfDialog why={picked.length === 0 ? "Tick what to add." : null} title="Add {noun} to {setName}" {onclose}>
   {#snippet body()}
+    <form id="tf-pick-{uid}" class="tf-dform" onsubmit={add}></form>
     <label class="tf-fsearch tf-wide"
-      ><input bind:value={typed} placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" /></label
+      ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+        ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
+      ><input bind:this={filterEl} bind:value={typed} {@attach filterKeys()} form="tf-pick-{uid}" placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" onkeydown={(event) => intoList(event, listEl)} /></label
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the {noun}: {failed}</p>
     {/if}
-    <div class="tf-picks" role="group" aria-label={KIND_LABEL[kind]}>
+    {#if all === null && failed === null}
+      <p class="tf-dim tf-picks-more">Reading the {noun}…</p>
+    {:else if all !== null && all.length === 0}
+      <p class="tf-dim tf-picks-more">knobas holds no {noun} yet. A source that has them fills this list once it has synced.</p>
+    {:else if all !== null && shown.length === 0}
+      <p class="tf-dim tf-picks-more">No {noun} match “{typed.trim()}”.</p>
+    {/if}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="group" aria-label={KIND_LABEL[kind]} bind:this={listEl} onkeydown={listKey}>
       {#each shown.slice(0, DRAWN) as row (row.entity_id)}
         {@const held = have.has(row.entity_id)}
         <label class:tf-in={held}
@@ -84,7 +112,7 @@
             checked={held || picked.includes(row.entity_id)}
             disabled={held}
             onchange={(event) => toggle(row.entity_id, event.currentTarget.checked)}
-          /> <Marked text={row.name} {typed} /><span class="tf-dim">{held ? "already in" : row.sub}</span></label
+          /> <span class="tf-pick-name"><Marked text={row.name} {typed} /></span><span class="tf-dim">{held ? "already in" : row.sub}</span></label
         >
       {/each}
       {#if shown.length > DRAWN}
@@ -94,8 +122,8 @@
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    <span class="tf-dim tf-picked">{picked.length} picked</span>
+    {#if picked.length > 0}<span class="tf-dim tf-picked">{picked.length} picked</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" onclick={add}>Add</button>
+    <button type="submit" class="tf-btn tf-primary" form="tf-pick-{uid}" disabled={picked.length === 0}>Add</button>
   {/snippet}
 </TfDialog>

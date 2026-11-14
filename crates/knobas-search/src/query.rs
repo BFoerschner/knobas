@@ -250,6 +250,14 @@ pub struct EffectiveFilters {
     /// `Searcher::search` and nothing else, so a Docs search or a saved
     /// list's count reads no body it does not show.
     pub excerpts: bool,
+    /// Whether the page's rows carry a `ts_headline` of their title and body
+    /// ([`SearchHit::snippet`](crate::SearchHit::snippet)). **No command
+    /// sets it** (the query audit of 2026-11-12): the launcher draws
+    /// [`Self::excerpts`] and the Docs search cuts its own snippet from the
+    /// body, and the headline of a page of 50 rows was 65 ms of a common
+    /// word's 264 ms in the launcher and 142 of 190 ms in the Docs search.
+    /// Off, the statement answers `null` and a hit's `snippet` is empty.
+    pub headline: bool,
     /// The kinds declaring the Builds frame's `pipeline` (#2422,
     /// [`crate::frames`]): each is answered as kind `pipeline`, and a
     /// `pipeline` kind filter takes them in. Set by the launcher's search
@@ -502,6 +510,8 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
         // The grammar has no word for it; the query sets it (`Searcher::search`).
         titles: false,
         excerpts: false,
+        // Nothing draws one (`EffectiveFilters::headline`).
+        headline: false,
         // The launcher's search sets these from the declarations (#2422).
         pipeline_kinds: Vec::new(),
         hidden_kinds: Vec::new(),

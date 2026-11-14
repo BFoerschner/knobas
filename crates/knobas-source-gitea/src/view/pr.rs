@@ -11,7 +11,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::rows::{self, ListedCommit};
-use super::{fact, login, when_of};
+use super::{fact, login, name_of, person_fact, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
@@ -47,7 +47,6 @@ pub(super) async fn draw(
     let mut actions = Vec::new();
     let sections = match section {
         None => {
-            let pull = at.pull().await?;
             // Each tab is its own reads over the one record, so they are read
             // side by side (#703); the first to fail fails the view. Who the
             // token is goes beside them: the review actions are not offered
@@ -58,15 +57,26 @@ pub(super) async fn draw(
             // label…* offers (#1194, #1235).
             // And who a review can be requested from (#2303), for
             // *Request…*.
-            let (reviews, commits, comments, viewer, landing, statuses, labels, candidates) = tokio::try_join!(
+            //
+            // In two rounds, not three (the priority lane, 2026-11-13): the
+            // reads that need nothing of the record go beside it, and those
+            // that need the record or the reviews, the reviews' line
+            // comments among them, beside each other. A round is a forge's
+            // answer, and a forge a sync is loading takes hundreds of
+            // milliseconds over each.
+            let (pull, reviews, comments, viewer, labels) = tokio::try_join!(
+                at.pull(),
                 at.reviews(),
-                at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
+                at.labels(),
+            )?;
+            let (commits, landing, statuses, candidates, said) = tokio::try_join!(
+                at.commits(Some(&pull)),
                 at.landing(&pull),
                 at.statuses(&pull),
-                at.labels(),
                 at.candidates(&pull),
+                async { Ok(at.line_comments(&reviews).await) },
             )?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
@@ -88,13 +98,12 @@ pub(super) async fn draw(
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
-                conversation(&reviews, &comments, &at.line_comments(&reviews).await),
+                conversation(&reviews, &comments, &said),
             ]
         }
         Some(OVERVIEW) => {
-            let pull = at.pull().await?;
-            let (reviews, landing, statuses) =
-                tokio::try_join!(at.reviews(), at.landing(&pull), at.statuses(&pull))?;
+            let (pull, reviews) = tokio::try_join!(at.pull(), at.reviews())?;
+            let (landing, statuses) = tokio::try_join!(at.landing(&pull), at.statuses(&pull))?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
             vec![overview(&pull, &reviews, &landing, checks)]
@@ -113,6 +122,54 @@ pub(super) async fn draw(
         }
     };
     Ok(SourceView { sections, actions })
+}
+
+/// A pull request's whole view from its record as the mirror holds it
+/// (ADR-0042), reading nothing: *Overview*'s state, author, branches, times
+/// and description, and *Files*' count. What only Gitea's other reads hold --
+/// reviews, checks, whether it can be merged, its commits and conversation --
+/// is left out, the two tabs saying so in a muted line, and no action is
+/// offered. `None` for a record that is not a pull request.
+pub(crate) fn from_record(payload: &serde_json::Value) -> Option<SourceView> {
+    // Every field of [`Pull`] is optional: a record is one that names its
+    // number and its head.
+    payload.get("number")?.as_u64()?;
+    payload.get("head")?.as_object()?;
+    let pull: Pull = serde_json::from_value(payload.clone()).ok()?;
+    let mut blocks = vec![Block::Facts {
+        facts: overview_facts(&pull, Vec::new()),
+    }];
+    let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
+    if !body.trim().is_empty() {
+        blocks.push(Block::Text {
+            text: body.to_owned(),
+            markdown: true,
+        });
+    }
+    let waiting = |id: &str, title: &str, what: &str| ViewSection {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        count: None,
+        deferred: false,
+        blocks: vec![super::rows::muted_line(format!(
+            "The {what} are read from Gitea; the last sync holds none."
+        ))],
+    };
+    Some(SourceView {
+        sections: vec![
+            ViewSection {
+                id: OVERVIEW.to_owned(),
+                title: "Overview".to_owned(),
+                count: None,
+                deferred: false,
+                blocks,
+            },
+            files_stub(&pull),
+            waiting(COMMITS, "Commits", "commits"),
+            waiting(CONVERSATION, "Conversation", "reviews and comments"),
+        ],
+        actions: Vec::new(),
+    })
 }
 
 /// The pull request one view is about.
@@ -522,14 +579,17 @@ fn conversation(
     let mut blocks = Vec::with_capacity(said.len() * 2 + 1);
     blocks.extend(unread.map(|reason| super::rows::muted_line(reason.clone())));
     for entry in &said {
-        let who = login(entry.user).unwrap_or_else(|| "someone".to_owned());
+        // Named as a ticket's comments name their authors (F-107), the
+        // login beside the name for the reader's own.
+        let who = name_of(entry.user).unwrap_or_else(|| "someone".to_owned());
         let when = entry.at.map(when_of).unwrap_or_default();
-        let mut facts = vec![fact(&who, when)];
+        let mut facts = vec![person_fact(&who, when, entry.user)];
         if let Some((value, tone)) = &entry.verdict {
             facts.push(Fact {
                 label: "Review".to_owned(),
                 value: value.clone(),
                 tone: *tone,
+                account: None,
             });
         }
         blocks.push(Block::Facts { facts });
@@ -648,10 +708,11 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
             label: "State".to_owned(),
             value: state.clone(),
             tone,
+            account: None,
         });
     }
-    if let Some(author) = login(pull.user.as_ref()) {
-        facts.push(fact("Author", author));
+    if let Some(author) = name_of(pull.user.as_ref()) {
+        facts.push(person_fact("Author", author, pull.user.as_ref()));
     }
     if let (Some(head), Some(base)) = (pull.head.as_ref(), pull.base.as_ref())
         && let (Some(head_ref), Some(base_ref)) = (head.r#ref.as_deref(), base.r#ref.as_deref())
@@ -674,7 +735,7 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
     if pull.merged
         && let Some(at) = pull.merged_at.as_deref()
     {
-        let value = match login(pull.merged_by.as_ref()) {
+        let value = match name_of(pull.merged_by.as_ref()) {
             Some(by) => format!("{} by {by}", when_of(at)),
             None => when_of(at),
         };
@@ -691,28 +752,32 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
 /// a reviewer's latest review), and a plain comment after a verdict does not
 /// take it back.
 fn verdicts(reviews: &[Review]) -> Vec<Fact> {
-    let mut standing: Vec<(String, String)> = Vec::new();
+    // By login, as Gitea counts a reviewer, each with the review's account.
+    let mut standing: Vec<(String, String, Option<&UserRef>)> = Vec::new();
     for review in reviews {
         let Some(who) = login(review.user.as_ref()) else {
             continue;
         };
         let state = review.state.as_deref().unwrap_or_default();
         if review.dismissed {
-            standing.retain(|(name, _)| *name != who);
+            standing.retain(|(name, _, _)| *name != who);
             continue;
         }
         if state.is_empty() || state == "PENDING" {
             continue;
         }
-        match standing.iter_mut().find(|(name, _)| *name == who) {
+        match standing.iter_mut().find(|(name, _, _)| *name == who) {
             Some(_) if state == "COMMENT" => {}
-            Some((_, verdict)) => state.clone_into(verdict),
-            None => standing.push((who, state.to_owned())),
+            Some((_, verdict, _)) => state.clone_into(verdict),
+            None => standing.push((who, state.to_owned(), review.user.as_ref())),
         }
     }
     standing
         .into_iter()
-        .map(|(who, state)| {
+        .map(|(login, state, user)| {
+            // Named as a ticket names its people (F-107); the login stays
+            // the fact's account.
+            let who = name_of(user).unwrap_or(login);
             let (value, tone) = match state.as_str() {
                 "APPROVED" => (format!("approved by {who}"), Some(Tone::Ok)),
                 "REQUEST_CHANGES" => (format!("changes requested by {who}"), Some(Tone::Warn)),
@@ -724,9 +789,8 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
                 ),
             };
             Fact {
-                label: "Review".to_owned(),
-                value,
                 tone,
+                ..person_fact("Review", value, user)
             }
         })
         .collect()

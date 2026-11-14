@@ -34,17 +34,21 @@
   900px the columns stack and the handle is not drawn.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { openExternal } from "../../shell/open-external";
-  import { pressSection, type CardTable } from "./card-sections";
+  import type { CardTable } from "./card-sections";
+  import TfCardRows from "./TfCardRows.svelte";
   import { cardWidth, naturalWidth, SIDE_MAX, SIDE_MIN } from "./card-width.svelte";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
-  import { epicLine, initials } from "../tickets/tickets";
+  import { epicLine, initials, shortKey } from "../tickets/tickets";
   import { blockers, keyOf, loggedRow } from "./job";
-  import { toneClass } from "../tone";
 
   let {
     detail,
@@ -85,12 +89,21 @@
   } = $props();
 
   const key = $derived(keyOf(detail.row.entity_id));
+  /**
+   * The key as a ticket card draws it: a forge's issue by its repository and number (*payout-service#37*), the whole key
+   * on hover, since its owner in a 32 px face cut a long one off at the card's edge (the Windows pass, 2026-11-14).
+   */
+  const shownKey = $derived(shortKey(key));
   const blockedBy = $derived(blockers(detail));
+  const stacked = new MediaQuery("(max-width: 900px)");
   const epicId = $derived(parentOf(detail.row));
   const epic = $derived(epicLine({ path: detail.row.path, parent_title: parentTitle }));
   const labels = $derived(detail.labels ?? []);
   const reporter = $derived(detail.reporter ?? null);
   const reporterMine = $derived(reporter !== null && me !== null && reporter === me);
+  /** What a person is called (F-107): the name the source keeps beside the account, as the Conversation below says it. */
+  const reporterName = $derived(detail.reporter_name ?? reporter);
+  const assigneeName = $derived(detail.author_name ?? detail.author);
   const logged = $derived(loggedRow(detail, me));
   /** A meter segment's width, through the CSSOM: the app's CSP refuses `style=""` in markup, not this. */
   const width = (share: number) => (node: HTMLElement) => {
@@ -161,6 +174,22 @@
     event.preventDefault();
   }
 
+  /** While rows pass under the pinned foot, a line on its top edge: the rows end at it. Gone at the end of the card's scroll, where nothing is cut. */
+  const footLine = (node: HTMLElement) => {
+    if (typeof ResizeObserver === "undefined") return;
+    const measure = () => node.classList.toggle("tf-tkcut", node.scrollHeight - node.clientHeight - node.scrollTop > 1);
+    const seen = new ResizeObserver(measure);
+    seen.observe(node);
+    for (const child of node.children) seen.observe(child);
+    node.addEventListener("scroll", measure, { passive: true });
+    node.addEventListener("toggle", measure, true);
+    return () => {
+      seen.disconnect();
+      node.removeEventListener("scroll", measure);
+      node.removeEventListener("toggle", measure, true);
+    };
+  };
+
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
@@ -175,6 +204,7 @@
   class:tf-sheetcard={!pinned}
   class:tf-tkdragging={release !== null}
   aria-label={pinned ? "Job card" : "Ticket"}
+  {@attach footLine}
 >
   {#if !narrow}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -195,7 +225,7 @@
   {/if}
   <div>
     <div class="tf-tkhead">
-      <div class="tf-jobkey">{key}</div>
+      <div class="tf-jobkey" title={shownKey === key ? undefined : key}>{shownKey}</div>
       <button
         type="button"
         class="tf-iconbtn tf-sm tf-tkcopy"
@@ -216,28 +246,32 @@
     {/if}
   </div>
   <div class="tf-jobrow">
-    <span class="tf-chip">{detail.status ?? "No status"}</span>
+    <TfStateChip text={detail.status ?? "No status"} />
     {#each blockedBy as blocker (blocker)}
-      <span class="tf-chip tf-err">Blocked by {blocker}</span>
+      <span class="tf-chip tf-err">Blocked by <TfKey value={blocker} /></span>
     {/each}
   </div>
+  <!-- Stacked below 900 px the title follows the key, and the facts and rows fold, so the first screen is the ticket. -->
+  <p class="tf-tkcardtitle" aria-hidden="true">{detail.row.title}</p>
+  <details class="tf-tkstack" open={!stacked.current}>
+    <summary>Details and connections</summary>
   <dl class="tf-facts">
     {#if epic !== null && epicId !== null}
       <dt>Epic</dt>
-      <dd><a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}>{epic}</a></dd>
+      <dd><a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}><TfKeyed text={epic} lead /></a></dd>
     {/if}
     {#if reporter !== null}
       <dt>Reporter</dt>
       <dd>
-        <span class="tf-av" class:tf-me={reporterMine} aria-hidden="true">{initials(reporter)}</span><span
-          >{reporter}{reporterMine ? " (you)" : ""}</span
+        <span class="tf-av" class:tf-me={reporterMine} aria-hidden="true">{initials(reporterName)}</span><span
+          >{reporterName}{reporterMine ? " (you)" : ""}</span
         >
       </dd>
     {/if}
     <dt>Assignee</dt>
     <dd>
-      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(detail.author)}</span><span
-        >{detail.author ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
+      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(assigneeName)}</span><span
+        >{assigneeName ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
       >
     </dd>
     {#if detail.issue_type}<dt>Type</dt><dd>{detail.issue_type}</dd>{/if}
@@ -263,20 +297,7 @@
     {/if}
   </dl>
   {#if table.rows.length > 0}
-    <div class="tf-tktable tf-tksecs">
-      {#each table.rows as row (row.name)}
-        <a
-          href={row.href}
-          title={row.opens === "subtasks" ? `Tickets under ${key}. ${row.words}` : `${row.name} view, this ticket only. ${row.words}`}
-          onclick={() => pressSection(row, detail.row.entity_id)}
-          ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
-              class="tf-st"
-              class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
-              ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{row.state.text}</span
-            >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
-        >
-      {/each}
-    </div>
+    <TfCardRows rows={table.rows} entityId={detail.row.entity_id} ticketKey={key} />
   {:else if table.settled}
     <p class="tf-tknone">Nothing connected yet.</p>
   {/if}
@@ -289,6 +310,7 @@
     {/if}
     <button type="button" onclick={onlink}><span>Link something to it</span><span class="tf-chev" aria-hidden="true">›</span></button>
   </div>
+  </details>
   {#if action !== null}
     <div class="tf-go">
       <button type="button" class="tf-btn tf-primary tf-lg" onclick={onaction}>{action.label}</button>

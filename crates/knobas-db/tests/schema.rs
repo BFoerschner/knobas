@@ -3064,3 +3064,150 @@ async fn zero_sixty_one_leaves_a_payload_without_a_changelog_alone() {
         "a second run rewrites no row"
     );
 }
+
+/// Line endings and the recorded checksums (2026-11-11). A Windows build made
+/// from a CRLF checkout recorded the SHA-384 of every migration with CRLF line
+/// endings, and a Mac or Linux build refused that database as "previously
+/// applied but has been modified". These pin both directions: a database
+/// either build migrated opens under the other.
+mod line_endings {
+    use knobas_db::migrate;
+    use sqlx::migrate::{MigrateError, Migration, MigrationType, Migrator};
+
+    fn sha384(sql: &str) -> Vec<u8> {
+        Migration::new(
+            0,
+            "".into(),
+            MigrationType::Simple,
+            sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(sql.to_owned())),
+            false,
+        )
+        .checksum
+        .into_owned()
+    }
+
+    fn crlf(sql: &str) -> String {
+        sql.replace("\r\n", "\n").replace('\n', "\r\n")
+    }
+
+    /// The migrations as a build from a CRLF checkout embeds them.
+    async fn crlf_build() -> (Migrator, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        for entry in std::fs::read_dir(&source).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "sql") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                std::fs::write(dir.path().join(path.file_name().unwrap()), crlf(&text)).unwrap();
+            }
+        }
+        let migrator = Migrator::new(dir.path()).await.unwrap();
+        (migrator, dir)
+    }
+
+    async fn recorded(pool: &sqlx::PgPool) -> Vec<(i64, Vec<u8>)> {
+        sqlx::query_as("select version, checksum from public._sqlx_migrations order by version")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    fn checksums_of(migrator: &Migrator) -> Vec<(i64, Vec<u8>)> {
+        migrator
+            .iter()
+            .map(|m| (m.version, m.checksum.to_vec()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_database_a_crlf_build_migrated_opens_under_this_build() {
+        let connector = knobas_db::test_util::scratch_database("crlf-to-lf").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        // What a Windows build before the fix left: every checksum the CRLF one.
+        for migration in this_build.iter() {
+            sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+                .bind(sha384(&crlf(migration.sql.as_str())))
+                .bind(migration.version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let (crlf_build, _dir) = crlf_build().await;
+        assert_eq!(recorded(&pool).await, checksums_of(&crlf_build));
+
+        // The cause, as sqlx alone sees it. Without its lock: a refused run
+        // returns before it unlocks, and the lock would stay with the pool's
+        // connection and hold up the run below for good.
+        let mut unlocked = sqlx::migrate!("./migrations");
+        unlocked.set_locking(false);
+        let refused = unlocked.run(&pool).await.unwrap_err();
+        assert!(
+            matches!(refused, MigrateError::VersionMismatch(1)),
+            "{refused}"
+        );
+
+        migrate::run(&pool)
+            .await
+            .expect("a Windows database opens under this build");
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        // And again, with nothing left to rewrite.
+        migrate::run(&pool).await.unwrap();
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_database_this_build_migrated_opens_under_a_crlf_build() {
+        let connector = knobas_db::test_util::scratch_database("lf-to-crlf").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        let (crlf_build, _dir) = crlf_build().await;
+        assert_ne!(checksums_of(&crlf_build), checksums_of(&this_build));
+
+        migrate::run_with(&crlf_build, &pool)
+            .await
+            .expect("this build's database opens under a CRLF build");
+        assert_eq!(recorded(&pool).await, checksums_of(&crlf_build));
+
+        // Back, so the scratch database is handed on as it came.
+        migrate::run(&pool).await.unwrap();
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        pool.close().await;
+    }
+
+    /// Only line endings: a migration edited in any other way is refused as
+    /// before, and its recorded checksum is left as it was.
+    #[tokio::test]
+    async fn a_migration_changed_beyond_its_line_endings_is_still_refused() {
+        let connector = knobas_db::test_util::scratch_database("edited").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        let first = this_build.iter().next().unwrap();
+        let edited = sha384(&format!("{}\n-- edited\n", first.sql.as_str()));
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+            .bind(&edited)
+            .bind(first.version)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let refused = migrate::run(&pool).await.unwrap_err();
+        assert!(
+            matches!(
+                &refused,
+                knobas_db::DbError::Migrate(MigrateError::VersionMismatch(v)) if *v == first.version
+            ),
+            "{refused}"
+        );
+        assert_eq!(recorded(&pool).await[0], (first.version, edited));
+
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+            .bind(first.checksum.as_ref())
+            .bind(first.version)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+}

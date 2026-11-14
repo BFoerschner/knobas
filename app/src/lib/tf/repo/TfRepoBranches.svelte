@@ -3,7 +3,7 @@
   `renderRepo(...,'branches')`: the filter (text, *Mine*, *No PR*, *Merged*),
   then the default branch marked *default* and every other branch with ahead
   and behind it (or *merged*), its open pull request, who committed its tip
-  (*By*) and when; *Open PR* and *Delete…* where the source offers them.
+  (*By*) and when; *New pull request* and *Delete…* where the source offers them.
 
   *By* and *Mine* are the tip's declared author (`code_facts`, #986), never
   the listing's line.
@@ -15,33 +15,60 @@
   and why a delete is held back, are its view's actions, never a reading of
   its facts (ADR-0020 rule 4).
 
+  A pull request this session sent from a branch stands in its *Pull request*
+  cell, *Queued* then *Sent*, a link to the *Pull requests* tab (F-264), and
+  its *New pull request* goes, until the branch's view holds it (F-257).
+
+  The default branch's row offers *New pull request* too (2026-11-13), into
+  another branch: its view measures it against nothing and offers none, so the
+  row offers it where another branch's view shows the repository takes pull
+  requests. Compare picks its *Into*.
+
   *Delete…* opens prototype-6's `openDeleteBranch` and queues `DeleteBranch`
   against the branch. A branch made or deleted this session is drawn at once
   with its echo (`tf/queued.svelte.ts`, #2105), *queued* and then *sent*,
   until the listing holds it or no longer does: read again on the refresh
   event and a run's end, not only as the tab opens.
+
+  A listing knobas held is drawn at once under the held line (ADR-0042, *As
+  knobas read it … Checking …*) and read again behind it. A branch the source
+  lists and the mirror has not synced yet has its standing read at the id
+  the source named (`unsynced`), and offers no *Delete…* until a sync holds
+  it. Read again, the listing lands without moving the row the reader is on
+  (`landInPlace`).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
+  import TfKey from "../TfKey.svelte";
   import { ipcErrorMessage } from "../../ipc";
-  import type { CodeFacts, ViewRow } from "../../ipc/entity";
+  import type { CodeFacts, ShownView, ViewRow } from "../../ipc/entity";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { landInPlace } from "../land-in-place";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
+  import { jumpAcross } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import {
     DELETED,
     MADE,
+    MADE_PR,
     REPO_BRANCHES,
+    REPO_PRS,
     branchStanding,
+    buildsHash,
     compareHash,
+    repoHash,
     sourceName,
     viewRows,
     visibleBranches,
@@ -49,13 +76,19 @@
     type BranchStanding,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfRunGlyph from "../builds/TfRunGlyph.svelte";
+  import { toneWord } from "../builds/builds";
+  import { branchWords, railOf } from "./repo-builds";
+  import type { RepoBuilds } from "../../ipc/entity";
   import { waitPhase } from "../waiting";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     ports,
     source = null,
     repoId,
     refreshed = 0,
+    builds = null,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "codeFacts" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -63,7 +96,14 @@
     repoId: string;
     /** The page's refreshes (#2135): each reads the listing again over what the tab drew. */
     refreshed?: number;
+    /** The page's Builds answer (`repo_pipelines`, the repo-builds pass): each branch's builds, in the *Builds* column. */
+    builds?: RepoBuilds | null;
   } = $props();
+
+  /** Each branch's builds: the worst of its pipelines' newest runs, by name (`railOf`, the Builds tab's rail). */
+  const buildsByBranch = $derived(
+    builds === null ? null : new Map(railOf(builds.pipelines, []).map((branch) => [branch.name, branch])),
+  );
 
   /** How many branch views are read at once: a source's burst stays small. */
   const AT_ONCE = 4;
@@ -73,6 +113,15 @@
   let reading = $state(false);
   let failed = $state<string | null>(null);
   let standings = $state<Record<string, BranchStanding>>({});
+  /** The id the source named for each listed branch the mirror has not synced yet, by name: its standing is read there. */
+  let unsynced = $state<Map<string, string>>(new Map());
+  /** When the listing drawn was read, where knobas held it (ADR-0042); and why the read behind it failed. */
+  let heldAt = $state<string | null>(null);
+  let heldFailed = $state<string | null>(null);
+  /** The table, where a listing read again keeps the reader's place. */
+  let table = $state<HTMLElement | undefined>(undefined);
+  /** Each listing read, so only the newest answer lands. */
+  let readNo = 0;
   let facts = $state<Record<string, CodeFacts>>({});
 
   $effect(() => {
@@ -95,6 +144,24 @@
     return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
 
+  // A pull request sent from here lands on the repository's *Pull requests*: its refresh brings the branch's standing with it.
+  $effect(() => {
+    const id = repoId;
+    return untrack(() => watchEchoes(REPO_PRS, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
+  });
+
+  // The listing knobas held, read again behind it (ADR-0042); or the read behind it failed, which the held line says.
+  onViewFresh(
+    () => repoId,
+    "branches",
+    () => {
+      const id = repoId;
+      void readBranches(id, () => repoId === id, true);
+    },
+    untrack(() => ports.listen),
+    (why) => (heldFailed = why),
+  );
+
   // A refresh of the page reads the listing again, over what the tab drew (#2135).
   onRefreshed(
     () => refreshed,
@@ -110,15 +177,24 @@
    * fails.
    */
   function readBranches(id: string, alive: () => boolean, again = false): Promise<unknown> {
-    reading = true;
+    // Read again behind what is drawn, the listing stays live: dimmed it would be inert, and drop the reader's focus.
+    if (!again) reading = true;
+    const mine = ++readNo;
     return ports.entityView(id, "branches").then(
       (view) => {
-        if (!alive()) return;
+        if (!alive() || mine !== readNo) return;
         reading = false;
-        listed = viewRows(view?.sections[0]);
-        const names = new Set(listed.map((row) => row.title));
+        const shownView = view as ShownView | null;
+        heldAt = shownView?.held_at ?? null;
+        heldFailed = null;
+        const section = view?.sections[0];
+        unsynced = new Map((shownView?.unsynced ?? []).filter((row) => section === undefined || row.section === section.id).map((row) => [row.title, row.entity_id]));
+        const read = viewRows(section);
+        if (again) void landInPlace(table, () => (listed = read));
+        else listed = read;
+        const names = new Set(read.map((row) => row.title));
         settleEchoes(id, (echo) => (echo.kind === MADE && names.has(echo.text)) || (echo.kind === DELETED && !names.has(echo.text)));
-        const every = listed.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
+        const every = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (every.length > 0)
           ports.codeFacts(every).then(
             (answer) => {
@@ -126,31 +202,64 @@
             },
             () => {},
           );
-        const ids = listed.filter((row) => row.entity_id !== null && row.chip !== "default").map((row) => row.entity_id!);
-        let next = 0;
-        const worker = async () => {
-          while (alive() && next < ids.length) {
-            const branchId = ids[next++]!;
-            try {
-              const standing = branchStanding(await ports.entityView(branchId, null));
-              if (alive()) standings[branchId] = standing;
-            } catch {
-              // A branch whose view fails draws without its standing.
-            }
-          }
-        };
-        return Promise.all(Array.from({ length: AT_ONCE }, worker));
+        // Each standing is read where it is wanted (`want`): the rows drawn, and every row while a filter asks for
+        // standings. A read again reads them again as they are wanted.
+        reads = { alive, asked: new Set() };
+        return want(drawnIds);
       },
       (error) => {
-        if (!alive()) return;
+        if (!alive() || mine !== readNo) return;
         reading = false;
         if (!again) failed = ipcErrorMessage(error);
       },
     );
   }
 
+  /**
+   * The branches whose standing is read, and those asked for since the listing was read. A repository of thousands
+   * of branches reads the standing of the rows it draws, not of every branch at once (the extremes pass, 2026-11-13:
+   * 5,000 branches were 5,000 reads of the forge as the tab opened).
+   */
+  let reads: { alive: () => boolean; asked: Set<string> } | null = null;
+  const queue: string[] = [];
+  let workers = 0;
+
+  /** Reads the standings of `ids` not asked for yet, these first, `AT_ONCE` at a time. */
+  function want(ids: readonly string[]): Promise<unknown> {
+    const now = reads;
+    if (now === null) return Promise.resolve();
+    const fresh = ids.filter((id) => !now.asked.has(id));
+    for (const id of fresh) now.asked.add(id);
+    queue.unshift(...fresh);
+    const worker = async () => {
+      workers++;
+      try {
+        while (queue.length > 0) {
+          const branchId = queue.shift()!;
+          const at = reads;
+          if (at === null || !at.alive() || !at.asked.has(branchId)) continue;
+          try {
+            const standing = branchStanding(await ports.entityView(branchId, null));
+            if (at.alive()) standings[branchId] = standing;
+          } catch {
+            // A branch whose view fails draws without its standing.
+          }
+        }
+      } finally {
+        workers--;
+      }
+    };
+    return Promise.all(Array.from({ length: Math.max(0, AT_ONCE - workers) }, worker));
+  }
+
+  /** Where a row's standing is read: its id, or the id the source named for one not synced; none for the default. */
+  const standingId = (row: BranchRow) => (row.isDefault ? null : (row.entityId ?? unsynced.get(row.name) ?? null));
+
   /** A branch's row, or the note a cut listing ends on (no id, no line). */
   const isNote = (row: ViewRow) => row.entity_id === null && row.meta === null && row.chip !== "default";
+
+  /** Where each pull request this session sent stands, by the branch it proposes, until the branch's view holds it (F-257). */
+  const prSent = $derived(new Map(echoesOn(repoId, MADE_PR).flatMap((echo) => (echo.base === null ? [] : [[echo.base, echo.state] as const]))));
 
   /** Branches this session queued that the listing does not hold yet, by name, with their echo's word. */
   const made = $derived(new Map(echoesOn(repoId, MADE).map((echo) => [echo.text, echo.state])));
@@ -168,19 +277,23 @@
           // redraws its own row, not every row (#2200's class: a thousand
           // branches rebuilt the list a thousand times).
           get standing() {
-            return row.entity_id !== null ? (standings[row.entity_id] ?? null) : null;
+            const at = row.entity_id ?? unsynced.get(row.title) ?? null;
+            return at !== null ? (standings[at] ?? null) : null;
           },
-          author: row.entity_id !== null ? (facts[row.entity_id]?.author ?? null) : null,
+          // The name the record gives the tip's author, else the account (F-107); `mine` compares the account.
+          author: row.entity_id !== null ? (facts[row.entity_id]?.author_name ?? facts[row.entity_id]?.author ?? null) : null,
           mine: row.entity_id !== null && facts[row.entity_id]?.mine === true,
         }),
       ),
-      ...[...made.keys()].map(
+      ...[...made.keys()].filter((name) => !branches.some((row) => row.title === name)).map(
         (name): BranchRow => ({ name, entityId: null, isDefault: false, meta: null, standing: null, author: null, mine: false }),
       ),
     ];
   });
   const notes = $derived((listed ?? []).filter(isNote));
   const defaultName = $derived(rows.find((row) => row.isDefault)?.name ?? "the default branch");
+  /** Another branch's view offers a pull request (or says why not): the repository takes them, so the default branch's row offers one too. */
+  const takesPrs = $derived(rows.some((row) => !row.isDefault && row.standing !== null && (row.standing.canOpenPr || row.standing.prBlocked !== null)));
 
   const filter = $derived(sessionFilter(`repo-branches:${repoId}`));
   const config = $derived<FilterConfig>({
@@ -188,9 +301,23 @@
     placeholder: "Filter branches",
     noun: "branches",
     one: "branch",
-    chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged"].map((value) => ({ value, label: value })) }],
+    chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged", "Failing"].map((value) => ({ value, label: value })) }],
   });
-  const shown = $derived(visibleBranches(rows, filter.chips["show"] ?? [], filter.text));
+  /** *Failing* (the repo-builds pass): the branches whose builds failed, by the page's Builds answer. */
+  const shown = $derived(
+    visibleBranches(rows, filter.chips["show"] ?? [], filter.text).filter(
+      (row) => !(filter.chips["show"] ?? []).includes("Failing") || (buildsByBranch?.get(row.name)?.failing ?? 0) > 0,
+    ),
+  );
+  /** Thousands of branches draw only the rows near the viewport (the extremes pass, 2026-11-13); a row is 41 px. */
+  const win = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.name, estimate: 41 });
+  const drawnIds = $derived(win.slice(shown).flatMap((row) => standingId(row) ?? []));
+  /** *No PR* and *Merged* filter by standing, so they ask for every branch's. */
+  const needsAll = $derived((filter.chips["show"] ?? []).some((chip) => chip === "No PR" || chip === "Merged"));
+  $effect(() => {
+    const ids = needsAll ? rows.flatMap((row) => standingId(row) ?? []) : drawnIds;
+    untrack(() => void want(ids));
+  });
 
   function against(standing: BranchStanding | null): string {
     if (standing === null || standing.ahead === null) return "";
@@ -208,7 +335,7 @@
     try {
       const write = await ports.submitWrite({ DeleteBranch: { entity: row.entityId } });
       echoWrite(repoId, DELETED, row.name, { write, many: true, following: { name: `Delete of ${row.name}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
-      toastQueued(`delete branch ${row.name}`, source);
+      toastQueued(`delete branch ${row.name}`, source, { write });
       deleting = null;
     } catch (cause) {
       push({ text: `Could not queue the delete: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -227,40 +354,54 @@
 <div class="tf-rbar">
   <FilterBar {config} {filter} shown={listed === null ? null : shown.length} total={listed === null ? null : rows.length} />
 </div>
+<TfHeldNote {heldAt} source={sourceName(source)} failed={heldFailed} />
 <TfWaiting phase={waitPhase({ drawn: listed !== null, reading, failed: failed !== null })} error={failed} columns={6}>
 {#if shown.length === 0}
-  <div class="tf-empty">No branches match.</div>
+  <TfNoMatch noun="branches" {filter} />
 {:else}
-  <table class="tf-tbl tf-rbranches">
+  <!-- The *Builds* column holds its room from the first draw, so the builds answering later moves no column. -->
+  <table class="tf-tbl tf-rbranches tf-rb-withbuilds" bind:this={table}>
     <thead>
-      <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Updated</th><th></th></tr>
+      <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Builds</th><th>Updated</th><th></th></tr>
     </thead>
-    <tbody>
-      {#each shown as row (row.name)}
+    <tbody {@attach win.list}>
+      {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
+      {#each win.slice(shown) as row (row.name)}
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
-        <tr>
-          <td class="tf-mono"
-            ><Marked text={row.name} typed={filter.text} />{#if row.isDefault}{" "}<span class="tf-chip">default</span>{/if}{#if made.has(row.name)}{" "}<span
-                class="tf-chip tf-info">{made.get(row.name)}</span
-              >{/if}{#if gone !== null}{" "}<span class="tf-chip tf-info">delete {gone}</span>{/if}</td
+        {@const built = buildsByBranch?.get(row.name)}
+        <tr data-place {@attach win.row(row.name)}>
+          <td title={row.name}
+            ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
           <td
-            >{#if standing?.merged}<span class="tf-chip tf-ok">merged</span>{:else}{against(standing)}{/if}</td
+            >{#if standing?.merged}<TfStateChip text="merged" tone="ok" />{:else}{against(standing)}{/if}</td
           >
           <td
             >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
-                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<span class="tf-chip tf-{standing.pr.tone ?? 'info'}"
-                  >{standing.pr.state}</span
-                >{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
+                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<a class="tf-sentlink" href={repoHash(repoId, "prs")} title="Show in Pull requests" onclick={(event) => jumpAcross(event, "Branches")}><TfStateChip text={prSent.get(row.name)} tone="info" /></a>{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
-          <td>{row.author ?? ""}</td>
-          <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
+          <td>{row.mine ? "you" : (row.author ?? "")}</td>
+          <td class="tf-rbr-builds tf-nowrap"
+            >{#if built !== undefined}<a
+                class:tf-err={built.failing > 0}
+                class:tf-info={built.tone === "run"}
+                href={buildsHash(repoId, row.name)}
+                title="Show {row.name}'s builds"><TfRunGlyph tone={built.tone} word={toneWord(built.tone)} />{branchWords(built)}</a
+              >{:else if buildsByBranch !== null}<span class="tf-dim" title="No pipeline built a commit of {row.name}">–</span>{/if}</td
+          >
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
           <td class="tf-nowrap tf-racts"
-            >{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
-                  >Open PR</a
-                >{" "}{/if}{#if standing.deletable}<button
+            ><span class="tf-rowend">{#if row.isDefault && takesPrs}<a
+                class="tf-btn tf-sm"
+                href={compareHash(repoId, row.name)}
+                onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
+              >{:else if standing !== null && !gone}{#if standing.canOpenPr && !prSent.has(row.name)}<a
+                  class="tf-btn tf-sm"
+                  href={compareHash(repoId, row.name)}
+                  onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
+                >{" "}{/if}{#if standing.deletable && row.entityId !== null}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"
                   aria-disabled={standing.deleteBlocked !== null ? "true" : undefined}
@@ -268,10 +409,11 @@
                   onclick={() => {
                     if (standing.deleteBlocked === null) deleting = row;
                   }}>Delete…</button
-                >{/if}{/if}</td
+                ></span>{/if}{/if}</span></td
           >
         </tr>
       {/each}
+      {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("after")}></td></tr>{/if}
     </tbody>
   </table>
 {/if}
@@ -283,7 +425,8 @@
 {#if deleting !== null && deleting.standing !== null}
   {@const standing = deleting.standing}
   {@const row = deleting}
-  <TfDialog title="Delete {row.name}?" onclose={() => (deleting = null)} className="tf-rdel">
+  <TfDialog onclose={() => (deleting = null)} className="tf-rdel">
+    {#snippet title()}Delete <TfKey value={row.name} />?{/snippet}
     {#snippet body()}
       {#if standing.merged}
         <p>Every commit on this branch is in {defaultName}. Nothing is lost.</p>

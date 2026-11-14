@@ -48,6 +48,7 @@
 </script>
 
 <script lang="ts">
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { readingFor } from "../../detail/relations";
   import { push } from "../../shell/toasts.svelte";
@@ -135,13 +136,10 @@
   {#if read === null}
     <!-- Not read yet, or on its way elsewhere. -->
   {:else if "missing" in read}
-    <div class="tf-empty">
-      <p>Nothing lives at <span class="tf-mono">{location.hash}</span> in the new shell.</p>
-      <a class="tf-btn" href="#/tickets">Go to Tickets</a>
-    </div>
+    <TfNothingHere message="knobas does not hold this note. It may have been deleted." href="#/tickets" action="All tickets" />
   {:else if "failed" in read}
     <TfCrumbs parts={[{ name: "Note" }]} {back} />
-    <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {read.failed}</p></div>
+    <TfNothingHere message="This note could not be read: {read.failed}" href="#/tickets" action="All tickets" />
   {:else}
     {@const detail = read.note}
     <TfCrumbs parts={[{ name: "Note" }]} {back} />

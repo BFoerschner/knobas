@@ -19,7 +19,7 @@ use std::task::Poll;
 use knobas_source::ReviewSide;
 use knobas_source::view::{DiffFile, DiffLine, FileThread, Hunk, LineComment, LineThread};
 
-use super::super::login;
+use super::super::{login, profile_name};
 use super::Review;
 use crate::model::UserRef;
 
@@ -41,6 +41,8 @@ pub(super) struct Written {
     /// Who resolved the conversation this comment opens, as Gitea keeps it
     /// on the comment (`resolver`); `None` while open.
     resolver: Option<String>,
+    /// The resolver's profile name, where it has one (F-107).
+    resolver_name: Option<String>,
 }
 
 /// The fields of Gitea's `PullReviewComment` placing reads.
@@ -91,9 +93,15 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
                 (0, old) => (ReviewSide::Old, old),
                 (new, _) => (ReviewSide::New, new),
             };
-            let author = login(c.user.as_ref())
-                .or_else(|| login(review.user.as_ref()))
-                .unwrap_or_else(|| "someone".to_owned());
+            // The comment's account, else its review's; named, as a pull
+            // request's people are, by its profile where it has one (F-107).
+            let by = c
+                .user
+                .as_ref()
+                .filter(|u| login(Some(u)).is_some())
+                .or(review.user.as_ref());
+            let author = login(by).unwrap_or_else(|| "someone".to_owned());
+            let author_name = profile_name(by);
             Some(Written {
                 path,
                 side,
@@ -106,8 +114,10 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
                     .resolver
                     .as_ref()
                     .map(|r| login(Some(r)).unwrap_or_else(|| "someone".to_owned())),
+                resolver_name: profile_name(c.resolver.as_ref()),
                 comment: LineComment {
                     author,
+                    author_name,
                     body: c.body.unwrap_or_default(),
                     at: c.created_at,
                 },
@@ -275,6 +285,7 @@ fn opened(comment: Written, outdated: bool) -> LineThread {
         outdated,
         id: comment.id.map(|id| id.to_string()),
         resolved_by: comment.resolver,
+        resolved_by_name: comment.resolver_name,
         replies: false,
         comments: vec![comment.comment],
         commit,
@@ -293,6 +304,7 @@ fn join(thread: &mut LineThread, comment: Written) {
     {
         thread.id = Some(id.to_string());
         thread.resolved_by = comment.resolver;
+        thread.resolved_by_name = comment.resolver_name;
         if thread.outdated {
             thread.commit = comment.commit;
             thread.hunk = comment.hunk;
@@ -355,4 +367,70 @@ where
     })
     .await?;
     Ok(done.into_iter().flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A line comment, and the thread's resolver, are named by the profile
+    /// where it has one, beside the login the app compares with its username
+    /// (F-107, after the live run on #2479): the diff drew *jonas.becker*
+    /// where Conversation now says *Jonas Becker*. A comment Gitea sent with
+    /// no account is its review's, named the same way; a profile with no
+    /// name gives none, and the shell draws the login.
+    #[test]
+    fn a_line_comment_and_its_resolver_carry_the_profiles_name_beside_the_login() {
+        let review: Review = serde_json::from_value(json!({
+            "id": 21, "state": "COMMENT",
+            "user": { "login": "priya.nair", "full_name": "Priya Nair" }
+        }))
+        .unwrap();
+        let at = |id: u64, user: serde_json::Value| {
+            json!({
+                "id": id, "user": user, "path": "src/a.rs", "position": 2,
+                "original_position": 0, "body": "b", "created_at": "2026-08-22T09:00:00Z",
+                "resolver": { "login": "olu", "full_name": " " }
+            })
+        };
+        let written = written(
+            &review,
+            vec![
+                at(
+                    1,
+                    json!({ "login": "jonas.becker", "full_name": "Jonas Becker" }),
+                ),
+                at(2, json!(null)),
+                at(3, json!({ "login": "kai", "full_name": "" })),
+            ],
+        );
+        let names: Vec<_> = written
+            .iter()
+            .map(|w| (w.comment.author.as_str(), w.comment.author_name.as_deref()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("jonas.becker", Some("Jonas Becker")),
+                ("priya.nair", Some("Priya Nair")),
+                ("kai", None),
+            ]
+        );
+        assert_eq!(written[0].resolver.as_deref(), Some("olu"));
+        assert_eq!(
+            written[0].resolver_name, None,
+            "a blank profile name is none"
+        );
+
+        let thread = opened(
+            Written {
+                resolver_name: Some("Olu Adeyemi".to_owned()),
+                ..written.into_iter().next().unwrap()
+            },
+            false,
+        );
+        assert_eq!(thread.resolved_by.as_deref(), Some("olu"));
+        assert_eq!(thread.resolved_by_name.as_deref(), Some("Olu Adeyemi"));
+    }
 }

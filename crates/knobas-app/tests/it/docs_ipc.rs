@@ -183,6 +183,45 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     );
 }
 
+/// Each space carries its source's name (the live run on #2479): the live
+/// Confluence's *Engineering* and the mock's read the same in Docs, and the
+/// reader tells them apart by where they come from.
+#[tokio::test]
+async fn each_space_names_its_source() {
+    let pool = pool().await;
+    let live = confluence(&pool).await;
+    let mock = confluence(&pool).await;
+    sqlx::query("update knobas.source_config set display_name = $2 where id = $1")
+        .bind(&live)
+        .bind("Tidewater Confluence")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.source_config set display_name = ' ' where id = $1")
+        .bind(&mock)
+        .execute(&pool)
+        .await
+        .unwrap();
+    page(&pool, &live, "1", "Eng home", "ENG", &[], "").await;
+    page(&pool, &mock, "1", "Eng home", "ENG", &[], "").await;
+
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    let named = |source: &str| {
+        tree.spaces
+            .iter()
+            .find(|s| s.source_id == source)
+            .map(|s| s.source_name.clone())
+    };
+    assert_eq!(named(&live).as_deref(), Some("Tidewater Confluence"));
+    assert_eq!(
+        named(&mock),
+        Some(mock.clone()),
+        "a source with a blank name is called by its id"
+    );
+}
+
 /// Only live pages are in the tree: not a withdrawn one, and none of a source
 /// the user turned off (#981 reads the pages without `sync.live_item`).
 #[tokio::test]
@@ -2100,4 +2139,264 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
     hits.sort_unstable();
     assert_eq!(hits, wanted, "the search hits the filler's pages alone");
     assert_eq!(found.total, 2, "and counts no other");
+}
+
+/// A space deep enough that the outline holds part of it: two top pages,
+/// each with `wide` pages under it, each of those with three under it.
+async fn deep_space(pool: &sqlx::PgPool, src: &str, wide: usize) -> Vec<String> {
+    let mut ids = Vec::new();
+    for (n, top) in ["Handbook", "Runbooks"].into_iter().enumerate() {
+        ids.push(page(pool, src, &format!("t{n}"), top, "DEEP", &[], "").await);
+        for i in 0..wide {
+            let mid = format!("{top} {i:02}");
+            ids.push(page(pool, src, &format!("m{n}-{i}"), &mid, "DEEP", &[top], "").await);
+            for j in 0..3 {
+                let leaf = format!("{mid} leaf {j}");
+                ids.push(
+                    page(
+                        pool,
+                        src,
+                        &format!("l{n}-{i}-{j}"),
+                        &leaf,
+                        "DEEP",
+                        &[top, &mid],
+                        "",
+                    )
+                    .await,
+                );
+            }
+        }
+    }
+    ids
+}
+
+/// The instant-open pass (2026-11-12): the Docs home's outline and the parts
+/// `docs_nodes` reads are cuts of the tree `docs_tree` reads, in its order,
+/// each holding every page above each page it holds, with the space's count
+/// and each page's count of pages under it; a space read whole is the tree's.
+#[tokio::test]
+async fn the_outline_and_its_parts_are_cuts_of_the_tree() {
+    use knobas_app::commands::entity::{docs_nodes_inner, docs_outline_inner};
+    use knobas_app::docs::DocsNodesAsked;
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let ids = deep_space(&pool, &src, 20).await;
+    let registry = Registry::for_process();
+    let tree = docs_tree_inner(&pool, &registry).await.unwrap();
+    let whole = tree
+        .spaces
+        .iter()
+        .find(|s| s.source_id == src)
+        .expect("the DEEP space")
+        .clone();
+    assert_eq!(whole.pages.len(), ids.len());
+    let order = |id: &str| whole.pages.iter().position(|p| p.entity_id == id).unwrap();
+    let under = |id: Option<&str>| {
+        whole
+            .pages
+            .iter()
+            .filter(|p| p.parent.as_deref() == id)
+            .map(|p| p.entity_id.clone())
+            .collect::<Vec<_>>()
+    };
+    // A cut of the tree: the tree's own pages in its order, every parent held,
+    // and each page's count of pages under it the tree's.
+    let is_cut = |part: &knobas_app::docs::DocSpace| {
+        assert_eq!(
+            part.page_count,
+            Some(u32::try_from(whole.pages.len()).unwrap())
+        );
+        let held: Vec<&str> = part.pages.iter().map(|p| p.entity_id.as_str()).collect();
+        let mut sorted = held.clone();
+        sorted.sort_by_key(|id| order(id));
+        assert_eq!(held, sorted, "in the tree's order");
+        for page in &part.pages {
+            let mine = &whole.pages[order(&page.entity_id)];
+            assert_eq!((&page.title, &page.parent), (&mine.title, &mine.parent));
+            assert_eq!(
+                page.children,
+                Some(u32::try_from(under(Some(&page.entity_id)).len()).unwrap())
+            );
+            assert_eq!(
+                page.ord,
+                Some(u32::try_from(order(&page.entity_id)).unwrap())
+            );
+            if let Some(parent) = &page.parent {
+                assert!(
+                    held.contains(&parent.as_str()),
+                    "{parent} above {} is held",
+                    page.entity_id
+                );
+            }
+        }
+        held.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+
+    let outline = docs_outline_inner(&pool, &registry, None).await.unwrap();
+    let part = outline.spaces.iter().find(|s| s.source_id == src).unwrap();
+    let held = is_cut(part);
+    for top in under(None) {
+        assert!(held.contains(&top), "the top is held whole");
+    }
+    assert!(
+        held.len() < whole.pages.len(),
+        "the outline is not the whole space: {} pages",
+        held.len()
+    );
+    // The home's tile reads the space level by level: the outline holds the
+    // tree's first pages in that order.
+    let mut by_level = under(None);
+    let mut level = by_level.clone();
+    while !level.is_empty() {
+        level = level.iter().flat_map(|id| under(Some(id))).collect();
+        by_level.extend(level.clone());
+    }
+    let first: Vec<String> = by_level
+        .iter()
+        .take(knobas_app::docs::OUTLINE_LEVEL_PAGES)
+        .cloned()
+        .collect();
+    for id in &first {
+        assert!(
+            held.contains(id),
+            "{id} of the first pages by level is held"
+        );
+    }
+
+    let fold = whole
+        .pages
+        .iter()
+        .find(|p| p.title == "Runbooks 19")
+        .unwrap()
+        .entity_id
+        .clone();
+    let parts = docs_nodes_inner(
+        &pool,
+        &registry,
+        &DocsNodesAsked {
+            folds: vec![fold.clone()],
+            ..Default::default()
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let held = is_cut(&parts[0]);
+    for child in under(Some(&fold)) {
+        assert!(held.contains(&child), "a fold's pages are read");
+    }
+
+    let leaf = whole
+        .pages
+        .iter()
+        .find(|p| p.title == "Handbook 07 leaf 2")
+        .unwrap()
+        .entity_id
+        .clone();
+    let parts = docs_nodes_inner(
+        &pool,
+        &registry,
+        &DocsNodesAsked {
+            pages: vec![leaf.clone()],
+            ..Default::default()
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let held = is_cut(&parts[0]);
+    let mid = whole
+        .pages
+        .iter()
+        .find(|p| p.title == "Handbook 07")
+        .unwrap()
+        .entity_id
+        .clone();
+    for sibling in under(Some(&mid))
+        .into_iter()
+        .chain(under(whole.pages[order(&mid)].parent.as_deref()))
+        .chain(under(None))
+    {
+        assert!(
+            held.contains(&sibling),
+            "the way to a page is drawn open: {sibling}"
+        );
+    }
+
+    let parts = docs_nodes_inner(
+        &pool,
+        &registry,
+        &DocsNodesAsked {
+            spaces: vec![format!("{src}/DEEP")],
+            ..Default::default()
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(parts.len(), 1);
+    assert_eq!(
+        is_cut(&parts[0]).len(),
+        whole.pages.len(),
+        "a space asked whole is read whole"
+    );
+}
+
+/// The instant-open pass (2026-11-12): a kept tree answers what the mirror
+/// holds. A page renamed, one withdrawn and one added are read on the next
+/// read, and the kept tree reads as the tree read afresh.
+#[tokio::test]
+async fn a_kept_tree_is_read_again_when_a_page_moves() {
+    use knobas_app::commands::entity::docs_tree_cached;
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let ids = deep_space(&pool, &src, 2).await;
+    let registry = Registry::for_process();
+    let cache = knobas_app::docs::TreeCache::default();
+    let mine = |tree: &knobas_app::docs::DocsTree| {
+        tree.spaces
+            .iter()
+            .filter(|s| s.source_id == src)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let kept = docs_tree_cached(&pool, &registry, Some(&cache))
+        .await
+        .unwrap();
+    assert_eq!(
+        mine(&kept),
+        mine(&docs_tree_inner(&pool, &registry).await.unwrap())
+    );
+    assert_eq!(
+        mine(
+            &docs_tree_cached(&pool, &registry, Some(&cache))
+                .await
+                .unwrap()
+        ),
+        mine(&kept)
+    );
+
+    sqlx::query("update sync.item set title = 'Handbook, renamed' where entity_id = $1")
+        .bind(&ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ids[5])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let added = page(&pool, &src, "new", "Added", "DEEP", &[], "").await;
+    let again = docs_tree_cached(&pool, &registry, Some(&cache))
+        .await
+        .unwrap();
+    assert_eq!(
+        mine(&again),
+        mine(&docs_tree_inner(&pool, &registry).await.unwrap())
+    );
+    let space = &mine(&again)[0];
+    let held: Vec<&str> = space.pages.iter().map(|p| p.entity_id.as_str()).collect();
+    assert!(held.contains(&added.as_str()));
+    assert!(!held.contains(&ids[5].as_str()));
+    assert!(space.pages.iter().any(|p| p.title == "Handbook, renamed"));
 }

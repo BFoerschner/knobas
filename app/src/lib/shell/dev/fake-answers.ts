@@ -3,10 +3,10 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { appStatus, commandSteps, completeFirstRun, diffPipelines, frontendReady, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setUserRenderers, userRenderers } from "../../ipc/app";
-import type { ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
+import type { appStatus, commandSteps, completeFirstRun, diffPipelines, frontendReady, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
+import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
-import type { acceptSuggestion, actionItemTicket, artifactBytes, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCommitDiff, entityFileBytes, entityFilePiped, entityRangeDiff, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
+import type { acceptSuggestion, actionItemTicket, cardReads, entityBriefs, artifactBytes, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneAll, cloneAllPlan, cloneAllState, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsNodes, docsOutline, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCheckouts, entityCommitDiff, entityFileBytes, entityFilePiped, entityLocalDir, entityLocalFile, entityLocalPaths, entityLocalTree, entityRangeDiff, entitySourceRangeDiff, entityThread, entityHead, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, inboxShelves, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, publishStandupProtocolAgain, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity, repoPipelines, commitRepositories, entityRangeFile, entityRangeFiles, entitySourceRangeFiles, cancelRead } from "../../ipc/entity";
 import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, search, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, clearToneOverrides, setToneOverride, stateColours, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
@@ -17,6 +17,7 @@ type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnTy
 export interface Answers {
   accept_suggestion: Answer<typeof acceptSuggestion>;
   ack_alert: Answer<typeof ackAlert>;
+  unack_alert: Answer<typeof unackAlert>;
   set_monitor_hidden: Answer<typeof setMonitorHidden>;
   action_item_ticket: Answer<typeof actionItemTicket>;
   ad_hoc_block: Answer<typeof adHocBlock>;
@@ -40,8 +41,13 @@ export interface Answers {
   capture_shortcut: Answer<typeof captureShortcut>;
   check_adapter_updates: Answer<typeof checkAdapterUpdates>;
   checkout_settings: Answer<typeof checkoutSettings>;
+  clone_all: Answer<typeof cloneAll>;
+  clone_all_plan: Answer<typeof cloneAllPlan>;
+  clone_all_state: Answer<typeof cloneAllState>;
   clone_repo: Answer<typeof cloneRepo>;
   code_facts: Answer<typeof codeFacts>;
+  card_reads: Answer<typeof cardReads>;
+  entity_briefs: Answer<typeof entityBriefs>;
   complete_first_run: Answer<typeof completeFirstRun>;
   complete_inbox_item: Answer<typeof completeInboxItem>;
   create_action_item_ticket: Answer<typeof createActionItemTicket>;
@@ -77,6 +83,8 @@ export interface Answers {
   docs_create_page: Answer<typeof docsCreatePage>;
   docs_edit_section: Answer<typeof docsEditSection>;
   docs_export_markdown: Answer<typeof docsExportMarkdown>;
+  docs_nodes: Answer<typeof docsNodes>;
+  docs_outline: Answer<typeof docsOutline>;
   docs_page: Answer<typeof docsPage>;
   docs_search: Answer<typeof docsSearch>;
   docs_tree: Answer<typeof docsTree>;
@@ -89,7 +97,17 @@ export interface Answers {
   entity_commit_diff: Answer<typeof entityCommitDiff>;
   entity_file_bytes: Answer<typeof entityFileBytes>;
   entity_file_piped: Answer<typeof entityFilePiped>;
+  entity_local_file: Answer<typeof entityLocalFile>;
+  entity_local_dir: Answer<typeof entityLocalDir>;
+  entity_local_paths: Answer<typeof entityLocalPaths>;
+  entity_local_tree: Answer<typeof entityLocalTree>;
   entity_range_diff: Answer<typeof entityRangeDiff>;
+  entity_source_range_diff: Answer<typeof entitySourceRangeDiff>;
+  entity_range_files: Answer<typeof entityRangeFiles>;
+  entity_range_file: Answer<typeof entityRangeFile>;
+  entity_source_range_files: Answer<typeof entitySourceRangeFiles>;
+  cancel_read: Answer<typeof cancelRead>;
+  entity_checkouts: Answer<typeof entityCheckouts>;
   entity_thread: Answer<typeof entityThread>;
   entity_view: Answer<typeof entityView>;
   export_notes_markdown: Answer<typeof exportNotesMarkdown>;
@@ -100,12 +118,14 @@ export interface Answers {
   frontend_ready: Answer<typeof frontendReady>;
   get_asset: Answer<typeof getAsset>;
   get_entity: Answer<typeof getEntity>;
+  entity_head: Answer<typeof entityHead>;
   get_note: Answer<typeof getNote>;
   get_route: Answer<typeof getRoute>;
   hide_link_set_member: Answer<typeof hideLinkSetMember>;
   hide_saved_view: Answer<typeof hideSavedView>;
   inbox_count: Answer<typeof inboxCount>;
   inbox_items: Answer<typeof inboxItems>;
+  inbox_shelves: Answer<typeof inboxShelves>;
   install_adapter: Answer<typeof installAdapter>;
   job_link_sets: Answer<typeof jobLinkSets>;
   job_pipelines: Answer<typeof jobPipelines>;
@@ -126,6 +146,7 @@ export interface Answers {
   log_work: Answer<typeof logWork>;
   mini_board: Answer<typeof miniBoard>;
   monitor_roster: Answer<typeof monitorRoster>;
+  monitors_down: Answer<typeof monitorsDown>;
   monitoring_settings: Answer<typeof monitoringSettings>;
   move_asset: Answer<typeof moveAsset>;
   move_notes_to_confluence: Answer<typeof moveNotesToConfluence>;
@@ -146,11 +167,14 @@ export interface Answers {
   order_dep_layers: Answer<typeof orderDepLayers>;
   owed_tickets: Answer<typeof owedTickets>;
   pages_kept_open: Answer<typeof pagesKeptOpen>;
+  smooth_scrolling: Answer<typeof smoothScrolling>;
   parent_links: Answer<typeof parentLinks>;
   passive_attribution: Answer<typeof passiveAttribution>;
   pending_writes: Answer<typeof pendingWrites>;
   ping: Answer<typeof ping>;
   pipeline_runs: Answer<typeof pipelineRuns>;
+  repo_pipelines: Answer<typeof repoPipelines>;
+  commit_repositories: Answer<typeof commitRepositories>;
   pipeline_settings: Answer<typeof pipelineSettings>;
   pipelines: Answer<typeof pipelines>;
   place_dep_kind: Answer<typeof placeDepKind>;
@@ -164,6 +188,7 @@ export interface Answers {
   promote_context: Answer<typeof promoteContext>;
   proposal_evidence: Answer<typeof proposalEvidence>;
   publish_standup_protocol: Answer<typeof publishStandupProtocol>;
+  publish_standup_protocol_again: Answer<typeof publishStandupProtocolAgain>;
   reachable_transitions: Answer<typeof reachableTransitions>;
   record_capture_context: Answer<typeof recordCaptureContext>;
   refresh_entity: Answer<typeof refreshEntity>;
@@ -204,6 +229,7 @@ export interface Answers {
   set_notes_shown: Answer<typeof setNotesShown>;
   set_notification_kinds: Answer<typeof setNotificationKinds>;
   set_pages_kept_open: Answer<typeof setPagesKeptOpen>;
+  set_smooth_scrolling: Answer<typeof setSmoothScrolling>;
   set_tone_override: Answer<typeof setToneOverride>;
   state_colours: Answer<typeof stateColours>;
   clear_tone_overrides: Answer<typeof clearToneOverrides>;

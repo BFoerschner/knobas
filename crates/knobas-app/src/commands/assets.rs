@@ -893,6 +893,24 @@ pub async fn monitor_roster<R: tauri::Runtime>(
     Ok(rows)
 }
 
+/// How many monitors on the roster read *down*, hidden and paused ones left
+/// out: the nav's Monitors badge (PR #2479, the monitors-builds pass).
+///
+/// Apart from [`monitor_roster`] because the badge is read on every sync's
+/// end, on every page, and the roster with its samples was the whole day of
+/// every monitor; the count is the roster's own rows and state rule
+/// (`assets::monitors_down`), so it cannot disagree with the tab.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn monitors_down(lifecycle: State<'_, Lifecycle>) -> Result<u32, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::monitors_down(&pool, lifecycle.registry()).await
+}
+
 /// The write ops each source in `rows` offers, for `MonitorRow::actions`
 /// (issue #452).
 ///
@@ -1029,6 +1047,26 @@ pub async fn ack_alert<R: tauri::Runtime>(
 ) -> Result<OpenAlert, IpcError> {
     let pool = lifecycle.pool()?;
     let written = assets::ack_alert(&pool, &monitor_id, chrono::Utc::now()).await?;
+    announce(&app, written.activity);
+    Ok(written.value)
+}
+
+/// Take an ack back (*Undo* on the ack's toast, the *Acked* button): the alert
+/// asks again. `assets::unack_alert` argues the writes.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when that monitor has no open
+/// alert, and [`Internal`](crate::IpcErrorCode::Internal) if a write fails.
+#[tauri::command]
+pub async fn unack_alert<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    monitor_id: String,
+) -> Result<OpenAlert, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::unack_alert(&pool, &monitor_id).await?;
     announce(&app, written.activity);
     Ok(written.value)
 }
@@ -1191,6 +1229,7 @@ mod tests {
             ("produce_estate_file", "landUnder"),
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
+            ("unack_alert", "monitorId"),
             ("set_monitor_hidden", "monitorId"),
             ("set_monitor_hidden", "hidden"),
         ] {

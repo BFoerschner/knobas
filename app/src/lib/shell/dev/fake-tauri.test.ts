@@ -816,8 +816,10 @@ test("the parse finds every command the fixture answers, in every module that in
   // still share `IPC_DIR`, so this controls which files are read, not where.
   const modules = new Set(commands.values());
   for (const name of readdirSync(IPC_DIR)) {
-    if (!name.endsWith(".ts")) continue;
-    if (!readFileSync(join(IPC_DIR, name), "utf8").includes('from "@tauri-apps/api/core"')) continue;
+    if (!name.endsWith(".ts") || name.endsWith(".test.ts")) continue;
+    // A barrel module calls the app's own `invoke` (`ipc/invoke.ts`), never Tauri's: since v3.2.9-ux7's start-up hang,
+    // only `answer-cache.ts` (behind `invoke.ts`) imports Tauri's, and it names no command of its own.
+    if (!/import \{[^}]*\binvoke\b[^}]*\} from "\.\/invoke"/.test(readFileSync(join(IPC_DIR, name), "utf8"))) continue;
     expect(modules, `${name} imports invoke and the parse found no command in it`).toContain(name);
   }
 });

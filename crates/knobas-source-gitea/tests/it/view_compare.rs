@@ -232,3 +232,61 @@ async fn a_compare_gitea_does_not_find_past_a_commit_with_a_parent_is_its_404() 
     assert_eq!(error.status(), Some(404), "{error}");
     assert!(!error.to_string().contains("first commit"), "{error}");
 }
+
+/// A pull request from the default branch into another (2026-11-13): Compare
+/// draws what the compare carries, as the default branch's own view measures
+/// it against nothing. The range lists the compare's commits, newest first as
+/// Gitea lists them, each titled by its subject and dated as a commit row.
+#[tokio::test]
+async fn a_compare_from_the_default_branch_lists_its_commits_in_its_range() {
+    const MIDDLE: &str = "5d77e1a2c3b4a5d6e7f8091a2b3c4d5e6f708192";
+    let server = MockServer::builder().start().await;
+    let wire = format!("{REPO}/compare/release%2F1.4...main");
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("output", "diff"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("files", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 2,
+            "commits": [
+                { "sha": HEAD, "parents": [{ "sha": MIDDLE }],
+                  "commit": { "message": "Retry with backoff\n\nThe body.", "author": { "name": "Mara Lindqvist", "date": "2026-11-12T09:00:00Z" } } },
+                { "sha": MIDDLE, "parents": [{ "sha": BASE }],
+                  "commit": { "message": "Bump deps", "author": { "name": "Jonas Becker", "date": "2026-11-11T09:00:00Z" } } }
+            ]
+        })))
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(ENTITY, Some("compare:release/1.4...main"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff");
+    };
+    let range = range.as_ref().expect("a listing that settles both ends");
+    assert_eq!((range.base.as_str(), range.head.as_str()), (BASE, HEAD));
+    let listed: Vec<(&str, &str)> = range
+        .commits
+        .iter()
+        .map(|c| (c.sha.as_str(), c.title.as_str()))
+        .collect();
+    assert_eq!(
+        listed,
+        [(HEAD, "Retry with backoff"), (MIDDLE, "Bump deps")]
+    );
+    assert!(
+        range.commits[0]
+            .meta
+            .as_deref()
+            .is_some_and(|meta| meta.contains("Mara Lindqvist")),
+        "{:?}",
+        range.commits[0].meta
+    );
+}

@@ -58,6 +58,18 @@ const DURABLE_SETTINGS: [(&str, &str); 3] = [
     ("full_page_writes", "on"),
 ];
 
+/// How much of the database the server keeps in its own memory, passed as
+/// `-c shared_buffers` every time it starts (the query audit of 2026-11-12).
+///
+/// PostgreSQL's default is 128 MB, and a mirror of 39,770 items is 820 MB on
+/// disk: a search that ranks a common word reads more pages than fit, so each
+/// keystroke fetched thousands of them from the operating system's cache
+/// again. Twice the default holds what those reads touch: the launcher's
+/// widest searches went from 194 to 181 ms and from 166 to 151 on that
+/// mirror, and 512 MB bought 4 ms more. The memory is mapped at start and
+/// used as pages are read, so a small mirror costs what it did.
+const SHARED_BUFFERS: &str = "256MB";
+
 /// Pool size. The desktop app is a single user with a handful of concurrent
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
@@ -1095,7 +1107,6 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
     let adoption = settings.clone();
-    let mut postgresql = PostgreSQL::new(settings);
 
     // One yield before the work starts, so a *warm* install interleaves the
     // way a cold one does. On a machine without the binaries, `setup()`
@@ -1111,6 +1122,11 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     tokio::task::yield_now().await;
 
     initialise(root_dir, &adoption).await?;
+    // The port is ours to pick, on the loopback, as late as the handle allows:
+    // `setup()` below only finds the install and the data directory `initialise`
+    // left, so the port is free for that long and no longer. See [`loopback_port`].
+    settings.port = loopback_port().map_err(|source| DbError::io(&data_dir, source))?;
+    let mut postgresql = PostgreSQL::new(settings);
     postgresql.setup().await?;
     let owned = adoption.clone();
     off_runtime(&data_dir, move || keep_to_owner(&owned)).await?;
@@ -1544,6 +1560,26 @@ pub(crate) fn find_tool(installation_dir: &Path, name: &str) -> Option<PathBuf> 
         .find(|path| path.is_file())
 }
 
+/// A free TCP port on `127.0.0.1`, for a fresh start to hand the server.
+///
+/// `postgresql_embedded` 0.21 picks the port of a start on port 0 with
+/// `TcpListener::bind(("0.0.0.0", 0))` (`postgresql.rs:294`): a listening
+/// socket on every interface inside `knobas-app`, for the moment it takes to
+/// read its number. Windows Defender asks about exactly that, so every Windows
+/// user got a firewall prompt at the first start, and a machine whose policy
+/// answers it alone writes block rules for the app. The server itself always
+/// listened on the loopback alone (`listen_addresses`, below), so nothing
+/// was ever served beyond it; the wildcard socket was the port probe, and this
+/// one is on the address every client here dials.
+///
+/// The port is free when this returns, not reserved: something else can take
+/// it before the server binds it, which ends the start with the server's
+/// reason, as a stranger on a recorded port does.
+fn loopback_port() -> io::Result<u16> {
+    let probe = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
+    Ok(probe.local_addr()?.port())
+}
+
 fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     std::fs::create_dir_all(root_dir).map_err(|source| DbError::io(root_dir, source))?;
 
@@ -1556,7 +1592,8 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings.data_dir = root_dir.join("data");
     settings.password_file = root_dir.join(".pgpass");
     settings.host = HOST.to_string();
-    // 0 makes `start()` pick a free loopback port and record it in `settings`.
+    // 0 until `start_managed` picks a free loopback port ([`loopback_port`]);
+    // `start_server` refuses a handle that still has it.
     settings.port = 0;
     settings.temporary = false;
     // Explicit: `None` keeps `Settings::url` on the TCP form.
@@ -1585,6 +1622,11 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
             .configuration
             .insert(name.to_owned(), value.to_owned());
     }
+    // As `-c`, like the rest: a data directory an older build made, whose
+    // `postgresql.conf` says 128 MB, gets it at its next start.
+    settings
+        .configuration
+        .insert("shared_buffers".to_owned(), SHARED_BUFFERS.to_owned());
     settings.timeout = Some(COMMAND_TIMEOUT);
 
     // The password `Settings::new()` invented is left in place here. Reading
@@ -1916,8 +1958,18 @@ const FATAL: &str = "FATAL:";
 ///
 /// Every server start goes through here. The handle is the caller's to forget
 /// on a failure: `PostgreSQL::drop` stops whatever `postmaster.pid` names.
+///
+/// A handle without a port is refused before anything opens a socket: on port
+/// 0, `postgresql_embedded` picks one by listening on `0.0.0.0`
+/// ([`loopback_port`] says why that must not happen).
 async fn start_server(postgresql: &mut PostgreSQL) -> Result<(), DbError> {
     let data_dir = postgresql.settings().data_dir.clone();
+    if postgresql.settings().port == 0 {
+        return Err(DbError::io(
+            data_dir,
+            io::Error::other("no port picked: the server's port is chosen on the loopback first"),
+        ));
+    }
     let log = data_dir.join(START_LOG);
     // `pg_ctl` appends, so the log holds every earlier start's lines too.
     let since = tokio::fs::metadata(&log).await.map_or(0, |meta| meta.len());
@@ -2642,6 +2694,63 @@ mod tests {
         assert_eq!(settings.password_file, dir.path().join(".pgpass"));
         // No `?host=` query -- a Unix-socket URL would carry one.
         assert!(settings.url(DATABASE_NAME).contains("@127.0.0.1:0/knobas"));
+    }
+
+    /// Every start passes the server's own cache size, beside the durable
+    /// settings.
+    #[test]
+    fn build_settings_gives_the_server_twice_the_default_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = build_settings(dir.path()).unwrap();
+        assert_eq!(
+            settings
+                .configuration
+                .get("shared_buffers")
+                .map(String::as_str),
+            Some("256MB")
+        );
+        for (name, value) in DURABLE_SETTINGS {
+            assert_eq!(
+                settings.configuration.get(name).map(String::as_str),
+                Some(value)
+            );
+        }
+    }
+
+    /// The port a fresh start hands the server comes from a bind on
+    /// `127.0.0.1`, and is free again once picked.
+    #[test]
+    fn the_servers_port_is_picked_on_the_ipv4_loopback() {
+        let port = loopback_port().unwrap();
+        assert_ne!(port, 0);
+        let again = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+            .expect("the picked port is released for the server to take");
+        assert_eq!(
+            again.local_addr().unwrap().ip(),
+            std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST)
+        );
+    }
+
+    /// `postgresql_embedded` picks a port 0 itself by listening on `0.0.0.0`,
+    /// which is the Windows firewall prompt. A handle that reaches the start
+    /// with port 0 is refused before `pg_ctl` runs or any socket opens.
+    #[tokio::test]
+    async fn a_start_without_a_picked_port_is_refused_before_anything_listens() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = build_settings(dir.path()).unwrap();
+        assert_eq!(settings.port, 0);
+        let mut postgresql = PostgreSQL::new(settings);
+        let error = start_server(&mut postgresql).await.unwrap_err();
+        assert!(
+            matches!(&error, DbError::Io { source, .. } if source.to_string().contains("no port picked")),
+            "{error}"
+        );
+        assert!(
+            !dir.path().join("data").join(START_LOG).exists(),
+            "pg_ctl never ran"
+        );
+        // Nothing started, so the handle's `Drop` has nothing to stop.
+        drop(postgresql);
     }
 
     #[test]

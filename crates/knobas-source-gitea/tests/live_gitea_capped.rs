@@ -68,7 +68,7 @@ const REQUESTED: usize = 50;
 ///
 /// The capped profile serves one record per request, so `sync.rs`'s page
 /// budgets stop being page counts and become record counts:
-/// `MAX_LIST_PAGES`/`MAX_BRANCH_PAGES` afford 21 requests and
+/// `MAX_LIST_PAGES` affords 21 requests, `MAX_BRANCH_PAGES` 201, and
 /// `MAX_PR_PAGES`/`MAX_COMMIT_PAGES` 20. Past them the two exhaustive walks
 /// fail loudly with `cap_reached` and the two budgeted ones stop *silently* on
 /// their own budget -- correct behaviour, but it would arrive at the assertions

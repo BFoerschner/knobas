@@ -1,7 +1,7 @@
 /**
  * `?fake-ipc`: Docs, the reader over declared docs (#859).
  *
- * Answers `docs_tree`, `docs_page`, `docs_search` (#860), and the writes
+ * Answers `docs_tree`, `docs_outline`, `docs_nodes`, `docs_page`, `docs_search` (#860), and the writes
  * `docs_export_markdown` (#861), `docs_edit_section` and `docs_create_page`
  * (#862), and `move_notes_to_confluence` (#941), which answer as queued and
  * change nothing.
@@ -37,6 +37,8 @@
  *   pages four or five folds deep, to measure Docs at a real space's size
  *   (#2200: `&fake-docs-pages=4000`). Its pages carry the generic body and
  *   the search matches them by title only.
+ * - `?fake-scale` (`fake-scale.ts`) puts 5,000 pages in three spaces instead, one
+ *   parent holding 800 children and one 300.
  * - `?fake-docs-long=<n>` draws *SEPA payout retry design* with its body
  *   and its comments repeated `n` times, each heading numbered, to measure a
  *   very long page (`&fake-docs-long=200`: 4,000 blocks, 400 comments).
@@ -51,6 +53,7 @@
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
+import { SCALE_SPACES, scalePages } from "../fake-scale";
 import type {
   DocBlock,
   DocHit,
@@ -64,7 +67,8 @@ import type {
   TableCell,
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
-import { CORPUS, fakeRoleScope } from "./corpus";
+import { CORPUS, fakeEmpty, fakeRoleScope } from "./corpus";
+import { linkedTickets } from "./entity";
 import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
 
@@ -72,6 +76,8 @@ import { keyOf } from "../../../time/format";
 const WIKI_ROLE = "wiki";
 /** The source the fixture's spaces and pages are of. */
 const SOURCE = "confluence";
+/** What the fake's Confluence is called, as its pages say (`source_name`). */
+const SOURCE_NAME = "Confluence";
 
 /** Whether the fixture's source fills the wiki, which both Docs reads narrow to (#1296). */
 function wikiFilled(): boolean {
@@ -540,21 +546,24 @@ function generic(page: FakePage, by: string): Body {
  * tree holds no space, no page read last and no *For you*.
  */
 function tree(bulk: FakePage[]): DocsTree {
-  if (!wikiFilled()) return { spaces: [], last_read: null, for_you: [] };
+  if (!wikiFilled() || fakeEmpty("docs")) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
     source_id: SOURCE,
+    source_name: SOURCE_NAME,
     key,
     name,
     pages: PAGES.filter((p) => p.space === key)
       .map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent }))
       .sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase())),
   }));
-  if (bulk.length > 0)
+  // The bulk pages, one space per key they carry: `BULK`'s, or `fake-scale`'s three.
+  for (const key of new Set(bulk.map((p) => p.space)))
     spaces.push({
       source_id: SOURCE,
-      key: BULK_KEY,
-      name: BULK_NAME,
-      pages: bulk.map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
+      source_name: SOURCE_NAME,
+      key,
+      name: SCALE_SPACES[key] ?? BULK_NAME,
+      pages: bulk.filter((p) => p.space === key).map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
     });
   return {
     spaces,
@@ -645,6 +654,23 @@ function work(blocks: DocBlock[]): DocPage["work"] {
   return out;
 }
 
+/** A page as a link's end, so `create_link` takes every page the tree holds, as the real mirror does. */
+export function docPageEnd(id: string): { kind: string; title: string; deleted_at: string | null } | null {
+  const held = PAGES.find((p) => p.id === id);
+  return held ? { kind: "page", title: held.title, deleted_at: null } : null;
+}
+
+/** The chips' tickets and the tickets `create_link` holds on the page, each linked one saying so, as the real read does. */
+function withLinks(chips: DocPage["work"], page: string): DocPage["work"] {
+  const out = [...chips];
+  for (const ticket of linkedTickets(page)) {
+    const known = out.find((w) => w.entity_id === ticket.entity_id);
+    if (known) known.linked = true;
+    else out.push({ ...ticket, linked: true });
+  }
+  return out;
+}
+
 /** The pages whose prototype body links to `title`. */
 function backlinks(title: string): DocPage["backlinks"] {
   return PAGES.filter((p) => {
@@ -674,7 +700,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
   return {
     entity_id: found.id,
     source_id: "confluence",
-    source_name: "Confluence",
+    source_name: SOURCE_NAME,
     title: found.title,
     space: { key: found.space, name: SPACES[found.space] ?? (found.space === BULK_KEY ? BULK_NAME : null) },
     ancestors: found.parent === null ? [] : [{ title: found.parentTitle ?? "", entity_id: found.parent }],
@@ -711,7 +737,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
         : []),
     ],
     backlinks: backlinks(found.title),
-    work: work(body.blocks.map(block)),
+    work: withLinks(work(body.blocks.map(block)), found.id),
     writes: ["comment", "update_page", "create_page"],
     run_embeds: !EMBEDS_OFF.has("confluence"),
   };
@@ -775,7 +801,9 @@ function search(args: Record<string, unknown>, bulk: FakePage[]): DocsHits | nul
     }
     const sentence = best?.sentence ?? parts.find((x) => x.text.trim() !== "")?.text ?? "";
     const segments: { text: string; hit: boolean }[] = [];
-    for (const piece of sentence.slice(0, 150).split(new RegExp(`(${stems.map((s) => `${s}[\\p{L}\\p{N}]*`).join("|") || "$^"})`, "iu"))) {
+    // As the real read's `cut`: an ellipsis where the sentence was cut.
+    const shown = sentence.length > 150 ? `${sentence.slice(0, 150)}…` : sentence;
+    for (const piece of shown.split(new RegExp(`(${stems.map((s) => `${s}[\\p{L}\\p{N}]*`).join("|") || "$^"})`, "iu"))) {
       if (piece === "") continue;
       segments.push({ text: piece, hit: stems.some((s) => piece.toLowerCase().startsWith(s)) });
     }
@@ -881,9 +909,13 @@ var call = "${call}";
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
-  const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
+  const bulk = params.has("fake-scale") ? scalePages(5_000) : bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
+    // The instant-open pass (2026-11-12): the fixture's spaces are small, so its outline and every part asked for are
+    // the tree whole, which is a cut of the tree as the backend's are.
+    docs_outline: () => tree(bulk),
+    docs_nodes: () => tree(bulk).spaces,
     docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {

@@ -7,7 +7,7 @@
 .tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
 /* Which source's ticket this is, when another source holds the same key (#1476). */
 .tf-jobcard .tf-jobsrc { font-size: var(--t-sm); margin: 6px 0 0; }
-.tf-jobcard .tf-jobsrc a { color: inherit; }
+.tf-jobcard .tf-jobsrc a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tf-jobcard p { color: var(--card-ink-2); }
 .tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }
@@ -20,8 +20,9 @@
    (`knobas.ticket.side`), a double click fits it so nothing on the card wraps. The handle shows as the card's edge
    darkening under the pointer. Below 900px the columns stack and the handle is gone. */
 .tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
-.tf-tkhandle:hover, .tf-tkhandle:focus-visible, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); outline: 0; }
-.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle:focus-visible, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf-tkhandle:hover, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); }
+.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf .tf-tkhandle:focus-visible { outline-offset: -2px; border-radius: 0; }
 .tf-ticketcard.tf-tkdragging, .tf-ticketcard.tf-tkdragging * { cursor: col-resize; user-select: none; }
 @media (max-width: 900px) {
   .tf-ticketpage { height: auto; }
@@ -31,6 +32,9 @@
 /* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
 .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
 .tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* A key wider than the card (a forge repository's long name) wraps inside it, never past its edge: the copy button keeps
+   its place at the right (the Windows pass, 2026-11-14). A key that fits draws as before. */
+.tf-tkhead .tf-jobkey { min-width: 0; overflow-wrap: anywhere; }
 .tf-ticketcard .tf-tkcopy { color: var(--card-ink-2); }
 .tf-ticketcard .tf-tkcopy:hover { background: rgba(0,0,0,.08); color: var(--card-ink); }
 .tf-sheetcard .tf-tkcopy { color: var(--ink-2); }
@@ -43,10 +47,12 @@
    text, a chip or an avatar, so the rhythm holds. */
 .tf-ticketcard .tf-facts { grid-template-columns: 68px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
 .tf-ticketcard .tf-facts dt, .tf-ticketcard .tf-facts dd { line-height: 20px; min-height: 20px; }
+/* *Logged* reads on its value's line, with the meter under both. */
+.tf-ticketcard .tf-facts dt:has(+ dd .tf-tkmeter) { align-self: start; }
 .tf-ticketcard .tf-facts dt { color: var(--card-ink-2); }
 .tf-sheetcard .tf-facts dt { color: var(--ink-2); }
 .tf-ticketcard .tf-facts dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.tf-ticketcard .tf-facts dd .tf-av { width: 20px; height: 20px; font-size: 9px; line-height: 1; }
+.tf-ticketcard .tf-facts dd .tf-av { width: 22px; height: 22px; line-height: 1; }
 .tf-ticketcard .tf-facts dd .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
 .tf-ticketcard .tf-facts dd .tf-lab { line-height: 16px; }
 .tf-ticketcard .tf-facts .tf-av { background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.2); color: var(--card-ink); }
@@ -82,11 +88,13 @@
 .tf-ticketcard.tf-card, .tf-tcard.tf-card, .tf-row.tf-card {
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+  --mark: #F6E08F;
 }
 /* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
    one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
    two action rows under it take the same shape with the name and the chevron alone. A list of places, not buttons. */
-.tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+/* `flex: none`: on a short window the card scrolls, where a list that shrinks would just clip its rows. */
+.tf-tktable { flex: none; display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
 .tf-tktable > a, .tf-tktable > button {
   display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
   padding: 7px 10px; border: 0; border-top: 1px solid rgba(0,0,0,.12); background: none; font: inherit; font-size: var(--t-sm);
@@ -101,20 +109,47 @@
 .tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
 .tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
 .tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
-.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
-.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
-.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
-.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
-.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
-.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
+/* The same rows on a sheet: a ticket only read, and the Tickets preview's *Around this ticket*. */
+:is(.tf-sheetcard, .tf-preview) .tf-tktable { border-color: var(--rule); background: var(--paper); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable > a, :is(.tf-sheetcard, .tf-preview) .tf-tktable > button { border-top-color: var(--rule-2); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable > :first-child { border-top: 0; }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable > a:hover, :is(.tf-sheetcard, .tf-preview) .tf-tktable > button:hover { background: var(--sheet-2); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-n, :is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-st, :is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
-.tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
+/* The one decision the card exists for stays on screen when a short window makes the card scroll. */
+.tf-ticketcard .tf-go { margin-top: auto; padding: 8px 0 18px; margin-bottom: -18px; position: sticky; bottom: -18px; background: var(--card); }
+/* On a window too short for the card, the rows passing under the foot end at a line (`TfJobCard`'s `footLine`). */
+.tf-ticketcard.tf-tkcut .tf-go { border-top: 1px solid rgba(0,0,0,.2); }
+.tf-sheetcard.tf-ticketcard.tf-tkcut .tf-go { border-top-color: var(--rule); }
+/* The card's fold holds its facts and rows at their spacing. Only stacked does it have a summary, or close. */
+.tf-tkstack { flex: none; }
+.tf-tkstack > * + * { margin-top: 14px; }
+.tf-tkstack > summary { display: none; }
+.tf-tkcardtitle { display: none; }
+@media (max-width: 900px) {
+  .tf-tkcardtitle { display: block; font-size: var(--t-2xl); font-weight: 700; font-variation-settings: "wdth" 85; line-height: 1.2; color: inherit; overflow-wrap: anywhere; }
+  .tf-ticketcard p.tf-tkcardtitle { color: inherit; }
+  .tf-tkread .tf-tkpagehead h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .tf-tkstack > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; list-style: none; }
+  .tf-tkstack > summary::-webkit-details-marker { display: none; }
+  .tf-tkstack > summary::before { content: ""; width: 6px; height: 6px; margin: 0 4px 1px 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
+  .tf-tkstack[open] > summary::before { transform: rotate(45deg); }
+  /* The foot ends the card's flow: pinned, it sliced the rows above it in half. */
+  .tf-ticketcard .tf-go, .tf-ticketcard.tf-tkcut .tf-go { position: static; margin: 0; padding: 0; background: none; border-top: 0; }
+}
+.tf-sheetcard.tf-ticketcard .tf-go { background: var(--sheet); }
+/* On the yellow the scrollbar's thumb is the card's own, not a grey strip. */
+.tf-ticketcard.tf-card::-webkit-scrollbar-thumb { background: var(--card-2); }
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+.tf-ticketcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--card-ink) 82%, var(--card)); background: var(--tf-hover); border-color: var(--tf-hover); }
 /* Two moods of one card: the yellow is for the ticket you are on (`tf-card`); a ticket you are reading sits on a sheet. */
 .tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
 .tf-sheetcard p { color: var(--ink-2); }
 .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
-.tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+/* The app's one primary, as the Tickets preview draws the same button: `--fill`, so it stays below the card's yellow in dark. */
+.tf-sheetcard .tf-go .tf-btn { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
+.tf-sheetcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 /* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the
    card at a reading width (Björn's call; the design system's left alignment stays everywhere else). */
 .tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
@@ -163,8 +198,8 @@
 .tf-tkatt .tf-stale { margin: 10px 12px 2px; }
 .tf-tkatt .tf-stale .tf-btn { margin-left: auto; }
 
-.tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
-.tf-work > * { flex: none; }
+.tf-work .tf-sbody { display: flex; flex-direction: column; }
+.tf-work .tf-sbody > * { flex: none; }
 .tf-wtabs {
   display: flex; align-items: center; gap: 2px; padding: 10px 22px 0; border-bottom: 1px solid var(--rule);
   background: var(--paper); position: sticky; top: 0; z-index: 6;
@@ -173,8 +208,17 @@
 .tf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
 
 /* ---------- a job section (R-4.6) ---------- */
-.tf-panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
-.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
+.tf-panel { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
+/* One placement for a panel's heading: above its box, not in it (design system, Heading steps). A small button's height
+   whether or not it holds one, so panels side by side share their first rule. The box is what follows the heading.
+   A panel that opens with its heading says so by `tf-headed`, not by `:has(> header)`: a `:has()` before a subject
+   with no class, tag or id makes Chromium restyle the whole page each time a row enters any list (PR #2479, the
+   smoothness pass; `style-cost.test.ts` refuses the shape). */
+.tf-panel.tf-headed { background: none; border: 0; border-radius: 0; }
+.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 0 0 6px; min-height: calc(var(--control-h-sm) + 6px); }
+.tf-headed > :not(header) { background: var(--sheet); border: solid var(--rule); border-width: 0 1px; }
+.tf-headed > header + * { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
+.tf-headed > :not(header):last-child { border-bottom-width: 1px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
 .tf-panel > header h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-open {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2);
@@ -188,13 +232,6 @@
   margin: 0 12px 8px; padding: 8px 10px; border-radius: 6px; background: var(--sheet-2);
   display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--t-sm);
 }
-.tf-openin { position: relative; }
-.tf-menu {
-  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column;
-  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 4px;
-}
-.tf-menu button { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
-.tf-menu button:hover { background: var(--sheet-2); }
 .tf-rows { display: flex; flex-direction: column; }
 .tf-r {
   display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-top: 1px solid var(--rule-2);
@@ -203,20 +240,24 @@
 a.tf-r:hover { background: var(--sheet-2); }
 .tf-r .tf-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+/* The last value: *Download* stands in its place on hover, so it is at least as wide. */
+.tf-r .tf-rend .tf-rowval { min-width: 72px; text-align: right; }
 .tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 .tf-minif {
-  display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px;
+  display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--field); border-radius: 4px;
   padding: 2px 7px; flex: 1; min-width: 120px; max-width: 220px; color: var(--ink-2);
 }
 .tf-minif svg { width: 12px; height: 12px; flex: none; }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
+/* The ring is the wrapper's: a second one on the input would draw a ring inside a ring. */
+.tf .tf-minif input:focus-visible { outline: none; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
 /* Builds' stale-data warning, with its fix (R-4.7). */
 .tf-stale {
   margin: 0 12px 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--warn);
   font-size: var(--t-xs); display: flex; gap: 8px; align-items: center;
 }
-.tf-stale a { margin-left: auto; color: inherit; font-weight: 600; }
+.tf-stale a { margin-left: auto; color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
 
 /* ---------- the blocked banner (R-4.8) ---------- */
 .tf-blocked {
@@ -228,6 +269,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 /* ---------- Start work (R-4.9) ---------- */
 .tf-swnote { margin: 0; }
 .tf-steps { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+/* It takes focus so a keyboard's next Tab is the first field; it is no control, so it draws no ring. */
+.tf .tf-steps:focus-visible { outline: none; }
 .tf-step {
   display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 14px;
   border-top: 1px solid var(--rule-2); align-items: center;
@@ -240,31 +283,37 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step.tf-st-done .tf-num { background: var(--ok); border-color: var(--ok); color: var(--sheet); }
 .tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
 .tf-step.tf-st-failed .tf-num { border-color: var(--err); color: var(--err); }
+.tf-step.tf-st-skipped :is(input, select) { color: var(--ink-2); }
 .tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tf-step input, .tf-step select {
-  font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+  font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--field); color: var(--ink);
   padding: 4px 8px; border-radius: 4px; width: 100%; max-width: 400px;
 }
-.tf-step select { max-width: 260px; }
+/* A step's select shows its choice whole, and a value you cannot edit reads as words. */
+.tf-step select { width: auto; max-width: 100%; }
+.tf-step input[readonly] { background: none; border-color: transparent; border-left: 0; padding-left: 0; font-family: var(--sans); }
+/* A step's fixed value as words, with its key in mono, as wide as a step's field so the notes beside them line up. */
+.tf-stepval { font-size: var(--t-sm); padding: 4px 0; width: 100%; max-width: 400px; }
+.tf .tf-step input[aria-label="Open pull request"] { font-family: var(--sans); }
 .tf-step .tf-state { grid-row: 1 / span 2; grid-column: 3; font-size: var(--t-xs); }
 .tf-step .tf-swdetail { grid-column: 2; margin: 0; color: var(--ink-2); }
 /* The canonical footer (#2294): the note on the left, the primary on the right. */
 .tf-steps footer {
   display: flex; justify-content: flex-end; gap: var(--control-gap); padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
-  border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap;
+  border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap; min-height: calc(var(--control-h-lg) + 25px);
 }
 .tf-steps footer .tf-swhint { margin-right: auto; }
 
+/* ---------- the worklog draft (`TfWorklogDraft.svelte`) ---------- */
+.tf-dialog.tf-logdlg { width: min(720px, calc(100vw - 32px)); }
+.tf-dialog.tf-logdlg .tf-fine { font-size: var(--t-xs); }
+
 /* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
 .tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }
-.tf-formgrid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
-.tf-formgrid input, .tf-formgrid select {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink); width: 100%;
-}
 /* A tick box in the grid (*Link to <job>*, #984) keeps its own size beside its words. */
 .tf-formgrid .tf-ck input[type="checkbox"] { width: auto; padding: 0; }
 .tf-radio { display: flex; flex-direction: column; gap: 6px; }
 .tf-radio label { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
-.tf-radio label:has(input:checked) { border-color: var(--ink); background: var(--sheet-2); }
+.tf-radio label:has(input:checked) { border-color: var(--ink); }
 .tf-radio label:has(> input:disabled) { cursor: not-allowed; color: var(--ink-2); }
 .tf-radio small { display: block; color: var(--ink-2); }

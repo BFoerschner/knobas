@@ -5,7 +5,7 @@ use super::*;
 // -- the Builds frame (ADR-0022, #848) -------------------------------------
 
 use knobas_core::builds::RawRun;
-pub(super) use knobas_core::builds::{PipelineRow, RunRow};
+pub(super) use knobas_core::builds::{CommitRepository, PipelineRow, RepoBuilds, RunRow};
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
 /// list. The read is CI's by definition, so it narrows itself to the role's
@@ -35,6 +35,49 @@ pub async fn pipelines_inner(
     let runs = knobas_core::builds::recent_runs(&mut pipelines);
     with_commits(pool, &declarations, None, runs).await?;
     Ok(pipelines)
+}
+
+/// The repository's Builds tab in one answer (the repo-builds pass,
+/// 2026-11-13): the pipelines that build it, each with its newest run per
+/// branch, and its open pull requests by branch
+/// ([`knobas_core::builds::repo_pipelines`]). The mirror alone, as
+/// [`pipelines_inner`]: CI's fillers only, no live read, no run's `commit_id`.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not an entity
+/// id; [`Internal`](crate::IpcErrorCode::Internal) for a query failure. An id
+/// no live repository carries answers no pipelines.
+pub async fn repo_pipelines_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    repo_id: &str,
+) -> Result<RepoBuilds, IpcError> {
+    let repo = EntityRef::parse(repo_id).map_err(IpcError::invalid)?;
+    // As [`pipelines_inner`]: the stored rows follow the stored declarations.
+    crate::commands::search::declare(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
+    let identity = identity_of(pool).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
+    Ok(
+        knobas_core::builds::repo_pipelines(pool, &declarations, &identity, &fillers, &repo)
+            .await?,
+    )
+}
+
+/// The repositories of mirrored commits, for *By repository* on the Builds
+/// list (the repo-builds pass): the list's runs already name their commits
+/// (`commit_id`), so a pipeline's repositories are one keyed read of those
+/// commits' stored parents. A commit the mirror does not hold answers nothing.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn commit_repositories_inner(
+    pool: &PgPool,
+    commit_ids: &[String],
+) -> Result<Vec<CommitRepository>, IpcError> {
+    Ok(knobas_core::builds::commit_repositories(pool, commit_ids).await?)
 }
 
 /// One pipeline's runs, newest first, at most `limit` (100 when `None`).
@@ -441,12 +484,24 @@ async fn run_adapter(
     live: &crate::sources::live::LiveSources,
     run_id: &str,
 ) -> Result<(EntityRef, std::sync::Arc<dyn knobas_source::Source>), IpcError> {
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    Ok((entity, lent.source))
+}
+
+/// [`run_adapter`], lent as the read cache keys what it reads.
+async fn run_lent(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    run_id: &str,
+) -> Result<(EntityRef, crate::sources::live::Lent), IpcError> {
     let entity = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
-    let source =
-        crate::sources::crud::run_source(pool, secrets, registry, live, &entity.to_string())
-            .await
-            .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
-    Ok((entity, source))
+    let lent = live
+        .source(pool, secrets, registry, &entity.to_string())
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
+    Ok((entity, lent))
 }
 
 /// A source's failure on a run read, as [`crate::sources::to_ipc`] maps it.
@@ -473,14 +528,23 @@ pub async fn run_log_inner(
     from: Option<u64>,
     count: Option<u32>,
 ) -> Result<Option<knobas_source::run::RunLog>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
+    let whole = from.is_none() && count.is_none();
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
     let count = count
         .unwrap_or(knobas_source::run::LOG_LINES_MAX)
         .clamp(1, knobas_source::run::LOG_LINES_MAX);
-    source
-        .run_log(&entity.to_string(), from, count)
-        .await
-        .map_err(|error| run_read_failed(&entity, error))
+    let id = entity.to_string();
+    // A finished run's whole log is kept and held (ADR-0042).
+    let fixed = whole && crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
+    live.fixed_read(
+        &lent,
+        &id,
+        "run:log",
+        fixed,
+        lent.source.run_log(&id, from, count),
+    )
+    .await
+    .map_err(|error| run_read_failed(&entity, error))
 }
 
 /// Run `run_id`'s tests, failed first (#855). Errors as [`run_log_inner`].
@@ -495,9 +559,10 @@ pub async fn run_tests_inner(
     live: &crate::sources::live::LiveSources,
     run_id: &str,
 ) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
-    source
-        .run_tests(&entity.to_string())
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    let id = entity.to_string();
+    let fixed = crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
+    live.fixed_read(&lent, &id, "run:tests", fixed, lent.source.run_tests(&id))
         .await
         .map_err(|error| run_read_failed(&entity, error))
 }
@@ -550,11 +615,19 @@ pub async fn run_artifacts_inner(
 ) -> Result<Option<Vec<knobas_source::run::ArtifactEntry>>, IpcError> {
     let path = path.unwrap_or_default();
     artifact_path(path)?;
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
-    source
-        .run_artifacts(&entity.to_string(), path)
-        .await
-        .map_err(|error| run_read_failed(&entity, error))
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    let id = entity.to_string();
+    let fixed = crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
+    let ask = format!("run:artifacts:{path}");
+    live.fixed_read(
+        &lent,
+        &id,
+        &ask,
+        fixed,
+        lent.source.run_artifacts(&id, path),
+    )
+    .await
+    .map_err(|error| run_read_failed(&entity, error))
 }
 
 /// The head of one text artifact of run `run_id`, for *Preview* (#856).
@@ -571,11 +644,19 @@ pub async fn artifact_preview_inner(
     path: &str,
 ) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
     artifact_path(path)?;
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
-    source
-        .artifact_preview(&entity.to_string(), path)
-        .await
-        .map_err(|error| run_read_failed(&entity, error))
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    let id = entity.to_string();
+    let fixed = crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
+    let ask = format!("run:preview:{path}");
+    live.fixed_read(
+        &lent,
+        &id,
+        &ask,
+        fixed,
+        lent.source.artifact_preview(&id, path),
+    )
+    .await
+    .map_err(|error| run_read_failed(&entity, error))
 }
 
 /// The media type a data URL draws an artifact under: its name's, the viewer's
@@ -854,6 +935,36 @@ pub async fn download_run_file<R: tauri::Runtime>(
 pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRow>, IpcError> {
     let pool = lifecycle.pool()?;
     pipelines_inner(&pool, lifecycle.registry()).await
+}
+
+/// The pipelines that build one repository (the repo-builds pass).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`repo_pipelines_inner`] refuses with.
+#[tauri::command]
+pub async fn repo_pipelines(
+    lifecycle: State<'_, Lifecycle>,
+    repo_id: String,
+) -> Result<RepoBuilds, IpcError> {
+    let pool = lifecycle.pool()?;
+    repo_pipelines_inner(&pool, lifecycle.registry(), &repo_id).await
+}
+
+/// The repositories of mirrored commits (the repo-builds pass).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`commit_repositories_inner`] refuses with.
+#[tauri::command]
+pub async fn commit_repositories(
+    lifecycle: State<'_, Lifecycle>,
+    commit_ids: Vec<String>,
+) -> Result<Vec<CommitRepository>, IpcError> {
+    let pool = lifecycle.pool()?;
+    commit_repositories_inner(&pool, &commit_ids).await
 }
 
 /// One pipeline's runs (#848).

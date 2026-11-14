@@ -29,9 +29,12 @@ use crate::responsiveness_probe::Synthetic;
 /// `lane_paths`, `label_paths` and `state_paths` the same for a lane's field,
 /// the labels and a build's or pull request's state (#939); `assignee_paths`
 /// the inbox's assignee candidates (#1164), and `pipeline_paths` its failed
-/// build's pipeline candidates (#2364).
+/// build's pipeline candidates (#2364); `card_keys`, one row per declared
+/// source, the key its tickets' stored cards are read under (migration
+/// `0075`).
 const SMALL: &[&str] = &[
     "source_config",
+    "card_keys",
     "grouped",
     "status_paths",
     "lane_paths",
@@ -351,6 +354,9 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                     .bind(None::<Vec<String>>)
                     .bind(project.map(str::to_owned))
                     .bind(declared.clone())
+                    // No parent named: the statement's ninth bind since the
+                    // list read learnt `parent` (the query audit, item 2).
+                    .bind(None::<String>)
             },
         )
         .await;
@@ -383,10 +389,10 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                 );
             }
             if category == knobas_core::inbox::Category::Mention
-                && !reads_body_index(&plan[0]["Plan"])
+                && !reads_stored_names(&plan[0]["Plan"])
             {
                 wrong.push(format!(
-                    "{name}: reads every item's body, not {BODY_INDEX} (#1170)"
+                    "{name}: reads every item's body, not {NAMES_INDEX} (#1170)"
                 ));
             }
             if category == knobas_core::inbox::Category::NewAssignment {
@@ -404,15 +410,19 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         RESHAPED_RULES.len(),
         "every reshaped rule was planned"
     );
-    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
-        q.bind(None::<Vec<String>>)
-            .bind(None::<Vec<String>>)
-            .bind(None::<String>)
-            .bind(declared.clone())
-            .bind(Some(50_i64))
-            .bind(None::<String>)
-            .bind(None::<i64>)
-    })
+    let plan = explain(
+        &pool,
+        knobas_core::mini_board::planned_statement_unlaned(),
+        |q| {
+            q.bind(None::<Vec<String>>)
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(50_i64))
+                .bind(None::<String>)
+                .bind(None::<i64>)
+        },
+    )
     .await;
     wrong.extend(shapes("mini_board", &plan));
     // In lanes (#939): by epic, the costliest lane read, its first ten.
@@ -437,15 +447,19 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     .await
     .unwrap();
     assert!(matched.len() > 1_000, "{} tickets matched", matched.len());
-    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
-        q.bind(Some(matched.clone()))
-            .bind(None::<Vec<String>>)
-            .bind(None::<String>)
-            .bind(declared.clone())
-            .bind(Some(8_i64))
-            .bind(None::<String>)
-            .bind(None::<i64>)
-    })
+    let plan = explain(
+        &pool,
+        knobas_core::mini_board::planned_statement_unlaned(),
+        |q| {
+            q.bind(Some(matched.clone()))
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(8_i64))
+                .bind(None::<String>)
+                .bind(None::<i64>)
+        },
+    )
     .await;
     wrong.extend(shapes("mini_board narrowed", &plan));
     wrong.extend(
@@ -992,21 +1006,53 @@ fn item_scans_filtered_per_row(node: &serde_json::Value) -> Vec<String> {
     found
 }
 
-/// The trigram index over the prose kinds' bodies (migration `0049`).
-const BODY_INDEX: &str = "item_body_trgm_idx";
+/// The key of `sync.item_mention` (migration `0079`): the names each prose
+/// body writes at somebody, by name.
+const NAMES_INDEX: &str = "item_mention_pkey";
 
-/// Whether the plan finds its items through [`BODY_INDEX`] (#1170). The
-/// mention rule read every prose item's body for the reader's name: 12 ms of
-/// the stream on the probe's 18,500, for every reader, the one rule left that
-/// cost the same whoever reads it. Through the index it reads the bodies that
-/// hold the name's trigrams, which for a name nobody wrote is none.
-fn reads_body_index(node: &serde_json::Value) -> bool {
-    node["Node Type"] == "Bitmap Index Scan" && node["Index Name"] == BODY_INDEX
+/// Whether the plan finds its items through `sync.item_mention`, by
+/// [`NAMES_INDEX`] or, on a table of a few pages, by reading it whole, and
+/// matches no body the names did not lead to. The mention
+/// rule read every prose item's body for the reader's name (12 ms of the
+/// stream on the probe's 18,500, #1170), then the bodies holding the name's
+/// trigrams (`0049`), which for a username that is also a word was thousands
+/// of them (the query audit of 2026-11-12). Through the stored names it
+/// reads the items that write the name at somebody, which for a name nobody
+/// wrote is none.
+fn reads_stored_names(node: &serde_json::Value) -> bool {
+    scans_names(node) && !matches_bodies_in_a_scan(node)
+}
+
+/// Whether the plan reads `sync.item_mention` at all.
+fn scans_names(node: &serde_json::Value) -> bool {
+    node["Relation Name"] == "item_mention"
+        || node["Index Name"] == NAMES_INDEX
         || node["Plans"]
             .as_array()
             .into_iter()
             .flatten()
-            .any(reads_body_index)
+            .any(scans_names)
+}
+
+/// Whether a scan of `sync.item` matches bodies on rows the stored names did
+/// not lead it to: any scan testing `body_text` but a probe of the primary
+/// key by an id, which reads one row for each item storing the name.
+fn matches_bodies_in_a_scan(node: &serde_json::Value) -> bool {
+    let tests_bodies = ["Filter", "Recheck Cond", "Index Cond"].iter().any(|at| {
+        node[*at]
+            .as_str()
+            .is_some_and(|text| text.contains("body_text"))
+    });
+    let probed_by_id = node["Index Name"] == "item_pkey"
+        && node["Index Cond"]
+            .as_str()
+            .is_some_and(|cond| cond.contains("entity_id = "));
+    (node["Relation Name"] == "item" && tests_bodies && !probed_by_id)
+        || node["Plans"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(matches_bodies_in_a_scan)
 }
 
 /// Every node type in a plan, subplans included.
@@ -1017,4 +1063,159 @@ fn node_types(node: &serde_json::Value, out: &mut Vec<String>) {
     for child in node["Plans"].as_array().into_iter().flatten() {
         node_types(child, out);
     }
+}
+
+/// Twenty Gitea repositories over the mirror's builds (the repo-builds pass):
+/// each build's revision is a commit of one of them, so a repository's commits
+/// are 75 of the 1,500 builds' shas, and every repository's commits name it as
+/// Gitea's records do. What `repo_pipelines` is planned over.
+async fn repositories(pool: &PgPool) {
+    crate::support::source_config(pool, "git", "gitea", "Gitea", &serde_json::json!({})).await;
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select 'git:repo:acme/r' || k, 'repo', 'acme/r' || k from generate_series(0, 19) k
+         union all
+         select 'git:commit:' || (payload #>> '{revisions,revision,0,version}'), 'commit', entity_id
+           from sync.item where source_id = 'ci' and kind = 'build'",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         select 'git:repo:acme/r' || k, 'git', 'repo', 'acme/r' || k, '',
+                jsonb_build_object('full_name', 'acme/r' || k, 'name', 'r' || k, 'default_branch', 'main'), now()
+           from generate_series(0, 19) k
+         union all
+         select 'git:commit:' || b.sha, 'git', 'commit', b.sha, '',
+                jsonb_build_object('sha', b.sha, 'repository',
+                  jsonb_build_object('full_name', 'acme/r' || (b.n % 20), 'name', 'r' || (b.n % 20))), now()
+           from (select payload #>> '{revisions,revision,0,version}' as sha,
+                        row_number() over (order by entity_id) as n
+                   from sync.item where source_id = 'ci' and kind = 'build') b",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// **A repository's Builds tab reads the repository's, not the mirror's**
+/// (the repo-builds pass): its commits by their stored parent, the runs of
+/// their shas by `item_revision_revision_idx`, each run's pipeline and branch
+/// by its stored row. No link table is read whole and no item is filtered per
+/// row, on tables never analyzed and analyzed; the time it takes is printed.
+async fn assert_repo_pipelines_read_the_repositorys_rows(analyzed: bool) {
+    let (pool, declarations) = mirror(false).await;
+    repositories(&pool).await;
+    if analyzed {
+        sqlx::query("analyze").execute(&pool).await.unwrap();
+    }
+    let registry = Registry::for_process();
+    let answered =
+        knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
+            .await
+            .unwrap();
+    assert!(
+        !answered.pipelines.is_empty(),
+        "the repository's builds are found"
+    );
+    assert!(
+        answered.pipelines.iter().all(|p| !p.latest.is_empty()),
+        "each pipeline with its newest run per branch"
+    );
+    let fillers = vec!["ci".to_owned()];
+    let plan = explain(&pool, knobas_core::builds::REPO_PIPELINES, |q| {
+        q.bind(declarations.as_param())
+            .bind("git:repo:acme/r3")
+            .bind(fillers.clone())
+    })
+    .await;
+    let name = "repo pipelines";
+    let mut wrong = corpus_shapes(name, &plan);
+    wrong.extend(
+        knobas_db::plan_shape::filtered_per_row(&plan, "item")
+            .into_iter()
+            .chain(
+                ["item_pipeline", "item_revision", "item_parent"]
+                    .iter()
+                    .flat_map(|t| whole_reads(&plan[0]["Plan"], t)),
+            )
+            .map(|f| format!("{name}: {f}")),
+    );
+    // *By repository*'s read: the repositories of a repository's commits, by
+    // the commits' stored parents, never every parent read whole.
+    let commits: Vec<String> = sqlx::query_scalar(
+        "select i.entity_id from sync.item i
+          where i.kind = 'commit' and i.payload #>> '{repository,full_name}' = 'acme/r3'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let plan = explain(&pool, knobas_core::builds::COMMIT_REPOSITORIES, |q| {
+        q.bind(commits.clone())
+    })
+    .await;
+    wrong.extend(
+        whole_reads(&plan[0]["Plan"], "item_parent")
+            .into_iter()
+            .map(|f| format!("commit repositories: {f}")),
+    );
+    // The tab's open pull requests: the repository's children by their stored parent, never every parent read whole.
+    let plan = explain(&pool, knobas_core::builds::REPO_PULL_HEADS, |q| {
+        q.bind(declarations.as_param()).bind("git:repo:acme/r3")
+    })
+    .await;
+    wrong.extend(
+        whole_reads(&plan[0]["Plan"], "item_parent")
+            .into_iter()
+            .map(|f| format!("repo pull heads: {f}")),
+    );
+    let named = knobas_app::commands::entity::commit_repositories_inner(&pool, &commits)
+        .await
+        .unwrap();
+    assert_eq!(
+        named.len(),
+        commits.len(),
+        "each commit names its repository"
+    );
+    let state = if analyzed {
+        "analyzed"
+    } else {
+        "never analyzed"
+    };
+    assert!(wrong.is_empty(), "tables {state}: {wrong:#?}");
+
+    let mut fastest = std::time::Duration::MAX;
+    for _ in 0..5 {
+        let at = std::time::Instant::now();
+        knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
+            .await
+            .unwrap();
+        fastest = fastest.min(at.elapsed());
+    }
+    let (analysis,): (serde_json::Value,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "explain (analyze, format json) {}",
+        knobas_core::builds::REPO_PIPELINES
+    )))
+    .bind(declarations.as_param())
+    .bind("git:repo:acme/r3")
+    .bind(&fillers)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    println!(
+        "repo_pipelines, tables {state}: {} pipelines in {fastest:?} (fastest of five), the statement {} ms",
+        answered.pipelines.len(),
+        analysis[0]["Execution Time"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_pipelines_read_the_repositorys_rows_on_tables_never_analyzed() {
+    assert_repo_pipelines_read_the_repositorys_rows(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_pipelines_read_the_repositorys_rows_on_analyzed_tables() {
+    assert_repo_pipelines_read_the_repositorys_rows(true).await;
 }

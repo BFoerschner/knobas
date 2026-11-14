@@ -89,16 +89,15 @@
   }
 </script>
 
-<TfDialog
+<TfDialog why={name.trim() === "" ? (typeId === "" ? "Name it, and choose a type." : "Name it first.") : typeId === "" ? "Choose a type." : null}
   closeButton
   title="New asset"
   subtitle={at.parent === null ? "At the top of the estate" : `In ${at.parent.name}`}
   {onclose}
 >
   {#snippet body()}
-    <div class="fields">
-      <div class="fld">
-        <label class="l" for="{fieldId}-name">Name</label>
+    <div class="tf-formgrid">
+        <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -109,16 +108,14 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-type">Type</label>
+        <label for="{fieldId}-type">Type</label>
         <select
           class="inp"
           id="{fieldId}-type"
           bind:value={typeId}
           onkeydown={onfieldkeydown}
         >
+          {#if typeId === ""}<option value="" disabled>Choose a type…</option>{/if}
           <!--
             Two groups rather than two lists: the conventions are an ordering,
             and a reader who wants something else finds it in the same control
@@ -142,9 +139,8 @@
           {/if}
         </select>
         {#if usual}
-          <p class="hint">{usual}</p>
+          <span class="hint">{usual}</span>
         {/if}
-      </div>
 
       {#if failure}
         <p class="fail" role="alert">{failure}</p>
@@ -165,23 +161,11 @@
 </TfDialog>
 
 <style>
-  .fields {
-    display: grid;
-    gap: 12px;
-  }
-
-  .fld .l {
-    display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
-    margin-bottom: 4px;
-  }
-
+  /* A note on the field above it, in the field's column. */
   .hint {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
+    grid-column: 2;
+    margin-top: -2px;
+    font-size: var(--t-xs);
+    color: var(--ink-2);
   }
 </style>

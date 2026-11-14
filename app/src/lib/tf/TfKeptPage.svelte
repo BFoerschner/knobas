@@ -7,9 +7,12 @@
   sections row narrowed the page's section to, #2401), so a hidden page keeps the props of the address it was left
   at, and tells the components inside it through `pageVisible()`. It draws the
   role frame (#2106) for a page that names a `role`: *Sync now* into its header
-  as `sync`, and `syncRevision`, which also moves each time the page is shown
-  again, so a role view re-reads on its return as it does after a run. It
-  keeps the page's scroll across a hide (`keepScroll`, #2248).
+  as `sync`, and `syncRevision`, which moves when its *Sync now* ends and when
+  a run of a source filling its role ends with something new, whoever started
+  it. While the page is hidden it holds, so a page shown again re-reads only
+  when such a run ended meanwhile: a return to what nothing changed reads
+  nothing (Björn, 2026-11-10, on Code at his size). It
+  keeps the page's scroll across a hide (`keepScroll`, #2248), for as long as it shows the address it was left at.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -26,7 +29,6 @@
     entry,
     route,
     visible,
-    shows,
     ctx,
   }: {
     /** The page; fixed for this instance, since the host keys it with the entry. */
@@ -34,8 +36,6 @@
     /** The address the page is at, or was left at while hidden. */
     route: TfRoute;
     visible: boolean;
-    /** How many times the page was shown again after being hidden. */
-    shows: number;
     ctx: Omit<TfPageContext, "route" | "visible">;
   } = $props();
 
@@ -44,7 +44,7 @@
   providePageName(() => visible);
   // The shell's one scroller is every page's: each page shows again where it was left (#2248).
   let wrapper = $state<HTMLElement>();
-  keepScroll(() => wrapper, () => visible);
+  keepScroll(() => wrapper, () => visible, () => JSON.stringify(route));
 
   /**
    * The page's *This job*: the ticket a card's sections row narrowed this
@@ -78,10 +78,36 @@
 
   /** The role this page is a view of, and its *Sync now* (#2106). */
   const roleSync = $derived(page.role === undefined ? null : ctx.roleSyncs.of(page.role));
-  /** What the frame hands a role view beside its own props: nothing for any other page. */
-  const frameProps = $derived<RoleFrameProps>(
-    roleSync === null ? {} : { sync: syncNow, syncRevision: roleSync.revision + shows },
-  );
+  /**
+   * When a role view reads again: each *Sync now* that ended, and each run of the role's sources that ended with
+   * something new, whoever started it (the third smoothness pass of PR #2479: a scheduled sync that brought a ticket made
+   * elsewhere onto the board reads it again, without leaving it). A hidden page holds the count it was hidden at, so it
+   * reads nothing while hidden, once on its return if either moved, and nothing on a return to what no run changed
+   * (Björn, 2026-11-10). A number, so it tells the page only when it moves.
+   */
+  let atHide = 0;
+  const revision = $derived.by(() => {
+    const now = roleSync === null ? 0 : roleSync.revision + roleSync.ran;
+    if (visible) atHide = now;
+    return atHide;
+  });
+  /**
+   * What the frame hands a role view beside its own props: nothing for any other page. One object whose getters read
+   * {@link revision}, never one rebuilt per change: a spread of a new object tells every prop it holds, and `ctx` is new
+   * at every address, so a hidden Code page read its 4,400 pull requests and ran `git status` in 132 checkouts again
+   * each time the reader left it (2026-11-10, at Björn's mirror's size).
+   */
+  const frameProps: RoleFrameProps =
+    page.role === undefined
+      ? {}
+      : {
+          get sync() {
+            return syncNow;
+          },
+          get syncRevision() {
+            return revision;
+          },
+        };
   const Page = page.component;
 </script>
 
@@ -90,12 +116,14 @@
 {/snippet}
 
 <div class="tf-kept" hidden={!visible} bind:this={wrapper}>
-  {#if page.crumbs && route.view === "full"}
-    <div class="tf-full">
-      <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} />
+  <div class="tf-keptpage">
+    {#if page.crumbs && route.view === "full"}
+      <div class="tf-full">
+        <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} sectionTop />
+        <Page {...pageProps} {...frameProps} />
+      </div>
+    {:else}
       <Page {...pageProps} {...frameProps} />
-    </div>
-  {:else}
-    <Page {...pageProps} {...frameProps} />
-  {/if}
+    {/if}
+  </div>
 </div>

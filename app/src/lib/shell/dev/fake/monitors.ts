@@ -98,7 +98,7 @@ export function fakeOpenAlerts(): OpenAlert[] {
       state: row.state as OpenAlert["state"],
       opened_at: new Date(now - (index + 1) * 37 * 60_000).toISOString(),
       acked_at:
-        index === 0 || FIXTURE_ACKED.has(row.entity_id)
+        (index === 0 && !FIXTURE_UNACKED.has(row.entity_id)) || FIXTURE_ACKED.has(row.entity_id)
           ? new Date(now - 12 * 60_000).toISOString()
           : null,
       assets: row.assets,
@@ -183,6 +183,8 @@ const FIXTURE_OPS: Record<string, string> = {
  * here. Cleared by a reload, which is what a fixture is.
  */
 const FIXTURE_ACKED = new Set<string>();
+/** The seed's acked alert once taken back. */
+const FIXTURE_UNACKED = new Set<string>();
 
 /**
  * `ack_alert`: mark one monitor's open alert seen, and answer with it.
@@ -199,7 +201,20 @@ function fakeAck(args: Record<string, unknown>) {
     throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
   }
   FIXTURE_ACKED.add(monitorId);
+  FIXTURE_UNACKED.delete(monitorId);
   return { ...alert, acked_at: new Date().toISOString() };
+}
+
+/** `unack_alert`: the alert asks again; `not_found` for a monitor with nothing open, as the real command answers. */
+function fakeUnack(args: Record<string, unknown>) {
+  const monitorId = typeof args.monitorId === "string" ? args.monitorId : "";
+  const alert = fakeOpenAlerts().find((row) => row.monitor_id === monitorId);
+  if (!alert) {
+    throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
+  }
+  FIXTURE_ACKED.delete(monitorId);
+  FIXTURE_UNACKED.add(monitorId);
+  return { ...alert, acked_at: null };
 }
 
 /** The monitors a reader hid this session (`set_monitor_hidden`); a reload clears it. */
@@ -313,6 +328,21 @@ const FIXTURE_PORT_CHECKS = new Set(["teamcity", "jira", "confluence"]);
  * would make the tab look right while hiding the one thing that could be
  * wrong.
  */
+/** Monitors a still-rows trip took down, by index: a sync that saw a check fail. */
+const FORCED_DOWN = new Set<number>();
+
+/**
+ * `?fake-hooks`' `monitorDown` (the still-rows trips, 2026-11-11): the monitor that is up and first by name goes down, so
+ * it sorts to the roster's top, where the reader is.
+ */
+export function downFakeMonitor(): void {
+  const up = SEEDED_MONITORS.map((monitor, index) => ({ name: monitor.name, index })).filter(
+    ({ index }) => !FORCED_DOWN.has(index) && (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up") === "up" && SEEDED_MONITORS[index]!.name !== FIXTURE_PAUSED,
+  );
+  const first = up.sort((a, b) => a.name.localeCompare(b.name))[0];
+  if (first) FORCED_DOWN.add(first.index);
+}
+
 export function fakeMonitorRoster() {
   const now = Date.now();
   const named = SEEDED_MONITORS.map(({ name, type }) => ({
@@ -321,7 +351,7 @@ export function fakeMonitorRoster() {
     watching: FIXTURE_ESTATE.filter((asset) => asset.monitors.includes(name)),
   }));
   return named.map((entry, index) => {
-    const state = FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up";
+    const state = FORCED_DOWN.has(index) ? "down" : (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up");
     const samples = fakeSamples(state, index, now);
     // The last one, for the reason above.
     const last = samples.at(-1);
@@ -394,6 +424,11 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
       return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id));
     },
+    // The nav's badge (PR #2479): the roster's down rows, as the server counts them.
+    monitors_down: () => {
+      const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
+      return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id) && row.state === "down" && !row.tombstoned && !row.hidden).length;
+    },
     // The Monitors tab's Pause / Resume (#452). Answers the queued row the
     // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
     // behind it, so the honest fixture is "knobas took the write" and a
@@ -413,6 +448,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // reader makes themselves — a fixture that answered the same list after
     // the click would make the button look broken.
     ack_alert: (args) => fakeAck(args),
+    unack_alert: (args) => fakeUnack(args),
     // The row's *Hide* / *Unhide*: knobas-local, so remembered here.
     set_monitor_hidden: (args) => fakeSetHidden(args),
     // The Monitors tab's *Not monitored* roster (#449), derived from the same
@@ -422,4 +458,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_HIDDEN);
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN, FORCED_DOWN);

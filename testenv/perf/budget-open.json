@@ -1,0 +1,1267 @@
+{
+ "_": "Lines for testenv/perf/open.mjs --check (just open-budget --real <port>): per place and CPU throttle, the most ms from the press to the first frame with the place's own rows and nothing waiting, on every round (first visit 6 s after start, return, return after every other section, return after every source ended a run that changed something), and how many rows may move after that frame. From the instant-open pass of PR #2479 (2026-11-12), measured in headless Chrome on an M2 Pro over the saved scale database; docs/decisions/2026-11-12-opening-a-page-draws-what-the-mirror-holds.md. 100 ms at 1x and 200 ms at 4x is the pass's aim; the measured opens sit at 4 to 60 ms at 1x and 7 to 100 ms at 4x. The Windows pass (2026-11-14) held Builds' first open drawn at 4x to 220 ms: 270 to 280 with its rail and a day of 76 runs drawn whole, 136 to 196 windowed.",
+ "real": {
+  "inbox": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "tickets-board": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "ticket-preview": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "ticket": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "code": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pull-request": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs-space": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs-page": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "docs-page-back": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "builds": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0,
+    "drawnMs": 220
+   }
+  },
+  "pipeline": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "run": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "monitors": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "standup": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "time": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "settings": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  },
+  "launcher": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   }
+  }
+ },
+ "inner": {
+  "file-readme": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "files-go-to": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-overview": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-branches": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-landing": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "files-deep": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "file-small": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "file-large": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "file-binary": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "repo-commit": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "repo-compare": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "new-pull-request": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "pr-files": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 2
+   }
+  },
+  "pr-files-large": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 2
+   }
+  },
+  "run-log": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "run-tests": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "run-artifacts": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "moved": 0
+   }
+  },
+  "folder-300": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "drawnMs": 100,
+    "firstDrawnMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "drawnMs": 200,
+    "firstDrawnMs": 200,
+    "moved": 0
+   }
+  },
+  "folder-3000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "drawnMs": 100,
+    "firstDrawnMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "drawnMs": 200,
+    "firstDrawnMs": 200,
+    "moved": 0
+   }
+  },
+  "folder-12000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "drawnMs": 100,
+    "firstDrawnMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "drawnMs": 200,
+    "firstDrawnMs": 200,
+    "moved": 0
+   }
+  },
+  "folder-deep": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "drawnMs": 100,
+    "firstDrawnMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "drawnMs": 200,
+    "firstDrawnMs": 200,
+    "moved": 0
+   }
+  },
+  "forge-folder-300": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 2000,
+    "drawnMs": 100,
+    "firstDrawnMs": 2000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 2000,
+    "drawnMs": 200,
+    "firstDrawnMs": 2000,
+    "moved": 0
+   }
+  },
+  "compare-300": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "compare-3000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "compare-10000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "forge-compare-300": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 1000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 1000,
+    "moved": 0
+   }
+  },
+  "forge-compare-3000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 1500,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 1500,
+    "moved": 0
+   }
+  },
+  "forge-compare-10000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 2500,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 2500,
+    "moved": 0
+   }
+  },
+  "forge-folder-3000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 3000,
+    "drawnMs": 100,
+    "firstDrawnMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 3000,
+    "drawnMs": 200,
+    "firstDrawnMs": 3000,
+    "moved": 0
+   }
+  },
+  "forge-folder-12000": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 5000,
+    "drawnMs": 100,
+    "firstDrawnMs": 5000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 5000,
+    "drawnMs": 200,
+    "firstDrawnMs": 5000,
+    "moved": 0
+   }
+  }
+ },
+ "forge": {
+  "file-readme": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "files-go-to": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-overview": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-branches": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-landing": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "files-deep": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "file-small": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "file-large": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "file-binary": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "repo-commit": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "repo-compare": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "new-pull-request": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "pr-files": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 2
+   }
+  },
+  "pr-files-large": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 2
+   }
+  },
+  "run-log": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "run-tests": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  },
+  "run-artifacts": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 26000,
+    "moved": 0
+   }
+  }
+ },
+ "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; the repository holds about 31,400 entries, so the clone's folders past the 20,000th are pressed too. In a repository with no clone the first press of the 300, 3,000 and 12,000 ones reads the folder's own level of Gitea's tree (about 0.1, 0.2 and 0.6 s on the WSL box in round two, where `contents` took 0.7 s, 9 s and never): 2, 3 and 5 s, room for a loaded box; every round after is held to the aim.",
+ "syncing": {
+  "file-readme": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "files-go-to": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "pr-overview": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-branches": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "repo-landing": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "files-deep": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "file-small": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "file-large": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "file-binary": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 1
+   }
+  },
+  "repo-commit": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "repo-compare": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "new-pull-request": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "pr-files": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 2
+   }
+  },
+  "pr-files-large": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 2
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 2
+   }
+  },
+  "run-tests": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "run-artifacts": {
+   "1": {
+    "usefulMs": 3000,
+    "firstUsefulMs": 3000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 6000,
+    "firstUsefulMs": 6000,
+    "moved": 0
+   }
+  },
+  "pr-conversation": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  }
+ },
+ "_syncing": "Lines for open.mjs --set inner with a run of the Gitea source kept going (just open-budget --real <port> --inner --syncing live-gitea; the priority lane, 2026-11-13, docs/decisions/2026-11-13-a-persons-read-goes-ahead-of-the-sync.md), from two passes on the live Gitea on the WSL box with its scheduled run filling the quota at ten requests a second: a place knobas holds within the inner pages' aim (100 ms at 1x, 200 at 4x) on every round; a place only the forge holds within 3 s at 1x and 6 s at 4x on its first open and on its return after every source's run, which reads a file at its branch from the forge again (up to 3.4 s at 4x with the lane, 7.9 s without), where before the lane it reached 7.8 s (a pull request's Files) and 8.7 s (a deep folder at 4x); what knobas holds, and Conversation's own section, within the aim on the first open too. The binary file at 4x may move one row: once in two passes its first frame still held the file before it. Compare on a branch with many changes and a run's Log have no line: the first waits on each branch's whole view, longer than the probe's cap under a sync's load, and the second's item makes no read in the rig. The big folders are left out: their set-up waits for a run of its own.",
+ "_extremes": "Lines for open.mjs --set extremes (just open-budget --real <port> --extremes; the extremes pass of PR #2479, 2026-11-13; testenv/README.md, *The extremes*): the aim, 100 ms at 1x and 200 at 4x, nothing moved, except where the read itself is the floor, measured on the Mac (M2 Pro) with margin: x-pr-files waits for the 8 MB *Files* view of 3,000 files over the bridge and its parse; x-docs-page for the 2.6 MB page body of a 2,000-row table; x-docs-huge for a 5 MB page's 10 MB body, which the backend turns into blocks in about 330 ms; x-repo-compare's first open for the forge's own compare of the branch (1.1 to 5.7 s on the WSL box), its return held to the aim. x-run's one moved row is the run page's, before and after this pass.",
+ "extremes": {
+  "x-ticket": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-overview": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-conversation": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-commits": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-repo-branches": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-repo-prs": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-docs-space": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-run": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 1
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 1
+   }
+  },
+  "x-run-artifacts": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-run-tests": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-run-log": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  },
+  "x-pr-files": {
+   "1": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "moved": 0
+   }
+  },
+  "x-docs-page": {
+   "1": {
+    "usefulMs": 250,
+    "firstUsefulMs": 250,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 400,
+    "firstUsefulMs": 400,
+    "moved": 0
+   }
+  },
+  "x-docs-huge": {
+   "1": {
+    "usefulMs": 600,
+    "firstUsefulMs": 600,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 700,
+    "firstUsefulMs": 700,
+    "moved": 0
+   }
+  },
+  "x-repo-compare": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 8000,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 8000,
+    "moved": 0
+   }
+  },
+  "x-repo-builds": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   }
+  }
+ }
+}

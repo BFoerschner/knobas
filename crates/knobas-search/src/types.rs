@@ -328,13 +328,21 @@ pub struct EntityRow {
     pub cell: Option<String>,
 }
 
-/// One result: a row, its rank, and the excerpt with the match marked.
+/// One result: a row, its rank, and where the words appear in its text.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 pub struct SearchHit {
     #[serde(flatten)]
     pub row: EntityRow,
     pub rank: f32,
+    /// Empty from every command since 2026-11-12 (the query audit, PR
+    /// #2479). It held a `ts_headline` of the row, which no screen drew and
+    /// which cost a quarter of a common word's keystroke, so no command asks
+    /// its statement for one any more
+    /// ([`EffectiveFilters::headline`](crate::query::EffectiveFilters::headline)).
+    /// The field keeps its place on the wire, so a reader written before that
+    /// decodes a hit as it did. What a reader sees of the match is
+    /// [`Self::excerpts`].
     pub snippet: Vec<Segment>,
     /// Where the words appear in the row's text, each with its place
     /// (#2431): what the launcher's preview draws under *Everything*, so the

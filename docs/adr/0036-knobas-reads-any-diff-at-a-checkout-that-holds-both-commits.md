@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0041
 ---
 
 # knobas reads any diff at a checkout that holds both commits

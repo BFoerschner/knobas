@@ -228,7 +228,7 @@
   .fld {
     display: grid;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 
@@ -237,6 +237,7 @@
     gap: 2px;
     max-height: 180px;
     overflow-y: auto;
+    background: var(--under);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -263,6 +264,6 @@
 
   .sub {
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 </style>

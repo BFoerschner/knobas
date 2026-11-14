@@ -60,7 +60,7 @@ function record(at: Date, bytes: number): BackupRecord {
 /** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
 const DECLARED_STATES: [string, [string, Tone | null][]][] = [
   ["build", [["running", "info"], ["queued", "info"], ["SUCCESS", "ok"], ["FAILURE", "err"], ["UNKNOWN", "muted"]]],
-  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "warn"], ["maintenance", "muted"]]],
+  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "info"], ["maintenance", "muted"]]],
   ["pr", [["merged", "ok"], ["open", "info"], ["closed", "muted"]]],
   ["ticket", [["Done", "ok"], ["Resolved", "ok"], ["In Progress", "info"], ["In Review", "info"], ["Closed", "muted"]]],
 ];
@@ -99,6 +99,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   if (params.has("fake-tone-override")) toneOverrides.set("ticket\u0000Blocked", "warn");
   // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
   const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
+  /** *Smooth scrolling on 120 Hz displays*: offered here as on the Mac, on until set. */
+  let smooth = true;
   let keptOpen = keptAsked === null ? 5 : Math.min(15, Math.max(0, Math.round(Number(keptAsked)) || 0));
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
@@ -197,6 +199,11 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       keptOpen = Math.min(15, Math.max(0, Math.round(Number(args["count"]))));
       return keptOpen;
     },
+    smooth_scrolling: () => smooth,
+    set_smooth_scrolling: (args) => {
+      smooth = args["on"] === true;
+      return smooth;
+    },
     passive_attribution: () => passive,
     set_passive_attribution: (args) => {
       passive = args["enabled"] === true;
@@ -218,8 +225,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     monitoring_settings: () => monitoring,
     set_monitoring_settings: (args) => {
       const next = args["settings"] as MonitoringSettings;
-      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 1)) {
-        throw { code: "invalid", message: "both numbers must be at least 1", source_id: null };
+      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 0)) {
+        throw { code: "invalid", message: "retention must be at least 1 day", source_id: null };
       }
       monitoring = next;
       return monitoring;

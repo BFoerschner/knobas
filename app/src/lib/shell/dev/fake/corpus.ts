@@ -33,6 +33,20 @@ const FIXTURE_HOST = "http://127.0.0.1:5399";
 /** When the fixture claims it last synced. Fixed, so screenshots are stable. */
 export const SYNCED_AT = "2026-08-22T14:30:00Z";
 
+/** The names the fixture's accounts go by, what Jira's `displayName` says beside `name`. */
+const PEOPLE: Record<string, string> = {
+  mara: "Mara Lindqvist",
+  jonas: "Jonas Becker",
+  priya: "Priya Nair",
+  tomasz: "Tomasz Wójcik",
+  lena: "Lena Hoffmann",
+};
+
+/** What the declared `assignee_name` reads for an account (F-107); an account with no name stays the only name. */
+export function fakePersonName(account: string | null): string | null {
+  return account === null ? null : (PEOPLE[account] ?? null);
+}
+
 /** Code's repositories (#837): name, last push, and prototype-6's team and language (#966). */
 const CODE_REPOS: [name: string, updated: string, team: string, language: string][] = [
   ["psp-client", "2026-08-21T13:20:00Z", "Payments", "Rust"],
@@ -255,6 +269,7 @@ export const CORPUS: {
   },
   row("mock:payout-service#142", "pr", "Idempotent retry window", "2026-08-22T10:12:00Z", "mara", {
     num: 142,
+    labels: ["payments", "needs-review"],
     repo: "payout-service",
     state: "open",
     approvals: "1/2",
@@ -632,7 +647,42 @@ function listProjects() {
 }
 
 /** One card of the fixture's board. */
+/**
+ * One corpus row by its id, through an index rebuilt whenever the corpus grows or goes back to its seed: at
+ * `?fake-scale`'s 30,000 rows a `CORPUS.find` per inbox row or set member made the fixture, not the app, the slow part
+ * of every load.
+ */
+export function corpusRow(id: string | null | undefined): (typeof CORPUS)[number] | undefined {
+  if (id === null || id === undefined) return undefined;
+  if (byId === null || indexed !== CORPUS.length) {
+    // The first row under an id, as `CORPUS.find` read it.
+    byId = new Map();
+    for (const entry of CORPUS) if (!byId.has(entry.entity_id)) byId.set(entry.entity_id, entry);
+    indexed = CORPUS.length;
+  }
+  return byId.get(id);
+}
+let byId: Map<string, (typeof CORPUS)[number]> | null = null;
+let indexed = 0;
+onFakeReset(() => {
+  byId = null;
+  cards = new WeakMap();
+  lastParsed = null;
+});
+
+/**
+ * Cards kept per row once the corpus is past a bulk switch's size (`?fake-scale`, `?fake-tickets`): a board or a count
+ * makes one per ticket on every read. A demo-sized corpus makes them fresh, so a fake write to a payload shows at once.
+ */
+let cards = new WeakMap<(typeof CORPUS)[number], ReturnType<typeof makeCard>>();
 function boardCard(entry: (typeof CORPUS)[number]) {
+  if (CORPUS.length < 5_000) return makeCard(entry);
+  let card = cards.get(entry);
+  if (card === undefined) cards.set(entry, (card = makeCard(entry)));
+  return card;
+}
+
+function makeCard(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() !== "" ? value.trim() : null;
   if (entry.entity_id.startsWith("gitea:")) return giteaCard(entry);
@@ -649,6 +699,7 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     // that is the shape this corpus is in.
     issue_type: text(entry.payload["type"]),
     assignee,
+    ...(fakePersonName(assignee) === null ? {} : { assignee_name: fakePersonName(assignee)! }),
     updated_at: entry.updated_at,
     path: text(entry.payload["epic"]),
     parent_title: FAKE_EPIC_TITLES[text(entry.payload["epic"]) ?? ""] ?? null,
@@ -810,7 +861,13 @@ export const FAKE_IDENTITY = "mara";
  * meaning any of them. A restatement, which certifies nothing: the real
  * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
  */
-function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+/**
+ * A query's keys and words, read once for a whole read rather than once per ticket: the words as the grammar reads
+ * them (#1889), where `or` separates alternatives, `-word` and `-"phrase"` are left out of the one they stand in, and
+ * a phrase is one needle.
+ */
+function parsedQuery(query: string) {
+  if (lastParsed?.query === query) return lastParsed;
   const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
   const keys = new Map<string, { negated: boolean; values: string[] }>();
   for (const [, minus, key, quoted, bare, word] of tokens) {
@@ -820,11 +877,15 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
     held.values.push((quoted ?? bare ?? "").toLowerCase());
     keys.set(name, held);
   }
+  lastParsed = { query, keys, alternatives: wordAlternatives(query) };
+  return lastParsed;
+}
+let lastParsed: { query: string; keys: Map<string, { negated: boolean; values: string[] }>; alternatives: ReturnType<typeof wordAlternatives> } | null = null;
+
+function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+  const { keys, alternatives } = parsedQuery(query);
   const card = boardCard(entry);
   const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
-  // The words as the grammar reads them (#1889): `or` separates alternatives,
-  // `-word` and `-"phrase"` are left out of the one they stand in, a phrase is one needle.
-  const alternatives = wordAlternatives(query);
   const admits = ({ holds, lacks }: { holds: string[]; lacks: string[] }) =>
     holds.every((word) => haystack.includes(word)) && !lacks.some((word) => haystack.includes(word));
   if (alternatives.length > 0 && !alternatives.some(admits)) return false;
@@ -886,6 +947,15 @@ export interface FakeClaimer {
   role_misses: { role: string }[];
   kinds: { id: string }[];
   payload_paths: { kind: string; frame?: string | null }[];
+}
+
+/**
+ * `?fake-empty=docs,sets,assets,wiki`: those areas answer with nothing, to draw their empty states. `wiki` is the one
+ * that takes a claim away: no source holds pages, as `sources.ts` answers it. Read per answer, as the address can change
+ * under a dev server.
+ */
+export function fakeEmpty(area: string): boolean {
+  return (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes(area);
 }
 
 /**

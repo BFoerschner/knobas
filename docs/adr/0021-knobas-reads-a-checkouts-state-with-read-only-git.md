@@ -1,5 +1,5 @@
 ---
-status: accepted, amended by ADR-0026
+status: accepted, amended by ADR-0026 and ADR-0041
 ---
 
 # knobas reads a checkout's state with read-only git
@@ -9,7 +9,7 @@ Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md). 
 - The one command is `git -C <checkout path> --no-optional-locks status --porcelain=v2 --branch`, with `GIT_OPTIONAL_LOCKS=0`, `core.fsmonitor` off, `LC_ALL=C`, no terminal prompt, stdin closed and a 2-second timeout. `--no-optional-locks` keeps `status` from refreshing the index it reads. `rev-list --count` or `log` may join on the same terms. Anything that writes a working tree, the index or a ref, and anything that touches the network, stays forbidden. ADR-0026 adds `git diff` on the same terms.
 - The argument rule stands. The only value from outside is the checkout path, found on this disk by the scan or typed by a person. The branch name the mirror holds is compared to what git reports and never passed to git.
 - The program is `git` on `PATH`, with no setting. A machine with no git draws *git not found*; so does a Mac whose `/usr/bin/git` is Apple's shim without the Command Line Tools (`xcode-select -p` fails, asked once per process), because running the shim opens an install dialog on every focus (#715). That is a state, not an error, as is a path that is no longer a repository.
-- The state is read when the panel opens and when the window regains focus, never stored and never polled.
+- The state is read when the panel opens and when the window regains focus, never stored and never polled. Read means answered as it stands: the last answer git gave at a checkout is kept in memory with a stamp of everything `git status` reads (HEAD, the index, every ref, the config and excludes, every tracked file and every directory holding one, by file metadata, no process started), and git runs again only when the stamp moved; a checkout that cannot be stamped whole (a linked worktree, a split or sparse index, off Unix) runs it every time (amended 2026-11-10, the scale pass on PR #2479: a return to Code ran `git status` in all 65 checkouts).
 - `status` runs what the checkout's own configuration names, such as a Git LFS clean filter. That configuration is the person's, so the argument rule holds; it is also why the read has a timeout.
 
 ## Rejected

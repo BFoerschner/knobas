@@ -15,7 +15,8 @@ USAGE:
     mockd [OPTIONS]
 
 OPTIONS:
-    --bind <ADDR>            Interface to bind [default: 0.0.0.0]
+    --bind <ADDR>            Interface to bind [default: 127.0.0.1;
+                             a container passes 0.0.0.0]
     --admin-port <PORT>      Health + /__mock/* admin API [default: 8200]
     --jira-port <PORT>       Jira Data Center REST v2  [default: 8210]
     --teamcity-port <PORT>   TeamCity REST             [default: 8212]
@@ -50,7 +51,7 @@ struct Args {
 impl Default for Args {
     fn default() -> Self {
         Self {
-            bind: IpAddr::from([0, 0, 0, 0]),
+            bind: IpAddr::from([127, 0, 0, 1]),
             admin_port: 8200,
             jira_port: 8210,
             teamcity_port: 8212,

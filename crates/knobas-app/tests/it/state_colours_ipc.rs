@@ -114,6 +114,7 @@ fn filter(sources: &[&str], kinds: &[&str]) -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: None,
+        parent: None,
     }
 }
 

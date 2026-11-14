@@ -318,12 +318,12 @@ function button(name: string): HTMLButtonElement | undefined {
 test("the header names the pipeline and number with the result, then branch, who started it, when and how long", async () => {
   draw();
   await settle();
-  expect(target.querySelector(".tf-crumbs")?.textContent).toBe("Builds › Payout_IntegrationTests › #1187");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toBe("Builds › Payouts › Payout_IntegrationTests › #1187");
   const h1 = target.querySelector("h1")!;
   expect(h1.textContent).toContain("Payout_IntegrationTests #1187");
-  expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("FAILURE");
+  expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("Failed");
   const sub = target.querySelector(".tf-bhead .tf-sub")!.textContent!;
-  expect(sub).toMatch(/^feature\/PAY-231-sepa-retry, started by VCS change a41f2c, .+, took 4 m 12 s$/);
+  expect(sub).toMatch(/^feature\/PAY-231-sepa-retry, started by VCS change a41f2c, .+, took 4m 12s$/);
   expect(button("Re-run")).toBeDefined();
   expect(button("Run again with changes…")).toBeDefined();
   expect(button("Stop")).toBeUndefined();
@@ -447,7 +447,7 @@ test("a failed run's Overview leads with its first failed test, where it is, and
   expect(problem.querySelector("pre")?.textContent).toContain("at tests/sepa_retry.rs:14:5");
   const links = [...problem.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(links).toEqual([
-    ["Show it in the log", "#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187/log"],
+    ["Show in log", "#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187/log"],
     ["Open the test file", "#/repo/gitea%3Arepo%3Apayout-service/files/tests/sepa_retry.rs"],
   ]);
   expect(problem.querySelector(".tf-dim")?.textContent).toBe("Also failed in #1185 on this branch. #1186 on main passed.");
@@ -464,7 +464,7 @@ test("the Run panel lists branch, commit, who started it, agent, start and took 
   expect(facts["Commit"]).toBe("a41f2c");
   expect(facts["Started by"]).toBe("VCS change a41f2c");
   expect(facts["Agent"]).toBe("linux-agent-03");
-  expect(facts["Took"]).toBe("4 m 12 s, −16 s against #1185");
+  expect(facts["Took"]).toBe("4m 12s, −16s against #1185");
   expect(panel.querySelector("dd a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Apayout-service/commits/gitea%3Acommit%3Aa41f2c");
 });
 
@@ -510,7 +510,7 @@ test("the Artifacts panel lists the first four with Download through knobas, and
   await settle();
   const panel = target.querySelector('[aria-label="Artifacts"].tf-panel')!;
   expect([...panel.querySelectorAll(".tf-r .tf-t")].map((t) => t.textContent)).toEqual(["a.xml", "b.html", "c.log", "d.log"]);
-  expect(panel.querySelector(".tf-open")?.textContent).toBe("All 5");
+  expect(panel.querySelector(".tf-open")?.textContent).toBe("All artifacts");
   panel.querySelector<HTMLButtonElement>(".tf-r button")!.click();
   await settle();
   // D8 (#856): through knobas into the downloads folder, not the source's page.
@@ -537,7 +537,7 @@ test("a run older than the latest page is looked for in the older pages", async 
 test("an address naming no run of the pipeline says so and leads back to it", async () => {
   draw("teamcity:build:1", undefined, {}, []);
   await settle();
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("No run of Payout_IntegrationTests at this address.");
+  expect(target.querySelector(".tf-empty")?.textContent).toContain("knobas does not hold this run.");
 });
 
 // -- Changes and Parameters (R-9.11) ------------------------------------------
@@ -620,12 +620,12 @@ test("under the header, the steps bar draws one segment per step of the run's lo
   const drawn = segments();
   expect(drawn.map((a) => a.querySelector("text")?.textContent)).toEqual(["Checkout", "cargo build --tests", "cargo test --test sepa_retry"]);
   expect(drawn.map((a) => a.querySelector("title")?.textContent)).toEqual([
-    "Checkout, 12 s",
-    "cargo build --tests, 2 m 10 s",
-    "cargo test --test sepa_retry, 1 m 22 s",
+    "Checkout, 12s",
+    "cargo build --tests, 2m 10s",
+    "cargo test --test sepa_retry, 1m 22s",
   ]);
   expect(drawn.map((a) => a.querySelector("rect")?.getAttribute("class"))).toEqual(["tf-sbseg tf-ok", "tf-sbseg tf-ok", "tf-sbseg tf-err"]);
-  // Width by duration: 130 s of 224 s.
+  // Width by duration: 130s of 224s.
   expect(parseFloat(drawn[1]!.querySelector("svg")!.getAttribute("width")!)).toBeCloseTo(58.04, 1);
   expect(drawn.every((a) => a.getAttribute("href") === `#/build/${encodeURIComponent(PIPE)}/${encodeURIComponent("teamcity:build:1187")}/log`)).toBe(true);
 });
@@ -746,8 +746,8 @@ test("a sync of the run's source finishing reads the run again: a running run dr
   await settle();
   expect(drawn.reads).toBe(2);
   expect(views, "the view again, and its failed test now that it finished").toEqual(["", "", "tests"]);
-  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("SUCCESS");
-  expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5 m");
+  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("Passed");
+  expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5m");
   expect(button("Stop")).toBeUndefined();
   expect(button("Re-run")).toBeDefined();
   expect(target.querySelector(".tf-callout.tf-info")).toBeNull();
@@ -809,13 +809,38 @@ test("the Log tab draws the log read again, and the steps bar follows it", async
 
 // -- a run queued here shows on the pipeline page (#1449) -----------------------
 
+test("Re-run holds as what its write is doing, and a second press queues nothing (F-338)", async () => {
+  const drawn = draw();
+  await settle();
+  const press = button("Re-run")!;
+  press.click();
+  await settle();
+  expect(press.textContent?.trim()).toBe("Queued");
+  expect(press.getAttribute("aria-disabled")).toBe("true");
+  press.click();
+  await settle();
+  expect(drawn.writes).toHaveLength(1);
+});
+
+test("Re-run's toast, once sent, leads to the runs (F-338, F-350)", async () => {
+  draw("teamcity:build:1187", undefined, { submitWrite: () => Promise.resolve({ id: 9, state: "sent" } as QueuedWrite) });
+  await settle();
+  button("Re-run")!.click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toMatch(/^Sent: /);
+  expect(toast.action?.label).toBe("Show in runs");
+  toast.action!.run();
+  expect(location.hash).toBe(`#/builds/${encodeURIComponent(PIPE)}`);
+});
+
 test("Re-run leaves the run queued on its pipeline, from the newest run held, and draws no queued row here", async () => {
   draw();
   await settle();
   button("Re-run")!.click();
   await settle();
   expect(echoesOn(PIPE, QUEUED_RUN)).toMatchObject([{ write: 9, kind: QUEUED_RUN, text: FEATURE, base: "teamcity:build:1188", state: "queued" }]);
-  expect(target.textContent).not.toContain("queued");
+  expect(target.querySelector(".tf-runbody")?.textContent).not.toMatch(/queued/i);
 });
 
 test("Run in Run again with changes… leaves the run queued on its pipeline too, the default branch as none", async () => {
@@ -864,25 +889,25 @@ test("a failed run with a failing test offers Create ticket after Open the test 
   draw();
   await settle();
   const acts = [...target.querySelectorAll(".tf-problem .tf-acts > *")].map((el) => el.textContent?.trim());
-  expect(acts).toEqual(["Show it in the log", "Open the test file", "Create ticket"]);
+  expect(acts).toEqual(["Show in log", "Open the test file", "Create ticket…"]);
 });
 
 test("a green run and a failed run without a failing test draw no Create ticket", async () => {
   draw("teamcity:build:1186");
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   if (page) unmount(page);
   page = null;
   draw("teamcity:build:1185", undefined, { view: noFailedTests });
   await settle();
   expect(target.querySelector("h1 .tf-chip.tf-err")).not.toBeNull();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 test("Create ticket opens the dialog prefilled from the failing test, its assertion and the run's address", async () => {
   draw();
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const title = document.querySelector<HTMLInputElement>(".tf-dialog input[aria-label='Ticket title']")!;
   expect(title.value).toBe(FILED_TITLE);
@@ -894,6 +919,8 @@ test("Create ticket opens the dialog prefilled from the failing test, its assert
   const options = [...document.querySelectorAll<HTMLOptionElement>(".tf-dialog select[aria-label='Project the ticket goes in'] option")];
   expect(options.map((o) => o.textContent)).toEqual(["Choose…", "Payments", "Web"]);
   expect(dialogButton("Create ticket")!.disabled).toBe(true);
+  // The title is filled in, so it arrives on the one field it waits on.
+  expect(document.activeElement).toBe(document.querySelector(".tf-dialog select[aria-label='Project the ticket goes in']"));
 });
 
 test("filing queues a CreateTicket in the picked project, linked to the run, and the problem block says it is queued", async () => {
@@ -906,7 +933,7 @@ test("filing queues a CreateTicket in the picked project, linked to the run, and
     },
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:WEB";
@@ -923,7 +950,7 @@ test("filing queues a CreateTicket in the picked project, linked to the run, and
   expect(linked).toEqual(["teamcity:build:1187"]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
   expect(toasts.items.at(-1)!.text).toBe(`Queued: ticket ${FILED_TITLE}.`);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
   expect(echoesOn("teamcity:build:1187", "ticket").map((m) => m.text)).toEqual([FILED_TITLE]);
 });
@@ -938,7 +965,7 @@ test("a project the source's credential cannot file in draws Create ticket disab
     },
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   expect(asked).toContainEqual([
     { entity: "jira:PAY", op: "create_ticket" },
@@ -966,7 +993,7 @@ test("once a sync brings the ticket in, the run page draws the linked ticket in 
   let links: LinkEntry[] = [];
   const drawn = draw("teamcity:build:1187", undefined, { links: () => Promise.resolve(links) });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:PAY";
@@ -982,7 +1009,7 @@ test("once a sync brings the ticket in, the run page draws the linked ticket in 
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-342");
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
   expect(echoesOn("teamcity:build:1187", "ticket")).toEqual([]);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 test("a run a ticket is already linked to draws the ticket and no Create ticket", async () => {
@@ -991,7 +1018,7 @@ test("a run a ticket is already linked to draws the ticket and no Create ticket"
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-300"));
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-300");
   expect(ticket?.title).toBe("Flaky SEPA retry");
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 // -- A reload before the ticket's sync (#1953) ---------------------------------
@@ -1015,7 +1042,7 @@ test("after a reload, a ticket filed from the run and still queued draws Ticket 
   });
   await settle();
   expect(asked).toEqual(["teamcity:build:1187"]);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   const chip = target.querySelector<HTMLElement>(".tf-problem .tf-acts .tf-chip");
   expect(chip?.textContent).toBe("Ticket queued");
   expect(chip?.title).toBe(FILED_TITLE);
@@ -1030,7 +1057,7 @@ test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until
     links: () => Promise.resolve(links),
   });
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket sent");
   // The ticket's listen for the sync that brings it in, beside the page's own.
   const listening = drawn.listening();
@@ -1038,7 +1065,7 @@ test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until
   // A sync that does not bring it in: still on its way.
   drawn.sync({ source_id: "teamcity", running: false });
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket sent");
 
   // Jira's sync brings it in: the read links it and names it no more.
@@ -1049,14 +1076,14 @@ test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-342");
   expect(echoesOn("teamcity:build:1187", "ticket")).toEqual([]);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(drawn.listening()).toBe(listening - 1);
 });
 
 test("after a reload, a ticket held on drift or refused offers Create ticket: it waits on the reader in the queue", async () => {
   draw("teamcity:build:1187", undefined, { owedTickets: () => Promise.resolve([owedWrite(41, "refused"), owedWrite(42, "held")]) });
   await settle();
-  expect(button("Create ticket")).toBeDefined();
+  expect(button("Create ticket…")).toBeDefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
 });
 
@@ -1076,17 +1103,17 @@ test("after a reload, a ticket held as unconfirmed draws Ticket queued and is fo
     }),
   });
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts .tf-chip")?.textContent).toBe("Ticket queued");
   expect(hearing).toHaveLength(1);
   // Still held as unconfirmed on the next read: still on its way.
   hearing[0]!(unconfirmed);
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   // The reader discards it in the queue: the create is offered again.
   noteWithdrawn(41);
   await settle();
-  expect(button("Create ticket")).toBeDefined();
+  expect(button("Create ticket…")).toBeDefined();
 });
 
 test("after a reload, a queued ticket is followed: refused, it gives Create ticket back and Edit and resend reopens what was filed", async () => {
@@ -1104,7 +1131,7 @@ test("after a reload, a queued ticket is followed: refused, it gives Create tick
   expect(hearing).toHaveLength(1);
   hearing[0]!({ ...owedWrite(41, "refused"), detail: "Summary is required" });
   await settle();
-  expect(button("Create ticket")).toBeDefined();
+  expect(button("Create ticket…")).toBeDefined();
   const toast = toasts.items.at(-1)!;
   expect(toast.text).toBe("Ticket was refused: Summary is required");
   toast.more!.find((a) => a.label === "Edit and resend")!.run();
@@ -1128,7 +1155,7 @@ test("after a reload, a ticket the owed read links as it answers is drawn, and C
   await settle();
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-342");
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 test("an owed read that answers before the create's own answer marks it once, and a refusal toasts once", async () => {
@@ -1146,7 +1173,7 @@ test("an owed read that answers before the create's own answer marks it once, an
     }),
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:PAY";
@@ -1181,7 +1208,7 @@ test("Ticket queued goes Ticket sent on landing, and goes once the refresh's rea
     follower: () => follower,
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:PAY";
@@ -1237,7 +1264,7 @@ test("a run whose refresh failed keeps its page and says why under the header", 
   await settle();
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway. Try again");
   expect(target.querySelector("h1")?.textContent).toContain("#1187");
   expect(target.querySelector(".tf-bhead + .tf-refresh-failed, .tf-bhead ~ .tf-refresh-failed")).not.toBeNull();
 });
@@ -1263,7 +1290,7 @@ const headerActs = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-bhe
 test("the view's Sync now ends the run's header after Refresh, and gives way to the run's own Sync now: one per header (#2287)", async () => {
   draw("teamcity:build:1187", undefined, { refresh: refreshProbe().ports }, RUNS, viewSync);
   await settle();
-  expect(headerActs().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  expect(headerActs().slice(-2)).toEqual(["Refresh run", "Sync now"]);
   unmount(page!);
   page = null;
   draw("teamcity:build:1187", undefined, { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, RUNS, viewSync);
@@ -1318,4 +1345,80 @@ test("⌘R on a run of a turned-off source, which draws no button, asks nothing 
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect([probe.refreshed, probe.synced]).toEqual([[], []]);
+});
+
+test("a tab a run doesn't have says so, marks no tab, and offers Overview", async () => {
+  draw("teamcity:build:1187", "nonsense");
+  await settle();
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("A run has no such tab.");
+  expect(target.querySelector(".tf-nohere a")?.textContent).toBe("Overview");
+  expect(target.querySelector('.tf-tabs [aria-current="page"]')).toBeNull();
+  expect(target.querySelector('[aria-label="Artifacts"].tf-panel')).toBeNull();
+});
+
+test("Create ticket with its project chosen arrives on Title, a restored draft included (F-453)", async () => {
+  draw();
+  await settle();
+  button("Create ticket…")!.click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = select.options[1]!.value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>(".tf-dialog .tf-dclose")!.click();
+  await settle();
+  button("Create ticket…")!.click();
+  await settle();
+  expect(document.activeElement).toBe(document.querySelector(".tf-dialog input[aria-label='Ticket title']"));
+  dialogButton("Cancel")!.click();
+  await settle();
+});
+
+test("what was typed in Create ticket outlives Esc and ×, and Cancel ends it (F-647)", async () => {
+  draw();
+  await settle();
+  const title = () => document.querySelector<HTMLInputElement>(".tf-dialog input[aria-label='Ticket title']")!;
+  button("Create ticket…")!.click();
+  await settle();
+  const prefilled = title().value;
+  title().value = "My own words";
+  title().dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>(".tf-dialog .tf-dclose")!.click();
+  await settle();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  button("Create ticket…")!.click();
+  await settle();
+  expect(title().value).toBe("My own words");
+  dialogButton("Cancel")!.click();
+  await settle();
+  button("Create ticket…")!.click();
+  await settle();
+  expect(title().value).toBe(prefilled);
+});
+
+// -- what knobas held (ADR-0042) -----------------------------------------------
+
+test("a run's view knobas held draws at once under a line saying from when; a source that does not answer is named, and the view stays", async () => {
+  const handlers: ((event: { payload: unknown }) => void)[] = [];
+  const old = new Date(Date.now() - 2 * 3_600_000).toISOString();
+  let reads = 0;
+  draw("teamcity:build:1187", undefined, {
+    view: (id, section) => {
+      if (section === "tests") return Promise.resolve(TESTS);
+      reads++;
+      return Promise.resolve({ ...viewOf(id === "teamcity:build:1188"), held_at: old });
+    },
+    listen: (event, handler) => {
+      if (event === "view:fresh") handlers.push(handler);
+      return Promise.resolve(() => {});
+    },
+  });
+  await settle();
+  const line = () => target.querySelector(".tf-heldnote")?.textContent?.trim() ?? null;
+  expect(line()).toBe(`As knobas read it 2 h ago. Checking ${PIPELINE.source_name}…`);
+  for (const handler of handlers) handler({ payload: { entity_id: "teamcity:build:1187", section: null, failed: "unreachable: no response headers" } });
+  await settle();
+  expect(reads, "a failure reads nothing again").toBe(1);
+  expect(line()).toBe(`As knobas read it 2 h ago. ${PIPELINE.source_name} did not answer: unreachable: no response headers`);
 });

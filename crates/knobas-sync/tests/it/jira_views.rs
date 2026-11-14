@@ -288,6 +288,88 @@ async fn a_jira_view_is_kept_with_its_tickets_in_jiras_order_and_shows_as_a_tick
     );
 }
 
+/// Each member row of a view as the table holds it, with where it is
+/// stored: a row a run wrote again has moved.
+async fn member_rows(pool: &PgPool, view: &str) -> Vec<(String, i32, String)> {
+    sqlx::query(
+        "select entity_id, rank, ctid::text as at from sync.saved_view_member
+          where view_id = $1 order by rank",
+    )
+    .bind(view)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| (row.get("entity_id"), row.get("rank"), row.get("at")))
+    .collect()
+}
+
+/// A run writes the members that changed and no other (the query audit of
+/// 2026-11-12): a run that changed nothing leaves every member row where it
+/// was, and a view whose keys moved ends holding exactly its keys, in order,
+/// whether it grew, shrank, was reordered or emptied.
+#[tokio::test]
+async fn a_run_writes_only_the_members_that_changed() {
+    let pool = pool("jira_views_members_diffed").await;
+    let keys_of = |keys: &[&str]| -> Vec<(String, i32)> {
+        keys.iter()
+            .zip(1..)
+            .map(|(key, rank)| (format!("jira:{key}"), rank))
+            .collect()
+    };
+    let run = async |steady: &[&str], moving: &[&str]| {
+        let (src, _) = source(vec![
+            (
+                "board-1".into(),
+                "Steady".into(),
+                board(1, steady, three_columns()),
+                false,
+            ),
+            (
+                "board-2".into(),
+                "Moving".into(),
+                board(2, moving, three_columns()),
+                false,
+            ),
+        ]);
+        knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    };
+    let steady = ["PAY-1", "PAY-2", "PAY-3"];
+
+    run(&steady, &["WEB-1", "WEB-2", "WEB-3", "WEB-4"]).await;
+    let before = member_rows(&pool, "jira:board-1").await;
+    let moving_before = member_rows(&pool, "jira:board-2").await;
+    assert_eq!(members(&pool, "jira:board-1").await, keys_of(&steady));
+
+    // Nothing changed: no member row is written again.
+    run(&steady, &["WEB-1", "WEB-2", "WEB-3", "WEB-4"]).await;
+    assert_eq!(member_rows(&pool, "jira:board-1").await, before);
+    assert_eq!(member_rows(&pool, "jira:board-2").await, moving_before);
+
+    // Reordered, shrunk, grown, a key held twice, emptied, filled again:
+    // the view holds its keys, and the other view's rows stay where they are.
+    for moving in [
+        &["WEB-2", "WEB-1", "WEB-3", "WEB-4"][..],
+        &["WEB-2", "WEB-1"],
+        &["WEB-2", "WEB-1", "WEB-9", "WEB-8", "WEB-7"],
+        &["WEB-2", "WEB-2", "WEB-9"],
+        &[],
+        &["WEB-5"],
+    ] {
+        run(&steady, moving).await;
+        assert_eq!(
+            members(&pool, "jira:board-2").await,
+            keys_of(moving),
+            "after {moving:?}"
+        );
+        assert_eq!(
+            member_rows(&pool, "jira:board-1").await,
+            before,
+            "the view whose keys stood, after {moving:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn name_and_columns_follow_jira_and_the_readers_settings_stay() {
     let pool = pool("jira_views_follow").await;

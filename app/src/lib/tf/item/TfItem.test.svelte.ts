@@ -196,7 +196,7 @@ test("an id the mirror does not hold says so", async () => {
     entityView: () => Promise.resolve(null),
   }, "surveys:gone");
 
-  expect(target.querySelector(".tf-cfail")?.textContent).toBe("Could not read surveys:gone: surveys:gone is not in the mirror");
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("knobas does not hold this. It may not have synced yet.");
 });
 
 test("a view's source action is drawn as the page's toolbar, named as the source names it (#1407)", async () => {
@@ -398,7 +398,7 @@ test("a failed refresh says why in one line and keeps the detail as it was", asy
 
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: connection refused");
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: connection refused. Try again");
   expect(count.detail).toBe(1);
   expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
   expect(target.querySelector(".tf-item-text")?.textContent).toBe(BODY);
@@ -447,7 +447,7 @@ test("a source run the not-offered answer asked for and was refused says why in 
 
   refreshButton()!.click();
   await settle();
-  expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not sync: the engine is starting"]);
+  expect(toasts.items.map((toast) => toast.text)).toEqual([`Could not sync ${detail().source.display_name}: the engine is starting`]);
   expect(refreshButton()?.textContent).toBe("Sync now");
 });
 

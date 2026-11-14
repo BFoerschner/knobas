@@ -6,7 +6,7 @@
   The commits are the source's view of the branch picked (`entity_view`,
   section `commits`): on the default branch its latest commits, on another
   what that branch carries over the default one. A row's who and when is the
-  source's own line (`author · age`), drawn as it came. A commit the mirror
+  source's own line (`author · age`), with *You* for the reader's own. A commit the mirror
   holds opens its diff; one it does not has no id to open and is drawn plain.
 
   *Author: Mine* (#973) keeps the commits whose declared author is mine
@@ -26,14 +26,20 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { ViewRow } from "../../ipc/entity";
+  import type { ShownView, ViewRow } from "../../ipc/entity";
+  import type { WriteSource } from "../../shell/queued-toast";
+  import TfHeldNote from "../TfHeldNote.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
-  import { commitHash, viewRows, visibleViewRows } from "./repo";
+  import { onViewFresh } from "./view-fresh.svelte";
+  import { commitLine } from "./file-tree";
+  import { commitHash, sourceName, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
   import TfWaiting from "../TfWaiting.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
@@ -45,14 +51,17 @@
     at,
     branch,
     defaultBranch,
+    source = null,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "codeFacts">;
+    ports: Pick<RepoPorts, "entityView" | "codeFacts" | "listen">;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
     branch: string | null;
     defaultBranch: string | null;
+    /** The repository's source, which the held line names. */
+    source?: WriteSource | null;
     /** The page's refreshes (#2135): each reads the commits again over what the tab drew. */
     refreshed?: number;
   } = $props();
@@ -63,6 +72,14 @@
   let failed = $state<string | null>(null);
   /** The commits whose declared author is mine. */
   let mine = $state<ReadonlySet<string>>(new Set());
+  /** How many commits the branch has, where the source counts them: it may hold only the latest of them. */
+  let counted = $state<number | null>(null);
+  /**
+   * When the commits drawn were read, where knobas held them (ADR-0042), and why the read behind them failed: a branch
+   * never read draws the tip the last sync stored at once (the inner-pages pass, 2026-11-12), and the rest join after it.
+   */
+  let heldAt = $state<string | null>(null);
+  let heldFailed = $state<string | null>(null);
 
   $effect(() => {
     const where = at;
@@ -73,6 +90,18 @@
       live = false;
     };
   });
+
+  // Kept by the app and read again behind its answer (PR #2479): a move is drawn over what the tab drew.
+  onViewFresh(
+    () => at,
+    "commits",
+    () => {
+      const where = at;
+      void readCommits(where, () => at === where, true);
+    },
+    untrack(() => ports.listen),
+    (why) => (heldFailed = why),
+  );
 
   // A refresh of the page reads the commits again, over what the tab drew.
   onRefreshed(
@@ -91,7 +120,10 @@
         if (!alive()) return;
         const read = viewRows(view?.sections[0]);
         reading = false;
+        heldAt = (view as ShownView | null)?.held_at ?? null;
+        heldFailed = null;
         rows = read;
+        counted = view?.sections[0]?.count == null ? null : Number(view.sections[0].count);
         mine = new Set();
         const ids = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (ids.length === 0) return;
@@ -115,7 +147,7 @@
   const filter = $derived(sessionFilter(`repo-commits:${repoId}`));
   const config = $derived<FilterConfig>({
     id: `repo-commits:${repoId}`,
-    placeholder: "Filter commits by message, sha or author",
+    placeholder: "Filter commits",
     noun:
       branch === null
         ? "commits"
@@ -135,6 +167,8 @@
     pick = null;
   });
   const range = $derived(pick === null ? null : rangeOf(shown, pick));
+  /** Whether any commit on screen can be picked: a list of commits the mirror holds no sha for offers no *Diff selected*. */
+  const anyPickable = $derived(shown.some((row) => shaOfCommit(row.entity_id) !== null));
   const count = $derived(pick === null ? 0 : Math.abs(pick.anchor - pick.end) + 1);
 
   /** A box clicked: a click picks its commit, a shift-click stretches the pick to it. */
@@ -159,22 +193,27 @@
 </script>
 
 <div class="tf-rbar tf-rpickbar">
-  <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows?.length ?? null} />
+  <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows === null ? null : Math.max(rows.length, counted ?? 0)} />
   <button
     type="button"
     class="tf-btn tf-sm"
     disabled={range === null}
+    hidden={!anyPickable}
     title={range === null ? "Pick a commit's box, then shift-click another's for a range" : undefined}
     onclick={diffSelected}>Diff selected{count > 0 ? ` (${count})` : ""}</button>
 </div>
+<TfHeldNote {heldAt} source={sourceName(source)} failed={heldFailed} />
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
-{#if shown.length === 0}
-  <div class="tf-empty">No commits match.</div>
+{#if rows !== null && rows.length === 0}
+  <div class="tf-empty"><p>{branch !== null && branch !== defaultBranch ? `${branch} has no commits ${defaultBranch ?? "its base"} lacks.` : "This branch has no commits yet."}</p></div>
+{:else if shown.length === 0}
+  <TfNoMatch noun="commits" {filter} />
 {:else}
   <table class="tf-tbl tf-rcommits">
     <tbody>
       {#each shown as row, n (n)}
         <tr class:tf-row={row.entity_id !== null} class:tf-picked={picked(pick, n)} onclick={(event) => open(event, row)}>
+          {#if anyPickable}
           <td class="tf-rpick"
             ><input
               type="checkbox"
@@ -185,18 +224,19 @@
               onclick={(event) => choose(event, n)}
             /></td
           >
+          {/if}
           <td class="tf-mono"
             >{#if row.entity_id !== null}<a href={commitHash(repoId, row.entity_id)}
                 ><Marked text={row.chip ?? ""} typed={filter.text} /></a
               >{:else}<Marked text={row.chip ?? ""} typed={filter.text} />{/if}</td
           >
           <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={filter.text} /></td>
-          <td class="tf-dim tf-nowrap"><Marked text={row.meta ?? ""} typed={filter.text} /></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={commitLine(row, row.entity_id !== null && mine.has(row.entity_id))} typed={filter.text} /></span></td>
           <td class="tf-ropen"
-            >{#if shaOfCommit(row.entity_id) !== null}<TfOpenObject
+            >{#if shaOfCommit(row.entity_id) !== null}<span class="tf-rowend"><span class="tf-rowacts"><TfOpenObject
                 entityId={repoId}
                 object={{ kind: "commit", sha: shaOfCommit(row.entity_id)! }}
-              />{/if}</td
+              /></span></span>{/if}</td
           >
         </tr>
       {/each}

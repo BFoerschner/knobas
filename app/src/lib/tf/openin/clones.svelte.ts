@@ -47,6 +47,8 @@ export interface Clones {
   /** Moves each time a clone finishes, so a page re-reads its checkouts. */
   readonly finished: number;
   start(subject: CloneSubject): Promise<void>;
+  /** Hear every clone's progress, one this window started or not (*Clone all*'s, PR #2479), so rows and pages follow them. */
+  watch(): Promise<unknown>;
   stop(entityId: string): Promise<void>;
   /** Tests only: drop the marks, the finished count, the subjects and the progress listener (#1743). */
   reset(): void;
@@ -66,12 +68,14 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
     delete marks[entityId];
     finished += 1;
     const subject = subjects.get(entityId);
+    // A clone this window did not start (*Clone all*'s, PR #2479) ends in the run's one summary, not a toast of its own.
+    if (subject === undefined) return;
     const view = await ports.entityCheckout(entityId).catch(() => null);
     const branch = view?.tree?.status === "read" ? view.tree.branch : null;
     await apps.ensure();
     const app = defaultApp(apps.settings);
     push({
-      text: `Cloned ${subject?.name ?? entityId} into ${path}${branch ? `, on ${branch}` : ""}`,
+      text: `Cloned ${subject.name} into ${path}${branch ? `, on ${branch}` : ""}`,
       ...(app ? { action: { label: `Open in ${app.name}`, run: () => runDefault(apps, entityId) } } : {}),
     });
   }
@@ -103,6 +107,7 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
     get finished() {
       return finished;
     },
+    watch: () => listen(),
     async start(subject) {
       subjects.set(subject.entityId, subject);
       await listen();

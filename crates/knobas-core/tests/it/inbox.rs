@@ -856,17 +856,23 @@ async fn a_failed_build_with_no_status_text_says_only_that_it_failed() {
     .await;
 
     let items = stream(pool).await;
-    let reason = |id: &str| {
+    let said = |id: &str| {
         items
             .iter()
             .find(|i| i.key == format!("failed_build:{id}"))
-            .map(|i| i.reason.clone())
+            .map(|i| (i.reason.clone(), i.title.clone(), i.detail.clone()))
+            .expect("the build is on the stream")
     };
+    let (reason, title, detail) = said(&told);
     assert_eq!(
-        reason(&told).as_deref(),
-        Some("this build failed: 3 tests failed")
+        reason,
+        format!("{title} failed"),
+        "the subject leads (F-115)"
     );
-    assert_eq!(reason(&silent).as_deref(), Some("this build failed"));
+    assert_eq!(detail.as_deref(), Some("3 tests failed"));
+    let (reason, title, detail) = said(&silent);
+    assert_eq!(reason, format!("{title} failed"));
+    assert_eq!(detail, None, "no status text is no second reading");
 }
 
 /// Story 4, second arm: a build CI triggered on my pull request finds me
@@ -1672,6 +1678,276 @@ async fn a_mention_in_the_description_is_dated_by_the_ticket_and_not_by_its_last
     );
 }
 
+/// **A mention is looked for in the items that moved inside the window** (the
+/// query audit of 2026-11-12). The rule reads the prose items whose own date
+/// is inside the fortnight, by the source's date or, where the source gave
+/// none, by knobas' own, and matches the names in those: the bodies of the
+/// rest are never fetched.
+///
+/// The same mentions for every record a source writes, since a comment is
+/// never dated after its item. **The direction it fails in, pinned**: a
+/// comment dated ahead of its item's own date is not found until the item
+/// next moves, and is then dated by the comment as before.
+#[tokio::test]
+async fn a_mention_is_looked_for_in_the_items_that_moved_inside_the_window() {
+    let pool = &scratch().await;
+    let moved = discussed_ticket(
+        pool,
+        "PAY-1",
+        "Retry failed payouts",
+        days_ago(60),
+        &[("[~mara.lindqvist] can you look?", days_ago(2))],
+        days_ago(2),
+    )
+    .await;
+    // No date from the source: knobas' own clock dates the item.
+    let undated = ticket(
+        pool,
+        "PAY-2",
+        Some(THEM),
+        None,
+        "ping @mara.lindqvist please",
+        days_ago(0),
+    )
+    .await;
+    let stale = ticket(
+        pool,
+        "PAY-3",
+        Some(THEM),
+        None,
+        "ping @mara.lindqvist please",
+        days_ago(0),
+    )
+    .await;
+    for (id, synced) in [(&undated, days_ago(1)), (&stale, days_ago(30))] {
+        sqlx::query(
+            "update sync.item set item_updated_at = null, synced_at = $2 where entity_id = $1",
+        )
+        .bind(id)
+        .bind(synced)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let ahead = discussed_ticket(
+        pool,
+        "PAY-4",
+        "Retry failed payouts",
+        days_ago(60),
+        &[("[~mara.lindqvist] can you look?", days_ago(1))],
+        days_ago(20),
+    )
+    .await;
+
+    let found = keys(&stream(pool).await);
+    assert!(
+        found.contains(&format!("mention:{moved}"))
+            && found.contains(&format!("mention:{undated}")),
+        "an item dated inside the window, by its source or by knobas: {found:?}"
+    );
+    assert!(
+        !found.contains(&format!("mention:{stale}")),
+        "an undated item knobas last saw a month ago: {found:?}"
+    );
+    assert!(
+        !found.contains(&format!("mention:{ahead}")),
+        "a comment dated after its item's own date waits for the item to move: {found:?}"
+    );
+
+    touch(pool, &ahead, days_ago(0)).await;
+    let items = stream(pool).await;
+    let item = items
+        .iter()
+        .find(|i| i.key == format!("mention:{ahead}"))
+        .unwrap_or_else(|| panic!("the item moved, so its mention is read: {:?}", keys(&items)));
+    assert_eq!(item.occurred_at, days_ago(1), "dated by the comment");
+}
+
+/// **A mention is found through the names its body stores**
+/// (`sync.item_mention`, migration `0079`): the run of name characters after
+/// each `@` and `[~`, kept by the database as the body is written. The rule
+/// reads the items storing a reader's name and no other body, and its own
+/// expressions still decide, so a name it could not store whole is found
+/// too: one with a letter outside the name characters stores its leading
+/// run, and one that starts with such a letter stores the empty run.
+#[tokio::test]
+async fn a_mention_is_found_through_the_names_its_body_stores() {
+    let pool = &scratch().await;
+    let stream_of = async |who: &str| -> Vec<String> {
+        keys(
+            &inbox::items(
+                pool,
+                &[who.to_owned()],
+                now(),
+                Shelf::Stream,
+                &declarations(),
+            )
+            .await
+            .unwrap(),
+        )
+    };
+    let said = async |key: &str, body: &str| -> String {
+        ticket(pool, key, Some(THEM), None, body, days_ago(1)).await
+    };
+    let at = said("PAY-1", "ping @mara.lindqvist, please").await;
+    let bracketed = said("PAY-2", "[~mara.lindqvist] look").await;
+    let longer = said("PAY-3", "ping @mara.lindqvist2").await;
+    let umlaut = said("PAY-4", "ping @j\u{f6}rg now").await;
+    let plain = said("PAY-5", "ping @jorg now").await;
+    let leading = said("PAY-6", "ping @\u{f6}mer now").await;
+    // A kind the rule does not read stores nothing.
+    let commit = item(
+        pool,
+        Mirrored {
+            source: "gitea",
+            kind: "commit",
+            key: "acme/payouts@abc",
+            author: Some(THEM),
+            body: "thanks @mara.lindqvist",
+            payload: serde_json::json!({}),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let stored: Vec<(String, String)> =
+        sqlx::query_as("select entity_id, token from sync.item_mention order by entity_id, token")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let token = |id: &String, token: &str| (id.clone(), token.to_owned());
+    assert_eq!(
+        stored,
+        [
+            token(&at, "mara.lindqvist"),
+            token(&bracketed, "mara.lindqvist"),
+            token(&longer, "mara.lindqvist2"),
+            token(&umlaut, "j"),
+            token(&plain, "jorg"),
+            token(&leading, ""),
+        ],
+        "one row a name written at somebody, none for {commit}"
+    );
+
+    let mut mine = stream_of(ME).await;
+    mine.sort();
+    assert_eq!(
+        mine,
+        [format!("mention:{at}"), format!("mention:{bracketed}")],
+        "the name whole, in either spelling, and not a longer one"
+    );
+    assert_eq!(stream_of("j\u{f6}rg").await, [format!("mention:{umlaut}")]);
+    assert_eq!(stream_of("\u{f6}mer").await, [format!("mention:{leading}")]);
+    assert_eq!(stream_of("jorg").await, [format!("mention:{plain}")]);
+
+    // A body rewritten moves its names with it: the mention arrives with the
+    // new text and leaves with it.
+    sqlx::query("update sync.item set body_text = 'and @mara.lindqvist too' where entity_id = $1")
+        .bind(&longer)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set body_text = 'nobody is named here' where entity_id = $1")
+        .bind(&at)
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut mine = stream_of(ME).await;
+    mine.sort();
+    assert_eq!(
+        mine,
+        [format!("mention:{bracketed}"), format!("mention:{longer}")]
+    );
+    // And a deleted item's names go with it.
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(&bracketed)
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("select count(*) from sync.item_mention where entity_id = $1")
+            .bind(&bracketed)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+}
+
+/// **Both shelves from one run are the two reads** (the query audit of
+/// 2026-11-12). The window asked for the stream, the snoozed shelf and the
+/// count as three reads, two of which ran every rule;
+/// [`inbox::shelves`] runs the derivation once. Its stream is
+/// [`Shelf::Stream`]'s rows in their order, its snoozed half
+/// [`Shelf::Snoozed`]'s, and the count is the stream's length: with an item
+/// on the stream, one snoozed, one done, and one whose snooze has passed and
+/// which is therefore back on the stream with no date.
+#[tokio::test]
+async fn the_two_shelves_from_one_run_are_the_two_reads() {
+    let pool = &scratch().await;
+    let waiting = pull_request(pool, "acme/payouts#1", &[ME], "open").await;
+    let later = pull_request(pool, "acme/payouts#2", &[ME], "open").await;
+    let handled = pull_request(pool, "acme/payouts#3", &[ME], "open").await;
+    let back = ticket(pool, "PAY-9", Some(THEM), Some(ME), "", days_ago(1)).await;
+    ticket(
+        pool,
+        "PAY-10",
+        Some(THEM),
+        None,
+        "ping @mara.lindqvist please",
+        days_ago(3),
+    )
+    .await;
+    inbox::snooze(
+        pool,
+        &format!("review_request:{later}"),
+        now() + Duration::days(2),
+    )
+    .await
+    .unwrap();
+    inbox::complete(pool, &format!("review_request:{handled}"), now())
+        .await
+        .unwrap();
+    inbox::snooze(
+        pool,
+        &format!("new_assignment:{back}"),
+        now() - Duration::hours(1),
+    )
+    .await
+    .unwrap();
+
+    let both = inbox::shelves(pool, &me(), now(), &declarations())
+        .await
+        .unwrap();
+    let stream = stream(pool).await;
+    let snoozed = inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
+        .await
+        .unwrap();
+    let json = |items: &[inbox::InboxItem]| serde_json::to_value(items).unwrap();
+    assert_eq!(json(&both.stream), json(&stream), "the stream half");
+    assert_eq!(json(&both.snoozed), json(&snoozed), "the snoozed half");
+    assert_eq!(
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap(),
+        i64::try_from(both.stream.len()).unwrap(),
+        "the count is the stream's length"
+    );
+
+    assert_eq!(keys(&both.snoozed), [format!("review_request:{later}")]);
+    assert!(both.snoozed[0].snoozed_until.is_some());
+    let on_stream = keys(&both.stream);
+    assert_eq!(on_stream.len(), 3, "{on_stream:?}");
+    assert!(
+        on_stream.contains(&format!("review_request:{waiting}"))
+            && on_stream.contains(&format!("new_assignment:{back}")),
+        "{on_stream:?}"
+    );
+    assert!(
+        both.stream.iter().all(|i| i.snoozed_until.is_none()),
+        "a stream row carries no snooze date, a passed one included"
+    );
+}
+
 /// Story 17 in its plainest form: the entity is withdrawn upstream and the
 /// item leaves on the next read, with nobody acting.
 #[tokio::test]
@@ -1994,8 +2270,13 @@ async fn an_alert_names_its_monitor_and_the_path_of_the_asset_it_watches() {
     );
     assert_eq!(item.kind.as_deref(), Some("asset"));
     assert_eq!(
-        item.reason, "hel / hel1 is warn",
-        "the reason is the asset's whole path and the trouble it is in"
+        item.reason, "hel1 is slow",
+        "the reason leads with the asset and says the trouble it is in, in the chips' word"
+    );
+    assert_eq!(
+        item.detail.as_deref(),
+        Some("hel"),
+        "the path above the asset is still reachable"
     );
     assert_eq!(item.occurred_at, days_ago(1));
     assert_eq!(item.web_url, None);
@@ -2156,6 +2437,82 @@ const FAILED_BUILD_BEFORE_785: &str = "
 #[tokio::test]
 async fn every_build_mine_names_what_the_per_build_statement_named() {
     let pool = &scratch().await;
+    let mirror = builds_mirror(pool).await;
+    let BuildsMirror {
+        ids,
+        running,
+        older,
+        elsewhere,
+        tombstoned,
+        off,
+        unconfigured,
+        linked,
+    } = &mirror;
+    let (running, older, elsewhere, tombstoned, off, unconfigured, linked) = (
+        *running,
+        *older,
+        *elsewhere,
+        *tombstoned,
+        *off,
+        *unconfigured,
+        *linked,
+    );
+
+    let before: Vec<String> = sqlx::query_scalar(FAILED_BUILD_BEFORE_785)
+        .bind(me())
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let rule = inbox::rule(Category::FailedBuild).unwrap();
+    let mut after: Vec<String> =
+        inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|i| i.entity_id.unwrap())
+            .collect();
+    after.sort();
+    assert_eq!(after, before);
+    // Worked by hand from the mirror above, so the comparison cannot pass by
+    // both statements naming nothing.
+    for (what, i, wanted) in [
+        ("the newest red of H, never green again", 55, true),
+        ("a red of A that A's next green resolved", 0, false),
+        ("a red whose re-run is still running", running, true),
+        ("a red with only an older green", older, true),
+        ("a red whose green is in another source", elsewhere, true),
+        ("a red whose green is tombstoned", tombstoned, true),
+        ("a red of a turned-off source", off, false),
+        ("a red with no configuration", unconfigured, true),
+        ("a red linked from me", linked, true),
+        ("a red linked to me", linked + 1, true),
+        ("a red only proposed to me", linked + 2, false),
+        (
+            "a red linked to itself and somebody else",
+            linked + 3,
+            false,
+        ),
+    ] {
+        assert_eq!(after.contains(&ids[i]), wanted, "{what}: {after:?}");
+    }
+}
+
+/// [`builds_mirror`]'s builds, and where each case of it sits among them.
+struct BuildsMirror {
+    ids: Vec<String>,
+    running: usize,
+    older: usize,
+    elsewhere: usize,
+    tombstoned: usize,
+    off: usize,
+    unconfigured: usize,
+    linked: usize,
+}
+
+/// A mirror of builds holding each way a red one is resolved or not, every
+/// one the reader's or linked to their work: what
+/// [`every_build_mine_names_what_the_per_build_statement_named`] describes.
+async fn builds_mirror(pool: &PgPool) -> BuildsMirror {
     source(pool, "teamcity", None, true).await;
     source(pool, "teamcity2", None, true).await;
     source(pool, "offci", None, false).await;
@@ -2363,44 +2720,573 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
     link(pool, &ids[linked + 2], &mine, false).await;
     link(pool, &ids[linked + 3], &ids[linked + 3], true).await;
     link(pool, &ids[linked + 3], &theirs, true).await;
+    BuildsMirror {
+        ids,
+        running,
+        older,
+        elsewhere,
+        tombstoned,
+        off,
+        unconfigured,
+        linked,
+    }
+}
 
-    let before: Vec<String> = sqlx::query_scalar(FAILED_BUILD_BEFORE_785)
-        .bind(me())
-        .fetch_all(pool)
+/// TeamCity's build as [`teamcity_build`] declares it, framed a run as its
+/// descriptor frames it: what makes the database keep each build's pipeline
+/// (`sync.item_pipeline`, migration `0062`).
+fn teamcity_run() -> knobas_core::payload::KindPaths {
+    knobas_core::payload::KindPaths {
+        frame: Some(knobas_core::payload::Frame::Run),
+        ..teamcity_build()
+    }
+}
+
+/// [`declarations`] with the two TeamCity sources' builds framed as runs.
+fn run_declarations() -> knobas_core::payload::Declarations {
+    declarations()
+        .with("teamcity", vec![teamcity_run()])
+        .with("teamcity2", vec![teamcity_run()])
+}
+
+/// The failed-build rule against the walk it replaced, for `who`, under
+/// `declared`: the same rows whole, in the same order. Returns the builds
+/// they name, sorted.
+async fn failed_builds(
+    pool: &PgPool,
+    who: &[String],
+    declared: &knobas_core::payload::Declarations,
+    when: &str,
+) -> Vec<String> {
+    let rule = inbox::planned_statements()
+        .into_iter()
+        .find(|(category, _)| *category == Category::FailedBuild)
+        .unwrap()
+        .1;
+    let mut answers = Vec::new();
+    for sql in [rule, inbox::FAILED_BUILD_WALKED] {
+        let wrapped = format!("select to_jsonb(q) from ({sql}) q");
+        let rows: Vec<serde_json::Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(wrapped))
+            .persistent(false)
+            .bind(who)
+            .bind(now())
+            .bind(false)
+            .bind(declared.as_param())
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        answers.push(rows);
+    }
+    assert_eq!(
+        answers[0], answers[1],
+        "{when}: the rule and the walk over every build's payload"
+    );
+    let mut ids: Vec<String> = answers[0]
+        .iter()
+        .map(|row| row["entity_id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// One rule against the statement it replaced, for `who`, under `declared`:
+/// the same rows whole, in the same order. Returns the items they name,
+/// sorted.
+async fn rule_both_ways(
+    pool: &PgPool,
+    category: Category,
+    walked: &str,
+    who: &[String],
+    declared: &knobas_core::payload::Declarations,
+    when: &str,
+) -> Vec<String> {
+    let rule = inbox::planned_statements()
+        .into_iter()
+        .find(|(c, _)| *c == category)
+        .unwrap()
+        .1;
+    let mut answers = Vec::new();
+    for sql in [rule, walked] {
+        let wrapped = format!("select to_jsonb(q) from ({sql}) q");
+        let rows: Vec<serde_json::Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(wrapped))
+            .persistent(false)
+            .bind(who)
+            .bind(now())
+            .bind(false)
+            .bind(declared.as_param())
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        answers.push(rows);
+    }
+    assert_eq!(
+        answers[0], answers[1],
+        "{when}: the rule and the walk it replaced"
+    );
+    let mut ids: Vec<String> = answers[0]
+        .iter()
+        .map(|row| row["entity_id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// What Jira's adapter declares for a ticket, as [`declarations`] binds it.
+fn jira_kinds() -> Vec<knobas_core::payload::KindPaths> {
+    use knobas_core::payload::{KindPaths, PayloadPath};
+    vec![KindPaths {
+        kind: "ticket".to_owned(),
+        assignee: vec![
+            PayloadPath::of(["fields", "assignee", "name"]),
+            PayloadPath::of(["fields", "assignee", "key"]),
+        ],
+        created: vec![PayloadPath::of(["fields", "created"])],
+        ..KindPaths::default()
+    }]
+}
+
+/// **A ticket is mine by the assignee the database stores for it**
+/// (`sync.item_field`; the stored-reads pass of 2026-11-12), and the rule
+/// names the tickets the walk of every window ticket's payload named: the
+/// first candidate naming me, a blank or numeric first candidate skipped, a
+/// first candidate naming somebody else with me second (not mine), a padded
+/// name, both candidates naming me (one row), one I raised, one outside the
+/// window, one with no date of its own, an unassigned one, and a source
+/// that declares one candidate where its record names me at another. With
+/// the declarations stored, with one source's never stored, after a ticket
+/// is rewritten, with the stored candidates moved away from the bound ones,
+/// and with none stored.
+#[tokio::test]
+async fn a_ticket_is_mine_by_the_assignee_the_database_stores() {
+    let pool = &scratch().await;
+    source(pool, "jira", None, true).await;
+    source(pool, "jira-eu", None, true).await;
+    // The declarations first, so each ticket's stored assignee is written
+    // with it. `jira-eu`'s adapter stores none: its tickets are walked. A
+    // second adapter stores a ticket's assignee under `key` alone, so every
+    // ticket also has a row under candidates the read does not bind: PAY-4's
+    // names me there.
+    declare(pool, "jira", &jira_kinds()).await;
+    declare(
+        pool,
+        "forge",
+        &[knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![knobas_core::payload::PayloadPath::of([
+                "fields", "assignee", "key",
+            ])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    )
+    .await;
+    let assigned = |source: &'static str,
+                    key: &'static str,
+                    author: &'static str,
+                    assignee: serde_json::Value,
+                    updated: Option<DateTime<Utc>>| {
+        (
+            source,
+            key,
+            author,
+            serde_json::json!({ "fields": { "assignee": assignee } }),
+            updated,
+        )
+    };
+    let fresh = Some(days_ago(1));
+    let rows = [
+        assigned(
+            "jira",
+            "PAY-1",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-2",
+            THEM,
+            serde_json::json!({ "name": "  ", "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-3",
+            THEM,
+            serde_json::json!({ "name": 42, "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-4",
+            THEM,
+            serde_json::json!({ "name": THEM, "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-5",
+            THEM,
+            serde_json::json!({ "name": format!(" {ME} ") }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-6",
+            THEM,
+            serde_json::json!({ "name": ME, "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-7",
+            ME,
+            serde_json::json!({ "name": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira",
+            "PAY-8",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            Some(days_ago(40)),
+        ),
+        assigned(
+            "jira",
+            "PAY-9",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            None,
+        ),
+        assigned("jira", "PAY-10", THEM, serde_json::Value::Null, fresh),
+        assigned(
+            "jira",
+            "PAY-11",
+            THEM,
+            serde_json::json!({ "name": THEM }),
+            fresh,
+        ),
+        assigned(
+            "jira-eu",
+            "EU-1",
+            THEM,
+            serde_json::json!({ "key": ME }),
+            fresh,
+        ),
+        assigned(
+            "jira-eu",
+            "EU-2",
+            THEM,
+            serde_json::json!({ "name": ME }),
+            fresh,
+        ),
+    ];
+    let mut ids = Vec::new();
+    for (source, key, author, payload, updated) in rows {
+        let id = EntityRef::new(source, key).to_string();
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
+            .bind(&id)
+            .bind(key)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item
+                 (entity_id, source_id, kind, title, body_text, author, item_updated_at, payload)
+             values ($1, $2, 'ticket', $3, '', $4, $5, $6)",
+        )
+        .bind(&id)
+        .bind(source)
+        .bind(key)
+        .bind(author)
+        .bind(updated)
+        .bind(payload)
+        .execute(pool)
         .await
         .unwrap();
-    let rule = inbox::rule(Category::FailedBuild).unwrap();
-    let mut after: Vec<String> =
-        inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
+        ids.push(id);
+    }
+    let stored: (i64, i64) = sqlx::query_as(
+        "select count(*), count(distinct paths) from sync.item_field
+          where field = 'assignee' and entity_id like 'jira:%'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (22, 2),
+        "each of jira's tickets has its assignee under both stored candidates"
+    );
+    let elsewhere: Option<String> = sqlx::query_scalar(
+        "select value from sync.item_field where field = 'assignee' and entity_id = $1
+            and jsonb_array_length(paths) = 1",
+    )
+    .bind(&ids[3])
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        elsewhere.as_deref(),
+        Some(ME),
+        "PAY-4 names me under the candidates the read does not bind"
+    );
+    // `jira-eu` binds one candidate, `name`, where the stored rows are under
+    // two: nothing is stored under what it binds, so its tickets are walked.
+    let declared = declarations().with(
+        "jira-eu",
+        vec![knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![knobas_core::payload::PayloadPath::of([
+                "fields", "assignee", "name",
+            ])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    );
+    let mine = |when: &'static str| {
+        let declared = declared.clone();
+        async move {
+            rule_both_ways(
+                pool,
+                Category::NewAssignment,
+                inbox::NEW_ASSIGNMENT_WALKED,
+                &me(),
+                &declared,
+                when,
+            )
             .await
-            .unwrap()
-            .into_iter()
-            .map(|i| i.entity_id.unwrap())
-            .collect();
-    after.sort();
-    assert_eq!(after, before);
-    // Worked by hand from the mirror above, so the comparison cannot pass by
-    // both statements naming nothing.
+        }
+    };
+
+    let mut want: Vec<String> = [0, 1, 2, 4, 5, 8, 12]
+        .into_iter()
+        .map(|n: usize| ids[n].clone())
+        .collect();
+    want.sort();
+    assert_eq!(mine("every assignee stored").await, want);
+    let theirs = rule_both_ways(
+        pool,
+        Category::NewAssignment,
+        inbox::NEW_ASSIGNMENT_WALKED,
+        &[THEM.to_owned()],
+        &declared,
+        "somebody else",
+    )
+    .await;
+    assert!(
+        theirs.is_empty(),
+        "every ticket they hold they raised themselves: {theirs:?}"
+    );
+    // Both names one reader's: the tickets either holds that neither raised.
+    let either = rule_both_ways(
+        pool,
+        Category::NewAssignment,
+        inbox::NEW_ASSIGNMENT_WALKED,
+        &[ME.to_owned(), THEM.to_owned()],
+        &declared,
+        "both names",
+    )
+    .await;
+    assert!(
+        either.is_empty(),
+        "each was raised by one of the two: {either:?}"
+    );
+    assert!(
+        rule_both_ways(
+            pool,
+            Category::NewAssignment,
+            inbox::NEW_ASSIGNMENT_WALKED,
+            &[],
+            &declared,
+            "nobody"
+        )
+        .await
+        .is_empty()
+    );
+
+    // A ticket rewritten moves its stored assignee with it.
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&ids[10])
+        .bind(serde_json::json!({ "fields": { "assignee": { "name": ME } } }))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&ids[0])
+        .bind(serde_json::json!({ "fields": { "assignee": { "name": THEM } } }))
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut want: Vec<String> = [1, 2, 4, 5, 8, 10, 12]
+        .into_iter()
+        .map(|n: usize| ids[n].clone())
+        .collect();
+    want.sort();
+    assert_eq!(mine("two tickets rewritten").await, want);
+
+    // The stored candidates move away from the ones the read binds: every
+    // ticket is walked again.
+    let mut moved = jira_kinds();
+    moved[0].assignee.truncate(1);
+    declare(pool, "jira", &moved).await;
+    assert_eq!(mine("stored under other candidates").await, want);
+
+    // No declaration stored at all.
+    sqlx::query("delete from sync.parent_declaration")
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("select count(*) from sync.item_field")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(mine("nothing stored").await, want);
+}
+
+/// **A build is ruled by the rows the database keeps of it** (`sync.item_row`
+/// for its tone, `sync.item_pipeline` for its configuration; the stored-reads
+/// pass of 2026-11-12), and the rule names the builds the walk over every
+/// build's payload named: with every row stored, with some builds' rows
+/// gone and with none, with the pipelines stored for one source alone, with
+/// stored declarations that are not the ones the read binds, and with none
+/// stored at all. On the mirror
+/// [`every_build_mine_names_what_the_per_build_statement_named`] reads, so
+/// every way a red build is resolved or not is asked each time.
+#[tokio::test]
+async fn a_failed_build_is_ruled_by_the_rows_the_database_keeps_of_it() {
+    let pool = &scratch().await;
+    // The declarations before the builds, so each build is written with its
+    // rows, as a sync writes it after bring-up.
+    declare(pool, "teamcity", &[teamcity_run()]).await;
+    declare(pool, "teamcity2", &[teamcity_run()]).await;
+    let mirror = builds_mirror(pool).await;
+    let declared = run_declarations();
+    let builds: i64 = sqlx::query_scalar("select count(*) from sync.item where kind = 'build'")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let stored = |table: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "select count(distinct t.entity_id) from {table} t join sync.item i using (entity_id)
+              where i.kind = 'build' and i.source_id like 'teamcity%'"
+        )))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    // Every build of the two sources has its row, and its pipeline unless
+    // it names no configuration, as two do. The turned-off source's two
+    // builds are not counted.
+    assert_eq!(stored("sync.item_row").await, builds - 2);
+    assert_eq!(stored("sync.item_pipeline").await, builds - 4);
+
+    let mine = failed_builds(pool, &me(), &declared, "every row stored").await;
     for (what, i, wanted) in [
         ("the newest red of H, never green again", 55, true),
         ("a red of A that A's next green resolved", 0, false),
-        ("a red whose re-run is still running", running, true),
-        ("a red with only an older green", older, true),
-        ("a red whose green is in another source", elsewhere, true),
-        ("a red whose green is tombstoned", tombstoned, true),
-        ("a red of a turned-off source", off, false),
-        ("a red with no configuration", unconfigured, true),
-        ("a red linked from me", linked, true),
-        ("a red linked to me", linked + 1, true),
-        ("a red only proposed to me", linked + 2, false),
+        ("a red whose re-run is still running", mirror.running, true),
+        ("a red with only an older green", mirror.older, true),
         (
-            "a red linked to itself and somebody else",
-            linked + 3,
-            false,
+            "a red whose green is in another source",
+            mirror.elsewhere,
+            true,
         ),
+        ("a red whose green is tombstoned", mirror.tombstoned, true),
+        ("a red of a turned-off source", mirror.off, false),
+        ("a red with no configuration", mirror.unconfigured, true),
+        ("a red linked from me", mirror.linked, true),
+        ("a red linked to me", mirror.linked + 1, true),
+        ("a red only proposed to me", mirror.linked + 2, false),
     ] {
-        assert_eq!(after.contains(&ids[i]), wanted, "{what}: {after:?}");
+        assert_eq!(mine.contains(&mirror.ids[i]), wanted, "{what}: {mine:?}");
     }
+    let theirs = failed_builds(pool, &[THEM.to_owned()], &declared, "somebody else's").await;
+    assert_eq!(theirs.len(), 4, "the four builds they triggered");
+    assert!(
+        failed_builds(pool, &[], &declared, "nobody")
+            .await
+            .is_empty()
+    );
+    // The declarations every other test binds frame no run: the stored
+    // pipelines are still the ones their candidates give, and the tones too.
+    assert_eq!(
+        failed_builds(pool, &me(), &declarations(), "bound without the frame").await,
+        mine
+    );
+
+    // Some builds' rows gone, as builds the fill has not reached.
+    sqlx::query(
+        "delete from sync.item_row where entity_id in (
+           select entity_id from sync.item where kind = 'build' order by entity_id offset 3 limit 40)",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "some rows gone").await,
+        mine
+    );
+    sqlx::query("delete from sync.item_row")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(failed_builds(pool, &me(), &declared, "no row").await, mine);
+    knobas_core::item_row::fill(pool).await.unwrap();
+    assert_eq!(stored("sync.item_row").await, builds - 2);
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "the rows filled again").await,
+        mine
+    );
+
+    // One source's stored declaration names another pipeline: its builds'
+    // stored pipelines are not the bound candidates', so they are walked,
+    // and the other source's are still read.
+    let mut moved = teamcity_run();
+    moved.pipeline = vec![knobas_core::payload::PayloadPath::of(["status"])];
+    declare(pool, "teamcity", &[moved]).await;
+    let elsewhere: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_pipeline where source_id = 'teamcity' and pkey = 'FAILURE'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        elsewhere > 0,
+        "the stored pipelines moved with the declaration"
+    );
+    assert_eq!(
+        failed_builds(
+            pool,
+            &me(),
+            &declared,
+            "a pipeline stored under other candidates"
+        )
+        .await,
+        mine
+    );
+
+    // And another state: the stored rows are under a key the read does not
+    // bind, so every tone is walked.
+    let mut restated = teamcity_run();
+    restated.state.truncate(1);
+    declare(pool, "teamcity", &[restated]).await;
+    knobas_core::item_row::fill(pool).await.unwrap();
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "a state stored under another key").await,
+        mine
+    );
+
+    // No declaration stored at all.
+    sqlx::query("delete from sync.parent_declaration")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(stored("sync.item_row").await, 0);
+    assert_eq!(stored("sync.item_pipeline").await, 0);
+    assert_eq!(
+        failed_builds(pool, &me(), &declared, "nothing stored").await,
+        mine
+    );
 }
 
 /// **The stream, the shelf and the count are planned for their values every
@@ -2585,5 +3471,271 @@ async fn a_failed_sign_in_leaves_when_the_sign_in_works_again() {
             .await
             .unwrap(),
         0
+    );
+}
+
+/// What the adapter of `gitea` declares for a pull request, as
+/// [`declarations`] binds it: what a test writes to
+/// `sync.parent_declaration`, so the database stores the reviewers under the
+/// candidates the reads bind.
+fn gitea_kinds() -> Vec<knobas_core::payload::KindPaths> {
+    use knobas_core::payload::{KindPaths, ListPath, PayloadPath};
+    vec![KindPaths {
+        kind: "pr".to_owned(),
+        reviewers: vec![ListPath {
+            at: PayloadPath::of(["requested_reviewers"]),
+            entry: PayloadPath::of(["login"]),
+        }],
+        state: gitea_pr_state(),
+        ..KindPaths::default()
+    }]
+}
+
+/// Writes an adapter's declarations to `sync.parent_declaration`, as bring-up
+/// does, replacing what it held.
+async fn declare(pool: &PgPool, adapter: &str, kinds: &[knobas_core::payload::KindPaths]) {
+    sqlx::query(
+        "insert into sync.parent_declaration (adapter_kind, payload_paths) values ($1, $2)
+         on conflict (adapter_kind) do update set payload_paths = excluded.payload_paths",
+    )
+    .bind(adapter)
+    .bind(sqlx::types::Json(kinds))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A `forge` pull request: its reviewers are plain names under `asked`.
+async fn forge_pull_request(pool: &PgPool, key: &str, asked: &[&str], phase: &str) -> String {
+    item(
+        pool,
+        Mirrored {
+            source: "forge",
+            kind: "pr",
+            key,
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({ "asked": asked, "phase": phase }),
+            updated: days_ago(1),
+        },
+    )
+    .await
+}
+
+/// One rule's rows as [`inbox::items`] binds them, each row whole.
+async fn rule_rows(pool: &PgPool, sql: &str, who: &[String]) -> Vec<serde_json::Value> {
+    let wrapped = format!("select to_jsonb(q) from ({sql}) q");
+    sqlx::query_scalar(sqlx::AssertSqlSafe(wrapped))
+        .persistent(false)
+        .bind(who)
+        .bind(now())
+        .bind(false)
+        .bind(declarations().as_param())
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// The review request rule against the walk it replaced, for `who`: the same
+/// rows whole, in the same order. Returns the pull requests they name.
+async fn review_requests(pool: &PgPool, who: &[String]) -> Vec<String> {
+    let rule = inbox::planned_statements()
+        .into_iter()
+        .find(|(category, _)| *category == Category::ReviewRequest)
+        .unwrap()
+        .1;
+    let read = rule_rows(pool, rule, who).await;
+    let walked = rule_rows(pool, inbox::REVIEW_REQUEST_WALKED, who).await;
+    assert_eq!(
+        read, walked,
+        "the rule and the walk over every pull request"
+    );
+    let mut ids: Vec<String> = read
+        .iter()
+        .map(|row| row["entity_id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// **The pull requests that ask me are found through the names the database
+/// stores** (`sync.item_reviewer`, migration `0080`), and they are the ones
+/// the walk over every pull request's payload found: with the source's
+/// declarations stored, with another source's never stored, after a pull
+/// request is rewritten, and after the stored declarations change under the
+/// read.
+#[tokio::test]
+async fn a_review_request_is_found_through_the_names_the_database_stores() {
+    let pool = &scratch().await;
+    declare(pool, "gitea", &gitea_kinds()).await;
+    let asks = pull_request(pool, "acme/payouts#1", &[THEM, ME], "open").await;
+    let twice = pull_request(pool, "acme/payouts#2", &[ME, ME], "open").await;
+    let closed = pull_request(pool, "acme/payouts#3", &[ME], "closed").await;
+    let others = pull_request(pool, "acme/payouts#4", &[THEM], "open").await;
+    let nobody = pull_request(pool, "acme/payouts#5", &[], "open").await;
+    let withdrawn = pull_request(pool, "acme/payouts#6", &[ME], "open").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&withdrawn)
+        .execute(pool)
+        .await
+        .unwrap();
+    // A source whose declarations the database never stored: walked.
+    let walked = forge_pull_request(pool, "forge/app#1", &[ME], "active").await;
+    forge_pull_request(pool, "forge/app#2", &[THEM], "active").await;
+    forge_pull_request(pool, "forge/app#3", &[ME], "done").await;
+    // A ticket shaped like a pull request that asks me: not a kind the rule
+    // reads, and not one a stored declaration gives reviewers.
+    item(
+        pool,
+        Mirrored {
+            source: "gitea",
+            kind: "ticket",
+            key: "acme/payouts#7",
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({
+                "state": "open",
+                "requested_reviewers": [{ "login": ME }],
+            }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let stored: Vec<(String, String)> =
+        sqlx::query_as("select entity_id, reviewer from sync.item_reviewer order by 1, 2")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let named = |id: &String, who: &str| (id.clone(), who.to_owned());
+    assert_eq!(
+        stored,
+        [
+            named(&asks, THEM),
+            named(&asks, ME),
+            named(&twice, ME),
+            named(&closed, ME),
+            named(&others, THEM),
+            named(&withdrawn, ME),
+        ],
+        "a row a name a stored declaration reaches, none for {nobody} or the forge's"
+    );
+
+    let mut mine = vec![asks.clone(), twice.clone(), walked.clone()];
+    mine.sort();
+    assert_eq!(review_requests(pool, &me()).await, mine);
+    assert_eq!(
+        review_requests(pool, &[THEM.to_owned()]).await.len(),
+        3,
+        "the three that ask somebody else"
+    );
+    assert!(review_requests(pool, &[]).await.is_empty());
+    assert!(
+        review_requests(pool, &["nobody".to_owned()])
+            .await
+            .is_empty()
+    );
+    // Two names of one reader, both on one pull request: one request.
+    assert_eq!(
+        review_requests(pool, &[ME.to_owned(), THEM.to_owned()])
+            .await
+            .len(),
+        5
+    );
+
+    // A pull request rewritten moves its names with it.
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&others)
+        .bind(serde_json::json!({
+            "state": "open",
+            "requested_reviewers": [{ "login": ME }],
+        }))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&asks)
+        .bind(serde_json::json!({ "state": "open", "requested_reviewers": [] }))
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut mine = vec![others.clone(), twice.clone(), walked.clone()];
+    mine.sort();
+    assert_eq!(review_requests(pool, &me()).await, mine);
+
+    // The forge's declarations arrive: its pull requests are stored and read
+    // from the table, and answer as the walk did.
+    declare(pool, "forge", &forge_kinds()).await;
+    let forge_rows: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_reviewer where entity_id like 'forge:%'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        forge_rows, 3,
+        "the forge's three pull requests, one name each"
+    );
+    assert_eq!(review_requests(pool, &me()).await, mine);
+
+    // The stored declarations move away from the ones the read binds: the
+    // names are stored under other candidates, so the read walks again.
+    let mut moved = gitea_kinds();
+    moved[0].reviewers[0].at = knobas_core::payload::PayloadPath::of(["assignees"]);
+    declare(pool, "gitea", &moved).await;
+    let under_bound: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_reviewer where entity_id like 'gitea:%'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(under_bound, 0, "no gitea payload has `assignees`");
+    assert_eq!(review_requests(pool, &me()).await, mine);
+
+    // No declaration stored at all, and a deleted pull request's names gone.
+    sqlx::query("truncate sync.parent_declaration")
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("select count(*) from sync.item_reviewer")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(review_requests(pool, &me()).await, mine);
+    declare(pool, "gitea", &gitea_kinds()).await;
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(&twice)
+        .execute(pool)
+        .await
+        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("select count(*) from sync.item_reviewer where entity_id = $1")
+            .bind(&twice)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+    let mut mine = vec![others, walked];
+    mine.sort();
+    assert_eq!(review_requests(pool, &me()).await, mine);
+}
+
+/// `sync.resolve_item_reviewers` (migration `0080`) carries
+/// [`knobas_core::declared_list!`]'s expansion: the names it stores are the
+/// ones the walk reads, by the same expression.
+#[tokio::test]
+async fn the_stored_reviewers_are_read_by_the_walks_own_expression() {
+    let pool = &scratch().await;
+    let stored: String =
+        sqlx::query_scalar("select pg_get_functiondef('sync.resolve_item_reviewers'::regproc)")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let expansion = knobas_core::declared_list!("dd.decl", "reviewers");
+    assert!(
+        stored.contains(expansion),
+        "sync.resolve_item_reviewers no longer carries declared_list!'s expansion; \
+         a migration restates it:\n{expansion}"
     );
 }

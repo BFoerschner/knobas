@@ -6,9 +6,16 @@
   PR (`TfControls.test.svelte.ts` reads the section's table).
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfMenu from "../TfMenu.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { filterKeys } from "../filter-keys";
+
   let layout = $state<"board" | "list">("board");
   let mine = $state(true);
   let failing = $state(false);
+  let menuOpen = $state(false);
+  let menuFace = $state<HTMLButtonElement | null>(null);
 </script>
 
 <div class="tf-full">
@@ -38,7 +45,7 @@
 
   <div class="tf-fbar">
     <label class="tf-fsearch">
-      <input type="text" placeholder="Filter" aria-label="Filter" />
+      <input type="text" placeholder="Filter" aria-label="Filter" {@attach filterKeys()} />
     </label>
     <label class="tf-fsel">
       Branch
@@ -92,13 +99,46 @@
       </div>
     </section>
 
+    <section class="tf-panel tf-headed" aria-labelledby="tf-ctl-panel">
+      <header><h3 id="tf-ctl-panel">A panel's heading, above its box</h3></header>
+      <div class="tf-rows">
+        <div class="tf-r">
+          <TfKey value="PAY-231" lead />
+          <span class="tf-t">A key that leads a row, then <TfKey value="OPS-77" /> in a sentence</span>
+          <span class="tf-rend"><TfStateChip text="In Progress" tone="info" /><TfStateChip text="FAILURE" tone="err" /></span>
+        </div>
+        <div class="tf-r">
+          <span class="tf-t">A row's repeated actions stand in place of its last value on hover; a state's action stays</span>
+          <span class="tf-rend tf-rowend">
+            <span class="tf-dim tf-rowval">2 h ago</span>
+            <button type="button" class="tf-btn tf-sm">Ack</button>
+            <span class="tf-rowacts">
+              <button type="button" class="tf-btn tf-sm tf-ghost">Pause</button>
+              <button type="button" class="tf-btn tf-sm tf-ghost">Hide</button>
+            </span>
+          </span>
+        </div>
+        <div class="tf-r">
+          <span class="tf-t">A menu draws in the host at the shell's root, placed from its opener</span>
+          <span class="tf-rend">
+            <button type="button" class="tf-btn tf-sm" aria-haspopup="menu" aria-expanded={menuOpen} bind:this={menuFace} onclick={() => (menuOpen = !menuOpen)}>More</button>
+            <TfMenu bind:open={menuOpen} opener={menuFace} label="More">
+              <button type="button" role="menuitem" onclick={() => (menuOpen = false)}>An item</button>
+              <button type="button" role="menuitem" onclick={() => (menuOpen = false)}>Another item</button>
+            </TfMenu>
+          </span>
+        </div>
+      </div>
+    </section>
+
     <section class="tf-dialog" aria-labelledby="tf-ctl-dialog">
       <header><h2 id="tf-ctl-dialog">A dialog footer</h2></header>
-      <div class="tf-body"><p>The extra action on the far left, then a ghost Cancel, then the primary.</p></div>
+      <div class="tf-body"><p>The extra action on the far left, what the primary waits for, then a ghost Cancel, then the primary.</p></div>
       <footer>
         <button type="button" class="tf-btn tf-ghost tf-danger tf-first">Delete</button>
+        <p class="tf-dwhy" role="status">Name it first.</p>
         <button type="button" class="tf-btn tf-ghost">Cancel</button>
-        <button type="button" class="tf-btn tf-primary">Save</button>
+        <button type="button" class="tf-btn tf-primary" disabled>Save</button>
       </footer>
     </section>
 
@@ -140,6 +180,25 @@
         <button type="button" class="tf-btn tf-lg tf-no">Not related <kbd>N</kbd></button>
         <button type="button" class="tf-btn tf-lg tf-ghost">Decide later <kbd>S</kbd></button>
       </div>
+    </section>
+
+    <section class="tf-dialog" aria-labelledby="tf-ctl-form">
+      <header><h2 id="tf-ctl-form">A form</h2></header>
+      <div class="tf-body">
+        <div class="tf-formgrid">
+          <label for="tf-ctl-short">A short field</label>
+          <input id="tf-ctl-short" type="text" />
+          <label for="tf-ctl-pick">A select</label>
+          <select id="tf-ctl-pick"><option>main</option></select>
+          <label for="tf-ctl-wide">A wide field, its label above it</label>
+          <textarea id="tf-ctl-wide" rows="2"></textarea>
+          <p class="tf-dlg-note">A sentence takes the whole row. A disabled primary says what is missing here, in words.</p>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="tf-btn tf-ghost">Cancel</button>
+        <button type="button" class="tf-btn tf-primary" disabled title="Name it first">Save</button>
+      </footer>
     </section>
   </div>
 </div>

@@ -2,8 +2,8 @@
  * The Docs reader's rules (#859, requirements §10), pure: which page an
  * address opens, what the tree holds, the header's words and the anchors.
  *
- * Prototype-6 draws all three Docs addresses with one screen: `#/docs` opens
- * the page read last, `#/docs/space/<key>` that space's first page, and
+ * One screen draws the Docs addresses: `#/docs` is the Docs home (Björn,
+ * 2026-11-05), `#/docs/space/<key>` that space's own page, and
  * `#/page/<id>[/<section>]` the page itself. A key two sources hold is
  * addressed `#/docs/space/<source>:<key>` (#1455), as a ticket key two sources
  * hold is `#/job/<source>:<key>` (#1476).
@@ -31,9 +31,9 @@ import { isDone } from "../tickets/tickets";
 
 /** Where a Docs address points. */
 export type DocsPlace =
-  | { kind: "last" }
+  | { kind: "home" }
   | { kind: "space"; source: string | null; key: string }
-  | { kind: "page"; id: string; section: number | null }
+  | { kind: "page"; id: string; section: number | null; mention?: true }
   | { kind: "search"; words: string };
 
 /**
@@ -46,24 +46,24 @@ export type DocsPlace =
  */
 export function placeOf(rest: string[]): DocsPlace {
   const [head, next] = rest;
-  if (head === undefined || head === "") return { kind: "last" };
+  if (head === undefined || head === "") return { kind: "home" };
   // `#/docs/search/<words>` (#2425): the launcher's *Search Docs for …* row.
-  if (head === "search") return next ? { kind: "search", words: next } : { kind: "last" };
+  if (head === "search") return next ? { kind: "search", words: next } : { kind: "home" };
   if (head === "space") {
-    if (!next) return { kind: "last" };
+    if (!next) return { kind: "home" };
     const colon = next.indexOf(":");
     return colon > 0
       ? { kind: "space", source: next.slice(0, colon), key: next.slice(colon + 1) }
       : { kind: "space", source: null, key: next };
   }
   const section = next !== undefined && /^\d+$/.test(next) ? Number(next) : null;
-  return { kind: "page", id: head, section };
+  return next === MENTION ? { kind: "page", id: head, section, mention: true } : { kind: "page", id: head, section };
 }
 
 /**
  * The Docs area searching for `words` (#2425): what the launcher's *Search
- * Docs for …* row opens. The page under the hits is the one read last, as
- * `#/docs`'s is.
+ * Docs for …* row opens. The hits are in the rail, and the main column stays on
+ * the home until one is opened, so "no page matches" never sits beside an article.
  */
 export function docsSearchHash(words: string): string {
   return `#/docs/search/${encodeURIComponent(words)}`;
@@ -75,31 +75,99 @@ export function pageHash(entityId: string, section?: number): string {
   return section === undefined ? base : `${base}/${section}`;
 }
 
+/** What a page's address ends in when it opens at the reader's mention, as a ticket's does. */
+const MENTION = "mention";
+
+/** Where a *For you* row opens: the page, brought to the mention it is listed for (F-431). */
+export function forYouHash(entityId: string): string {
+  return `${pageHash(entityId)}/${MENTION}`;
+}
+
+/** Whether a block names the reader: what brings a page's comment into view from *For you*. */
+export function mentionsMe(block: DocBlock): boolean {
+  switch (block.type) {
+    case "heading":
+    case "paragraph":
+      return block.text.some((run) => run.type === "mention" && run.me);
+    case "list":
+      return block.items.flatMap((item) => item.blocks).some(mentionsMe);
+    case "table":
+      return block.rows.flat().flatMap((cell) => cell.blocks).some(mentionsMe);
+    case "panel":
+    case "collapsible":
+      return block.blocks.some(mentionsMe);
+    default:
+      return false;
+  }
+}
+
+/** Where the reader was on each page this session, for *Continue reading* (F-431). Held for the window, never written anywhere. */
+const reading = new Map<string, number>();
+
+export function noteReading(entityId: string, top: number): void {
+  reading.set(entityId, top);
+}
+
+export function readingAt(entityId: string): number {
+  return reading.get(entityId) ?? 0;
+}
+
+/** A new session, which is what each test is. */
+export function forgetReading(): void {
+  reading.clear();
+}
+
 /** A space's first page: the first one at the top of its tree. */
 export function firstPage(space: DocSpace): DocNode | undefined {
   return space.pages.find((p) => p.parent === null) ?? space.pages[0];
 }
 
 /**
- * The page an address opens, or `null` when the tree has nothing to open.
- * `#/docs` with nothing read yet opens the first space's first page. A space
- * named with its source is matched through {@link spaceId}; a bare key opens
- * the first space holding it, and so does a segment whose `:` belongs to the
- * key rather than naming a source.
+ * The page an address opens, or `null` when it opens none. Only a page's own
+ * address opens one: the home, a space's page and a search open none, so none
+ * of them records a visit.
  */
-export function pageToOpen(place: DocsPlace, tree: DocsTree): string | null {
-  if (place.kind === "page") return place.id;
-  if (place.kind === "space") {
-    const { source, key } = place;
-    const named = source === null ? undefined : spaceId({ source_id: source, key });
-    const space =
-      tree.spaces.find((s) => spaceId(s) === named) ??
-      tree.spaces.find((s) => s.key === (source === null ? key : `${source}:${key}`));
-    return space ? (firstPage(space)?.entity_id ?? null) : null;
+export function pageToOpen(place: DocsPlace): string | null {
+  return place.kind === "page" ? place.id : null;
+}
+
+/**
+ * The space a `#/docs/space/<key>` address names, or `undefined` when the tree holds none. A space named with its
+ * source is matched through {@link spaceId}; a bare key opens the first space holding it, and so does a segment whose
+ * `:` belongs to the key rather than naming a source.
+ */
+export function spaceAt(place: DocsPlace, tree: DocsTree): DocSpace | undefined {
+  if (place.kind !== "space") return undefined;
+  const { source, key } = place;
+  const named = source === null ? undefined : spaceId({ source_id: source, key });
+  return tree.spaces.find((s) => spaceId(s) === named) ?? tree.spaces.find((s) => s.key === (source === null ? key : `${source}:${key}`));
+}
+
+/** *Continue reading* on the Docs home: the page read last and where it sits, while the tree still holds it. */
+export function continueReading(tree: DocsTree): JobPage | null {
+  const id = tree.last_read;
+  if (id === null) return null;
+  const space = spaceOfPage(tree, id);
+  const page = space?.pages.find((p) => p.entity_id === id);
+  return space === undefined || page === undefined ? null : { entity_id: id, title: page.title, where: whereOf(space, page) };
+}
+
+/**
+ * A space's pages as its tile on the Docs home takes them: the top of its tree, then the level below and so on, so a
+ * space whose top holds one index page still fills its tile from what is under it. A page whose parent the space does
+ * not hold comes last.
+ */
+export function pagesByLevel(space: DocSpace): DocNode[] {
+  const under = childrenByParent(space);
+  const out: DocNode[] = [];
+  const seen = new Set<string>();
+  for (let level = under.get(null) ?? []; level.length > 0; ) {
+    const fresh = level.filter((p) => !seen.has(p.entity_id));
+    for (const page of fresh) seen.add(page.entity_id);
+    out.push(...fresh);
+    level = fresh.flatMap((p) => under.get(p.entity_id) ?? []);
   }
-  if (tree.last_read !== null) return tree.last_read;
-  const first = tree.spaces[0];
-  return first ? (firstPage(first)?.entity_id ?? null) : null;
+  return [...out, ...space.pages.filter((p) => !seen.has(p.entity_id))];
 }
 
 /** The space holding a page, if the tree has it. */
@@ -136,9 +204,46 @@ export function spaceHash(spaces: readonly SpaceRef[], space: SpaceRef): string 
   return `#/docs/space/${encodeURIComponent(shared ? `${space.source_id}:${space.key}` : space.key)}`;
 }
 
-/** The picker's words for a space: *ENG Engineering (12)*. */
-export function spaceLabel(space: DocSpace): string {
-  return `${space.key} ${space.name ?? ""}`.trim() + ` (${space.pages.length})`;
+/** A space's name: its own, else its key. */
+export function spaceName(space: { key: string; name: string | null }): string {
+  return space.name ?? space.key;
+}
+
+/** A space as {@link spaceSource} reads it: where it comes from and what it is called. */
+type NamedSpace = { source_id: string; source_name: string; key: string; name: string | null };
+
+/**
+ * The source a space names beside its name, or `null`. Only where a space of another source in `spaces` has the same
+ * name: the live Confluence's *Engineering* and the mock's read the same in Docs (the live run, 2026-11-09), and a space
+ * whose name is its own needs no more words, as Code's twin rows do (`twinRows`).
+ */
+export function spaceSource(space: NamedSpace, spaces: readonly NamedSpace[]): string | null {
+  const name = spaceName(space);
+  return spaces.some((s) => s.source_id !== space.source_id && spaceName(s) === name) ? space.source_name : null;
+}
+
+/** A space's name, with its source where another source's space has the same name: *Engineering on Tidewater Confluence*. */
+export function spaceTitle(space: NamedSpace, spaces: readonly NamedSpace[]): string {
+  const source = spaceSource(space, spaces);
+  return source === null ? spaceName(space) : `${spaceName(space)} on ${source}`;
+}
+
+/** The tree's space a page or hit of `source_id` names by `key`, for {@link spaceTitle}. */
+export function treeSpace<Space extends NamedSpace>(spaces: readonly Space[], sourceId: string, key: string): Space | undefined {
+  return spaces.find((s) => s.source_id === sourceId && s.key === key);
+}
+
+/** The picker's words for a space: *Engineering (12)*, and its source where another's has its name. */
+export function spaceLabel(space: DocSpace, spaces: readonly DocSpace[] = []): string {
+  return `${spaceTitle(space, spaces)} (${pageCount(space)})`;
+}
+
+/**
+ * How many live pages a space has: the count a part of the tree says (the instant-open pass, 2026-11-12,
+ * `tree-store.ts`), else the pages held, which the tree read whole holds all of.
+ */
+export function pageCount(space: Pick<DocSpace, "pages" | "page_count">): number {
+  return space.page_count ?? space.pages.length;
 }
 
 /**
@@ -170,6 +275,32 @@ export function foldsHolding(space: DocSpace, entityId: string | null): Set<stri
   // The backend breaks parent loops; the set stops the walk on a bad answer all the same.
   for (let at: string | null | undefined = entityId; at != null && !held.has(at); at = parentOf.get(at)) held.add(at);
   return held;
+}
+
+/**
+ * A space's pages in order of their path, each with the path it reads as, *Booking › Booking API v3 guide*. By segment,
+ * so a folder's pages stay together whatever sorts between its name and the separator (F-452).
+ */
+export function pagesByPath(space: Pick<DocSpace, "pages">): { entity_id: string; label: string }[] {
+  const byId = new Map(space.pages.map((page) => [page.entity_id, page]));
+  const rows = space.pages.map((page) => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    // The backend breaks parent loops; the set stops the walk on a bad answer all the same.
+    for (let at: DocNode | undefined = page; at !== undefined && !seen.has(at.entity_id); at = at.parent === null ? undefined : byId.get(at.parent)) {
+      seen.add(at.entity_id);
+      names.unshift(at.title);
+    }
+    return { entity_id: page.entity_id, names };
+  });
+  rows.sort((a, b) => {
+    for (let i = 0; i < Math.min(a.names.length, b.names.length); i++) {
+      const order = a.names[i]!.localeCompare(b.names[i]!);
+      if (order !== 0) return order;
+    }
+    return a.names.length - b.names.length;
+  });
+  return rows.map((row) => ({ entity_id: row.entity_id, label: row.names.join(" › ") }));
 }
 
 /**
@@ -238,6 +369,13 @@ export function revealMatch(match: Element): void {
     const title = fold.querySelector(":scope > summary");
     if (!title?.contains(match)) (fold as HTMLDetailsElement).open = true;
   }
+}
+
+/** How far down `article` a match sits. One in a closed fold has no box of its own, so it counts as where the fold is drawn. */
+export function matchLine(match: Element, article: Element): number {
+  let drawn = match;
+  while (drawn.getClientRects().length === 0 && drawn.parentElement !== null && drawn !== article) drawn = drawn.parentElement;
+  return drawn.getBoundingClientRect().top - article.getBoundingClientRect().top;
 }
 
 /**
@@ -357,6 +495,9 @@ export function createdBy(page: DocPage): { who: string; at: string | null } | n
  * *Linked from* says `50+`.
  */
 const BACKLINK_LIMIT = 50;
+
+/** Up to this many backlinks are listed outright; past it, by space, each a closed fold (F-424). */
+export const LINKED_FLAT = 6;
 
 /** *Linked from*'s heading: the number of backlinks, `50+` at the backend's limit (#2080). */
 export function linkedFromHeading(count: number): string {
@@ -520,6 +661,27 @@ export interface Section {
 }
 
 /** A body's sections, prototype-6's numbering: the first heading opens section 1. */
+/** A long table's rows a body draws at first (`TfDocBlocks`); the rest follow a piece a task. */
+export const TABLE_ROWS_FIRST = 40;
+
+/** The blocks of one run a body draws at first (`TfDocBlocks`), where one heading holds thousands. */
+export const DOC_BLOCKS_FIRST = 80;
+
+/**
+ * About how much a body draws of `blocks` at first, in characters of their JSON: a long table or list its first rows
+ * (`TfDocBlocks` draws the rest after). What a page body draws in each task is
+ * measured in this (`TfDocBody`), so a section of one huge table is not held back until a budget covers all of it.
+ */
+export function firstDrawWeight(blocks: DocBlock[]): number {
+  let n = 0;
+  for (const block of blocks.slice(0, DOC_BLOCKS_FIRST)) {
+    if (block.type === "table") n += JSON.stringify(block.rows.slice(0, TABLE_ROWS_FIRST + 1)).length;
+    else if (block.type === "list") n += JSON.stringify(block.items.slice(0, TABLE_ROWS_FIRST)).length;
+    else n += JSON.stringify(block).length;
+  }
+  return n;
+}
+
 export function sectionsOf(blocks: DocBlock[]): Section[] {
   const out: Section[] = [{ number: 0, heading: null, blocks: [] }];
   for (const block of blocks) {
@@ -530,11 +692,25 @@ export function sectionsOf(blocks: DocBlock[]): Section[] {
 }
 
 /**
- * The windows the reader folds its outline above the page in (#2081, R-10.9):
- * narrower than 1240px. `css/docs.css` writes the same query for the same
- * band, and `tf-css.test.ts` holds the two together.
+ * What the outline takes from the reader's page beside it: its column and the gap before it (`.tf-rd-sheet` in
+ * `css/docs.css`; `tf-css.test.ts` holds the two together).
  */
-export const READER_NARROW = "(max-width: 1239px)";
+export const OUTLINE_ROOM = 268 + 56;
+
+/** The narrowest reading column the outline stays beside, whatever the header's actions need. */
+export const READING_MIN = 660;
+
+/**
+ * What the reader's own width makes of its header (#2081, F-406), asked of what fits and not of the window: `room` is
+ * the sheet's inner width, `row` the width of the header's actions in one row, the view's *Sync now* among them, and
+ * `sync` what *Sync now* takes of that row, 0 where it has none.
+ *
+ * The outline folds above the page once the row would stop fitting beside it. Only when the row does not fit with the
+ * outline folded either does *Sync now* move into *More*, so no button ever wraps alone.
+ */
+export function readerFit(room: number, row: number, sync: number): { outlineFolds: boolean; syncInMore: boolean } {
+  return { outlineFolds: room - OUTLINE_ROOM < Math.max(row, READING_MIN), syncInMore: sync > 0 && room < row };
+}
 
 /**
  * The windows the reader's tree is a drawer over the page in (#2084, R-10.9):
@@ -556,14 +732,34 @@ export function sectionMatches(blocks: DocBlock[], stems: string[]): Map<number,
   return out;
 }
 
-/** The search field's scope, in the placeholder and the header line: *all spaces* or the space's name. */
-export function scopeName(space: DocSpace | undefined): string {
-  return space === undefined ? "all spaces" : (space.name ?? space.key);
+/** The search field's scope, in the placeholder and the header line: *all spaces* or the space's name, with its source where another's has the name. */
+export function scopeName(space: DocSpace | undefined, spaces: readonly DocSpace[] = []): string {
+  return space === undefined ? "all spaces" : spaceTitle(space, spaces);
 }
 
-/** The hits' header line: *5 pages in all spaces, 1 ms*. */
-export function hitsLine(total: number, scope: string, ms: number): string {
-  return `${total} page${total === 1 ? "" : "s"} in ${scope}, ${Math.max(1, ms)} ms`;
+/** The hits' header line: *5 pages in all spaces*. */
+export function hitsLine(total: number, scope: string): string {
+  return `${total} page${total === 1 ? "" : "s"} in ${scope}`;
+}
+
+/**
+ * A page's place as the crumb has it, the one way Docs words it: the space by name, then the pages above it, or only
+ * the space for a page at the top of it: *Engineering › Payments*, *Payments team*. Empty when nothing is known.
+ */
+export function pagePlace(space: { key: string; name: string | null } | null, path: string | null): string {
+  return [space === null ? null : (space.name ?? space.key), path].filter(Boolean).join(" › ");
+}
+
+/**
+ * Where a hit sits: {@link pagePlace}, and within one space's search without that space, so only the pages above it, if
+ * any. A space another source's space shares a name with says its source (`spaceTitle`), read from `spaces`, the tree's.
+ */
+export function hitWhere(hit: Pick<DocHit, "space" | "path"> & { entity_id?: string }, spanning: boolean, spaces: readonly DocSpace[] = []): string {
+  if (!spanning || hit.space === null) return pagePlace(null, hit.path);
+  const id = hit.entity_id ?? "";
+  const source = id.slice(0, Math.max(0, id.indexOf(":")));
+  const space = treeSpace(spaces, source, hit.space.key);
+  return pagePlace(space === undefined ? hit.space : { key: space.key, name: spaceTitle(space, spaces) }, hit.path);
 }
 
 /** What a snippet opens with: its section, or *Comment by Priya*. */
@@ -595,23 +791,23 @@ export function refusalReason(refusal: SectionRefusal, source: string): string {
   return `This section has a table, code or a macro. knobas edits text-only sections; edit this one in ${source}.`;
 }
 
-/** What *Copy link* copies: the knobas address, then the page in the source. */
-export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">): string {
-  return [pageHash(page.entity_id), page.web_url].filter((x): x is string => x !== null).join("\n");
+/** What *Copy link* copies: the knobas address, then the page in the source. A section's `#` copies its own address. */
+export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">, section?: number): string {
+  return [pageHash(page.entity_id, section), page.web_url].filter((x): x is string => x !== null).join("\n");
 }
 
 // ---------------------------------------------------------------------------
 // *This job* (#863, R-2.8): the job's pages, grouped by the reason it reaches them.
 // ---------------------------------------------------------------------------
 
-/** One page of the job: its title and where it sits, *OPS › Runbooks*. */
+/** One page of the job: its title and where it sits, *Operations › Runbooks*. */
 export interface JobPage {
   entity_id: string;
   title: string;
   where: string;
 }
 
-/** The job's pages under one reason: *Linked to PAY-231*, *Parent PAY-230*. */
+/** The job's pages under one reason: *Pages on PAY-231*, *Parent PAY-230*. */
 export interface JobPageGroup {
   reason: string;
   pages: JobPage[];
@@ -620,14 +816,14 @@ export interface JobPageGroup {
 /**
  * Why the job reaches a page, as its group's heading: one of the parent's own
  * links is *Parent PAY-230* (the job sections' label); a page linked to the
- * ticket is *Linked to PAY-231*; a page further down the walk names its first
- * step, *Via <title>*, when `titles` has the step's title.
+ * ticket is *Pages on PAY-231*, what the home calls them too, since a page the walk found may offer *Link to PAY-231*; a
+ * page further down the walk names its first step, *Via <title>*, when `titles` has the step's title.
  */
 export function reachReason(reached: Reached, job: string, titles: ReadonlyMap<string, string>): string {
   const origin = originLabel(reached);
   if (origin !== null) return origin;
   const step = reached.step === reached.entity_id ? undefined : titles.get(reached.step);
-  return step === undefined ? `Linked to ${job}` : `Via ${step}`;
+  return step === undefined ? `Pages on ${job}` : `Via ${step}`;
 }
 
 /** The ids of the reached pages the tree holds. */
@@ -636,7 +832,7 @@ export function reachedPages(reach: readonly Reached[], tree: DocsTree): Set<str
   return new Set(tree.spaces.flatMap((s) => s.pages.filter((p) => ids.has(p.entity_id)).map((p) => p.entity_id)));
 }
 
-/** A page's place: its space's key, then its ancestors' titles from the top. */
+/** A page's {@link pagePlace}, its ancestors' titles from the top. */
 function whereOf(space: DocSpace, page: DocNode): string {
   const byId = new Map(space.pages.map((p) => [p.entity_id, p]));
   const path: string[] = [];
@@ -648,7 +844,7 @@ function whereOf(space: DocSpace, page: DocNode): string {
     path.unshift(node.title);
     up = node.parent;
   }
-  return [space.key, ...path].join(" › ");
+  return pagePlace(space, path.join(" › "));
 }
 
 /**
@@ -674,4 +870,21 @@ export function jobPageGroups(
     }
   }
   return [...groups].map(([reason, pages]) => ({ reason, pages }));
+}
+
+/**
+ * `next`, a page read again, with what `drawn` already draws where it reads the same: its body's blocks and each
+ * comment's, so a return to a kept page, or a sync's re-read, rebuilds none of it (PR #2479: the largest Confluence
+ * page drew its 216 KB body again on every return, 75 to 94 ms in one task).
+ */
+export function keepDrawn(drawn: DocPage | null, next: DocPage): DocPage {
+  if (drawn === null || drawn.entity_id !== next.entity_id) return next;
+  const same = <T>(a: T, b: T) => a === b || JSON.stringify(a) === JSON.stringify(b);
+  const blocks = same(drawn.blocks, next.blocks) ? drawn.blocks : next.blocks;
+  const comments = next.comments.map((c, i) => {
+    const was = drawn.comments[i];
+    return was !== undefined && same(was, c) ? was : c;
+  });
+  const sections = same(drawn.sections, next.sections) ? drawn.sections : next.sections;
+  return { ...next, blocks, comments, sections };
 }

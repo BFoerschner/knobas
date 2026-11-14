@@ -357,9 +357,25 @@ async fn a_started_server_listens_on_the_ipv4_loopback_alone() {
     };
     let on_v4 = answers(std::net::Ipv4Addr::LOCALHOST.into());
     let on_v6 = answers(std::net::Ipv6Addr::LOCALHOST.into());
+    // What the server was told, not only what answered: no wildcard (`*`,
+    // `0.0.0.0`, `::`) and no other interface on any platform.
+    let (listen,): (String,) = sqlx::query_as("show listen_addresses")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let connector = db.connector();
     db.stop().await.unwrap();
     assert!(on_v4, "the server answers on 127.0.0.1");
     assert!(!on_v6, "the server must not listen on ::1 as well");
+    assert_eq!(
+        listen, "127.0.0.1",
+        "the server listens on the loopback alone"
+    );
+    assert!(
+        connector.url().contains("@127.0.0.1:"),
+        "every client dials the loopback: {}",
+        connector.url().split('@').nth(1).unwrap_or_default()
+    );
 }
 
 /// #1779: a postmaster that dies under its handle is seen gone by the
@@ -416,14 +432,28 @@ async fn the_apps_server_runs_with_fsync_on_after_a_restart_too() {
     .await
     .unwrap();
     let started = durability(db.pool()).await;
+    let cache = shared_buffers(db.pool()).await;
 
     knobas_db::test_util::kill_server(dir.path());
     db.restart().await.expect("the dead server starts again");
     let restarted = durability(db.pool()).await;
+    let cache_restarted = shared_buffers(db.pool()).await;
     db.stop().await.unwrap();
 
     assert_eq!(started, DURABLE_SETTINGS, "the started server");
     assert_eq!(restarted, DURABLE_SETTINGS, "the restarted server");
+    // And with the cache every start passes it (the query audit of
+    // 2026-11-12), not the 128 MB its `postgresql.conf` says.
+    assert_eq!(cache, "256MB", "the started server");
+    assert_eq!(cache_restarted, "256MB", "the restarted server");
+}
+
+/// What the server behind `pool` runs `shared_buffers` at.
+async fn shared_buffers(pool: &sqlx::PgPool) -> String {
+    sqlx::query_scalar("select current_setting('shared_buffers')")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 /// #1896: an orphan this build left is adopted, and the adopting handle's

@@ -44,7 +44,7 @@
 </script>
 
 {#if boxes.length > 1}
-  <section class="tf-panel tf-chain" aria-label="Chain">
+  <section class="tf-panel tf-headed tf-chain" aria-label="Chain">
     <header><h3>Chain on {#if branch !== null}<span class="tf-mono">{branch}</span>{:else}the default branch{/if}</h3></header>
     <div class="tf-chainrow">
       {#each boxes as box, i (i)}

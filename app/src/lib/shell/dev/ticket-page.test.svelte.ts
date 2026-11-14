@@ -148,7 +148,7 @@ function key(name: string, options: KeyboardEventInit = {}): void {
 }
 
 function crumbs(): (string | undefined)[] {
-  return [...(shown(".tf-crumbs")?.querySelectorAll("a, strong") ?? [])].map((part) => part.textContent?.trim());
+  return [...(shown(".tf-crumbs")?.querySelectorAll("a:not(.tf-esc), strong") ?? [])].map((part) => part.textContent?.trim());
 }
 
 function hint(): string | null {
@@ -282,18 +282,23 @@ test("Resume work chooses the ticket and starts the timer on it; the foot then s
   await until(() => sent.some((call) => call.cmd === "start_timer"), "the timer never started");
   const started = sent.find((call) => call.cmd === "start_timer")!.args["target"] as { entity_id?: string };
   expect(started.entity_id).toBe("mock:PAY-231");
-  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
+  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log…", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
   expect(pageCard()!.querySelector(".tf-clock"), "the running time is the chip's alone").toBeNull();
 });
 
-test("Start work chooses the ticket and runs the stepper", async () => {
+test("Start work shows the stepper and chooses nothing, and running its steps chooses the ticket (F-130)", async () => {
   await openOn("#/ticket/mock%3APAY-240", "Payout dashboard latency");
   const page = await pageOf("PAY-240");
   expect(shown(".tf-steps"), "reading runs no stepper").toBeNull();
   await until(() => foot(page)?.textContent?.trim() === "Start work", "Start work never offered");
   foot(page)!.click();
-  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
   await until(() => shown(".tf-steps") !== null, "the stepper never ran");
+  expect(chosenJob.id, "a look at the steps chooses nothing").toBeNull();
+  expect(mood(pageCard()!)).not.toBe("pinned");
+  const run = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-steps footer button")].find((button) => button.textContent === "Run all steps");
+  await until(() => run() !== undefined && run()!.getAttribute("aria-disabled") !== "true", "Run all steps never offered");
+  run()!.click();
+  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
   expect(mood(pageCard()!)).toBe("pinned");
 });
 
@@ -346,10 +351,10 @@ test("on a ticket page, Link to targets that ticket, not the chosen job", async 
   await search("PAY-231");
   inLauncher("Tab");
   const rows = [...target.querySelectorAll('[aria-label="Actions on the selected result"] .tf-ln-nm')].map((row) => row.textContent?.trim());
-  expect(rows[0]).toBe("Link to PAY-240");
+  expect(rows).toContain("Link to PAY-240");
 });
 
-test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Tickets", async () => {
+test("a ticket result in ⌘K opens the ticket page, and Esc there goes back to the page it was pressed over (F-047)", async () => {
   await openOn("#/builds", "Builds");
   await search("PAY-240");
   inLauncher("Enter");
@@ -357,7 +362,7 @@ test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Ticke
   await pageOf("PAY-240");
   await until(() => launcher() === null, "the launcher stayed open");
   key("Escape");
-  await until(() => location.hash === "#/tickets", `Esc went to ${location.hash}`);
+  await until(() => location.hash.startsWith("#/builds"), `Esc went to ${location.hash}`);
 });
 
 test("a bare #/ticket lands on Tickets, and an unreadable id says it was not found", async () => {
@@ -366,7 +371,7 @@ test("a bare #/ticket lands on Tickets, and an unreadable id says it was not fou
   expect(lit()).toBe("Tickets");
 
   location.hash = "#/ticket/mock%3ANOPE-1";
-  await until(() => shown(".tf-empty")?.textContent?.includes("No ticket NOPE-1 in the mirror") ?? false, "an unreadable ticket never said so");
+  await until(() => shown(".tf-empty")?.textContent?.includes("knobas does not hold this ticket.") ?? false, "an unreadable ticket never said so");
 });
 
 /** A failed run of the fixture, and its address (`runHash`). */
@@ -540,11 +545,11 @@ test("PAY-231's card: the key with its copy button, the status chip, then Epic, 
 
   expect(page.querySelector(".tf-tkhead .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(page.querySelector(".tf-tkhead button.tf-tkcopy")?.getAttribute("aria-label")).toBe("Copy the key and the title");
-  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In Progress");
+  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In progress");
   expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Reporter", "Assignee", "Type", "Priority", "Labels", "Logged"]);
   expect(facts(page)[1]).toEqual(["Reporter", "LH Lena Hoffmann"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me"), "somebody else's report is not in full ink").toBe(false);
-  expect(facts(page)[2]![1]).toBe("MA mara (you)");
+  expect(facts(page)[2]![1]).toBe("ML Mara Lindqvist (you)");
   expect(avatar(page, "Assignee")?.classList.contains("tf-me"), "my own ticket's avatar is in full ink").toBe(true);
   expect(facts(page).slice(3)).toEqual([
     ["Type", "Story"],
@@ -609,7 +614,7 @@ test("a ticket with no estimate draws the time alone and no meter; my own report
   await until(() => facts(page).some(([label]) => label === "Logged"), `the facts read ${JSON.stringify(facts(page))}`);
   expect(facts(page).find(([label]) => label === "Logged")).toEqual(["Logged", "3h 40m"]);
   expect(meter(page)).toBeNull();
-  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "MA mara (you)"]);
+  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "ML Mara Lindqvist (you)"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me")).toBe(true);
 });
 
@@ -637,7 +642,7 @@ test("OPS-77's card draws no row its source leaves empty: no Epic, no Reporter, 
   const page = await pageOf("OPS-77");
   await until(() => facts(page).length > 0, "no facts drawn");
   expect(facts(page)).toEqual([
-    ["Assignee", "PR priya"],
+    ["Assignee", "PN Priya Nair"],
     ["Priority", "Low"],
     ["Labels", "on-call"],
   ]);

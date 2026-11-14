@@ -145,11 +145,13 @@ function mountIt(props: Record<string, unknown> = {}) {
     createLink: vi.fn(async () => ({})),
     submitWrite: vi.fn(async () => ({})),
     ackAlert: vi.fn(async () => ({})),
+    unackAlert: vi.fn(async () => ({})),
     copyText: vi.fn(async () => {}),
     openCheckout: vi.fn(async () => ["code", "/src/svc"]),
     repoOf: vi.fn(async () => "gitea:acme/svc"),
     clone: vi.fn(async () => {}),
     inboxAck: vi.fn(async () => {}),
+    inboxUnack: vi.fn(async () => {}),
     inboxDone: vi.fn(async () => {}),
     branches: vi.fn(async (_repoId: string) => BRANCHES),
     // No sets unless a test gives some: the table's other rows stay as they were.
@@ -165,6 +167,8 @@ function mountIt(props: Record<string, unknown> = {}) {
     target,
     props: {
       open: true,
+      // These tests type a kind's word to reach its row; *Go to* has its own.
+      places: [],
       onnavigate: calls.navigate,
       onclose: () => {},
       ontimer: calls.timer,
@@ -181,14 +185,16 @@ function mountIt(props: Record<string, unknown> = {}) {
       },
       sheetPorts: {
         createLink: calls.createLink,
-        submitWrite: calls.submitWrite,
+        submitWrite: calls.submitWrite as never,
         ackAlert: calls.ackAlert,
+        unackAlert: calls.unackAlert,
         copyText: calls.copyText,
         openCheckout: calls.openCheckout,
         checkoutSettings: async () => APPS,
         repoOf: calls.repoOf,
         clone: calls.clone,
         inboxAck: calls.inboxAck,
+        inboxUnack: calls.inboxUnack,
         inboxDone: calls.inboxDone,
         branches: calls.branches,
         linkSets: calls.linkSets,
@@ -279,10 +285,10 @@ test("Tab lifts the row under the box, labels the box Actions and empties it; th
   expect(pinned?.querySelector(".tf-ln-t")?.textContent).toBe("svc");
   expect(pinned?.querySelector(".tf-ln-k")?.textContent).toBe("acme");
   expect(labels()).toEqual([
-    "Link to PAY-999",
     "Create pull request…",
     "Pull requests",
     "Branches",
+    "Link to PAY-999",
     "Open in VS Code",
     "Open in IntelliJ",
     "Clone",
@@ -391,18 +397,18 @@ test("Link to is offered on any page the shell names a job for, and never on the
   await settle();
   await sheetOn("ticket");
   expect(labels()).not.toContain("Link to PAY-231");
-  expect(labels()[0]).toBe("Start timer");
+  expect(labels()[0]).toBe("Work on this");
 });
 
-test("a ticket: Start timer, Work on this, Copy key; Start timer hands the ticket to the shell", async () => {
+test("a ticket: Work on this, Start timer, Copy key; Start timer hands the ticket to the shell, by its key", async () => {
   const calls = mountIt();
   await settle();
   await sheetOn("ticket");
-  expect(labels()).toEqual(["Link to PAY-999", "Start timer", "Work on this", "Favourite", "Copy key"]);
+  expect(labels()).toEqual(["Work on this", "Start timer", "Link to PAY-999", "Favourite", "Copy key"]);
   press("ArrowDown");
   press("Enter");
   await settle();
-  expect(calls.timer).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts");
+  expect(calls.timer).toHaveBeenCalledWith("jira:PAY-231", "PAY-231");
 });
 
 test("Start timer is on tickets only", async () => {
@@ -428,12 +434,12 @@ test("a pull request: the files, the conversation, Approve queued as a write", a
   const calls = mountIt();
   await settle();
   await sheetOn("pr");
-  expect(labels()).toEqual(["Link to PAY-999", "Review the files", "Conversation", "Approve", "Open in VS Code", "Open in IntelliJ", "Favourite", "Copy title"]);
+  expect(labels()).toEqual(["Review the files", "Conversation", "Approve", "Link to PAY-999", "Open in VS Code", "Open in IntelliJ", "Favourite", "Copy title"]);
   narrow("approve");
   press("Enter");
   await settle();
   expect(calls.submitWrite).toHaveBeenCalledWith({ Approve: { entity: "gitea:acme/svc#142", body: "" } });
-  expect(lastToast()).toBe("Approval queued for Backoff");
+  expect(lastToast()).toBe("Queued: approve Backoff.");
 });
 
 test("Review the files and Conversation go to the pull request's tabs", async () => {
@@ -503,6 +509,17 @@ test("a pipeline runs, queued as a write", async () => {
   expect(calls.submitWrite).toHaveBeenCalledWith({ TriggerBuild: { entity: "teamcity:Pay_Build" } });
 });
 
+test("a second Enter while a write is out sends nothing", async () => {
+  const calls = mountIt();
+  await settle();
+  await sheetOn("pipeline");
+  narrow("run");
+  press("Enter");
+  press("Enter");
+  await settle();
+  expect(calls.submitWrite).toHaveBeenCalledTimes(1);
+});
+
 test("a monitor is acknowledged", async () => {
   const calls = mountIt();
   await settle();
@@ -512,6 +529,24 @@ test("a monitor is acknowledged", async () => {
   await settle();
   expect(calls.ackAlert).toHaveBeenCalledWith("kuma:7");
   expect(lastToast()).toBe("Acknowledged payout-api");
+  const undo = toasts.items.at(-1)!.action!;
+  expect(undo.label).toBe("Undo");
+  undo.run();
+  await settle();
+  expect(calls.unackAlert).toHaveBeenCalledWith("kuma:7");
+});
+
+test("Undo on a monitor that has since recovered says so in words, as the Inbox does", async () => {
+  const calls = mountIt();
+  await settle();
+  await sheetOn("monitor");
+  narrow("ack");
+  press("Enter");
+  await settle();
+  calls.unackAlert.mockRejectedValueOnce({ code: "not_found", message: 'no open alert on "kuma:7"', source_id: null });
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(lastToast()).toBe("payout-api has already left the inbox. It was resolved at its source.");
 });
 
 test("Copy title and Copy key put the text on the clipboard", async () => {
@@ -756,16 +791,16 @@ test("Add to a set… on a page picks a set and re-saves it with the page as one
   expect(lastToast()).toBe("Added SEPA design to Payments");
 });
 
-test("Show a set on a ticket picks a set and adds one manual rule for the ticket", async () => {
+test("Apply a link set on a ticket picks a set and adds one manual rule for the ticket", async () => {
   const calls = mountIt();
   calls.linkSets.mockImplementation(async () => SETS);
   await settle();
   await sheetOn("ticket");
-  narrow("show");
-  expect(labels()[0]).toBe("Show a set on PAY-231…");
+  narrow("apply");
+  expect(labels()[0]).toBe("Apply a link set…");
   press("Enter");
   await settle();
-  expect(modeLabel()).toBe("Show on PAY-231");
+  expect(modeLabel()).toBe("Apply to PAY-231");
   narrow("ops");
   press("Enter");
   await settle();
@@ -773,13 +808,13 @@ test("Show a set on a ticket picks a set and adds one manual rule for the ticket
   expect(lastToast()).toBe("Ops now shows on PAY-231");
 });
 
-test("a set: Show on the job adds one manual rule for the job's ticket (story 38)", async () => {
+test("a set: Apply to the job adds one manual rule for the job's ticket (story 38)", async () => {
   const calls = mountIt();
   calls.linkSets.mockImplementation(async () => SETS);
   await settle();
   await sheetOn("set");
-  expect(labels()).toEqual(["Open", "Show on PAY-999"]);
-  narrow("show");
+  expect(labels()).toEqual(["Open", "Apply to PAY-999"]);
+  narrow("apply");
   press("Enter");
   await settle();
   expect(calls.saveLinkSet).toHaveBeenCalledTimes(1);
@@ -852,9 +887,10 @@ test("Merge… follows the source's declared merge: picks the style and queues t
   press("Enter");
   await settle();
   expect(calls.submitWrite).toHaveBeenCalledWith({
-    MergePullRequest: { entity: "gitea:acme/svc#142", style: "squash", delete_branch: true, message: "Backoff (#142)" },
+    // No tick to untick here, so the branch stays: nothing that removes data is preselected (F-028).
+    MergePullRequest: { entity: "gitea:acme/svc#142", style: "squash", delete_branch: false, message: "Backoff (#142)" },
   });
-  expect(lastToast()).toBe("Merge queued for Backoff");
+  expect(lastToast()).toBe("Queued: merge Backoff.");
 });
 
 test("Merge… the source draws disabled shows its reason and writes nothing; no declared merge, no row", async () => {

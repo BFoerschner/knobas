@@ -14,6 +14,10 @@
   gotcha 7).
 -->
 <script lang="ts">
+  import { kindTag } from "../assets/tree";
+  import { aimed } from "./aim";
+  import { chordLabel } from "../shell/platform";
+  import { shortKey } from "../tf/tickets/tickets";
   import type { Tone } from "../ipc/entity";
 
   let {
@@ -24,6 +28,7 @@
     mono = false,
     title,
     chord = null,
+    source = null,
     id,
     selected,
     onopen,
@@ -41,6 +46,8 @@
     title: string;
     /** The chord bound to the row (#2429): a saved list's, which opens it from anywhere. */
     chord?: string | null;
+    /** The source's name, where another row in the list has this row's key (#1476): two tickets, not one drawn twice. */
+    source?: string | null;
     /** The option's element id, which the listbox names while it is active (#1411). */
     id: string;
     selected: boolean;
@@ -56,10 +63,13 @@
   role="option"
   aria-selected={selected}
   onclick={onopen}
-  onmouseenter={onhover}
+  onpointermove={aimed(onhover)}
 >
-  <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{monogram}</span>
-  <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>
+  <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{kindTag(monogram)}</span>
+  <!-- A forge's issue key is told apart by its repository and number, which the cell's ellipsis cut: ten Gitea issues
+       read *tidewater/pay…* on the live run (2026-11-09). Shortened as a ticket card shortens it, the whole on hover. -->
+  <span class="tf-ln-k" class:tf-ln-mono={mono} title={mono && shortKey(cell) !== cell ? cell : undefined}>{mono ? shortKey(cell) : cell}</span>
   <span class="tf-ln-t">{title}</span>
-  {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}
+  {#if source}<span class="tf-ln-src" title={source}>{source}</span>{/if}
+  {#if chord}<kbd class="tf-ln-chord" title="Its key">{chordLabel(chord)}</kbd>{/if}
 </button>

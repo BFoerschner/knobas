@@ -168,3 +168,91 @@ fn announce_context<R: tauri::Runtime>(
 ) {
     crate::events::emit(app, None, crate::events::CONTEXTS_CHANGED, row);
 }
+
+// -- a card's sections over one walk (the query audit of PR #2479) ----------
+
+/// What [`card_reads`] answers: the ticket's reach, and each section's rows
+/// read through it, in the order the sections were asked.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct CardRows {
+    pub reached: Vec<knobas_core::reach::Reached>,
+    /// One list per section asked, in order: its page from offset 0. A
+    /// section whose read failed answers no rows, as its row then draws
+    /// nothing.
+    pub sections: Vec<Vec<EntityRow>>,
+}
+
+/// [`card_reads`] over a pool, for a test.
+///
+/// # Errors
+///
+/// `invalid` for a section filter the list read refuses;
+/// [`Internal`](crate::IpcErrorCode::Internal) when the walk fails.
+pub async fn card_reads_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+    sections: &[knobas_core::entity_list::EntityFilter],
+    limit: u32,
+) -> Result<CardRows, IpcError> {
+    let reached = knobas_core::reach::reach(pool, entity_id).await?;
+    let ids: Vec<String> = reached.iter().map(|row| row.entity_id.clone()).collect();
+    let declarations = declared_paths(pool, registry).await?;
+    let limit = limit.min(crate::commands::ROW_CEILING);
+    // One after another on one connection: four reads of a few milliseconds
+    // each, where four requests at once held four of the pool's five.
+    let mut rows = Vec::with_capacity(sections.len());
+    for section in sections {
+        let filter = knobas_core::entity_list::EntityFilter {
+            reach: Some(entity_id.to_owned()),
+            ..section.clone()
+        };
+        let read = async {
+            let fillers = match filter.role.as_deref() {
+                Some(role) => Some(crate::sources::crud::role_scope(pool, registry, role).await?),
+                None => None,
+            };
+            let page = knobas_core::entity_list::read_reached(
+                pool,
+                &filter,
+                limit,
+                0,
+                &declarations,
+                fillers,
+                Some(&ids),
+            )
+            .await?;
+            Ok::<_, IpcError>(page.rows)
+        };
+        rows.push(read.await.unwrap_or_else(|error| {
+            tracing::warn!(?error, "a card section could not be read");
+            Vec::new()
+        }));
+    }
+    let sections = rows;
+    Ok(CardRows { reached, sections })
+}
+
+/// A ticket's card sections in one read (the query audit of PR #2479,
+/// 2026-11-12): what `entity_id` reaches (as [`job_reach`]), walked once,
+/// and each of `sections` read through it as `list_entities` reads a filter
+/// whose `reach` is `entity_id`, at most `limit` rows each. The Tickets
+/// preview asked the same five things in five requests, each walking the
+/// reach again, on every selection.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// when the walk fails.
+#[tauri::command]
+pub async fn card_reads(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    sections: Vec<knobas_core::entity_list::EntityFilter>,
+    limit: u32,
+) -> Result<CardRows, IpcError> {
+    let pool = lifecycle.pool()?;
+    card_reads_inner(&pool, lifecycle.registry(), &entity_id, &sections, limit).await
+}

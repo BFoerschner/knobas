@@ -22,7 +22,7 @@
   never unwinds two ladders.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import type { SearchHit } from "../ipc/search";
   import { launcherHome, search } from "../ipc/search";
@@ -34,6 +34,7 @@
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { linkFailureMessage } from "./links";
   import { DEFAULT_RELATION, RELATIONS, drawn } from "./relations";
+  import { sentenceCase } from "../tf/tickets/tickets";
 
   let {
     fromId,
@@ -59,11 +60,15 @@
   onMount(() => () => session.dispose());
 
   let target = $state<SearchHit | null>(null);
-  let relation = $state(DEFAULT_RELATION);
+  /** The field holds a relation's words. A curated one's words mean its stored id; anything else is stored as typed (§5a). */
+  const wordsOf = (id: string) => sentenceCase(RELATIONS.find((option) => option.id === id)?.forward ?? id);
+  let relationWords = $state(wordsOf(DEFAULT_RELATION));
+  const relation = $derived(RELATIONS.find((option) => option.forward === relationWords.trim().toLowerCase())?.id ?? relationWords);
   let note = $state("");
   /** What the last attempt refused with, shown in the dialog rather than as a toast. */
   let failure = $state<string | null>(null);
   let writing = $state(false);
+  let primary = $state<HTMLButtonElement | null>(null);
 
   /** Unique per instance, so two stacked dialogs cannot share a list id. */
   const listId = `relations-${Math.random().toString(36).slice(2, 9)}`;
@@ -83,6 +88,8 @@
     target = hit;
     failure = null;
     session.set("");
+    // The box that held focus is gone, and the pick made the primary ready.
+    void tick().then(() => primary?.focus());
   }
 
   /**
@@ -149,11 +156,11 @@
   }
 </script>
 
-<TfDialog closeButton title="Link to…" subtitle={fromTitle} {onclose}>
+<TfDialog why={target ? null : "Pick what to link it to."} title="Link {fromTitle}" {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
-        <label class="l" for="{listId}-target">What to link to</label>
+        <label class="l" for="{listId}-target">What to link to <small class="tf-req">required</small></label>
         {#if target}
           <div class="picked">
             <Monogram text={monogramOf(target.kind)} label={labelOf(target.kind)} />
@@ -216,7 +223,7 @@
           type="text"
           list={listId}
           autocomplete="off"
-          bind:value={relation}
+          bind:value={relationWords}
           onkeydown={onfieldkeydown}
         />
         <!--
@@ -225,7 +232,7 @@
         -->
         <datalist id={listId}>
           {#each RELATIONS as option (option.id)}
-            <option value={option.id}>{option.forward}</option>
+            <option value={wordsOf(option.id)}></option>
           {/each}
         </datalist>
         <div class="chips">
@@ -233,9 +240,9 @@
             <button
               class="pill"
               class:on={relation === option.id}
-              onclick={() => (relation = option.id)}
+              onclick={() => (relationWords = wordsOf(option.id))}
             >
-              {option.id}
+              {wordsOf(option.id)}
             </button>
           {/each}
         </div>
@@ -262,7 +269,7 @@
 
   {#snippet footer()}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button class="tf-btn tf-primary" disabled={!target || writing} onclick={() => void submit()}>
+    <button class="tf-btn tf-primary" bind:this={primary} disabled={!target || writing} onclick={() => void submit()}>
       {writing ? "Linking…" : "Link"}
     </button>
   {/snippet}
@@ -271,16 +278,33 @@
 <style>
   .fields {
     display: grid;
-    gap: 12px;
+    gap: 8px;
+  }
+
+  /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
+  .fld {
+    display: grid;
+    grid-template-columns: var(--tf-label) minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: center;
+  }
+
+  .fld > :global(*):not(.l) {
+    grid-column: 2;
+  }
+
+  .fld :global(input.inp),
+  .fld :global(select.inp) {
+    height: var(--control-h);
+  }
+
+  .fld > :global(.tf-btn) {
+    justify-self: start;
   }
 
   .fld .l {
-    display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
-    margin-bottom: 4px;
+    font-size: var(--t-sm);
+    color: var(--ink-2);
   }
 
   .fld .chips {
@@ -297,10 +321,10 @@
     border: 1px solid var(--hair2);
     border-radius: 2px;
     background: var(--bg);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
-  .picked > * {
+  .picked > :is(.t, .k) {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -312,6 +336,7 @@
   .hits {
     max-height: 210px;
     overflow: auto;
+    background: var(--under);
     margin-top: 6px;
     border: 1px solid var(--hair);
     border-radius: 2px;
@@ -328,12 +353,12 @@
   .hint {
     margin-top: 6px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .fail {
     color: var(--fail);
-    font-size: 12px;
+    font-size: var(--t-xs);
     line-height: 1.5;
   }
 </style>

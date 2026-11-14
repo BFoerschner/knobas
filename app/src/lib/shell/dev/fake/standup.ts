@@ -3,7 +3,7 @@
  * tickets (#829; Settings > Standup, #831).
  *
  * Answers `standup_digest`, `standup_protocol`, `publish_standup_protocol`,
- * `standup_publish_target`, `set_standup_publish_target`,
+ * `publish_standup_protocol_again`, `standup_publish_target`, `set_standup_publish_target`,
  * `create_action_item_ticket` and `action_item_ticket`.
  *
  * **Shape from prototype-6's `tmStandup`**: yesterday three lines (PAY-231
@@ -36,11 +36,15 @@
  * - A publish and an action-item ticket start `pending` and read `sent` on the
  *   second ask, which is what the write queue does between a click and a
  *   sync; nothing is written anywhere.
+ * - *Publish again* (F-327) likewise, with the body sent kept per day, so
+ *   `changed_since` is true to the note as `save_note` left it. `?fake-standup-moved`
+ *   draws the page as edited in the source once published, and
+ *   `?fake-standup-again=refused` or `=held` stops every *Publish again* so.
  */
 import type { Handlers } from "../fake-tauri";
 import type { ActionItemTicket, DigestLine, Protocol, PublishTarget } from "../../../ipc/entity";
 import { CORPUS } from "./corpus";
-import { seedNote } from "./notes";
+import { noteBody, seedNote } from "./notes";
 
 /** The ticket filed for the protocol's first action item, titled by its words (#1433). */
 const FILED_TICKET = "mock:OPS-131";
@@ -115,12 +119,20 @@ export function handlers(): Handlers {
     seedNote(`note:standup-${day}`, `Standup ${day}`, protocolBody(day), [{ target_id: FILED_TICKET, relation: "related" }]);
     return protocolOf(day);
   };
+  /** The body the queue last carried to each day's page. */
+  const carried = new Map<string, string>();
+  /** Each day's *Publish again* still on its way. */
+  const going = new Map<string, NonNullable<Protocol["again"]>>();
+  const flags = new URLSearchParams(globalThis.location?.search);
   const protocolOf = (day: string): Protocol => ({
     day,
     note_id: `note:standup-${day}`,
     page_title: day,
     publication: published.get(day) ?? null,
     owed_tickets: [],
+    changed_since: carried.has(day) && carried.get(day) !== noteBody(`note:standup-${day}`),
+    page_moved: flags.has("fake-standup-moved") && published.get(day)?.linked === true,
+    again: going.get(day) ?? null,
   });
   /** A re-read of a pending publication finds it sent, as the queue would. */
   const settle = (day: string): Protocol => {
@@ -128,8 +140,16 @@ export function handlers(): Handlers {
     if (publication?.state === "pending") {
       published.set(day, { ...publication, state: "sent", page_entity_id: "confluence:sepa", linked: true });
     }
+    const again = going.get(day);
+    if (again?.state === "pending") {
+      // The body it carried is what the page holds now.
+      carried.set(day, sending.get(day) ?? "");
+      going.delete(day);
+    }
     return protocol(day);
   };
+  /** The body each *Publish again* on its way carries. */
+  const sending = new Map<string, string>();
 
   return {
     standup_digest: (args) => {
@@ -168,6 +188,22 @@ export function handlers(): Handlers {
       const write_id = nextWrite++;
       asked.set(write_id, 0);
       published.set(day, { write_id, state: "pending", detail: null, page_entity_id: null, linked: false });
+      const answer = protocol(day);
+      carried.set(day, noteBody(answer.note_id) ?? "");
+      return protocolOf(day);
+    },
+    publish_standup_protocol_again: (args) => {
+      const day = String(args["day"]);
+      const body = noteBody(`note:standup-${day}`) ?? "";
+      const stop = flags.get("fake-standup-again");
+      if (!going.has(day) && carried.get(day) !== body) {
+        sending.set(day, body);
+        going.set(day, {
+          write_id: nextWrite++,
+          state: stop === "refused" ? "refused" : stop === "held" ? "held" : "pending",
+          detail: stop === "refused" ? "Confluence says the page version is out of date." : stop === "held" ? "The page changed after this was queued." : null,
+        });
+      }
       return protocol(day);
     },
     standup_publish_target: () => target,

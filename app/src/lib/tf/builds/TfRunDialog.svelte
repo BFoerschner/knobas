@@ -25,7 +25,9 @@
   *queued* at once (R-9.8).
 -->
 <script lang="ts">
+  import { Windowed } from "../../shell/windowed.svelte";
   import { onMount, untrack } from "svelte";
+  import TfKey from "../TfKey.svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
@@ -176,7 +178,10 @@
     return cannotOverride !== null ? field.default : (values[field.name] ?? "");
   }
   const shownBranch = $derived(branch.trim() || fallback || "the default branch");
-  const summary = $derived(summaryOf(shownBranch, overrides));
+  const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
+  /** The footer's word for a run with no overrides is *Start from*'s, so the two lines can't disagree. */
+  const startWord = $derived(start === "from" ? (from?.number != null ? fromLabel : "this run’s settings") : pickedPreset !== null ? `preset ${pickedPreset.name}` : "defaults");
+  const summary = $derived(summaryOf(shownBranch, overrides, startWord));
 
   // -- the branch combobox -----------------------------------------------------
 
@@ -186,6 +191,11 @@
   let open = $state(false);
   let active = $state(0);
   const shown = $derived(matchingBranches(choices, branch));
+  /**
+   * A pipeline's thousands of branches draw only the options near the list's scroll (the extremes pass, 2026-11-13);
+   * ↑ and ↓ bring the active one into it.
+   */
+  const optWin = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.name, estimate: 30, scrolls: true });
   const listId = `tf-run-branches-${uid}`;
 
   function choose(name: string) {
@@ -197,14 +207,16 @@
     if (event.key === "ArrowDown") {
       open = true;
       active = Math.min(active + 1, shown.length - 1);
+      optWin.reveal(active);
       event.preventDefault();
     } else if (event.key === "ArrowUp") {
       active = Math.max(active - 1, 0);
+      optWin.reveal(active);
       event.preventDefault();
     } else if (event.key === "Enter" && open && shown[active] !== undefined) {
       choose(shown[active]!.name);
       event.preventDefault();
-    } else if (event.key === "Escape" && open) {
+    } else if (event.key === "Escape" && open && shown.length > 0) {
       // The list closes first; the dialog stays.
       open = false;
       event.stopPropagation();
@@ -217,7 +229,6 @@
   const title = $derived(
     from !== null ? `Run ${pipeline.name} again, from ${from.number !== null ? `#${from.number}` : "this run"}` : `Run ${pipeline.name}`,
   );
-  const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
 
   function run() {
     const options = { clean_checkout: clean, first_in_queue: firstInQueue };
@@ -268,14 +279,17 @@
           onkeydown={onBranchKey}
         />
         {#if open && shown.length > 0}
-          <div class="tf-opts" id={listId} role="listbox" aria-label="Branches">
-            {#each shown as choice, at (choice.name)}
+          <div class="tf-opts" id={listId} role="listbox" aria-label="Branches" {@attach optWin.list}>
+            {#if optWin.before > 0}<div class="tf-wgap" aria-hidden="true" {@attach optWin.room("before")}></div>{/if}
+            {#each optWin.slice(shown) as choice, i (choice.name)}
+              {@const at = optWin.start + i}
               <div
                 id={`${listId}-${at}`}
                 role="option"
                 tabindex="-1"
                 aria-selected={at === active}
                 class:tf-act={at === active}
+                {@attach optWin.row(choice.name)}
                 onmousedown={(event) => {
                   event.preventDefault();
                   choose(choice.name);
@@ -284,6 +298,7 @@
                 <span>{choice.name}</span>{#if choice.note !== null}<span class="tf-dim">{choice.note}</span>{/if}
               </div>
             {/each}
+            {#if optWin.after > 0}<div class="tf-wgap" aria-hidden="true" {@attach optWin.room("after")}></div>{/if}
           </div>
         {/if}
       </div>
@@ -296,7 +311,7 @@
       <p class="tf-dim tf-run-refused">{cannotOverride}</p>
     {/if}
     {#if fields.length > 0}
-      <div class="tf-prm">
+      <div class="tf-formgrid">
         {#each fields as field (field.name)}
           {@const id = `tf-run-p-${uid}-${field.name}`}
           <label class="tf-k" for={id} title={field.label !== null ? field.name : undefined}>{field.label ?? field.name}</label>
@@ -326,7 +341,7 @@
       </div>
     {/if}
     {#if extra.length > 0 && cannotOverride === null}
-      <div class="tf-prm">
+      <div class="tf-formgrid">
         {#each extra as row, at (at)}
           <input class="tf-k" type="text" placeholder="name" aria-label={`Name of added parameter ${at + 1}`} bind:value={row.name} />
           <input type="text" placeholder="value" aria-label={`Value of added parameter ${at + 1}`} bind:value={row.value} />
@@ -336,7 +351,7 @@
     {/if}
     <button
       type="button"
-      class="tf-linkish tf-run-add"
+      class="tf-btn tf-sm tf-run-add"
       {...refusedAttrs(cannotOverride)}
       onclick={() => {
         if (cannotOverride === null) extra = [...extra, { name: "", value: "" }];
@@ -364,7 +379,7 @@
     {/if}
   {/snippet}
   {#snippet footer()}
-    <span class="tf-runsum">{summary}</span>
+    <span class="tf-runsum">On <TfKey value={shownBranch} />{summary.slice(`On ${shownBranch}`.length)}</span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" onclick={run}>Run</button>
   {/snippet}

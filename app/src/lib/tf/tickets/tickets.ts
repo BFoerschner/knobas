@@ -3,12 +3,11 @@
  * draws, what a card's corner says, what the preview's button reads, and
  * what *Around this ticket* counts.
  */
-import type { EntityDetail, KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { EntityDetail, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
-import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 import { keyOf } from "../../time/format";
 import { entityAddress } from "../address";
-import type { SectionTally } from "../job/sections";
+import { stateWord } from "../state-word";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
 export const COLUMN_CAP = 8;
@@ -37,7 +36,35 @@ export function isDone(status: string | null): boolean {
  * name; a ticket's status is its card's (#1423).
  */
 export function columnName(status: string | null): string {
-  return status ?? "No status";
+  return status === null || status === "" ? "No status" : stateWord(status);
+}
+
+/**
+ * A column's head. A view's column called after a status it holds reads as that status does; one named anything else keeps
+ * the words it was given, by the reader or by a board in the source, because `stateWord` takes states and *Waiting on Björn*
+ * is a name.
+ */
+export function columnHead(name: string | null, columns: readonly { name: string; statuses: readonly (string | null)[] }[]): string {
+  const own = columns.find((column) => column.name === name);
+  return name !== null && name !== "" && own !== undefined && !own.statuses.includes(name) ? name : columnName(name);
+}
+
+/**
+ * A key as a card can hold it: a forge's `owner/repo/issues/143` or `owner/repo#143` is told apart by its repository
+ * and number, which an end-of-line ellipsis would cut. Every other key is short already.
+ */
+export function shortKey(key: string): string {
+  const issue = /^[^/\s]+\/([^/\s]+)\/issues\/(\d+)$/.exec(key) ?? /^[^/\s]+\/([^/\s#]+)#(\d+)$/.exec(key);
+  return issue === null ? key : `${issue[1]}#${issue[2]}`;
+}
+
+/**
+ * A source's word as a label: Gitea says *closed* and *high* where Jira says *Done* and *High*, and the shell's
+ * labels are sentence case. Only the first letter moves, for a word that is not a state, such as a priority: a status goes
+ * through {@link columnName}, and so `stateWord`.
+ */
+export function sentenceCase<Word extends string | null>(word: Word): Word | string {
+  return word === null || word === "" ? word : word[0]!.toLocaleUpperCase() + word.slice(1);
 }
 
 /**
@@ -51,25 +78,95 @@ export function columnDone(column: MiniBoardColumn, listed: readonly string[] = 
 }
 
 /**
- * The cards a column draws (R-3.4): up to eight, three for a done one
- * ({@link columnDone}), fifty of either while the filter has words, and all
- * of them once expanded.
+ * How many cards one press of a column's *Show more* adds (2026-11-10, Björn's mirror): a Done column of 8,000
+ * tickets drew all of them at once, 73,000 nodes, after a read of every card on the board.
  */
+export const MORE_STEP = 50;
+
+/** Past this many cards drawn, a column with more also offers them in the list, which windows its rows. */
+export const LIST_POINTER_AT = 200;
+
+/**
+ * How many cards a column draws (R-3.4): up to eight, three for a done one ({@link columnDone}), fifty of either
+ * while the filter has words, and {@link MORE_STEP} more for each press of its *Show more* (`pages`).
+ */
+export function shownCount(total: number, pages: number, typing: boolean, done: boolean): number {
+  return Math.min(total, (typing ? TYPED_CAP : done ? DONE_CAP : COLUMN_CAP) + pages * MORE_STEP);
+}
+
+/** The cards a column draws: {@link shownCount} of them. */
 export function drawnCards(
   column: MiniBoardColumn,
-  expanded: boolean,
+  pages: number,
   typing: boolean,
   done: boolean = columnDone(column),
 ): MiniBoardCard[] {
-  if (expanded) return column.cards;
-  return column.cards.slice(0, typing ? TYPED_CAP : done ? DONE_CAP : COLUMN_CAP);
+  return column.cards.slice(0, shownCount(column.cards.length, pages, typing, done));
 }
 
-/** What the column's *Show N more* button says, or `null` when it draws every card. */
+/**
+ * `board` without the ticket `key` names, in every source that holds it: a ticket's sub-tasks. The search reads
+ * `under:<key>` as "under it at any depth, or the ticket itself", so the board it answers holds the ticket too, and a
+ * ticket with no sub-tasks counted itself, once per source that has it (the live run, 2026-11-09). Each total drops by
+ * the cards it held of the ticket, so a board read with every card (`perColumn` null) comes out exact. A column or
+ * lane left with nothing goes.
+ */
+export function withoutTicket(board: MiniBoard, key: string): MiniBoard {
+  const own = (entityId: string) => keyOf(entityId) === key;
+  const columns = columnsWithout(board.columns, key);
+  const lanes = board.lanes
+    .map((lane) => {
+      const cells = lane.columns.map((cell) => {
+        const ids = cell.ids.filter((id) => !own(id));
+        return { ...cell, ids, total: Math.max(0, cell.total - (cell.ids.length - ids.length)) };
+      });
+      const dropped = lane.columns.reduce((all, cell) => all + cell.ids.length, 0) - cells.reduce((all, cell) => all + cell.ids.length, 0);
+      return { ...lane, columns: cells.filter((cell) => cell.total > 0), count: Math.max(0, lane.count - dropped) };
+    })
+    .filter((lane) => lane.count > 0);
+  return { ...board, columns, lanes };
+}
+
+/** {@link withoutTicket}'s columns, for a read that needs no lanes. */
+export function columnsWithout(columns: readonly MiniBoardColumn[], key: string): MiniBoardColumn[] {
+  return columns
+    .map((column) => {
+      const cards = column.cards.filter((card) => keyOf(card.entity_id) !== key);
+      return { ...column, cards, total: Math.max(0, column.total - (column.cards.length - cards.length)) };
+    })
+    .filter((column) => column.total > 0);
+}
+
+/**
+ * What the column's *Show more* button says, or `null` when it draws every card: the {@link MORE_STEP} it adds and,
+ * while more are left than that, of how many (*Show 50 of 8013 more done*).
+ */
 export function moreLine(column: MiniBoardColumn, drawn: number, done: boolean = columnDone(column)): string | null {
   const rest = column.total - drawn;
   if (rest <= 0) return null;
-  return done ? `Show ${rest} more done` : `Show ${rest} more`;
+  const what = rest <= MORE_STEP ? `${rest}` : `${MORE_STEP} of ${rest}`;
+  return done ? `Show ${what} more done` : `Show ${what} more`;
+}
+
+/** The column's way to the list once it draws {@link LIST_POINTER_AT} cards and holds more, or `null`. */
+export function listPointer(column: MiniBoardColumn, drawn: number): string | null {
+  return drawn >= LIST_POINTER_AT && column.total > drawn ? `See all ${column.total} in the list` : null;
+}
+
+/**
+ * The filter words that keep a column's tickets, for its way to the list: its statuses as `status:` values, any one
+ * of which a ticket may have (the grammar reads two values of one key as either). A column of no status has no words.
+ */
+export function columnWords(column: MiniBoardColumn, listed: readonly string[]): string {
+  const statuses = listed.length > 0 ? listed : column.status === null ? [] : [column.status];
+  return statuses.map((status) => "status:" + quotedWord(status)).join(" ");
+}
+
+/** A filter value as the grammar takes it: bare, or in double quotes when it holds a space or a quote of its own. */
+function quotedWord(value: string): string {
+  const QUOTE = String.fromCharCode(34);
+  if (!value.includes(" ") && !value.includes(QUOTE)) return value;
+  return QUOTE + value.split(QUOTE).join("") + QUOTE;
 }
 
 /**
@@ -95,15 +192,61 @@ export function commentsLine(count: number | null): string | null {
 }
 
 /**
- * The initials in a card's corner: the first letters of an account's first
- * two parts (`mara.lindqvist` is *ML*), or its first two letters, or *–* for
- * nobody.
+ * The initials on an avatar: a display name's first and last letters (*Lena Hoffmann* is *LH*), else the first two
+ * letters of an account's first part, or *–* for nobody. One account has one avatar, whichever form a read answered:
+ * `mara` and `mara.lindqvist` are both *MA*.
  */
 export function initials(assignee: string | null): string {
   if (assignee === null) return "–";
+  const names = assignee.trim().split(/\s+/);
+  if (names.length >= 2) return (names[0]![0]! + names.at(-1)![0]!).toUpperCase();
   const parts = assignee.split(/[.\s_@-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
   return (parts[0] ?? assignee).slice(0, 2).toUpperCase();
+}
+
+/**
+ * What a card calls its assignee (F-107): the name the source keeps beside the
+ * account, which is what a ticket's comments call the same person, else the
+ * account. Filters and lanes stay on the account, the stored value.
+ */
+export function assigneeName(card: Pick<MiniBoardCard, "assignee" | "assignee_name">): string | null {
+  return card.assignee_name ?? card.assignee;
+}
+
+/** What a list's narrow column calls someone: the first word of the name the source gave, on one line. The whole name is the cell's title. */
+export function firstName(name: string | null): string | null {
+  return name?.trim().split(/\s+/)[0] || null;
+}
+
+/**
+ * What the List calls someone, in its column and its *Assignee* select (F-107): the first word of the source's name, or with no
+ * name the account's first part with a capital, so `mara` and `Mara Lindqvist` read alike a few rows apart. Drawn, never stored: filters stay on the account.
+ */
+export function listName(card: Pick<MiniBoardCard, "assignee"> & { assignee_name?: string | null }): string | null {
+  if (card.assignee_name) return firstName(card.assignee_name);
+  const part = card.assignee?.split(/[.\s_@-]+/).find(Boolean);
+  return part === undefined ? null : part.charAt(0).toUpperCase() + part.slice(1);
+}
+
+/** Someone the cards read have named or assigned. */
+export interface CardPerson {
+  name: string | null;
+  mine: boolean;
+}
+
+/**
+ * *Assignee*'s options (F-161, F-165): the accounts the source offers and the people on the cards read, each by the name the
+ * column draws, or the whole name where two people share one. You are *Me*, so your own cards add no row of their own.
+ */
+export function assigneeOptions(accounts: readonly string[], people: ReadonlyMap<string, CardPerson>): { value: string; label: string }[] {
+  const offered = [...new Set([...accounts, ...[...people].filter(([, person]) => !person.mine).map(([account]) => account)])].filter((account) => account !== "@me");
+  const short = (account: string) => listName({ assignee: account, assignee_name: people.get(account)?.name ?? null }) ?? account;
+  const taken = new Map<string, number>();
+  for (const account of offered) taken.set(short(account), (taken.get(short(account)) ?? 0) + 1);
+  const named = offered
+    .map((value) => ({ value, label: (taken.get(short(value)) ?? 0) > 1 ? (people.get(value)?.name ?? value) : short(value) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return accounts.includes("@me") ? [{ value: "@me", label: "Me" }, ...named] : named;
 }
 
 /**
@@ -113,7 +256,7 @@ export function initials(assignee: string | null): string {
  */
 export type TicketFacts = Pick<
   MiniBoardCard,
-  "entity_id" | "key" | "title" | "status" | "assignee" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
+  "entity_id" | "key" | "title" | "status" | "assignee" | "assignee_name" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
 >;
 
 /**
@@ -126,7 +269,7 @@ export type TicketFacts = Pick<
  * it is read, or when it cannot be, draws the path line alone.
  */
 export function ticketFacts(
-  detail: Pick<EntityDetail, "row" | "author" | "status" | "priority">,
+  detail: Pick<EntityDetail, "row" | "author" | "author_name" | "status" | "priority">,
   mine: boolean,
   parentTitle: string | null,
 ): TicketFacts {
@@ -136,6 +279,7 @@ export function ticketFacts(
     title: detail.row.title,
     status: detail.status,
     assignee: detail.author,
+    ...(detail.author_name ? { assignee_name: detail.author_name } : {}),
     priority: detail.priority,
     path: detail.row.path,
     parent_title: parentTitle,
@@ -150,79 +294,38 @@ export function ticketFacts(
  * decides it: *Start work* on a To Do ticket of mine, *Open job* on a done one
  * or somebody else's, *Resume work* on the rest of mine. The state is the
  * ticket's own status, whatever column it stands in (#1423). `chooses` says
- * where it goes: *Start work* and *Resume work* to the job's address
- * (`jobHash`), which makes it the chosen job; *Open job* only reads, so to the
- * ticket's page (`ticketHash`), which chooses nothing (spec #2396).
+ * where it goes: *Resume work* to the job's address (`jobHash`), which makes it
+ * the chosen job; *Open ticket* only reads, so to the ticket's page
+ * (`ticketHash`), which chooses nothing (spec #2396); and *Start work* to the
+ * ticket's page too, because it chooses nothing until its steps run (F-130).
+ * `asks` is what the ticket's page does on arriving (`job/chosen.svelte.ts`).
  */
 export function previewAction(
   card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
   timerOnIt: boolean,
-): { label: string; note: string; chooses: boolean } {
+  chosen = false,
+): { label: string; note: string; chooses: boolean; asks?: "steps" | "timer" } {
   const lower = card.status?.toLowerCase() ?? "";
+  // Already the job: nothing to start from here, and its page has the timer.
+  if (chosen) return { label: "Open ticket", note: timerOnIt ? "Your timer is running on this ticket." : "This is the ticket you are on.", chooses: false };
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",
-      note: "Creates a branch and PR, moves it to In Progress, starts the timer. You review each step.",
-      chooses: true,
+      note: "Shows the steps first. Nothing happens until you run them.",
+      chooses: false,
+      asks: "steps",
     };
   }
-  if (lower === "done") return { label: "Open job", note: "Done. Opening shows what was attached.", chooses: false };
+  if (lower === "done") return { label: "Open ticket", note: "Done. Opening shows what was attached.", chooses: false };
   if (!card.mine) {
-    return { label: "Open job", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned.", chooses: false };
+    return { label: "Open ticket", note: card.assignee ? `Assigned to ${assigneeName(card)}.` : "Unassigned.", chooses: false };
   }
   return {
     label: "Resume work",
     note: timerOnIt ? "Your timer is running on this ticket." : "Starts the timer on this ticket.",
     chooses: true,
+    ...(timerOnIt ? {} : { asks: "timer" as const }),
   };
-}
-
-/** One line of *Around this ticket*: a section and what it holds. */
-export interface AroundLine {
-  section: string;
-  /** "7 builds" */
-  count: string;
-  /** "1 failing or down", or `null` when nothing is. */
-  failing: string | null;
-}
-
-/**
- * *Around this ticket* (R-3.9): one line per section of what the ticket's
- * job would show, from the tally of the job's section reads
- * (`reachTally`, #1030) — so a build is its configuration's latest, and a
- * ticket nobody has opened yet counts what it reaches — grouped the way the room's tiles
- * group kinds (`sectionOf`). Tickets are the view's own and not a section
- * here. A section of one kind says that kind's plural; a mixed one (Code)
- * says *items*. Tone `err` is what fails or is down. A line the Builds read
- * counted (`section: "builds"`) counts under Builds whatever its run kind
- * (#1256): the mirror answered it for the CI role, so the shell need not know
- * the role's run kinds (#1300).
- */
-export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTally, "section">>)[] | null): AroundLine[] {
-  const sections = new Map<string, { label: string; order: number; kinds: Set<string>; n: number; bad: number }>();
-  for (const line of tally ?? []) {
-    if (line.kind === "ticket" || line.count === 0) continue;
-    const section = sectionOf(line.section === "builds" ? "build" : line.kind);
-    const held = sections.get(section.id) ?? { label: section.label, order: section.order, kinds: new Set(), n: 0, bad: 0 };
-    held.kinds.add(line.kind);
-    held.n += line.count;
-    if (line.tone === "err") held.bad += line.count;
-    sections.set(section.id, held);
-  }
-  return [...sections.values()]
-    .sort((a, b) => a.order - b.order)
-    .map((held) => {
-      const only = held.kinds.size === 1 ? [...held.kinds][0]! : null;
-      const one = held.n === 1;
-      const noun = (
-        only === null ? (one ? "item" : "items") : one ? kindSingular(only) : kindLabel(only)
-      ).toLowerCase();
-      return {
-        section: held.label,
-        count: `${held.n} ${noun}`,
-        failing: held.bad > 0 ? `${held.bad} failing or down` : null,
-      };
-    });
 }
 
 /** What a ticket board's lanes split by (R-3.5): nothing, or one field. */

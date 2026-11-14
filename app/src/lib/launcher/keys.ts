@@ -13,6 +13,8 @@
  * an action's chord per kind, which runs that action of the Tab sheet on the
  * selected row inside the launcher.
  */
+import { chordLabel } from "../shell/platform";
+
 const MODIFIERS = [
   ["metaKey", "⌘"],
   ["ctrlKey", "⌃"],
@@ -89,16 +91,16 @@ export function isHelpPress(event: Mods & Pick<KeyboardEvent, "key">): boolean {
 
 /** Why a press cannot be bound, said as the panel says it, or `null` when it is free (or no chord). */
 export function refusalOf(event: Mods & Pick<KeyboardEvent, "code" | "key">): string | null {
-  if (isHelpPress(event)) return `${event.metaKey ? "⌘" : "⌃"}? is the launcher's own`;
+  if (isHelpPress(event)) return `${chordLabel(event.metaKey ? "⌘?" : "⌃?")} is the launcher's own`;
   const chord = chordOf(event);
   if (chord === null || !(event.metaKey || event.ctrlKey)) return null;
   // ⌘[ and ⌘] are history's (`shell/keys.ts`), typed with ⌥ and a digit on a
   // German board, so they are a chord there.
-  if (event.key === "[" || event.key === "]") return `${chord} is the shell's own`;
+  if (event.key === "[" || event.key === "]") return `${chordLabel(chord)} is the shell's own`;
   // The owners read the character, the chord reads the code: on a German
   // board undo is ⌘ on KeyY. Either reading refuses.
   const owner = TAKEN[chord.slice(-1)] ?? (event.key.length === 1 ? TAKEN[event.key.toUpperCase()] : undefined);
-  return owner ? `${chord} is the ${owner}'s own` : null;
+  return owner ? `${chordLabel(chord)} is the ${owner}'s own` : null;
 }
 
 /** The kind's word in a sentence ("on any pull request"): "pull request", "repository", else the kind. */

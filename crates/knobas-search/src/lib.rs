@@ -361,7 +361,12 @@ impl Searcher {
         let started = Instant::now();
         let query = validate(query)?;
 
-        let vocab = self.vocabulary().await?;
+        // The vocabulary, and beside it which mirror the match stage reads
+        // (migration `0084`, [`corpus::mirror`]): one probe, asked while the
+        // vocabulary's two reads are out, so it adds no wait of its own.
+        let (vocab, mirror) = tokio::try_join!(self.vocabulary(), async {
+            Ok(corpus::mirror(&self.pool).await?)
+        })?;
         let mut parsed = query::parse(&query.raw, &vocab);
         // Pipelines under the shell's word, and no runs or commits (#2422).
         let frames = frames::LauncherFrames::of(&vocab.declarations);
@@ -404,7 +409,10 @@ impl Searcher {
         let rows: Vec<RawHit> = if known_under.admits_nothing {
             Vec::new()
         } else {
-            let corpora = corpus::searched(self.corpora(), filters.titles);
+            // The mirror's match stage off its search copies alone, once
+            // every copy holds what the stage reads (migration `0084`).
+            let corpora =
+                corpus::with_mirror(corpus::searched(self.corpora(), filters.titles), mirror);
             let built = sql::search_sql(
                 &corpora,
                 text,
@@ -413,7 +421,7 @@ impl Searcher {
                 PER_GROUP,
                 query.limit,
             );
-            sql::query_as_with(built).fetch_all(&self.pool).await?
+            self.rows_of(built, text).await?
         };
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
@@ -439,6 +447,27 @@ impl Searcher {
             coverage,
             took_ms: took_ms(started),
         })
+    }
+
+    /// The rows of a statement [`sql::search_sql`] built: through the indexes
+    /// when it has words to match ([`sql::fetch_matched`]), the narrow table
+    /// read whole for a single character
+    /// ([`sql::fetch_matched_by_a_letter`]), as the planner chooses for a
+    /// browse.
+    async fn rows_of(
+        &self,
+        built: sql::SearchSql,
+        words: Option<&str>,
+    ) -> Result<Vec<RawHit>, sqlx::Error> {
+        match words {
+            // One character matches most of any mirror: read whole, where
+            // the whole is the narrow table and not the mirror's own rows.
+            Some(text) if text.chars().count() == 1 && built.matches_narrowly() => {
+                sql::fetch_matched_by_a_letter(&self.pool, built).await
+            }
+            Some(_) => sql::fetch_matched(&self.pool, built).await,
+            None => sql::query_as_with(built).fetch_all(&self.pool).await,
+        }
     }
 
     /// Every entity id of `kind` the query admits, uncapped (#810): the
@@ -481,6 +510,23 @@ impl Searcher {
         raw: &str,
         kind: &str,
     ) -> Result<Option<Vec<String>>, SearchError> {
+        match Self::admits_in(vocab, raw, kind)? {
+            Admits::Every => Ok(None),
+            Admits::Nothing => Ok(Some(Vec::new())),
+            Admits::Some(narrowing) => Ok(Some(narrowing.ids(&self.pool).await?)),
+        }
+    }
+
+    /// What `raw` admits of `kind`, as [`matching_ids`](Self::matching_ids)
+    /// reads it, without asking the mirror for the ids: for a reader that
+    /// narrows a scan of its own by the query ([`Narrowing`]), the Tickets
+    /// view's board, which then reads its tickets once and not twice (the
+    /// broad-keys pass, 2026-11-13).
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Invalid`] for a query past the launcher's length.
+    pub fn admits_in(vocab: &Vocabulary, raw: &str, kind: &str) -> Result<Admits, SearchError> {
         let query = validate(SearchQuery {
             titles: false,
             raw: raw.to_owned(),
@@ -489,17 +535,18 @@ impl Searcher {
         })?;
         let parsed = query::parse(&query.raw, vocab);
         let mut filters = query::merge(&parsed, &query.filters);
-        let words = query::word_alternatives(&parsed.query.text);
-        if words.is_empty() && filters.is_empty() {
-            return Ok(None);
+        let alternatives = query::word_alternatives(&parsed.query.text);
+        if alternatives.is_empty() && filters.is_empty() {
+            return Ok(Admits::Every);
         }
         if !filters.kinds.is_empty() && !filters.kinds.iter().any(|k| k == kind) {
-            return Ok(Some(Vec::new()));
+            return Ok(Admits::Nothing);
         }
         filters.kinds = vec![kind.to_owned()];
-        let built = sql::ids_sql(&words, &filters);
-        let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(&self.pool).await?;
-        Ok(Some(ids.into_iter().map(|(id,)| id).collect()))
+        Ok(Admits::Some(Box::new(Narrowing {
+            alternatives,
+            filters,
+        })))
     }
 
     /// The Docs search (#860, R-10.3, R-10.4): the live pages a query
@@ -573,14 +620,14 @@ impl Searcher {
             });
         }
         let built = sql::search_sql(
-            &[&corpus::LIVE_ITEM],
+            &[corpus::mirror(&self.pool).await?],
             text,
             parsed.prefix_last_term,
             &filters,
             query.limit,
             query.limit,
         );
-        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        let rows = self.rows_of(built, text).await?;
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
             .find(|g| g.kind == PAGE);
@@ -751,6 +798,37 @@ impl Searcher {
         })
     }
 
+    /// The parents [`Searcher::filter_parent_suggestions`] offers, read by
+    /// the whole statement however many parent rows there are: what the
+    /// newest rows' shortcut has to answer the same as.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the read fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn whole_parent_suggestions(
+        &self,
+        under: &str,
+    ) -> Result<Vec<ParentSuggestion>, SearchError> {
+        suggest::whole_parents(&self.pool, under).await
+    }
+
+    /// The ticket keys' values [`Searcher::filter_suggestions`] offers, as
+    /// `(key, value, detail)` rows, read from what the database stores and
+    /// then by the walk of every sampled payload the statement made before:
+    /// the two a test holds equal.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if a read fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn field_suggestion_rows_both_ways(
+        &self,
+    ) -> Result<(Vec<suggest::FieldRow>, Vec<suggest::FieldRow>), SearchError> {
+        let vocab = self.vocabulary().await?;
+        suggest::field_rows_both_ways(&self.pool, &vocab).await
+    }
+
     /// The plan the board's recency read runs under.
     ///
     /// # Errors
@@ -820,6 +898,96 @@ impl Searcher {
     /// [`SearchError::Db`] if the delete fails.
     pub async fn delete_list(&self, id: &str) -> Result<(), SearchError> {
         saved::delete(&self.pool, id).await
+    }
+}
+
+/// What a query admits of one kind ([`Searcher::admits_in`]).
+#[derive(Debug)]
+pub enum Admits {
+    /// A query with neither words nor a filter: it narrows nothing.
+    Every,
+    /// One that admits none of the kind, a `type:` naming another among
+    /// them.
+    Nothing,
+    /// The rows of the kind the [`Narrowing`] keeps.
+    Some(Box<Narrowing>),
+}
+
+/// A query as the rows of one kind it keeps: the words and keys of
+/// [`Searcher::matching_ids`], parsed and not yet asked of the mirror.
+///
+/// Asked for the ids ([`Self::ids`]), or put in a ticket board's own scan:
+/// it is a [`knobas_core::mini_board::CardsNarrowing`], which reads the board's
+/// card rows with the query's predicates beside the board's
+/// ([`sql::board_sql`]).
+#[derive(Debug)]
+pub struct Narrowing {
+    alternatives: Vec<query::WordAlternative>,
+    filters: query::EffectiveFilters,
+}
+
+impl Narrowing {
+    /// Every live id the narrowing keeps: [`sql::ids_sql`]'s.
+    ///
+    /// # Errors
+    ///
+    /// [`sqlx::Error`] if the statement fails.
+    pub async fn ids(&self, pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+        let built = sql::ids_sql(&self.alternatives, &self.filters);
+        let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(pool).await?;
+        Ok(ids.into_iter().map(|(id,)| id).collect())
+    }
+
+    /// Whether a board bound to `declarations` takes the narrowing in its
+    /// own scan ([`sql::board_sql`]): they are the declarations the query
+    /// was parsed with. Under any others the narrowing reads its ids first.
+    #[must_use]
+    pub fn in_scan_under(&self, declarations: &knobas_core::payload::Declarations) -> bool {
+        self.declared_as(&declarations.as_param().0)
+    }
+
+    fn declared_as(&self, declared: &serde_json::Value) -> bool {
+        self.filters.declarations.as_param().0 == *declared
+    }
+}
+
+impl knobas_core::mini_board::CardsNarrowing for Narrowing {
+    /// The board's card rows for the tickets the query keeps.
+    ///
+    /// In the board's own scan where the board binds the declarations the
+    /// query was parsed with, which is every board the app reads: both come
+    /// from the registry's descriptors and the configured sources. A board
+    /// bound to other declarations reads the ids first and its statement
+    /// over them, the two statements a filter always was: the query's words
+    /// and keys read a stored card and stored fields under *its*
+    /// declarations, and in the board's scan they would read the board's.
+    async fn rows(
+        &self,
+        pool: &PgPool,
+        statement: knobas_core::mini_board::CardsStatement,
+        binds: knobas_core::mini_board::CardsBinds<'_>,
+    ) -> Result<Vec<knobas_core::mini_board::CardRow>, sqlx::Error> {
+        if self.declared_as(&binds.declared.0) {
+            let built = sql::board_sql(statement, binds, &self.alternatives, &self.filters);
+            return sql::query_as_with(built).fetch_all(pool).await;
+        }
+        let mut ids = self.ids(pool).await?;
+        if let Some(members) = binds.members {
+            let members: std::collections::HashSet<&str> =
+                members.iter().map(String::as_str).collect();
+            ids.retain(|id| members.contains(id.as_str()));
+        }
+        sqlx::query_as(statement.whole)
+            .persistent(false)
+            .bind(&ids)
+            .bind(binds.sources)
+            .bind(binds.project)
+            .bind(binds.declared)
+            .bind(binds.per_column)
+            .bind(binds.lanes)
+            .bind(binds.lanes_first)
+            .fetch_all(pool)
+            .await
     }
 }
 

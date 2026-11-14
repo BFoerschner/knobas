@@ -178,24 +178,64 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 /// with. `starts_with` is the exact test. `lower` on both sides, in SQL: the
 /// lowering `sql::parent_positions` compares with. A name the trim leaves empty, or
 /// a row without a kind, is not offered.
-const PARENTS_SQL: &str = concat!(
-    "select g.name, g.kind from ( \
-       select p.name collate \"C\" as name, p.kind, max(p.at) as top from ( \
-         select ip.name, ip.kind, ip.at from sync.item_parent ip \
-         union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
-        where lower(p.name) ~>=~ lower($1) \
-          and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
-          and starts_with(lower(p.name), lower($1)) \
-          and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
-        group by p.name collate \"C\", p.kind \
-        order by top desc nulls last, p.name collate \"C\", p.kind \
-       offset 0) g \
-     cross join lateral (select 1 from ",
-    crate::under::parent_names!(),
-    " k where lower(k.name) = lower(g.name collate \"default\") \
-        and k.name = g.name collate \"default\" and k.kind = g.kind limit 1) known \
-     order by g.top desc nulls last, g.name, g.kind \
-     limit $2"
+macro_rules! parents_sql {
+    ($recent:expr, $top:expr) => {
+        concat!(
+            "select g.name, g.kind",
+            $top,
+            " from ( \
+               select p.name collate \"C\" as name, p.kind, max(p.at) as top from ( \
+                 select ip.name, ip.kind, ip.at from sync.item_parent ip",
+            $recent,
+            " union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
+                where lower(p.name) ~>=~ lower($1) \
+                  and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
+                  and starts_with(lower(p.name), lower($1)) \
+                  and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
+                group by p.name collate \"C\", p.kind \
+                order by top desc nulls last, p.name collate \"C\", p.kind \
+               offset 0) g \
+             cross join lateral (select 1 from ",
+            crate::under::parent_names!(),
+            " k where lower(k.name) = lower(g.name collate \"default\") \
+                and k.name = g.name collate \"default\" and k.kind = g.kind limit 1) known \
+             order by g.top desc nulls last, g.name, g.kind \
+             limit $2"
+        )
+    };
+}
+
+/// The statement above over every row: what a prefix reads, and what the
+/// newest rows fall back to ([`RECENT_PARENTS_SQL`]).
+const PARENTS_SQL: &str = parents_sql!("", "");
+
+/// How many of `sync.item_parent`'s newest rows [`RECENT_PARENTS_SQL`] ranks.
+const RECENT_PARENT_ROWS: i64 = 2000;
+
+/// The parent row [`RECENT_PARENTS_SQL`] reads back to: the
+/// [`RECENT_PARENT_ROWS`]th newest with a time, through `item_parent_at_idx`
+/// (migration `0074`); `null` where there are fewer.
+macro_rules! recent_parents_since {
+    () => {
+        "(select b.at from sync.item_parent b where b.at is not null \
+           order by b.at desc nulls last limit 1 offset $3)"
+    };
+}
+
+/// [`PARENTS_SQL`] over the newest parent rows alone, every row at or after
+/// the [`RECENT_PARENT_ROWS`]th newest (`$3` its offset), and every asset;
+/// each answer with its time and the time read back to (the scale pass,
+/// 2026-11-10). With nothing typed the whole statement ranks every row
+/// `sync.item_parent` has, 66 ms at 112,000 rows; this reads 2,000, 3 ms.
+///
+/// **The same answer whenever its last is no older than that time**, which
+/// [`parents`] checks: a name is ranked by its newest row, and every row
+/// that new is read, so each name it offers has its true time, and a name it
+/// left out has none that new and ranks after its last. Otherwise
+/// [`parents`] reads the whole statement.
+const RECENT_PARENTS_SQL: &str = parents_sql!(
+    concat!(" where ip.at >= ", recent_parents_since!()),
+    concat!(", g.top, ", recent_parents_since!(), " as since")
 );
 
 /// How many values one ticket key is offered with (#811): the most used
@@ -214,6 +254,75 @@ pub const FIELD_SUGGESTIONS: i64 = 50;
 /// (#768's entry).
 pub(crate) const FIELD_SAMPLE: i64 = 200;
 
+/// One sampled row's stored `$field` (`sync.item_field`, migration `0063`)
+/// under the candidates the bound declarations give its source and kind, as
+/// a one-element array, and null where the database stores none for them
+/// or the row's kind declares no such field: `knobas_core::stored_string!`'s
+/// probe over the sampled row `r`. One index probe a row, written as a
+/// subquery so that no join is planned from the sample's row estimate.
+macro_rules! sampled_field {
+    ($field:literal) => {
+        concat!(
+            "(case when '",
+            $field,
+            "' = any(r.fields) then (select array[f.value] from sync.item_field f \
+               where f.entity_id = r.entity_id and f.field = '",
+            $field,
+            "' and f.paths = ((select fdecl.d from fdecl) #> array[r.source_id, r.kind, '",
+            $field,
+            "']) limit 1) end)"
+        )
+    };
+}
+
+/// A row of `walks`' value for `$field`: the stored one `$column` holds
+/// ([`sampled_field!`]), else the payload's where the row's kind declares
+/// the field, else none.
+macro_rules! stored_or_walked {
+    ($column:literal, $field:literal) => {
+        concat!(
+            "(case when i.",
+            $column,
+            " is not null then i.",
+            $column,
+            "[1] when '",
+            $field,
+            "' = any(i.fields) then ",
+            $crate::corpus::field_of!($field),
+            " end)"
+        )
+    };
+}
+
+/// A row of `walks`' value for `$field`, a column of its card: the card's
+/// where it has one, else the payload's where its kind declares the field.
+macro_rules! card_or_walked {
+    ($field:literal) => {
+        concat!(
+            "(case when i.has_card then i.",
+            $field,
+            " when '",
+            $field,
+            "' = any(i.fields) then ",
+            $crate::corpus::field_of!($field),
+            " end)"
+        )
+    };
+}
+
+/// What [`FIELDS_SQL`] and [`FIELDS_SQL_WALKED`] share after their rows `v
+/// (key, value, detail)`: the most used `$2` values of each key.
+macro_rules! most_used {
+    () => {
+        " select f.key, f.value, f.detail from ( \
+            select v.key, v.value, max(v.detail) as detail, count(*) as uses, \
+                   row_number() over (partition by v.key order by count(*) desc, v.value) as rn \
+              from v where v.value is not null group by v.key, v.value) f \
+           where f.rn <= $2 \
+           order by f.key, f.uses desc, f.value"
+    };
+}
+
 /// The values the live mirror holds for each ticket key (#811), the most
 /// used [`FIELD_SUGGESTIONS`] per key, most used first: `(key, value,
 /// detail)`.
@@ -225,20 +334,134 @@ pub(crate) const FIELD_SAMPLE: i64 = 200;
 /// declaration is resolved once a source and kind, as the mini board does
 /// (#753), rather than walked per row; and only the newest
 /// [`FIELD_SAMPLE`] (`$3`) live rows of each source and kind that declares
-/// any of these fields are read, each probe ordered as
-/// `item_source_updated_idx` is so it stops early. A row whose record misses
-/// a path contributes nothing for that key: the miss direction, offering
-/// fewer values, never a wrong one.
+/// any of these fields are read. A row whose record misses a path
+/// contributes nothing for that key: the miss direction, offering fewer
+/// values, never a wrong one. Rows of one source and kind dated the same
+/// instant at the sample's cut are taken in no stated order, as they were.
+///
+/// **Each value is the stored one where the database holds it** (the
+/// stored-reads pass of 2026-11-12), and the payload's where it does not:
+///
+/// * the project's key and name, the status and the assignee off
+///   `sync.item_field` (migration `0063`), which keeps them for an item of
+///   any kind under the candidates the bound declarations give it: a row
+///   there is `knobas_core::declared_string!`'s answer over those
+///   candidates, a miss included, and no row means nothing is stored for
+///   them (`knobas_core::stored_string!`'s rule);
+/// * the type, the priority, the labels and whether a sprint is active off
+///   the ticket's card (`sync.item_card`, migrations `0075` and `0082`)
+///   under the key of the bound declarations, where each column is the
+///   payload macro's answer (`knobas-app`'s `tests/it/item_card.rs`).
+///
+/// A row is walked only where it declares a field it has no stored value
+/// for (`walks`): a ticket whose card is not filled yet, a pull request's
+/// labels, a source whose declarations the database never stored. Its
+/// payload is decompressed once (`payload #> '{}'`, the whole value; the
+/// scale pass, 2026-11-10) and every walked field reads that copy. Walking
+/// every sampled row was 70 of the first open of Tickets' 81 ms on a mirror
+/// of 20,000 Jira tickets: 1,494 payloads decompressed for values the
+/// database already held for 1,291 of them, and each source and kind's
+/// 3,600 rows fetched from the table, payload pointer and all, to find its
+/// newest 200, where the sample now reads ids off `item_ticket_brief_idx`.
+/// 24 ms from the stored values. [`FIELDS_SQL_WALKED`] is the earlier
+/// statement, kept for the tests to hold this one to.
+///
+/// **No join here is planned from an estimate.** The CTEs over the
+/// declarations give the planner no row counts, and joined flat it hashed
+/// every stored field of the mirror to find 1,494 rows' (3.3 s). Each
+/// stored value is a subquery probed by the sampled row's id.
 ///
 /// The value keeps the source's spelling, the way a reader knows it; the key
 /// matches it ignoring case. A project is offered by its key, its name beside
 /// it. `sprint` is offered as `current`, once, when a sampled row is in an
 /// active sprint.
-const FIELDS_SQL: &str = concat!(
+pub(crate) const FIELDS_SQL: &str = concat!(
+    "with fdecl as (select $1::jsonb as d), ",
+    crate::corpus::field_paths_ctes!(),
+    ", declared as materialized ( \
+       select p.source_id, p.kind, array_agg(distinct p.field) as fields \
+         from (select source_id, kind, field from fp union all \
+               select source_id, kind, field from lp) p group by p.source_id, p.kind), \
+     sampled as materialized ( \
+       select r.entity_id, p.source_id, p.kind, p.fields \
+         from declared p \
+         cross join lateral (select i.entity_id from sync.item i \
+                              where i.source_id = p.source_id and i.kind = p.kind and ",
+    knobas_core::live_by_exclusion!("i"),
+    " order by i.item_updated_at desc nulls last limit $3) r), \
+     stored as materialized ( \
+       select r.entity_id, r.source_id, r.kind, r.fields, ",
+    sampled_field!("project_key"),
+    " as pk, ",
+    sampled_field!("project_name"),
+    " as pn, ",
+    sampled_field!("status_name"),
+    " as st, ",
+    sampled_field!("assignee"),
+    " as asg, \
+              c.entity_id is not null as has_card, c.issue_type, c.priority, c.labels, \
+              c.sprint_active \
+         from sampled r \
+         left join lateral (select c.entity_id, c.issue_type, c.priority, c.labels, \
+                                   c.sprint_active \
+                              from sync.item_card c \
+                             where c.entity_id = r.entity_id \
+                               and c.paths_key = (select fcard.k from fcard \
+                                                   where fcard.source_id = r.source_id) \
+                             limit 1) c on true), \
+     walks as materialized ( \
+       select s.*, \
+              case when (s.pk is null and 'project_key' = any(s.fields)) \
+                     or (s.pn is null and 'project_name' = any(s.fields)) \
+                     or (s.st is null and 'status_name' = any(s.fields)) \
+                     or (s.asg is null and 'assignee' = any(s.fields)) \
+                     or (not s.has_card and s.fields && array['issue_type', 'priority', \
+                                                              'labels', 'sprint_state']) \
+                   then (select it.payload #> '{}'::text[] from sync.item it \
+                          where it.entity_id = s.entity_id) end as payload \
+         from stored s), \
+     v as ( \
+       select 'project' as key, ",
+    stored_or_walked!("pk", "project_key"),
+    " as value, ",
+    stored_or_walked!("pn", "project_name"),
+    " as detail from walks i \
+       union all select 'status', ",
+    stored_or_walked!("st", "status_name"),
+    ", null from walks i \
+       union all select 'issuetype', ",
+    card_or_walked!("issue_type"),
+    ", null from walks i \
+       union all select 'priority', ",
+    card_or_walked!("priority"),
+    ", null from walks i \
+       union all select 'assignee', ",
+    stored_or_walked!("asg", "assignee"),
+    ", null from walks i \
+       union all select 'label', l.value, null from walks i cross join lateral unnest(i.labels) \
+                   as l(value) where i.has_card \
+       union all select 'label', l.value, null from walks i cross join lateral ",
+    crate::corpus::list_of!("labels"),
+    " l where not i.has_card and 'labels' = any(i.fields) \
+       union all select 'sprint', 'current', null from walks i \
+                  where case when i.has_card then i.sprint_active \
+                             when 'sprint_state' = any(i.fields) \
+                             then exists (select 1 from ",
+    crate::corpus::list_of!("sprint_state"),
+    " s where lower(s.value) = 'active') else false end)",
+    most_used!()
+);
+
+/// [`FIELDS_SQL`] as it read before the stored-reads pass of 2026-11-12:
+/// every sampled row's payload decompressed and every field walked out of
+/// it. No command reads it; `tests/it/suggest.rs` holds [`FIELDS_SQL`]'s
+/// answer to this one's.
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) const FIELDS_SQL_WALKED: &str = concat!(
     "with fdecl as (select $1::jsonb as d), ",
     crate::corpus::field_paths_ctes!(),
     ", sampled as materialized ( \
-       select r.source_id, r.kind, r.payload \
+       select r.source_id, r.kind, r.payload #> '{}'::text[] as payload \
          from (select source_id, kind from fp union select source_id, kind from lp) p \
          cross join lateral (select i.source_id, i.kind, i.payload from sync.item i \
                               where i.source_id = p.source_id and i.kind = p.kind and ",
@@ -267,20 +490,44 @@ const FIELDS_SQL: &str = concat!(
     " l \
        union all select 'sprint', 'current', null from sampled i where exists (select 1 from ",
     crate::corpus::list_of!("sprint_state"),
-    " s where lower(s.value) = 'active')) \
-     select f.key, f.value, f.detail from ( \
-       select v.key, v.value, max(v.detail) as detail, count(*) as uses, \
-              row_number() over (partition by v.key order by count(*) desc, v.value) as rn \
-         from v where v.value is not null group by v.key, v.value) f \
-      where f.rn <= $2 \
-      order by f.key, f.uses desc, f.value"
+    " s where lower(s.value) = 'active'))",
+    most_used!()
 );
+
+/// One row of the ticket keys' values: `(key, value, detail)`.
+pub type FieldRow = (String, String, Option<String>);
+
+/// [`FIELDS_SQL`]'s rows and [`FIELDS_SQL_WALKED`]'s for the same
+/// declarations, in that order: what `tests/it/suggest.rs` compares.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if a read fails.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn field_rows_both_ways(
+    pool: &PgPool,
+    vocab: &Vocabulary,
+) -> Result<(Vec<FieldRow>, Vec<FieldRow>), SearchError> {
+    let mut out = Vec::new();
+    for sql in [FIELDS_SQL, FIELDS_SQL_WALKED] {
+        let rows: Vec<FieldRow> = sqlx::query_as(sql)
+            .bind(vocab.declarations.as_param())
+            .bind(FIELD_SUGGESTIONS)
+            .bind(FIELD_SAMPLE)
+            .persistent(false)
+            .fetch_all(pool)
+            .await?;
+        out.push(rows);
+    }
+    let walked = out.pop().unwrap_or_default();
+    Ok((out.pop().unwrap_or_default(), walked))
+}
 
 /// The ticket keys' values (#811), `@me` first among the assignees while
 /// knobas knows who the user is, and `assigned:`'s windows, which every
 /// installation has, and `has:`'s four signals (#815).
 async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion>, SearchError> {
-    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(FIELDS_SQL)
+    let rows: Vec<FieldRow> = sqlx::query_as(FIELDS_SQL)
         .bind(vocab.declarations.as_param())
         .bind(FIELD_SUGGESTIONS)
         .bind(FIELD_SAMPLE)
@@ -339,6 +586,46 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
 ///
 /// [`SearchError::Db`] if the read fails.
 pub(crate) async fn parents(
+    pool: &PgPool,
+    under: &str,
+) -> Result<Vec<ParentSuggestion>, SearchError> {
+    type Recent = (
+        String,
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    );
+    // With nothing typed, the newest rows first ([`RECENT_PARENTS_SQL`]); a
+    // prefix narrows the whole statement through its index already.
+    if under.is_empty() {
+        let recent: Vec<Recent> = sqlx::query_as(RECENT_PARENTS_SQL)
+            .bind(under)
+            .bind(PARENT_SUGGESTIONS)
+            .bind(RECENT_PARENT_ROWS - 1)
+            .persistent(false)
+            .fetch_all(pool)
+            .await?;
+        let whole = usize::try_from(PARENT_SUGGESTIONS).is_ok_and(|n| recent.len() == n);
+        let new_enough = recent.last().is_some_and(
+            |(_, _, top, since)| matches!((top, since), (Some(top), Some(since)) if top >= since),
+        );
+        if whole && new_enough {
+            return Ok(recent
+                .into_iter()
+                .map(|(name, kind, _, _)| ParentSuggestion { name, kind })
+                .collect());
+        }
+    }
+    whole_parents(pool, under).await
+}
+
+/// [`PARENTS_SQL`]'s answer for the prefix `under`: [`parents`] without the
+/// newest rows' shortcut.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if the read fails.
+pub(crate) async fn whole_parents(
     pool: &PgPool,
     under: &str,
 ) -> Result<Vec<ParentSuggestion>, SearchError> {

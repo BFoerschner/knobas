@@ -282,9 +282,14 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
             let registry = std::sync::Arc::clone(&self.registry);
             let source_id = status.source_id.clone();
             // Refused once the quit has begun: the next sync resolves it.
-            self.background.spawn(async move {
-                resolve_arrivals(&pool, registry.as_ref(), &source_id).await;
-            });
+            // After a run, for the run: any request it sends yields to a
+            // person's, as the run's own did (the priority lane, 2026-11-13).
+            self.background.spawn(knobas_http::on_lane(
+                knobas_http::Lane::Background,
+                async move {
+                    resolve_arrivals(&pool, registry.as_ref(), &source_id).await;
+                },
+            ));
         }
         self.inner.sync_state(status);
     }
@@ -867,7 +872,14 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// and the next scheduled sync re-reads the source either way.
 pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     let entity = read_back(&scheduler.deps().pool, write).await;
-    if let Err(error) = crate::sources::refresh::refresh(scheduler, &entity, Some(write.id)).await {
+    if let Err(error) = crate::sources::refresh::refresh(
+        scheduler,
+        &entity,
+        Some(write.id),
+        knobas_sync::refresh::Lock::Wait,
+    )
+    .await
+    {
         tracing::warn!(
             source = %write.source_id,
             write_id = write.id,

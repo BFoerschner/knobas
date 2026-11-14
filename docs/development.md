@@ -215,7 +215,7 @@ retrying a rejected credential on a timer can lock the account.
 Queued writes follow the same rules. A write to a source that did not answer
 is tried again on the same ladder. A write whose credential was rejected
 waits until a credential is saved for that source, its address or
-configuration is edited, or the reader presses *Flush now*.
+configuration is edited, or the reader presses *Retry waiting writes*.
 
 ## Shutting down
 
@@ -225,7 +225,7 @@ and stops the embedded server, also while the boot screen is still up. Every
 step is bounded, so a quit does not wait out a slow remote call.
 
 A write knobas is sending when you quit gets up to three seconds to finish, so
-it is marked sent. This includes the write you wait on after *Flush now*, *Send
+it is marked sent. This includes the write you wait on after *Retry waiting writes*, *Send
 mine anyway* or *Edit and send*. A write you make after the quit began is
 queued and not sent; the next start sends it. If a send is still going after
 three seconds, knobas abandons it and holds the write, because the source may

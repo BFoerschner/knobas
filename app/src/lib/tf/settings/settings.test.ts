@@ -164,9 +164,9 @@ const JIRA = { id: "jira", display_name: "Jira", auth_kind: "UserPassword" as co
 test("a sync run reads as started, took and what it did", () => {
   const run = RUN;
   // The suite runs in Europe/Berlin (vite.config.ts), two hours ahead in October.
-  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4 s", result: "12 updated", detail: null, tone: "ok" });
+  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4s", result: "12 updated", detail: null, tone: "ok" });
   expect(runRow({ ...run, trigger: "backfill", finished_at: "2026-10-15T12:31:12Z" }, JIRA, NOW)).toMatchObject({
-    took: "3 m 12 s",
+    took: "3m 12s",
     result: "12 updated, backfill",
   });
   expect(runRow({ ...run, outcome: "unauthorized", error: "401 Unauthorized" }, JIRA, NOW)).toMatchObject({
@@ -175,7 +175,7 @@ test("a sync run reads as started, took and what it did", () => {
   });
   expect(runRow({ ...run, finished_at: null, outcome: null }, JIRA, NOW)).toMatchObject({ result: "Running…", tone: "run" });
   // CHANGED (#1986): an older run read "12 Oct 10:00" and yesterday's "14 Oct 10:00"; they read as the backup line does.
-  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("2026-10-12 10:00");
+  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("Mon 10:00");
   expect(runRow({ ...run, started_at: "2026-10-14T08:00:00Z" }, JIRA, NOW).started).toBe("yesterday 10:00");
   expect(runRow({ ...run, started_at: "not a date" }, JIRA, NOW).started).toBe("—");
 });

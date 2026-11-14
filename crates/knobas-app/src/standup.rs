@@ -244,7 +244,9 @@ pub struct DigestLine {
     /// mirror line means "the source attributes this to you", never "you wrote
     /// it".
     pub verb: String,
-    /// Why this line is here, as a sentence naming the source and the verb.
+    /// Why this line is here, as a person says it, naming the source by its
+    /// display name: *you merged it in Tidewater Gitea*, never an op code or
+    /// a source id.
     pub reason: String,
     /// When it happened -- and for a blocker, when the item last moved, which
     /// is what the list is ordered by.
@@ -319,16 +321,17 @@ pub async fn digest(
     today: DayWindow,
     earlier: &[DayWindow],
 ) -> Result<StandupDigest, IpcError> {
-    let mut today_lines = work_in(pool, identity, today).await?;
+    let names = SourceNames::read(pool).await?;
+    let mut today_lines = work_in(pool, identity, today, &names).await?;
     if today.from <= now && now < today.to {
-        today_lines.extend(running_timer(pool).await?);
+        today_lines.extend(running_timer(pool, &names).await?);
         sort_newest_first(&mut today_lines);
     }
 
     let mut yesterday_day = None;
     let mut yesterday = Vec::new();
     for window in in_reach(today.day, earlier) {
-        let lines = work_in(pool, identity, window).await?;
+        let lines = work_in(pool, identity, window, &names).await?;
         if !lines.is_empty() {
             yesterday_day = Some(window.day);
             yesterday = lines;
@@ -345,7 +348,7 @@ pub async fn digest(
         yesterday_day,
         yesterday,
         today: today_lines,
-        blockers: blockers(pool, identity, declarations).await?,
+        blockers: blockers(pool, identity, declarations, &names).await?,
         infrastructure: infrastructure(pool, since, today.to).await?,
     })
 }
@@ -380,10 +383,11 @@ async fn work_in(
     pool: &PgPool,
     identity: &[String],
     window: DayWindow,
+    names: &SourceNames,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let mut lines = attributed_in_the_mirror(pool, identity, window).await?;
-    lines.extend(written_through_knobas(pool, window).await?);
-    lines.extend(logged_as_worklogs(pool, window).await?);
+    let mut lines = attributed_in_the_mirror(pool, identity, window, names).await?;
+    lines.extend(written_through_knobas(pool, window, names).await?);
+    lines.extend(logged_as_worklogs(pool, window, names).await?);
     sort_newest_first(&mut lines);
     Ok(lines)
 }
@@ -429,6 +433,7 @@ async fn attributed_in_the_mirror(
     pool: &PgPool,
     identity: &[String],
     window: DayWindow,
+    names: &SourceNames,
 ) -> Result<Vec<DigestLine>, IpcError> {
     let rows = sqlx::query_as::<_, MirrorRow>(ATTRIBUTED_TO_ME)
         .bind(identity)
@@ -442,7 +447,11 @@ async fn attributed_in_the_mirror(
         .into_iter()
         .map(|row| DigestLine {
             entity_id: Some(row.entity_id),
-            reason: format!("{} attributes this {} to you", row.source_id, row.kind),
+            reason: format!(
+                "{} credits this {} to you",
+                names.of(&row.source_id),
+                kind_words(&row.kind)
+            ),
             kind: Some(row.kind),
             title: row.title,
             source: row.source_id,
@@ -463,6 +472,9 @@ struct WriteRow {
     entity_id: String,
     op: String,
     source_id: Option<String>,
+    /// A source action's own name (`add_label`), while the queue still holds
+    /// the write; `None` for every other op and once the queue is pruned.
+    action: Option<String>,
     kind: Option<String>,
     title: Option<String>,
 }
@@ -500,10 +512,13 @@ const WRITTEN: &str = r#"select a.at,
               a.entity_id,
               a.detail->>'op'        as op,
               a.detail->>'source_id' as source_id,
+              q.payload->'SourceAction'->>'id' as action,
               e.kind,
               e.title
          from knobas.activity a
          left join knobas.entity e on e.id = a.entity_id
+         left join knobas.write_queue q
+                on q.id::text = a.detail->>'write_id' and q.op = 'source_action'
         where a.actor = $1
           and a.verb = 'queued'
           and a.entity_id is not null
@@ -517,6 +532,7 @@ const WRITTEN: &str = r#"select a.at,
 async fn written_through_knobas(
     pool: &PgPool,
     window: DayWindow,
+    names: &SourceNames,
 ) -> Result<Vec<DigestLine>, IpcError> {
     let rows = sqlx::query_as::<_, WriteRow>(WRITTEN)
         .bind(ACTOR)
@@ -534,7 +550,7 @@ async fn written_through_knobas(
                 .source_id
                 .unwrap_or_else(|| namespace_of(&row.entity_id));
             DigestLine {
-                reason: format!("you queued a {} on it in {source}", row.op),
+                reason: wrote(&row.op, row.action.as_deref(), &names.of(&source)),
                 title: row.title.unwrap_or_else(|| row.entity_id.clone()),
                 entity_id: Some(row.entity_id),
                 kind: row.kind,
@@ -568,7 +584,11 @@ const WORKLOGS: &str = r#"select w.started_at as at, w.entity_id, e.kind, e.titl
         order by w.started_at desc
         limit $3"#;
 
-async fn logged_as_worklogs(pool: &PgPool, window: DayWindow) -> Result<Vec<DigestLine>, IpcError> {
+async fn logged_as_worklogs(
+    pool: &PgPool,
+    window: DayWindow,
+    names: &SourceNames,
+) -> Result<Vec<DigestLine>, IpcError> {
     let rows = sqlx::query_as::<_, WorklogRow>(WORKLOGS)
         .bind(window.from)
         .bind(window.to)
@@ -581,7 +601,7 @@ async fn logged_as_worklogs(pool: &PgPool, window: DayWindow) -> Result<Vec<Dige
         .map(|row| {
             let source = namespace_of(&row.entity_id);
             DigestLine {
-                reason: format!("you logged work on it in {source}"),
+                reason: format!("you logged work on it in {}", names.of(&source)),
                 title: row.title.unwrap_or_else(|| row.entity_id.clone()),
                 entity_id: Some(row.entity_id),
                 kind: row.kind,
@@ -610,7 +630,7 @@ const TIMER_TARGET: &str = "select kind, title from knobas.entity where id = $1"
 /// target produces a line with no `entity_id`: the digest still has to say
 /// what the clock is on, and "DB config for the migration" is a legal answer
 /// with nowhere to click.
-async fn running_timer(pool: &PgPool) -> Result<Vec<DigestLine>, IpcError> {
+async fn running_timer(pool: &PgPool, names: &SourceNames) -> Result<Vec<DigestLine>, IpcError> {
     let Some(timer) = crate::time::current(pool).await? else {
         return Ok(Vec::new());
     };
@@ -636,7 +656,7 @@ async fn running_timer(pool: &PgPool) -> Result<Vec<DigestLine>, IpcError> {
                     .as_ref()
                     .map_or_else(|| entity_id.clone(), |row| row.title.clone()),
                 kind: named.map(|row| row.kind),
-                reason: format!("the timer is running on it, in {source}"),
+                reason: format!("the timer is running on it, in {}", names.of(&source)),
                 entity_id: Some(entity_id.clone()),
                 source,
                 verb: TIMER.to_owned(),
@@ -645,6 +665,92 @@ async fn running_timer(pool: &PgPool) -> Result<Vec<DigestLine>, IpcError> {
         }
     };
     Ok(vec![line])
+}
+
+/// What each configured source is called (`knobas.source_config.display_name`),
+/// so a reason names *Tidewater Gitea* and never `live-gitea`. Read once per
+/// digest. A source with a blank name, one since removed, and [`KNOBAS`] are
+/// named by their id.
+struct SourceNames(std::collections::HashMap<String, String>);
+
+/// The display name of every configured source.
+const SOURCE_NAMES: &str = "select id, display_name from knobas.source_config";
+
+impl SourceNames {
+    async fn read(pool: &PgPool) -> Result<Self, IpcError> {
+        let rows: Vec<(String, String)> = sqlx::query_as(SOURCE_NAMES)
+            .fetch_all(pool)
+            .await
+            .map_err(IpcError::internal)?;
+        Ok(Self(
+            rows.into_iter()
+                .filter(|(_, name)| !name.trim().is_empty())
+                .map(|(id, name)| (id, name.trim().to_owned()))
+                .collect(),
+        ))
+    }
+
+    /// What `source_id` is called.
+    fn of(&self, source_id: &str) -> String {
+        self.0
+            .get(source_id)
+            .cloned()
+            .unwrap_or_else(|| source_id.to_owned())
+    }
+}
+
+/// A kind as a person says it: `pr` is *pull request*. A kind this list does
+/// not know reads as its id with the underscores spaced.
+fn kind_words(kind: &str) -> String {
+    match kind {
+        "pr" => "pull request".to_owned(),
+        "repo" => "repository".to_owned(),
+        "build_config" => "pipeline".to_owned(),
+        other => other.replace('_', " "),
+    }
+}
+
+/// What the reader did, in their words, for a write queued as `op` to the
+/// source called `source` (the live run on #2479: the digest said *you
+/// queued a source_action on it in live-gitea*). A source action is named by
+/// its own id where the queue still holds it (`add_label`, *add a label*);
+/// an op this list does not know says the reader asked the source to change
+/// it. `log_work` never reaches here ([`WRITTEN`] leaves it out).
+fn wrote(op: &str, action: Option<&str>, source: &str) -> String {
+    let did = match op {
+        "comment" => "commented on it",
+        "transition" => "moved it",
+        "create_ticket" => "filed it",
+        "create_branch" => "created a branch for it",
+        "create_pull_request" => "opened a pull request for it",
+        "approve" => "approved it",
+        "trigger_build" | "run_build" => "started a build of it",
+        "rerun_build" => "ran it again",
+        "create_page" => "created a page for it",
+        "update_page" => "edited it",
+        "pause_monitor" => "paused it",
+        "resume_monitor" => "resumed it",
+        "create_monitor" => "added a monitor for it",
+        "merge_pull_request" => "merged it",
+        "set_parameter" => "set a parameter on it",
+        "submit_review" => "reviewed it",
+        "delete_branch" => "deleted a branch of it",
+        "edit_pull_request" => "edited it",
+        "update_pull_request_branch" => "updated its branch",
+        "commit_file" => "committed a file to it",
+        "reply_to_thread" => "replied in a thread on it",
+        "resolve_thread" => "resolved a thread on it",
+        "request_reviewers" => "asked for a review of it",
+        knobas_source::SOURCE_ACTION => {
+            return match action.map(str::trim).filter(|id| !id.is_empty()) {
+                Some("add_label") => format!("you asked {source} to add a label"),
+                Some(id) => format!("you asked {source} to {}", id.replace(['_', '-'], " ")),
+                None => format!("you asked {source} to change it"),
+            };
+        }
+        _ => return format!("you asked {source} to change it"),
+    };
+    format!("you {did} in {source}")
 }
 
 /// The source id an entity id names, or [`KNOBAS`] for one that names none.
@@ -689,24 +795,43 @@ const BLOCKED_STATUSES: &str = "blocked_statuses";
 /// which is ADR-0007's pinned failure direction.
 ///
 /// The declaration is bound as one jsonb parameter and resolved inside the
-/// statement (`declared_string!`, `declared_array!`), so nothing is pulled
+/// statement (`declared_string!`, and the blocked sets out of it by
+/// source and kind), so nothing is pulled
 /// into Rust to be filtered there and nothing is concatenated into SQL.
+///
+/// **Only the kinds that declare a blocked set are read, and the assignee and
+/// the status are the stored ones** (`sync.item_field`, #2184) where the
+/// database holds them for these declarations, walked where it does not
+/// (the scale pass, 2026-11-10). It walked every live item's payload twice,
+/// 1.1 s of the digest's 1.2 s on 48,000 items; a kind with no blocked set
+/// could never match, since its set is empty.
 macro_rules! blocked_by_status {
     () => {
         concat!(
-            "select s.entity_id, s.kind, s.source_id, s.title, s.at, s.status
+            "with blocking as materialized (
+               select sd.key as source_id, kd.key as kind,
+                      kd.value->'blocked_statuses' as blocked
+                 from jsonb_each(case when jsonb_typeof($2::jsonb) = 'object'
+                                      then $2::jsonb else '{}'::jsonb end) sd
+                cross join lateral jsonb_each(case when jsonb_typeof(sd.value) = 'object'
+                                                   then sd.value else '{}'::jsonb end) kd
+                where jsonb_typeof(kd.value->'blocked_statuses') = 'array'
+                  and jsonb_array_length(kd.value->'blocked_statuses') > 0)
+             select s.entity_id, s.kind, s.source_id, s.title, s.at, s.status
                from (select i.entity_id, i.kind, i.source_id, i.title,
                             coalesce(i.item_updated_at, i.synced_at) as at,
                             ",
-            knobas_core::declared_string!("$2", "assignee"),
+            knobas_core::stored_or!("sa", knobas_core::declared_string!("$2", "assignee")),
             " as assignee,
                             ",
-            knobas_core::declared_string!("$2", "status_name"),
+            knobas_core::stored_or!("ss", knobas_core::declared_string!("$2", "status_name")),
             " as status,
-                            ",
-            knobas_core::declared_array!("$2", "blocked_statuses"),
-            " as blocked
-                       from sync.live_item i) s
+                            bl.blocked
+                       from blocking bl
+                       join sync.live_item i on i.source_id = bl.source_id and i.kind = bl.kind",
+            knobas_core::stored_join!("sa", "$2", "assignee"),
+            knobas_core::stored_join!("ss", "$2", "status_name"),
+            ") s
               where s.assignee = any($1)
                 and s.status is not null
                 and exists (select 1
@@ -792,6 +917,7 @@ async fn blockers(
     pool: &PgPool,
     identity: &[String],
     declarations: &Declarations,
+    names: &SourceNames,
 ) -> Result<Vec<DigestLine>, IpcError> {
     let by_status = sqlx::query_as::<_, BlockedStatusRow>(BLOCKED_BY_STATUS)
         .bind(identity)
@@ -815,10 +941,7 @@ async fn blockers(
             entity_id: Some(row.entity_id),
             kind: Some(row.kind),
             title: row.title,
-            reason: format!(
-                "{} calls this status blocked-like: {}",
-                row.source_id, row.status
-            ),
+            reason: format!("it is {} in {}", row.status, names.of(&row.source_id)),
             source: row.source_id,
             verb: BLOCKED_STATUS.to_owned(),
             at: row.at,
@@ -916,6 +1039,80 @@ async fn infrastructure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every op the queue records says what the reader did, never its code:
+    /// none falls through to the catch-all, and none spells an identifier.
+    #[test]
+    fn every_queued_op_is_said_in_a_persons_words() {
+        let ops = [
+            "comment",
+            "transition",
+            "create_ticket",
+            "create_branch",
+            "create_pull_request",
+            "approve",
+            "trigger_build",
+            "rerun_build",
+            "create_page",
+            "update_page",
+            "pause_monitor",
+            "resume_monitor",
+            "create_monitor",
+            "merge_pull_request",
+            "set_parameter",
+            "run_build",
+            "submit_review",
+            "delete_branch",
+            "edit_pull_request",
+            "update_pull_request_branch",
+            "commit_file",
+            "reply_to_thread",
+            "resolve_thread",
+            "request_reviewers",
+        ];
+        let fallback = wrote("no_such_op", None, "Tidewater Gitea");
+        assert_eq!(fallback, "you asked Tidewater Gitea to change it");
+        for op in ops {
+            let said = wrote(op, None, "Tidewater Gitea");
+            assert_ne!(said, fallback, "{op} has its own words");
+            assert!(!said.contains('_'), "{op}: {said}");
+            assert!(
+                said.starts_with("you ") && said.ends_with(" in Tidewater Gitea"),
+                "{said}"
+            );
+        }
+        assert_eq!(
+            wrote(
+                knobas_source::SOURCE_ACTION,
+                Some("add_label"),
+                "Tidewater Gitea"
+            ),
+            "you asked Tidewater Gitea to add a label"
+        );
+        assert_eq!(
+            wrote(knobas_source::SOURCE_ACTION, Some("pin-release"), "X"),
+            "you asked X to pin release"
+        );
+        assert_eq!(
+            wrote(knobas_source::SOURCE_ACTION, None, "X"),
+            "you asked X to change it"
+        );
+        assert_eq!(kind_words("pr"), "pull request");
+        assert_eq!(kind_words("build_config"), "pipeline");
+        assert_eq!(kind_words("build"), "build");
+    }
+
+    /// A source with a blank name, or none configured, is named by its id.
+    #[test]
+    fn a_source_with_no_name_is_called_by_its_id() {
+        let names = SourceNames(
+            [("live-gitea".to_owned(), "Tidewater Gitea".to_owned())]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(names.of("live-gitea"), "Tidewater Gitea");
+        assert_eq!(names.of("gone"), "gone");
+    }
 
     #[test]
     fn an_alert_reads_in_minutes_then_hours_and_is_never_under_a_minute() {

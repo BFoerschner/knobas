@@ -29,6 +29,7 @@ pub mod code_pages;
 pub mod contract;
 pub mod diff;
 pub mod docs;
+pub mod file_text;
 pub mod fingerprint;
 pub mod grants;
 pub mod instance;
@@ -36,6 +37,7 @@ pub mod pipeline;
 pub mod query;
 pub mod role;
 pub mod run;
+pub mod tree;
 pub mod url_forms;
 pub mod view;
 pub mod watermark;
@@ -2142,6 +2144,107 @@ pub trait Source: Send + Sync {
     fn view_standing(&self, entity: &str, section: Option<&str>) -> view::Standing {
         let _ = (entity, section);
         view::Standing::Live
+    }
+    /// The view of `entity` at `section` as far as the mirror's own record of
+    /// it can draw it, reading nothing (ADR-0042, the second smoothness pass
+    /// on PR #2479): what a page shows the first time it is opened, before
+    /// the source's read lands over it, said to be from the last sync. Only
+    /// what the record holds is drawn; a section it cannot fill says so in a
+    /// muted line, and no action is offered.
+    ///
+    /// `payload` is the record the mirror holds for `entity`, as the sync
+    /// wrote it. `None`, the default, is a source that draws nothing from it:
+    /// the page waits for the source, as before. Pure.
+    fn mirror_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// The kind of the entities under `entity` whose mirror records
+    /// [`mirror_listing`](Source::mirror_listing) draws `section` from, where
+    /// it draws one (the inner-pages pass on PR #2479, 2026-11-12): a
+    /// repository's branches, from the branch records the sync wrote. `None`,
+    /// the default, draws no listing, and the app asks for none. Pure.
+    fn mirror_listing_kind(&self, entity: &str, section: Option<&str>) -> Option<&'static str> {
+        let _ = (entity, section);
+        None
+    }
+    /// The view of `entity` at `section` as far as the mirror's records of
+    /// it and of the entities under it can draw it, reading nothing: what
+    /// [`mirror_view`](Source::mirror_view) is for a section the entity's own
+    /// record cannot fill, such as its list of branches (ADR-0042, as amended
+    /// 2026-11-12). `payload` is the entity's record; `under` the records of
+    /// every entity of [`mirror_listing_kind`](Source::mirror_listing_kind)
+    /// the mirror holds under it, as the sync wrote them, in no order. Drawn
+    /// with the same rows the source's read draws, so where nothing moved
+    /// since the sync the source's answer lands on the same view. `None`, the
+    /// default, is the page waiting for the source, as before. Pure.
+    fn mirror_listing(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        under: &[serde_json::Value],
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload, under);
+        None
+    }
+    /// Where this adapter's mirror records keep what the sync's tree pass
+    /// plans from ([`tree`], the stored-trees pass of PR #2479): its
+    /// repositories' default branches, its branches' heads, its pull
+    /// requests' head branches. `None`, the default, is an adapter that
+    /// stores no tree, and the pass asks it nothing. Pure.
+    fn tree_shape(&self) -> Option<tree::TreeShape> {
+        None
+    }
+    /// The levels of the tree at `commit` in `repository` (an entity id of
+    /// [`tree_shape`](Source::tree_shape)'s repository kind) that `held`
+    /// does not hold, read from the source: the root's sha, and every level
+    /// under it not held, each in git's order. A tree of more than `cap`
+    /// entries in all is [`tree::TreeRead::TooLarge`], read no further.
+    /// Called by the tree pass after a run, on the background lane.
+    ///
+    /// `Ok(None)` is **this adapter reads no tree**, and is the default.
+    async fn read_tree(
+        &self,
+        repository: &str,
+        commit: &str,
+        held: &dyn tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<tree::TreeRead>, SourceError> {
+        let _ = (repository, commit, held, cap);
+        Ok(None)
+    }
+    /// What `section` of `entity`'s view draws from a stored tree, where it
+    /// draws one: the branch, the commit the section names, the place.
+    /// `payload` is the entity's mirror record (a repository's names its
+    /// default branch). `None`, the default, reads no stored tree. Pure.
+    fn tree_ask(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<tree::TreeAsk> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// `section` of `entity`'s view drawn from `tree`, the stored levels
+    /// [`tree_ask`](Source::tree_ask) named, as the source's own read at the
+    /// same commit draws it: the same entries, ids, trail and page. `None`
+    /// where the levels do not hold the place. Pure.
+    fn tree_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tree: &tree::StoredTree,
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload, tree);
+        None
     }
     /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
     /// step 5), read whole up to `cap` bytes: a README's image, a PDF.

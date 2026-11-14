@@ -134,8 +134,10 @@ async function openMenu(object: OpenObject, ends?: () => Promise<{ base: string;
   await settle();
 }
 
-const items = () => [...target.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
+/** What opens the object: every entry but the two links each *Open in…* ends with. */
+const items = () => [...target.querySelectorAll<HTMLButtonElement>("button[role=menuitem]")];
 const names = () => items().map((item) => text(item.querySelector("b")));
+const links = () => [...target.querySelectorAll<HTMLAnchorElement>("a[role=menuitem]")].map((link) => [text(link), link.getAttribute("href")]);
 
 const COMMIT: OpenObject = { kind: "commit", sha: "c90d11e4a7b2" };
 
@@ -197,6 +199,14 @@ test("with nothing to open it here, the menu says why", async () => {
   await openMenu({ kind: "range", base: "main", head: "feature/x" });
   expect(items()).toEqual([]);
   expect(text(target.querySelector(".tf-appmenu"))).toContain("not on this machine");
+});
+
+test("every menu ends with Add an application, on this repository and this object, and Manage applications", async () => {
+  await openMenu(COMMIT);
+  expect(links()).toEqual([
+    ["Add an application", "#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service/commit/c90d11e4a7b2"],
+    ["Manage applications", "#/settings/checkouts"],
+  ]);
 });
 
 test("a range whose two shas the checkout holds offers the Diff tool, and it runs on them", async () => {

@@ -3070,3 +3070,85 @@ mod hung_up {
         assert_eq!(server.count("GET /second HTTP/1.1"), 1);
     }
 }
+
+/// **A sync's request stands aside until a person's is answered** (the
+/// priority lane, 2026-11-13), not only until it passed the quota.
+///
+/// The quota has room for both. A person's read the server takes 400 ms to
+/// answer goes first; a sync request sent 50 ms later through another client
+/// for the same instance reaches the server only once that answer is in, so
+/// a busy server is not handed the sync's work while a person waits on it.
+/// On the wall clock: the server's delay is a real one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_request_waits_for_a_persons_answer() {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!("http://{}", listener.local_addr().expect("addr"));
+    let arrivals = Arc::new(std::sync::Mutex::new(
+        Vec::<(String, std::time::Instant)>::new(),
+    ));
+    let seen = Arc::clone(&arrivals);
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(mut socket) = socket else { return };
+            let seen = Arc::clone(&seen);
+            std::thread::spawn(move || {
+                let mut buffer = [0u8; 2048];
+                let read = socket.read(&mut buffer).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buffer[..read]).to_string();
+                let path = head.split(' ').nth(1).unwrap_or_default().to_owned();
+                seen.lock()
+                    .unwrap()
+                    .push((path.clone(), std::time::Instant::now()));
+                if path == "/slow" {
+                    std::thread::sleep(Duration::from_millis(400));
+                }
+                let _ = socket.write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+            });
+        }
+    });
+    let client = |url: &str| {
+        HttpClient::new(HttpConfig {
+            requests_per_second: 10,
+            burst: 10,
+            ..config(url.to_owned())
+        })
+        .expect("client")
+    };
+    let (person, sync) = (client(&url), client(&url));
+
+    let started = std::time::Instant::now();
+    let read = async {
+        person
+            .send(person.request(Method::GET, "/slow"))
+            .await
+            .map(|_| std::time::Instant::now())
+    };
+    let synced = knobas_http::on_lane(knobas_http::Lane::Background, async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        sync.send(sync.request(Method::GET, "/sync"))
+            .await
+            .map(|_| ())
+    });
+    let (answered, synced) = tokio::join!(read, synced);
+    let answered = answered.expect("the person's read");
+    synced.expect("the sync's request");
+
+    let arrivals = arrivals.lock().unwrap().clone();
+    let at = |path: &str| {
+        arrivals
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, at)| *at)
+            .unwrap_or_else(|| panic!("{path} never arrived: {arrivals:?}"))
+    };
+    assert!(
+        at("/sync") >= answered - Duration::from_millis(20),
+        "the sync's request arrived {:?} after the start, the person's answer {:?}",
+        at("/sync") - started,
+        answered - started
+    );
+}

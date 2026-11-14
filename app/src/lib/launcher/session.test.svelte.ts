@@ -11,7 +11,7 @@ import { flushSync } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LauncherHome, SearchQuery, SearchResponse } from "../ipc";
-import { Session } from "./session.svelte";
+import { askedAs, Session } from "./session.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -66,20 +66,42 @@ function ports(search: (q: SearchQuery) => Promise<SearchResponse>) {
   return { search, launcherHome: async () => EMPTY_HOME };
 }
 
-test("a word typed one letter at a time is one query, not five", async () => {
+test("a word typed one letter at a time is two queries, not five: its first key at once, the rest when the keys pause", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
 
-  for (const raw of ["s", "se", "sep", "sepa"]) {
+  // The first key of a settled box is asked at once (the broad-filters pass, 2026-11-13).
+  session.type("s");
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s"]);
+  await vi.advanceTimersByTimeAsync(20);
+  for (const raw of ["se", "sep", "sepa"]) {
     session.type(raw);
-    // Four keystrokes inside one debounce window.
+    // Three more keystrokes inside one debounce window.
     await vi.advanceTimersByTimeAsync(20);
   }
-  expect(search).not.toHaveBeenCalled();
+  expect(search).toHaveBeenCalledTimes(1);
 
   await vi.advanceTimersByTimeAsync(90);
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s", "sepa"]);
+
+  // A key typed after the box settled again is asked at once.
+  await vi.advanceTimersByTimeAsync(200);
+  session.type("sepal");
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s", "sepa", "sepal"]);
+});
+
+test("a key typed while a query is out waits for the keys to pause", async () => {
+  let answerIt: () => void = () => {};
+  const search = vi.fn((q: SearchQuery) => new Promise<SearchResponse>((resolve) => (answerIt = () => resolve(answer(q.raw)))));
+  const session = new Session(ports(search));
+
+  session.type("p");
+  await vi.advanceTimersByTimeAsync(200);
+  session.type("pa");
   expect(search).toHaveBeenCalledTimes(1);
-  expect(search.mock.calls[0]?.[0]?.raw).toBe("sepa");
+  answerIt();
+  await vi.advanceTimersByTimeAsync(90);
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["p", "pa"]);
 });
 
 /**
@@ -232,10 +254,12 @@ test("closing the box cancels a keystroke that has not fired yet", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
 
+  // The first key is asked at once; the next, inside the debounce, waits and is cancelled with the box.
+  session.type("se");
   session.type("sep");
   session.dispose();
   await vi.advanceTimersByTimeAsync(500);
-  expect(search).not.toHaveBeenCalled();
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["se"]);
 });
 
 /**
@@ -645,4 +669,30 @@ test("asking again under the other mode keeps a list just saved as saved", async
   expect(session.savedId).toBe("list-1");
 
   session.dispose();
+});
+
+test("a pull request written as a developer writes it is asked as one, and anything else goes as typed (F-066)", () => {
+  for (const raw of ["PR 142", "pr 142", "PR #142", "PR#142", " pull request 142 "]) expect(askedAs(raw), raw).toBe("#p 142");
+  for (const raw of ["142", "#142", "PR-142", "pr142", "PR 142 retry", "#t PR 142", "prose 142"]) expect(askedAs(raw), raw).toBe(raw);
+});
+
+test("the box keeps what was typed, the engine is asked for pull requests, and a saved list keeps what was asked (F-066)", async () => {
+  const asked: string[] = [];
+  const created: string[] = [];
+  const session = new Session({
+    debounceMs: 0,
+    search: async (query: SearchQuery) => {
+      asked.push(query.raw);
+      return { interpreted: { text: "142", prefix: null, filters: { sources: [], kinds: ["pr"], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] }, groups: [], total: 0, took_ms: 1, coverage: [] } as unknown as SearchResponse;
+    },
+    launcherHome: async () => ({}) as LauncherHome,
+    createSmartList: async (name: string, query: string) => (created.push(query), { id: "list-1", name, query }) as never,
+  });
+  session.set("PR 142");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(asked).toEqual(["#p 142"]);
+  expect(session.raw).toBe("PR 142");
+  await session.saveCurrent("That one");
+  expect(created).toEqual(["#p 142"]);
 });

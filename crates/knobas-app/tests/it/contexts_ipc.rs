@@ -69,6 +69,7 @@ fn scoped_to(ctx: &str) -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: None,
+        parent: None,
     }
 }
 

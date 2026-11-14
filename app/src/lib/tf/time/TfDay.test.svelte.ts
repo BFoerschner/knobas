@@ -14,8 +14,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { EntityRow } from "../../ipc/entity";
 import type { SearchHit, SearchQuery, SearchResponse } from "../../ipc/search";
-import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget } from "../../ipc/time";
-import { toasts } from "../../shell/toasts.svelte";
+import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget, Week } from "../../ipc/time";
+import { dismiss, toasts } from "../../shell/toasts.svelte";
 import { until } from "../../shell/test-wait";
 import { createLayers } from "../layers.svelte";
 import TfDay from "./TfDay.svelte";
@@ -110,6 +110,7 @@ function render(
     plainPx?: number;
     refuseDelete?: boolean;
     refusedWrites?: RefusedWritesPort;
+    week?: unknown;
   } = {},
 ) {
   const offers = over.offers ?? OFFERS;
@@ -145,6 +146,7 @@ function render(
         },
         launcherHome: () => Promise.resolve({ recent: RECENT, favourites: [], stale_sources: [] } as never),
         ...(over.refusedWrites ? { refusedWrites: over.refusedWrites } : {}),
+        weekTimesheet: () => (over.week === undefined ? Promise.reject(new Error("no week here")) : Promise.resolve(over.week as Week)),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
@@ -272,8 +274,8 @@ test("a strip label that does not fit its block ends in an ellipsis, one with no
   const label = (cls: string) => strip(cls).querySelector("text")?.textContent ?? null;
   // 09:40 to 11:50 is 130 of 600 px, less the label's padding: PAY-231 fits whole.
   expect(label("tf-tm-manual")).toBe("PAY-231");
-  // 13:10 to 13:58 is 48 px, 36 of them for text: five characters with the ellipsis.
-  expect(label("tf-tm-label")).toBe("Stan…");
+  // 13:10 to 13:58 is 48 px, 36 of them for text: four characters and the ellipsis say nothing, so the label goes.
+  expect(label("tf-tm-label")).toBeNull();
   expect(squash(strip("tf-tm-label").querySelector("title")?.textContent)).toBe("13:10 to 13:58, Standup and planning");
   // 09:25 to 09:40 is 15 px: no room for a character and the ellipsis.
   expect(strip("tf-tm-passive").querySelector("text")).toBeNull();
@@ -290,10 +292,34 @@ test("Add to <ticket> gives an offered block to the ticket it is linked to", asy
   expect(sent.updates).toEqual([[2, at(9, 25), at(9, 40), { kind: "entity", entity_id: "jira:PAY-228" }]]);
 });
 
-test("Log to <ticket> gives a label block the ticket ad_hoc_block suggests", async () => {
+test("Add to <ticket>'s toast offers Undo, which deletes the block it made, so the next read offers the stretch again (F-339)", async () => {
   const sent = render();
   await settle();
-  button(row("label"), "Log to PAY-200").click();
+  button(row("offered"), "Add to PAY-228").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(sent.deletes).toEqual([2]);
+});
+
+test("Assign to <ticket>'s Undo puts the label block's own target back (F-339)", async () => {
+  const sent = render();
+  await settle();
+  const before = sent.updates.length;
+  button(row("label"), "Assign to PAY-200").click();
+  await settle();
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(sent.updates.slice(before).map((update) => update[3].kind)).toEqual(["entity", "label"]);
+  expect(sent.deletes).toEqual([]);
+});
+
+test("Assign to <ticket> gives a label block the ticket ad_hoc_block suggests", async () => {
+  const sent = render();
+  await settle();
+  button(row("label"), "Assign to PAY-200").click();
   await settle();
   expect(sent.updates).toEqual([[5, at(13, 10), at(13, 58), { kind: "entity", entity_id: "jira:PAY-200" }]]);
 });
@@ -328,7 +354,7 @@ test("Log… on a ticket whose source's credential cannot log work is drawn disa
 test("Edit moves a block and keeps its target, and the dialog sits on the shell's layers", async () => {
   const sent = render();
   await settle();
-  button(row("unlogged"), "Edit").click();
+  button(row("unlogged"), "Edit…").click();
   flushSync();
   expect(sent.layers.open).toHaveLength(1);
   const from = target.querySelector<HTMLInputElement>("#tf-tm-from")!;
@@ -350,7 +376,7 @@ test("Delete block hides the block at once and sends the delete when the toast's
   try {
     const sent = render();
     await settle();
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     flushSync();
     button(target, "Delete block").click();
     await settle();
@@ -376,7 +402,7 @@ test("Undo on the delete toast puts the block back and no delete is ever sent", 
   try {
     const sent = render();
     await settle();
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     flushSync();
     button(target, "Delete block").click();
     await settle();
@@ -398,7 +424,7 @@ test("a held delete the backend refuses brings the block back and says why", asy
   try {
     render({ refuseDelete: true });
     await settle();
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     flushSync();
     button(target, "Delete block").click();
     await settle();
@@ -424,7 +450,7 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   const what = squash(row("open").textContent);
   expect(what).toContain("No target, app open");
   expect(what).toContain("knobas was open and in front, with no timer and nothing it could name.");
-  expect(squash(row("open").querySelector(".tf-chip")?.textContent)).toBe("open");
+  expect(squash(row("open").querySelector(".tf-chip")?.textContent)).toBe("Open");
   // Dashed on the strip, and the legend says what dashed means.
   expect(target.querySelectorAll(".tf-tm-strip .tf-tm-gap")).toHaveLength(2);
   expect(squash(target.querySelector(".tf-tm-legend")?.textContent)).toContain("Open: app in front, no target");
@@ -432,7 +458,7 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   expect(squash(target.textContent)).not.toContain("Nothing tracked");
 });
 
-test("an open stretch reads Assign… in the sans face on the strip, and pressing it only selects the row (#1523)", async () => {
+test("an open stretch reads Assign… in the sans face on the strip, and pressing it opens the assign dialog (#1523, F-344)", async () => {
   Element.prototype.scrollIntoView = () => {};
   render({ stripWidth: 2000 });
   await settle();
@@ -442,14 +468,14 @@ test("an open stretch reads Assign… in the sans face on the strip, and pressin
   expect(text.getAttribute("class")).toContain("tf-tm-plain");
   (gap as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
-  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   expect(gap.getAttribute("class")).toContain("tf-on");
 });
 
-test("an open stretch's Assign… is fitted to a narrow block like any label (#1523)", async () => {
+test("an open stretch's Assign… is fitted to a narrow block like any label, and dropped where it would say nothing (#1523)", async () => {
   render({ stripWidth: 600 });
   await settle();
-  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("As…");
+  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")).toBeNull();
 });
 
 test("an open stretch is measured in the sans face: Assign… fits where the mono face would not (#1523)", async () => {
@@ -485,16 +511,37 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
   expect(options()).toEqual(["OPS-77 Rotate the gateway certificates"]);
   button(target, "OPS-77 Rotate the gateway certificates").click();
   flushSync();
-  expect(squash(target.querySelector(".tf-tm-picked")?.textContent)).toBe("OPS-77 Rotate the gateway certificates");
+  expect(squash(target.querySelector(".tf-chosen")?.textContent)).toBe("OPS-77 Rotate the gateway certificates");
   button(target, "Assign").click();
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
 });
 
-test("Assign… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
+test("the picker marks no row until the arrow keys move, the footer says what Assign waits for, and a pick clears it (design system, Forms)", async () => {
+  render();
+  await settle();
+  button(row("offered"), "Other ticket…").click();
+  await settle();
+  const marked = () => target.querySelectorAll('[role="dialog"] [role="option"][aria-selected="true"]').length;
+  expect(marked()).toBe(0);
+  expect(squash(target.querySelector(".tf-dialog footer .tf-dwhy")?.textContent)).toBe("Pick a ticket first.");
+  const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  flushSync();
+  expect(marked()).toBe(1);
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  flushSync();
+  expect(target.querySelector(".tf-dialog footer .tf-dwhy")).toBeNull();
+  expect(target.querySelector(".tf-chosen svg")).not.toBeNull();
+  // F-030: the box is gone, and focus goes on to the press the pick made ready rather than to the body.
+  await settle();
+  expect(document.activeElement).toBe(button(target, "Assign"));
+});
+
+test("Other ticket… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
   const sent = render();
   await settle();
-  button(row("offered"), "Assign…").click();
+  button(row("offered"), "Other ticket…").click();
   await settle();
   expect(options()).toEqual(["PAY-228 Payout export to CSV"]);
   // Assign waits for a pick.
@@ -511,7 +558,7 @@ test("Assign… on an offered block lists the recent tickets, and only tickets, 
 test("+ Add a block opens with the ticket search focused, and Esc closes it", async () => {
   render();
   await settle();
-  button(target, "+ Add a block").click();
+  button(target, "Add a block…").click();
   await settle();
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Search for a ticket");
   document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
@@ -522,7 +569,7 @@ test("+ Add a block opens with the ticket search focused, and Esc closes it", as
 test("+ Add a block on A label makes an ad-hoc block on that label", async () => {
   const sent = render();
   await settle();
-  button(target, "+ Add a block").click();
+  button(target, "Add a block…").click();
   await settle();
   button(target, "A label").click();
   flushSync();
@@ -559,20 +606,20 @@ test("the On row's field takes the row and shows what the block is on; the kind 
   try {
     render();
     await settle();
-    button(row("label"), "Edit").click();
+    button(row("label"), "Edit…").click();
     await settle();
     const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
     expect(on.value).toBe("Standup and planning");
-    const kind = target.querySelector<HTMLElement>(".tf-tm-on > .tf-seg")!;
+    const kind = target.querySelector<HTMLElement>(".tf-onrow > .tf-seg")!;
     expect([getComputedStyle(kind).flexGrow, getComputedStyle(kind).flexShrink]).toEqual(["0", "0"]);
     expect([getComputedStyle(on).flexGrow, getComputedStyle(on).minWidth]).toEqual(["1", "0px"]);
     button(target, "Cancel").click();
     flushSync();
 
     // A ticket reads by its key and title, in a field that grows the same way.
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     await settle();
-    const picked = target.querySelector<HTMLElement>(".tf-tm-on > .tf-tm-picked")!;
+    const picked = target.querySelector<HTMLElement>(".tf-onrow > .tf-chosen")!;
     expect(squash(picked.textContent)).toBe("PAY-231 Retry failed SEPA payouts");
     expect([getComputedStyle(picked).flexGrow, getComputedStyle(picked).minWidth]).toEqual(["1", "0px"]);
   } finally {
@@ -584,11 +631,15 @@ test("an open stretch offers Add to the current job, and makes a block on it ove
   const sent = render({ job: { key: "PAY-231", entityId: "jira:PAY-231" } });
   await settle();
   expect(button(row("open"), "Add to PAY-231").className).not.toContain("tf-ghost");
-  expect(button(row("open"), "Assign…").className).toContain("tf-ghost");
+  expect(button(row("open"), "Other ticket…").className).toContain("tf-ghost");
   button(row("open"), "Add to PAY-231").click();
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:PAY-231" }]]);
   expect(toasts.items.at(-1)?.text).toBe("Made a block on PAY-231, 12:35 to 13:10");
+  // Undo takes back the block it made (F-339).
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(sent.deletes).toHaveLength(1);
 });
 
 test("without a current job an open stretch offers Assign… only", async () => {
@@ -599,18 +650,141 @@ test("without a current job an open stretch offers Assign… only", async () => 
   expect(row("open").textContent).not.toContain("Add to");
 });
 
-test("Dismiss on an offered block dismisses it, says knobas will not offer it again, and the day re-reads", async () => {
-  const sent = render();
-  await settle();
-  expect(button(row("offered"), "Dismiss").className).toContain("tf-ghost");
-  button(row("offered"), "Dismiss").click();
-  await settle();
-  expect(sent.dismissals).toEqual([2]);
-  expect(sent.deletes).toEqual([]);
-  expect(toasts.items.at(-1)?.text).toBe("Dismissed. knobas will not offer it again.");
-  expect(rows()).not.toContain("offered");
-  // Only an offer has it.
-  expect(() => button(row("unlogged"), "Dismiss")).toThrow();
+test("Dismiss hides the offer at once and sends when the toast's Undo has had its time, and the day re-reads (F-339)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render();
+    await settle();
+    expect(button(row("offered"), "Dismiss").className).toContain("tf-ghost");
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    expect(sent.dismissals).toEqual([]);
+    const toast = toasts.items.at(-1)!;
+    expect([toast.text, toast.action?.label]).toEqual(["Dismissed. knobas will not offer it again.", "Undo"]);
+    expect(rows()).not.toContain("offered");
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(sent.dismissals).toEqual([2]);
+    expect(sent.deletes).toEqual([]);
+    expect(rows()).not.toContain("offered");
+    // Only an offer has it.
+    expect(() => button(row("unlogged"), "Dismiss")).toThrow();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a mouse's Dismiss leaves the row's words at its height until the pointer has left the list and the toast has gone, and a key's closes at once (F-138, F-064, F-159, F-163)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    render();
+    await settle();
+    const rowsOf = () => [...target.querySelectorAll(".tf-tm-list > .tf-tm-row")];
+    const before = rowsOf().length;
+    const at = rowsOf().indexOf(row("offered"));
+    button(row("offered"), "Dismiss").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    await settle();
+    const held = target.querySelector(".tf-tm-rowheld")!;
+    expect(rowsOf().indexOf(held), "where it stood").toBe(at);
+    expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
+    expect(held.textContent, "it still says what it was").toContain("knobas saw");
+    expect(held.querySelector(".tf-tm-state")?.textContent?.trim(), "and what became of it (F-366)").toBe("Dismissed");
+    expect(rowsOf()).toHaveLength(before);
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+    await settle();
+    expect(target.querySelector(".tf-tm-rowheld"), "*Undo* is on the toast, and the way to it leaves the list").not.toBeNull();
+    vi.advanceTimersByTime(6_500);
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+    await settle();
+    expect(target.querySelector(".tf-tm-rowheld")).toBeNull();
+    expect(rowsOf()).toHaveLength(before - 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Dismisses during one toast are counted on it, its Undo takes back all of them, and the next press starts again (F-365)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render({ blocks: jobPrJob(), offers: linked("linked_to_target"), open: [] });
+    await settle();
+    const press = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-tm-row button")].find((b) => b.textContent === "Dismiss")!.click();
+    press();
+    await settle();
+    expect(toasts.items.map((toast) => toast.text)).toEqual(["Dismissed. knobas will not offer it again."]);
+    press();
+    await settle();
+    press();
+    await settle();
+    expect(toasts.items.map((toast) => toast.text)).toEqual(["Dismissed 3 rows. knobas will not offer them again."]);
+    const before = target.querySelectorAll(".tf-tm-row button").length;
+    toasts.items[0]!.action!.run();
+    dismiss(toasts.items[0]!.id);
+    await settle();
+    expect(target.querySelectorAll(".tf-tm-row button").length, "all three back").toBeGreaterThan(before);
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(sent.dismissals, "and nothing was sent").toEqual([]);
+    press();
+    await settle();
+    expect(toasts.items.map((toast) => toast.text)).toEqual(["Dismissed. knobas will not offer it again."]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a Dismiss survives leaving the Day during its toast: the row stays hidden, Undo brings it back, and the write still goes (F-356)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    // To Week and back: a new Day, whose read still has the block, while the toast stands.
+    const again = () => {
+      unmount(view!);
+      view = undefined;
+      return render();
+    };
+    render();
+    await settle();
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    again();
+    await settle();
+    expect(rows(), "hidden under its toast").not.toContain("offered");
+
+    toasts.items.at(-1)!.action!.run();
+    await settle();
+    expect(rows(), "Undo reaches the new Day").toContain("offered");
+
+    const pressedOn = again();
+    await settle();
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    again();
+    await settle();
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(pressedOn.dismissals, "the write still goes").toEqual([2]);
+    expect(rows(), "not drawn again from a read older than the write").not.toContain("offered");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Undo on Dismiss puts the offer back and nothing is ever sent (F-339)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render();
+    await settle();
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    toasts.items.at(-1)!.action!.run();
+    await settle();
+    expect(rows()).toContain("offered");
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(sent.dismissals).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 // #1108: job, its pull request (confirmed link to the job), job again.
@@ -653,13 +827,13 @@ test("a run of offered rows going to one ticket offers one Add over all of them"
   expect(runs()).toHaveLength(0);
 });
 
-test("each row in a run keeps its own Add to, Assign… and Dismiss", async () => {
+test("each row in a run keeps its own Add to, Other ticket… and Dismiss", async () => {
   render({ blocks: jobPrJob(), offers: linked("linked_to_target"), open: [] });
   await settle();
   const offered = [...target.querySelectorAll<HTMLElement>('.tf-tm-row[data-state="offered"]')];
   expect(offered).toHaveLength(3);
   for (const each of offered) {
-    for (const label of ["Add to PAY-231", "Assign…", "Dismiss"]) expect(() => button(each, label)).not.toThrow();
+    for (const label of ["Add to PAY-231", "Other ticket…", "Dismiss"]) expect(() => button(each, label)).not.toThrow();
   }
 });
 
@@ -687,6 +861,48 @@ test("a day with nothing on it says so, and a day before today offers the day af
   expect(squash(target.textContent)).toContain("Nothing tracked on this day.");
   expect(target.querySelector('a[aria-label="Day after"]')!.getAttribute("href")).toBe("#/time/2026-08-21");
   expect(squash(target.querySelector('a[href="#/time"]')?.textContent)).toBe("Today");
+});
+
+test("a past day with no blocks says what Week counts for it, so the two pages agree (F-361)", async () => {
+  render({ blocks: [], open: [], day: "2026-08-20", week: { days: ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"], rows: [{ target: null, title: null, cells: [{}, {}, {}, { tracked_seconds: 13_320 }] }], past_horizon: [] } });
+  await settle();
+  expect(squash(target.textContent)).toContain("No blocks kept for this day. Week counts 3h 42m.");
+  expect(squash(target.textContent)).not.toContain("Nothing tracked");
+});
+
+test("rows dismissed down a run each hold, its group stands where it stood, and a held row's group draws no action (F-159)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const job = { kind: "entity", entity_id: "jira:PAY-231" } as const;
+    const three = [
+      block(21, at(9), at(9, 20), { kind: "passive", target: job }),
+      block(22, at(9, 20), at(9, 25), { kind: "passive", target: job }),
+      block(23, at(9, 25), at(9, 47), { kind: "passive", target: job }),
+    ];
+    render({ blocks: three, open: [], offers: { 21: null, 22: null, 23: null } });
+    await settle();
+    const list = target.querySelector<HTMLElement>(".tf-tm-list")!;
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 900, 600);
+    const shape = () => [...list.children].map((one) => (one.classList.contains("tf-tm-group") ? "group" : one.classList.contains("tf-tm-rowheld") ? "held" : "row"));
+    const dismiss = () => button(target.querySelector('.tf-tm-row[data-state="offered"]')!, "Dismiss").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(shape()).toEqual(["group", "row", "row", "row"]);
+
+    dismiss();
+    await settle();
+    expect(shape(), "the group stays above the row that left").toEqual(["group", "held", "row", "row"]);
+    expect(squash(list.querySelector(".tf-tm-group")?.textContent)).toContain("2 offered rows go to");
+
+    dismiss();
+    await settle();
+    expect(shape(), "with one row left it still keeps its room").toEqual(["group", "held", "held", "row"]);
+    expect(list.querySelector(".tf-tm-group button"), "and adds nothing").toBeNull();
+
+    window.dispatchEvent(new WheelEvent("wheel"));
+    await settle();
+    expect(shape()).toEqual(["row"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("past the horizon, what knobas saw is absent rather than zero, and the blocks you tracked stay", async () => {
@@ -726,4 +942,23 @@ test("The Day tab stops its clock while its page is hidden and reads it once whe
     vi.useRealTimers();
     page.shown = true;
   }
+});
+
+test("a row's actions stand in their slots, and Other ticket… stands beside a ticket the row names", async () => {
+  render({ job: { key: "PAY-231", entityId: "jira:PAY-231" } });
+  await settle();
+  const slot = (each: HTMLElement) =>
+    [...each.querySelectorAll<HTMLButtonElement>(".tf-tm-acts button")].map((found) => [squash(found.textContent), found.className.match(/tf-tm-s\d/)?.[0]]);
+  expect(slot(row("offered"))).toEqual([["Add to PAY-228", "tf-tm-s1"], ["Other ticket…", "tf-tm-s2"], ["Dismiss", "tf-tm-s3"]]);
+  expect(slot(row("open"))).toEqual([["Add to PAY-231", "tf-tm-s1"], ["Other ticket…", "tf-tm-s2"]]);
+  expect(slot(row("unlogged")).at(-1)).toEqual(["Edit…", "tf-tm-s3"]);
+});
+
+test("a day with nothing on it draws its one line and Add a block, not five figures and a strip (F-354)", async () => {
+  render({ blocks: [], open: [], day: "2026-08-20" });
+  await settle();
+  expect(target.querySelector(".tf-tm-sum")).toBeNull();
+  expect(target.querySelector(".tf-tm-strip")).toBeNull();
+  expect(target.querySelector(".tf-tm-legend")).toBeNull();
+  expect(squash(target.querySelector(".tf-tm-empty")?.textContent)).toContain("Add a block…");
 });

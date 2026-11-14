@@ -82,7 +82,7 @@ test("failed tests come first, open to their assertion, Show in log and how ofte
   expect(detail.querySelector("a")?.getAttribute("href")).toBe("#/build/p/r/log");
   expect(detail.querySelector(".tf-tacts .tf-dim")?.textContent).toBe("Failed in 2 of the last 10 runs, both on this branch.");
   expect(asked).toEqual(["2"]);
-  expect(target.querySelector(".tf-trow .tf-chip.tf-err")?.textContent).toBe("failed");
+  expect(target.querySelector(".tf-trow .tf-chip.tf-err")?.textContent).toBe("Failed");
   expect(target.querySelectorAll(".tf-trow")[1]?.querySelector(".tf-dim")?.textContent).toBe("420 ms");
 });
 

@@ -21,6 +21,8 @@ knobas-app/estate_live  just estate-live runs it with --test estate_live
 knobas-app/read_cache_live  just gitea-live runs it with --test read_cache_live
 knobas-app/kuma_write_live  just kuma-live runs it with --test kuma_write_live
 knobas-app/share_exit  just atlassian-live runs it with --test share_exit
+knobas-app/slow_forge_live  its header runs it with --test slow_forge_live
+knobas-app/slow_sources_live  its header runs it with --test slow_sources_live
 knobas-app/start_work_live  just start-work-live runs it with --test start_work_live
 knobas-app/teamcity_seeded_live  just teamcity-live-seeded runs it with --test teamcity_seeded_live
 knobas-search/coverage  just search-perf runs it with --test coverage

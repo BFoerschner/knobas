@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
+import { pageContext } from "../kept-pages.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
@@ -119,7 +120,7 @@ function ports(over: Partial<CodePorts> = {}): CodePorts {
       if (filter.order === "attention") return page(OPEN, GROUPS);
       return page([...OPEN, ...SETTLED]);
     },
-    entityCheckout: async (id) => checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null),
+    entityCheckouts: async (ids) => ids.map((id) => ({ entity_id: id, checkout: checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null) })),
     codeFacts: async (ids) => FACTS.filter((facts) => ids.includes(facts.entity_id)),
     listSources: async () => [{ ...sourceFacts("gitea"), base_url: "https://git.example.com" }, { ...sourceFacts("jira"), base_url: "" }],
     listContexts: async () => [],
@@ -153,23 +154,24 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   await draw([]);
 
   expect(text(target.querySelector("h1"))).toBe("Code");
-  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, what asks for you first.");
+  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, yours first.");
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Repositories 3", "Pull requests 4"]);
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
 
   const rows = [...target.querySelectorAll("tbody tr")];
   expect(rows.map(cells)).toEqual([
-    // A repository holding a merged pull request of yours is yours too (#966).
-    ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
-    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in… ▾"],
+    // Yours by open work (2026-11-11): an open pull request of yours is in it. A merged one of yours lifts nothing,
+    // since only `code_facts` knows it, after the rows drew.
+    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "Thu 12:00", "Open in…"],
     // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
     ["tidewater/fx-rates", "Platform", "Go", "0", "not on this machine", "today 11:00", "Clone"],
+    ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
   ]);
-  expect(rows[1]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
+  expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
   expect([...target.querySelectorAll("thead th")].map(text).slice(0, 3)).toEqual(["Repository", "Team", "Language"]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter 3 repositories by name, team or language",
+    "Filter repositories",
   );
 });
 
@@ -194,22 +196,23 @@ test("Repositories: the Team and Language dropdowns keep what the repositories d
 test("Pull requests are grouped in the attention read's order, then merged or closed, each with its job", async () => {
   await draw(["prs"]);
 
-  // Your merged pull request is under *Yours* (#966), so nothing is left
-  // under *Merged or closed*.
+  // Yours is open work (2026-11-11): your merged pull request stays under
+  // *Merged or closed*, and says *you*.
   expect([...target.querySelectorAll(".tf-cgroup-h")].map(text)).toEqual([
     "Asking for your review 1",
-    "Yours 2",
+    "Yours 1",
     "Open, others 1",
+    "Merged or closed 1",
   ]);
   const rows = [...target.querySelectorAll("tbody tr")].map(cells);
   expect(rows).toEqual([
-    ["#144", `Add payout CSV export${PAYOUT}, tom`, "open", "", "today 10:20"],
-    ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "open", "PAY-231", "today 10:20"],
-    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "merged", "", "today 10:20"],
-    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "open", "", "2026-08-10"],
+    ["#144", `Add payout CSV export${PAYOUT}, tom`, "Open", "", "today 10:20"],
+    ["#142", `SEPA retry with exponential backoff${PAYOUT}, you`, "Open", "PAY-231", "today 10:20"],
+    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "10 Aug"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, you", "Merged", "", "today 10:20"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter pull requests by title, repo, author or number",
+    "Filter PRs",
   );
   const attention = reads.find((filter) => filter.order === "attention");
   expect(attention?.kinds).toEqual(["pr"]);
@@ -221,7 +224,7 @@ test("a pull request whose state word has no tone draws its word in the neutral 
     filter.kinds.includes("repo") ? page(REPOS) : filter.kinds.includes("branch") ? page([]) : page([draft]);
   await draw(["prs"], null, ports({ listEntities }));
 
-  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "draft");
+  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "Draft");
   expect(chip?.getAttribute("class")?.trim()).toBe("tf-chip");
 });
 
@@ -245,8 +248,23 @@ test("Waiting on me keeps the review asked of you; This job with nothing held of
   expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#139"]);
 });
 
-test("New pull request opens the compare page for the job's branch; with no job it cannot", async () => {
+test("the primary opens the job's open pull request, not a compare page that only says one is open (F-243)", async () => {
   await draw([]);
+  const primary = target.querySelector<HTMLAnchorElement>(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("Open PR #142");
+  expect(primary.getAttribute("href")).toMatch(/^#\/pr\//);
+});
+
+test("New pull request opens the compare page for the job's branch; with no job there is no off button, as a repository's page offers it (F-252)", async () => {
+  const base = ports();
+  await draw([], "PAY-231", {
+    ...base,
+    // The job's branch stands, and no pull request of the job's is open.
+    listEntities: async (filter, limit, offset) => {
+      const page = await base.listEntities(filter, limit, offset);
+      return filter.kinds?.includes("pr") ? { ...page, rows: page.rows.map((row) => ({ ...row, state: { ...row.state!, text: "Merged" } })) } : page;
+    },
+  });
   const link = [...target.querySelectorAll("a")].find((a) => text(a) === "New pull request");
   expect(link?.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2FPAY-231-sepa-retry",
@@ -255,8 +273,7 @@ test("New pull request opens the compare page for the job's branch; with no job 
   view = null;
 
   await draw([], null);
-  const button = [...target.querySelectorAll("button")].find((b) => text(b) === "New pull request");
-  expect(button?.getAttribute("aria-disabled")).toBe("true");
+  expect([...target.querySelectorAll(".tf-fhead a, .tf-fhead button")].map(text)).not.toContain("New pull request");
   expect(target.querySelector(".tf-chip-job")).toBeNull();
 });
 
@@ -458,4 +475,115 @@ test("the Pull requests count is the mirror's total while the later pages are he
     }),
   );
   expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe("Pull requests 1503");
+});
+
+test("shown again with no run in between, Code reads only its checkouts, which git changes without a sync (Björn, 2026-11-10)", async () => {
+  const shown = $state({ on: true });
+  let checkoutReads = 0;
+  let checkoutCalls = 0;
+  const stand = ports({
+    entityCheckouts: async (ids) => (
+      (checkoutCalls += 1),
+      (checkoutReads += ids.length),
+      ids.map((id) => ({ entity_id: id, checkout: checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null) }))
+    ),
+  });
+  view = mount(TfCode, { target, props: { ready: true, rest: ["repos"], job: null, ports: stand, now: NOW }, context: pageContext(() => shown.on) });
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  const listed = reads.length;
+  const firstCheckouts = checkoutReads;
+  expect(firstCheckouts).toBe(REPOS.length);
+  shown.on = false;
+  flushSync();
+  shown.on = true;
+  flushSync();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(reads.length, "no list read again").toBe(listed);
+  expect(checkoutReads, "each row's checkout again").toBe(firstCheckouts + REPOS.length);
+  expect(checkoutCalls, "in one call each time (the scale pass, 2026-11-10)").toBe(2);
+  expect(target.querySelector(".tf-wait-dim"), "nothing dims").toBeNull();
+});
+
+test("each pull request group declares its five columns, so a windowed group's spacer row sizes none of them (2026-11-10)", async () => {
+  await draw(["prs"]);
+  const tables = [...target.querySelectorAll("table.tf-cprs")];
+  expect(tables.length).toBeGreaterThan(0);
+  for (const table of tables) expect(table.querySelectorAll(":scope > colgroup > col")).toHaveLength(5);
+});
+
+test("Pull requests reads the newest 100 first, the rest once the filter wants them, and asks code_facts once a row (the query audit, 2026-11-12)", async () => {
+  const { sessionFilter } = await import("../filter/filter-state.svelte");
+  const filter = sessionFilter("code-prs");
+  Object.assign(filter, { text: "", scope: "all", chips: {}, dropdowns: {} });
+  const settled = Array.from({ length: 250 }, (_, n) => pr(5000 - n, `Old change ${n}`, "merged", PAYOUT, `2026-07-${String(1 + (n % 28)).padStart(2, "0")}T10:00:00Z`));
+  const every = [...OPEN, ...settled];
+  const newest: [number, number][] = [];
+  const asked: string[][] = [];
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (wanted, limit, offset) => {
+        if (wanted.kinds.includes("repo")) return page(REPOS);
+        if (wanted.kinds.includes("branch")) return page([]);
+        if (wanted.order === "attention") return page(OPEN, GROUPS);
+        newest.push([limit, offset]);
+        return { rows: every.slice(offset, offset + limit), total: every.length, tally: null, groups: null };
+      },
+      codeFacts: async (ids) => (asked.push(ids), FACTS.filter((facts) => ids.includes(facts.entity_id))),
+    }),
+  );
+  expect(newest).toEqual([[100, 0]]);
+  expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe(`Pull requests ${every.length}`);
+  expect(target.querySelector(".tf-fcount-n")?.textContent).toBe(`${every.length} pull requests`);
+  const first = asked.flat();
+  expect(new Set(first).size).toBe(first.length);
+  expect(first).toHaveLength(REPOS.length + 100);
+
+  filter.text = "Old change 249";
+  flushSync();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(newest).toEqual([[100, 0], [1000, 100]]);
+  const all = asked.flat();
+  expect(new Set(all).size).toBe(all.length);
+  expect(all).toHaveLength(REPOS.length + every.length);
+  expect([...target.querySelectorAll(".tf-cprs .tf-rowt")].map(text)).toEqual(["Old change 249"]);
+  filter.text = "";
+});
+
+test("once the page has drawn and the window is idle, the rest of the pull requests is read, and lands in one piece (the frame budget's code-filter, 2026-11-12)", async () => {
+  const { sessionFilter } = await import("../filter/filter-state.svelte");
+  Object.assign(sessionFilter("code-prs"), { text: "", scope: "all", chips: {}, dropdowns: {} });
+  const settled = Array.from({ length: 2400 }, (_, n) => pr(9000 - n, `Old change ${n}`, "merged"));
+  const every = [...OPEN, ...settled];
+  const newest: [number, number][] = [];
+  const drawnRows: number[] = [];
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (wanted, limit, offset) => {
+        if (wanted.kinds.includes("repo")) return page(REPOS);
+        if (wanted.kinds.includes("branch")) return page([]);
+        if (wanted.order === "attention") return page(OPEN, GROUPS);
+        newest.push([limit, offset]);
+        // What the page drew when each later page was asked: the rest lands once, after the last.
+        drawnRows.push(target.querySelectorAll(".tf-cprs tbody tr:not(.tf-wgap)").length);
+        return { rows: every.slice(offset, offset + limit), total: every.length, tally: null, groups: null };
+      },
+    }),
+  );
+  expect(newest).toEqual([[100, 0]]);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  flushSync();
+  expect(newest).toEqual([[100, 0], [1000, 100], [1000, 1100], [1000, 2100]]);
+  expect(new Set(drawnRows.slice(1)).size).toBe(1);
+  expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe(`Pull requests ${every.length}`);
 });

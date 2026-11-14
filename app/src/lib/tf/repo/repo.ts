@@ -24,6 +24,7 @@ import type {
   ViewRow,
   ViewSection,
   RefusedWrite,
+  Unsynced,
   WriteAsk,
 } from "../../ipc/entity";
 import type { WriteSource } from "../../shell/queued-toast";
@@ -56,6 +57,10 @@ export function headLine(
  * file until the source holds a newer blob.
  */
 export const MADE = "branch";
+/** A pull request this session queued, on the repository's entity with its title as the text (F-242) and the branch it proposes as its `base` (F-257). */
+export const MADE_PR = "pull request";
+/** The surface those echoes are tagged with, so the repository's *Pull requests* reads again for them. */
+export const REPO_PRS = "repo-prs";
 export const DELETED = "delete";
 export const commitKind = (branch: string, path: string) => `commit ${branch}\u0000${path}`;
 /** The surfaces they are tagged with, whose re-reads settle them. */
@@ -77,6 +82,8 @@ export const REPO_TABS = [
   { id: "branches", label: "Branches", group: "ref" },
   { id: "compare", label: "Compare", group: "ref" },
   { id: "prs", label: "Pull requests", group: "work" },
+  // The pipelines that build the repository, branch by branch (the repo-builds pass).
+  { id: "builds", label: "Builds", group: "work" },
   { id: "local", label: "Local changes", group: "work" },
 ] as const;
 
@@ -102,10 +109,12 @@ export interface RepoRoute {
   line: number | null;
   /** Commits: the commit's entity id, whose diff opens. */
   commit: string | null;
-  /** Compare: the branch proposed (#837's `compare/<branch>`). */
+  /** Compare: the branch proposed (#837's `compare/<branch>`). Builds: the branch shown (`builds/<branch>`). */
   branch: string | null;
   /** Compare: the branch it goes into, where the address names one (`compare/<base>...<head>`, #2427). */
   base: string | null;
+  /** Builds: the pipeline whose runs open inside the tab (`builds/<branch>/<pipeline id>`, each encoded whole). */
+  pipeline: string | null;
 }
 
 /** Between the base and the head in a compare address: git's own, and never part of a ref name. */
@@ -122,7 +131,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
   if (rest[1] === LINE) {
     const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
-    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null };
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null, pipeline: null };
   }
   const tab = (TABS.has(rest[1] ?? "") ? rest[1] : "files") as RepoTab;
   const tail = rest.slice(2).join("/") || null;
@@ -134,9 +143,16 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
     path: tab === "files" || tab === "edit" ? tail : null,
     line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
-    branch: tab === "compare" ? compared.branch : null,
+    // Builds' branch and pipeline are each one segment, encoded whole (`buildsHash`).
+    branch: tab === "compare" ? compared.branch : tab === "builds" ? (rest[2] ?? null) : null,
     base: tab === "compare" ? compared.base : null,
+    pipeline: tab === "builds" ? (rest[3] ?? null) : null,
   };
+}
+
+/** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
+export function knowsRepoTab(rest: readonly string[]): boolean {
+  return rest[1] === undefined || rest[1] === LINE || TABS.has(rest[1]);
 }
 
 /** The address of the repository page, a tab of it, or a place inside a tab. */
@@ -144,6 +160,11 @@ export function repoHash(repoId: string, tab?: RepoTab, ...tail: string[]): stri
   const parts = [`#/repo/${encodeURIComponent(repoId)}`];
   if (tab !== undefined) parts.push(tab, ...tail);
   return parts.join("/");
+}
+
+/** The Builds tab at `branch`, and inside it `pipeline`'s runs where given; each encoded whole. */
+export function buildsHash(repoId: string, branch: string, pipeline?: string): string {
+  return repoHash(repoId, "builds", encodeURIComponent(branch), ...(pipeline === undefined ? [] : [encodeURIComponent(pipeline)]));
 }
 
 /** The Files tab with `path` open; each segment encoded, the slashes kept. */
@@ -219,32 +240,61 @@ export function underRepoHash(kind: UnderRepoKind, entityId: string, repoId: str
 export interface BranchOption {
   name: string;
   /**
-   * The branch's entity id, which its files and commits are read at; `null`
-   * only for the default branch where the mirror does not hold it, which is
-   * read at the repository instead.
+   * The branch's entity id, which its files and commits are read at: the
+   * mirror's, or for a branch the source lists and the mirror has not synced
+   * yet the id its adapter named (`ShownView.unsynced`), read through the
+   * source. `null` for the default branch where the mirror does not hold it,
+   * which is read at the repository instead, and for a branch this session
+   * made that no read holds yet (`made`).
    */
   entityId: string | null;
   isDefault: boolean;
+  /** Not in the mirror yet: read through the source, linked nowhere. */
+  unsynced?: boolean;
+  /** Made by knobas this session and not in any read yet: its write's word, *queued* or *sent*. */
+  made?: "queued" | "sent";
 }
 
 /**
  * The branches the dropdown offers, from the view's *Branches* section, in
- * its order (the default branch first). Only a branch the mirror holds has an
- * id to read at; the view cleared the others' (ADR-0020 rule 7), and the note
- * a cut list ends on has none either. The default branch is offered either
- * way: it is read at the repository.
+ * its order (the default branch first). A branch the mirror holds has its
+ * id; one the source lists and the mirror has not synced yet has the id its
+ * adapter named, which the view moved to `unsynced` (ADR-0020 rule 7), so a
+ * branch made on the forge since the last sync is offered as soon as the
+ * listing names it. The note a cut list ends on has no id either way. The
+ * default branch is offered either way: it is read at the repository.
  */
-export function branchOptions(section: ViewSection | null): BranchOption[] {
+export function branchOptions(section: ViewSection | null, unsynced: readonly Unsynced[] = []): BranchOption[] {
   const options: BranchOption[] = [];
+  const named = new Map(unsynced.filter((row) => section === null || row.section === section.id).map((row) => [row.title, row.entity_id]));
   for (const block of section?.blocks ?? []) {
     if (block.type !== "entities") continue;
     for (const row of block.rows) {
       const isDefault = row.chip === "default";
-      if (row.entity_id === null && !isDefault) continue;
-      options.push({ name: row.title, entityId: row.entity_id, isDefault });
+      const readAt = row.entity_id ?? named.get(row.title) ?? null;
+      if (readAt === null && !isDefault) continue;
+      options.push({ name: row.title, entityId: readAt, isDefault, ...(row.entity_id === null && readAt !== null ? { unsynced: true } : {}) });
     }
   }
   return options;
+}
+
+/**
+ * The branches with each one this session made (`MADE` echoes) that the
+ * listing does not hold yet, after the listed ones: a branch knobas made is
+ * offered at once, without waiting for a read, and goes from here when a
+ * read lists it.
+ */
+export function withMade(listed: readonly BranchOption[], made: readonly { text: string; state: "queued" | "sent" }[]): BranchOption[] {
+  const names = new Set(listed.map((option) => option.name));
+  const extra: BranchOption[] = [];
+  // Two echoes of one name (a commit to a new branch, then *New branch…* of it) are one branch: the list is keyed by name.
+  for (const echo of made) {
+    if (names.has(echo.text)) continue;
+    names.add(echo.text);
+    extra.push({ name: echo.text, entityId: null, isDefault: false, made: echo.state });
+  }
+  return extra.length === 0 ? [...listed] : [...listed, ...extra];
 }
 
 /**
@@ -565,7 +615,7 @@ export interface BranchRow {
   meta: string | null;
   /** `null` until its view answers, and for a branch with no id to read at. */
   standing: BranchStanding | null;
-  /** Its tip's author as the source spells the account (`code_facts`, #986), or `null`. */
+  /** Its tip's author by the name the record gives (`code_facts`' `author_name`, F-107), else as the source spells the account (#986), or `null`. */
   author: string | null;
   /** Whether that author is mine. */
   mine: boolean;
@@ -606,6 +656,26 @@ export function proposal(head: string, ticket: ProposedFrom | null): { title: st
     title: `${ticket.key}: ${ticket.summary}`,
     body: description === "" ? `Closes ${ticket.key}.` : `${description}\n\nCloses ${ticket.key}.`,
   };
+}
+
+/**
+ * What git would refuse in a branch's name (`git check-ref-format`), in words, or `null` for one it takes. The dialog
+ * says so while typing, so the refusal isn't a queued write that comes back (F-247).
+ */
+export function branchNameProblem(name: string): string | null {
+  const it = name.trim();
+  if (it === "") return "Name the branch.";
+  if (/\s/.test(it)) return "A branch name can’t have spaces in it.";
+  if (it.endsWith("/")) return "A branch name can’t end in /.";
+  if (it.startsWith("/") || it.startsWith("-")) return `A branch name can’t start with ${it[0]}.`;
+  if (it.includes("//")) return "A branch name can’t have // in it.";
+  if (it.includes("..")) return "A branch name can’t have .. in it.";
+  if (it.includes("@{")) return "A branch name can’t have @{ in it.";
+  const bad = /[~^:?*[\\\x00-\x1f\x7f]/.exec(it);
+  if (bad !== null) return `A branch name can’t have ${bad[0]} in it.`;
+  if (it.endsWith(".") || it.endsWith(".lock")) return `A branch name can’t end in ${it.endsWith(".") ? "." : ".lock"}.`;
+  if (it.split("/").some((part) => part.startsWith("."))) return "A part of a branch name can’t start with a dot.";
+  return null;
 }
 
 /** *New branch…*'s name, prefilled with the job's key (R-8.8). */

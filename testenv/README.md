@@ -783,7 +783,9 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   daemon. It is what lets a Docker check created through knobas have a host
   (`kuma-live`'s `a_docker_check_is_published_with_the_seeded_docker_host`).
 - **`./seed-kuma.sh` deletes every monitor `monitors.json` does not name**
-  (since 2026-09-06, #441). That is what makes the seed idempotent, and it is
+  (since 2026-09-06, #441), except one named `scale-…`, which belongs to
+  `just seed-scale kuma` (*Björn's scale*) and is never read by the sweep.
+  That is what makes the seed idempotent, and it is
   also a sweep: a monitor a sibling added by hand, or that knobas itself
   created through the Kuma source's *Create monitor for this asset* (#453,
   landed 2026-09-07), is gone on anyone's next `./seed`, silently and with no
@@ -1145,10 +1147,18 @@ configuration's next number -- 413 after a fresh seed -- and the number
 counter is not wound back, which is harmless: the seed only sets a counter
 while the build with the fixture's number does not exist. Before any test
 that asserts an exact set, the suite **clears what a killed run left**: every
-build whose id is not in `seed-state.json` is canceled if in flight and
-deleted, so recovery from a run that died mid-way is "run the suite again",
-never `testenv/reset`. After a green run the server holds exactly the seeded
-builds again.
+build in the seed's projects (`Ledger`, `Payout`, `SeededChain` and what is
+nested in them) whose id is not in `seed-state.json` is canceled if in flight
+and deleted, and every project a run made -- one named `Knobas…`, or one
+inside a seed project -- is deleted with its configurations. So recovery from
+a run that died mid-way is "run the suite again", never `testenv/reset`. After
+a green run the seed's projects hold exactly the seeded builds again.
+**Nothing outside them is touched or counted**: every listing the clearing and
+the exact sets read is `affectedProject:` one of the seed's projects, every
+source the suite builds is scoped to them unless a test names its own scope,
+and a project under `_Root` with any other name is another estate's (the
+`Scale` tree of *Björn's scale*), which
+`a_project_another_estate_owns_is_left_alone_by_the_cleanup` holds to.
 
 **One owner at a time**, exactly as for the Gitea suites (see *One
 environment, one owner at a time*): the leftover clearing cannot tell a sibling's build
@@ -1351,11 +1361,15 @@ payload, cursor, the real 401 — and `crates/knobas-app/tests/atlassian_live.rs
 write ops read back out of Jira. Both write, and both take back what they wrote
 from a `Drop` that checks rather than assumes. What a *killed* run leaves is put
 back by the next run of the **adapter's** suite, whose leftover clearing works
-from `seed-state.json` rather than from anything a run remembers — a stray issue,
-comment or attachment deleted, the `knobas-live-suite` label removed, a status
-moved back through the workflow — and prints what it put back. So after a green
-run the server holds exactly the seeded corpus, and recovery from a dirty one is
-"run the suite again". The one thing neither can undo is the `PAY` key counter:
+from `seed-state.json` rather than from anything a run remembers — a stray issue
+(with its sub-tasks), comment or attachment deleted, the `knobas-live-suite`
+label removed, a status moved back through the workflow — and prints what it put
+back. It searches **the seed's projects alone** (`jira.projects` and the
+narrowing project, `NARROW`), and every source either suite builds is scoped to
+them unless a test names its own scope, so another estate on the same Jira (the
+SCL* projects of *Björn's scale*) is neither touched nor counted. So after a
+green run those projects hold exactly the seeded corpus, and recovery from a
+dirty one is "run the suite again". The one thing neither can undo is the `PAY` key counter:
 the create leaves the project one key further on, so nothing may assume the
 fixture's keys are the highest ones.
 
@@ -1649,6 +1663,180 @@ snapshot's name, its size and its age.
   hour. The 22k copies are about 0.2 GB each as files; the clone costs little
   until the run writes.
 
+## Björn's scale (`just seed-scale`, `just scale-sync`)
+
+Björn's real sources hold about 5,000 Confluence pages, 20,000 Jira issues,
+4,000 TeamCity objects and 10,000 Gitea items; the seed holds a few dozen of
+each. `testenv/seed-scale.sh` fills the live products to his size **beside**
+the seed, never in it, so a profile that syncs the seed alone sees no change:
+
+| Product | Scope it adds | What it makes (default `--count`) |
+|---|---|---|
+| `jira` | projects `SCLPAY`, `SCLOPS`, `SCLWEB`, `SCLDATA`, `SCLMOB`, `SCLSEC` (*Scale test: …*) | 20,000 issues: epics (one with ~900 children), stories, tasks, bugs, sub-tasks; To Do / In Progress / In Review / Done by age; priorities, assignees and reporters from the fixture's five people and `knobas`, labels, components, monthly fix versions, due dates, estimates; ~20,000 comments written as those people, ~4,500 worklogs, ~7,000 links (Blocks, Relates, Duplicate, Cloners, across projects); a Scrum board per project with 55 two-week sprints (52 closed with their done issues, one active, two future) |
+| `confluence` | spaces `SCLENG`, `SCLOPS`, `SCLPRD` | 5,000 pages in trees up to nine deep, yearly meeting-note folders of ~250 pages each, incident reports, release notes, ADRs, an API reference; storage bodies from 150 bytes to 90 KB (median ~3 KB) with headings, tables, code, panels, status lozenges, expands, task lists, page links, mentions and Jira macros; labels, ~4,000 comments by six people (the fixture's five are made in Confluence, password `tidewater-dev`), ~360 attachments (PNG, PDF, CSV, JSON, text) |
+| `teamcity` | project tree `Scale` (*Scale test*) | 40 projects (8 groups of 3–4), 85 build configurations, 3,800 builds: ~78 % green, failures by exit code and by failed tests, cancelled ones, an OOM-killed few; ~150,000 test results, artifacts on ~30 %; each leaf builds a scale Gitea repository on `main` and its branches |
+| `gitea` / `forgejo` | orgs `scale-platform`, `scale-commerce`, `scale-data` | 58 repositories, ~18,700 commits by the fixture's people dated over the two years, ~1,200 branches, ~1,700 pull requests (two thirds merged, with their merge commits), ~2,600 issues with labels, milestones and assignees, ~4,000 comments, ~1,100 reviews; ~11,000 items as knobas mirrors them at the default budgets |
+| `kuma` | monitors `scale-*` | 200 monitors in 12 groups, checking Gitea over http, keyword, tcp and ping on the compose network, about one in twenty down |
+
+```sh
+just live-up jira                 # the product up and seeded, as for a suite
+just seed-scale jira              # = testenv/seed-scale.sh jira [--count N] [--workers W]
+just seed-scale jira --plan-only  # the plan's numbers, no server
+```
+
+**A plan, not a loop.** `testenv/scale/*.py` (stdlib Python; the shell script
+is the entry point) draw every item from a generator keyed on a fixed seed, the
+product and the item's index, and date the estate over the two years ending
+2026-11-01, not over the run. A rerun makes the same estate. Each product's
+phases are idempotent and recorded on the server once done for a count (a Jira
+project property and a Confluence space property `knobas-scale-seed`, a Gitea
+repository's Actions variable `KNOBAS_SCALE_SEED`), so a rerun on a filled
+product reads those and writes nothing (Jira: 3 s); a run killed mid-phase
+picks the phase up where it stopped. Kuma's monitors are found by name.
+
+**Dates the APIs refuse are written into the product's own database.** Jira
+takes no `created`, `updated` or `resolved` over REST: the seed rewrites them
+(and the comments', change history's and worklogs', and the closed sprints'
+completion dates) in `knobas-jira-db` with `docker exec … psql`, then runs a
+background reindex so JQL sees them. Gitea's history is built locally with
+`git fast-import`, so commit dates are real; pull requests are opened while
+`main` still points at its root commit, the final `main` is pushed after, and
+the forge's manual-merge detection (`autodetect_manual_merge`) marks them
+merged; created, closed and merged times, the merger, comments' and reviews'
+dates are then set in the forge's SQLite (`docker exec … sqlite3`).
+Confluence's page created and modified times (and its comments' and
+attachments') are rewritten in `knobas-confluence-db`, the server restarted so
+its caches read them (which also renews the licence), and the index rebuilt
+over `POST /rest/prototype/1/index/reindex`: CQL's `lastmodified`, which
+knobas' incremental sync walks by, and `version.when` then agree. TeamCity's
+builds run when the seed queues them; afterwards the server is stopped and each
+configuration's builds are spread over the two years in `HISTORY`,
+`LIGHT_HISTORY` and `BUILD_STATE` of its internal HSQLDB, each keeping its
+own duration (`testenv/scale/Sql.java`, run with `java` and `hsqldb-jdk8.jar`
+in the server's own image).
+
+**What it cannot reach.**
+
+- **TeamCity's licence.** The free Professional licence stops at 100 build
+  configurations (#1560 met it), and the fixture, the chain and the live
+  suite's own need some, so the scale tree has 85, not the 400 Björn's real
+  server has. The seed refuses to start when it would pass 100. The licence
+  also allows three agents: the seed starts `knobas-scale-agent-2` and `-3`
+  beside `knobas-teamcity-agent` for the run and removes them and their agent
+  records after it. A build costs about ten seconds of agent time whatever it
+  does, so 3,800 builds take about three and a half hours.
+
+**The live suites run beside it** (since 2026-11-10). Every leftover clearing
+and every exact set a suite asserts is scoped to what the seed and the suite
+own, and every source a suite builds is scoped the same way unless a test names
+its own scope, so a run neither touches nor counts the scale estate:
+
+- `live_jira_seeded` and `atlassian_live` search `project in (PAY, OPS,
+  NARROW)` (`jira.projects` and the narrowing project from `seed-state.json`),
+  never the instance. Until then the adapter suite's clearing searched `ORDER BY
+  key ASC` across the instance and deleted every issue the seed did not record:
+  it took SCLDATA-1 to 3 and stopped on a 400 at SCLDATA-4, which has sub-tasks,
+  and 26 of 37 tests failed.
+- `live_teamcity_seeded` lists builds `affectedProject:` each seed project
+  (`Ledger`, `Payout`, `SeededChain`) and deletes only the projects a run makes
+  (named `Knobas…`, or nested in a seed project). Until then it deleted every
+  build and every project the seed did not own, the whole `Scale` tree in one
+  run.
+- `./seed-kuma.sh` leaves every `scale-…` monitor alone, and `live_kuma`
+  counts monitor types over the seeded six.
+- Gitea's, Forgejo's and Confluence's suites were already scoped to
+  `tidewater` and to their own spaces and pages; `atlassian_live`'s wait for
+  a deleted page to leave the CQL index now asks the page's space only, since
+  a 200-row search of the whole instance never reached it past the scale
+  spaces.
+
+**Syncing it: `testenv/scale-sync.sh <root>`.** The debug app
+(`target/debug/knobas-app --demo`, `just demo`'s binary) on a profile of its
+own: `HOME=<root>` for the app, so its demo profile is
+`<root>/Library/Application Support/dev.knobas.desktop/demo` and Björn's own is
+never touched; `live-sources.sh add --scale --data-dir …` first (`--scale`
+widens each source's scope to the scale projects, spaces and orgs the product
+holds); then the app's own scheduler syncs, and the script prints each
+source's first run (seconds, rows), the mirror's rows per source and kind and
+the database's size, and quits the app. Run it once per JVM product while that
+product is up; the sources are updated in place.
+
+**Measured, 2026-11-10**, on the WSL box (*Live products on a remote
+machine*), the seeds and the app on the Mac through the tunnel:
+
+| Product | Fill | First sync into knobas | Mirror rows |
+|---|---|---|---|
+| Jira | ~25 min (bulk create 20/s over six projects side by side, transitions ~150/s, comments ~100/s, then ~15 min of reindex) | 110 s | 20,007 tickets, 9 views |
+| Confluence | 317 s, restart and reindex included | 74 s | 5,032 pages |
+| Gitea | ~50 min at 8 repositories at a time (an issue or pull request is one request after another inside a repository) | 242 s (the adapter's default 10 requests/s) | 11,486 |
+| TeamCity | 2,613 of 3,800 builds in ~3 h on three agents, ~18 builds/min; stopped there for a deadline | 26 s | 2,711 |
+| Kuma | 30 s | 0.2 s | 218 |
+
+The knobas database then held 693 MB (1.4 GB on disk). The one write that
+crawled was the mirror's upsert: `sync.item`'s 500-row statement passed the
+1 s slow-statement threshold 58 times, up to 2.8 s and 78 s in all, most of it
+inside Jira's first sync. Kuma's scheduled run rewrote all 218 monitors every
+five minutes with nothing changed. A rerun of a filled product: Jira 3 s,
+Confluence 1 s, Gitea and Forgejo seconds per repository.
+
+**Resuming.** A fill that was stopped picks up where it stopped: run the same
+`just seed-scale <product>` with the product up. Jira, Confluence and the
+forges skip each finished phase and take an unfinished one up by reading what
+is there; TeamCity counts the builds each configuration already has and queues
+the rest, then runs the date rewrite (it marks `knobas.scale.seed.builds` and
+`.dates` on the `Scale` project when done). A TeamCity fill killed hard leaves
+`knobas-scale-agent-2`/`-3` running, which the next run keeps; one stopped
+normally removes them with their volumes and their agent records. The 2026-11-10 run stopped with
+TeamCity at 2,613 builds, undated, and Forgejo at about 40 of its 58
+repositories.
+
+**The saved database** of that run is a whole scratch `HOME`, outside the
+repository, with a README of its own: open a clone with `HOME=<clone>
+target/debug/knobas-app --demo`, never the binary without `--demo` and `HOME`
+(that opens the default profile).
+
+## The extremes (`testenv/seed-extremes.sh`)
+
+Björn's scale has every item in an ordinary shape, and the speed checks press only what they are scripted to press,
+so a folder of thousands of files taking a second to open was found by Björn, not by a check (PR #2479, 2026-11-13).
+`testenv/seed-extremes.sh` makes the worst shapes a real team's data has on the live products, beside the seed and the
+scale estate and never in them, each product under a scope of its own that no live suite reads:
+
+| Product | Scope | What it makes |
+|---|---|---|
+| `jira` | project `XTRM` (*Extreme shapes*) | XTRM-1 with 500 comments (one at Jira's 32,767-character limit), 200 sub-tasks, 100 links, 200 attachments and 100 labels; 5,000 people (`xtrm-person-NNNN`) each the assignee of a ticket, and 3,000 labels |
+| `confluence` | space `XTRM` | *A page with everything*: a 2,000-row table, 100 expand macros, 300 comments (one 300 KB); *A 5 MB page*; 3,000 pages at one level under the home page |
+| `gitea` | org `knobas-extremes`, repository `everything` | 5,000 branches; 2,000 open pull requests; one pull request (`wide`) of 3,000 changed files over 500 commits, one file a single 1 MB line, with 300 comments (one 300 KB) |
+| `teamcity` | project `Extremes` | one build of 5,000 artifacts (3,000 in one folder), 20,000 tests (400 failed) and a log with a 1 MB line |
+
+```sh
+testenv/seed-extremes.sh gitea            # idempotent: reads what is there, adds what is missing
+testenv/seed-extremes.sh gitea --remove   # the scope deleted again
+```
+
+- **Each run holds its product's live lock** (the Gitea lock, or the JVM product's own; *One environment, one owner
+  at a time*), so it never writes into a product while that product's suite runs.
+- **Credentials** are this worktree's `seed-state.json`; `KNOBAS_EXTREMES_STATE` names another, for a worktree whose
+  own lacks a product's block because another run rewrote it.
+- **What the products refuse, and how it is got round.** Jira's ten-user licence stops 5,000 people having
+  application access, and Jira assigns no one without it: the people are made without it and set as their tickets'
+  assignees in Jira's own database, then those tickets reindexed (`/rest/api/2/reindex/issue`). Jira's text fields stop
+  at 32,767 characters, so the 300 KB comments are Confluence's and Gitea's. TeamCity publishes at most 1,000 files a
+  build (`maxArtifactsNumber` in `main-config.xml`): the seed raises it for its one build and puts back the value it
+  found the moment the build ends. The project is not named `Knobas…`, which the seeded TeamCity suite deletes as its own.
+- **Not named for the suites' sweeps:** the Gitea suite reads `tidewater`, the Jira suite its seeded projects, the
+  Confluence suite its own space, and the TeamCity suite deletes only `Knobas…` projects.
+- **How long:** Jira about 14 minutes (the 5,300 tickets in bulk, 5,000 people at about 67 a second), Confluence 2,
+  TeamCity 1, Gitea about 35 (the forge opens a pull request about once a second, each checked against its base).
+
+**Synced and measured by `just open-budget --extremes`** (`testenv/perf/README.md`, *The extremes*): the run seeds
+what is missing, widens the profile's sources to the scopes, syncs, presses the extreme pages, and removes the extremes
+again at the end (`--keep-extremes` leaves them).
+
+**The Gitea adapter's branch walk** used to fail a whole source's run on a repository of more than 1,000 branches
+(`cap_reached`), so a team with such a repository mirrored nothing of it. It walks 10,000 now
+(`MAX_BRANCH_PAGES`, the extremes pass), as the issues walk does.
+
 ## The estate file
 
 `estate.json` is the estate knobas models, written down: this notebook, the
@@ -1770,7 +1958,9 @@ it does, which the UI will happily create), deletes and re-adds one whose type,
 URL, hostname or interval drifted, and leaves a matching one alone — so a second
 run changes nothing and an old list's leftovers do not linger. Everything else
 about a monitor (notifications, tags, a paused state a live run left behind) is
-the instance's business and is not touched.
+the instance's business and is not touched. A monitor named `scale-…` is not the
+seed's at all: `just seed-scale kuma` adds those beside it (*Björn's scale*),
+the sweep never reads them, and `monitors.json` may not use the prefix.
 
 ### The canary
 
@@ -2133,12 +2323,12 @@ out of the DOM.
 
 `open-in-editor` (#501, ported to the ticket-first shell by #1084) is the
 spawn: it writes a stub executable and a fake clone into a scratch directory,
-and in Settings › *Checkouts and Open in…* sets the **Clones root** to that
+and in Settings › *Checkouts and Open in* sets the **Clones root** to that
 directory (*Change…*, *Save*) and adds an application whose command is
-`<stub> {path}` (*Edit applications…*, *Add an application…*). It opens the
+`<stub> {path}` (*Add an application*, the application page). It opens the
 repository payout-service through the launcher, waits for its *Cloned at* line
 to name the clone, picks the new application from *Open in…* (the menu's last
-application, three steps up from the focused default), and asserts that the stub ran with
+application, walked up to from the focused default), and asserts that the stub ran with
 **exactly one** argument and that it is the checkout path. Exactly one is the
 assertion ADR-0016 asks for: what the program received is what the disk
 answered, and nothing the mirror holds. Each run leaves its application in the
@@ -2159,7 +2349,7 @@ uses the testenv Gitea, over **https through the https front**
 from the same tree, for the token in `./seed --env`, and the front's root trusted
 once (`just live-trust-ca`). It clones the repository into a scratch clones root and names a
 stub as the clone's `diff.guitool`, adds the Gitea in Settings › *Sources*
-(*+ Add a source*, *Test connection*, *Add source*) and an application with a
+(*Add a source…*, *Test connection*, *Add source*) and an application with a
 pull-request command, opens `SEPA retry with exponential backoff` from ⌘K once
 the source has synced it, and asserts: the application ran with the worktree
 as its only argument, the worktree is at the head and its own `FETCH_HEAD`
@@ -2675,7 +2865,7 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 |---|---|
 | `./seed` | Gitea and Kuma, in order. Idempotent — re-running is a no-op that exits 0. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
-| `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted. |
+| `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted, `scale-…` monitors excepted. |
 | `./kuma-monitor.sh` | `add <name> <url>` / `delete <name>` on one throwaway monitor, through the same socket.io channel the seed uses. Idempotent both ways. What `just kuma-live` witnesses a deletion with; not part of the baseline, so `./seed-kuma.sh` sweeps whatever it leaves. |
 | `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. On a remote target it runs on that machine and binds its Docker bridge. |
 | `./stall.sh` | Remote target only: `up` / `down` / `url` on a socket that accepts and never answers (bridge address, port 8298), for `live_kuma`'s refresh-waits witness. `just kuma-live` binds and releases it. |
@@ -2689,18 +2879,106 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. On a remote target: runs on two products go at once, two on one product take turns, a lock with no product is none, and the memory section serialises its takers. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
+| `./seed-scale.sh` | Fills one live product to Björn's scale beside the seed (`testenv/scale/`); `--plan-only` prints the plan. See *Björn's scale*. |
+| `./scale-sync.sh` | Syncs the filled products into a scratch profile with the debug app and times each source's first sync. See *Björn's scale*. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `images.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
 | `./live-shot.sh` | Screenshots of the real app against live products (#1483): `just demo` with in-memory secrets, a steps file of `shot`/`press`/`focus`/`click-at`/`type`/`key`, the knobas window only. Takes the screen and the witness's lock; not part of `just check`. See *Screenshots of the real app*. |
 | `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers, and that every driver's landing has its DOM replay in `App.test.svelte.ts` (#1968). No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
+| `./ui-checks/` | The press trips, the screenshot comparison and the real-window driver, from the UX polish loop. Not part of `just check`. See *UI checks*. |
 
 One script outside this folder belongs to the same family, since it measures the app rather than a product:
 
 | Script | Does |
 |---|---|
 | `scripts/keep-alive-budget.sh <slot>` | Keep-alive's budget and memory witness (#2250): `just keep-alive-budget <slot>`. Headless Chrome against the `?fake-ipc` dev server on `5300 + slot` (reused when one is up), debug port `9400 + slot`. Times the return to the repository page's Files tab, a 10,000-line file open (`?fake-file-lines=10000`), after Commits: 7 runs, exit 1 when the median is over 50 ms (`KEEP_ALIVE_RETURNS`, `KEEP_ALIVE_BUDGET_MS`). Then the JS heap after a forced garbage collection and the DOM node count with five pages held (that page, Inbox, Builds, Docs, Time), at *Pages kept open* 0 and 5 (`?fake-pages-kept-open=<n>`), twice each. It prints `scripts/machine-load.sh`'s line first: a timing on a machine that line calls over is quoted beside it. Starts no product; not part of `just check`. |
+
+## UI checks
+
+`testenv/ui-checks/` holds three checks the UX polish loop (#2479) ran on every round. They caught regressions that the
+suite and the screenshots missed, so they are kept, but none is a gate and none starts a product: all three use the mock
+corpus under `?fake-ipc`.
+
+**The press trips** (`trips.mjs`, with `chrome.mjs` beside it): about 210 trips a person makes, written by hand in the
+table at the top of `trips.mjs`, in headless Chrome against a built app. A press twice by key and by pointer, a walk down
+a list by mouse, a leave and a return while a toast is up, an *Undo* on a stale toast, typing into a dialog, `Esc` in
+every field, the way back by the nav, ⌘F. Each kind and what fails it is in the file's header. Build the app in
+development mode (so `?fake-ipc` is there), serve it for the one command, and run:
+
+```sh
+testenv/ui-checks/build-app.sh . "$TMPDIR/knobas-built"
+testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5340 node testenv/ui-checks/trips.mjs "$TMPDIR/trips" --port 5340 --strict
+```
+
+It writes `trips.json` and `trips.md` to the out folder and exits 1 if a trip fails or can no longer find its control.
+`--only a,b` runs the trips whose id, kind, finding, page or route holds one of the words, `--workers n` sets the
+Chromes (2), and `--strict` adds the trips marked strict, which is how the loop ran it. `KNOBAS_CHROME` names another
+Chrome. `with-built.sh` serves the folder on 127.0.0.1 for the length of the command and refuses a port already taken.
+
+**Rows that hold still** (`rows-still` in `trips.mjs`, PR #2479, 2026-11-11): a recorder of every visible row's box, each
+frame, from a list's first draw to settled, that fails if a drawn row moves, grows, leaves, or has one come in above it. It
+runs a page five ways: the first visit, a return, a return after a sync, a sync while shown, and arriving by the launcher.
+Three fixture switches feed it: `?fake-late=<command>:<ms>,…` (`*:<ms>` for every command) answers each read that late, so
+it lands after the first draw; `?fake-hooks` puts `window.__fake` in the page (`corpus`, `endRuns`, `inboxNew`, `runNew`,
+`monitorDown`), so a trip adds rows and ends a run that changed something; and `?fake-real=<port>` sends every command to
+the app's own backend running with no window (`crates/knobas-app/examples/headless_ipc.rs`), so the built front end draws
+a real database in headless Chrome:
+
+```sh
+cp -cR <saved home> "$TMPDIR/home"                       # an APFS clone, never the original
+HOME="$TMPDIR/home" cargo run -p knobas-app --features test-util --example headless_ipc -- \
+  --data-dir "$TMPDIR/home/Library/Application Support/dev.knobas.desktop" --port 5399
+# then open the built app at ?fake-ipc&fake-real=5399
+curl -X POST http://127.0.0.1:5399/quit                 # stops its scheduler and its PostgreSQL, as a quit does
+```
+
+It opens the demo profile under the directory named and nothing else, shows no notification and opens no window. Killed
+rather than quit, it leaves the profile's PostgreSQL running: `pg_ctl stop -D <profile>/db/data` stops it.
+
+**The frame budget** (`testenv/perf/`, `just frame-budget`, PR #2479, 2026-11-11): how smooth the app is, measured.
+It builds the app as the probes measure it (`KNOBAS_PERF=1`: `?fake-ipc` with Svelte's runtime as released), drives it
+in a headless Chrome with the main thread slowed 1x and 4x, and fails when a list scrolls, a filter key paints or a page
+switches slower than its line in `testenv/perf/budget.json`, or when a box that scrolls has no opaque background. On the
+fixture at scale by default, or `--real <port>` on the windowless backend over a saved database. The same scripts drive
+Edge or WebView2 on Windows over the DevTools protocol (`--attach`), which is where a scroll on the compositor shows,
+and `testenv/perf/wk/` holds the WKWebView instruments (a bare WKWebView host, real HID wheel input, a recording of what
+the window showed). `testenv/perf/README.md` has each tool, what its numbers mean, and how to run it on each machine.
+
+**The screenshot comparison** (`pixel-same.py`): given two folders of screenshots taken of the same screens on two
+heads, and the manifest that named them, it lists the screens whose pixels changed that nobody meant to change, most
+changed first. "Meant to" is a screen with `arrows` in the manifest, or one named as a whole word in a text passed with
+`--names-from`. It reads the PNGs with zlib alone, prints only, and exits 0 whatever it finds. The same build shot twice
+differs by up to about 540 px on a screen (a clock, a caret), so it draws a line at 600 px.
+
+```sh
+testenv/ui-checks/pixel-same.py <old shots> <new shots> <manifest.json> [--workers n] [--names-from notes.md ...]
+```
+
+**The real window** (`real-window.sh`, macOS): the debug app in its own window, its WKWebView and its menu, on the mock
+corpus, driven by real CGEvent input: pointer moves with real `movementX`, presses, drags, wheels and keys. It is what
+reaches the parts headless Chrome can't: a hover, a glide, a press guard that reads `movementX`, macOS's own text
+checking in a field, which key the app's menu takes, a link a press doesn't focus. A probe on the dev server's HMR
+socket reads the page back. The page's IPC bridge is renamed in the served modules, so the fake installs where the
+real one can't be replaced, and the window never talks to the demo profile's sources.
+
+```sh
+testenv/ui-checks/real-window.sh start                 # dev server on 1420 and target/debug/knobas-app --demo, window at 1440 x 900
+testenv/ui-checks/real-window.sh start --live          # the same on the demo profile's own sources: run `just live-sources` first
+testenv/ui-checks/real-window.sh js 'location.hash'    # a value from the page
+testenv/ui-checks/real-window.sh ev move 400 225 click 1378 221 key f cmd type retry
+testenv/ui-checks/real-window.sh keys '#/page/confluence%3Asepa' .tf-doc .tf-rd-main
+testenv/ui-checks/real-window.sh tabs '#/inbox' 12
+testenv/ui-checks/real-window.sh stop
+```
+
+It needs a debug build (`just demo` once), `swiftc`, an Accessibility grant for the terminal, and port 1420 free; it
+refuses while another knobas runs. `start --live` is `just live-demo` driven by the same input: the page keeps the real
+bridge and the profile's stored credentials, so the window shows what the live products synced, and its writes are real
+writes to them. Take back what a run wrote. The live run of 2026-11-09 (#2479) used it. It takes the screen and the pointer while it runs, so it isn't for a Mac someone is
+using. `real-window/page-helpers.js` is what `js` can call as `window.__q` (where to press, what has focus, how far a
+box scrolled). A changed system setting such as Full Keyboard Access is read at launch: `restart` after changing one.
 
 ## mockd's documented deviations
 

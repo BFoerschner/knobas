@@ -114,7 +114,7 @@ test("with the setting off every diff is raw and nothing runs, and the per-diff 
   await settle();
   expect(asked).toEqual([]);
   expect(lines()).toEqual([`1− ${btoa(OLD_JSON)}`, `1+ ${btoa(NEW_JSON)}`]);
-  expect(target.querySelector(".tf-dtool button.tf-pill")?.getAttribute("aria-pressed")).toBe("false");
+  expect(target.querySelector(".tf-dtool .tf-fchips button")?.getAttribute("aria-pressed")).toBe("false");
   button("Run pipeline")!.click();
   await settle();
   expect(asked).toHaveLength(2);
@@ -125,7 +125,7 @@ test("the toolbar's Run pipelines turns every file's pipeline on or off for this
   const { context } = reader();
   draw({ files: [B64], context, piping: storedSetting() });
   await settle();
-  const pill = target.querySelector<HTMLButtonElement>(".tf-dtool button.tf-pill")!;
+  const pill = target.querySelector<HTMLButtonElement>(".tf-dtool .tf-fchips button")!;
   expect(squash(pill)).toBe("Run pipelines");
   expect(pill.getAttribute("aria-pressed")).toBe("true");
   pill.click();
@@ -149,7 +149,7 @@ test("a file with no default pipeline, or a diff whose caller runs none, is draw
   draw({ files: [{ ...B64, path: "src/plain.txt" }], context, piping: storedSetting() });
   await settle();
   expect(asked).toEqual([]);
-  expect(target.querySelector(".tf-dtool button.tf-pill")).toBeNull();
+  expect(target.querySelector(".tf-dtool .tf-fchips button")).toBeNull();
   expect(button("Show raw")).toBeUndefined();
 });
 

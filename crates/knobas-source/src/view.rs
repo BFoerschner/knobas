@@ -19,6 +19,29 @@ pub use crate::diff::{
     DiffChange, DiffFile, DiffLine, DiffLineKind, FileThread, Hunk, LineComment, LineThread,
 };
 
+/// How long ago, as the shell's `ago()` (`app/src/lib/shell/time.ts`) says
+/// it, so an age an adapter writes into a row's `meta` reads the same as a
+/// room's row and the same in every adapter: minutes, then hours, then the UTC
+/// date. A time in the future is *just now*.
+#[must_use]
+pub fn ago(then: chrono::DateTime<chrono::Utc>, now: chrono::DateTime<chrono::Utc>) -> String {
+    let seconds = (now - then).num_seconds();
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let minutes = (seconds as f64 / 60.0).round() as i64;
+    if minutes < 1 {
+        return "just now".to_owned();
+    }
+    if minutes < 60 {
+        return format!("{minutes} min ago");
+    }
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let hours = (minutes as f64 / 60.0).round() as i64;
+    if hours < 24 {
+        return format!("{hours} h ago");
+    }
+    then.format("%Y-%m-%d").to_string()
+}
+
 /// What a view's answer stands at, as
 /// [`Source::view_standing`](crate::Source::view_standing) says before the
 /// read (ADR-0032, #2239). Never on the wire: it is the app's to act on, and
@@ -307,6 +330,24 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         paths: Option<String>,
+        /// The whole git sha of the commit the listing was read at, where the
+        /// source has one (the smoothness pass, PR #2479): what the shell
+        /// holds its checkout's copy of the same tree to, read first, so a
+        /// branch that moved since the mirror's sync is noticed. Compared,
+        /// never parsed or sent back. `None` where the source cannot say.
+        /// Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        commit: Option<String>,
+        /// The listing was read on its own, because the whole tree the source
+        /// reads at once (the one `paths` names) was cut before this
+        /// directory (the big-folder pass of PR #2479, 2026-11-13): every entry
+        /// is here, and the shell says that folders past the cut are read one
+        /// at a time. `None` for a listing drawn from the whole tree, and where
+        /// the source reads no whole tree. Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        read_alone: Option<bool>,
     },
     File {
         trail: Vec<Crumb>,
@@ -684,6 +725,14 @@ pub struct Fact {
     pub value: String,
     /// Colour, only where something is wrong or moving (the Signal design).
     pub tone: Option<Tone>,
+    /// The account of the person the fact names, where its label or value
+    /// names them by the source's display name: what the app compares with
+    /// the source's configured username, and what a write about them sends.
+    /// A Gitea review's *approved by Mara Lindqvist* is `mara`. Absent on
+    /// the wire when `None`, so a fact without one keeps its old shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
 }
 
 /// One row of an [`Block::Entities`] list.
@@ -841,11 +890,13 @@ mod tests {
                         label: "Commit".into(),
                         value: "c90d11a".into(),
                         tone: None,
+                        account: None,
                     },
                     Fact {
                         label: "Outcome".into(),
                         value: "failed".into(),
                         tone: Some(Tone::Err),
+                        account: None,
                     },
                 ],
             },
@@ -893,12 +944,14 @@ mod tests {
                             author: "priya.nair".into(),
                             body: "Bound the `jitter`.".into(),
                             at: Some("2026-08-22T09:00:00Z".into()),
+                            author_name: None,
                         }],
                         id: None,
                         resolved_by: None,
                         replies: false,
                         commit: None,
                         hunk: None,
+                        resolved_by_name: None,
                     }];
                     files
                 },
@@ -919,12 +972,14 @@ mod tests {
                             author: "jonas.becker".into(),
                             body: "Why a second retry loop?".into(),
                             at: None,
+                            author_name: None,
                         }],
                         id: None,
                         resolved_by: None,
                         replies: false,
                         commit: None,
                         hunk: None,
+                        resolved_by_name: None,
                     },
                 }],
                 range: Some(DiffRange {
@@ -999,6 +1054,8 @@ mod tests {
                 truncated: true,
                 url: Some("https://gitea.example/o/r/src/branch/main/src".into()),
                 paths: Some("paths".into()),
+                commit: None,
+                read_alone: Some(true),
             },
             Block::File {
                 trail: vec![Crumb {
@@ -1154,6 +1211,8 @@ mod tests {
             truncated: false,
             url: None,
             paths: None,
+            commit: None,
+            read_alone: None,
         };
         assert_eq!(
             serde_json::to_value(&tree).unwrap(),
@@ -1218,6 +1277,7 @@ mod tests {
                 label: "Outcome".into(),
                 value: "failed".into(),
                 tone: Some(Tone::Err),
+                account: None,
             }],
         })
         .unwrap();
@@ -1237,12 +1297,14 @@ mod tests {
                 author: "olu".into(),
                 body: "nit".into(),
                 at: None,
+                author_name: None,
             }],
             id: None,
             resolved_by: None,
             replies: false,
             commit: None,
             hunk: None,
+            resolved_by_name: None,
         }];
         let diff = serde_json::to_value(Block::Diff {
             files,
@@ -1263,12 +1325,14 @@ mod tests {
                         author: "olu".into(),
                         body: "was".into(),
                         at: None,
+                        author_name: None,
                     }],
                     id: None,
                     resolved_by: None,
                     replies: false,
                     commit: None,
                     hunk: None,
+                    resolved_by_name: None,
                 },
             }],
             range: None,

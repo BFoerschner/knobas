@@ -78,6 +78,8 @@ vi.mock("./lib/ipc/app", () => ({
   ping: () => Promise.resolve("pong"),
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: (count: number) => Promise.resolve(count),
+  smoothScrolling: () => Promise.resolve(true),
+  setSmoothScrolling: (on: boolean) => Promise.resolve(on),
   diffPipelines: () => Promise.resolve(true),
   setDiffPipelines: (on: boolean) => Promise.resolve(on),
   userRenderers: () => Promise.resolve([]),
@@ -123,6 +125,8 @@ vi.mock("./lib/ipc/sources", () => ({
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
+  // A read ahead of a press (`tf/repo/hover-reads.ts`): nothing is pressed here.
+  readViewAhead: () => Promise.resolve(null),
   // What a capture would attach (#503): the main window records its foreground
   // here whenever it changes. Recorded, because this file is the only place
   // the shell's own answer can be read.
@@ -176,6 +180,11 @@ vi.mock("./lib/ipc/entity", () => ({
     entityAnswer?.row.entity_id === entityId
       ? Promise.resolve(entityAnswer)
       : Promise.reject({ code: "not_found", message: "no such entity" }),
+  // What many ids are (the query audit): the one entity this test holds, as `getEntity` answers it.
+  entityBriefs: (ids: string[]) =>
+    Promise.resolve(entityAnswer !== null && ids.includes(entityAnswer.row.entity_id) ? [entityAnswer.row] : []),
+  batchedBrief: () => () => Promise.resolve(null),
+  cardReads: () => Promise.reject(new Error("no cardReads in this test")),
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   // The share export's link-set tick, read when Settings › Backup and export draws (#1469).
   linkSets: () => Promise.resolve([]),
@@ -184,6 +193,7 @@ vi.mock("./lib/ipc/entity", () => ({
   // arriving.
   inboxItems: (shelf: string) => Promise.resolve(shelf === "stream" ? inboxRows : []),
   inboxCount: () => Promise.resolve(inboxRows.length),
+  inboxShelves: () => Promise.resolve({ stream: inboxRows, snoozed: [], count: inboxRows.length }),
   snoozeInboxItem: () => Promise.reject(new Error("no snooze in this test")),
   completeInboxItem: () => Promise.reject(new Error("no answer in this test")),
   // Which kinds may raise a desktop notification (#290).
@@ -265,6 +275,8 @@ vi.mock("./lib/ipc/time", () => ({
   createBlock: () => Promise.reject(new Error("no edit in this test")),
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: () => Promise.reject(new Error("no settings write in this test")),
+  smoothScrolling: () => Promise.resolve(true),
+  setSmoothScrolling: () => Promise.reject(new Error("no settings write in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
@@ -815,7 +827,7 @@ test("a note captured in the other window is asked for here when the capture say
     () => target.querySelector(".tf a[aria-current='page'][href='#/settings/notes']") !== null,
     "Settings never opened on Notes and capture",
   );
-  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.textContent).not.toContain("knobas has no such page.");
 });
 
 /** #1504: while notes are shown, *Open in knobas* lands on the note's own page. */
@@ -853,12 +865,12 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   // A ticket opens its ticket page (spec #2227), not its job.
   location.hash = "#/entity/mock:PAY-231";
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `#/entity/… stayed ${location.hash}`);
-  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.textContent).not.toContain("knobas has no such page.");
 
   // An id the mirror does not know keeps its address and says so.
   location.hash = "#/entity/mock:NOPE-1";
   await until(
-    () => target.textContent?.includes("Nothing lives at #/entity/mock:NOPE-1") ?? false,
+    () => target.textContent?.includes("knobas has no such page.") ?? false,
     `an unknown #/entity/… read ${target.textContent}`,
   );
   expect(location.hash).toBe("#/entity/mock:NOPE-1");
@@ -897,7 +909,7 @@ test("an inbox item arriving while the window is unfocused reaches the notify co
       () => window.location.hash === "#/pr/gitea%3Aacme%2Fpayouts%23144",
       "the click never moved the window",
     );
-    expect(target.textContent, "the click landed on a dead end").not.toContain("Nothing lives at");
+    expect(target.textContent, "the click landed on a dead end").not.toContain("knobas has no such page.");
   } finally {
     unfocused.mockRestore();
   }
@@ -976,7 +988,7 @@ test("a stop opens the draft over the running clock, and Keep running leaves it 
   expect(timerStops, "the clock stopped before the reader answered").toBe(0);
   expect(target.querySelector(".tf-timer:not(.tf-off)"), "the chip read No timer behind the draft").not.toBeNull();
   const keep = [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find(
-    (button) => button.textContent?.trim() === "Keep running",
+    (button) => button.textContent?.trim() === "Cancel, keep running",
   );
   keep!.click();
   await until(() => target.querySelector(".tf-dialog") === null, "Keep running never closed the draft");
@@ -1250,7 +1262,9 @@ test("/ on Tickets opens the launcher with the section's filter, and ⌘K after 
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
   flushSync();
   const box = () => target.querySelector<HTMLInputElement>(".tf-launch input");
-  await until(() => box()?.value === "#t ", "the launcher never opened on #t");
+  const seed = () => target.querySelector(".tf-ln-seed")?.textContent?.trim();
+  // The query holds `#t `; the box draws it as a chip named for the section.
+  await until(() => box()?.value === "" && seed() === "Tickets", "the launcher never opened on the Tickets chip");
   target.querySelector<HTMLButtonElement>('.tf-ln-q button[aria-label="Close"]')!.click();
   flushSync();
   await until(() => box() === null, "the launcher never closed");
@@ -1258,6 +1272,7 @@ test("/ on Tickets opens the launcher with the section's filter, and ⌘K after 
   flushSync();
   await until(() => box() !== null, "⌘K never opened the launcher");
   expect(box()!.value).toBe("");
+  expect(seed(), "⌘K opens with no section's chip").toBeUndefined();
 });
 
 test("launcher-hotkey: ⌘K lands on the launcher's query box", async () => {
@@ -1271,7 +1286,7 @@ test("open-in-editor: ⌘K lands on the launcher's query box", async () => {
 });
 
 test("open-in-editor: Settings › Checkouts and Open in… lands on the section open-in-editor.sh sets the root in", async () => {
-  await openSettingsSection("Checkouts and Open in…");
+  await openSettingsSection("Checkouts and Open in");
   await landsOn(landing("open-in-editor", "settings-checkouts"));
 });
 
@@ -1281,11 +1296,36 @@ test("pull-request-open-in: Settings › Sources lands on the section the driver
 });
 
 test("pull-request-open-in: Settings › Checkouts and Open in… lands on the section the driver sets the root in", async () => {
-  await openSettingsSection("Checkouts and Open in…");
+  await openSettingsSection("Checkouts and Open in");
   await landsOn(landing("pull-request-open-in", "settings-checkouts"));
 });
 
 test("pull-request-open-in: ⌘K lands on the launcher's query box", async () => {
   await pressLauncherKey();
   await landsOn(landing("pull-request-open-in", "cmd-k"));
+});
+
+/**
+ * v3.2.9-ux7 hung on *Starting the local database* in every packaged build. The answer cache assigned to
+ * `window.__TAURI_INTERNALS__.invoke`, which Tauri 2.11 (`scripts/core.js`) defines with `Object.defineProperty` and
+ * `value` only, so the assignment threw inside `onMount`'s start-up block, before `lifecycle.start()`, and nothing
+ * ever asked `app_status`. The tests skip the cache (`MODE === "test"`), and the fake bridge's `invoke` was writable,
+ * so nothing caught it. Here the cache runs, over a bridge shaped as Tauri's, and the window must reach `ready`.
+ */
+test("the window starts over Tauri's read-only invoke, with the answer cache on", async () => {
+  const { disableAnswerCache, readCacheEnabled } = await import("./lib/ipc/answer-cache");
+  const internals = {};
+  Object.defineProperty(internals, "invoke", { value: () => Promise.resolve(null) });
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: internals, configurable: true });
+  vi.stubEnv("MODE", "production");
+  try {
+    dbReady = true;
+    app = mount(App, { target, props: {} });
+    await until(() => lifecycle.ready, "the window never left the database's start: the start-up block was thrown away");
+    expect(readCacheEnabled(), "the cache should start over a read-only invoke").toBe(true);
+  } finally {
+    vi.unstubAllEnvs();
+    disableAnswerCache();
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  }
 });

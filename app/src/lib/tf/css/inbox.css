@@ -1,22 +1,71 @@
 /* ---------- Inbox (#834, R-12.1 to R-12.3) ---------- */
 .tf-ibody { padding: 16px 22px 40px; display: flex; flex-direction: column; gap: 12px; }
-.tf-inbox { display: flex; flex-direction: column; gap: 6px; }
+/* One sheet of rows, as every other list: rows that belong together are divided, not boxed. */
+.tf-inbox:has(> .tf-empty) { background: none; border: 0; }
+.tf-inbox, .tf-ishelf-rows { display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .tf-ib {
-  display: grid; grid-template-columns: 108px minmax(0, 1fr) auto; gap: 2px 14px; padding: 10px 14px;
-  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; align-items: center;
+  display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 1px 14px; padding: 9px 14px;
+  border-bottom: 1px solid var(--rule-2); align-items: center; position: relative;
 }
+.tf-ib:last-child { border-bottom: 0; }
+.tf-ib:hover { background: var(--sheet-2); }
 .tf-ib time { white-space: nowrap; font-size: var(--t-xs); color: var(--ink-2); grid-row: 1 / span 2; font-variant-numeric: tabular-nums; }
-.tf-ib .tf-what { font-weight: 600; }
-.tf-ib .tf-ctx { grid-column: 2; font-size: var(--t-sm); color: var(--ink-2); }
-.tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; }
-.tf-isnooze { grid-column: 2 / span 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-top: 6px; }
-.tf-isnooze input { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--sheet); color: var(--ink); font: inherit; font-size: var(--t-sm); }
-.tf-ishelf { font-size: var(--t-sm); }
+/* Every title starts on one edge: a failure's dot hangs in a gutter the others keep empty. */
+.tf-ib .tf-what { font-weight: 500; padding-left: 14px; }
+/* The sentence is the row's link: no underline at rest, and a click on the row follows it, as a list's rows do (F-142).
+   Nothing stretches over the row, so its words can be selected. Pointing at something else the row holds names that instead. */
+.tf-ib .tf-what a { color: inherit; text-decoration: none; }
+.tf-ib:has(.tf-what a) { cursor: pointer; }
+.tf-ib:not(:has(.tf-acts :hover, .tf-ctx a:hover, .tf-isnooze:hover)):hover .tf-what a { text-decoration: underline; text-underline-offset: 2px; }
+/* A row a mouse press took away keeps its room and its words, dimmed and with no controls, until the pointer leaves the list (F-138, F-064, F-159). */
+.tf-ib.tf-ib-held { min-height: var(--tf-row-held); cursor: default; }
+.tf-ib.tf-ib-held:hover { background: none; }
+.tf-ib.tf-ib-held :is(time, .tf-what, .tf-ctx) { color: var(--muted); }
+@media (min-width: 901px) {
+  .tf-ib.tf-ib-held { grid-template-columns: 96px minmax(0, 1fr) var(--tf-row-held-acts, 0); }
+}
+.tf-inbox-h:focus { outline: none; }
+/* *Snooze…* and *Done* hold one place down the list (F-155): the group keeps its room at the row's end, shown or not, and a
+   row's own action stands left of it. The other lists hang the group over a value column, and the Inbox has none. */
+.tf-ib .tf-rowacts { position: static; transform: none; }
+.tf-ib .tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { margin-right: 0; }
+.tf-ib .tf-what .tf-dot { position: absolute; margin: .5em 0 0 -14px; }
+.tf-ib .tf-ctx { grid-column: 2; padding-left: 14px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
+/* Under the row's *Snooze…*, as a menu stands (F-154): the row doesn't move, and the hand barely does. `snooze-float.ts` places it. */
+.tf-isnooze {
+  position: fixed; left: 0; top: 0; z-index: 35; width: 240px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; font-size: var(--t-sm);
+}
+.tf-isnooze > .tf-btn { justify-content: flex-start; }
+.tf-isnooze-day { display: flex; gap: 6px; align-items: center; padding: 6px 9px 2px; margin-top: 2px; border-top: 1px solid var(--rule-2); }
+.tf-isnooze-day input { flex: 1; min-width: 0; }
+.tf-isnooze > .tf-dim { padding: 0 9px 4px; }
+/* Where a pick was just made: empty, and on top of what would otherwise be under a still pointer, until the pointer moves off it. */
+.tf-isnooze-spent { position: fixed; z-index: 35; }
+.tf-isnooze input { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--field); color: var(--ink); font: inherit; font-size: var(--t-sm); }
+/* The fold is a heading over a sheet of rows in the list's shape, so its titles start on the list's edge. */
+.tf-ishelf.tf-collapse { border: 0; border-radius: 0; margin: 12px 0 0; }
+.tf-ishelf.tf-collapse > summary { padding: 0; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-ishelf.tf-collapse > .tf-ishelf-rows { margin-top: 8px; padding: 0; }
+.tf-ishelf.tf-collapse > .tf-ishelf-rows > :last-child { margin-bottom: 0; }
 .tf-ifail { color: var(--err); font-size: var(--t-sm); }
 @media (max-width: 900px) {
   .tf-ibody { padding-left: 16px; padding-right: 16px; }
-  .tf-ib { grid-template-columns: minmax(0, 1fr); }
-  .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
-  .tf-ib .tf-acts { justify-content: flex-start; }
+  .tf-ib { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Stacked, the time keeps the titles' edge: a failure's dot still hangs in the gutter. */
+  .tf-ib time { grid-row: 1; grid-column: 1; margin-left: 14px; }
+  .tf-ib .tf-what, .tf-ib .tf-ctx { grid-column: 1 / -1; }
+  /* Stacked, all of a row's actions stand together at the right of the time's line, showing, so the eye has one place to look and a row stays short (F-146, F-069). */
+  .tf-ib .tf-acts { grid-row: 1; grid-column: 2; }
+  .tf-ib .tf-acts.tf-rowend { position: static; }
+  .tf-ib .tf-rowacts { opacity: 1; pointer-events: auto; }
+  /* Its actions have gone and its height stays, so its words keep the lines they had. */
+  .tf-ib.tf-ib-held { align-content: start; }
+  .tf-ib.tf-ib-held time { min-height: var(--control-h-sm); display: flex; align-items: center; }
+}
+/* With no room beside the time, they take a line of their own at the row's foot. */
+@media (max-width: 520px) {
+  .tf-ib .tf-acts { grid-row: auto; grid-column: 1 / -1; justify-content: flex-start; order: 3; margin: 6px 0 0 14px; }
 }
 

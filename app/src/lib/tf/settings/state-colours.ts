@@ -8,9 +8,10 @@ import type { StateWordColour, ToneChoice, ToneOrigin } from "../../ipc/sources"
 /** The board's columns, left to right: the five tones, then *No colour*. */
 export const COLUMNS: readonly ToneChoice[] = ["ok", "warn", "err", "info", "muted", "none"];
 
-/** What a column is headed. */
+/** What a column is headed: what its tone means, not the token's name (F-634). */
 export function columnName(column: ToneChoice): string {
-  return column === "none" ? "No colour" : column;
+  const names: Record<ToneChoice, string> = { ok: "Good", warn: "Warning", err: "Error", info: "Active", muted: "Quiet", none: "No colour" };
+  return names[column];
 }
 
 /** The column a word draws in: its resulting tone, or *No colour*. */
@@ -34,13 +35,12 @@ export function ordered(words: readonly StateWordColour[]): StateWordColour[] {
 }
 
 /**
- * What a chip says about where its tone comes from. `category` is a seen
- * word whose default is its tickets' Jira status category (#2468), no colour
- * for a to-do status included, and `unset` a seen word of a kind no adapter
- * reads on past the word for.
+ * Where a chip's tone comes from, in its title: a chip is marked only when it is yours, by its *Reset*, because a board of *adapter* said nothing
+ * (F-634). `category` is a seen word whose default is its tickets' Jira status category (#2468), no colour for a to-do status
+ * included, and `unset` a seen word of a kind no adapter reads on past the word for.
  */
 export function originName(origin: ToneOrigin): string {
-  const names: Record<ToneOrigin, string> = { yours: "yours", adapter: "adapter", category: "Jira category", unset: "seen" };
+  const names: Record<ToneOrigin, string> = { yours: "Yours", adapter: "From the adapter", category: "From its Jira category", unset: "Seen, with no default" };
   return names[origin];
 }
 
@@ -58,17 +58,17 @@ export function recolours(line: unknown): boolean {
  * The line under a kind's section: what its tone drives besides the colour.
  * Each names the readers that branch on a tone (`crates/knobas-core/src/inbox.rs`
  * and `signals.rs` for `err` builds, `entity_list.rs`'s attention order for the
- * Code tile, `job.ts`'s
- * rollups for a job's builds and monitors). Backticks mark a tone's name.
+ * Code page's pull requests, `job.ts`'s
+ * rollups for a job's builds and monitors). Backticks mark a column's name.
  */
 export function drives(kind: string): string | null {
   switch (kind) {
     case "build":
-      return "`err` is what the inbox and signals count as a failed build. A job counts `err` builds as failing, `info` as running and `ok` as passing.";
+      return "`Error` is what the inbox and signals count as a failed build. A job counts `Error` builds as failing, `Active` as running and `Good` as passing.";
     case "pr":
-      return "`ok` and `muted` pull requests are hidden from open-work lists (a room's Code tile).";
+      return "`Good` and `Quiet` pull requests are left out of the open ones on Code.";
     case "monitor":
-      return "A job counts `err` monitors as down, `warn` as warning and `ok` as fine.";
+      return "A job counts `Error` monitors as down, `Warning` as warning and `Good` as fine.";
     case "ticket":
       return "The tone colours a ticket's status wherever it is drawn. No list hides or counts tickets by it.";
     default:

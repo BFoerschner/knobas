@@ -38,6 +38,12 @@ export function proseMarkdown(text: string, markup: Markup, attachments: readonl
   }
 }
 
+/** Jira wiki with each `!name|…!` and `[^name]` reduced to the file's name, for a surface with no attachment list. */
+export function withoutAttachmentMarks(text: string, markup: Markup): string {
+  if (markup !== "jira_wiki") return text;
+  return text.replace(ATTACHMENT, (_whole, image: string | undefined, link: string | undefined) => image ?? link ?? "");
+}
+
 /** A ticket's attachment as the wiki's `!name!` resolves it (#2406): by its file name, to its id. */
 export interface NamedFile {
   id: string;

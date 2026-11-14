@@ -18,6 +18,7 @@
  * `queued`), which is what the adapter declares (#666), and not the
  * prototype's *passed*: the shell draws what the source says.
  */
+import { SCALE_HISTORY } from "../fake-scale";
 import type {
   ChainStepRow,
   JobPipeline,
@@ -279,6 +280,20 @@ let built: { day: string; runs: Map<string, RunRow[]> } | null = null;
 /** How many times {@link history} has built a history: a test's witness that reads reuse it. */
 export let historyBuilds = 0;
 
+/**
+ * `?fake-hooks`' `runNew` (the still-rows trips, 2026-11-11): every configuration gets a run newer than its last, as a sync
+ * that saw builds finish brings them.
+ */
+export function addFakeRuns(now: Date = new Date()): void {
+  history(now);
+  if (built === null) return;
+  for (const [config, runs] of built.runs) {
+    if (runs.length === 0) continue;
+    const no = Math.max(...runs.map((run) => Number(run.number ?? 0))) + 1;
+    runs.unshift(runRow(config, no, "success", "main", new Date(now.getTime() - 60_000), 120));
+  }
+}
+
 onFakeReset(() => {
   built = null;
 });
@@ -341,7 +356,11 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
-/** `job_pipelines`: *your branch* first, then *PR check*, as the read orders them. */
+/**
+ * `job_pipelines`: *your branch* first, then *PR check*, as the read orders them.
+ * The crate's read starts from the job's reach, as the card's Builds count does, so
+ * only a configuration the job reaches (`job.checks`, `job-reach.ts`) has a reason.
+ */
 export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobPipeline[] {
   const job = JOBS[keyOf(entityId)];
   if (job === undefined) return [];
@@ -351,8 +370,9 @@ export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobP
       const config = pipeline.name;
       const reasons: PipelineReason[] = [];
       const built = new Set((runs.get(config) ?? []).map((run) => run.branch));
+      if (!job.checks.includes(config)) return { pipeline_id: pipeline.entity_id, reasons };
       for (const branch of job.branches) if (built.has(branch)) reasons.push({ kind: "branch", branch });
-      if (job.checks.includes(config)) reasons.push({ kind: "pr_check", pr: job.pr });
+      reasons.push({ kind: "pr_check", pr: job.pr });
       return { pipeline_id: pipeline.entity_id, reasons };
     })
     .filter((row) => row.reasons.length > 0);
@@ -366,7 +386,7 @@ const OLDER_DEPTH = 200;
  * history the way it was filled, from a seed of the run it starts from, so
  * two scrolls agree. A history ends {@link OLDER_DEPTH} runs before the story.
  */
-export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number): RunRow[] {
+export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number, depth = OLDER_DEPTH): RunRow[] {
   const random = seeded(Number(before.number ?? 1) * 31 + config.length);
   const base = before.duration_seconds ?? 180;
   const out: RunRow[] = [];
@@ -374,7 +394,7 @@ export function fakeOlderRuns(config: string, before: RunRow, limit: number, sto
   let at = new Date(before.started ?? before.updated_at ?? Date.now()).getTime();
   while (out.length < limit) {
     no -= 1 + Math.floor(random() * 2);
-    if (no <= story - OLDER_DEPTH) break;
+    if (no <= story - depth) break;
     at -= (60 + Math.floor(random() * 700)) * 60_000;
     const st = random() < 0.05 ? "failed" : "success";
     const branch = /Prod/.test(config) || random() < 0.55 ? "main" : "feature/cleanup-87";
@@ -476,7 +496,7 @@ function artifactRows(config: string, no: number) {
     chip: null,
     url: file ? `https://ci.tidewater.example/repository/download/${config}/${no}:id/${title}` : null,
   });
-  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 files", false)];
+  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 file", false)];
   if (/Build|Docker|Release/.test(config))
     return [
       row("payout-service-1.9.0-rc1-x86_64.tar.gz", "6.2 MB", true),
@@ -587,6 +607,14 @@ export function runView(id: string, section: string | null): SourceView | undefi
   ];
   return { sections: section === null ? sections : sections.filter((s) => s.id === section), actions: [] };
 }
+
+/** The fixture's open pull requests by the branch each is opened from (`views/repos.ts`' branches). */
+const PULL_HEADS: Record<string, { branch: string; entity_id: string; cell: string | null }[]> = {
+  "payout-service": [
+    { branch: "feat/PAY-231-idempotent-retry", entity_id: "mock:payout-service#142", cell: "#142" },
+    { branch: "feature/csv-export", entity_id: "mock:payout-service#150", cell: "#150" },
+  ],
+};
 
 /** prototype-6's `repoOfCfg`: the repository a configuration builds, by the mock's repository ids. */
 function repositoryOf(config: string): string | null {
@@ -719,6 +747,8 @@ export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const bulk = bulkPipelines(Number(params.get("fake-pipelines") ?? 0) || 0);
   const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
+  // `fake-scale` (`fake-scale.ts`): a history thousands of runs long.
+  const depth = params.has("fake-scale") ? SCALE_HISTORY : OLDER_DEPTH;
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));
@@ -727,7 +757,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const mirrored = history(new Date()).get(config) ?? [];
       // The whole history beyond the mirror, continued from its oldest run:
       // the same chain on every call, so pages join up.
-      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, OLDER_DEPTH, Number(mirrored[0]?.number ?? 0))];
+      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, depth, Number(mirrored[0]?.number ?? 0), depth)];
       const at = all.findIndex((run) => run.entity_id === before);
       return at < 0 ? [] : all.slice(at + 1, at + 1 + limit);
     },
@@ -767,6 +797,32 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return pins.has(id);
     },
     job_pipelines: (args) => fakeJobPipelines(String(args["entityId"] ?? "")),
+    // The repository's Builds tab: the pipelines that build it (prototype-6's `repoOfCfg`), each with its newest run per
+    // branch, as the server reads the runs of the repository's commits. A queued run has built no commit yet.
+    repo_pipelines: (args) => {
+      const repo = String(args["repoId"] ?? "").replace(/^mock:tidewater\//, "");
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      const runs = history(new Date());
+      const pipelines = fakePipelines()
+        .filter((pipeline) => fillers.has(pipeline.source_id) && repositoryOf(configOf(pipeline.entity_id)) === repo)
+        .map(({ recent: _recent, pinned: _pinned, ...pipeline }) => {
+          const seen = new Set<string>();
+          const latest: RunRow[] = [];
+          for (const run of runs.get(configOf(pipeline.entity_id)) ?? []) {
+            if (run.branch === null || run.started === null || seen.has(run.branch)) continue;
+            seen.add(run.branch);
+            latest.push(run);
+          }
+          return { ...pipeline, latest };
+        });
+      return { pipelines, pull_requests: PULL_HEADS[repo] ?? [] };
+    },
+    // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
+    commit_repositories: (args) =>
+      ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {
+        const repo = /^mock:(tidewater\/[^@]+)@/.exec(commitId)?.[1];
+        return repo === undefined ? [] : [{ commit_id: commitId, repo_id: `mock:${repo}`, repo_title: repo }];
+      }),
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
       const bulkRow = bulkById.get(id);

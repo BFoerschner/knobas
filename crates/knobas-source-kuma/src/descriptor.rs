@@ -175,7 +175,7 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// ADR-0007 exists to prevent.
 ///
 /// **The same word as a `state` chip (#1020)**, so a row draws the monitor's
-/// dot: `up` ok, `down` err, `pending` warn, and `maintenance` muted, since
+/// dot: `up` ok, `down` err, `pending` info, and `maintenance` muted, since
 /// somebody silenced it on purpose. A code `crate::map` has no word for is a
 /// null `state`, which draws no dot rather than a guessed one.
 ///
@@ -227,7 +227,7 @@ fn monitor_state() -> Vec<knobas_source::StatePath> {
         values: vec![
             StateValue::of("up", Tone::Ok),
             StateValue::of("down", Tone::Err),
-            StateValue::of("pending", Tone::Warn),
+            StateValue::of("pending", Tone::Info),
             StateValue::of("maintenance", Tone::Muted),
         ],
     }]
@@ -344,7 +344,7 @@ mod tests {
         use knobas_core::tone::Tone;
         assert_eq!(chip("up"), Some(("up".to_owned(), Tone::Ok)));
         assert_eq!(chip("down"), Some(("down".to_owned(), Tone::Err)));
-        assert_eq!(chip("pending"), Some(("pending".to_owned(), Tone::Warn)));
+        assert_eq!(chip("pending"), Some(("pending".to_owned(), Tone::Info)));
         assert_eq!(
             chip("maintenance"),
             Some(("maintenance".to_owned(), Tone::Muted))

@@ -1331,6 +1331,33 @@ responsiveness-probe:
     fi
     exit "$status"
 
+# The frame budget (PR #2479, `testenv/perf/README.md`): builds the app as the probes measure it (`KNOBAS_PERF=1`: a
+# development build for `?fake-ipc`, with Svelte's runtime as released), drives it in a headless Chrome with the main
+# thread slowed 1x and 4x, and fails when a list scrolls, a filter key paints or a page switches slower than its line in
+# `testenv/perf/budget.json`, or when a box that scrolls has no opaque background. On the fixture at scale by default;
+# `--real <port>` runs it on the windowless backend over a saved database (`examples/headless_ipc.rs`).
+frame-budget *args:
+    testenv/perf/frame-budget.sh {{args}}
+
+# The open budget (the instant-open pass of PR #2479, 2026-11-12, `testenv/perf/README.md`): presses every page's nav
+# entry or row in a headless Chrome at 1x and 4x, on its first visit, its return, its return after every other section
+# and its return after a sync, and fails when its first useful frame or its settling is over its line in
+# `testenv/perf/budget-open.json`, or a row moved after it drew. On the windowless backend over the saved scale
+# database: `just open-budget --real <port>`. `--inner` presses a repository's tabs, files, a commit, Compare, a pull
+# request's tabs and a run's tabs against the live forge instead, and `--inner --forge <ms>` with every request held
+# that long (the inner-pages pass, 2026-11-12; the README's *The inner pages*). `--extremes` presses the worst shapes
+# a real team's data has, seeded on the live products for the run and removed after (the extremes pass, 2026-11-13;
+# the README's *The extremes*).
+open-budget *args:
+    testenv/perf/open-budget.sh {{args}}
+
+# The keys budget (the broad-filters pass of PR #2479, 2026-11-13, `testenv/perf/README.md`): presses the keys that keep
+# most of a page, Tickets' first letter, a `-project:` and a `-priority:`, and a single letter under Everything, as real
+# input in a headless Chrome at 1x and 4x, and fails when the rows a key asks for draw later than their line in
+# `testenv/perf/budget-keys.json` or anything drawn moves. On the saved scale database: `just keys-budget --real <port>`.
+keys-budget *args:
+    testenv/perf/keys-budget.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
@@ -1398,6 +1425,29 @@ live-sources-remove app="":
 # `just demo` with every live product as a source already in place.
 live-demo: (live-sources "")
     just demo
+
+# testenv/README.md, *Björn's scale*: `just seed-scale jira`, `... confluence`,
+# `... teamcity`, `... gitea`, `... forgejo`, `... kuma`, each with `--count N`
+# for another size or `--plan-only` for the plan's numbers without a server.
+# The product must be up (`just live-up <product>`). Idempotent: a rerun on a
+# filled product adds nothing.
+# Fill a live product to Björn's scale, beside the seed.
+seed-scale product *args:
+    testenv/seed-scale.sh {{ product }} {{ args }}
+
+# testenv/README.md, *The extremes*: `just seed-extremes jira`, `... confluence`,
+# `... gitea`, `... teamcity`, each under its own scope and the product's live
+# lock; `--remove` deletes the scope again. Idempotent.
+# Make the worst shapes a real team's data has on a live product, beside the seed.
+seed-extremes product *args:
+    testenv/seed-extremes.sh {{ product }} {{ args }}
+
+# testenv/scale-sync.sh: the debug app on a scratch profile under `root`, its
+# sources added with --scale, each source's first sync timed. *Björn's scale*
+# says how the saved database was made.
+# Sync the filled products into a database of its own.
+scale-sync root *ids:
+    testenv/scale-sync.sh {{ quote(root) }} {{ ids }}
 
 # For the milestone review's bundle, or the desktop witness's.
 # A built bundle on the demo profile with every live product as a source.

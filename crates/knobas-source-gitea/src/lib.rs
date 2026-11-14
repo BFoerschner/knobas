@@ -453,6 +453,11 @@ fn payload_paths() -> Vec<KindPaths> {
             parent: repo(&["repository"]),
             commit: vec![PayloadPath::of(["commit", "id"])],
             default_branch: vec![PayloadPath::of(["repository", "default_branch"])],
+            // The tip's author: the login Gitea matched them to, and the name
+            // git recorded, which is the one name a branch record gives
+            // (F-107). Branches draws the name, and compares the login.
+            reporter: vec![PayloadPath::of(["commit", "author", "username"])],
+            reporter_name: vec![PayloadPath::of(["commit", "author", "name"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -470,6 +475,17 @@ fn payload_paths() -> Vec<KindPaths> {
             base: vec![PayloadPath::of(["base", "ref"])],
             commit: vec![PayloadPath::of(["head", "sha"])],
             head_repo: vec![PayloadPath::of(["head", "repo", "full_name"])],
+            // Gitea keeps a pull request's labels on the record as an
+            // issue's, and the page draws them as a ticket's card does.
+            labels: vec![ListPath {
+                at: PayloadPath::of(["labels"]),
+                entry: PayloadPath::of(["name"]),
+            }],
+            // Its opener, by account and by the profile's name (F-107): Code
+            // names a person as a ticket's card does, the login where the
+            // profile has no name.
+            reporter: vec![PayloadPath::of(["user", "login"])],
+            reporter_name: vec![PayloadPath::of(["user", "full_name"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -498,12 +514,15 @@ fn payload_paths() -> Vec<KindPaths> {
 ///   have neither. Declared so the role's minimum is met, and a miss for
 ///   every reader. A ticket answers as a parent to `knobas.key`, its own
 ///   key (`owner/repo/issues/7`), which no Gitea record names today.
-/// * **assignee** is `assignee.login`, `null` when nobody is assigned.
+/// * **assignee** is `assignee.login`, `null` when nobody is assigned, and
+///   its name the profile's `full_name` (F-107), blank and so a miss where
+///   the account never set one.
 /// * **labels** are the label records' names.
 /// * **project** is the repository the issue is in: `repository.full_name`
 ///   as its key, the bare `name` as its name.
 /// * **comment count** is Gitea's `comments`, the card's *N comments*.
-/// * **reporter** is `user.login`, the issue's creator, and **created** is
+/// * **reporter** is `user.login`, the issue's creator, named by its
+///   `full_name` as the assignee is, and **created** is
 ///   `created_at` (#2403). Gitea keeps no time spent and no worklog, so the
 ///   card's *Logged* row is not drawn for an issue.
 ///
@@ -519,6 +538,7 @@ fn ticket_paths() -> KindPaths {
         priority: knobas("priority"),
         issue_type: knobas("issue_type"),
         assignee: vec![PayloadPath::of(["assignee", "login"])],
+        assignee_name: vec![PayloadPath::of(["assignee", "full_name"])],
         labels: vec![ListPath {
             at: PayloadPath::of(["labels"]),
             entry: PayloadPath::of(["name"]),
@@ -532,6 +552,7 @@ fn ticket_paths() -> KindPaths {
         project_name: vec![PayloadPath::of(["repository", "name"])],
         comment_count: vec![PayloadPath::of(["comments"])],
         reporter: vec![PayloadPath::of(["user", "login"])],
+        reporter_name: vec![PayloadPath::of(["user", "full_name"])],
         created: vec![PayloadPath::of(["created_at"])],
         // The issue's body as written (#2308): Markdown, as Gitea renders it.
         description: vec![PayloadPath::of(["body"])],
@@ -593,6 +614,55 @@ mod tests {
         assert_eq!(
             repo.default_branch,
             vec![PayloadPath::of(["default_branch"])]
+        );
+    }
+
+    /// A pull request carries its labels as an issue does (the live run on
+    /// #2479: *Kind/Bug* reached the mirror and the page drew none), and
+    /// names its opener by account and by the profile's name, as an issue
+    /// names its reporter and assignee (F-107).
+    #[test]
+    fn a_pull_request_declares_its_labels_and_its_openers_name() {
+        let template = descriptor_template();
+        let paths = |kind: &str| {
+            template
+                .payload_paths
+                .iter()
+                .find(|paths| paths.kind == kind)
+                .cloned()
+                .unwrap_or_else(|| panic!("{kind} declares paths"))
+        };
+        let labels = vec![ListPath {
+            at: PayloadPath::of(["labels"]),
+            entry: PayloadPath::of(["name"]),
+        }];
+        let pr = paths(KIND_PR);
+        assert_eq!(pr.labels, labels);
+        assert_eq!(pr.reporter, vec![PayloadPath::of(["user", "login"])]);
+        assert_eq!(
+            pr.reporter_name,
+            vec![PayloadPath::of(["user", "full_name"])]
+        );
+        // A branch record names no profile, only the login Gitea matched the
+        // tip's author to and the name git recorded: the name it gives.
+        let branch = paths(KIND_BRANCH);
+        assert_eq!(
+            branch.reporter,
+            vec![PayloadPath::of(["commit", "author", "username"])]
+        );
+        assert_eq!(
+            branch.reporter_name,
+            vec![PayloadPath::of(["commit", "author", "name"])]
+        );
+        let ticket = paths(KIND_TICKET);
+        assert_eq!(ticket.labels, labels);
+        assert_eq!(
+            ticket.reporter_name,
+            vec![PayloadPath::of(["user", "full_name"])]
+        );
+        assert_eq!(
+            ticket.assignee_name,
+            vec![PayloadPath::of(["assignee", "full_name"])]
         );
     }
 

@@ -20,8 +20,10 @@ import {
   rerunRequest,
   runTabHash,
   runTabOf,
+  noSuchRunTab,
   tookLine,
 } from "./run";
+import { jumpAcross, leftName, takeTold } from "../opener";
 
 function run(no: number, tone: "ok" | "err" | null, branch = "main", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -62,6 +64,9 @@ test("a run's tab is the address's third segment, and Overview is the run's own 
   expect(runTabOf(["p", "r", "changes"])).toBe("changes");
   expect(runTabOf(["p", "r", "params"])).toBe("params");
   expect(runTabOf(["p", "r", "nonsense"])).toBe("overview");
+  expect(noSuchRunTab(["p", "r", "nonsense"])).toBe(true);
+  expect(noSuchRunTab(["p", "r", "params"])).toBe(false);
+  expect(noSuchRunTab(["p", "r"])).toBe(false);
   expect(runTabHash("teamcity:buildType:A", "teamcity:build:7", "overview")).toBe(
     "#/build/teamcity%3AbuildType%3AA/teamcity%3Abuild%3A7",
   );
@@ -77,9 +82,9 @@ test("the previous run on the branch is the next older finished one on the same 
 });
 
 test("took says the duration and the difference to the previous run on the branch", () => {
-  expect(tookLine(RUNS[1]!, RUNS[3]!)).toBe("4 m 12 s, −16 s against #1185");
-  expect(tookLine(RUNS[3]!, RUNS[4]!)).toBe("4 m 28 s, +28 s against #1184");
-  expect(tookLine(RUNS[4]!, null)).toBe("4 m 00 s");
+  expect(tookLine(RUNS[1]!, RUNS[3]!)).toBe("4m 12s, −16s against #1185");
+  expect(tookLine(RUNS[3]!, RUNS[4]!)).toBe("4m 28s, +28s against #1184");
+  expect(tookLine(RUNS[4]!, null)).toBe("4m");
   expect(tookLine(RUNS[0]!, null)).toBe("still running");
   expect(tookLine(run(1189, null, "main", { started: null }), null)).toBe("not started");
 });
@@ -286,4 +291,25 @@ test("Re-run sends the run's branch and every value it ran with that is not a de
   expect(onMain.payload).toEqual({
     RunBuild: { entity: "teamcity:buildType:A", branch: null, parameters: [], clean_checkout: false, first_in_queue: false },
   });
+});
+
+test("a press to another tab of the run is told as a jump, and a ⌘-press stays the browser's (F-355)", () => {
+  const press = (over: MouseEventInit = {}) => {
+    const link = document.createElement("a");
+    link.setAttribute("href", "#/build/p/r/log");
+    let event!: MouseEvent;
+    link.addEventListener("click", (fired) => {
+      event = fired;
+      jumpAcross(fired, "Overview");
+    });
+    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...over }));
+    return event;
+  };
+  location.hash = "#/build/p/r/overview";
+  expect(press({ metaKey: true }).defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/build/p/r/overview");
+  expect(press().defaultPrevented).toBe(true);
+  expect(location.hash).toBe("#/build/p/r/log");
+  expect(takeTold(location.hash)).toBe("across");
+  expect(leftName()).toBe("Overview");
 });

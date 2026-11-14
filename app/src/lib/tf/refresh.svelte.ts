@@ -12,10 +12,15 @@
  *
  * An instance that answers *not offered* all the same (its config turned the
  * read off) gets the run in its place, and its detail says *Sync now* from then.
+ *
+ * A press that read the item ends in one toast, replaced by the next press's (F-359): *Refreshed from TeamCity*, or
+ * what the page knows better, which it says with {@link DetailRefresh.answer} while it reads again. While the source's
+ * last sync failed, the toast says that too, since the band above still does (F-362): *Refreshed from TeamCity. Its
+ * sign-in is still failing.*
  */
 import type { EntityDetail } from "../ipc/entity";
 import { ipcErrorMessage } from "../ipc";
-import { refreshEntity, type EntityRefresh } from "../ipc/sources";
+import { refreshEntity, syncStatus, type EntityRefresh, type SourceSyncStatus } from "../ipc/sources";
 import { sourceSyncs, type RoleSync, type RoleSyncs } from "./role-sync.svelte";
 import { push } from "../shell/toasts.svelte";
 
@@ -41,12 +46,22 @@ export interface DetailRefreshPorts {
   refreshEntity: (entityId: string) => Promise<EntityRefresh>;
   /** The runs a detail's *Sync now* starts or joins, by source id. */
   syncs: RoleSyncs;
+  /** How each source's last run ended, for what a *Refresh* adds to its toast (F-362). */
+  syncStatus: () => Promise<SourceSyncStatus[]>;
 }
 
 export const DETAIL_REFRESH_BRIDGE: DetailRefreshPorts = {
   refreshEntity: (entityId) => refreshEntity(entityId),
   syncs: sourceSyncs,
+  syncStatus: () => syncStatus(),
 };
+
+/** What a refreshed item's toast adds while its source's last run failed. Nothing here says the refresh read nothing: it did. */
+const STILL = {
+  unauthorized: "Its sign-in is still failing.",
+  unreachable: "Its last sync couldn't reach it.",
+  error: "Its last sync failed.",
+} as const;
 
 /** One detail's *Refresh*. */
 export interface DetailRefresh {
@@ -63,6 +78,8 @@ export interface DetailRefresh {
    * detail as it was and says why.
    */
   refresh(detail: RefreshSubject, reread: () => Promise<void> | void): Promise<void>;
+  /** While `reread` runs: the words this press ends in, in place of *Refreshed from <source>*. `null` claims nothing. */
+  answer(words: string | null): void;
   /** Back to nothing asked, for another item. */
   reset(): void;
 }
@@ -75,6 +92,8 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
   });
   /** The newest ask: an answer for an item the reader left is dropped. */
   let asked = 0;
+  /** What the page had this ask say: `null` is nothing, and `undefined` is that it said nothing about it. */
+  let words: string | null | undefined;
 
   return {
     get reading() {
@@ -95,6 +114,7 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
       const mine = ++asked;
       state.reading = true;
       state.failed = null;
+      words = undefined;
       let answer: EntityRefresh;
       try {
         answer = await ports.refreshEntity(detail.row.entity_id);
@@ -111,12 +131,19 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
         state.failed = `Couldn't refresh: ${answer.reason}`;
         return;
       }
+      // A run of the source holds its lock for the whole run (the query audit, 2026-11-12: 74 to 242 s), so the press
+      // says the sync is running instead of waiting behind it; the run's end reads the page again.
+      if (answer.outcome === "run_in_flight") {
+        state.reading = false;
+        push({ text: `${detail.source.display_name} is syncing now. This page updates when that sync ends.`, subject: `refresh:${detail.row.entity_id}` });
+        return;
+      }
       if (answer.outcome === "not_offered") {
         state.unoffered[detail.source.id] = true;
         state.reading = false;
         const run = ports.syncs.of(detail.source.id);
-        await run.start();
-        if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
+        await run.start(detail.source.display_name);
+        if (run.failed !== null) push({ text: `Could not sync ${detail.source.display_name}: ${run.failed}`, tone: "err" });
         return;
       }
       // Refreshed, gone, or turned off since the detail was read: the detail
@@ -126,11 +153,27 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
       } finally {
         if (mine === asked) state.reading = false;
       }
+      // Gone or turned off, the detail's banner says which.
+      if (mine !== asked || answer.outcome !== "refreshed" || words === null) return;
+      const subject = `refresh:${detail.row.entity_id}`;
+      if (words !== undefined) {
+        push({ text: words, subject });
+        return;
+      }
+      const rows = await ports.syncStatus().catch(() => []);
+      if (mine !== asked) return;
+      const outcome = rows.find((row) => row.source_id === detail.source.id)?.last_outcome ?? "ok";
+      const refreshed = `Refreshed from ${detail.source.display_name}`;
+      push({ text: outcome === "ok" ? refreshed : `${refreshed}. ${STILL[outcome]}`, subject });
+    },
+    answer(said) {
+      words = said;
     },
     reset() {
       asked += 1;
       state.reading = false;
       state.failed = null;
+      words = undefined;
     },
   };
 }

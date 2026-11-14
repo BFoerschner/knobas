@@ -132,10 +132,10 @@ test("the note's links are rows that open their other end, a context's row only 
   ]);
 });
 
-test("a note that is not there reads the shell's Nothing lives at", async () => {
+test("a note that is not there says so, and leads away", async () => {
   open({ note: "missing" });
   await settle();
-  expect(text()).toContain("Nothing lives at");
+  expect(text()).toContain("knobas does not hold this note.");
   expect(target.querySelector("h1")).toBeNull();
 });
 

@@ -19,7 +19,7 @@
  * (`EVENTS.activityNew`, read by `shell/latest-change.svelte.ts`). A channel
  * of the estate's own would be a second thing to keep in step with the first.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type {
   AssetDetail,
   AssetEdit,
@@ -412,6 +412,14 @@ export function monitorRoster(): Promise<MonitorRow[]> {
 }
 
 /**
+ * How many monitors on the roster read *down*, hidden and paused ones left out: the nav's badge (PR #2479). The
+ * roster's own rows and state rule, without each monitor's day of samples, which the badge read on every sync's end.
+ */
+export function monitorsDown(): Promise<number> {
+  return invoke<number>("monitors_down");
+}
+
+/**
  * Every open alert in the estate, newest first.
  *
  * **One read for both surfaces.** The top strip's count is this list's length
@@ -437,6 +445,14 @@ export function openAlerts(): Promise<OpenAlert[]> {
  */
 export function ackAlert(monitorId: string): Promise<OpenAlert> {
   return invoke<OpenAlert>("ack_alert", { monitorId });
+}
+
+/**
+ * Take an ack back: the alert asks again, in the inbox too. Knobas-local, as
+ * the ack is. `not_found` when the monitor has since recovered.
+ */
+export function unackAlert(monitorId: string): Promise<OpenAlert> {
+  return invoke<OpenAlert>("unack_alert", { monitorId });
 }
 
 /**

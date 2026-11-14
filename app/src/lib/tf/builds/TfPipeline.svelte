@@ -34,8 +34,13 @@
   button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
-  import { secondsLabel } from "../../time/format";
-  import { onDestroy, onMount, untrack, type Snippet } from "svelte";
+  import { stateWord } from "../state-word";
+  import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { HeldOrder } from "../held-order.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
+  import { secondsLabel, timeLabel } from "../../time/format";
+  import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { EntityDetail, PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
@@ -45,6 +50,8 @@
   import { push } from "../../shell/toasts.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
+  import TfWindowedRows from "../TfWindowedRows.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
@@ -52,11 +59,15 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { runHash, runTone, shortTime } from "./builds";
+  import { newestFirst, testsWords, runHash, runTone, shortTime } from "./builds";
+  import { counted } from "../counted";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { RunHold } from "./run-hold.svelte";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import {
     BAR_STEP,
     BAR_WIDTH,
@@ -314,7 +325,8 @@
    * *sent*, until a read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
    */
   const started = $derived(queuedRunRows(echoesOn(id, QUEUED_RUN), defaultBranch(settings)));
-  const all = $derived(held === null ? null : [...started, ...held]);
+  /** The runs newest first by when they started or were queued (`newestFirst`), the ones started here on top. */
+  const all = $derived(held === null ? null : [...started, ...newestFirst(held)]);
 
   async function more() {
     if (held === null || older !== "more" || held.length === 0) return;
@@ -352,8 +364,6 @@
 
   const adapterKind = $derived(sources.find((s) => s.id === pipeline.source_id)?.adapter_kind ?? null);
   const word = $derived(pipelineWord(adapters, adapterKind));
-  /** The project path, as the source nests it (#849), else the group. */
-  const project = $derived(pipeline.path.length > 0 ? pipeline.path.join(" › ") : (pipeline.group ?? ""));
   const repositories = $derived(settings?.repositories ?? []);
   const triggers = $derived(triggersSentence(settings));
   const chain = $derived(chainSentence(settings?.chain ?? [], pipeline.entity_id));
@@ -361,26 +371,31 @@
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
   const fallback = $derived(defaultBranch(settings));
 
+  /** *Run on <branch>* holds as what its write is doing, so a second press at once can't queue a second run (F-338). */
+  const runOnHold = new RunHold(() => id);
+
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
   function runOn(branch: string | null) {
     if (cannotRun !== null) return;
     const words = branch ?? fallback ?? "the default branch";
-    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`);
+    void runOnHold.press(() => queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`));
   }
 
   /**
    * Queue a run and draw it *queued* at the top at once (R-9.8). The toast
    * names it by the dialog's line, as prototype-6's `startRun` does.
    */
-  async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
+  async function queue(payload: WriteOpPayload, summary: string): Promise<number | null> {
     try {
       const write = await ports.submitWrite(payload);
       echoRun(pipeline, write, runBranch(payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
-      return true;
+      // Pressed on the Runs tab the row is there already; from another tab, sent, the toast leads to it (F-350).
+      const where = tab === "runs" ? undefined : { label: "Show in runs", run: () => (location.hash = tabHash(id, "runs")) };
+      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline), { write, where });
+      return write.id;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return false;
+      return null;
     }
   }
 
@@ -394,7 +409,7 @@
 
   async function onrun(request: RunRequest) {
     dialog = null;
-    if (!(await queue(request.payload, request.summary)) || request.preset === null) return;
+    if ((await queue(request.payload, request.summary)) === null || request.preset === null) return;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
@@ -421,12 +436,22 @@
   if (filter.scope === null) filter.scope = "all";
   const config = $derived<FilterConfig>({
     id: "builds-runs",
-    placeholder: "Filter runs by number, branch, commit or person",
+    placeholder: "Filter runs",
     noun: "runs",
     one: "run",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "My job’s branches", query: "" }] : []),
-      { id: "mine", label: "Started by me", query: "" },
+      ...(job !== null
+        ? [
+            {
+              id: "job",
+              label: "This job",
+              count: all === null ? null : keptRuns(all, { text: "", scope: "job", results: [], branch: null }, jobBranches).length,
+              title: `Runs on ${job}'s branches`,
+              query: "",
+            },
+          ]
+        : []),
+      { id: "mine", label: "Mine", title: "Runs you started", query: "" },
       { id: "all", label: "All", query: "" },
     ],
     chips: [{ key: "result", label: "Result", options: RESULTS.map((value) => ({ value, label: value })) }],
@@ -439,7 +464,7 @@
           all,
           {
             text: filter.text,
-            // *My job's branches* is only offered with a job; a remembered one without reads as *All*.
+            // *This job* is only offered with a job; a remembered one without reads as *All*.
             scope: job !== null || filter.scope !== "job" ? filter.scope : "all",
             results: filter.chips["result"] ?? [],
             branch: filter.dropdowns["branch"] ?? null,
@@ -447,7 +472,72 @@
           jobBranches,
         ),
   );
-  const days = $derived(byDay(kept));
+  /**
+   * The runs stay where they first drew (the still-rows pass, 2026-11-11): a run a sync brings, a build that just
+   * finished, waits behind *Show N new* rather than pushing the list down under the pointer. A run you started is your
+   * own press: its echo sorts the list again, so it shows at once.
+   */
+  const runHold = new HeldOrder<RunRow>((run) => run.entity_id);
+  /** What the person chose, and the runs they started: a change sorts the list again. */
+  const runBasis = $derived(JSON.stringify([id, filter.text, filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)]));
+  const heldRuns = $derived(all === null ? { rows: [] as RunRow[], waiting: 0, stale: false } : runHold.place(kept, runBasis));
+  const heldBar = $derived({ waiting: heldRuns.waiting, stale: heldRuns.stale, show: () => runHold.release() });
+
+  /**
+   * Newest first, always (Björn on ux6: "how am i supposed to find the most recent run which is the most important
+   * anyways?"). The hold above is only for the pointer: while it rests on the runs, a run that arrives waits behind
+   * *Show N new runs* over the list's top, which takes no room; once the pointer is off the list, or the page is
+   * away, every run takes its place at once. So a first draw, a return and a sync all draw newest first.
+   */
+  let pointerOn = $state(false);
+  const shown = pageVisible();
+  $effect(() => {
+    if (!shown()) pointerOn = false;
+  });
+  $effect(() => {
+    if (!pointerOn && (heldRuns.waiting > 0 || heldRuns.stale)) untrack(() => runHold.release());
+  });
+  let runsBox = $state<HTMLElement | null>(null);
+  /** *Show N new runs*: they take the top, and the top comes into view. */
+  function showNew() {
+    runHold.release();
+    void tick().then(() => runsBox?.querySelector(".tf-runtbl tr")?.scrollIntoView?.({ block: "nearest" }));
+  }
+
+  /**
+   * The runs a read brought to the top after the list drew, by id: each is lit once as it draws (`tf-run-new`), so a
+   * run that came in while you looked elsewhere is the first thing you see. Not on a first draw, a filter, or older
+   * runs joining the end.
+   */
+  let arrived = $state.raw<ReadonlySet<string>>(new Set());
+  let drawnRuns: Set<string> | null = null;
+  let drawnFor: string | null = null;
+  $effect(() => {
+    const rows = heldRuns.rows;
+    const basis = runBasis;
+    if (drawnFor !== basis) {
+      drawnFor = basis;
+      drawnRuns = null;
+    }
+    if (rows.length === 0) return;
+    if (drawnRuns === null) {
+      drawnRuns = new Set(rows.map((run) => run.entity_id));
+      return;
+    }
+    const seen = drawnRuns;
+    const top = rows.findIndex((run) => seen.has(run.entity_id));
+    const fresh = rows.slice(0, Math.max(0, top)).filter((run) => !isStartedHere(run));
+    for (const run of rows) seen.add(run.entity_id);
+    if (fresh.length > 0) untrack(() => (arrived = new Set([...arrived, ...fresh.map((run) => run.entity_id)])));
+  });
+  const days = $derived(byDay(heldRuns.rows));
+  /**
+   * A history read back by scrolling holds thousands of runs (2026-11-10: 35,000 nodes and 133 ms frames at 1,400 of
+   * them), so past thirty days only the days on screen and near it are drawn, a day at a time.
+   */
+  const dayWin = new Windowed({ count: () => days.length, key: (i) => days[i]!.key, estimate: 260, from: 30 });
+  /** A run's row before it is drawn: one 34 px line with its chips and *Log* (the Windows pass, 2026-11-14). */
+  const RUN_ROW_PX = 34;
 
   /**
    * A click anywhere on a run row opens the run (R-9.6, prototype-6's
@@ -455,7 +545,14 @@
    * in the row does its own, a selection of the row's words is not a click,
    * and a queued row has no run yet.
    */
+  /** A run started here and still in the write queue: a press on its row opens the queue, where it is (F-352). Once sent, the source holds it and there is nothing to open until a sync reads it. */
+  const inQueue = (run: RunRow): boolean => isStartedHere(run) && run.state?.text !== "sent";
+
   function openRow(event: MouseEvent, run: RunRow) {
+    if (inQueue(run)) {
+      if (!(event.target as Element | null)?.closest("a, button, input, select, label")) openWriteQueue();
+      return;
+    }
     if (isStartedHere(run)) return;
     if ((event.target as Element | null)?.closest("a, button, input, select, label")) return;
     if ((window.getSelection()?.toString() ?? "") !== "") return;
@@ -512,7 +609,7 @@
         source: pipeline.source_id,
       });
       editing = null;
-      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline));
+      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline), { write });
     } catch (cause) {
       push({ text: `Could not queue the change: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -527,7 +624,7 @@
   <div>
     <h1>{pipeline.name}</h1>
     <div class="tf-sub">
-      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{project !== "" ? ` in project ${project}` : ""}{#if repositories.length > 0}, builds
+      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{#if repositories.length > 0}, builds
         {#each repositories as repository, at (at)}{#if at > 0},{" "}{/if}{#if repository.entity_id !== null}<a
               class="tf-mono"
               href={`#/repo/${encodeURIComponent(repository.entity_id)}`}>{repository.name}</a
@@ -545,28 +642,30 @@
       <button
         type="button"
         class="tf-btn"
-        {...refusedAttrs(cannotRun)}
-        onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button
+        aria-disabled={runOnHold.word !== null ? "true" : undefined}
+        {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
+        onclick={() => runOn(jobBranch)}><span class="tf-keepw" data-keep="Run on {jobBranch}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on <span class="tf-mono">{jobBranch}</span>{/if}</span></span></button
       >
     {:else}
       <button
         type="button"
         class="tf-btn"
-        {...refusedAttrs(cannotRun)}
+        aria-disabled={runOnHold.word !== null ? "true" : undefined}
+        {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
         onclick={() => runOn(null)}
-        >Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}</button
+        ><span class="tf-keepw" data-keep="Run on {fallback ?? 'the default branch'}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}{/if}</span></span></button
       >
     {/if}
     {#if onpin !== undefined}
       <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
     {/if}
     {#if pipeline.web_url !== null}
-      <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
+      <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={openInSource}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
     {/if}
-    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} />
+    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
   </div>
 </header>
-{#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+{#if detail !== null}<TfDetailBanners {detail} {refresh} reread={refreshRead} />{/if}
 
 {#if stale !== null}
   <div class="tf-stale tf-bstale">
@@ -590,7 +689,7 @@
       >
         {#each history as run, at (run.entity_id)}
           {@const h = barHeight(run, max)}
-          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${resultWord(run)}`}>
+          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${stateWord(resultWord(run))}`}>
             <title>{barTip(run)}</title>
             <rect class={`tf-bar tf-run-${runTone(run)}`} x={at * (BAR_STEP)} y={CHART_HEIGHT - h} width={BAR_WIDTH} height={h} rx="2" />
           </a>
@@ -627,17 +726,28 @@
 
 {#if tab === "runs"}
   <div class="tf-runbar">
-    <FilterBar {config} {filter} shown={all === null ? null : kept.length} total={all?.length ?? null} />
+    <FilterBar {config} {filter} shown={all === null ? null : heldRuns.rows.length} total={all?.length ?? null} held={heldBar} />
   </div>
-  <div class="tf-runs">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tf-runs" bind:this={runsBox} onpointerenter={() => (pointerOn = true)} onpointerleave={() => (pointerOn = false)}>
+    {#if heldRuns.waiting > 0}
+      <!-- Over the list's top, in no room of its own: it appearing moves no run under the pointer. -->
+      <div class="tf-newruns"><button type="button" title="Started since the list drew. They wait here while the pointer is on the runs, so nothing moves under it." onclick={showNew}>Show {counted(heldRuns.waiting, "new run", "new runs")}</button></div>
+    {/if}
     {#if all === null && failed === null}
       <p class="tf-dim">Reading runs…</p>
     {:else if all !== null && all.length === 0}
       <div class="tf-empty"><p>No runs yet.</p></div>
     {:else if all !== null && kept.length === 0}
-      <div class="tf-empty"><p>No run matches.</p></div>
+      <TfNoMatch noun="runs" {filter}>
+        {#if filter.scope !== "all"}
+          <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Show all runs</button>
+        {/if}
+      </TfNoMatch>
     {/if}
-    {#each days as day (day.label)}
+    <div class="tf-days" {@attach dayWin.list}>
+    {#each dayWin.slice(days) as day, at (day.key)}
+      <div class="tf-day" class:tf-day-first={dayWin.start + at === 0} {@attach dayWin.row(day.key)}>
       <h3 class="tf-dayh">{day.label}</h3>
       <table class="tf-tbl tf-runtbl" aria-label={`Runs, ${day.label}`}>
         <!-- One width per column on every day's table, so they line up down the page (#1452). -->
@@ -646,28 +756,29 @@
             class="tf-run-dur"
           /><col class="tf-run-at" /><col class="tf-run-acts" /></colgroup
         >
-        <tbody>
-          {#each day.runs as run (run.entity_id)}
+        <!-- A day's runs window too (the Windows pass, 2026-11-14): the scale estate's TeamCity ran its builds on one day, and seventy-six of them drawn whole were 1,500 elements of Builds' first open. 150 px of overscan: a scroll draws a few rows at a time, each move at 4x a 15 ms frame where 300 px made it 18 and 600 px 25. -->
+        <TfWindowedRows rows={day.runs} key={(run) => run.entity_id} estimate={RUN_ROW_PX} colspan={7} overscan={150}>
+          {#snippet row(run, attach)}
             {@const tone = runTone(run)}
-            <tr class:tf-row={!isStartedHere(run)} onclick={(event) => openRow(event, run)}>
+            <tr {@attach attach} class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
-                  <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet. -->
-                  <b>{run.state?.text ?? "queued"}</b>
+                  <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
+                  <TfStateChip text={stateWord(run.state?.text ?? "queued")} class="tf-info" />
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
-                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : run.state.text}</span>{/if}
+                {#if run.state !== null && !isStartedHere(run)}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
               </td>
+              <!-- A flex row, so the name takes the ellipsis: it is the chip that ties a run to the job, and an inline chip after the name is the first thing cut (F-357). -->
               <td class="tf-mono tf-run-br"
-                >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
-                    class="tf-chip tf-jobchip-sm">{job}</span
-                  >{/if}</td
+                ><span class="tf-run-brin"
+                  >{#if run.branch !== null}<span class="tf-run-brname" title={run.branch}><Marked text={run.branch} typed={filter.text} /></span>{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</span
+                ></td
               >
-              <td class="tf-dim tf-run-trig"><Marked text={triggerLabel(run)} typed={filter.text} /></td>
+              <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-run-tests"
-                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{run.tests
-                    .passed} passed{#if run.tests.ignored > 0}, {run.tests.ignored} ignored{/if}{/if}</td
+                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{testsWords({ ...run.tests, failed: 0 })}{/if}</td
               >
               <td class="tf-nowrap tf-num tf-run-dur">
                 {#if run.duration_seconds !== null}
@@ -676,31 +787,39 @@
                   >{secondsLabel(run.duration_seconds)}
                 {:else if tone === "run"}
                   <progress class="tf-progress" aria-label="Running"></progress> running
+                {:else if isStartedHere(run)}
+                  <!-- Why it waits (F-352): in the queue, or sent and not yet read back. -->
+                  <span class="tf-dim">{inQueue(run) ? "in the write queue" : "until the next sync"}</span>
                 {:else}
                   waiting
                 {/if}
               </td>
-              <td class="tf-nowrap tf-dim tf-num tf-run-at">{run.started !== null ? shortTime(run.started) : ""}</td>
+              <td class="tf-nowrap tf-dim tf-num tf-run-at"><span class="tf-rowval">{run.started !== null ? timeLabel(run.started) : ""}</span></td>
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
-                  <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
-                  {#if run.finished !== null}
-                    <button
-                      type="button"
-                      class="tf-btn tf-sm tf-ghost"
-                      {...refusedAttrs(cannotRun)}
-                      onclick={() => runDialog(run)}>Run again…</button
-                    >
-                  {/if}
+                  <span class="tf-rowend"><span class="tf-rowacts">
+                    <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
+                    {#if run.finished !== null}
+                      <button
+                        type="button"
+                        class="tf-btn tf-sm tf-ghost"
+                        {...refusedAttrs(cannotRun)}
+                        onclick={() => runDialog(run)}>Run again…</button
+                      >
+                    {/if}
+                  </span></span>
                 {/if}
               </td>
             </tr>
-          {/each}
-        </tbody>
+          {/snippet}
+        </TfWindowedRows>
       </table>
+      </div>
     {/each}
+    </div>
     {#if all !== null && all.length > 0}
-      <div class="tf-older" bind:this={sentinel}>
+      <!-- `hidden`, not gone: the sentinel keeps reading older runs while a filter has emptied the page. -->
+      <div class="tf-older" hidden={kept.length === 0} bind:this={sentinel}>
         {#if olderFailed !== null}
           <p class="tf-dim">Older runs could not be read: {olderFailed}</p>
           <button type="button" class="tf-btn tf-sm" onclick={() => ((olderFailed = null), void more())}>Try again</button>
@@ -759,11 +878,11 @@
                 {:else}
                   {(paramEcho(setting.name)?.text ?? setting.value) || "(empty)"}
                 {/if}
-                {#if paramEcho(setting.name) !== null}<span class="tf-chip tf-info">{paramEcho(setting.name)?.state}</span>{/if}
+                {#if paramEcho(setting.name) !== null}<TfStateChip text={paramEcho(setting.name)?.state} tone="info" />{/if}
               </td>
               <td class="tf-dim">
                 {field?.kindWord ?? "text"}
-                {#if !setting.secret && setting.inherited}<span class="tf-chip">inherited</span>{/if}
+                {#if !setting.secret && setting.inherited}<TfStateChip text="inherited" />{/if}
               </td>
               <td class="tf-nowrap">
                 {#if editing === setting.name}
@@ -798,7 +917,7 @@
           {#each settings.triggers as trigger, at (at)}
             <tr>
               <td
-                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<span class="tf-chip">disabled</span>{/if}{#if trigger.facts.length > 0}<span
+                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<TfStateChip text="disabled" />{/if}{#if trigger.facts.length > 0}<span
                     class="tf-sub">{triggerDetail(trigger)}</span
                   >{/if}</td
               >

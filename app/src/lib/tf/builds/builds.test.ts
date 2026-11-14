@@ -6,6 +6,8 @@ import { expect, test } from "vitest";
 
 import type { PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import {
+  failedBuildLine,
+  testsWords,
   foldOpen,
   pinnedOf,
   reasonsLine,
@@ -18,7 +20,13 @@ import {
   pipelineOf,
   runHash,
   runTone,
-  stripOf,
+  sharedPrefix,
+  railTime,
+  railGlyph,
+  listRows,
+  repoTreeOf,
+  newestFirst,
+  recentNewestFirst,
 } from "./builds";
 
 function run(extra: Partial<RunRow> = {}): RunRow {
@@ -83,12 +91,15 @@ test("a run's block tone: finished by its declared tone, in flight as running or
   expect(runTone(run({ state: null }))).toBe("muted");
 });
 
-test("the strip is the last twelve runs oldest first, so the newest is on the right", () => {
-  const recent = Array.from({ length: 14 }, (_, i) => run({ entity_id: `r${i}` }));
-  const strip = stripOf(pipeline("A", recent));
-  expect(strip).toHaveLength(12);
-  expect(strip.at(-1)?.entity_id).toBe("r0");
-  expect(strip[0]?.entity_id).toBe("r11");
+test("a rail row's glyph is its latest run's tone, and says it in words", () => {
+  expect(railGlyph(pipeline("A", [failed, run()]))).toEqual({ tone: "err", word: "Failed" });
+  expect(railGlyph(pipeline("B", [running]))).toEqual({ tone: "run", word: "Running" });
+  expect(railGlyph(pipeline("C", [queued]))).toEqual({ tone: "q", word: "Queued" });
+  // The run's own state, as its chip says it; a finished run that declares none says only that.
+  expect(railGlyph(pipeline("D", [run({ state: { text: "WARNING", tone: "warn" } })]))).toEqual({ tone: "warn", word: "Warning" });
+  expect(railGlyph(pipeline("E", [run({ state: { text: "cancelled", tone: "muted" } })]))).toEqual({ tone: "muted", word: "Cancelled" });
+  expect(railGlyph(pipeline("G", [run({ state: null })]))).toEqual({ tone: "muted", word: "Finished" });
+  expect(railGlyph(pipeline("F", []))).toEqual({ tone: "none", word: "No runs" });
 });
 
 test("the latest time reads as prototype-6 writes it: a time today, yesterday and a time, else the date", () => {
@@ -96,7 +107,7 @@ test("the latest time reads as prototype-6 writes it: a time today, yesterday an
   const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
   expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
   expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
-  expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("2026-08-19");
+  expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("Wed 09:00");
   expect(latestTime(pipeline("B", []), now)).toBe("");
   // A queued run has not started: its time is when the source last touched it.
   const waiting = run({ started: null, finished: null, updated_at: new Date(2026, 7, 22, 14, 20).toISOString() });
@@ -205,4 +216,136 @@ test("with This job on, a bare #/builds selects the job's failing pipeline, else
   expect(pipelineOf(list, [], [list[1]!, list[2]!])?.name).toBe("MineBad");
   expect(pipelineOf(list, [], [list[1]!])?.name).toBe("Mine");
   expect(pipelineOf(list, [], [])?.name).toBe("Elsewhere");
+});
+
+test("the rail's time climbs the one ladder at every width (F-049): the clock today, yesterday, the weekday this past week, else the date", () => {
+  const now = new Date(2026, 7, 22, 15, 0);
+  const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
+  expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
+  expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
+  expect(latestTime(at(new Date(2026, 7, 16, 9, 0)), now)).toBe("Sun 09:00");
+  expect(latestTime(at(new Date(2026, 7, 15, 9, 0)), now)).toBe("15 Aug");
+  expect(latestTime(pipeline("B", []), now)).toBe("");
+});
+
+test("a run's tests read one way, and only TeamCity's own failed-build line is read as counts (F-010)", () => {
+  expect(testsWords({ failed: 1, passed: 41, ignored: 0 })).toBe("1 failed, 41 passed");
+  expect(testsWords({ failed: 0, passed: 41, ignored: 2 })).toBe("41 passed, 2 ignored");
+  expect(testsWords({ failed: 0, passed: 0, ignored: 0 })).toBe("0 passed");
+  expect(failedBuildLine("Tests failed: 3 (3 new), passed: 212")).toBe("3 failed, 212 passed");
+  expect(failedBuildLine("Tests failed: 3")).toBe("3 failed");
+  expect(failedBuildLine("Tests failed: 1, passed: 9, ignored: 2")).toBe("1 failed, 9 passed, 2 ignored");
+  expect(failedBuildLine("Tests failed: 1, passed: 9, muted: 2"), "a shape it doesn't know stays the source's").toBe("Tests failed: 1, passed: 9, muted: 2");
+  expect(failedBuildLine("Compilation error")).toBe("Compilation error");
+});
+
+test("runs sort newest first by when they started, a queued one by its queue time, the read's order between equals", () => {
+  const a = run({ entity_id: "a", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T11:00:00Z", updated_at: "2026-08-22T11:00:00Z" });
+  const b = run({ entity_id: "b", started: "2026-08-22T10:30:00Z", finished: "2026-08-22T10:35:00Z", updated_at: "2026-08-22T10:35:00Z" });
+  const q = run({ entity_id: "q", started: null, finished: null, updated_at: "2026-08-22T10:50:00Z" });
+  const same = run({ entity_id: "same", started: "2026-08-22T10:30:00Z" });
+  const undated = run({ entity_id: "u", started: null, finished: null, updated_at: null });
+  expect(newestFirst([undated, a, b, same, q]).map((r) => r.entity_id)).toEqual(["q", "b", "same", "a", "u"]);
+});
+
+test("the Builds list's latest run reads the recent runs newest first", () => {
+  const older = run({ entity_id: "older", started: "2026-08-22T09:00:00Z", finished: "2026-08-22T12:00:00Z", state: { text: "FAILURE", tone: "err" } });
+  const newer = run({ entity_id: "newer", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:05:00Z" });
+  const row = recentNewestFirst(pipeline("Payout", [older, newer]));
+  expect(row.recent.map((r) => r.entity_id)).toEqual(["newer", "older"]);
+  expect(isFailing(row)).toBe(false);
+  expect(railGlyph(row)).toEqual({ tone: "ok", word: "Passed" });
+});
+
+test("a folder's pipelines share the prefix they all start with, cut at a separator, never a whole name", () => {
+  expect(sharedPrefix(["Payout_Build", "Payout_Lint", "Payout_Docker"])).toBe("Payout_");
+  expect(sharedPrefix(["Payout_Deploy_Staging", "Payout_Deploy_Prod"])).toBe("Payout_Deploy_");
+  expect(sharedPrefix(["web.build", "web.e2e"])).toBe("web.");
+  expect(sharedPrefix(["api - build", "api - lint"])).toBe("api - ");
+  // No separator after the common letters: nothing is shared.
+  expect(sharedPrefix(["BookingApi_Build", "BookingWeb_Build"])).toBe("");
+  // A lone pipeline, and one that would be left with nothing, keep their whole names.
+  expect(sharedPrefix(["Payout_Build"])).toBe("");
+  expect(sharedPrefix(["Payout_", "Payout_Build"])).toBe("");
+  expect(sharedPrefix([])).toBe("");
+});
+
+test("a rail row shows a time only where it says something: when it failed, when it started running, or that it is queued", () => {
+  const now = new Date(2026, 7, 22, 14, 32);
+  const t = (h: number, m: number) => new Date(2026, 7, 22, h, m).toISOString();
+  const latest = (extra: Partial<RunRow>) => pipeline("A", [run({ started: t(10, 5), finished: t(10, 9), updated_at: t(10, 9), ...extra })]);
+  // A failure says when it failed: when the run finished, not when it started.
+  expect(railTime(latest({ state: { text: "FAILURE", tone: "err" } }), now)).toEqual({ text: "10:09", tone: "err" });
+  expect(railTime(latest({ state: { text: "running", tone: "info" }, finished: null }), now)).toEqual({ text: "10:05", tone: "info" });
+  expect(railTime(latest({ state: { text: "queued", tone: "info" }, started: null, finished: null }), now)).toEqual({ text: "queued", tone: null });
+  // A pass, a warning, a cancelled run and no run at all leave the row quiet: its title has the time.
+  expect(railTime(latest({}), now)).toBeNull();
+  expect(railTime(latest({ state: { text: "WARNING", tone: "warn" } }), now)).toBeNull();
+  expect(railTime(latest({ state: { text: "cancelled", tone: "muted" } }), now)).toBeNull();
+  expect(railTime(pipeline("B", []), now)).toBeNull();
+  // Only the latest run counts: an older failure under a newer pass says nothing.
+  const recovered = pipeline("C", [run({ started: t(11, 0) }), run({ started: t(10, 0), state: { text: "FAILURE", tone: "err" } })]);
+  expect(railTime(recovered, now)).toBeNull();
+});
+
+test("a folder counts its running pipelines beside its failing ones, at any depth", () => {
+  const go = (name: string, path: string[]) => pipeline(name, [running], { path });
+  const [tree] = treeOf([go("A_Build", ["Payments", "Payouts"]), go("B_Build", ["Payments", "Ledger"]), at("C_Build", ["Payments"])]);
+  const payments = tree!.folds[0]!;
+  expect([payments.count, payments.failing, payments.running]).toEqual([3, 0, 2]);
+  expect(payments.folds.map((f) => f.running)).toEqual([1, 1]);
+});
+
+test("a rail row carries the prefix its folder's own pipelines share; a pinned row and a lone one carry none", () => {
+  const list = [
+    at("Payout_Build", ["Payments", "Payouts"], false, { pinned: true }),
+    at("Payout_Lint", ["Payments", "Payouts"]),
+    at("Payout_Deploy_Prod", ["Payments", "Payouts", "Deploy"]),
+    at("Ledger_Build", ["Payments"]),
+  ];
+  const rows = listRows(pinnedOf(list), treeOf(list), "all", () => true);
+  const pre = rows.flatMap((row) => (row.kind === "pipeline" ? [[row.key, row.pre]] : []));
+  expect(pre).toEqual([
+    ["pin:teamcity:buildType:Payout_Build", ""],
+    ["tree:teamcity:buildType:Ledger_Build", ""],
+    ["tree:teamcity:buildType:Payout_Build", "Payout_"],
+    ["tree:teamcity:buildType:Payout_Lint", "Payout_"],
+    ["tree:teamcity:buildType:Payout_Deploy_Prod", ""],
+  ]);
+});
+
+test("by repository: a fold for each repository a pipeline's runs built, by name, then the pipelines that built none", () => {
+  const list = [at("Payout_Build", ["Payments"]), at("Shared_Lint", ["Tools"], true), at("Nightly", ["Data"])];
+  const repos: Record<string, { id: string; title: string }[]> = {
+    Payout_Build: [{ id: "git:payout", title: "tidewater/payout-service" }],
+    Shared_Lint: [
+      { id: "git:payout", title: "tidewater/payout-service" },
+      { id: "git:ledger", title: "tidewater/ledger-api" },
+    ],
+  };
+  const [tree] = repoTreeOf(list, (p) => repos[p.name] ?? []);
+  expect(tree!.folds.map((f) => [f.name, f.pipelines.map((p) => p.name), f.failing])).toEqual([
+    ["tidewater/ledger-api", ["Shared_Lint"], 1],
+    ["tidewater/payout-service", ["Payout_Build", "Shared_Lint"], 1],
+    ["No repository", ["Nightly"], 0],
+  ]);
+  // A pipeline in two folds is two rows, each with a key of its own.
+  const rows = listRows([], [tree!], "all", () => true);
+  const keys = rows.filter((r) => r.kind === "pipeline").map((r) => r.key);
+  expect(new Set(keys).size).toBe(keys.length);
+});
+
+test("in a fold two sources share, the rows of the fewer say their source", () => {
+  const list = [
+    at("CI", ["Repo"], false, { source_id: "gha", source_name: "GitHub Actions" }),
+    at("E2E", ["Repo"], false, { source_id: "gha", source_name: "GitHub Actions" }),
+    at("Web_Build", ["Repo"]),
+  ];
+  const rows = listRows([], treeOf(list).concat(), "all", () => true);
+  const tags = rows.flatMap((r) => (r.kind === "pipeline" ? [[r.pipeline.name, r.tag]] : []));
+  // By project each source is its own tree, so no fold is shared and no row says its source.
+  expect(tags).toEqual([["CI", null], ["E2E", null], ["Web_Build", null]]);
+  const [repo] = repoTreeOf(list, () => [{ id: "git:web", title: "tidewater/web" }]);
+  const mixed = listRows([], [repo!], "all", () => true).flatMap((r) => (r.kind === "pipeline" ? [[r.pipeline.name, r.tag]] : []));
+  expect(mixed).toEqual([["CI", null], ["E2E", null], ["Web_Build", "TeamCity"]]);
 });

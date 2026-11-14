@@ -504,9 +504,20 @@ export type SearchFilters = { sources: Array<string>, kinds: Array<string>, upda
 authors: Array<string>, };
 
 /**
- * One result: a row, its rank, and the excerpt with the match marked.
+ * One result: a row, its rank, and where the words appear in its text.
  */
-export type SearchHit = { rank: number, snippet: Array<Segment>, 
+export type SearchHit = { rank: number, 
+/**
+ * Empty from every command since 2026-11-12 (the query audit, PR
+ * #2479). It held a `ts_headline` of the row, which no screen drew and
+ * which cost a quarter of a common word's keystroke, so no command asks
+ * its statement for one any more
+ * ([`EffectiveFilters::headline`](crate::query::EffectiveFilters::headline)).
+ * The field keeps its place on the wire, so a reader written before that
+ * decodes a hit as it did. What a reader sees of the match is
+ * [`Self::excerpts`].
+ */
+snippet: Array<Segment>, 
 /**
  * Where the words appear in the row's text, each with its place
  * (#2431): what the launcher's preview draws under *Everything*, so the

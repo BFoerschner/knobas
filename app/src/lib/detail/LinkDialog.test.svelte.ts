@@ -150,13 +150,13 @@ beforeEach(() => {
 test("the relation is pre-filled with related, and the curated list is offered", () => {
   const screen = render();
 
-  expect(screen.relation().value).toBe("related");
+  expect(screen.relation().value).toBe("Related to");
   const offered = [...screen.target.querySelectorAll("datalist option")].map((o) =>
     o.getAttribute("value"),
   );
-  expect(offered).toContain("blocks");
-  expect(offered).toContain("documents");
-  expect(offered).toContain("depends-on");
+  expect(offered).toContain("Blocks");
+  expect(offered).toContain("Documents");
+  expect(offered).toContain("Depends on");
 
   screen.done();
 });
@@ -185,13 +185,16 @@ test("closing the dialog within the debounce sends no search", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const screen = render();
 
+  // The first key of a settled box is asked at once (the broad-filters pass, 2026-11-13); the next, inside the
+  // debounce, waits on the timer the close must disarm.
+  screen.type(screen.picker(), "p");
   screen.type(screen.picker(), "payout");
   screen.done();
   // Past the debounce on the fake clock, which would fire a timer the close left armed (#2048).
   vi.advanceTimersByTime(DEBOUNCE_MS);
   await Promise.resolve();
 
-  expect(queries, "a search was sent after the dialog closed").toEqual([]);
+  expect(queries, "a search was sent after the dialog closed").toEqual(["p"]);
 });
 
 /**
@@ -380,7 +383,7 @@ test("picking monitors from a monitor writes monitored-by, drawn from the asset"
   await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
 
-  screen.button("monitors").click();
+  screen.button("Monitors").click();
   screen.button("Link").click();
 
   await waitFor(() => expect(writes).toHaveLength(1));
@@ -403,7 +406,7 @@ test("picking monitored-by from an asset writes the same row", async () => {
   await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
 
-  screen.button("monitored-by").click();
+  screen.button("Monitored by").click();
   screen.button("Link").click();
 
   await waitFor(() => expect(writes).toHaveLength(1));

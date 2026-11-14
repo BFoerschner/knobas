@@ -82,15 +82,34 @@ export function usualHere(choices: TypeChoices): string | null {
 }
 
 /**
- * The type a create dialog opens on: the first usual one, else the first of
- * the table.
- *
- * The table's order is spec #427's — outermost thing first, down to the
- * smallest — so falling back to its head means the top of the estate opens on
- * *Site*, which is where §12.1's chain begins.
+ * The type a create dialog opens on: the one type this parent's conventions name,
+ * or nothing, so the reader picks and a wrong guess isn't one key away (the enabled
+ * rule). Several usual types, or none, are a real choice. One is what a new thing
+ * here nearly always is, so it stays one field and `Enter`: a table with a single
+ * type has nothing to choose either.
  */
 export function defaultTypeId(choices: TypeChoices): string | null {
-  return choices.usual[0]?.id ?? choices.rest[0]?.id ?? null;
+  if (choices.usual.length === 1) return choices.usual[0]!.id;
+  if (choices.usual.length === 0 && choices.rest.length === 1) return choices.rest[0]!.id;
+  return null;
+}
+
+/**
+ * Whether a text value is too long for the value column: a sentence, or a code value
+ * that would break mid-word. It takes the pane's width, with a field that can hold it.
+ */
+export function readsWide(property: Pick<AssetProperty, "value">): boolean {
+  const held = property.value;
+  if (held === null || held.kind !== "text") return false;
+  const text = String(held.value);
+  return text.length > (/\s/.test(text) ? 40 : 26);
+}
+
+/** Prose in its pieces: what stands in backticks is a code value. An unclosed backtick is only a character. */
+export function proseParts(text: string): { text: string; code: boolean }[] {
+  const parts = text.split("`");
+  if (parts.length % 2 === 0) return [{ text, code: false }];
+  return parts.map((part, at) => ({ text: part, code: at % 2 === 1 })).filter((part) => part.text !== "");
 }
 
 /**
@@ -185,5 +204,5 @@ export function propertyEdit(key: string, value: PropertyValue | null): Property
 export function deleteConfirm(detail: AssetDetail): string {
   const lands = detail.reachable_via.filter((route) => route.target_id === detail.asset.id).length;
   const routes = lands > 0 ? ` ${lands} route${lands > 1 ? "s" : ""} landing on it will land on nothing.` : "";
-  return `Delete ${detail.asset.name}?${routes} Links to it stay, marked deleted.`;
+  return `${routes.trimStart()}${routes ? " " : ""}Links to it stay, marked deleted.`;
 }

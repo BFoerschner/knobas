@@ -1,2 +1,13 @@
+# Every text file is LF in every checkout, Windows included (2026-11-11).
+# A checkout that converts line endings changes bytes the build hashes or
+# embeds: sqlx checksums each migration's file, and a Windows build made from
+# a CRLF checkout recorded checksums no Mac or Linux build accepts
+# (`crates/knobas-db/src/migrate.rs`, *Line endings*). `text=auto` leaves a
+# file git sees as binary alone.
+* text=auto eol=lf
+# Named as well: the files sqlx hashes stay LF whatever becomes of the line above.
+crates/knobas-db/migrations/*.sql text eol=lf
+crates/knobas-db/migrations.sha384 text eol=lf
+
 # The live seed uploads these and compares them byte for byte (#2410).
 testenv/jira-attachments/** binary

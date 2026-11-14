@@ -321,7 +321,8 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
       if (!state.kinds.includes(entry.item.category)) continue;
       io.send({
         title: entry.item.title,
-        body: entry.item.reason,
+        // What the row's two lines say, so a path or a build's status still reaches the notification.
+        body: entry.item.detail ? `${entry.item.reason}: ${entry.item.detail}` : entry.item.reason,
         extra: { [ADDRESS]: addressOf(entry.item) },
       });
     }

@@ -22,17 +22,21 @@ import type {
 } from "../../ipc/entity";
 import type { ViewColumn } from "../../ipc/search";
 import type { Prose } from "../../render/prose";
-import { reachTally, type ReachPorts } from "../job/sections";
+import { getAsset, type AssetDetail } from "../../ipc/assets";
+import { entityCheckout, type CheckoutView } from "../../ipc/entity";
+import { cardSections, readCardReads, type CardReadPorts, type CardTable } from "../job/card-sections";
+import { bridgeTicketBoard } from "../job/ports";
+import type { ReachPorts } from "../job/sections";
 import { TICKET_SYSTEM } from "../roles.svelte";
 import {
-  aroundLines,
   boardLanes,
   COLUMN_CAP,
   columnDone,
   drawnCards,
+  shownCount,
+  withoutTicket,
   LANES_AT_FIRST,
   TYPED_CAP,
-  type AroundLine,
   type Lane,
   type LaneField,
   type ListSort,
@@ -58,8 +62,16 @@ export interface BoardReaderPorts {
   detail: (entityId: string) => Promise<Pick<EntityDetail, "description" | "markup">>;
   /** The job's section reads, scoped by what a ticket reaches: *Around this ticket* (#1030). */
   listEntities: ReachPorts["listEntities"];
-  /** What a ticket reaches (`job_reach`, #817), for the Assets line. */
+  /** What a ticket reaches (`job_reach`, #817), for the Assets row. */
   jobReach: ReachPorts["jobReach"];
+  /** One reached asset, for the Assets row's state; the bridge's when left out. */
+  getAsset?: (assetId: string) => Promise<AssetDetail>;
+  /** The board under `under:<key>`, for the Sub-tasks row; the bridge's when left out. */
+  ticketBoard?: (query: string) => Promise<MiniBoard>;
+  /** A branch's checkout on this machine, for Code's *not pushed*; the bridge's when left out. */
+  entityCheckout?: (entityId: string) => Promise<CheckoutView>;
+  /** The card's sections in one read over one walk of the reach (`card_reads`); where left out, a read a section. */
+  cardReads?: CardReadPorts["cardReads"];
 }
 
 /** One view's session: the switches over what it was saved with, and the expanded columns. */
@@ -96,6 +108,11 @@ export interface BoardScope {
   base: string | null;
   /** The saved view the board reads (#877), or `null`. */
   savedView: string | null;
+  /**
+   * The ticket whose sub-tasks the board is narrowed to, by key, or `null`: its base is `under:<key>`, which answers
+   * the ticket itself too, so its cards are dropped ({@link withoutTicket}) and every card is read to drop them all.
+   */
+  without?: string | null;
 }
 
 /** The filter bar as a read sends it. */
@@ -124,8 +141,11 @@ export interface BoardView {
 /** A band of the board (one, untitled, without lanes): each column with the cards it draws. */
 export interface Band {
   lane: Lane;
-  /** `done`: whether the column is a done one ({@link columnDone}), so it draws three. */
-  drawn: { column: MiniBoardColumn; cards: MiniBoardCard[]; done: boolean }[];
+  /**
+   * `done`: whether the column is a done one ({@link columnDone}), so it draws three; `listed`: the statuses the
+   * view's column gathers, none for the board's own.
+   */
+  drawn: { column: MiniBoardColumn; cards: MiniBoardCard[]; done: boolean; listed: readonly string[] }[];
 }
 
 export interface BoardReader {
@@ -151,12 +171,14 @@ export interface BoardReader {
   /** The previewed ticket's description, or `null` until it answers or where it has none. */
   readonly description: Prose | null;
   /** What the previewed ticket reaches, by section, or `null` until it answers. */
-  readonly around: AroundLine[] | null;
+  readonly around: CardTable | null;
+  /** Moves each time a read the person caused lands: what the drawn cards sort again on. A sync's refresh leaves it. */
+  readonly asked: number;
   /** Opens a scope: the board starts fresh, and an answer for the last one is dropped. */
   open(scope: BoardScope, filter: BoardFilter): void;
   /** A change in the filter bar: read once the keys pause. */
   setFilter(filter: BoardFilter): void;
-  /** A column's *Show N more*: that column read whole. */
+  /** A column's *Show more*: {@link MORE_STEP} more of its cards, read and drawn. */
   expand(lane: Lane, column: MiniBoardColumn): void;
   /** The list's *Show N more*: every ticket read. */
   expandAll(): void;
@@ -164,7 +186,7 @@ export interface BoardReader {
   moreLanes(): void;
   chooseLayout(layout: "board" | "list"): void;
   chooseLanes(lanes: LaneField): void;
-  /** Reads now, with no pause. */
+  /** Reads now, with no pause: a sync's re-read, which keeps the drawn cards where they are (`asked` stays). */
   refresh(): void;
   /** Reads `id`'s preview once, or drops the one out for the last when `null`. */
   preview(id: string | null): void;
@@ -197,10 +219,31 @@ export interface BoardReaderOptions {
   sessions: ViewSessions;
   /** What the view on screen says about drawing it. */
   view: () => BoardView;
+  /**
+   * How long, in ms, a moved selection waits for the next move before its preview is read: {@link PREVIEW_PAUSE_MS} on
+   * the page, none when left out. The first selection, and one that comes back from none, is read at once.
+   */
+  previewPause?: number;
 }
+
+/**
+ * How long a moved selection settles before its preview is read: the launcher's preview's 120 ms (the query audit,
+ * 2026-11-12: holding j sent seven requests a row, and they queued behind each other for the pool's five connections).
+ */
+export const PREVIEW_PAUSE_MS = 120;
+
+/** How many previews the reader holds, so a ticket selected again draws what it showed at once. */
+const PREVIEWS_HELD = 40;
+
+/** How long, in ms, typed words wait for a board read still out before they are read anyway. */
+export const TYPED_WAIT_MOST = 400;
+
+/** How long, in ms, the keys pause before a list showing every ticket reads all of them for its words. */
+export const LIST_SETTLE_MS = 600;
 
 export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderOptions): BoardReader {
   const { typingPause, sessions } = options;
+  const previewPause = options.previewPause ?? 0;
   /**
    * The last answer, replaced whole and never changed in place: `$state.raw`,
    * since the list's *Show N more* reads every ticket and a deep proxy over
@@ -211,10 +254,11 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     total: null as number | null,
     failed: null as string | null,
     lanesShown: LANES_AT_FIRST,
-    scope: { key: "", base: null, savedView: null } as BoardScope,
+    scope: { key: "", base: null, savedView: null, without: null } as BoardScope,
     filter: { query: "", words: false } as BoardFilter,
     description: null as Prose | null,
-    around: null as AroundLine[] | null,
+    around: null as CardTable | null,
+    asked: 0,
   });
   /** Bumped by every read and every key, so only the last read's answer lands. */
   let reading = 0;
@@ -222,9 +266,28 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   let epoch = 0;
   /** The read a filter change waits to make until the keys pause. */
   let pausing: ReturnType<typeof setTimeout> | undefined;
+  /** Board reads sent and not yet answered. */
+  let out = 0;
+  /** The read words typed while a read was out wait to make: made once it answers, with the words as they are then. */
+  let queued: (() => void) | null = null;
+  /** The list's whole read after its quick one, once the keys have paused ({@link LIST_SETTLE_MS}). */
+  let settling: ReturnType<typeof setTimeout> | undefined;
+  /** When the last board read was sent, and the last filter change made (`Date.now()`). */
+  let sentAt = 0;
+  let keyAt = 0;
   /** The ticket previewed, and the generation its answers carry. */
   let previewing: string | null = null;
   let previewed = 0;
+  /** A moved selection's pause before its preview is read. */
+  let settlingPreview: ReturnType<typeof setTimeout> | undefined;
+  /** The previews read, newest last: a ticket selected again draws its own at once while it is read again. */
+  const heldPreviews = new Map<string, { description: Prose | null; around: CardTable | null }>();
+  const holdPreview = (id: string, part: Partial<{ description: Prose | null; around: CardTable | null }>) => {
+    const held = { description: null, around: null, ...heldPreviews.get(id), ...part };
+    heldPreviews.delete(id);
+    heldPreviews.set(id, held);
+    if (heldPreviews.size > PREVIEWS_HELD) heldPreviews.delete(heldPreviews.keys().next().value!);
+  };
 
   const view = $derived(options.view());
   const own = $derived(sessions.views[state.scope.key]);
@@ -234,8 +297,6 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const lanes = $derived(own?.lanes ?? view.lanes);
   const laned = $derived(layout === "board" && lanes !== "none");
   const typing = $derived(state.filter.words);
-  /** The board's columns as the view's own columns gather them (R-3.15). */
-  const cols = $derived(viewColumns(board?.columns ?? [], view.columns));
   const bands = $derived(
     boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
       (lane) => ({
@@ -243,7 +304,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         drawn: lane.columns.map((column) => {
           const listed = (view.listed ?? view.columns).find((own) => own.name === column.status)?.statuses ?? [];
           const done = columnDone(column, listed);
-          return { column, cards: drawnCards(column, expanded.includes(expandKey(lane, column)), typing, done), done };
+          return { column, cards: drawnCards(column, pagesOf(expandKey(lane, column)), typing, done), done, listed };
         }),
       }),
     ),
@@ -257,18 +318,25 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * one is expanded (every column's once the list is). In lanes the same,
    * each lane's column counted on its own (#939).
    */
-  function capFor(): number | null {
+  function capFor(quick = false): number | null {
+    if (state.scope.without) return null;
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
+    if (quick) return cap;
     const answered = board;
     if ((expanded.length === 0 && !listAll) || answered === null) return cap;
-    const wanted = laned
-      ? bands.flatMap(({ lane, drawn }) =>
-          drawn.filter(({ column }) => expanded.includes(expandKey(lane, column))).map(({ column }) => column.total),
-        )
-      : (listAll ? answered.columns : cols.filter((column) => expanded.includes(columnKey(column)))).map(
-          (column) => column.total,
-        );
+    if (listAll && !laned) return Math.max(cap, ...answered.columns.map((column) => column.total));
+    // An expanded column asks for what it draws, not for every card it holds (MORE_STEP).
+    const wanted = bands.flatMap(({ lane, drawn }) =>
+      drawn.map(({ column, done }) => shownCount(column.total, pagesOf(expandKey(lane, column)), typing, done)),
+    );
     return Math.max(cap, ...wanted);
+  }
+
+  /** How many times the reader pressed a column's *Show more*: its key, once a press. */
+  function pagesOf(key: string): number {
+    let pages = 0;
+    for (const held of expanded) if (held === key) pages++;
+    return pages;
   }
 
   /** What a laned read asks for (#939), or `null` without lanes. */
@@ -282,19 +350,33 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * large one a short prefix is the broadest of them; it sends fifty cards a
    * column at most (R-3.4, #1024).
    */
-  function read() {
+  function read(quick = false, byPerson = true) {
     clearTimeout(pausing);
-    const { base, savedView } = state.scope;
+    const { base, savedView, without } = state.scope;
     if (base === null) return;
+    const kept = (answer: MiniBoard) => (without ? withoutTicket(answer, without) : answer);
     const query = state.filter.query;
     const mine = ++reading;
+    out += 1;
+    sentAt = Date.now();
     ports
-      .board(capFor(), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
+      .board(capFor(quick), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
+      .finally(() => {
+        out -= 1;
+        if (out === 0 && queued) {
+          const run = queued;
+          queued = null;
+          run();
+        }
+      })
       .then((answer) => {
         if (mine !== reading) return;
-        board = answer;
+        const drawn = kept(answer);
+        board = drawn;
         state.failed = null;
-        if (query === base) state.total = sum(answer);
+        // A read the person caused (a filter, *Show more*, lanes) sorts the cards again; a sync's does not (`held-order`).
+        if (byPerson) state.asked += 1;
+        if (query === base) state.total = sum(drawn);
       })
       .catch((error: unknown) => {
         if (mine === reading) state.failed = messageOf(error);
@@ -303,9 +385,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     if (query !== base && state.total === null) {
       const at = epoch;
       ports
-        .board(1, base === "" ? null : base, savedView, undefined, TICKET_SYSTEM)
+        .board(without ? null : 1, base === "" ? null : base, savedView, undefined, TICKET_SYSTEM)
         .then((answer) => {
-          if (at === epoch) state.total ??= sum(answer);
+          if (at === epoch) state.total ??= sum(kept(answer));
         })
         .catch(() => {});
     }
@@ -354,26 +436,65 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     get around() {
       return state.around;
     },
+    get asked() {
+      return state.asked;
+    },
     open(scope, filter) {
       board = null;
       state.total = null;
       state.failed = null;
       reading += 1;
       epoch += 1;
+      queued = null;
+      clearTimeout(settling);
       state.scope = { ...scope };
       state.filter = { ...filter };
       if (scope.base !== null) read();
     },
     /**
-     * The read waits until the keys pause for `typingPause`, so a word typed
-     * at speed is one read and not one a letter, and an answer still out for
-     * the text before it is never drawn (#897).
+     * A key reads at once when no read is out and the last was sent at least
+     * `typingPause` ago: the first key typed into a settled board (the
+     * broad-filters pass, 2026-11-13). Any other read waits until the keys
+     * pause for `typingPause`, so the rest of a word typed at speed is one
+     * read and not one a letter, and an answer still out for the text before
+     * it is never drawn (#897). While a read is out the next
+     * waits for its answer and then reads the words as they are by then: at
+     * 20,000 tickets a typed read takes 160 to 240 ms, so a key every 150 ms
+     * had two or three running against each other, each slower for it
+     * (2026-11-10).
      */
     setFilter(filter) {
       state.filter = { ...filter };
       clearTimeout(pausing);
+      clearTimeout(settling);
       reading += 1;
-      pausing = setTimeout(read, typingPause);
+      // The list showing every ticket reads the capped board first, then all of it once the keys pause: every match
+      // read on every key was 5.8 MB and 1.2 s a key at 20,000 tickets (2026-11-10).
+      const quick = listAll && !laned && layout === "list";
+      const go = () => {
+        read(quick);
+        if (quick) settling = setTimeout(() => read(), LIST_SETTLE_MS);
+      };
+      // The first key after the board settled reads at once: the pause made every first key wait 90 ms for keys that
+      // were not coming (the broad-filters pass, 2026-11-13). A key typed within the pause of the last key or read
+      // waits, so a word typed at speed is still one read after its first letter.
+      const at = Date.now();
+      const settled = out === 0 && at - Math.max(sentAt, keyAt) >= typingPause;
+      keyAt = at;
+      if (settled) {
+        queued = null;
+        return go();
+      }
+      pausing = setTimeout(() => {
+        const waited = Date.now() - sentAt;
+        if (out === 0 || waited >= TYPED_WAIT_MOST) return go();
+        // A read that hangs holds nothing up for long: past the most, the words go anyway.
+        queued = go;
+        pausing = setTimeout(() => {
+          queued = null;
+          go();
+        }, TYPED_WAIT_MOST - waited);
+      }, typingPause);
     },
     expand(lane, column) {
       here().expanded = [...expanded, expandKey(lane, column)];
@@ -402,32 +523,47 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       // Each field is its own read of lanes (#939).
       if (wasLaned || laned) read();
     },
-    refresh: read,
+    refresh: () => read(false, false),
     preview(id) {
       if (id === previewing) return;
+      const moved = previewing !== null;
       previewing = id;
       const mine = ++previewed;
+      clearTimeout(settlingPreview);
       if (id === null) return;
-      state.description = null;
-      state.around = null;
-      ports
-        .detail(id)
-        .then((detail) => {
-          if (mine === previewed && detail.description !== null) {
-            state.description = { text: detail.description, markup: detail.markup };
-          }
-        })
-        .catch(() => {});
-      // What the job's sections would show, through the job-reach read: no
-      // context is needed, and none is promoted to draw this (#1030). Each
-      // line says which section's read counted it, so a run of any kind counts
-      // under Builds without the shell knowing the CI role's run kinds (#1300).
-      void reachTally(ports, id).then((tally) => {
-        if (mine === previewed) state.around = aroundLines(tally);
-      });
+      // The selection draws at once, with what is held of its preview; the reads wait until it stops moving.
+      const held = heldPreviews.get(id);
+      state.description = held?.description ?? null;
+      state.around = held?.around ?? null;
+      const read = () => {
+        if (mine !== previewed) return;
+        ports
+          .detail(id)
+          .then((detail) => {
+            if (mine !== previewed) return;
+            const description = detail.description === null ? null : { text: detail.description, markup: detail.markup };
+            holdPreview(id, { description });
+            if (description !== null) state.description = description;
+          })
+          .catch(() => {});
+        // The card's own rows, through the job-reach read: no context is needed, and
+        // none is promoted to draw this (#1030). A run counts under Builds because
+        // the Builds read answered it, as on the card (#1300).
+        void readCardReads({ ...ports, getAsset: ports.getAsset ?? getAsset, ticketBoard: ports.ticketBoard ?? bridgeTicketBoard, entityCheckout: ports.entityCheckout ?? entityCheckout }, id).then((reads) => {
+          if (mine !== previewed) return;
+          const around = cardSections(reads);
+          holdPreview(id, { around });
+          state.around = around;
+        });
+      };
+      if (moved && previewPause > 0) settlingPreview = setTimeout(read, previewPause);
+      else read();
     },
     close() {
+      clearTimeout(settlingPreview);
       clearTimeout(pausing);
+      clearTimeout(settling);
+      queued = null;
       reading += 1;
       epoch += 1;
       previewing = null;

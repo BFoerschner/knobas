@@ -52,10 +52,23 @@ export interface FillContext {
   line: number | null;
 }
 
-/** The last part of a path: what `{name}` is, the checkout folder's own name. */
+/** The last part of a path: what `{name}` is, the checkout folder's own name. A Windows path's `\\` counts as `/`. */
 export function folderName(path: string): string {
-  const parts = path.split("/").filter((part) => part !== "");
+  const parts = path.split(/[\\/]/).filter((part) => part !== "");
   return parts[parts.length - 1] ?? "";
+}
+
+/**
+ * `relative` (a path inside a checkout, `/`-separated as git and the source
+ * give it) joined onto `checkout` with the checkout's own separator, so a
+ * Windows checkout reads `C:\\src\\knobas\\src\\lib.rs` as the backend's `Path::join`
+ * gives it.
+ */
+export function joinInside(checkout: string, relative: string): string {
+  const windows = /^[A-Za-z]:\\|^\\\\/.test(checkout) || (checkout.includes("\\") && !checkout.includes("/"));
+  const sep = windows ? "\\" : "/";
+  const base = checkout.replace(/[\\/]+$/, "");
+  return `${base}${sep}${windows ? relative.replace(/\//g, "\\") : relative}`;
 }
 
 /** A command with its placeholders drawn in, as prototype-6's `fill`. */
@@ -67,9 +80,57 @@ export function fill(command: string, at: FillContext): string {
     .replace(/\{name\}/g, folderName(at.path));
 }
 
-/** A word with a space in it, quoted as a person would type it. */
+/**
+ * A word with a space in it, quoted as a person would type it: in double
+ * quotes, which the command's own splitting takes on every platform and a
+ * Windows path can't hold. An empty word is `""`.
+ */
 export function quoteIfSpace(word: string): string {
-  return /\s/.test(word) ? `'${word}'` : word;
+  return word === "" || /\s/.test(word) ? `"${word}"` : word;
+}
+
+/**
+ * A command split into words as the backend splits it
+ * (`knobas_core::checkout::open::split_words`): `"` and `'` group, and are not
+ * passed on; nothing else is special, so a `\\` in a Windows path is a
+ * character. `null` for a quote that never closes, which the backend refuses.
+ */
+export function splitWords(command: string): string[] | null {
+  const words: string[] = [];
+  let current = "";
+  let started = false;
+  let quote: string | null = null;
+  for (const ch of command) {
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      else current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      started = true;
+    } else if (/\s/.test(ch)) {
+      if (started) words.push(current);
+      current = "";
+      started = false;
+    } else {
+      current += ch;
+      started = true;
+    }
+  }
+  if (quote !== null) return null;
+  if (started) words.push(current);
+  return words;
+}
+
+/**
+ * *It will run*: `command` split as the backend splits it, each word filled
+ * for the object, and the words read as one line, so a path with a space is
+ * one quoted argument as it will be one argument. `null` where the command
+ * can't be split.
+ */
+export function runPreview(command: string, at: ObjectFill): string | null {
+  const words = splitWords(command);
+  if (words === null) return null;
+  return argvText(words.map((word) => fillObject(word, at)));
 }
 
 /** An argument vector as one line, for *Started VS Code: …*. */
@@ -196,7 +257,7 @@ export interface ObjectFill {
 /** A command with its placeholders drawn in for an object, as the backend fills them. */
 export function fillObject(command: string, at: ObjectFill): string {
   const { object } = at;
-  const file = object.kind === "file" ? `${at.path}/${object.path}` : null;
+  const file = object.kind === "file" ? joinInside(at.path, object.path) : null;
   const line = object.kind === "file" ? object.line : null;
   let out = fill(command, { path: at.path, file, line });
   const value = (name: string, given: string | number | null | undefined) => {
@@ -233,7 +294,7 @@ export function worktreeOf(clonesRoot: string | null, repoEntityId: string | nul
   if (clonesRoot === null || repoEntityId === null) return null;
   const [owner, repo, ...rest] = keyOf(repoEntityId).split("/");
   if (!owner || !repo || rest.length > 0) return null;
-  return `${clonesRoot.replace(/\/+$/, "")}/pull-requests/${owner}/${repo}-${number}`;
+  return joinInside(clonesRoot, `pull-requests/${owner}/${repo}-${number}`);
 }
 
 /** Whether `end` is a sha the Diff tool takes: 7 to 64 hex digits, a base with one `^` allowed. */

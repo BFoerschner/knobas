@@ -10,10 +10,13 @@
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
   import { clockLabel } from "../time/format";
+  import { aimed } from "./aim";
   import Row from "./Row.svelte";
+  import { stateWord } from "../tf/state-word";
+  import { sentence } from "../tf/inbox/inbox";
   import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
-  import type { LauncherRow } from "./rows";
+  import { holdsAnswer, ticketsFirst, type LauncherRow } from "./rows";
 
   let {
     response,
@@ -21,6 +24,9 @@
     selected,
     optionId,
     chordOf = () => null,
+    sourceOf = () => null,
+    within = null,
+    filtered = false,
     now,
     onopen,
     onhover,
@@ -35,15 +41,24 @@
     optionId: (index: number) => string;
     /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
     chordOf?: (row: LauncherRow) => string | null;
+    /** The source a row names, where its key repeats in the list (#1476); none when omitted. */
+    sourceOf?: (row: LauncherRow) => string | null;
+    /** The section whose filter the box is on, which an empty answer's line names. */
+    within?: string | null;
+    /** Whether filters narrowed the search, so an empty answer is no claim about everything. */
+    filtered?: boolean;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
 
+  /** The *Go to* rows, which come first in the flat list. */
+  const placeCount = $derived(rows.filter((row) => row.kind === "action").length);
+
   /** Where each group's hits start in the flat list. */
   const offsets = $derived.by(() => {
     const out: number[] = [];
-    let at = 0;
-    for (const group of response.groups) {
+    let at = placeCount;
+    for (const group of ticketsFirst(response)) {
       out.push(at);
       at += group.hits.length;
     }
@@ -88,8 +103,29 @@
   </div>
 {/if}
 
+<!-- Places the words name, above their answer: a name is the likeliest thing the reader is after. -->
+{#if placeCount > 0}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Go to</span></div>
+  {#each rows as row, index (row.id)}
+    {#if row.kind === "action"}
+      <button
+        id={optionId(index)}
+        class="tf-ln-opt tf-ln-go"
+        class:tf-ln-on={index === selected}
+        role="option"
+        aria-selected={index === selected}
+        onclick={() => onopen(row)}
+        onpointermove={aimed(() => onhover(index))}
+      >
+        <span class="tf-ln-nm">{row.action.label}</span>
+        <span class="tf-ln-s">{row.action.detail}</span>
+      </button>
+    {/if}
+  {/each}
+{/if}
+
 <!-- No count on a heading (#2421): the list is quiet, and the rows are what is read. -->
-{#each response.groups as group, g (group.kind)}
+{#each ticketsFirst(response) as group, g (group.kind)}
   <div class="tf-ln-h"><span class="tf-ln-lab">{group.plural}</span></div>
   {#each group.hits as hit, h (hit.entity_id)}
     {@const index = (offsets[g] ?? 0) + h}
@@ -99,11 +135,12 @@
       <Row
         monogram={group.monogram}
         tone={hit.state?.tone ?? null}
-        kindName={hit.state ? `${group.label}: ${hit.state.text}` : group.label}
+        kindName={hit.state ? `${group.label}: ${stateWord(hit.state.text)}` : group.label}
         cell={cells.cell}
         mono={cells.mono}
         title={cells.title}
         chord={chordOf(row)}
+        source={sourceOf(row)}
         id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}
@@ -128,7 +165,7 @@
       kindName="Inbox line"
       cell={clockLabel(row.item.occurred_at, now ?? new Date(), true)}
       mono
-      title={row.item.title}
+      title={sentence(row.item)}
       id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}
@@ -142,12 +179,12 @@
   {#if row.kind === "docs"}
     <button
       id={optionId(index)}
-      class="tf-ln-opt"
+      class="tf-ln-opt tf-ln-go"
       class:tf-ln-on={index === selected}
       role="option"
       aria-selected={index === selected}
       onclick={() => onopen(row)}
-      onmouseenter={() => onhover(index)}
+      onpointermove={aimed(() => onhover(index))}
     >
       <span class="tf-ln-nm">Search Docs for “{row.words}”</span>
       <span class="tf-ln-s">Every space, in the Docs area</span>
@@ -155,9 +192,26 @@
   {/if}
 {/each}
 
-{#if response.groups.length === 0 && !rows.some((row) => row.kind === "inbox")}
+{#if !holdsAnswer(rows)}
+  <!-- Under any place row, so the line is about the search and not about the row above it. -->
   <p class="tf-ln-none">
-    Nothing in the mirror matches
+    {#if within !== null}Nothing in {within} matches{:else if placeCount > 0 && !filtered}No tickets, code, builds or docs match{:else}Nothing matches{/if}
     <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
+  {#each rows as row, index (row.id)}
+    {#if row.kind === "widen"}
+      <button
+        id={optionId(index)}
+        class="tf-ln-opt tf-ln-go"
+        class:tf-ln-on={index === selected}
+        role="option"
+        aria-selected={index === selected}
+        onclick={() => onopen(row)}
+        onpointermove={aimed(() => onhover(index))}
+      >
+        <span class="tf-ln-nm">Search everything</span>
+        <span class="tf-ln-s">Every field, with no filters.</span>
+      </button>
+    {/if}
+  {/each}
 {/if}

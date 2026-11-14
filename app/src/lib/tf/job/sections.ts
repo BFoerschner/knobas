@@ -1,7 +1,7 @@
 /**
  * The job's section reads (#817), in one place: the job page draws its
- * sections from them, and the Tickets preview's *Around this ticket* counts
- * them (#1030, story 31), so the two count the same rows.
+ * sections from them, and the Tickets preview's *Around this ticket* draws the
+ * same rows (`card-sections.ts`; #1030, story 31, F-109).
  *
  * Every read goes through the job-reach read (`job_reach`, and
  * `list_entities` scoped by `reach`), which takes the ticket's entity id and
@@ -14,10 +14,9 @@
  * Monitors name theirs within the role (#1296, #1297, #1298).
  *
  * Nothing here knows the CI role's run kinds (#1300): a run is a build because
- * the Builds read answered it, and the tally says which section counted each
- * line. Routing a run's address is `job.ts`'s `runKindsOf`.
+ * the Builds read answered it. Routing a run's address is `job.ts`'s `runKindsOf`.
  */
-import type { EntityFilter, EntityOrder, EntityPage, EntityRow, KindTally, Reached } from "../../ipc/entity";
+import type { EntityFilter, EntityOrder, EntityPage, EntityRow, Reached } from "../../ipc/entity";
 import { CI, CODE_HOST, MONITORING, WIKI } from "../roles.svelte";
 import { CODE_KINDS } from "./job";
 
@@ -71,49 +70,8 @@ export function reachFilter(id: string | null, kinds: readonly string[], order: 
   };
 }
 
-/** The two reads the sections are counted from. */
+/** The two reads the sections come from. */
 export interface ReachPorts {
   listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
   jobReach: (entityId: string) => Promise<Reached[]>;
-}
-
-/**
- * One line of the reach tally: a kind and tone's count, and the section whose
- * read counted it. `"assets"` is the reached assets, which come from the reach
- * itself rather than a section read.
- */
-export interface SectionTally extends KindTally {
-  section: Section | "assets";
-}
-
-/**
- * What the job's sections would hold for ticket `id`, counted by section,
- * kind and tone: the Code, Builds, Pages and Monitors reads as the job makes
- * them, each for its role, and
- * the reached assets the Assets section reads (with no tone: their health is
- * read one asset at a time, and only on the job). A read that fails counts
- * nothing, as its section draws nothing.
- */
-export async function reachTally(ports: ReachPorts, id: string): Promise<SectionTally[]> {
-  const sections = Object.entries(SECTION_READS) as [Section, SectionRead][];
-  const reads = sections.map(([section, read]) =>
-    readSection(ports.listEntities, id, read)
-      .catch(() => [])
-      .then((rows) => rows.map((row) => ({ section, row }))),
-  );
-  const assets = ports
-    .jobReach(id)
-    .then((rows) => rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT))
-    .catch(() => [] as Reached[]);
-  const rows = (await Promise.all(reads)).flat();
-  const counted = new Map<string, SectionTally>();
-  const add = (section: SectionTally["section"], kind: string, tone: KindTally["tone"]) => {
-    const key = `${section}\u0000${kind}\u0000${tone ?? ""}`;
-    const held = counted.get(key) ?? { kind, tone, count: 0, section };
-    held.count += 1;
-    counted.set(key, held);
-  };
-  for (const { section, row } of rows) add(section, row.kind, row.state?.tone ?? null);
-  for (const asset of await assets) add("assets", asset.kind, null);
-  return [...counted.values()];
 }

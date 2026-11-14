@@ -50,8 +50,13 @@ use knobas_core::entity::EntityRef;
 use crate::IpcError;
 
 pub mod clone;
+pub mod clone_all;
+pub mod fetch;
+pub mod local;
 pub mod open;
 pub mod range;
+pub mod range_files;
+pub mod stamp;
 pub mod uncommitted;
 pub mod working_tree;
 pub mod worktree;
@@ -242,9 +247,116 @@ pub async fn set_override(
 pub async fn view(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
     let mut checkout = resolve(pool, entity_id).await?;
     if let Some(path) = checkout.path.as_deref() {
-        checkout.tree = Some(working_tree::read(Path::new(path)).await);
+        checkout.tree = Some(working_tree::read_known(Path::new(path)).await);
     }
     Ok(checkout)
+}
+
+/// One repo's or branch's checkout in [`views`]' answer.
+///
+/// The scale pass (PR #2479, 2026-11-10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct CheckoutOf {
+    /// The id it was asked for.
+    pub entity_id: String,
+    /// What [`view`] answers for it.
+    pub checkout: CheckoutView,
+}
+
+/// How many working trees [`views`] reads at once.
+const TREES_AT_ONCE: usize = 8;
+
+/// [`view`] for each of `entity_ids`, in their order, in one call: what
+/// Code asks of every repository it lists, each time it is shown, because a
+/// commit or a clone made in a terminal changes a checkout and no sync
+/// brings that (the scale pass, 2026-11-10: 65 calls, each with its own walk
+/// of the clones root). The clones root is read and walked once here, and a
+/// working tree nothing touched since its last read is not read again
+/// ([`working_tree::read_known`]). An id [`view`] refuses is left out, as
+/// the page leaves a cell empty for a read that failed.
+///
+/// Every id's repository and override are read in one statement
+/// ([`REPOS_OF`], the query audit of PR #2479: two or three statements a
+/// repository, 262 for Code's 65), by the rules [`repo_of`] and
+/// [`resolve_in`] read one by.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the clones root cannot be
+/// read.
+pub async fn views(pool: &PgPool, entity_ids: &[String]) -> Result<Vec<CheckoutOf>, IpcError> {
+    let root = clones_root(pool).await?;
+    let clones = match root.clone() {
+        Some(root) => tokio::task::spawn_blocking(move || checkout::scan(Path::new(&root)))
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    // The ids `repo_of` would read, as it spells them; one that is not an
+    // entity id is refused there, and left out here.
+    let asked: Vec<(&String, String)> = entity_ids
+        .iter()
+        .filter_map(|asked| Some((asked, EntityRef::parse(asked).ok()?.to_string())))
+        .collect();
+    let ids: Vec<&str> = asked.iter().map(|(_, id)| id.as_str()).collect();
+    let rows = sqlx::query(REPOS_OF)
+        .bind(&ids)
+        .fetch_all(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let found: std::collections::HashMap<String, (RepoOf, Option<String>)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("id"),
+                (
+                    RepoOf {
+                        entity_id: row.get("repo_id"),
+                        url: row.get("url"),
+                    },
+                    row.get("override_path"),
+                ),
+            )
+        })
+        .collect();
+    let mut answers = Vec::with_capacity(asked.len());
+    for (entity_id, id) in asked {
+        // An id asked twice answers twice, as one call per id did.
+        let Some((repo, stored)) = found.get(&id).cloned() else {
+            continue;
+        };
+        answers.push(CheckoutOf {
+            entity_id: entity_id.clone(),
+            checkout: view_of(repo, stored, root.clone(), Some(&clones)).await,
+        });
+    }
+    let lanes = std::sync::Arc::new(tokio::sync::Semaphore::new(TREES_AT_ONCE));
+    let mut reads = tokio::task::JoinSet::new();
+    for (at, answer) in answers.iter().enumerate() {
+        if let Some(path) = answer.checkout.path.clone() {
+            let lanes = lanes.clone();
+            reads.spawn(async move {
+                let _lane = lanes.acquire_owned().await;
+                (at, working_tree::read_known(Path::new(&path)).await)
+            });
+        }
+    }
+    while let Some(read) = reads.join_next().await {
+        if let Ok((at, tree)) = read {
+            answers[at].checkout.tree = Some(tree);
+        }
+    }
+    // A read that did not finish (the runtime stopping) says so rather than
+    // nothing.
+    for answer in &mut answers {
+        if answer.checkout.path.is_some() && answer.checkout.tree.is_none() {
+            answer.checkout.tree = Some(TreeRead::Failed {
+                reason: "the read did not finish".to_owned(),
+            });
+        }
+    }
+    Ok(answers)
 }
 
 /// The uncommitted changes at a repo's or a branch's checkout (#824,
@@ -308,6 +420,15 @@ pub struct RangeDiff {
     /// Local git or the source. Whitespace is ignored only at `checkout`:
     /// the source's API cannot return a diff with whitespace ignored.
     pub read_at: DiffReadAt,
+    /// Two branch names read at the checkout between the tips the mirror
+    /// holds for them (ADR-0041): when the mirror stored the newer of the
+    /// two (RFC 3339). The source may have moved since, so the page checks
+    /// it with `entity_source_range_diff` behind the answer. `None` for a
+    /// diff between two shas, and for every source read. Absent on the wire
+    /// when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub predicted_at: Option<String>,
 }
 
 /// The diff from `base` to `head` of the repository `entity_id` (#2272,
@@ -316,7 +437,9 @@ pub struct RangeDiff {
 /// `compare:<base>...<head>` section, through the read cache, and whitespace
 /// shown as the source answers it.
 ///
-/// A checkout that lacks a commit is never fetched into: the source answers.
+/// A checkout that lacks a branch tip the mirror names answers through the
+/// source, and has that tip fetched behind it (ADR-0041,
+/// [`fetch_missing_tip`]); two shas are never fetched.
 ///
 /// # Errors
 ///
@@ -337,14 +460,149 @@ pub async fn range_diff(
     if let Some(local) = local_diff(pool, entity_id, base, head, ignore_whitespace).await {
         return Ok(local);
     }
+    if let Some(predicted) = predicted_diff(
+        pool,
+        registry.as_ref(),
+        entity_id,
+        base,
+        head,
+        ignore_whitespace,
+    )
+    .await
+    {
+        return Ok(predicted);
+    }
+    fetch_missing_tip(pool, registry.as_ref(), entity_id, base, head).await;
+    source_range_diff(pool, secrets, registry, live, entity_id, base, head).await
+}
+
+/// A checkout that lacks a branch tip the mirror names for a compare has that
+/// tip fetched behind the source's answer, as *Files* has (ADR-0041), so the
+/// next *New pull request* from a branch pushed elsewhere reads locally. The
+/// head first, which is the one a push elsewhere moves; one fetch per checkout
+/// at a time ([`fetch::Fetches::behind`]).
+async fn fetch_missing_tip(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) {
+    let Ok(Some(repo)) = repo_of(pool, entity_id).await.map(|r| r.entity_id) else {
+        return;
+    };
+    let Ok(Some(path)) = resolve(pool, &repo).await.map(|c| c.path) else {
+        return;
+    };
+    for name in [head, base] {
+        let Ok(Some(tip)) = branch_tip(pool, registry, &repo, name).await else {
+            continue;
+        };
+        if !range::holds_commits(Path::new(&path), &[tip.commit.as_str()]).await {
+            fetch::Fetches::global()
+                .behind(pool, registry, &repo, &path, &tip.commit)
+                .await;
+            return;
+        }
+    }
+}
+
+/// The diff from `base` to `head` as the source's compare answers it now,
+/// never local: what a page that drew [`range_diff`]'s predicted answer asks
+/// behind it, to see whether a branch moved since the mirror's sync
+/// (ADR-0041).
+///
+/// The head the source's compare settled is fetched into a checkout that
+/// lacks it, behind the answer ([`fetch_answered_tip`]): a branch the mirror
+/// has not synced yet, pushed elsewhere since the page drew, reads at the
+/// clone from its next open (the third smoothness pass of PR #2479).
+///
+/// # Errors
+///
+/// As [`range_diff`]. [`NotFound`](crate::IpcErrorCode::NotFound) too where
+/// the source answers the compare 404, which is a branch it does not hold:
+/// the page says so only then, never while a read could still find it.
+pub async fn source_range_diff(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) -> Result<RangeDiff, IpcError> {
     let section = format!("compare:{base}...{head}");
-    source_diff(pool, secrets, registry, live, entity_id, &section)
-        .await?
+    let diff =
+        match crate::sources::crud::view(pool, secrets, registry, live, entity_id, Some(&section))
+            .await
+        {
+            Ok(view) => diff_of(view),
+            Err(crate::sources::SourcesError::Source(error)) if error.status() == Some(404) => {
+                return Err(IpcError::not_found(format!(
+                    "the source holds no branch {head} or {base} to compare: {error}"
+                )));
+            }
+            Err(error) => return Err(crate::sources::to_ipc(&error, None)),
+        }
         .ok_or_else(|| {
             IpcError::not_found(format!(
                 "the source draws no diff between {base} and {head}"
             ))
-        })
+        })?;
+    fetch_answered_tip(
+        &fetch::Fetches::global(),
+        pool,
+        registry.as_ref(),
+        entity_id,
+        &diff,
+    )
+    .await;
+    Ok(diff)
+}
+
+/// [`fetch_answered_tip`] through `fetches`, one that admits the testenv's
+/// http. **Tests only**, as [`fetch::Fetches::admitting`].
+#[cfg(feature = "test-util")]
+pub async fn fetch_answered_tip_with(
+    fetches: &std::sync::Arc<fetch::Fetches>,
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    diff: &RangeDiff,
+) {
+    fetch_answered_tip(fetches, pool, registry, entity_id, diff).await;
+}
+
+/// The head commit a source's compare settled, fetched into the checkout
+/// behind the answer where the checkout lacks it (ADR-0041 as amended): the
+/// tip of a branch made on the forge after the last sync, which the mirror
+/// names no tip for. A checked sha, as every fetched one; nothing else of the
+/// answer reaches git.
+async fn fetch_answered_tip(
+    fetches: &std::sync::Arc<fetch::Fetches>,
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    diff: &RangeDiff,
+) {
+    let Some(range) = diff.range.as_ref() else {
+        return;
+    };
+    if !checkout::open::is_sha(&range.head) {
+        return;
+    }
+    let Ok(Some(repo)) = repo_of(pool, entity_id).await.map(|r| r.entity_id) else {
+        return;
+    };
+    let Ok(Some(path)) = resolve(pool, &repo).await.map(|c| c.path) else {
+        return;
+    };
+    if range::holds_commits(Path::new(&path), &[range.head.as_str()]).await {
+        return;
+    }
+    fetches
+        .behind(pool, registry, &repo, &path, &range.head)
+        .await;
 }
 
 /// The change one commit made (#2319, story 78): `sha` against its first
@@ -381,6 +639,47 @@ pub async fn commit_diff(
         .ok_or_else(|| IpcError::not_found(format!("the source draws no diff for {commit}")))
 }
 
+/// [`range_diff`] between two branch names, predicted at the checkout
+/// (ADR-0041): each name looked up in the mirror for the tip it last synced
+/// (compared there, never passed to git), the source's three-dot compare
+/// reproduced as the diff from the two tips' merge base to the head's tip.
+/// `None` when either name has no tip in the mirror, there is no checkout,
+/// or it lacks either commit.
+async fn predicted_diff(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> Option<RangeDiff> {
+    let repo = repo_of(pool, entity_id).await.ok()?.entity_id?;
+    let path = resolve(pool, &repo).await.ok()?.path?;
+    let base_tip = branch_tip(pool, registry, &repo, base).await.ok()??;
+    let head_tip = branch_tip(pool, registry, &repo, head).await.ok()??;
+    let path = Path::new(&path);
+    let from = range::merge_base(path, &base_tip.commit, &head_tip.commit).await?;
+    let local = range::read(path, &from, &head_tip.commit, ignore_whitespace).await?;
+    let predicted_at = match (base_tip.as_of, head_tip.as_of) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    };
+    Some(RangeDiff {
+        files: local.files,
+        truncated: local.truncated,
+        range: local.base.map(|base| knobas_source::view::DiffRange {
+            repository: repo.clone(),
+            base,
+            head: local.head,
+            commits: Vec::new(),
+            reviewed: None,
+        }),
+        read_at: DiffReadAt::Checkout,
+        // The mirror stamps every row, so this is always there.
+        predicted_at: Some(predicted_at.unwrap_or_default()),
+    })
+}
+
 /// [`range_diff`]'s local half: `None` when `entity_id` has no checkout or
 /// its checkout does not hold both ends ([`range::read`]).
 async fn local_diff(
@@ -403,6 +702,7 @@ async fn local_diff(
             reviewed: None,
         }),
         read_at: DiffReadAt::Checkout,
+        predicted_at: None,
     })
 }
 
@@ -421,7 +721,13 @@ async fn source_diff(
     let view = crate::sources::crud::view(pool, secrets, registry, live, entity, Some(section))
         .await
         .map_err(|error| crate::sources::to_ipc(&error, None))?;
-    Ok(view.and_then(|view| {
+    Ok(diff_of(view))
+}
+
+/// The diff block of a view's first section, as a [`RangeDiff`] the source
+/// answered.
+fn diff_of(view: Option<knobas_source::view::SourceView>) -> Option<RangeDiff> {
+    view.and_then(|view| {
         view.sections.into_iter().next().and_then(|section| {
             section.blocks.into_iter().find_map(|block| match block {
                 knobas_source::view::Block::Diff {
@@ -434,11 +740,276 @@ async fn source_diff(
                     truncated,
                     range,
                     read_at: DiffReadAt::Source,
+                    predicted_at: None,
                 }),
                 _ => None,
             })
         })
+    })
+}
+
+/// The commit the mirror names for a branch's tree: its declared `commit`
+/// as the last sync stored it, and when that was.
+///
+/// The smoothness pass (PR #2479, ADR-0041).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct MirrorTip {
+    /// The whole sha the mirror holds for the branch's tip.
+    pub commit: String,
+    /// When the mirror stored it (RFC 3339).
+    pub as_of: Option<String>,
+}
+
+/// The tip the mirror holds for `entity_id`'s tree: a branch's own declared
+/// `commit`, or a repository's declared default branch's. `None` where the
+/// mirror holds no such branch or its kind declares no commit. Read off the
+/// mirror alone: no git, no source.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn mirror_tip(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+) -> Result<Option<MirrorTip>, IpcError> {
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let row = sqlx::query(concat!(
+        "select i.kind, i.source_id, ",
+        knobas_core::declared_string!("$2", "commit"),
+        " as commit, ",
+        knobas_core::declared_string!("$2", "default_branch"),
+        " as default_branch, to_char(i.synced_at at time zone 'UTC', \
+           'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as as_of \
+           from sync.live_item i where i.entity_id = $1"
+    ))
+    .bind(entity_id)
+    .bind(declarations.as_param())
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let kind: String = row.get("kind");
+    match kind.as_str() {
+        "branch" => Ok(row
+            .get::<Option<String>, _>("commit")
+            .filter(|sha| checkout::open::is_sha(sha))
+            .map(|commit| MirrorTip {
+                commit,
+                as_of: row.get("as_of"),
+            })),
+        "repo" => match row.get::<Option<String>, _>("default_branch") {
+            Some(name) => branch_tip(pool, registry, entity_id, &name).await,
+            None => Ok(None),
+        },
+        _ => Ok(None),
+    }
+}
+
+/// The tip the mirror holds for the branch `name` of the repository
+/// `repo_id`: the branch item under the repository whose declared `name` is
+/// `name`. The name is compared in the mirror and never passed to git.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn branch_tip(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    repo_id: &str,
+    name: &str,
+) -> Result<Option<MirrorTip>, IpcError> {
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let row = sqlx::query(concat!(
+        "select ",
+        knobas_core::declared_string!("$2", "commit"),
+        " as commit, to_char(i.synced_at at time zone 'UTC', \
+           'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as as_of \
+           from sync.live_item i \
+          where i.kind = 'branch' \
+            and i.source_id = (select source_id from sync.item where entity_id = $1) \
+            and starts_with(i.entity_id, $1) and i.entity_id <> $1 \
+            and (",
+        knobas_core::declared_string!("$2", "name"),
+        " = $3 or i.title = $3) \
+          order by length(i.entity_id) limit 1"
+    ))
+    .bind(repo_id)
+    .bind(declarations.as_param())
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    Ok(row.and_then(|row| {
+        row.get::<Option<String>, _>("commit")
+            .filter(|sha| checkout::open::is_sha(sha))
+            .map(|commit| MirrorTip {
+                commit,
+                as_of: row.get("as_of"),
+            })
     }))
+}
+
+/// `entity_id`'s whole tree read at its checkout, at the commit the mirror
+/// names for it (ADR-0041): what *Files* draws first. `None` where it has no
+/// checkout, the mirror names no tip, or the checkout does not hold that
+/// commit; then the tab reads the source as before, and a checkout that
+/// lacks the commit is fetched into behind it ([`fetch`]), which tells
+/// `checkout:fetched` when the tree can be read here.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not a
+/// repo or a branch; [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// does not hold it; [`Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+pub async fn local_tree(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    fetches: Option<&std::sync::Arc<fetch::Fetches>>,
+    entity_id: &str,
+) -> Result<Option<local::LocalTree>, IpcError> {
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    let Some(tip) = mirror_tip(pool, registry, entity_id).await? else {
+        return Ok(None);
+    };
+    match local::tree(Path::new(&path), &tip.commit).await {
+        Some(tree) => Ok(Some(tree.sent(tip.as_of))),
+        None => {
+            if let Some(fetches) = fetches {
+                fetches
+                    .behind(pool, registry, entity_id, &path, &tip.commit)
+                    .await;
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// One directory of `entity_id`'s tree read at its checkout (the big-folder
+/// pass of PR #2479, 2026-11-13): what *Files* draws for a folder, read when it
+/// opens, so the page holds what it draws and a folder past twenty thousand
+/// entries is drawn whole. With no `commit`, at the commit the mirror names
+/// for the branch, as [`local_tree`] reads it (a checkout that lacks it is
+/// fetched into behind the answer); with one, at that commit, from the tree
+/// kept for it wherever it was read, so a folder's read finds no checkout
+/// again. `None` where the checkout cannot answer, or holds no such directory.
+///
+/// # Errors
+///
+/// As [`local_tree`].
+pub async fn local_dir(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    fetches: Option<&std::sync::Arc<fetch::Fetches>>,
+    entity_id: &str,
+    commit: Option<&str>,
+    dir: &str,
+) -> Result<Option<local::LocalDir>, IpcError> {
+    let dir = dir.trim_matches('/');
+    if let Some(sha) = commit {
+        if !checkout::open::is_sha(sha) {
+            return Ok(None);
+        }
+        if let Some(tree) = local::kept_at(sha) {
+            return Ok(local::listing(&tree, dir, None));
+        }
+        let checkout = resolve(pool, entity_id).await?;
+        let Some(path) = checkout.path else {
+            return Ok(None);
+        };
+        return Ok(local::tree(Path::new(&path), sha)
+            .await
+            .and_then(|tree| local::listing(&tree, dir, None)));
+    }
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    let Some(tip) = mirror_tip(pool, registry, entity_id).await? else {
+        return Ok(None);
+    };
+    match local::tree(Path::new(&path), &tip.commit).await {
+        Some(tree) => Ok(local::listing(&tree, dir, tip.as_of)),
+        None => {
+            if let Some(fetches) = fetches {
+                fetches
+                    .behind(pool, registry, entity_id, &path, &tip.commit)
+                    .await;
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Every file of `entity_id`'s tree at `commit` (a sha [`local_dir`]
+/// answered), read at its checkout (the big-folder pass): what *Go to file*
+/// filters. `None` where the checkout cannot answer.
+///
+/// # Errors
+///
+/// As [`local_tree`].
+pub async fn local_paths(
+    pool: &PgPool,
+    entity_id: &str,
+    commit: &str,
+) -> Result<Option<local::LocalPaths>, IpcError> {
+    if !checkout::open::is_sha(commit) {
+        return Ok(None);
+    }
+    if let Some(tree) = local::kept_at(commit) {
+        return Ok(Some(local::paths(&tree)));
+    }
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    Ok(local::tree(Path::new(&path), commit)
+        .await
+        .map(|tree| local::paths(&tree)))
+}
+
+/// The file at `file` in `entity_id`'s tree at `commit`, read at its
+/// checkout (ADR-0041); `None` where the checkout cannot answer it.
+/// `commit` is a sha a [`local_tree`] answered; anything else is `None`.
+///
+/// # Errors
+///
+/// As [`local_tree`].
+pub async fn local_file(
+    pool: &PgPool,
+    entity_id: &str,
+    commit: &str,
+    file: &str,
+) -> Result<Option<knobas_source::view::Block>, IpcError> {
+    let checkout = resolve(pool, entity_id).await?;
+    let Some(path) = checkout.path else {
+        return Ok(None);
+    };
+    Ok(local::file(Path::new(&path), commit, file).await)
+}
+
+/// The bytes of `file` in `entity_id`'s tree at `commit`, read at its
+/// checkout where it holds that commit (ADR-0041): `None` where it cannot
+/// answer, so the source is asked; `Some(Err(size))` for a file over `cap`.
+pub async fn local_file_bytes(
+    pool: &PgPool,
+    entity_id: &str,
+    commit: &str,
+    file: &str,
+    cap: u64,
+) -> Option<Result<Vec<u8>, u64>> {
+    if !checkout::open::is_sha(commit) {
+        return None;
+    }
+    let path = resolve(pool, entity_id).await.ok()?.path?;
+    local::file_bytes(Path::new(&path), commit, file, cap).await
 }
 
 /// [`view`] without the working tree read: where the checkout is, and no git.
@@ -446,8 +1017,19 @@ async fn source_diff(
 /// What [`open`] asks, because an editor needs the path and not two seconds of
 /// `git status` on a large tree before it starts.
 pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
-    let repo = repo_of(pool, entity_id).await?;
     let root = clones_root(pool).await?;
+    resolve_in(pool, entity_id, root, None).await
+}
+
+/// [`resolve`] under the clones root `root`, matching against `clones`, the
+/// root's scan, where it was walked already ([`views`]); `None` walks it.
+async fn resolve_in(
+    pool: &PgPool,
+    entity_id: &str,
+    root: Option<String>,
+    clones: Option<&[checkout::FoundClone]>,
+) -> Result<CheckoutView, IpcError> {
+    let repo = repo_of(pool, entity_id).await?;
 
     let stored: Option<String> = match repo.entity_id.as_deref() {
         Some(id) => {
@@ -459,9 +1041,25 @@ pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutVi
         }
         None => None,
     };
+    Ok(view_of(repo, stored, root, clones).await)
+}
 
+/// What [`resolve_in`] answers for `repo`, its stored override `stored`, the
+/// clones root `root` and its scan `clones` where it was walked already.
+async fn view_of(
+    repo: RepoOf,
+    stored: Option<String>,
+    root: Option<String>,
+    clones: Option<&[checkout::FoundClone]>,
+) -> CheckoutView {
     let (path, found_by) = match (stored, root.as_deref(), repo.url.as_deref()) {
         (Some(path), _, _) => (Some(path), FoundBy::Override),
+        (None, Some(_), Some(url)) if clones.is_some() => {
+            match matching(clones.unwrap_or_default(), url) {
+                Some(path) => (Some(path.to_string_lossy().into_owned()), FoundBy::Scan),
+                None => (None, FoundBy::Nothing),
+            }
+        }
         (None, Some(root), Some(url)) => match scan_for(root, url).await {
             Some(path) => (Some(path.to_string_lossy().into_owned()), FoundBy::Scan),
             None => (None, FoundBy::Nothing),
@@ -469,7 +1067,7 @@ pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutVi
         _ => (None, FoundBy::Nothing),
     };
 
-    Ok(CheckoutView {
+    CheckoutView {
         repo_entity_id: repo.entity_id,
         clone_command: repo.url.as_deref().map(checkout::clone_command),
         repo_url: repo.url,
@@ -477,7 +1075,41 @@ pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutVi
         found_by,
         clones_root: root,
         tree: None,
-    })
+    }
+}
+
+/// [`repo_of`] and the override [`resolve_in`] reads, for each id of `$1` at
+/// once ([`views`]): an id the mirror holds as a repo or a branch, with its
+/// repository's id and address (a branch's the longest repo id of its source
+/// it starts with, `null` where none is held) and that repository's stored
+/// override. An id not held, or of another kind, has no row.
+const REPOS_OF: &str = "
+select a.id,
+       case when i.kind = 'repo' then i.entity_id else r.entity_id end as repo_id,
+       case when i.kind = 'repo' then i.web_url else r.web_url end as url,
+       o.path as override_path
+  from unnest($1::text[]) as a(id)
+  join sync.item i on i.entity_id = a.id
+  left join lateral (
+         select x.entity_id, x.web_url
+           from sync.item x
+          where i.kind = 'branch' and x.kind = 'repo' and x.source_id = i.source_id
+            and starts_with(a.id, x.entity_id)
+          order by length(x.entity_id) desc
+          limit 1) r on true
+  left join knobas.checkout_override o
+         on o.entity_id = case when i.kind = 'repo' then i.entity_id else r.entity_id end
+ where i.kind in ('repo', 'branch')
+";
+
+/// The first of `clones` (a scan, in its order) whose remote names the same
+/// repository as `url`: [`checkout::find`] over a scan already made.
+fn matching(clones: &[checkout::FoundClone], url: &str) -> Option<PathBuf> {
+    let wanted = checkout::remote_key(url)?;
+    clones
+        .iter()
+        .find(|clone| clone.key == wanted)
+        .map(|clone| clone.path.clone())
 }
 
 /// The scan, off the async runtime.
@@ -497,6 +1129,7 @@ async fn scan_for(root: &str, url: &str) -> Option<PathBuf> {
 }
 
 /// The repository a checkout question is about.
+#[derive(Clone)]
 struct RepoOf {
     /// `None` only for a branch whose repository the mirror does not hold.
     entity_id: Option<String>,

@@ -19,9 +19,14 @@
   ticket you are on"). Only the `running` row carries `tf-tm-run`.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { keyOf, minutesLabel } from "../../time/format";
+
+  import { onDestroy, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -30,19 +35,24 @@
     dayBlocks as realDayBlocks,
     deleteBlock as realDeleteBlock,
     dismissBlock as realDismissBlock,
+    weekTimesheet as realWeekTimesheet,
     updateBlock as realUpdateBlock,
     type TimerTarget,
   } from "../../ipc/time";
   import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
   import type { SessionPorts } from "../../launcher/session.svelte";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
+  import { forgetSent, holdBlock, holdDismissal, isHeld } from "./held-blocks.svelte";
+  import { heldByPointer, heldHeight, holdUnderPointer, withHolds } from "../row-hold";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
+  import { mondayOf, weekWindows } from "../../time/week";
   import { atClock, clockOf } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { dayFigures, dayRows, fitLabel, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
+  import { weekView } from "./week-view";
   import { readDay, type DayRecord } from "./day-read";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
@@ -53,6 +63,8 @@
     createBlock: typeof realCreateBlock;
     deleteBlock: typeof realDeleteBlock;
     dismissBlock: typeof realDismissBlock;
+    /** What Week counts for a day with no blocks kept (F-361). */
+    weekTimesheet: typeof realWeekTimesheet;
     /** The block dialog's ticket picker searches with the launcher's reads (#1429). */
     search: SessionPorts["search"];
     launcherHome: SessionPorts["launcherHome"];
@@ -109,6 +121,7 @@
     createBlock: realCreateBlock,
     deleteBlock: realDeleteBlock,
     dismissBlock: realDismissBlock,
+    weekTimesheet: realWeekTimesheet,
     search: (query) => realSearch(query),
     launcherHome: () => realLauncherHome(),
     ...ports,
@@ -134,8 +147,9 @@
       if (mine !== issued) return;
       loaded = answer;
       failure = null;
-      // A delete that has been sent is in this answer now, or refused and back.
-      held = held.filter((hold) => !hold.sent);
+      // A delete that has been sent is in this answer now, or refused and back. A Day already left says nothing: its answer
+      // isn't the one on screen, so the Day that took its place could draw the block again from a read older than the write.
+      if (!left) forgetSent();
     } catch (cause) {
       if (mine !== issued) return;
       failure = ipcErrorMessage(cause);
@@ -146,12 +160,9 @@
   // a block, and the day has to read it back.
   const runningSince = $derived(timer.current?.started_at ?? null);
 
-  /**
-   * Blocks *Delete block* took and has not written yet (#1429): off the day at
-   * once, sent when the toast's *Undo* has had its time. `sent` once the write
-   * has landed, so the next read, which no longer has the block, lets it go.
-   */
-  let held = $state<{ id: number; sent: boolean }[]>([]);
+  /** This Day has gone, and its read is no longer the one on screen. */
+  let left = false;
+  onDestroy(() => (left = true));
   $effect(() => {
     revision;
     runningSince;
@@ -164,7 +175,7 @@
       ? []
       : dayRows({
           day: key,
-          blocks: ready.blocks.filter((entry) => !held.some((hold) => hold.id === entry.block.id)),
+          blocks: ready.blocks.filter((entry) => !isHeld(entry.block.id)),
           offers: ready.offers,
           open: ready.open,
           running: timer.current,
@@ -184,7 +195,6 @@
   );
   $effect(() => askInto(JSON.parse(logAsks) as WriteAsk[], io.refusedWrites, (answer) => (refused = answer)));
   /** Each run of offered rows to one ticket, by its first row's key (#1108). */
-  const runAt = $derived(new Map(offerRuns(rows).map((run) => [run.rows[0]!.key, run])));
   /**
    * Past the observation horizon what was in front of you is absent, not zero
    * (`CONTEXT.md`), so the two figures made from it say so.
@@ -249,7 +259,9 @@
 
   /** Six pixels of padding at each end of a block, as `x="6"` starts the text. */
   const LABEL_PAD = 12;
-  function stripLabel(row: DayRow, widthPct: number): string | null {
+  function stripLabel(row: DayRow, at: { left: number; width: number }): string | null {
+    // The now line stands in front: a block it crosses keeps its label to the line's left, so the line cuts no word (F-344).
+    const widthPct = nowAt !== null && nowAt > at.left && nowAt < at.left + at.width ? nowAt - at.left : at.width;
     const room = (widthPct / 100) * stripPx - LABEL_PAD;
     if (room <= 0) return null;
     if (row.target === null) return fitLabel("Assign…", room, measurer(true));
@@ -260,6 +272,8 @@
   function select(row: DayRow) {
     selected = row.key;
     document.getElementById(`tf-tm-row-${row.key}`)?.scrollIntoView({ block: "nearest" });
+    // *Assign…* is what the block says, so a press does it (F-344); `open` is declared with the writes below.
+    if (row.target === null) open({ mode: "assign", row });
   }
 
   const STRIP_CLASS: Record<DayRow["state"], string> = {
@@ -309,9 +323,11 @@
   >(null);
   let refusal = $state<string | null>(null);
 
-  async function write(action: () => Promise<unknown>, said: string): Promise<boolean> {
+  /** `undo` takes the write back: given, the toast offers it, as *Delete block*'s does (F-339). */
+  async function write<T>(action: () => Promise<T>, said: string, undo?: (done: T) => Promise<unknown>): Promise<boolean> {
+    let done: T;
     try {
-      await action();
+      done = await action();
     } catch (error) {
       refusal = ipcErrorMessage(error);
       if (dialog === null) push({ text: refusal, tone: "err" });
@@ -319,7 +335,8 @@
     }
     dialog = null;
     refusal = null;
-    push({ text: said });
+    if (undo === undefined) push({ text: said });
+    else undoable(said, () => void undo(done).then(reread, (error: unknown) => push({ text: ipcErrorMessage(error), tone: "err" })));
     await reread();
     return true;
   }
@@ -335,11 +352,19 @@
 
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
 
-  /** *Add to <ticket>* on an offered block, *Log to <ticket>* on a label block. */
+  /**
+   * *Add to <ticket>* on an offered block, *Assign to <ticket>* on a label block: neither logs anything. *Undo* puts a
+   * label block's own target back. An offer became a block the reader owns, so *Undo* deletes that, and the next read
+   * offers the stretch again from what knobas saw.
+   */
   function giveTo(row: DayRow, entityId: string, said: string) {
     const block = row.block;
     if (block === null) return;
-    void write(() => io.updateBlock(block.block.id, row.from, row.to, entity(entityId)), said);
+    void write(
+      () => io.updateBlock(block.block.id, row.from, row.to, entity(entityId)),
+      said,
+      () => (row.state === "offered" ? io.deleteBlock(block.block.id) : io.updateBlock(block.block.id, row.from, row.to, block.block.target)),
+    );
   }
 
   /**
@@ -354,13 +379,19 @@
       for (const row of run.rows) {
         if (row.block !== null) await io.updateBlock(row.block.block.id, row.from, row.to, to);
       }
-    }, `Added ${durationOf(run)} to ${keyOf(run.entityId)}`);
+    }, `Added ${durationOf(run)} to ${keyOf(run.entityId)}`, async () => {
+      for (const row of run.rows) if (row.block !== null) await io.deleteBlock(row.block.block.id);
+    });
     if (!done) await reread();
   }
 
   /** *Add to <job>* on an open row (#1027): a block on the job over exactly the stretch. */
   function addOpen(row: DayRow, entityId: string, said: string) {
-    void write(() => io.createBlock(row.from, row.to, entity(entityId)), said);
+    void write(
+      () => io.createBlock(row.from, row.to, entity(entityId)),
+      said,
+      (made) => io.deleteBlock(made.block.id),
+    );
   }
 
   function extendToNow(row: DayRow) {
@@ -410,50 +441,73 @@
     );
   }
 
+  /** A row of the list, or one a press took away, which `height` says. */
+  type Drawn = { row: DayRow; height: number | null };
+  /** The rows mouse presses on *Dismiss* took away, still holding their places until the pointer has left the list and the toast has gone (F-138, F-159, F-163). */
+  let holding = $state.raw<readonly { id: number; at: number; entry: Drawn }[]>([]);
+  /** Those still away. An *Undo* or a refused write brings the row itself back, and that is drawn instead. */
+  const standing = $derived(holding.filter((hold) => !rows.some((row) => row.block?.block.id === hold.id)));
+  const drawn = $derived(withHolds<Drawn>(rows.map((row) => ({ row, height: null })), standing));
+  const anyHeld = $derived(standing.length > 0);
+  /**
+   * The rows that go to one ticket, over what is drawn, so a group stands where it stood while rows hold and dismissing one moves
+   * no other (F-159). `live` is what it can still add, which a row that left is no part of: `null` once fewer than two are left.
+   */
+  const runAt = $derived(
+    new Map(
+      offerRuns(drawn.map((one) => one.row)).map((whole) => {
+        const left = whole.rows.filter((row) => !standing.some((hold) => hold.entry.row.key === row.key));
+        return [whole.rows[0]!.key, { whole, live: offerRuns(left)[0] ?? null }];
+      }),
+    ),
+  );
+  $effect(() => {
+    if (!anyHeld) {
+      holding = [];
+      return;
+    }
+    return holdUnderPointer(() => document.querySelector(".tf-tm-list"), () => (holding = []), true);
+  });
+
+  /** Nothing to draw: not while the last row a press took away still holds its place, or what stands under the pointer would move. */
+  const nothing = $derived(rows.length === 0 && !anyHeld);
+
+  /** What Week counts for a past day that has no blocks left, so the two pages say the same thing about it (F-361). A read that fails leaves the plain line. */
+  let weekCounts = $state.raw<{ day: string; minutes: number } | null>(null);
+  $effect(() => {
+    if (!nothing || key === today) return;
+    const on = key;
+    let live = true;
+    void io.weekTimesheet(weekWindows(mondayOf(on))).then(
+      (week) => {
+        if (live) weekCounts = { day: on, minutes: weekView(week, null, untrack(() => clock)).dayTotals[week.days.indexOf(on)] ?? 0 };
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  const weekSays = $derived(weekCounts !== null && weekCounts.day === key && weekCounts.minutes > 0 ? minutesLabel(weekCounts.minutes) : null);
+
   /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
-  function dismiss(row: DayRow) {
+  function dismiss(row: DayRow, event: MouseEvent) {
     const block = row.block;
     if (block === null) return;
-    void write(() => io.dismissBlock(block.block.id), "Dismissed. knobas will not offer it again.");
+    const id = block.block.id;
+    const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-tm-row")?.getBoundingClientRect() : undefined;
+    if (box !== undefined) holding = [...standing, { id, at: drawn.findIndex((one) => one.row.key === row.key), entry: { row, height: box.height } }];
+    holdDismissal(id, () => io.dismissBlock(id), reread, UNDO_MS);
   }
 
-  /**
-   * *Delete block* (#1429): the block leaves the day at once and the delete is
-   * held for the toast's life, then sent; *Undo* cancels a write that never
-   * happened, so the block keeps its id, its context and its worklog mark (the
-   * #835 pattern). The timer outlives the view, so leaving the day does not lose
-   * the delete; closing the window inside those seconds does, and the block is
-   * simply there next time.
-   */
+  /** *Delete block* (#1429). */
   function remove() {
     const current = dialog;
     if (current === null || current.mode !== "edit" || current.row.block === null) return;
     const id = current.row.block.block.id;
     dialog = null;
     refusal = null;
-    held = [...held, { id, sent: false }];
-    const release = () => (held = held.filter((hold) => hold.id !== id));
-    const pending = setTimeout(async () => {
-      try {
-        await io.deleteBlock(id);
-        held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold));
-      } catch (error) {
-        release();
-        push({ text: ipcErrorMessage(error), tone: "err" });
-      }
-      await reread();
-    }, UNDO_MS);
-    push({
-      text: "Deleted the block",
-      ms: UNDO_MS,
-      action: {
-        label: "Undo",
-        run: () => {
-          clearTimeout(pending);
-          release();
-        },
-      },
-    });
+    holdBlock(id, "Deleted the block", () => io.deleteBlock(id), reread, UNDO_MS);
   }
 
   function open(next: NonNullable<typeof dialog>) {
@@ -463,12 +517,12 @@
 </script>
 
 <div class="tf-tm-nav">
-  <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, -1)}" aria-label="Day before">‹</a>
+  <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, -1)}" aria-label="Day before"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg></a>
   <h2>{dayLabel(key)}</h2>
   {#if key < today}
-    <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, 1)}" aria-label="Day after">›</a>
+    <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, 1)}" aria-label="Day after"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></a>
   {:else}
-    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true">›</span>
+    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></span>
   {/if}
   {#if key !== today}
     <a class="tf-btn tf-sm" href="#/time">Today</a>
@@ -487,13 +541,16 @@
     </p>
   </div>
 {:else if ready !== null}
-  <div class="tf-tm-sum">
-    <div><b>{minutesLabel(figures.tracked)}</b><span>tracked</span></div>
-    <div><b>{minutesLabel(figures.logged)}</b><span>logged</span></div>
-    <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{minutesLabel(figures.toLog)}</b><span>to log</span></div>
-    <div><b>{unknown.offered ? "–" : minutesLabel(figures.offered)}</b><span>offered by knobas</span></div>
-    <div><b>{unknown.open ? "–" : minutesLabel(figures.open)}</b><span>open, app in front</span></div>
-  </div>
+  <!-- A day with nothing on it says so once: five figures of *0m* and an empty strip would say it six times (F-354). -->
+  {#if !nothing}
+    <div class="tf-tm-sum">
+      <div><b>{minutesLabel(figures.tracked)}</b><span>tracked</span></div>
+      <div><b>{minutesLabel(figures.logged)}</b><span>logged</span></div>
+      <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{minutesLabel(figures.toLog)}</b><span>to log</span></div>
+      <div><b>{unknown.offered ? "–" : minutesLabel(figures.offered)}</b><span>offered by knobas</span></div>
+      <div><b>{unknown.open ? "–" : minutesLabel(figures.open)}</b><span>open, app in front</span></div>
+    </div>
+  {/if}
 
   {#if ready.pastHorizon}
     <p class="tf-tm-note">
@@ -502,91 +559,127 @@
     </p>
   {/if}
 
-  <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks" bind:this={stripEl}>
-    <defs>
-      <pattern id="tf-tm-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect class="tf-tm-hatch" width="5" height="10" />
-      </pattern>
-    </defs>
-    <rect class="tf-tm-bed" x="0" y="22" width="100%" height="62" rx="6" />
-    {#each hours as hour (hour)}
-      {@const x = `${Math.round(((hour - frame.from) / (frame.to - frame.from)) * 10_000) / 100}%`}
-      <line class="tf-tm-hr" x1={x} x2={x} y1="22" y2="84" />
-      <text class="tf-tm-hl" {x} y="14" text-anchor="middle">{hourLabel(hour)}</text>
-    {/each}
-    {#each rows as row (row.key)}
-      {@const at = place(key, frame, row.from, row.to)}
-      {@const label = stripLabel(row, at.width)}
-      <svg
-        class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
-        x="{at.left}%"
-        y="30"
-        width="{at.width}%"
-        height="46"
-        overflow="visible"
-        role="button"
-        tabindex="0"
-        aria-label="{span(row)}, {row.target ? targetReading(row.target) : 'open'}"
-        onclick={() => select(row)}
-        onkeydown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            select(row);
-          }
-        }}
-      >
-        <title>{span(row)}{row.target ? `, ${targetReading(row.target)}` : ""}</title>
-        <rect width="100%" height="100%" rx="4" />
-        {#if label !== null}
-          <text
-            class={row.target === null || row.target.kind === "label" ? "tf-tm-plain" : ""}
-            x="6"
-            y="50%"
-            dominant-baseline="central"
-            aria-hidden="true">{label}</text
-          >
-        {/if}
-      </svg>
-    {/each}
-    {#if nowAt !== null}
-      <rect class="tf-tm-now" x="{nowAt}%" y="18" width="2" height="70">
-        <title>Now, {clockOf(clock.toISOString())}</title>
-      </rect>
-    {/if}
-  </svg>
-
-  <div class="tf-tm-legend">
-    <span><i class="tf-tm-manual"></i>You tracked</span>
-    <span><i class="tf-tm-logged"></i>Logged</span>
-    <span><i class="tf-tm-run"></i>Timer running</span>
-    <span><i class="tf-tm-passive"></i>Offered: what was in front of you</span>
-    <span><i class="tf-tm-gap"></i>Open: app in front, no target</span>
-    <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>+ Add a block</button>
-  </div>
-
-  {#if rows.length === 0}
+  {#if nothing}
     <div class="tf-tm-empty">
-      <p>Nothing tracked on this day. ⌘T starts the timer on whatever is in front of you, and every stretch it runs lands here.</p>
+      {#if key === today}
+        <p>Nothing tracked yet today. ⌘T starts the timer on whatever is in front of you, and every stretch it runs lands here.</p>
+      {:else if weekSays !== null}
+        <p>No blocks kept for this day. Week counts {weekSays}.</p>
+      {:else}
+        <p>Nothing tracked on this day. Add a block for time you spent on it.</p>
+      {/if}
+      <button class="tf-btn tf-sm" onclick={() => open({ mode: "add" })}>Add a block…</button>
     </div>
   {:else}
-    <div class="tf-tm-list">
+    <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks" bind:this={stripEl}>
+      <defs>
+        <pattern id="tf-tm-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect class="tf-tm-hatch" width="5" height="10" />
+        </pattern>
+      </defs>
+      <rect class="tf-tm-bed" x="0" y="22" width="100%" height="62" rx="6" />
+      {#each hours as hour (hour)}
+        {@const x = `${Math.round(((hour - frame.from) / (frame.to - frame.from)) * 10_000) / 100}%`}
+        <line class="tf-tm-hr" x1={x} x2={x} y1="22" y2="84" />
+        <text class="tf-tm-hl" {x} y="14" text-anchor="middle">{hourLabel(hour)}</text>
+      {/each}
       {#each rows as row (row.key)}
-        {@const run = runAt.get(row.key)}
-        {#if run}
+        {@const at = place(key, frame, row.from, row.to)}
+        {@const label = stripLabel(row, at)}
+        <svg
+          class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
+          x="{at.left}%"
+          y="30"
+          width="{at.width}%"
+          height="46"
+          overflow="visible"
+          role="button"
+          tabindex="0"
+          aria-label="{span(row)}, {row.target ? targetReading(row.target) : 'open'}"
+          onclick={() => select(row)}
+          onkeydown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              select(row);
+            }
+          }}
+        >
+          <title>{span(row)}{row.target ? `, ${targetReading(row.target)}` : ""}</title>
+          <rect width="100%" height="100%" rx="4" />
+          {#if label !== null}
+            <text
+              class={row.target === null || row.target.kind === "label" ? "tf-tm-plain" : ""}
+              x="6"
+              y="50%"
+              dominant-baseline="central"
+              aria-hidden="true">{label}</text
+            >
+          {/if}
+        </svg>
+      {/each}
+      {#if nowAt !== null}
+        <rect class="tf-tm-now" x="{nowAt}%" y="18" width="2" height="70">
+          <title>Now, {clockOf(clock.toISOString())}</title>
+        </rect>
+        <!-- Drawn on the bed, so it never meets an hour's label above it; late in the day, on the line's left, so it stays on the bed. -->
+        <text class="tf-tm-nowl" x="{nowAt}%" dx={nowAt > 96 ? -5 : 5} y="80" text-anchor={nowAt > 96 ? "end" : "start"}>now</text>
+      {/if}
+    </svg>
+
+    <div class="tf-tm-legend">
+      <span><i class="tf-tm-manual"></i>You tracked</span>
+      <span><i class="tf-tm-logged"></i>Logged</span>
+      <span><i class="tf-tm-run"></i>Timer running</span>
+      <span><i class="tf-tm-passive"></i>Offered: what was in front of you</span>
+      <span><i class="tf-tm-gap"></i>Open: app in front, no target</span>
+      <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>Add a block…</button>
+    </div>
+
+    <div class="tf-tm-list">
+      {#snippet heldRow(row: DayRow, height: number)}
+        {@const target = row.target}
+        <!-- Its words stay, dimmed, until the pointer leaves the list (F-064, F-159). Nothing in them can be pressed. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="tf-tm-row tf-tm-rowheld" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(height)}>
+          <span class="tf-tm-when">{span(row)}<b>{durationOf(row)}</b></span>
+          <span class="tf-tm-what">
+            knobas saw
+            {#if target !== null && target.kind === "entity"}<span class="tf-mono">{targetReading(target)}</span> {titleOf(row)}{:else if target !== null}{target.label} (label){/if}
+            {#if target !== null}<small>{targetReading(target)} was in front of you.</small>{/if}
+          </span>
+          <span class="tf-tm-state"><TfStateChip text="dismissed" /></span>
+          <span class="tf-tm-acts"></span>
+        </div>
+      {/snippet}
+      {#each drawn as { row, height } (row.key)}
+        {@const group = runAt.get(row.key)}
+        {#if group !== undefined && group.live !== null}
+          {@const run = group.live}
           <div class="tf-tm-group">
             <span>
               {run.rows.length} offered rows go to <span class="tf-mono">{keyOf(run.entityId)}</span>,
               {clockReading(run.from, key)} to {clockReading(run.to, key)}.
               <small>Each is its own ticket or linked to it. One action adds them all.</small>
             </span>
-            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to {keyOf(run.entityId)}</button>
+            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to <TfKey value={keyOf(run.entityId)} /></button>
+          </div>
+        {:else if group !== undefined}
+          <!-- Its rows have left, and it keeps its room until they close. -->
+          <div class="tf-tm-group tf-tm-groupheld" aria-hidden="true">
+            <span>
+              Offered rows go to <span class="tf-mono">{keyOf(group.whole.entityId)}</span>,
+              {clockReading(group.whole.from, key)} to {clockReading(group.whole.to, key)}.
+              <small>Each is its own ticket or linked to it. One action adds them all.</small>
+            </span>
           </div>
         {/if}
+        {#if height !== null}{@render heldRow(row, height)}{:else}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <!-- A row click selects; the strip's blocks are the keyboard's way to the same. -->
         <div
           id="tf-tm-row-{row.key}"
           class="tf-tm-row {selected === row.key ? 'tf-on' : ''}"
+          data-row={row.key}
           data-state={row.state}
           onclick={(event) => {
             if (!(event.target as HTMLElement).closest("button")) selected = row.key;
@@ -608,8 +701,8 @@
               {#if row.state === "offered"}
                 {@const linked = linkedTo(row)}
                 <small>
-                  {targetReading(row.target)} was in front of you.
-                  {#if linked !== null}It is linked to {keyOf(linked)}.{/if}
+                  <TfKeyed text={targetReading(row.target)} /> was in front of you.
+                  {#if linked !== null}It is linked to <TfKey value={keyOf(linked)} />.{/if}
                 </small>
               {:else if row.state === "label"}
                 <small>
@@ -621,66 +714,70 @@
             {/if}
           </span>
           <span class="tf-tm-state">
-            {#if row.state === "logged"}<span class="tf-chip tf-ok">logged</span>
-            {:else if row.state === "unlogged"}<span class="tf-chip tf-warn">unlogged</span>
-            {:else if row.state === "running"}<span class="tf-chip tf-info">timer running</span>
-            {:else if row.state === "label"}<span class="tf-chip">needs a ticket</span>
-            {:else if row.state === "offered"}<span class="tf-chip">offered</span>
-            {:else}<span class="tf-chip">open</span>{/if}
+            {#if row.state === "logged"}<TfStateChip text="logged" tone="ok" />
+            {:else if row.state === "unlogged"}<TfStateChip text="unlogged" tone="warn" />
+            {:else if row.state === "running"}<TfStateChip text="timer running" tone="info" />
+            {:else if row.state === "label"}<TfStateChip text="needs a ticket" />
+            {:else if row.state === "offered"}<TfStateChip text="offered" />
+            {:else}<TfStateChip text="open" />{/if}
           </span>
+          <!-- Three slots, so the eye runs down a column: what the row is for, the other way to do it, then the row's own upkeep. *Other ticket…* stands beside a ticket the row names; with none named there is no other, and the one action is *Assign…*, as the dialog's title says. -->
           <span class="tf-tm-acts">
             {#if row.state === "unlogged" && row.target?.kind === "entity"}
               {@const on = row.target.entity_id}
-              {#if row.block?.block.ended_by_relaunch}
-                <button class="tf-btn tf-sm" onclick={() => extendToNow(row)}>Extend to now</button>
-              {/if}
               {@const cannot = refusalOf(refused, on, "log_work")}
-              <button class="tf-btn tf-sm" {...refusedAttrs(cannot)} onclick={() => cannot === null && onlog?.(on, key)}>Log…</button>
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit</button>
+              <button class="tf-btn tf-sm tf-tm-s1" {...refusedAttrs(cannot)} onclick={() => cannot === null && onlog?.(on, key)}>Log…</button>
+              {#if row.block?.block.ended_by_relaunch}
+                <button class="tf-btn tf-sm tf-tm-s2" onclick={() => extendToNow(row)}>Extend to now</button>
+              {/if}
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={() => open({ mode: "edit", row })}>Edit…</button>
             {:else if row.state === "running"}
-              <button class="tf-btn tf-sm" onclick={() => ontimer?.()}>Stop and log…</button>
+              <button class="tf-btn tf-sm tf-tm-s1" onclick={() => ontimer?.()}>Stop and log…</button>
             {:else if row.state === "label"}
               {#if row.suggestion}
                 {@const to = row.suggestion.entity_id}
                 <button
-                  class="tf-btn tf-sm"
+                  class="tf-btn tf-sm tf-tm-s1"
                   onclick={() => giveTo(row, to, `Assigned to ${keyOf(to)}. It is in Log all now.`)}
                 >
-                  Log to {keyOf(to)}
+                  Assign to <TfKey value={keyOf(to)} />
                 </button>
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
+                <button class="tf-btn tf-sm tf-ghost tf-tm-s2" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
               {:else}
-                <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+                <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit</button>
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={() => open({ mode: "edit", row })}>Edit…</button>
             {:else if row.state === "offered"}
               {#if row.suggestion}
                 {@const to = row.suggestion.entity_id}
                 <button
-                  class="tf-btn tf-sm"
+                  class="tf-btn tf-sm tf-tm-s1"
                   onclick={() => giveTo(row, to, `Added ${durationOf(row)} to ${keyOf(to)}`)}
                 >
-                  Add to {keyOf(to)}
+                  Add to <TfKey value={keyOf(to)} />
                 </button>
+                <button class="tf-btn tf-sm tf-ghost tf-tm-s2" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
+              {:else}
+                <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => dismiss(row)}>Dismiss</button>
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={(event) => dismiss(row, event)}>Dismiss</button>
             {:else if row.state === "open"}
               {#if job !== null}
                 {@const to = job.entityId}
                 <button
-                  class="tf-btn tf-sm"
+                  class="tf-btn tf-sm tf-tm-s1"
                   onclick={() => addOpen(row, to, `Made a block on ${job.key}, ${span(row)}`)}
                 >
-                  Add to {job.key}
+                  Add to <TfKey value={job.key} />
                 </button>
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+                <button class="tf-btn tf-sm tf-ghost tf-tm-s2" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
               {:else}
-                <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+                <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
             {/if}
           </span>
         </div>
+        {/if}
       {/each}
     </div>
   {/if}

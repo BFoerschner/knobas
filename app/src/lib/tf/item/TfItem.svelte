@@ -22,18 +22,20 @@
     getEntity,
     submitWrite,
     type EntityDetail,
+    type ShownView,
     type SourceView,
     type ViewAction,
     type ViewBlock,
     type ViewSection,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import { openLink } from "../../shell/external-links";
   import { DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
 
   /** The page's two reads, the write queue its actions queue through, and its *Refresh* (#2107). */
   export interface ItemPorts {
     getEntity: (entityId: string) => Promise<EntityDetail>;
-    entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
+    entityView: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     refresh?: DetailRefreshPorts;
   }
@@ -47,7 +49,9 @@
 </script>
 
 <script lang="ts">
-  import { ipcErrorMessage } from "../../ipc";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { actionName } from "../../detail/view/actions";
   import type { EscTarget } from "../escape";
   import TfCrumbs from "../TfCrumbs.svelte";
@@ -57,6 +61,8 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import { untrack } from "svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { onViewFresh } from "../repo/view-fresh.svelte";
 
   let {
     id,
@@ -73,8 +79,12 @@
 
   let detail = $state<EntityDetail | null>(null);
   let failed = $state<string | null>(null);
+  /** The read failed because no such item is held. */
+  let notHeld = $state(false);
   /** `undefined` until the view answers; `null` when the source draws nothing for the kind. */
-  let view = $state<SourceView | null | undefined>(undefined);
+  let view = $state<ShownView | SourceView | null | undefined>(undefined);
+  /** Why the source did not answer the read behind a view drawn from what knobas held (ADR-0042). */
+  let heldFailed = $state<string | null>(null);
   let viewFailed = $state<string | null>(null);
   /** A deferred section's read, once the reader opened it. */
   type Opened = { section: ViewSection } | { failed: string };
@@ -96,8 +106,13 @@
     untrack(() => refresh.reset());
     ports.getEntity(entity).then(
       (found) => live && (detail = found),
-      (error: unknown) => live && (failed = ipcErrorMessage(error)),
+      (error: unknown) => {
+        if (!live) return;
+        failed = ipcErrorMessage(error);
+        notHeld = isIpcError(error) && error.code === "not_found";
+      },
     );
+    heldFailed = null;
     ports.entityView(entity, null).then(
       (answer) => live && (view = answer),
       (error: unknown) => {
@@ -125,6 +140,25 @@
       viewFailed = null;
     }
   }
+
+  // The view knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => (ready ? id : null),
+    null,
+    () => {
+      const entity = id;
+      ports.entityView(entity, null).then(
+        (answer) => {
+          if (entity !== id) return;
+          view = answer;
+          heldFailed = null;
+        },
+        () => {},
+      );
+    },
+    undefined,
+    (why) => (heldFailed = why),
+  );
 
   function readDeferred(section: ViewSection) {
     const entity = id;
@@ -196,7 +230,7 @@
             {:else}
               {row.title}
             {/if}
-            {#if row.chip !== null}<span class="tf-chip tf-{row.tone ?? 'muted'}">{row.chip}</span>{/if}
+            {#if row.chip !== null}<TfStateChip text={row.chip} tone={row.tone ?? 'muted'} />{/if}
             {#if row.meta !== null}<span class="tf-item-meta">{row.meta}</span>{/if}
           </li>
         {/each}
@@ -215,7 +249,11 @@
   <!-- The breadcrumb names the kind (#1408): the title is the header's. -->
   {#if failed !== null}
     <TfCrumbs parts={[{ name: "Item" }]} {back} />
-    <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {failed}</p></div>
+    {#if notHeld}
+      <TfNothingHere message="knobas does not hold this. It may not have synced yet." href="#/tickets" action="All tickets" />
+    {:else}
+      <TfNothingHere message="This could not be read: {failed}" href="#/tickets" action="All tickets" />
+    {/if}
   {:else if detail !== null}
     <TfCrumbs parts={[{ name: kindLabel }]} {back} />
     <header class="tf-fhead">
@@ -227,14 +265,15 @@
         <div class="tf-acts">
           {@render buttonsOf(headerActions, false)}
           {#if detail.web_url !== null}
-            <a class="tf-btn tf-ghost" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
+            <a class="tf-btn tf-ghost" href={detail.web_url} onclick={openLink}>Open in {detail.source.display_name}</a>
           {/if}
           <TfDetailRefresh {detail} {refresh} {reread} page />
         </div>
       {/if}
     </header>
-    <TfDetailBanners {detail} failed={refresh.failed} />
+    <TfDetailBanners {detail} {refresh} {reread} />
     <div class="tf-item-body">
+      {#if view}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={detail.source.display_name} failed={heldFailed} />{/if}
       {#if view === undefined}
         <!-- The view has not answered yet. -->
       {:else if view === null}

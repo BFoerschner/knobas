@@ -39,6 +39,7 @@ pub mod docs;
 pub mod downloads;
 mod error;
 pub mod file_pipeline;
+pub mod frame_rate;
 pub mod inbox;
 #[cfg(test)]
 mod ipc_mirror;
@@ -49,6 +50,7 @@ pub mod notes_export;
 pub mod notify;
 mod profile;
 pub mod protocol;
+pub mod reads;
 pub mod renderers;
 pub mod run_presets;
 pub mod settings;
@@ -112,6 +114,14 @@ pub mod events {
     /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
     /// every page showing that view reads it again.
     pub const VIEW_FRESH: &str = "view:fresh";
+    /// Payload: `checkout::fetch::Fetched` -- a branch's tip, fetched into
+    /// its checkout behind a read that found it missing, landed (ADR-0041):
+    /// the page showing that tree reads it again at the checkout. Broadcast.
+    pub const CHECKOUT_FETCHED: &str = "checkout:fetched";
+    /// Payload: `checkout::clone_all::State` -- where *Clone all* is: each
+    /// clone's start and end, and the run's (the smoothness pass, PR #2479).
+    /// Broadcast: Code and Settings › Checkouts draw the same run.
+    pub const CLONE_ALL: &str = "clone:all";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -316,29 +326,10 @@ pub fn run() {
             start_file_log(&handle, &log_sink);
             let profile = Profile::new(demo, &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
-            handle.manage(profile);
-            // The file manager behind *Open the backup folder* (#1704), next
-            // to the profile whose folder it opens.
-            handle.manage(backup::FolderOpener::platform());
-            handle.manage(sources::SecretStoreKind::from_env());
-            handle.manage(Lifecycle::new());
-            // The desktop notification sender and its waiter registry (#339),
-            // over the real backend and the real event bridge. Managed here
-            // for the same reason as `Lifecycle`: the command that reaches for
-            // it must never see "state not managed".
+            // The desktop notification sender (#339) over the real backend.
             let backend: std::sync::Arc<dyn notify::Backend> =
                 std::sync::Arc::new(notify::platform::show);
-            let events = std::sync::Arc::new(sources::events::TauriEvents::new(handle.clone()));
-            handle.manage(std::sync::Arc::new(notify::Notifier::new(backend, events)));
-            // What the main window records about where the reader is, and why
-            // the stored capture shortcut is not registered (#503). Managed
-            // here for `Lifecycle`'s reason: the capture window can call in
-            // before the database is up, and "state not managed" is not an
-            // answer anything can branch on.
-            handle.manage(capture::CaptureState::new());
-            // The clones running in this process, which `clone_repo` starts
-            // and stops and the quit stops with their folders (#1633).
-            handle.manage(checkout::clone::Clones::global());
+            manage_app_state(&handle, profile, backend);
 
             // And the database comes up on its own task. M0 blocked here,
             // which froze the event loop for the length of a first run -- a
@@ -354,364 +345,7 @@ pub fn run() {
             spawn_bring_up(handle);
             Ok(())
         })
-        // Append-only, orchestrator-owned, grouped by owning module so a
-        // stream adding a command touches one line in one group.
-        .invoke_handler(tauri::generate_handler![
-            commands::app::ping,
-            commands::app::app_status,
-            commands::app::frontend_ready,
-            commands::app::retry_database,
-            commands::app::complete_first_run,
-            commands::app::pages_kept_open,
-            commands::app::set_pages_kept_open,
-            commands::backup::backup_status,
-            commands::backup::backup_now,
-            commands::backup::share_export,
-            commands::backup::set_backup_schedule,
-            commands::backup::restore_backup,
-            commands::backup::open_backup_folder,
-            commands::entity::list_contexts,
-            commands::entity::promote_context,
-            commands::entity::mini_board,
-            commands::entity::create_link,
-            commands::entity::create_note,
-            commands::entity::delete_note,
-            commands::entity::get_entity,
-            commands::entity::get_note,
-            commands::entity::list_entities,
-            commands::entity::save_note,
-            commands::entity::unlink,
-            commands::entity::room_suggestions,
-            commands::entity::accept_suggestion,
-            commands::entity::dismiss_suggestion,
-            commands::entity::start_work_flow,
-            commands::entity::start_work_run,
-            commands::entity::start_work_retry,
-            commands::entity::start_work_skip,
-            commands::entity::start_work_amend,
-            commands::entity::follow_merges,
-            commands::entity::submit_write,
-            commands::entity::reachable_transitions,
-            commands::entity::entity_view,
-            commands::entity::inbox_items,
-            commands::entity::inbox_count,
-            commands::entity::snooze_inbox_item,
-            commands::entity::complete_inbox_item,
-            commands::entity::list_projects,
-            commands::entity::docs_tree,
-            commands::entity::docs_page,
-            commands::entity::docs_search,
-            commands::entity::docs_export_markdown,
-            commands::entity::docs_edit_section,
-            commands::entity::docs_create_page,
-            commands::entity::set_clones_root,
-            commands::entity::entity_checkout,
-            commands::entity::set_checkout_override,
-            commands::entity::open_checkout,
-            commands::entity::open_object,
-            commands::entity::object_page,
-            commands::entity::diff_tool,
-            commands::entity::open_diff_tool,
-            commands::entity::pull_request_worktrees,
-            commands::entity::remove_pull_request_worktree,
-            commands::search::search,
-            commands::search::launcher_home,
-            commands::search::smart_lists,
-            commands::search::create_smart_list,
-            commands::search::rename_smart_list,
-            commands::search::delete_smart_list,
-            commands::sources::demo_load,
-            commands::sources::list_adapters,
-            commands::sources::state_colours,
-            commands::sources::set_tone_override,
-            commands::sources::clear_tone_overrides,
-            commands::sources::list_sources,
-            commands::sources::add_source,
-            commands::sources::update_source,
-            commands::sources::run_embedded_html,
-            commands::sources::set_run_embedded_html,
-            commands::sources::delete_source,
-            commands::sources::set_source_secret,
-            commands::sources::test_source,
-            commands::sources::credential_health,
-            commands::sources::sync_now,
-            commands::sources::sync_now_with_progress,
-            commands::sources::backfill_source,
-            commands::sources::sync_all,
-            commands::sources::sync_status,
-            commands::sources::pending_writes,
-            commands::sources::write_queue_counts,
-            commands::sources::flush_writes,
-            commands::sources::apply_held_write,
-            commands::sources::amend_write,
-            commands::sources::discard_write,
-            commands::sources::list_sync_runs,
-            commands::sources::db_stats,
-            commands::sources::reindex_fts,
-            commands::time::current_timer,
-            commands::time::start_timer,
-            commands::time::stop_timer,
-            commands::time::timer_heartbeat,
-            commands::time::day_blocks,
-            commands::time::update_block,
-            commands::time::delete_block,
-            commands::time::dismiss_block,
-            commands::time::create_block,
-            commands::time::passive_attribution,
-            commands::time::set_passive_attribution,
-            commands::time::worklog_draft,
-            commands::time::log_work,
-            commands::time::ad_hoc_block,
-            commands::time::week_timesheet,
-            commands::time::log_all_preview,
-            // Appended at the foot of the list rather than beside the other
-            // `commands::entity::` lines: the barrel is append-only (§10.8),
-            // and #288 was appending to it in the same week.
-            commands::entity::notification_kinds,
-            commands::entity::set_notification_kinds,
-            commands::entity::standup_digest,
-            commands::entity::standup_protocol,
-            commands::entity::publish_standup_protocol,
-            commands::entity::standup_publish_target,
-            commands::entity::set_standup_publish_target,
-            commands::entity::create_action_item_ticket,
-            commands::entity::notify,
-            // Appended at the foot of the list, after #288's group: the barrel
-            // is append-only (§10.8), and this is M4.0's first group.
-            commands::assets::asset_tree,
-            commands::assets::get_asset,
-            commands::assets::create_asset,
-            commands::assets::edit_asset,
-            commands::assets::move_asset,
-            commands::assets::delete_asset,
-            commands::assets::asset_types,
-            // #432's routes, appended after those. (#434's `context_assets`
-            // stood here until #1578 retired it.)
-            commands::assets::get_route,
-            commands::assets::create_route,
-            commands::assets::edit_route,
-            commands::assets::delete_route,
-            // (#435's `source_assets` stood here until #1578 retired it.)
-            // #439's Import, appended after those for the same reason.
-            commands::assets::preview_estate_import,
-            commands::assets::apply_estate_import,
-            // #443's monitoring settings, appended after those for the same
-            // reason: the list is append-only (§10.8) and never re-sorted.
-            commands::assets::monitoring_settings,
-            commands::assets::set_monitoring_settings,
-            // #448's Monitors tab, appended after those for the same reason.
-            commands::assets::monitor_roster,
-            // #444's open-alert read, appended after those: one read, and the
-            // top strip's count is its length.
-            commands::assets::open_alerts,
-            // #446's ack, appended after that: the one write on this surface
-            // that leaves its subject open on purpose.
-            commands::assets::ack_alert,
-            // Hiding a monitor from the Monitors tab and from the inbox,
-            // beside the ack it is the quieter cousin of.
-            commands::assets::set_monitor_hidden,
-            // #449's *Not monitored* roster, appended after that: the other
-            // list the Monitors tab draws, and a list of assets rather than
-            // of monitors.
-            commands::assets::unmonitored_assets,
-            // #496's URL resolver, appended after those for the same
-            // reason: it is stream E's read but the list is one list,
-            // append-only (§10.8) and never re-sorted.
-            commands::entity::resolve_url,
-            // #505's *Depends on this* panel, appended after that: an assets
-            // read arriving after an entity one, because the list is in merge
-            // order and never re-sorted (§10.8).
-            commands::assets::depends_on_this,
-            // #503's capture window, appended after that for the same reason.
-            // Five: two for the shortcut setting, two for the pair the main
-            // window records and the capture window reads, and one for the
-            // button that brings the note into the main window.
-            commands::entity::capture_shortcut,
-            commands::entity::set_capture_shortcut,
-            commands::entity::record_capture_context,
-            commands::entity::capture_context,
-            commands::entity::reveal_note,
-            // #509's hcloud importer, appended at the foot: the list is
-            // append-only (§10.8). The Import commands above are what consume
-            // what this answers with.
-            commands::assets::produce_estate_file,
-            // #601's query-box suggestions, appended at the foot: a read on
-            // the search module, and the list is append-only (§10.8).
-            commands::search::filter_suggestions,
-            // #779's read of an action item's ticket, appended at the foot:
-            // the list is append-only (§10.8).
-            commands::entity::action_item_ticket,
-            // #823's clone, appended at the foot: the list is append-only
-            // (§10.8).
-            commands::entity::clone_repo,
-            // #824's uncommitted diff at a checkout, appended at the foot:
-            // the list is append-only (§10.8).
-            commands::entity::entity_checkout_diff,
-            commands::entity::entity_range_diff,
-            // #819's two conversation reads, appended at the foot: the list
-            // is append-only (§10.8).
-            commands::entity::visit_entity,
-            commands::entity::entity_thread,
-            // #817's job-reach read and R-7.3's switch, appended at the foot:
-            // the list is append-only (§10.8).
-            commands::entity::job_reach,
-            commands::entity::parent_links,
-            commands::entity::set_parent_links,
-            // #832's notes and capture setting and the notes export,
-            // appended at the foot: the list is append-only (§10.8).
-            commands::entity::set_notes_shown,
-            commands::entity::export_notes_markdown,
-            // #812's ticket views, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::search::ticket_views,
-            commands::search::save_ticket_view,
-            commands::search::delete_ticket_view,
-            commands::search::hide_saved_view,
-            commands::search::open_saved_view,
-            commands::search::translate_ticket_view,
-            // #848's two Builds reads, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::pipelines,
-            commands::entity::pipeline_runs,
-            // #871's Dependencies read, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::assets::dependencies,
-            // #836's proposal evidence, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::proposal_evidence,
-            // #849's pin and #850's *This job* read, appended at the foot:
-            // the list is append-only (§10.8).
-            commands::entity::set_pipeline_pinned,
-            commands::entity::job_pipelines,
-            // #851's two pipeline reads, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::older_pipeline_runs,
-            commands::entity::pipeline_settings,
-            // #844's *Open in…* applications, appended at the foot: the list
-            // is append-only (§10.8).
-            commands::entity::checkout_settings,
-            commands::entity::set_checkout_applications,
-            // #852's Run… presets, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::run_presets,
-            commands::entity::save_run_preset,
-            // #842's *Viewed* on a pull request's files, appended at the
-            // foot: the list is append-only (§10.8).
-            commands::entity::pr_viewed_files,
-            commands::entity::set_pr_file_viewed,
-            // #873's layer writes and saved views, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::assets::create_dep_layer,
-            commands::assets::rename_dep_layer,
-            commands::assets::delete_dep_layer,
-            commands::assets::order_dep_layers,
-            commands::assets::place_dep_kind,
-            commands::assets::dep_views,
-            commands::assets::save_dep_view,
-            commands::assets::delete_dep_view,
-            commands::assets::set_dep_view_defaults,
-            // #866's link sets, appended at the foot: the list is append-only
-            // (§10.8).
-            commands::entity::link_sets,
-            commands::entity::link_set,
-            commands::entity::save_link_set,
-            commands::entity::delete_link_set,
-            commands::entity::preview_link_set_rule,
-            commands::entity::preview_link_set_pattern,
-            commands::entity::hide_link_set_member,
-            // #857's build chain read, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::run_chain,
-            // #854 to #856's run page reads and its download, appended at
-            // the foot: the list is append-only (§10.8).
-            commands::entity::run_log,
-            commands::entity::run_tests,
-            commands::entity::test_history,
-            commands::entity::run_artifacts,
-            commands::entity::artifact_preview,
-            commands::entity::download_run_file,
-            // #867's job link sets read, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::job_link_sets,
-            // #966's facts Code draws beside a row, appended at the foot: the
-            // list is append-only (§10.8).
-            commands::entity::code_facts,
-            // #996's removal of a Run… preset, appended at the foot: the list
-            // is append-only (§10.8).
-            commands::entity::delete_run_preset,
-            // #941's *Move to Confluence…*, appended at the foot: the list
-            // is append-only (§10.8).
-            commands::entity::move_notes_to_confluence,
-            // #870's link-set hint card, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::entity::link_set_hints,
-            // #1202's install of an external adapter from a local manifest,
-            // appended at the foot: the list is append-only (§10.8).
-            commands::sources::install_adapter,
-            // #1209's update check and update and #1210's uninstall, appended
-            // at the foot: the list is append-only (§10.8).
-            commands::sources::list_installed_adapters,
-            commands::sources::check_adapter_updates,
-            commands::sources::update_adapter,
-            commands::sources::uninstall_adapter,
-            // #1384's join of the run in flight for a source's settings page,
-            // appended at the foot: the list is append-only (§10.8).
-            commands::sources::watch_sync,
-            // #1953's read of the tickets filed from an entity that it does
-            // not link yet, appended at the foot: the list is append-only
-            // (§10.8).
-            commands::entity::owed_tickets,
-            // #2031's previews an install and an update show before the
-            // reader confirms, appended at the foot: the list is append-only
-            // (§10.8).
-            commands::sources::preview_install_adapter,
-            commands::sources::preview_update_adapter,
-            // #2040's read of the writes a source's credential cannot make,
-            // appended at the foot: the list is append-only (§10.8).
-            commands::entity::refused_writes,
-            // #2106's *Sync now* for a role view, appended at the foot: the
-            // list is append-only (§10.8).
-            commands::sources::sync_role,
-            // #2107's *Refresh* on an item's detail, appended at the foot.
-            commands::sources::refresh_entity,
-            // #2262's command renderers, appended at the foot: the list is
-            // append-only (§10.8).
-            commands::app::user_renderers,
-            commands::app::set_user_renderers,
-            commands::app::run_renderer,
-            // #2263's default renderer per file pattern, appended at the foot.
-            commands::app::renderer_defaults,
-            commands::app::set_renderer_defaults,
-            // #2256's byte read, appended at the foot (§10.8).
-            commands::entity::entity_file_bytes,
-            // #2264's pipeline over a file's bytes, appended at the foot (§10.8).
-            commands::entity::entity_file_piped,
-            // #2265's command steps and named pipelines, appended at the foot
-            // (§10.8).
-            commands::app::command_steps,
-            commands::app::set_command_steps,
-            commands::app::named_pipelines,
-            commands::app::set_named_pipelines,
-            // *Run pipelines on diffs* as a setting row (review of spec
-            // #2234), appended at the foot (§10.8).
-            commands::app::diff_pipelines,
-            commands::app::set_diff_pipelines,
-            // #2319's commit diff, local-first, appended at the foot (§10.8).
-            commands::entity::entity_commit_diff,
-            // #2405's attachment bytes and download, appended at the foot (§10.8).
-            commands::entity::attachment_bytes,
-            commands::entity::download_attachment,
-            // #2428's favourites, appended at the foot (§10.8).
-            commands::search::favourites,
-            commands::search::add_favourite,
-            commands::search::remove_favourite,
-            // #2429's keys, appended at the foot (§10.8).
-            commands::search::keys,
-            commands::search::bind_list_key,
-            commands::search::bind_action_key,
-            // #2417's artifact bytes, appended at the foot (§10.8).
-            commands::entity::artifact_bytes,
-        ])
+        .invoke_handler(invoke_handler())
         .build(context)
         .expect("build the tauri application")
         .run(|app, event| {
@@ -728,6 +362,466 @@ pub fn run() {
                 shutdown_app(app);
             }
         });
+}
+
+/// What `run`'s setup manages before anything can call in, over `profile`
+/// and the desktop notification `backend`: the same state the headless
+/// backend (`examples/headless_ipc.rs`) manages on a mock runtime, with a
+/// backend that shows nothing.
+///
+/// Both [`Profile`] and [`Lifecycle`] are managed synchronously, before
+/// anything can call in, and for the same reason: they are what a command
+/// asks when the database is *not* up yet. `Lifecycle` is the shared state's
+/// only door (see `commands::app::Lifecycle`), so managing it here rather
+/// than after bring-up is what makes `not_ready` reachable instead of
+/// Tauri's bare "state not managed".
+pub fn manage_app_state<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    profile: Profile,
+    backend: std::sync::Arc<dyn notify::Backend>,
+) {
+    handle.manage(profile);
+    // The file manager behind *Open the backup folder* (#1704), next
+    // to the profile whose folder it opens.
+    handle.manage(backup::FolderOpener::platform());
+    handle.manage(sources::SecretStoreKind::from_env());
+    handle.manage(Lifecycle::new());
+    // The Docs tree as last read, read again only when the pages moved
+    // (the instant-open pass, 2026-11-12, `docs::TreeCache`).
+    handle.manage(docs::TreeCache::default());
+    // The desktop notification sender and its waiter registry (#339),
+    // over `backend` and the real event bridge. Managed here
+    // for the same reason as `Lifecycle`: the command that reaches for
+    // it must never see "state not managed".
+    let events = std::sync::Arc::new(sources::events::TauriEvents::new(handle.clone()));
+    handle.manage(std::sync::Arc::new(notify::Notifier::new(backend, events)));
+    // What the main window records about where the reader is, and why
+    // the stored capture shortcut is not registered (#503). Managed
+    // here for `Lifecycle`'s reason: the capture window can call in
+    // before the database is up, and "state not managed" is not an
+    // answer anything can branch on.
+    handle.manage(capture::CaptureState::new());
+    // The clones running in this process, which `clone_repo` starts
+    // and stops and the quit stops with their folders (#1633).
+    handle.manage(checkout::clone::Clones::global());
+    // A fetch behind a local read that landed (ADR-0041): the page
+    // showing that tree reads it again, now at the checkout.
+    let fetched_to = handle.clone();
+    checkout::fetch::Fetches::global().on_fetched(move |fetched| {
+        events::emit(&fetched_to, None, events::CHECKOUT_FETCHED, fetched);
+    });
+}
+
+/// Every command the webview can call, as `run` registers them: here so the
+/// headless backend (`examples/headless_ipc.rs`, the still-rows pass of PR
+/// #2479) answers the same list on a mock runtime.
+pub fn invoke_handler<R: tauri::Runtime>()
+-> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    // Append-only, orchestrator-owned, grouped by owning module so a
+    // stream adding a command touches one line in one group.
+    tauri::generate_handler![
+        commands::app::ping,
+        commands::app::app_status,
+        commands::app::frontend_ready,
+        commands::app::retry_database,
+        commands::app::complete_first_run,
+        commands::app::pages_kept_open,
+        commands::app::set_pages_kept_open,
+        commands::backup::backup_status,
+        commands::backup::backup_now,
+        commands::backup::share_export,
+        commands::backup::set_backup_schedule,
+        commands::backup::restore_backup,
+        commands::backup::open_backup_folder,
+        commands::entity::list_contexts,
+        commands::entity::promote_context,
+        commands::entity::mini_board,
+        commands::entity::create_link,
+        commands::entity::create_note,
+        commands::entity::delete_note,
+        commands::entity::get_entity,
+        commands::entity::get_note,
+        commands::entity::list_entities,
+        commands::entity::save_note,
+        commands::entity::unlink,
+        commands::entity::room_suggestions,
+        commands::entity::accept_suggestion,
+        commands::entity::dismiss_suggestion,
+        commands::entity::start_work_flow,
+        commands::entity::start_work_run,
+        commands::entity::start_work_retry,
+        commands::entity::start_work_skip,
+        commands::entity::start_work_amend,
+        commands::entity::follow_merges,
+        commands::entity::submit_write,
+        commands::entity::reachable_transitions,
+        commands::entity::entity_view,
+        commands::entity::inbox_items,
+        commands::entity::inbox_count,
+        commands::entity::snooze_inbox_item,
+        commands::entity::complete_inbox_item,
+        commands::entity::list_projects,
+        commands::entity::docs_tree,
+        commands::entity::docs_page,
+        commands::entity::docs_search,
+        commands::entity::docs_export_markdown,
+        commands::entity::docs_edit_section,
+        commands::entity::docs_create_page,
+        commands::entity::set_clones_root,
+        commands::entity::entity_checkout,
+        commands::entity::set_checkout_override,
+        commands::entity::open_checkout,
+        commands::entity::open_object,
+        commands::entity::object_page,
+        commands::entity::diff_tool,
+        commands::entity::open_diff_tool,
+        commands::entity::pull_request_worktrees,
+        commands::entity::remove_pull_request_worktree,
+        commands::search::search,
+        commands::search::launcher_home,
+        commands::search::smart_lists,
+        commands::search::create_smart_list,
+        commands::search::rename_smart_list,
+        commands::search::delete_smart_list,
+        commands::sources::demo_load,
+        commands::sources::list_adapters,
+        commands::sources::state_colours,
+        commands::sources::set_tone_override,
+        commands::sources::clear_tone_overrides,
+        commands::sources::list_sources,
+        commands::sources::add_source,
+        commands::sources::update_source,
+        commands::sources::run_embedded_html,
+        commands::sources::set_run_embedded_html,
+        commands::sources::delete_source,
+        commands::sources::set_source_secret,
+        commands::sources::test_source,
+        commands::sources::credential_health,
+        commands::sources::sync_now,
+        commands::sources::sync_now_with_progress,
+        commands::sources::backfill_source,
+        commands::sources::sync_all,
+        commands::sources::sync_status,
+        commands::sources::pending_writes,
+        commands::sources::write_queue_counts,
+        commands::sources::flush_writes,
+        commands::sources::apply_held_write,
+        commands::sources::amend_write,
+        commands::sources::discard_write,
+        commands::sources::list_sync_runs,
+        commands::sources::db_stats,
+        commands::sources::reindex_fts,
+        commands::time::current_timer,
+        commands::time::start_timer,
+        commands::time::stop_timer,
+        commands::time::timer_heartbeat,
+        commands::time::day_blocks,
+        commands::time::update_block,
+        commands::time::delete_block,
+        commands::time::dismiss_block,
+        commands::time::create_block,
+        commands::time::passive_attribution,
+        commands::time::set_passive_attribution,
+        commands::time::worklog_draft,
+        commands::time::log_work,
+        commands::time::ad_hoc_block,
+        commands::time::week_timesheet,
+        commands::time::log_all_preview,
+        // Appended at the foot of the list rather than beside the other
+        // `commands::entity::` lines: the barrel is append-only (§10.8),
+        // and #288 was appending to it in the same week.
+        commands::entity::notification_kinds,
+        commands::entity::set_notification_kinds,
+        commands::entity::standup_digest,
+        commands::entity::standup_protocol,
+        commands::entity::publish_standup_protocol,
+        commands::entity::standup_publish_target,
+        commands::entity::set_standup_publish_target,
+        commands::entity::create_action_item_ticket,
+        commands::entity::notify,
+        // Appended at the foot of the list, after #288's group: the barrel
+        // is append-only (§10.8), and this is M4.0's first group.
+        commands::assets::asset_tree,
+        commands::assets::get_asset,
+        commands::assets::create_asset,
+        commands::assets::edit_asset,
+        commands::assets::move_asset,
+        commands::assets::delete_asset,
+        commands::assets::asset_types,
+        // #432's routes, appended after those. (#434's `context_assets`
+        // stood here until #1578 retired it.)
+        commands::assets::get_route,
+        commands::assets::create_route,
+        commands::assets::edit_route,
+        commands::assets::delete_route,
+        // (#435's `source_assets` stood here until #1578 retired it.)
+        // #439's Import, appended after those for the same reason.
+        commands::assets::preview_estate_import,
+        commands::assets::apply_estate_import,
+        // #443's monitoring settings, appended after those for the same
+        // reason: the list is append-only (§10.8) and never re-sorted.
+        commands::assets::monitoring_settings,
+        commands::assets::set_monitoring_settings,
+        // #448's Monitors tab, appended after those for the same reason.
+        commands::assets::monitor_roster,
+        // #444's open-alert read, appended after those: one read, and the
+        // top strip's count is its length.
+        commands::assets::open_alerts,
+        // #446's ack, appended after that: the one write on this surface
+        // that leaves its subject open on purpose.
+        commands::assets::ack_alert,
+        // Hiding a monitor from the Monitors tab and from the inbox,
+        // beside the ack it is the quieter cousin of.
+        commands::assets::set_monitor_hidden,
+        // #449's *Not monitored* roster, appended after that: the other
+        // list the Monitors tab draws, and a list of assets rather than
+        // of monitors.
+        commands::assets::unmonitored_assets,
+        // #496's URL resolver, appended after those for the same
+        // reason: it is stream E's read but the list is one list,
+        // append-only (§10.8) and never re-sorted.
+        commands::entity::resolve_url,
+        // #505's *Depends on this* panel, appended after that: an assets
+        // read arriving after an entity one, because the list is in merge
+        // order and never re-sorted (§10.8).
+        commands::assets::depends_on_this,
+        // #503's capture window, appended after that for the same reason.
+        // Five: two for the shortcut setting, two for the pair the main
+        // window records and the capture window reads, and one for the
+        // button that brings the note into the main window.
+        commands::entity::capture_shortcut,
+        commands::entity::set_capture_shortcut,
+        commands::entity::record_capture_context,
+        commands::entity::capture_context,
+        commands::entity::reveal_note,
+        // #509's hcloud importer, appended at the foot: the list is
+        // append-only (§10.8). The Import commands above are what consume
+        // what this answers with.
+        commands::assets::produce_estate_file,
+        // #601's query-box suggestions, appended at the foot: a read on
+        // the search module, and the list is append-only (§10.8).
+        commands::search::filter_suggestions,
+        // #779's read of an action item's ticket, appended at the foot:
+        // the list is append-only (§10.8).
+        commands::entity::action_item_ticket,
+        // #823's clone, appended at the foot: the list is append-only
+        // (§10.8).
+        commands::entity::clone_repo,
+        // #824's uncommitted diff at a checkout, appended at the foot:
+        // the list is append-only (§10.8).
+        commands::entity::entity_checkout_diff,
+        commands::entity::entity_range_diff,
+        // #819's two conversation reads, appended at the foot: the list
+        // is append-only (§10.8).
+        commands::entity::visit_entity,
+        commands::entity::entity_thread,
+        // #817's job-reach read and R-7.3's switch, appended at the foot:
+        // the list is append-only (§10.8).
+        commands::entity::job_reach,
+        commands::entity::parent_links,
+        commands::entity::set_parent_links,
+        // #832's notes and capture setting and the notes export,
+        // appended at the foot: the list is append-only (§10.8).
+        commands::entity::set_notes_shown,
+        commands::entity::export_notes_markdown,
+        // #812's ticket views, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::search::ticket_views,
+        commands::search::save_ticket_view,
+        commands::search::delete_ticket_view,
+        commands::search::hide_saved_view,
+        commands::search::open_saved_view,
+        commands::search::translate_ticket_view,
+        // #848's two Builds reads, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::pipelines,
+        commands::entity::pipeline_runs,
+        // #871's Dependencies read, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::assets::dependencies,
+        // #836's proposal evidence, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::proposal_evidence,
+        // #849's pin and #850's *This job* read, appended at the foot:
+        // the list is append-only (§10.8).
+        commands::entity::set_pipeline_pinned,
+        commands::entity::job_pipelines,
+        // #851's two pipeline reads, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::older_pipeline_runs,
+        commands::entity::pipeline_settings,
+        // #844's *Open in…* applications, appended at the foot: the list
+        // is append-only (§10.8).
+        commands::entity::checkout_settings,
+        commands::entity::set_checkout_applications,
+        // #852's Run… presets, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::run_presets,
+        commands::entity::save_run_preset,
+        // #842's *Viewed* on a pull request's files, appended at the
+        // foot: the list is append-only (§10.8).
+        commands::entity::pr_viewed_files,
+        commands::entity::set_pr_file_viewed,
+        // #873's layer writes and saved views, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::assets::create_dep_layer,
+        commands::assets::rename_dep_layer,
+        commands::assets::delete_dep_layer,
+        commands::assets::order_dep_layers,
+        commands::assets::place_dep_kind,
+        commands::assets::dep_views,
+        commands::assets::save_dep_view,
+        commands::assets::delete_dep_view,
+        commands::assets::set_dep_view_defaults,
+        // Taking an ack back, appended after those.
+        commands::assets::unack_alert,
+        // #866's link sets, appended at the foot: the list is append-only
+        // (§10.8).
+        commands::entity::link_sets,
+        commands::entity::link_set,
+        commands::entity::save_link_set,
+        commands::entity::delete_link_set,
+        commands::entity::preview_link_set_rule,
+        commands::entity::preview_link_set_pattern,
+        commands::entity::hide_link_set_member,
+        // #857's build chain read, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::run_chain,
+        // #854 to #856's run page reads and its download, appended at
+        // the foot: the list is append-only (§10.8).
+        commands::entity::run_log,
+        commands::entity::run_tests,
+        commands::entity::test_history,
+        commands::entity::run_artifacts,
+        commands::entity::artifact_preview,
+        commands::entity::download_run_file,
+        // #867's job link sets read, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::job_link_sets,
+        // #966's facts Code draws beside a row, appended at the foot: the
+        // list is append-only (§10.8).
+        commands::entity::code_facts,
+        // #996's removal of a Run… preset, appended at the foot: the list
+        // is append-only (§10.8).
+        commands::entity::delete_run_preset,
+        // #941's *Move to Confluence…*, appended at the foot: the list
+        // is append-only (§10.8).
+        commands::entity::move_notes_to_confluence,
+        // #870's link-set hint card, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::link_set_hints,
+        // #1202's install of an external adapter from a local manifest,
+        // appended at the foot: the list is append-only (§10.8).
+        commands::sources::install_adapter,
+        // #1209's update check and update and #1210's uninstall, appended
+        // at the foot: the list is append-only (§10.8).
+        commands::sources::list_installed_adapters,
+        commands::sources::check_adapter_updates,
+        commands::sources::update_adapter,
+        commands::sources::uninstall_adapter,
+        // #1384's join of the run in flight for a source's settings page,
+        // appended at the foot: the list is append-only (§10.8).
+        commands::sources::watch_sync,
+        // #1953's read of the tickets filed from an entity that it does
+        // not link yet, appended at the foot: the list is append-only
+        // (§10.8).
+        commands::entity::owed_tickets,
+        // #2031's previews an install and an update show before the
+        // reader confirms, appended at the foot: the list is append-only
+        // (§10.8).
+        commands::sources::preview_install_adapter,
+        commands::sources::preview_update_adapter,
+        // #2040's read of the writes a source's credential cannot make,
+        // appended at the foot: the list is append-only (§10.8).
+        commands::entity::refused_writes,
+        // #2106's *Sync now* for a role view, appended at the foot: the
+        // list is append-only (§10.8).
+        commands::sources::sync_role,
+        // #2107's *Refresh* on an item's detail, appended at the foot.
+        commands::sources::refresh_entity,
+        // #2262's command renderers, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::app::user_renderers,
+        commands::app::set_user_renderers,
+        commands::app::run_renderer,
+        // #2263's default renderer per file pattern, appended at the foot.
+        commands::app::renderer_defaults,
+        commands::app::set_renderer_defaults,
+        // #2256's byte read, appended at the foot (§10.8).
+        commands::entity::entity_file_bytes,
+        // #2264's pipeline over a file's bytes, appended at the foot (§10.8).
+        commands::entity::entity_file_piped,
+        // #2265's command steps and named pipelines, appended at the foot
+        // (§10.8).
+        commands::app::command_steps,
+        commands::app::set_command_steps,
+        commands::app::named_pipelines,
+        commands::app::set_named_pipelines,
+        // *Run pipelines on diffs* as a setting row (review of spec
+        // #2234), appended at the foot (§10.8).
+        commands::app::diff_pipelines,
+        commands::app::set_diff_pipelines,
+        // #2319's commit diff, local-first, appended at the foot (§10.8).
+        commands::entity::entity_commit_diff,
+        // #2405's attachment bytes and download, appended at the foot (§10.8).
+        commands::entity::attachment_bytes,
+        commands::entity::download_attachment,
+        // #2428's favourites, appended at the foot (§10.8).
+        commands::search::favourites,
+        commands::search::add_favourite,
+        commands::search::remove_favourite,
+        // #2429's keys, appended at the foot (§10.8).
+        commands::search::keys,
+        commands::search::bind_list_key,
+        commands::search::bind_action_key,
+        // #2417's artifact bytes, appended at the foot (§10.8).
+        commands::entity::artifact_bytes,
+        // F-327's *Publish again*, appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::publish_standup_protocol_again,
+        // The smoothness pass's local reads (PR #2479, ADR-0041),
+        // appended at the foot: the list is append-only (§10.8).
+        commands::entity::entity_local_tree,
+        commands::entity::entity_local_dir,
+        commands::entity::entity_local_paths,
+        commands::entity::entity_local_file,
+        commands::entity::entity_source_range_diff,
+        // The compare pass (PR #2479, 2026-11-13): a range's files first, each file's lines as it is reached,
+        // and a read the page no longer wants called off.
+        commands::entity::entity_range_files,
+        commands::entity::entity_range_file,
+        commands::entity::entity_source_range_files,
+        commands::entity::cancel_read,
+        commands::entity::clone_all_plan,
+        commands::entity::clone_all,
+        commands::entity::clone_all_state,
+        // The scale pass's checkouts in one call (PR #2479), appended at
+        // the foot: the list is append-only (§10.8).
+        commands::entity::entity_checkouts,
+        // Smooth scrolling on 120 Hz displays (PR #2479), appended at the
+        // foot for the same reason.
+        commands::app::smooth_scrolling,
+        commands::app::set_smooth_scrolling,
+        // The nav's Monitors badge as a count (PR #2479, the monitors-builds
+        // pass), appended at the foot for the same reason.
+        commands::assets::monitors_down,
+        // The instant-open pass (2026-11-12): Docs reads what it draws.
+        commands::entity::docs_outline,
+        commands::entity::docs_nodes,
+        // The query audit (PR #2479, 2026-11-12): what many ids are, in one read.
+        commands::entity::entity_briefs,
+        commands::entity::card_reads,
+        // The query audit: the inbox's two shelves and its count from one run.
+        commands::entity::inbox_shelves,
+        // The extremes pass (PR #2479, 2026-11-13): an entity's row without its text.
+        commands::entity::entity_head,
+        // A repository's Builds tab (the repo-builds pass, 2026-11-13): the
+        // pipelines that built its commits, appended at the foot (§10.8).
+        commands::entity::repo_pipelines,
+        // *By repository* on the Builds list: the repositories of the commits
+        // its runs built, appended at the foot (§10.8).
+        commands::entity::commit_repositories,
+    ]
 }
 
 /// Stop everything bring-up started, in the one order that does not stall:
@@ -913,15 +1007,62 @@ async fn bring_up_app<R: tauri::Runtime>(
         if let Err(error) = commands::search::searcher(&pool, &registry).await {
             tracing::error!(?error, "the adapters' declarations could not be stored");
         }
+        // Each ticket's card, stored for the board and the search's words
+        // (migration `0075`), filled in the background for the tickets that
+        // have none: after `0075` itself, and after the declarations above
+        // changed. Until a ticket is filled its reads walk its payload, the
+        // same answer; a sync's own writes keep their tickets' cards.
+        // After the declarations, which the cards are read under.
+        let fill_pool = pool.clone();
+        tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            match knobas_core::item_card::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the tickets' cards are filled"
+                ),
+                Err(error) => tracing::warn!(%error, "the tickets' cards could not all be filled"),
+            }
+            // Then what a list draws of every item (migration `0081`), the
+            // same way and for the same two reasons: after the cards, so the
+            // two fills never run at once.
+            let started = std::time::Instant::now();
+            match knobas_core::item_row::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the lists' rows are filled"
+                ),
+                Err(error) => tracing::warn!(%error, "the lists' rows could not all be filled"),
+            }
+            // Then what the launcher reads of a match beside its vector
+            // (migration `0084`), for the rows written before it: last, the
+            // longest of the three and the one no page waits on, since the
+            // launcher reads the mirror's own rows until every copy is
+            // filled, as it always did.
+            let started = std::time::Instant::now();
+            match knobas_core::item_search::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the search copies are filled"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "the search copies could not all be filled");
+                }
+            }
+        });
         // Before `Ready`, and before `AppState` is installed: the sync
         // engine is part of "the database is up" as far as the frontend is
         // concerned, and a window that reacted to `ready` by calling
         // `sync_status` must not race the scheduler into existence.
         //
         // The suggestion pass is built here, once, and goes to the
-        // scheduler, which requests a pass after every OK run: two would
-        // mean two passes at once (#745, #1485). Nothing else asks for
-        // one since `detect_suggestions` retired (#1611).
+        // scheduler, which requests a pass after an OK run that wrote to
+        // the mirror: two would mean two passes at once (#745, #1485).
+        // Nothing else asks for one since `detect_suggestions` retired
+        // (#1611).
         let suggestions = suggestion_pass::SuggestionPass::new(
             std::sync::Arc::new(sources::DbConnections(connector.clone())),
             suggestion_pass::PASS_STATEMENT_TIMEOUT,
@@ -950,6 +1091,15 @@ async fn bring_up_app<R: tauri::Runtime>(
         {
             tracing::error!(%error, "the capture shortcut could not be read");
         }
+        // Smooth scrolling on 120 Hz displays (macOS): the window is built
+        // before there is a pool to read the setting from, so it is set here.
+        // A failed read keeps WebKit's 60, which is no reason not to start.
+        if frame_rate::offered() {
+            match frame_rate::stored(&pool).await {
+                Ok(on) => frame_rate::apply(handle, on),
+                Err(error) => tracing::debug!(%error, "smooth scrolling could not be read"),
+            }
+        }
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>((pool, watch, generation))
     }
     .await;
@@ -964,6 +1114,7 @@ async fn bring_up_app<R: tauri::Runtime>(
             if let Some(watch) = watch {
                 spawn_watch(handle.clone(), watch, generation);
             }
+            spawn_docs_tree(handle.clone());
             return;
         }
         Err(error) => {
@@ -982,6 +1133,27 @@ async fn bring_up_app<R: tauri::Runtime>(
         tracing::error!(%error, "stopping the server of a failed bring-up failed");
     }
     set_db_state(handle, DbState::Failed { message });
+}
+
+/// The Docs tree read once in the background after `ready` (the
+/// instant-open pass, 2026-11-12, `docs::TreeCache`): at Björn's size it is
+/// 600 ms of walking page payloads, which the first open of Docs would
+/// otherwise wait for. A moment after `ready`, so the window's own first
+/// reads go first; a failure is the next read's to meet.
+fn spawn_docs_tree<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let lifecycle = handle.state::<Lifecycle>();
+        let Ok(pool) = lifecycle.pool() else { return };
+        let cache = handle.state::<docs::TreeCache>();
+        // By its whole path: a line that starts `commands::entity::` is read as a registered command
+        // (`commands::tests::registered`).
+        let read =
+            crate::commands::entity::docs_outline_inner(&pool, lifecycle.registry(), Some(&cache));
+        if let Err(error) = read.await {
+            tracing::debug!(%error, "the Docs tree was not read ahead");
+        }
+    });
 }
 
 /// How often a `ready` window looks at its own server (#1779). A read of
@@ -1371,6 +1543,8 @@ mod tests {
             super::events::CLONE_PROGRESS,
             super::events::ITEM_REFRESHED,
             super::events::VIEW_FRESH,
+            super::events::CHECKOUT_FETCHED,
+            super::events::CLONE_ALL,
         ];
         names.sort_unstable();
         declared.sort_unstable();

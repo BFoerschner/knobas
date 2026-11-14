@@ -5147,6 +5147,101 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     assert_eq!(drifted.state, None, "and no state was invented either");
 }
 
+/// **The badge counts what the roster draws down** (PR #2479, the
+/// monitors-builds pass): `monitors_down` is the roster's rows and state rule
+/// without the samples, so a newest sample, the mirror's state where the
+/// window holds none, a hidden and a paused monitor all count as the tab's
+/// rows do. And the roster's samples are thinned: a steady day is about a
+/// hundred, its first and newest kept.
+#[tokio::test]
+async fn the_down_count_is_the_rosters_and_a_steady_day_crosses_thinned() {
+    let pool = pool("monitors-down-count").await;
+    let registry = Registry::for_process();
+    let sampled = kuma_monitor(
+        &pool,
+        "kuma",
+        "sampled",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sample(&pool, &sampled, 3, Some("up")).await;
+    sample(&pool, &sampled, 1, Some("down")).await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "mirror",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    let recovered = kuma_monitor(
+        &pool,
+        "kuma",
+        "recovered",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    sample(&pool, &recovered, 2, Some("down")).await;
+    sample(&pool, &recovered, 1, Some("up")).await;
+    let hidden = kuma_monitor(
+        &pool,
+        "kuma",
+        "hidden",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    assets::set_monitor_hidden(&pool, &hidden, true)
+        .await
+        .unwrap();
+    let paused = kuma_monitor(
+        &pool,
+        "kuma",
+        "paused",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    sample(&pool, &paused, 1, Some("down")).await;
+    tombstone(&pool, &paused).await;
+    let steady = kuma_monitor(
+        &pool,
+        "kuma",
+        "steady",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state)
+         select $1, now() - make_interval(mins => m), 'down' from generate_series(1, 1430) m",
+    )
+    .bind(&steady)
+    .execute(&pool)
+    .await
+    .expect("a day of samples");
+
+    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    let drawn = roster
+        .iter()
+        .filter(|row| row.state.as_deref() == Some("down") && !row.tombstoned && !row.hidden)
+        .count();
+    assert_eq!(drawn, 3, "sampled, mirror and steady");
+    assert_eq!(assets::monitors_down(&pool, &registry).await.unwrap(), 3);
+
+    let day = &row(&roster, "steady").samples;
+    assert!(
+        day.len() <= 110,
+        "a steady day thins to about a hundred, not {}",
+        day.len()
+    );
+    assert!(
+        day.first().unwrap().taken_at < day.last().unwrap().taken_at - chrono::TimeDelta::hours(23)
+    );
+}
+
 /// **A hidden monitor stays on the roster, flagged** -- the tab decides what
 /// to draw in its fold of hidden monitors -- and *Unhide* clears the flag.
 #[tokio::test]

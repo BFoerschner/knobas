@@ -420,6 +420,17 @@ impl Source for JiraSource {
         Ok(offered.into_iter().map(|t| t.status).collect())
     }
 
+    /// A credential's grants change when an administrator changes them,
+    /// rarely: kept, answered from memory, and asked again behind (ADR-0032's
+    /// moving reads, the second smoothness pass on PR #2479), as Gitea's are.
+    fn refusal_standing(
+        &self,
+        ask: &knobas_source::grants::WriteAsk,
+    ) -> knobas_source::view::Standing {
+        let _ = ask;
+        knobas_source::view::Standing::Moving
+    }
+
     /// The asks this user's project permissions refuse (#2052), read from
     /// `mypermissions` and never probed: see [`crate::grants`]. A ticket's
     /// asks are answered in its project, a create's in the project it names;

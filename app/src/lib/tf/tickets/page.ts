@@ -8,5 +8,5 @@ export const page = definePage({
   matches: (route): route is Extract<TfRoute, { view: "tickets" }> => route.view === "tickets",
   role: TICKET_SYSTEM,
   component: TicketsPage,
-  props: ({ ready, timedTicket, route }) => ({ ready, timedTicket, viewId: route.rest[0] ?? null }),
+  props: ({ ready, timedTicket, route, back }) => ({ ready, timedTicket, viewId: route.rest[0] ?? null, back }),
 });

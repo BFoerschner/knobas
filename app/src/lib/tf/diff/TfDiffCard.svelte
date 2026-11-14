@@ -55,7 +55,11 @@
 </script>
 
 <script lang="ts">
+  import type { Attachment } from "svelte/attachments";
+  import TfStateChip from "../TfStateChip.svelte";
   import { flushSync } from "svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { inlineEditor } from "../inline-editor";
   import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
   import type { CommandPort } from "../../render/command";
@@ -63,10 +67,10 @@
   import type { DiffMode, RenderedPlan, Side, SideGot } from "./rendered";
   import TfDiffRendered from "./TfDiffRendered.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
-  import { ago } from "../../shell/time";
+  import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { placeThreads, targetOf } from "../pr/files";
-  import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
+  import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, waitingRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
   import type { DiffTalk } from "./talk";
   import { badgeOf, isGenerated, isLock, LOAD_OVER, needsLoad } from "./tree";
   import { marked, type Range } from "./words";
@@ -101,6 +105,12 @@
     repository = null,
     pipeline = null,
     onpipeline = () => {},
+    place = null,
+    waiting = false,
+    more = null,
+    onmore = () => {},
+    failedLines = null,
+    onretry = () => {},
   }: {
     file: DrawnFile;
     split: boolean;
@@ -137,7 +147,37 @@
     /** The file's pipeline, or `null` where it has none; `onpipeline` turns it on or off for this file. */
     pipeline?: CardPipeline | null;
     onpipeline?: (on: boolean) => void;
+    /** On the card's box: a windowed list of files measures and places it there (`TfDiffView`). */
+    place?: Attachment<HTMLDivElement> | null;
+    /** Its lines are being read (the view's `fill`): the card holds their room until they come. */
+    waiting?: boolean;
+    /** Where the next page of its lines starts, while one is still to be read; `onmore` reads it, as the card's end nears the view. */
+    more?: number | null;
+    onmore?: () => void;
+    /** Why reading its lines failed; `onretry` reads them again. */
+    failedLines?: string | null;
+    onretry?: () => void;
   } = $props();
+
+  /** Sizes the box `px` tall, through the CSSOM: the CSP takes no inline style (`house-rules.test.ts`). */
+  function room(px: number): Attachment<HTMLElement> {
+    return (node) => {
+      node.style.height = `${px}px`;
+    };
+  }
+
+  /** Calls `go` as the box comes within a screen of the view of the page that scrolls it. */
+  function near(go: () => void): Attachment<HTMLElement> {
+    return (node) => {
+      if (typeof IntersectionObserver === "undefined") return;
+      const watch = new IntersectionObserver((seen) => seen.some((one) => one.isIntersecting) && go(), {
+        root: node.closest(".tf-main, .tf-bmain"),
+        rootMargin: "100% 0px",
+      });
+      watch.observe(node);
+      return () => watch.disconnect();
+    };
+  }
 
   /** The sides a rendered diff draws: the plan's, less one the reader found no file on. */
   const sides = $derived(rendered ? rendered.sides.filter((side) => sideOf(side)?.kind !== "absent") : []);
@@ -187,7 +227,8 @@
       });
       if (cell.extra) return;
       for (const d of talk.draftsAt(file.path, cell.line)) out.push({ kind: "draft", key: `d${d.id}`, body: d.body });
-      if (talk.isOpen(file.path, cell.line)) out.push({ kind: "box", key: "box", line: cell.line, onNew });
+      // Keyed by its line: another line's box is another box, with its own way back.
+      if (talk.isOpen(file.path, cell.line)) out.push({ kind: "box", key: `box${targetOf(cell.line).side}${targetOf(cell.line).line}`, line: cell.line, onNew });
     };
     if (split) {
       for (const row of splitRows(file, expanded)) {
@@ -241,9 +282,12 @@
     root?.scrollIntoView?.({ block: "start" });
   }
 
-  /** `n` (`step` 1) and `p` (-1): the next or previous hunk of this file; false when there is none that way. */
-  export function nextHunk(step: 1 | -1): boolean {
-    const to = hunk + step;
+  /**
+   * `n` (`step` 1) and `p` (-1): the next or previous hunk of this file; false when there is none that way.
+   * `entering`: from another file, so its first hunk going down, its last going up.
+   */
+  export function nextHunk(step: 1 | -1, entering = false): boolean {
+    const to = !entering ? hunk + step : step === 1 ? 0 : starts.length - 1;
     if (!drawsLines || to < 0 || to >= starts.length) return false;
     hunk = to;
     show(starts[to]!);
@@ -261,12 +305,25 @@
     flushSync();
     const box = items.findIndex((item) => item.kind === "box");
     if (box >= 0) show(box);
-    root?.querySelector<HTMLTextAreaElement>(".tf-newc textarea")?.focus();
+    focusBox();
     return true;
   }
 
+  const focusBox = () => root?.querySelector<HTMLTextAreaElement>(".tf-newc:not(.tf-reply) textarea")?.focus();
+
+  /** The `+` that stands for `name`: what focus comes back to as the box goes. */
+  const plusOf = (label: string) => [...(root?.querySelectorAll<HTMLElement>(".tf-addc") ?? [])].find((plus) => plus.getAttribute("aria-label") === label) ?? null;
+  /** A thread's *Reply…*, for the same. */
+  const replyOf = (id: string | null) => [...(root?.querySelectorAll<HTMLElement>(".tf-thr-reply") ?? [])].find((face) => face.dataset["thread"] === id) ?? null;
+
+  /** A kept page answers no key, and comes back to the box it left. */
+  const pageShown = pageVisible();
+
   const SIGN = { context: " ", add: "+", del: "−" } as const;
   const old = $derived(file.old_path && file.old_path !== file.path ? file.old_path : null);
+  /** A local change's label says how it stands (*modified, not staged*): words, so not in the path's mono. */
+  const shownHow = $derived(/ \(([^()]*(?:not staged|staged))\)$/.exec(keyOf(file))?.[1] ?? null);
+  const shownPath = $derived(shownHow === null ? keyOf(file) : keyOf(file).slice(0, keyOf(file).lastIndexOf(" (")));
   const badge = $derived(badgeOf(file));
   const chip = $derived(isLock(file.path) ? "lock file" : isGenerated(file.path) ? "generated" : null);
   const changed = $derived(file.additions + file.deletions);
@@ -299,7 +356,7 @@
   {#each comments as c, k (k)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p><b>{c.author}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
+      <p title={agoStamp(c.at)}><b>{talk.isMe(c.author) ? "You" : (c.author_name ?? c.author)}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
       <TfMarkdown text={c.body} {render} />
     </div>
   {/each}
@@ -314,8 +371,8 @@
   {@const resolved = talk.isResolved(thread)}
   {#if resolved && !talk.isShown(thread)}
     <div class="tf-thr-h">
-      <span class="tf-chip tf-ok">Resolved</span>
-      <span class="tf-dim">{thread.resolved_by ? `by ${thread.resolved_by} · ` : ""}{thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}</span>
+      <TfStateChip text="Resolved" tone="ok" />
+      <span class="tf-dim">{thread.resolved_by ? `by ${talk.isMe(thread.resolved_by) ? "you" : (thread.resolved_by_name ?? thread.resolved_by)} · ` : ""}{thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}</span>
       <span class="tf-thr-sp"></span>
       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, true)}>Show</button>
       {#if talk.canResolve(thread)}<button type="button" class="tf-btn tf-sm" onclick={() => talk.resolve(thread, false)}>Unresolve</button>{/if}
@@ -323,11 +380,16 @@
   {:else}
     {@render said(thread.comments)}
     {#each talk.queuedOn(thread) as body, k (k)}
-      <div class="tf-said tf-queued"><p><b>You</b> <span class="tf-chip tf-warn">queued</span> {body}</p></div>
+      <div class="tf-said tf-queued"><p><b>You</b> <TfStateChip text="queued" tone="info" /> {body}</p></div>
     {/each}
     {#if talk.isReplying(thread)}
-      <div class="tf-newc tf-reply">
-        <textarea value={talk.replyDraft} oninput={(event) => (talk.replyDraft = event.currentTarget.value)} placeholder="Reply" aria-label="Reply on {file.path}, {lineName(thread.side, thread.line)}"></textarea>
+      <div class="tf-newc tf-reply" {@attach pageShown() && inlineEditor(() => talk.closeReply(), { back: () => replyOf(thread.id), escCloses: true, send: () => talk.replyDraft.trim() !== "" && talk.sendReply(file.path, thread) })}>
+        <textarea
+          value={talk.replyDraft}
+          oninput={(event) => (talk.replyDraft = event.currentTarget.value)}
+          placeholder="Reply"
+          aria-label="Reply on {file.path}, {lineName(thread.side, thread.line)}"
+        ></textarea>
         <div class="tf-acts">
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.cancelReply()}>Cancel</button>
           <button type="button" class="tf-btn tf-sm tf-primary" disabled={talk.replyDraft.trim() === ""} onclick={() => talk.sendReply(file.path, thread)}>Reply</button>
@@ -335,7 +397,7 @@
       </div>
     {:else if talk.canReply(thread) || talk.canResolve(thread) || resolved}
       <footer class="tf-thr-f">
-        {#if talk.canReply(thread)}<button type="button" class="tf-thr-reply" onclick={() => talk.openReply(thread)}>Reply…</button>{/if}
+        {#if talk.canReply(thread)}<button type="button" class="tf-thr-reply" data-thread={thread.id} onclick={() => talk.openReply(thread)}>Reply…</button>{/if}
         <span class="tf-thr-sp"></span>
         {#if resolved}<button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, false)}>Hide</button>{/if}
         {#if talk.canResolve(thread)}<button type="button" class="tf-btn tf-sm" onclick={() => talk.resolve(thread, !resolved)}>{resolved ? "Unresolve" : "Resolve"}</button>{/if}
@@ -349,7 +411,17 @@
   {#if talk.review && !cell.extra}
     {@const at = targetOf(cell.line)}
     {@const name = lineName(at.side, at.line)}
-    <button type="button" class="tf-addc" title="Comment on {name}" aria-label="Comment on {name} of {file.path}" onclick={() => talk.openAt(file.path, cell.line)}>+</button>
+    <button
+      type="button"
+      class="tf-addc"
+      title="Comment on {name}"
+      aria-label="Comment on {name} of {file.path}"
+      onclick={() => {
+        talk.openAt(file.path, cell.line);
+        flushSync();
+        focusBox();
+      }}>+</button
+    >
   {:else}<span></span>{/if}
 {/snippet}
 
@@ -384,12 +456,18 @@
   {:else if it.kind === "thread"}
     <div class="tf-thread" class:tf-on-new={split && it.onNew} class:tf-resolved={talk.isResolved(it.thread)} {@attach win.row(it.key)}>{@render conversation(it.thread)}</div>
   {:else if it.kind === "draft"}
-    <div class="tf-thread tf-pending" {@attach win.row(it.key)}><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {it.body}</p></div>
+    <div class="tf-thread tf-pending" {@attach win.row(it.key)}><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {it.body}</p></div>
   {:else}
     {@const at = targetOf(it.line)}
     {@const name = lineName(at.side, at.line)}
-    <div class="tf-newc" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)} {@attach keep(it.key)}>
-      <textarea value={talk.draft} oninput={(event) => (talk.draft = event.currentTarget.value)} placeholder="Comment on {name}" aria-label="Comment on {name} of {file.path}"></textarea>
+    {@const label = `Comment on ${name} of ${file.path}`}
+    <div class="tf-newc" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)} {@attach keep(it.key)} {@attach pageShown() && inlineEditor(() => talk.close(), { back: () => plusOf(label), escCloses: true, send: () => talk.draft.trim() !== "" && talk.add() })}>
+      <textarea
+        value={talk.draft}
+        oninput={(event) => (talk.draft = event.currentTarget.value)}
+        placeholder="Comment on {name}"
+        aria-label={label}
+      ></textarea>
       <div class="tf-acts">
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.cancel()}>Cancel</button>
         <button type="button" class="tf-btn tf-sm tf-primary" disabled={talk.draft.trim() === ""} onclick={() => talk.add()}>Add to review</button>
@@ -398,18 +476,18 @@
   {/if}
 {/snippet}
 
-<div class="tf-diff" class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root}>
+<div class="tf-diff" data-file={keyOf(file)} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root} {@attach place}>
   <div class="tf-fh">
     <button type="button" class="tf-fh-caret" aria-expanded={!closed} aria-label="{closed ? 'Expand' : 'Collapse'} {keyOf(file)}" onclick={ontoggle}
       ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d={closed ? "m6 4 4 4-4 4" : "m4 6 4 4 4-4"} /></svg></button
     >
     <span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}" title={file.change}>{badge}</span>
-    <span class="tf-mono">{old ? `${old} → ${keyOf(file)}` : keyOf(file)}</span>
+    <span class="tf-mono">{old ? `${old} → ${shownPath}` : shownPath}</span>{#if shownHow !== null}<span class="tf-state">{shownHow}</span>{/if}
     {#if file.change !== "binary"}
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>
     {/if}
-    {#if chip}<span class="tf-chip">{chip}</span>{/if}
+    {#if chip}<TfStateChip text={chip} />{/if}
     {#if pipeline !== null && pipeline.on && pipeline.failed === null}
       <span class="tf-ran" class:tf-running={pipeline.running} title={pipeline.running ? "Running the pipeline on both sides" : "The diff of the pipeline's output on both sides"}
         >{pipeline.label}</span
@@ -454,20 +532,43 @@
     {#if rendered !== null && shows !== "lines"}
       <TfDiffRendered plan={rendered} path={file.path} {sides} swipe={shows === "swipe"} {sideOf} {load} {render} {commands} />
     {:else if file.change === "binary"}
-      <div class="tf-dwhy">A binary file: no lines to draw.</div>
+      <div class="tf-dfwhy">A binary file: no lines to draw.</div>
     {:else if !drawsLines}
-      <div class="tf-dwhy">
+      <div class="tf-dfwhy">
         <span>{chip === "generated" ? "Generated, and over" : "Over"} {n(LOAD_OVER)} lines ({n(changed)} changed): not loaded until you ask; nothing is cut.</span>
         <button type="button" class="tf-btn tf-sm" onclick={onload}>Load diff</button>
       </div>
+    {:else if failedLines !== null && file.hunks.length === 0}
+      <div class="tf-dfwhy">
+        <span>Could not read its lines: {failedLines}</span>
+        <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
+      </div>
+    {:else if waiting}
+      <!-- Its lines are being read: their room, held, so nothing below moves much when they come. -->
+      <div class="tf-dwait tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading {keyOf(file)}'s lines" {@attach room(waitingRows(file) * 21)}>
+        {#each { length: Math.min(waitingRows(file), 6) }, k (k)}<span class="tf-skel-bar"></span>{/each}
+      </div>
     {:else if file.hunks.length === 0 && file.old_mode && file.new_mode && file.old_mode !== file.new_mode}
-      <div class="tf-dwhy">File mode changed from <span class="tf-mono">{file.old_mode}</span> to <span class="tf-mono">{file.new_mode}</span>. No content change.</div>
+      <div class="tf-dfwhy">File mode changed from <span class="tf-mono">{file.old_mode}</span> to <span class="tf-mono">{file.new_mode}</span>. No content change.</div>
     {:else if file.hunks.length === 0 && file.change === "renamed"}
-      <div class="tf-dwhy">Renamed{file.similarity != null ? ` with ${file.similarity}% similarity` : ""}. No content change.</div>
+      <div class="tf-dfwhy">Renamed{file.similarity != null ? ` with ${file.similarity}% similarity` : ""}. No content change.</div>
     {:else}
       <div class="tf-dbody" {@attach win.list}>
         {#each win.slice(items) as it (it.key)}{@render item(it)}{/each}
       </div>
+      {#if more !== null}
+        <!-- The rest of a long file: read as the reader reaches it. -->
+        {#if failedLines !== null}
+          <div class="tf-dfwhy">
+            <span>Could not read the rest of its lines: {failedLines}</span>
+            <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
+          </div>
+        {:else}
+          <div class="tf-dmore tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading more of {keyOf(file)}'s lines" {@attach near(onmore)}>
+            <span class="tf-skel-bar"></span><span class="tf-skel-bar"></span>
+          </div>
+        {/if}
+      {/if}
     {/if}
     {#if drawsLines && file.truncated}
       <div class="tf-hunk">Cut here at the {n(DIFF_CEILING)}-line ceiling: the rest of this file's change is at the source.</div>
@@ -479,7 +580,7 @@
           <div class="tf-thread" class:tf-resolved={talk.isResolved(thread)}><span class="tf-dim">{lineName(thread.side, thread.line)}</span><TfWrittenAt {thread} {repository} />{@render conversation(thread)}</div>
         {/each}
         {#each strays as d (d.id)}
-          <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {`${lineName(d.side, d.line)}: ${d.body}`}</p></div>
+          <div class="tf-thread tf-pending"><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {`${lineName(d.side, d.line)}: ${d.body}`}</p></div>
         {/each}
       </details>
     {/if}

@@ -282,7 +282,7 @@ test("a link to a file that does not exist says so once its directory is read", 
 
   for (const read of [...source.asked]) if (!source.answered.includes(read.section)) read.release();
   await settle();
-  expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toBe(`There is no file ${missing} on main.`);
+  expect(text(target.querySelector(".tf-fileview .tf-nohere p"))).toBe("main has no file at this path.");
 });
 
 test("a source that declares no tree sections asks for no section its listings have not named (#2298)", async () => {
@@ -670,7 +670,7 @@ test("a .md file mapped to Source opens as source, and the switcher offers Markd
   expect(face()).toBe("Render as Source");
   expect(menuItems()).toEqual([
     "Markdown built in",
-    "*Source built in · highlighted DEFAULT FOR *.md",
+    "*Source built in · highlighted Default for *.md",
     "Use Markdown for *.md by default",
     "Renderers and defaults… Settings › Renderers",
   ]);
@@ -694,7 +694,7 @@ test("a pick in the switcher holds for that file; Make default writes the patter
   view = mount(TfRepoFiles, { target, props });
   await settle();
   expect(menuItems()).toEqual([
-    "*Markdown built in DEFAULT FOR *.md",
+    "*Markdown built in Default for *.md",
     "Source built in · highlighted",
     "Use Source for *.md by default",
     "Renderers and defaults… Settings › Renderers",
@@ -747,7 +747,7 @@ test("a file only Source takes still shows the switcher, with nothing to make de
   draw(openSource(MD_FILES).entityView, "src/retry.rs");
   await settle();
   expect(face()).toBe("Render as Source");
-  expect(menuItems()).toEqual(["*Source built in · highlighted DEFAULT FOR *.rs", "Renderers and defaults… Settings › Renderers"]);
+  expect(menuItems()).toEqual(["*Source built in · highlighted Default for *.rs", "Renderers and defaults… Settings › Renderers"]);
 });
 
 // -- Mermaid files (#2258) --------------------------------------------------------
@@ -775,7 +775,7 @@ test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows i
   expect([frame.width, frame.height]).toEqual(["300", "120"]);
   expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
   expect(menuItems()).toEqual([
-    "*Mermaid built in · strict security DEFAULT FOR *.mmd",
+    "*Mermaid built in · strict security Default for *.mmd",
     "Source built in · highlighted",
     "Use Source for *.mmd by default",
     "Renderers and defaults… Settings › Renderers",
@@ -824,7 +824,7 @@ test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed fra
     expect([path, frame.getAttribute("sandbox"), frame.title]).toEqual([path, "", `${engine} diagram`]);
     expect(render.asked).toEqual(["a -> b"]);
     expect(menuItems()).toEqual([
-      `*${engine} built in · ${blurb} DEFAULT FOR ${pattern}`,
+      `*${engine} built in · ${blurb} Default for ${pattern}`,
       "Source built in · highlighted",
       `Use Source for ${pattern} by default`,
       "Renderers and defaults… Settings › Renderers",
@@ -886,6 +886,45 @@ test("the app's view:fresh for the top directory reads the tree at the new commi
   expect(lineText(0)).toEqual(["1", "// one"]);
 
   tell(REPO, "files");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// two"]);
+  expect(source.reads).toContain("file@2:main.rs");
+});
+
+test("a refresh reads the top again and not a file drawn at a commit; a branch that moved draws the file at its new commit", async () => {
+  const source = commitSource();
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "main.rs" as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: { dir: "files:", file: "file:" },
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  // A run of the source ended and the branch stands where it did: the top is read again, the file at the commit it was
+  // drawn at is not, since it cannot have changed (the WSL block, 2026-11-14: every run's end read it again from Gitea,
+  // 0.2 to 2.2 s, and a page opened meanwhile waited on it).
+  const before = source.reads.length;
+  props.refreshed += 1;
+  await settle();
+  expect(source.reads.slice(before)).toContain("files");
+  expect(source.reads.slice(before).filter((id) => id.endsWith("main.rs")), "the file drawn at its commit is not read again").toEqual([]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  // A run that moved the branch: the top names the file at the new commit, and that is read and drawn.
+  source.push();
+  props.refreshed += 1;
   await settle();
   expect(lineText(0)).toEqual(["1", "// two"]);
   expect(source.reads).toContain("file@2:main.rs");

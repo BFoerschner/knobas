@@ -53,8 +53,10 @@ export interface PrLine {
   number: string | null;
   /** Open, and nothing happened to it for more than five days. */
   idle: boolean;
-  /** Who opened it, as the source spells the account, or `null` before `code_facts` answers or on a miss. */
+  /** Who opened it, by the profile's name where the source keeps one, else as it spells the account; `null` before `code_facts` answers or on a miss. */
   author: string | null;
+  /** The reader wrote it: the row says *you*, and the filter still finds the account's name. */
+  mine: boolean;
 }
 
 /** Whether a group is *Mine*: asking your review, or yours. */
@@ -72,8 +74,12 @@ export function prNumber(entityId: string): string | null {
  * The tab's rows: first the attention read's (#712), which holds the open
  * pull requests group by group in its own order, then every other pull
  * request the recency read holds (merged or closed, which attention drops as
- * settled), newest first. A settled one whose author is mine (`code_facts`,
- * #966) is under *Yours*, as prototype-6 groups `p.by===ME`.
+ * settled), newest first, under *Merged or closed* whoever wrote them.
+ *
+ * Prototype-6 put a settled one of mine under *Yours* (`p.by===ME`), which
+ * only `code_facts` knows, read after both lists: a row moved groups under
+ * the pointer when it landed (the still-rows pass, 2026-11-11). Yours is open
+ * work now; *Mine* still keeps a settled pull request of yours.
  */
 export function prLines(attention: EntityPage, all: EntityPage, now: Date, facts: FactsById = new Map()): PrLine[] {
   const groupOf: (PrGroup | null)[] = [];
@@ -87,7 +93,7 @@ export function prLines(attention: EntityPage, all: EntityPage, now: Date, facts
   const seen = new Set(open.map((entry) => entry.row.entity_id));
   const settled = all.rows
     .filter((row) => row.kind === "pr" && !seen.has(row.entity_id))
-    .map((row) => line(row, facts.get(row.entity_id)?.mine ? "yours" : "settled", now, false, facts));
+    .map((row) => line(row, "settled", now, false, facts));
   return [...open, ...settled];
 }
 
@@ -98,7 +104,9 @@ function line(row: EntityRow, group: PrGroup | null, now: Date, open: boolean, f
     group,
     number: prNumber(row.entity_id),
     idle: open && !Number.isNaN(at) && now.getTime() - at > IDLE_MS,
-    author: facts.get(row.entity_id)?.author ?? null,
+    // The opener as a ticket's card names a person (F-107): the profile's name, else the account.
+    author: facts.get(row.entity_id)?.author_name ?? facts.get(row.entity_id)?.author ?? null,
+    mine: facts.get(row.entity_id)?.mine ?? false,
   };
 }
 
@@ -128,7 +136,8 @@ export function repoTeams(repos: readonly EntityRow[], facts: FactsById): Map<st
 
 /**
  * The pull requests the filter keeps, in the order given. *Mine* is what
- * asks for your review and what is yours (prototype-6: `p.by===ME||p.wait`).
+ * asks for your review and what you wrote, open or settled (prototype-6:
+ * `p.by===ME||p.wait`).
  * The words reach the number, title, repository and author.
  */
 export function visiblePrs(
@@ -137,9 +146,9 @@ export function visiblePrs(
   teams: ReadonlyMap<string, readonly string[]>,
 ): PrLine[] {
   const states = filter.states.map((state) => state.toLowerCase());
-  return lines.filter(({ row, group, number, idle, author }) => {
+  return lines.filter(({ row, group, number, idle, author, mine }) => {
     if (filter.scope === "job" && !filter.held(row.entity_id)) return false;
-    if (filter.scope === "mine" && !isMineGroup(group)) return false;
+    if (filter.scope === "mine" && !isMineGroup(group) && !mine) return false;
     if (states.length > 0 && !states.includes(row.state?.text.toLowerCase() ?? "")) return false;
     if (filter.flags.includes("Waiting on me") && group !== "review") return false;
     if (filter.flags.includes("Idle > 5 days") && !idle) return false;
@@ -183,6 +192,19 @@ function repoKey(sourceId: string, name: string): string {
 }
 
 /** How many open pull requests each repository has, by {@link repoKey}. */
+/**
+ * The rows whose name a row from another source holds too (the live run, 2026-11-09): Gitea and Forgejo both serve
+ * `tidewater/payout-service` and its #142, and two rows that read the same were two places nobody could tell apart. Only
+ * these name their source, as the launcher's twin tickets do (#1476).
+ */
+export function twinRows<Row extends { entity_id: string; source_id: string }>(rows: readonly Row[], name: (row: Row) => string): ReadonlySet<string> {
+  const byName = new Map<string, Row[]>();
+  for (const row of rows) byName.set(name(row), [...(byName.get(name(row)) ?? []), row]);
+  // Grouped by name, never narrowed by source: a name held in more than one source is a twin.
+  const holders = (group: readonly Row[]) => new Set(group.map((row) => row.source_id)).size;
+  return new Set([...byName.values()].filter((group) => holders(group) > 1).flatMap((group) => group.map((row) => row.entity_id)));
+}
+
 export function openPrsOf(lines: readonly PrLine[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const { row } of lines) {
@@ -224,9 +246,14 @@ export function repoChoices(repos: readonly EntityRow[], facts: FactsById): { te
 }
 
 /**
- * The repositories the filter keeps: yours first (a pull request of yours, or
- * one asking your review, is in it), then by last push, newest first. The
- * words reach the name, the teams and the language.
+ * The repositories the filter keeps: yours first (an open pull request of
+ * yours, or one asking your review, is in it), then by last push, newest
+ * first. The words reach the name, the teams and the language.
+ *
+ * Yours is the attention read's alone, so the order is decided once the
+ * repositories and the open pull requests are read; a merged one of yours,
+ * which only `code_facts` knows, lifted its repository when that landed, under
+ * the pointer (the still-rows pass, 2026-11-11).
  */
 export function visibleRepos(
   rows: readonly EntityRow[],
@@ -290,5 +317,5 @@ export function headerLine(
   } catch {
     host = null;
   }
-  return host ? `${total} ${noun} on ${host}, what asks for you first.` : `${total} ${noun}, what asks for you first.`;
+  return host ? `${total} ${noun} on ${host}, yours first.` : `${total} ${noun}, yours first.`;
 }

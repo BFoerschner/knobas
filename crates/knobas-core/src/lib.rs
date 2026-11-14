@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod asset;
+pub mod briefs;
 pub mod builds;
 pub mod checkout;
 pub mod code_facts;
@@ -9,7 +10,10 @@ pub mod entity_list;
 mod error;
 pub mod evidence;
 pub mod inbox;
+pub mod item_card;
 mod item_field;
+pub mod item_row;
+pub mod item_search;
 pub mod link;
 pub mod link_set;
 mod live;

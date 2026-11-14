@@ -3,6 +3,7 @@
  * `>` palette (#1417) and the query box's suggestions (#601).
  */
 import type { SearchResponse } from "../../../ipc/search";
+import { SYNTAX } from "../../../launcher/syntax";
 import type { Handlers } from "../fake-tauri";
 import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
@@ -302,15 +303,26 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
  * **A substring match, fixture-only**, like the estate search below: it
  * answers the shape and not the engine's question. The ranking, the excerpt
  * and the grammar are the engine's, witnessed over a real PostgreSQL in
- * `knobas-search`'s integration tests. A query with a prefix or a `:` token
- * is not answered here.
+ * `knobas-search`'s integration tests. A leading `#` filter narrows to its
+ * kinds (`SYNTAX`'s letters), so a section's search can be looked at too, and a
+ * `#` word that is no filter is the word, hash dropped (#2420). Any other
+ * prefix or a `:` token is not answered here.
  */
 function wordSearch(raw: string, titles: boolean): SearchResponse | null {
-  const text = raw.trim();
-  if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
-  const words = text.toLowerCase().split(/\s+/);
+  const typed = raw.trim();
+  const named = /^#([a-z]+)(?:\s+(.*))?$/i.exec(typed);
+  const lettersOf = [...(named?.[1]?.toLowerCase() ?? "")];
+  const kindsOf = lettersOf.flatMap((letter) => SYNTAX.find((row) => row.token === `#${letter}`)?.kind ?? []);
+  const filter = kindsOf.length === lettersOf.length ? named : null;
+  const kinds = filter ? kindsOf : [];
+  const asked = filter ? typed : typed.replace(/^#(?=[^\s])/, "");
+  const text = filter ? (filter[2] ?? "").trim() : asked;
+  if ((text === "" && filter === null) || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
   const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
+  const wanted = (kind: string) => filter === null || kinds.includes(kind);
   for (const { haystack, hit, log } of launcherKindHits()) {
+    if (!wanted(hit.kind)) continue;
     // Everything (#2431): a pipeline is found by its newest run's log too.
     const body = titles ? "" : (log ?? "");
     if (!words.every((word) => `${haystack} ${body}`.toLowerCase().includes(word))) continue;
@@ -319,7 +331,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     byKind.set(hit.kind, hits);
   }
   for (const entry of CORPUS) {
-    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
+    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind) || !wanted(entry.kind)) continue;
     const row = mirrorRow(entry);
     const body = titles ? "" : entry.body_text;
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
@@ -344,7 +356,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     interpreted: {
       text,
       prefix: null,
-      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
       left_out_tokens: [],
     },
@@ -380,6 +392,22 @@ function leftOutAnswer(raw: string): SearchResponse | null {
 }
 
 /** This feature's commands. */
+/**
+ * `?fake-projects=<n>`: `n` more projects among the ticket keys' values, to
+ * look at the view editor's Project condition at a real Jira's size
+ * (`&fake-projects=40`), where its values are a list to search.
+ */
+function manyProjects(): { key: string; value: string; detail: string }[] {
+  const count = Number(new URLSearchParams(globalThis.location?.search).get("fake-projects") ?? 0) || 0;
+  const areas = ["Billing", "Customs", "Tracking", "Warehouse", "Fleet", "Partner", "Returns", "Pricing", "Identity", "Analytics"];
+  const kinds = ["Platform", "Mobile", "Integrations", "Support", "Data", "Web"];
+  return Array.from({ length: count }, (_, at) => {
+    const area = areas[at % areas.length]!;
+    const kind = kinds[Math.floor(at / areas.length) % kinds.length]!;
+    return { key: "project", value: `${area.slice(0, 2)}${kind.slice(0, 1)}${at >= 60 ? at : ""}`.toUpperCase(), detail: `${area} ${kind}` };
+  });
+}
+
 export function handlers(): Handlers {
   return {
     // The launcher board (#504): the recent items alone since #2421 and
@@ -430,6 +458,7 @@ export function handlers(): Handlers {
       fields: [
         { key: "project", value: "PAY", detail: "Payments" },
         { key: "project", value: "OPS", detail: "Operations" },
+        ...manyProjects(),
         ...["In Progress", "To Do", "In Review", "Done"].map((value) => ({
           key: "status",
           value,
@@ -438,7 +467,7 @@ export function handlers(): Handlers {
         ...["Story", "Bug", "Task"].map((value) => ({ key: "issuetype", value, detail: "" })),
         ...["High", "Medium", "Low"].map((value) => ({ key: "priority", value, detail: "" })),
         { key: "assignee", value: "@me", detail: "you" },
-        { key: "assignee", value: "jonas.becker", detail: "" },
+        { key: "assignee", value: "jonas", detail: "" },
         { key: "label", value: "sepa", detail: "" },
         { key: "sprint", value: "current", detail: "the active sprint" },
         { key: "assigned", value: "today", detail: "assigned to you, changed in the last day" },

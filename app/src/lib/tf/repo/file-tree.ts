@@ -3,7 +3,7 @@
  * every path at the commit, which row the arrow keys go to, and what the file
  * header and the last-commit strip say.
  */
-import type { TreeEntry, ViewRow } from "../../ipc/entity";
+import type { LocalEntry, TreeEntry, ViewRow } from "../../ipc/entity";
 import { sized } from "../../render/pipeline";
 
 export { initials } from "../tickets/tickets";
@@ -37,16 +37,48 @@ export function goToFile(paths: readonly string[], typed: string, limit = GO_TO_
     .map(({ path }) => path);
 }
 
+/**
+ * One directory of a checkout's tree as the listing the tab draws (the big-folder pass, 2026-11-13): each entry by its
+ * name, opened by the section `sectionOf` makes for it (none for a submodule), directories first and then by name,
+ * case aside, as the source sorts them.
+ */
+export function checkoutListing(
+  entries: readonly LocalEntry[],
+  sectionOf: (kind: "dir" | "file", path: string) => string,
+): TreeEntry[] {
+  return entries
+    .map((entry) => ({
+      name: baseName(entry.path),
+      kind: entry.kind,
+      size: entry.size,
+      section: entry.kind === "submodule" ? null : sectionOf(entry.kind === "dir" ? "dir" : "file", entry.path),
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.kind === "dir") - Number(a.kind === "dir") ||
+        a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    );
+}
+
 /** One row of the tree as drawn: a directory (folded or not), a file, or what opens nothing (a submodule). */
 export interface TreeRow {
   path: string;
+  /** The entry's name, as its row reads. */
+  name: string;
   kind: "dir" | "file" | "other";
   depth: number;
   /** A directory drawn unfolded. */
   open: boolean;
+  /** The section that opens it, as its listing named it; `null` for what opens nothing. */
+  section: string | null;
 }
 
-/** The rows the tree draws, in order: each listing read, an open directory's entries after it. */
+/**
+ * The rows the tree draws, in order: each listing read, an open directory's entries after it. The tree draws this
+ * flat list through a windowed list (the big-folder pass, 2026-11-13), so a folder of ten thousand entries mounts the
+ * rows in view, not ten thousand.
+ */
 export function treeRows(listings: Readonly<Record<string, readonly TreeEntry[]>>, open: ReadonlySet<string>): TreeRow[] {
   const rows: TreeRow[] = [];
   const walk = (dir: string, depth: number) => {
@@ -54,7 +86,7 @@ export function treeRows(listings: Readonly<Record<string, readonly TreeEntry[]>
       const path = dir === "" ? entry.name : `${dir}/${entry.name}`;
       const kind = entry.kind === "dir" ? "dir" : entry.section === null ? "other" : "file";
       const unfolded = kind === "dir" && open.has(path);
-      rows.push({ path, kind, depth, open: unfolded });
+      rows.push({ path, name: entry.name, kind, depth, open: unfolded, section: entry.section });
       if (unfolded) walk(path, depth + 1);
     }
   };
@@ -121,6 +153,19 @@ export function fileMeta(file: { path: string; size: number | bigint; binary: bo
   const kind = file.binary ? (KINDS[ext] ?? "binary") : `${lines} ${lines === 1 ? "line" : "lines"}`;
   const at = file.commit ? ` · at ${file.commit.slice(0, 7)}` : "";
   return `${sized(Number(file.size))} · ${kind}${at}`;
+}
+
+/**
+ * A commit row's second reading: the source's `author · age`, or *You · age*
+ * on the reader's own commit (F-221), as the page's other lines call them.
+ * `mine` is `code_facts`' word, so a commit the mirror does not hold keeps its
+ * author's name, and a line that names no author stays as the source wrote it.
+ */
+export function commitLine(row: ViewRow, mine: boolean): string {
+  const meta = row.meta ?? "";
+  if (!mine || !row.author) return meta;
+  const { when } = authorOf(row);
+  return when !== null && when !== row.author ? `You · ${when}` : "You";
 }
 
 /**

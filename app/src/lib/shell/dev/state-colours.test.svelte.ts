@@ -55,19 +55,19 @@ test("the dev fake draws a section and its line for builds, monitors, pull reque
   const sections = [...target.querySelectorAll(".tf-kept:not([hidden]) .tf-sc section")];
   expect(sections.map((s) => s.getAttribute("aria-label"))).toEqual(["Builds", "Monitors", "Pull requests", "Tickets"]);
   expect(text(section("Builds")!.querySelector(".tf-sc-line"))).toBe(
-    "err is what the inbox and signals count as a failed build. A job counts err builds as failing, info as running and ok as passing.",
+    "Error is what the inbox and signals count as a failed build. A job counts Error builds as failing, Active as running and Good as passing.",
   );
-  expect(text(section("Pull requests")!.querySelector(".tf-sc-line"))).toContain("ok and muted pull requests are hidden from open-work lists");
+  expect(text(section("Pull requests")!.querySelector(".tf-sc-line"))).toContain("Good and Quiet pull requests are left out of the open ones on Code");
   for (const s of sections) expect(text(s.querySelector(".tf-sc-line"))).not.toBe("");
   // The fake's two seen Jira statuses: Blocked at its category's info, To Do (category to do) uncoloured.
-  expect(column("Tickets", "info")).toEqual(["In Progress", "In Review", "Blocked"]);
-  expect(text(section("Tickets")!.querySelector('.tf-sc-chip[aria-label="Blocked"] .tf-sc-from'))).toBe("Jira category");
-  expect(column("Tickets", "No colour")).toEqual(["To Do"]);
+  expect(column("Tickets", "Active")).toEqual(["In progress", "In review", "Blocked"]);
+  expect(section("Tickets")!.querySelector<HTMLElement>('button[aria-label="Move Blocked"]')!.title).toContain("From its Jira category");
+  expect(column("Tickets", "No colour")).toEqual(["To do"]);
 
   section("Builds")!
-    .querySelector('button[aria-label="Move FAILURE"]')!
+    .querySelector('button[aria-label="Move Failed"]')!
     .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-  await until(() => column("Builds", "info").includes("FAILURE"), "FAILURE never moved to info");
+  await until(() => column("Builds", "Active").includes("Failed"), "Failed never moved to Active");
   expect(sent.filter((c) => c.cmd === "set_tone_override").map((c) => c.args)).toEqual([{ kind: "build", word: "FAILURE", tone: "info" }]);
-  expect(text(section("Builds")!.querySelector('.tf-sc-chip[aria-label="FAILURE"] .tf-sc-from'))).toBe("yours");
+  expect(section("Builds")!.querySelector('button[aria-label="Reset Failed"]')).not.toBeNull();
 });

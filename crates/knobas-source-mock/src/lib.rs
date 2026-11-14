@@ -1254,7 +1254,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 values: vec![
                     StateValue::of("up", Tone::Ok),
                     StateValue::of("down", Tone::Err),
-                    StateValue::of("pending", Tone::Warn),
+                    StateValue::of("pending", Tone::Info),
                 ],
             }],
             monitor_type: vec![PayloadPath::of(["type"])],

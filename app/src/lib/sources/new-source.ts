@@ -18,6 +18,14 @@ export const AUTH_LABEL: Record<AuthMethod, string> = {
 /** Contract §4.1. The id is the entity namespace and is immutable (P10). */
 export const SOURCE_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
+/** An id the form can offer: the adapter's kind, or the next free one after it, so a prefill never starts out refused (F-624). */
+export function freeSourceId(kind: string, taken: readonly string[]): string {
+  if (!taken.includes(kind)) return kind;
+  let next = 2;
+  while (taken.includes(`${kind}-${next}`)) next += 1;
+  return `${kind}-${next}`;
+}
+
 /** A new source's schedule, unless the reader picks another: every 15 minutes. */
 export const DEFAULT_INTERVAL_SECS = 900;
 

@@ -144,6 +144,7 @@ fn asking(role: &str) -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: Some(role.to_owned()),
+        parent: None,
     }
 }
 
@@ -208,6 +209,7 @@ async fn a_role_reads_its_fillers_and_its_kinds_and_nothing_else() {
     // Every one of them is live: absent a role, the read draws them all.
     let unscoped = EntityFilter {
         role: None,
+        parent: None,
         ..asking(knobas_source::role::CI)
     };
     assert_eq!(read(&pool, &unscoped, &all).await.len(), 15);

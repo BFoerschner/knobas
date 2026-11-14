@@ -79,10 +79,41 @@ test("a command step added here is saved whole with its name, command and timeou
   type("Step name", "Upper");
   type("Step command", "tr a-z A-Z");
   type("Step timeout", "4");
-  button("Save step").click();
+  button("Add step").click();
   await settle();
   expect(s.stepSaves).toEqual([[{ id: null, name: "Upper", command: "tr a-z A-Z", timeout_secs: 4 }]]);
-  expect(cells(".tf-rnd-steps")).toEqual([["Upper", "tr a-z A-Z", "4 s"]]);
+  expect(cells(".tf-rnd-steps")).toEqual([["Upper", "tr a-z A-Z", "4s"]]);
+});
+
+test("a pipeline's Add a command step opens the step's dialog over it, and the new step joins the pipeline", async () => {
+  const held = stores([], [], []);
+  app = mount(TfPipelinesSettings, { target, props: { pipelines: held.pipelines, stepCommands: held.stepCommands, defaults: held.defaults } });
+  await new Promise((r) => setTimeout(r));
+  flushSync();
+  const named = (text: string, from: ParentNode = document) => [...from.querySelectorAll<HTMLElement>("button, a")].find((b) => b.textContent?.trim().startsWith(text))!;
+  const titles = () => [...document.querySelectorAll(".tf-dialog h2")].map((h) => h.textContent);
+  named("Add a pipeline…").click();
+  flushSync();
+  named("Add step…").click();
+  flushSync();
+  const item = named("Add a command step…", document.querySelector(".tf-menu")!);
+  expect(item.tagName, "not a link to the page it is on").toBe("BUTTON");
+  item.click();
+  flushSync();
+  expect(titles()).toEqual(["Add a pipeline", "Add a command step"]);
+  const field = (id: string, value: string) => {
+    const input = document.querySelector<HTMLInputElement>(id)!;
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  field("#tf-pst-name", "Decode");
+  field("#tf-pst-cmd", "protoc --decode_raw");
+  flushSync();
+  document.querySelector<HTMLFormElement>("#tf-pst-form")!.requestSubmit();
+  await new Promise((r) => setTimeout(r));
+  flushSync();
+  expect(titles()).toEqual(["Add a pipeline"]);
+  expect([...document.querySelectorAll(".tf-dialog .tf-pstep")].map((s) => s.textContent?.trim())).toContain("Decode");
 });
 
 test("a named pipeline is listed with the patterns that use it, and an edit keeps its id so they follow", async () => {
@@ -91,7 +122,7 @@ test("a named pipeline is listed with the patterns that use it, and an edit keep
   await settle();
   expect(cells(".tf-rnd-pipes")).toEqual([["Gzipped JSON", "gunzip → jq", "*.json.gz"]]);
 
-  button("Edit Gzipped JSON").click();
+  button("Edit Gzipped JSON…").click();
   flushSync();
   button("Remove jq").click();
   flushSync();

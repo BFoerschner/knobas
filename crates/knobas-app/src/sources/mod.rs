@@ -7,6 +7,7 @@
 
 pub mod crud;
 pub mod demo;
+pub mod held;
 pub mod install;
 pub mod installed;
 pub mod live;
@@ -16,6 +17,7 @@ pub mod refresh;
 pub mod registry;
 pub mod remote;
 pub mod state_colours;
+pub(crate) mod stored_tree;
 pub mod write_queue;
 
 // `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
@@ -611,9 +613,10 @@ pub struct BringUp {
     pub registry: Registry,
     /// The installed adapters' artifact store ([`install::store_dir`]).
     pub store: std::path::PathBuf,
-    /// The process's one suggestion pass, requested after every run that
-    /// ends OK ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync),
-    /// #1485): the one bring-up built, never one of the scheduler's own.
+    /// The process's one suggestion pass, requested after a run that ends
+    /// OK and wrote to the mirror
+    /// ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync), #1485):
+    /// the one bring-up built, never one of the scheduler's own.
     pub suggestions: crate::suggestion_pass::SuggestionPass,
 }
 
@@ -663,6 +666,8 @@ pub async fn bring_up<R: tauri::Runtime>(
     )
     .await?;
     let live = live::LiveSources::default();
+    // Pages show what knobas last read, from the session before too (ADR-0042).
+    live.hold_in(deps.pool.clone());
     let fresh_to = app.clone();
     live.on_fresh(move |fresh| {
         crate::events::emit(&fresh_to, None, crate::events::VIEW_FRESH, fresh);

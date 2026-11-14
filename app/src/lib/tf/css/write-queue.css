@@ -3,7 +3,7 @@
 .tf-dialog.tf-wq-dialog > footer { align-items: center; }
 .tf-wq-sec { display: flex; flex-direction: column; gap: 8px; }
 .tf-wq-sec + .tf-wq-sec { margin-top: 8px; }
-.tf-wq-h { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); font-weight: 600; }
+.tf-wq-h { display: flex; align-items: center; gap: 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 /*
   The decisions heading carries the tone, not just the rows under it: the eye
   reaches the heading first, and it is the heading that says "this section is
@@ -32,7 +32,7 @@
 .tf-wq-side { display: block; margin-bottom: 3px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-wq-pre {
   margin: 0; padding: 8px 10px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2);
-  font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto;
+  font: var(--t-xs)/1.5 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto;
 }
 .tf-wq-pre.tf-wq-mine { border-color: var(--rule); color: var(--ink); }
 .tf-wq-gone {

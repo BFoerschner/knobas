@@ -11,6 +11,7 @@
   import type { LauncherHome } from "../ipc";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { kindRegistry } from "../shell/kind-registry.svelte";
+  import { stateWord } from "../tf/state-word";
   import { cellsOf } from "./cells";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
@@ -21,6 +22,7 @@
     selected,
     optionId,
     chordOf = () => null,
+    sourceOf = () => null,
     onopen,
     onhover,
   }: {
@@ -31,6 +33,8 @@
     optionId: (index: number) => string;
     /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
     chordOf?: (row: LauncherRow) => string | null;
+    /** The source a row names, where its key repeats in the list (#1476); none when omitted. */
+    sourceOf?: (row: LauncherRow) => string | null;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
@@ -51,11 +55,12 @@
     <Row
       monogram={kindMonogram(item.kind, info)}
       tone={item.state?.tone ?? null}
-      kindName={item.state ? `${word}: ${item.state.text}` : word}
+      kindName={item.state ? `${word}: ${stateWord(item.state.text)}` : word}
       cell={cells.cell}
       mono={cells.mono}
       title={cells.title}
       chord={chordOf(row)}
+      source={sourceOf(row)}
       id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}

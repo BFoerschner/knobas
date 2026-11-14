@@ -349,7 +349,7 @@ async fn repo_id(pool: &PgPool, entity_id: &str) -> Result<String, IpcError> {
         })
 }
 
-async fn start_with(
+pub(super) async fn start_with(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
     clones: &Arc<Clones>,

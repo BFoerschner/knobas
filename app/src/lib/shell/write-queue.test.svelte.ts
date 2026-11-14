@@ -69,6 +69,7 @@ const {
   writeWords,
 } = await import("./write-queue.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
+const { toasts, reset: resetToasts } = await import("./toasts.svelte");
 
 /**
  * ADR-0012's canonical sentence, **read out of the ADR at test time**.
@@ -473,9 +474,8 @@ test("the panel is a ticket-first dialog: its title, its counts, no capitals, ev
   expect(screen.text()).toContain("Retries the waiting writes. Held writes are untouched.");
   expect(screen.layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
 
-  const capitals = uppercaseClasses();
-  expect(capitals).toContain("lab");
-  for (const name of capitals) expect(screen.target.querySelector(`.${name}`), name).toBeNull();
+  // The rooms sheet draws no capitals any more, so nothing here can reach them (design system, *Structure*).
+  expect(uppercaseClasses()).toEqual([]);
 
   const headings = [...screen.target.querySelectorAll(".tf-wq-row-h b")].map((node) => node.textContent);
   expect(headings).toEqual(["Comment on PAY-231", "Pause monitor Payments API", "Comment on PAY-300"]);
@@ -1007,18 +1007,18 @@ test("no amount of time moves a held write", async () => {
 });
 
 /**
- * And the other way the rule could be broken: a bulk action. *Flush now* is
+ * And the other way the rule could be broken: a bulk action. *Retry waiting writes* is
  * impatience, and it must reach the flush command and nothing else — the
  * backend will not offer a held write to its flush loop, and the panel must
  * not compensate for that on the reader's behalf.
  */
-test("flush now retries the waiting writes and releases nothing", async () => {
+test("Retry waiting writes retries them and releases nothing", async () => {
   rows = [held(), write()];
   counts = { pending: 1, held: 1, refused: 0 };
   const screen = await render();
   calls.length = 0;
 
-  screen.button("Flush now")!.click();
+  screen.button("Retry waiting writes")!.click();
   await waitFor(() => expect(calls.some((c) => c.command === "flush_writes")).toBe(true));
 
   expect(calls.filter((c) => c.command === "apply_held_write")).toEqual([]);
@@ -1029,8 +1029,8 @@ test("flush now retries the waiting writes and releases nothing", async () => {
   screen.done();
 });
 
-/** #2289: the canonical footer, its line on the far left, a ghost *Close*, then *Flush now* as the primary. */
-test("the footer reads its line, a ghost Close, then Flush now as the primary", async () => {
+/** #2289: the canonical footer, its line on the far left, a ghost *Close*, then *Retry waiting writes* as the primary. */
+test("the footer reads its line, a ghost Close, then Retry waiting writes as the primary", async () => {
   rows = [write()];
   counts = { pending: 1, held: 0, refused: 0 };
   const screen = await render();
@@ -1040,7 +1040,7 @@ test("the footer reads its line, a ghost Close, then Flush now as the primary", 
     "tf-btn tf-ghost",
     "tf-btn tf-primary",
   ]);
-  expect([...footer.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Close", "Flush now"]);
+  expect([...footer.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Close", "Retry waiting writes"]);
   screen.done();
 });
 
@@ -1132,21 +1132,21 @@ test("a queue whose first read failed shows the reason, not 'Nothing is queued'"
 });
 
 /**
- * Only *Flush now* is disabled while a send runs (#775, #1671): it is the send,
+ * Only *Retry waiting writes* is disabled while a send runs (#775, #1671): it is the send,
  * and the panel's other answers -- withdraw, edit, send anyway -- stay
  * pressable while it is out.
  */
-test("flush now disables only itself while the send it asked for is out", async () => {
+test("Retry waiting writes disables only itself while the send it asked for is out", async () => {
   rows = [held(), write()];
   counts = { pending: 1, held: 1, refused: 0 };
   const screen = await render();
   flushHold = new Promise(() => {});
   try {
-    screen.button("Flush now")!.click();
+    screen.button("Retry waiting writes")!.click();
     await settle();
     expect(screen.queue.busy).toBe(false);
     // Its own button is off while it is out (#1671); the other answers are not.
-    expect(screen.button("Flush now")!.disabled).toBe(true);
+    expect(screen.button("Retrying…")!.disabled).toBe(true);
     expect(screen.button("Discard")!.disabled).toBe(false);
   } finally {
     flushHold = null;
@@ -1154,19 +1154,50 @@ test("flush now disables only itself while the send it asked for is out", async 
   screen.done();
 });
 
-/** #1671: a double click on *Flush now* is one send. */
-test("double-clicking flush now sends one flush_writes", async () => {
+/** The press rule: a control that can't act is off with its reason, and a press says what it did. */
+test("Retry waiting writes is off with its reason when nothing is waiting", async () => {
+  rows = [held()];
+  counts = { pending: 0, held: 1, refused: 0 };
+  const screen = await render();
+  expect(screen.button("Retry waiting writes")!.disabled).toBe(true);
+  expect(screen.dialogs()[0]!.querySelector("footer .tf-dwhy")?.textContent).toBe("Nothing is waiting.");
+  screen.done();
+});
+
+test("Edit… puts focus in the box, and the stack's close takes the box and leaves the queue open, focus back on Edit…", async () => {
+  rows = [held()];
+  counts = { pending: 0, held: 1, refused: 0 };
+  const screen = await render();
+  const layers = screen.layers;
+  screen.button("Edit…")!.click();
+  await settle();
+  const box = screen.dialogs()[0]!.querySelector("textarea")!;
+  expect(document.activeElement).toBe(box);
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog", "dialog"]);
+
+  layers.open.at(-1)!.close();
+  await settle();
+  expect(screen.dialogs()).toHaveLength(1);
+  expect(screen.dialogs()[0]!.querySelector("textarea")).toBeNull();
+  expect(document.activeElement).toBe(screen.button("Edit…"));
+  screen.done();
+});
+
+/** #1671: a double click on *Retry waiting writes* is one send. */
+test("double-clicking Retry waiting writes sends one flush_writes", async () => {
   rows = [write()];
   counts = { pending: 1, held: 0, refused: 0 };
   const screen = await render();
   calls.length = 0;
-  const button = screen.button("Flush now")!;
+  resetToasts();
+  const button = screen.button("Retry waiting writes")!;
   button.click();
   button.click();
   await settle();
   expect(calls.filter((c) => c.command === "flush_writes")).toHaveLength(1);
+  expect(toasts.items.filter((toast) => /waiting/.test(toast.text)), "one press, one answer").toHaveLength(1);
   // …and the button is back once the send has answered.
-  expect(screen.button("Flush now")!.disabled).toBe(false);
+  expect(screen.button("Retry waiting writes")!.disabled).toBe(false);
   button.click();
   await settle();
   expect(calls.filter((c) => c.command === "flush_writes")).toHaveLength(2);

@@ -9,13 +9,39 @@
 import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import { clockLabel } from "../../time/format";
 import { originLabel } from "../job/job";
-
-/** How many runs the strip under a pipeline's name shows (R-9.4a). */
-export const STRIP = 12;
+import { stateWord } from "../state-word";
 
 /** The list's two chips, in prototype-6's words (R-9.1). */
 export const CHIPS = ["Failing", "Running"] as const;
 export type Chip = (typeof CHIPS)[number];
+
+/**
+ * When a run counts as made, for its place in a list: when it started, or, not started yet, the source's own time for
+ * it, which for a queued run is when it was queued. `-Infinity` for a run with neither.
+ */
+export function runMade(run: RunRow): number {
+  const at = run.started ?? run.updated_at;
+  const ms = at === null ? Number.NaN : Date.parse(at);
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+}
+
+/**
+ * Runs newest first by {@link runMade}, the read's order kept between equals (PR #2479, the monitors-builds pass).
+ * The mirror answers runs by the source's last word on each (a TeamCity build's finish), so a long build that finished
+ * after a newer short one sorted above it: every list of runs is by when it started instead, which is what a person
+ * looks for first.
+ */
+export function newestFirst(runs: readonly RunRow[]): RunRow[] {
+  return runs
+    .map((run, at) => ({ run, at, made: runMade(run) }))
+    .sort((a, b) => (a.made === b.made ? a.at - b.at : a.made < b.made ? 1 : -1))
+    .map(({ run }) => run);
+}
+
+/** A pipeline with its recent runs {@link newestFirst}: its strip, its latest run's time and its tone read them. */
+export function recentNewestFirst<P extends Pick<PipelineRow, "recent">>(pipeline: P): P {
+  return { ...pipeline, recent: newestFirst(pipeline.recent) };
+}
 
 /** Whether the pipeline's latest run failed: its name is drawn in err tone. */
 export function isFailing(pipeline: PipelineRow): boolean {
@@ -31,6 +57,8 @@ export function isRunning(pipeline: PipelineRow): boolean {
  * A run's block in the strip: finished, its declared tone; in flight,
  * running once it started and queued before.
  */
+export { stateWord };
+
 export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | "q" {
   if (run.finished === null && run.started !== null) return "run";
   if (run.finished === null && run.started === null) return "q";
@@ -38,9 +66,47 @@ export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | 
   return tone === "ok" || tone === "err" || tone === "warn" ? tone : "muted";
 }
 
-/** The last {@link STRIP} runs, oldest first, so the newest is on the right. */
-export function stripOf(pipeline: PipelineRow): RunRow[] {
-  return pipeline.recent.slice(0, STRIP).reverse();
+/** A rail row's glyph: its latest run's {@link runTone}, or `none` for a pipeline nothing ran. */
+export type GlyphTone = ReturnType<typeof runTone> | "none";
+
+/** What a glyph says where its run declares no state of its own. */
+const UNSAID: Record<GlyphTone, string> = {
+  ok: "Passed",
+  err: "Failed",
+  warn: "Warning",
+  run: "Running",
+  q: "Queued",
+  muted: "Finished",
+  none: "No runs",
+};
+
+/**
+ * The glyph a rail row draws for its pipeline's latest run, and its word: the run's state as its chip says it
+ * ({@link stateWord}, design system, Words), *Queued* as the run table's chip says a waiting one.
+ */
+export function railGlyph(pipeline: PipelineRow): { tone: GlyphTone; word: string } {
+  return runGlyph(pipeline.recent[0]);
+}
+
+/** What a glyph of `tone` says where its run declares no state of its own, and what a branch's glyph says. */
+export function toneWord(tone: GlyphTone): string {
+  return UNSAID[tone];
+}
+
+/** One run's glyph and word, as {@link railGlyph} draws a pipeline's latest; `undefined` is a pipeline nothing ran. */
+export function runGlyph(run: RunRow | undefined): { tone: GlyphTone; word: string } {
+  const tone: GlyphTone = run === undefined ? "none" : runTone(run);
+  const said = tone === "q" || tone === "none" ? "" : stateWord(run?.state?.text ?? "");
+  return { tone, word: said || UNSAID[tone] };
+}
+
+/**
+ * The instant a run is told by: a failure when it failed, that is when it finished; any other when it started, or,
+ * not started, when the source last touched it. `null` where it has none.
+ */
+export function runAt(run: RunRow): string | null {
+  const started = run.started ?? run.updated_at;
+  return runTone(run) === "err" ? (run.finished ?? started) : started;
 }
 
 /**
@@ -54,7 +120,26 @@ export function latestTime(pipeline: PipelineRow, now: Date = new Date()): strin
   return at === null ? "" : shortTime(at, now);
 }
 
-/** An instant as a row writes it: *11:45* today, *yesterday 16:20*, else the date. */
+/**
+ * The time a rail row shows, and its tone: only where it says something. A failed latest run says when it failed,
+ * that is when it finished (err), a running one when it started (info), a queued one that it waits. A pass, a
+ * warning, a cancelled run and a pipeline nothing ran show none: the row's title carries {@link latestTime}.
+ */
+export function railTime(
+  pipeline: PipelineRow,
+  now: Date = new Date(),
+): { text: string; tone: "err" | "info" | null } | null {
+  const latest = pipeline.recent[0];
+  if (latest === undefined) return null;
+  const tone = runTone(latest);
+  if (tone === "q") return { text: "queued", tone: null };
+  if (tone === "run") return { text: latestTime(pipeline, now), tone: "info" };
+  const failedAt = runAt(latest);
+  if (tone === "err") return { text: failedAt === null ? "" : shortTime(failedAt, now), tone: "err" };
+  return null;
+}
+
+/** An instant as a row writes it, on the one ladder: *11:45* today, *yesterday 16:20*, *Wed 14:32*, then *3 Nov*. */
 export function shortTime(iso: string, now: Date = new Date()): string {
   return clockLabel(iso, now, true);
 }
@@ -129,6 +214,8 @@ export interface Fold {
   count: number;
   /** How many of those are failing. */
   failing: number;
+  /** How many of those are running. */
+  running: number;
 }
 
 /** One source's tree: the pipelines at its top and its top folds. */
@@ -171,6 +258,7 @@ function fold(node: Draft, parentKey: string): Fold {
     folds,
     count: at.pipelines.length + folds.reduce((sum, f) => sum + f.count, 0),
     failing: at.pipelines.filter(isFailing).length + folds.reduce((sum, f) => sum + f.failing, 0),
+    running: at.pipelines.filter(isRunning).length + folds.reduce((sum, f) => sum + f.running, 0),
   };
 }
 
@@ -228,11 +316,12 @@ export function foldOpen(remembered: boolean | undefined, f: Fold, selected: str
 /**
  * One row of the pipeline list as the windowed list draws it (#2211): a
  * heading, a pipeline at its depth, or a fold's summary. `key` is unique: a
- * pinned pipeline is also in its fold.
+ * pinned pipeline is also in its fold. A pipeline's `pre` is the
+ * {@link sharedPrefix} of its fold's own pipelines, which the row draws dim.
  */
 export type ListRow =
   | { kind: "head"; key: string; text: string }
-  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number }
+  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number; pre: string; tag: string | null }
   | { kind: "fold"; key: string; fold: Fold; depth: number; open: boolean };
 
 /**
@@ -250,22 +339,93 @@ export function listRows(
   const rows: ListRow[] = [];
   if (pinned.length > 0) {
     rows.push({ kind: "head", key: "head:pinned", text: "Pinned" });
-    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0 });
+    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0, pre: "", tag: null });
   }
-  const walk = (pipelines: readonly PipelineRow[], folds: readonly Fold[], depth: number) => {
-    for (const pipeline of pipelines) rows.push({ kind: "pipeline", key: `tree:${pipeline.entity_id}`, pipeline, depth });
+  // A pipeline sits in one fold of a source's tree, but in each repository's it built: there every row is keyed by its
+  // fold, so a row keeps its key whichever folds are open.
+  const walk = (pipelines: readonly PipelineRow[], folds: readonly Fold[], depth: number, at: string, byFold: boolean) => {
+    const pre = sharedPrefix(pipelines.map((pipeline) => pipeline.name));
+    const tags = minorityTags(pipelines);
+    for (const pipeline of pipelines) {
+      const key = byFold ? `tree:${at}/${pipeline.entity_id}` : `tree:${pipeline.entity_id}`;
+      rows.push({ kind: "pipeline", key, pipeline, depth, pre, tag: tags.get(pipeline.source_id) ?? null });
+    }
     for (const f of folds) {
       const isOpen = open(f);
       rows.push({ kind: "fold", key: `fold:${f.key}`, fold: f, depth, open: isOpen });
-      if (isOpen) walk(f.pipelines, f.folds, depth + 1);
+      if (isOpen) walk(f.pipelines, f.folds, depth + 1, f.key, byFold);
     }
   };
   trees.forEach((tree, at) => {
-    const text = scope === "all" ? tree.source : at === 0 ? "By project" : null;
+    // The repositories' tree says so whatever the scope; a source's trees under *This job* share one heading.
+    const text = tree.sourceId === REPOS || scope === "all" ? tree.source : at === 0 ? "By project" : null;
     if (text !== null) rows.push({ kind: "head", key: `head:${tree.sourceId}:${text}`, text });
-    walk(tree.pipelines, tree.folds, 0);
+    walk(tree.pipelines, tree.folds, 0, tree.sourceId, tree.sourceId === REPOS);
   });
   return rows;
+}
+
+/**
+ * The prefix every one of a folder's own pipelines starts with, cut after its last separator (`_`, `.`, `-`, a space,
+ * `:` or `/`): the rail draws it in the second ink, so `Payout_` of *Payout_Build*, *Payout_Lint* is read past and the
+ * part that differs is read first. Nothing for a lone pipeline, and nothing that would leave a name empty.
+ */
+export function sharedPrefix(names: readonly string[]): string {
+  if (names.length < 2) return "";
+  let common = names[0]!;
+  for (const name of names) while (!name.startsWith(common)) common = common.slice(0, -1);
+  const cut = /^.*[_.\-\s:/]/.exec(common)?.[0] ?? "";
+  return names.every((name) => name.length > cut.length) ? cut : "";
+}
+
+/**
+ * Where two sources share a fold (*By repository*), the fewer's name by its id: what its rows say beside their name.
+ * Nothing for a fold one source holds, as every fold of a source's own tree.
+ */
+function minorityTags(pipelines: readonly PipelineRow[]): Map<string, string> {
+  const counts = new Map<string, { name: string; n: number }>();
+  for (const p of pipelines) counts.set(p.source_id, { name: p.source_name, n: (counts.get(p.source_id)?.n ?? 0) + 1 });
+  if (counts.size < 2) return new Map();
+  const most = [...counts.entries()].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]))[0]![0];
+  return new Map([...counts.entries()].filter(([id]) => id !== most).map(([id, { name }]) => [id, name]));
+}
+
+/** The id of {@link repoTreeOf}'s one tree, which no source carries. */
+const REPOS = "repos";
+
+/**
+ * The pipelines by the repositories their runs built (*By repository*, the repo-builds pass): one tree, a fold for
+ * each repository by its name, a pipeline under each it built (`reposOf`), then *No repository* for the pipelines that
+ * built none mirrored: nightlies, deploys, infrastructure.
+ */
+export function repoTreeOf(
+  list: readonly PipelineRow[],
+  reposOf: (pipeline: PipelineRow) => readonly { id: string; title: string }[],
+): SourceTree[] {
+  const byRepo = new Map<string, { title: string; pipelines: PipelineRow[] }>();
+  const none: PipelineRow[] = [];
+  for (const pipeline of list) {
+    const repos = reposOf(pipeline);
+    if (repos.length === 0) none.push(pipeline);
+    for (const repo of repos) {
+      if (!byRepo.has(repo.id)) byRepo.set(repo.id, { title: repo.title, pipelines: [] });
+      byRepo.get(repo.id)!.pipelines.push(pipeline);
+    }
+  }
+  const fold = (key: string, name: string, pipelines: PipelineRow[]): Fold => ({
+    name,
+    key: `repos/${key}`,
+    pipelines,
+    folds: [],
+    count: pipelines.length,
+    failing: pipelines.filter(isFailing).length,
+    running: pipelines.filter(isRunning).length,
+  });
+  const folds = [...byRepo.entries()]
+    .sort((a, b) => a[1].title.toLowerCase().localeCompare(b[1].title.toLowerCase()))
+    .map(([id, repo]) => fold(id, repo.title, repo.pipelines));
+  if (none.length > 0) folds.push(fold("", "No repository", none));
+  return [{ source: "By repository", sourceId: REPOS, pipelines: [], folds }];
 }
 
 /** The pinned pipelines among `list`, in its order. */
@@ -298,4 +458,23 @@ export function reasonsLine(reasons: readonly PipelineReason[], job: string): st
 /** The job's reasons by pipeline id. */
 export function reasonsById(rows: readonly JobPipeline[]): Map<string, PipelineReason[]> {
   return new Map(rows.map((row) => [row.pipeline_id, row.reasons]));
+}
+
+/** A run's tests in the one form the app draws them (F-010): *1 failed, 41 passed*, with an empty count left out. */
+export function testsWords(tests: { failed: number; passed: number; ignored: number }): string {
+  const said = [
+    ...(tests.failed > 0 ? [`${tests.failed} failed`] : []),
+    ...(tests.passed > 0 ? [`${tests.passed} passed`] : []),
+    ...(tests.ignored > 0 ? [`${tests.ignored} ignored`] : []),
+  ];
+  return said.join(", ") || "0 passed";
+}
+
+/**
+ * TeamCity's status line for a failed build (*Tests failed: 3 (3 new), passed: 212*), which is all the Inbox holds of its tests,
+ * read as counts and drawn as Builds draws them. Any other line is the source's own words, and stays as it wrote them.
+ */
+export function failedBuildLine(line: string): string {
+  const counts = /^Tests failed: (\d+)(?: \(\d+ new\))?(?:, passed: (\d+))?(?:, ignored: (\d+))?$/.exec(line);
+  return counts === null ? line : testsWords({ failed: Number(counts[1]), passed: Number(counts[2] ?? 0), ignored: Number(counts[3] ?? 0) });
 }

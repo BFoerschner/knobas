@@ -10,6 +10,17 @@
 //! its line to `migrations.sha384`. This module's test fails when a file no
 //! longer matches its pinned line, or a file has no line; a changed line in the
 //! list is a diff for review to catch.
+//!
+//! # Line endings
+//!
+//! A checksum is of the file's bytes, so the same migration checked out with
+//! CRLF hashes differently. Builds before 2026-11-11 made on Windows did that:
+//! the runner's git converted line endings, and every Windows database recorded
+//! the CRLF checksums, which a Mac or Linux build refused (and the reverse).
+//! `.gitattributes` now keeps the files LF on every checkout, and [`run`]
+//! accepts a recorded checksum of the same migration with the other line
+//! endings, rewriting it to the embedded one first
+//! ([`adopt_other_line_endings`]).
 
 /// Bring `pool`'s database up to the current schema.
 ///
@@ -31,6 +42,19 @@
 /// already-applied migration's checksum no longer matches the embedded file;
 /// [`crate::DbError::Sqlx`] if no connection can be had.
 pub async fn run(pool: &sqlx::PgPool) -> Result<(), crate::DbError> {
+    run_with(&sqlx::migrate!("./migrations"), pool).await
+}
+
+/// [`run`] with another set of migrations: what a test uses to stand for a
+/// build whose files had other line endings.
+///
+/// # Errors
+///
+/// As [`run`].
+pub async fn run_with(
+    migrator: &sqlx::migrate::Migrator,
+    pool: &sqlx::PgPool,
+) -> Result<(), crate::DbError> {
     let options = (*pool.connect_options())
         .clone()
         .options([("statement_timeout", "0")]);
@@ -38,10 +62,98 @@ pub async fn run(pool: &sqlx::PgPool) -> Result<(), crate::DbError> {
         .max_connections(1)
         .connect_with(options)
         .await?;
-    let outcome = sqlx::migrate!("./migrations").run(&migrating).await;
+    let outcome = async {
+        adopt_other_line_endings(migrator, &migrating).await?;
+        migrator.run(&migrating).await?;
+        Ok::<(), crate::DbError>(())
+    }
+    .await;
     migrating.close().await;
-    outcome?;
-    Ok(())
+    outcome
+}
+
+/// The migrations table sqlx keeps, in the schema the connection resolves it
+/// in, as sqlx itself names it.
+const APPLIED: &str = "_sqlx_migrations";
+
+/// Rewrite every recorded checksum that is an embedded migration's with the
+/// other line endings to the embedded one, in one transaction. Returns how
+/// many rows changed; 0 on a database that has none, or no migrations table.
+///
+/// A recorded checksum counts as the same migration when it is the SHA-384 of
+/// the embedded SQL with every line ending LF, or with every one CRLF, and
+/// nothing else: a migration whose text changed in any other way is still the
+/// "previously applied but has been modified" the runner reports. Under
+/// `select ... for update`, so two launches that meet here rewrite each row
+/// once; sqlx's own advisory lock comes after, in [`sqlx::migrate::Migrator::run`].
+async fn adopt_other_line_endings(
+    migrator: &sqlx::migrate::Migrator,
+    pool: &sqlx::PgPool,
+) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let (present,): (bool,) = sqlx::query_as("select to_regclass($1) is not null")
+        .bind(APPLIED)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !present {
+        return Ok(0);
+    }
+    let recorded: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "select version, checksum from {APPLIED} order by version for update"
+    )))
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut rewritten = 0;
+    for (version, checksum) in recorded {
+        let Some(migration) = migrator
+            .iter()
+            .find(|m| m.version == version && !m.migration_type.is_down_migration())
+        else {
+            continue;
+        };
+        if checksum == *migration.checksum {
+            continue;
+        }
+        let (lf, crlf) = line_ending_checksums(migration.sql.as_str());
+        if checksum != lf && checksum != crlf {
+            continue;
+        }
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "update {APPLIED} set checksum = $1 where version = $2"
+        )))
+        .bind(migration.checksum.as_ref())
+        .bind(version)
+        .execute(&mut *tx)
+        .await?;
+        rewritten += 1;
+    }
+    tx.commit().await?;
+    if rewritten > 0 {
+        tracing::info!(
+            rewritten,
+            "migration checksums recorded with the other line endings now name the same files"
+        );
+    }
+    Ok(rewritten)
+}
+
+/// The checksums sqlx gives `sql` with every line ending LF, and with every
+/// one CRLF: [`sqlx::migrate::Migration::new`]'s own, so the hash is sqlx's.
+fn line_ending_checksums(sql: &str) -> (Vec<u8>, Vec<u8>) {
+    let lf = sql.replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    let hash = |text: String| {
+        sqlx::migrate::Migration::new(
+            0,
+            "".into(),
+            sqlx::migrate::MigrationType::Simple,
+            sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(text)),
+            false,
+        )
+        .checksum
+        .into_owned()
+    };
+    (hash(lf), hash(crlf))
 }
 
 #[cfg(test)]

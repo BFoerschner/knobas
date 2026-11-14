@@ -13,7 +13,8 @@
   drawn at the end of the thread at once, muted with its echo (#1424, #2103),
   *queued* and then *sent*, until a read of the thread (the refresh after the
   write, or a run's end) holds its words. *Edit and resend* on a held or
-  refused one puts its words back in the box. A comment whose source writes
+  refused one puts its words back in the box. What is typed is the ticket's own draft (`drafts`), through
+  `Esc`, a move to another ticket and a return, and ⌘Enter sends it. A comment whose source writes
   markup (`markdown`, `jira_wiki`, #2308) is drawn with the Markdown
   component, its `!name!` images and `[^name]` links resolved against the
   ticket's attachments and drawn as the description's are (#2415). A
@@ -22,16 +23,21 @@
   The box is one line until it is used (`job.css`).
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { flushSync, tick, untrack } from "svelte";
 
   import type { Attachment, Thread } from "../../ipc/entity";
   import type { AttachmentImages } from "../../render/markdown";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { proseMarkdown } from "../../render/prose";
   import { refusedAttrs } from "../../shell/refused-writes";
+  import { drafts } from "../drafts.svelte";
+  import { sendKey } from "../inline-editor";
   import { takeAgain, type Echo } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
   import { firstName, mentionRuns, since, stamp, wholeThread } from "./conversation";
+  import { Windowed } from "../../shell/windowed.svelte";
+  import { textHeight } from "../../shell/windowed";
 
   let {
     jobKey,
@@ -46,7 +52,10 @@
     oncomment,
     attachments = [],
     images = null,
+    selfName = null,
   }: {
+    /** What the page's card calls the reader, where it does: the composer's avatar before they have commented (F-107). */
+    selfName?: string | null;
     jobKey: string;
     /** The ticket's entity id, which *Edit and resend* names. */
     entityId: string;
@@ -71,7 +80,8 @@
     images?: AttachmentImages | null;
   } = $props();
 
-  let draft = $state("");
+  const commentKey = $derived(`comment:${entityId}`);
+  const draft = $derived(drafts.get(commentKey));
   let sending = $state(false);
   let box = $state<HTMLTextAreaElement | null>(null);
 
@@ -79,13 +89,38 @@
   $effect(() => {
     const again = takeAgain(entityId, "comment");
     if (again === null) return;
-    draft = again;
+    untrack(() => drafts.put(commentKey, again));
     box?.focus();
   });
 
-  /** The reader as the thread names them: the author of their own comments, else their account. */
-  const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? thread?.me[0] ?? null);
+  /** The reader as the thread names them: the author of their own comments, else as the card does, else their account. */
+  const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? selfName ?? thread?.me[0] ?? null);
   const drawn = $derived(thread === null ? null : wholeThread(thread, lastVisit));
+
+  /** What the thread draws, in order: each comment, and the *New since your last visit* rule before the first new one. */
+  type Row = { key: string; entry: (NonNullable<typeof drawn>["entries"])[number] } | { key: "new"; entry: null };
+  const rows = $derived.by((): Row[] => {
+    if (drawn === null) return [];
+    const out: Row[] = [];
+    drawn.entries.forEach((entry, index) => {
+      if (index === drawn.newAt && lastVisit !== null) out.push({ key: "new", entry: null });
+      out.push({ key: String(index), entry });
+    });
+    return out;
+  });
+  /**
+   * A long thread draws only the comments near the viewport (the extremes pass, 2026-11-13: 500 comments were built
+   * whole as the ticket opened). By place: a thread only grows at its end.
+   */
+  const win = new Windowed({
+    count: () => rows.length,
+    key: (i) => rows[i]!.key,
+    estimate: 76,
+    gap: 10,
+    estimateOf: (key) => estimates.get(key) ?? 76,
+  });
+  /** Each row's room before it is drawn: a comment's by its length. */
+  const estimates = $derived(new Map(rows.map((row) => [row.key, row.entry ? textHeight(row.entry.comment.body, { base: 46, line: 21, chars: 100 }) : 18])));
 
   let convo = $state<HTMLDivElement | null>(null);
   /** Whether this opening has been brought to its mention: once a thread, so a re-read does not scroll again. */
@@ -100,22 +135,33 @@
       return;
     }
     if (drawn === null || convo === null || untrack(() => broughtTo)) return;
-    const mentions = convo.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
-    const newest = mentions[mentions.length - 1];
-    if (newest === undefined) return;
+    // The newest mention may be a comment the thread holds back: brought into the drawn rows first.
+    const at = untrack(() => {
+      for (let i = rows.length - 1; i >= 0; i--) if (rows[i]!.entry?.comment.mentions_me === true) return i;
+      return -1;
+    });
+    if (at < 0) return;
     broughtTo = true;
-    newest.scrollIntoView?.({ block: "center" });
+    untrack(() => win.reveal(at));
+    flushSync();
+    const mentions = convo.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
+    mentions[mentions.length - 1]?.scrollIntoView?.({ block: "center" });
   });
 
   async function send() {
     const body = draft.trim();
     if (body === "" || sending || refused !== null) return;
     sending = true;
+    // *Comment* goes off with its draft, so focus stays in the box, whichever way this was sent (F-266).
+    box?.focus({ preventScroll: true });
     try {
-      if (await oncomment(body)) draft = "";
+      if (await oncomment(body)) drafts.forget(commentKey);
     } finally {
       sending = false;
     }
+    // The comment has just taken room above the box, which focus came back to: all of it in view, *Comment* too (F-162).
+    await tick();
+    box?.closest(".tf-compose")?.scrollIntoView?.({ block: "nearest" });
   }
 </script>
 
@@ -125,13 +171,16 @@
   {:else if thread === null || drawn === null}
     <p class="tf-dim">Reading the conversation…</p>
   {:else}
-    {#each drawn.entries as entry, index (index)}
+    {#if rows.length > 0}
+    <div class="tf-convo-rows" {@attach win.list}>
+    {#each win.slice(rows) as row (row.key)}
+      {#if row.entry === null}
+        <div class="tf-newline" {@attach win.row(row.key)}>New since your last visit, {since(lastVisit ?? "", now)}</div>
+      {:else}
+      {@const entry = row.entry}
       {@const comment = entry.comment}
       {@const markdown = proseMarkdown(comment.body, comment.markup, attachments)}
-      {#if index === drawn.newAt && lastVisit !== null}
-        <div class="tf-newline">New since your last visit, {since(lastVisit, now)}</div>
-      {/if}
-      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me}>
+      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me} {@attach win.row(row.key)}>
         <span class="tf-av" class:tf-me={comment.mine} aria-hidden="true">{initials(comment.author)}</span>
         <div class="tf-msg-body">
           <div class="tf-who">
@@ -147,7 +196,10 @@
           {/if}
         </div>
       </article>
+      {/if}
     {/each}
+    </div>
+    {/if}
     {#if drawn.entries.length === 0 && queued.length === 0}
       <p class="tf-dim">No comments yet.</p>
     {/if}
@@ -156,16 +208,16 @@
     <article class="tf-msg tf-queued">
       <span class="tf-av tf-me" aria-hidden="true">{initials(myName)}</span>
       <div class="tf-msg-body">
-        <div class="tf-who"><b>You</b><span class="tf-chip tf-info">{echo.state}</span></div>
+        <div class="tf-who"><b>You</b><TfStateChip text={echo.state} tone="info" /></div>
         <p>{echo.text}</p>
       </div>
     </article>
   {/each}
-  <div class="tf-compose">
-    <textarea bind:this={box} bind:value={draft} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}"></textarea>
+  <div class="tf-compose" tabindex="-1">
+    <textarea bind:this={box} value={draft} oninput={(event) => drafts.put(commentKey, event.currentTarget.value)} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}" {@attach sendKey(() => void send())}></textarea>
     <div class="tf-acts">
       {#if refused !== null}<span class="tf-dim tf-small">{refused}</span>{/if}
-      <button type="button" class="tf-btn tf-primary" {...refusedAttrs(refused)} disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
+      <button type="button" class="tf-btn tf-sm tf-primary" {...refusedAttrs(refused)} disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
     </div>
   </div>
 </div>

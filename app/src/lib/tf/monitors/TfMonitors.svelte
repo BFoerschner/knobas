@@ -3,11 +3,11 @@
   one page with two tabs as prototype-6's `renderMonitors(tab)`.
 
   - **Monitors**: the filter bar (text over monitor, asset and type; *This
-    job / My jobs / All*; *Down / Warning / Up / Paused*; *Type*), then the
-    roster sorted down, warning, paused, up. Each row: the monitor and its
+    job / My jobs / All*; *Down / Slow / Up / Paused / Pending / Maintenance*; *Type*), then the
+    roster sorted down, slow, paused, up. Each row: the monitor and its
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
-    *Ack* on a down monitor, *Pause* or *Resume* where the source offers
+    *Ack* on a down monitor, which *Acked* or the toast's *Undo* takes back, *Pause* or *Resume* where the source offers
     it, and *Hide*. A hidden monitor leaves the roster for the fold at its
     end (*N hidden monitors*, closed until the reader opens it, or open by
     itself when it holds every match), where it is drawn dimmed with a
@@ -15,8 +15,8 @@
     fold as to the roster. Its alerts reach no inbox, so it raises no desktop
     notification and offers no *Ack*; knobas-local, Uptime Kuma goes on
     checking it. While a pause or resume is on its way its echo (*queued*, then *sent*,
-    `tf/queued.svelte.ts`, #2105) stands in the button's place until the
-    roster reads the new state.
+    `tf/queued.svelte.ts`, #2105) stands in the State cell after the state chip, because it says the state is changing,
+    and the button stays in its place, turned off, until the roster reads the new state.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
     A row whose create is on its way draws its echo instead (#1959, #2105),
@@ -33,6 +33,10 @@
     refresh after one of the page's writes reads both lists again, and while
     anything is on its way so does the end of every sync, which is when a
     sent one's monitor arrives.
+
+  A source of the roster's that can't sync draws the pipeline's band over the
+  tabs (`staleLine`) with its fix, and the header then says nothing of when it
+  synced: a check's own time is not a sync.
 
   **Refresh (#2138, #2107's pieces).** Monitors has no page of one monitor,
   so a monitor's *Refresh*, or *Sync now* where its source does not read one
@@ -64,18 +68,26 @@
     RouteRow,
     UnmonitoredAsset,
   } from "../../ipc/assets";
-  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { QueuedWrite, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import type { WriteFollower } from "../../shell/follow-write";
   import { counted } from "../counted";
+  import { PressHold } from "../press-hold.svelte";
   import type { OpenJobPorts } from "../job/open-jobs";
+  import type { SourceFacts } from "../job/job";
   import type { DetailRefreshPorts } from "../refresh.svelte";
 
   /** The reads and writes this page makes, injectable so a test needs no bridge. */
+  type SourceRow = SourceFacts & Partial<Pick<SourceSummary, "health" | "auth_kind">>;
+
   export interface MonitorPorts extends OpenJobPorts {
+    /** The sources' names, and whether each can sign in. */
+    listSources: () => Promise<SourceRow[]>;
     monitorRoster: () => Promise<MonitorRow[]>;
     unmonitoredAssets: () => Promise<UnmonitoredAsset[]>;
     openAlerts: () => Promise<OpenAlert[]>;
     ackAlert: (monitorId: string) => Promise<OpenAlert>;
+    /** *Acked* pressed, or *Undo* on the ack's toast. */
+    unackAlert: (monitorId: string) => Promise<OpenAlert>;
     setMonitorHidden: (monitorId: string, hidden: boolean) => Promise<boolean>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     getAsset: (assetId: string) => Promise<AssetDetail>;
@@ -88,17 +100,27 @@
     follower: () => WriteFollower;
     /** A row's *Refresh* and *Sync now* (#2138); the bridge's when left out. */
     refresh?: DetailRefreshPorts;
+    /** The roster changed what the nav's badge counts: a monitor hidden or back. */
+    badgesChanged?: () => void;
+    /** How each source's last sync ended, for the band over the page; the bridge's when left out. */
+    syncStatus?: () => Promise<SourceSyncStatus[]>;
   }
 </script>
 
 <script lang="ts">
+  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { badges } from "../badges.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
+  import { MONITOR_AT } from "../route";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import type { RoleFrameProps } from "../page-entry";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     ackAlert,
+    unackAlert,
     editAsset,
     editRoute,
     getAsset,
@@ -109,18 +131,24 @@
     unmonitoredAssets,
   } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
-  import { listSources } from "../../ipc/sources";
+  import { listSources, syncStatus } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
   import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
-  import { push } from "../../shell/toasts.svelte";
+  import { dismiss, push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { HeldOrder } from "../held-order.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
+  import { MediaQuery } from "svelte/reactivity";
+  import { barsOf, stripPaint, type Bar } from "./monitors";
+  import { on } from "svelte/events";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { listenSynced } from "../builds/pipeline-ports";
+  import { staleLine, syncWith } from "../builds/pipeline";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     stateChip,
@@ -152,6 +180,7 @@
       unmonitoredAssets: () => unmonitoredAssets(),
       openAlerts: () => openAlerts(),
       ackAlert: (monitorId) => ackAlert(monitorId),
+      unackAlert: (monitorId) => unackAlert(monitorId),
       setMonitorHidden: (monitorId, hidden) => setMonitorHidden(monitorId, hidden),
       submitWrite: (payload) => submitWrite(payload),
       getAsset: (assetId) => getAsset(assetId),
@@ -164,9 +193,11 @@
       jobReach: (entityId) => jobReach(entityId),
       listen: (event, handler) => tauriListen(event, handler),
       follower: () => writeFollower(),
+      badgesChanged: () => void badges.refresh(),
     },
     now: fixedNow,
     sync,
+    syncRevision = 0,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -177,25 +208,37 @@
     ports?: MonitorPorts;
     /** Injectable clock, for the bars and the header's *synced*. */
     now?: Date;
-    // The frame's `syncRevision` (#2106) is left unread: this view reads
-    // again on the end of every run of its role's sources already.
   } & RoleFrameProps = $props();
 
-  const now = $derived(fixedNow ?? new Date());
+  /**
+   * The clock the bars, the chips' *since* and the header's *synced* read: the time of the last roster read. It was
+   * read once, as the page first drew, and a kept page's bars stopped at that hour, leaving out every sample since.
+   */
+  let readAt = $state(new Date());
+  const now = $derived(fixedNow ?? readAt);
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");
+  /** The monitor the address opens the roster at, marked: an inbox alert's, a set member's. */
+  const markedId = $derived(rest[0] === MONITOR_AT ? (rest[1] ?? null) : null);
 
   /**
    * The roster as read: the read narrows itself to the sources filling the
    * monitoring role, so nothing here keeps rows by source (#1297, ADR-0029
    * as amended on 2026-10-19).
    */
-  let roster = $state<MonitorRow[] | null>(null);
+  // Raw: it is replaced whole and never changed in place, and a deep proxy made every row's read on a filter key go
+  // through one (PR #2479).
+  let roster = $state.raw<MonitorRow[] | null>(null);
   let unwatched = $state<UnmonitoredAsset[] | null>(null);
   let sourceNames = $state<Record<string, string>>({});
+  /** The sources as last read, `null` until then: whether one can sign in decides the band and the header's *synced*. */
+  let sources = $state<SourceRow[] | null>(null);
+  let syncRows = $state<SourceSyncStatus[]>([]);
   let failed = $state<string | null>(null);
   let jobs = $state<OpenJob[]>([]);
   /** When each monitor's open alert was acked, by monitor id: the open alerts' `acked_at`, so it outlives the visit (#1461). */
   let acked = $state<Record<string, string>>({});
+  /** Each ack's toast while it stands: taking the ack back takes its *Undo* with it. */
+  const ackToasts = new Map<string, number>();
   /** Rows whose write has not answered: a double click is one press. */
   let pressing = $state<Record<string, true>>({});
   let creating = $state<MonitorSubject | null>(null);
@@ -203,6 +246,13 @@
 
   /** Bumped to read both lists again. */
   let revision = $state(0);
+  // The frame moves this when *Sync now*'s runs end and each time the page is shown again, so a token entered in Settings takes the band away (#2106).
+  let syncedAt = untrack(() => syncRevision);
+  $effect(() => {
+    if (syncRevision === syncedAt) return;
+    syncedAt = syncRevision;
+    untrack(() => (revision += 1));
+  });
   /** The refreshes waiting on the roster read that answers next (#2138). */
   let rereads: (() => void)[] = [];
 
@@ -219,6 +269,7 @@
       .then((rows) => {
         if (!live) return;
         keepRefreshers(rows);
+        readAt = new Date();
         roster = rows;
         settleRoster(rows);
       }, fail)
@@ -246,7 +297,17 @@
     }, fail);
     ports.listSources().then(
       (rows) => {
-        if (live) sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+        if (!live) return;
+        sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+        sources = rows;
+      },
+      () => {
+        if (live) sources ??= [];
+      },
+    );
+    (ports.syncStatus ?? syncStatus)().then(
+      (rows) => {
+        if (live) syncRows = rows;
       },
       () => {},
     );
@@ -353,7 +414,7 @@
   );
   $effect(() => {
     if (!waiting) return;
-    return listenSynced(ports, null, () => {}, () => (revision += 1));
+    return listenSynced(ports, null, (row) => (syncRows = syncWith(syncRows, row)), () => (revision += 1));
   });
 
   /** What *Monitor queued* says on hover: where the create is. */
@@ -382,12 +443,12 @@
   const types = $derived([...new Set((roster ?? []).map((row) => kindWord(row.monitor_type)).filter(Boolean))].sort());
   const config = $derived<FilterConfig>({
     id: "monitors",
-    placeholder: "Filter by monitor, asset or type",
+    placeholder: "Filter monitors",
     noun: "monitors",
     one: "monitor",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" } satisfies FilterScope] : []),
-      { id: "mine", label: "My jobs", query: "" },
+      ...(job !== null ? [{ id: "job", label: "This job", count: roster === null ? null : visibleMonitors(roster, { scope: "job", job, states: [], type: "", text: "" }, index).shown.length, title: `The monitors ${job} reaches`, query: "" } satisfies FilterScope] : []),
+      { id: "mine", label: "Mine", title: "The monitors the jobs you work on reach", query: "" },
       { id: "all", label: "All", query: "" },
     ],
     chips: [{ key: "st", label: "State", options: STATE_CHIPS.map((value) => ({ value, label: value })) }],
@@ -411,10 +472,25 @@
           index,
         ),
   );
-  const rows = $derived(kept.shown);
+  /** The marked monitor, whatever the filter and the fold say: the reader came for it. */
+  const markedRow = $derived(markedId === null ? null : (roster?.find((row) => row.entity_id === markedId) ?? null));
+  /**
+   * The roster stays where it first drew (the still-rows pass, 2026-11-11): a check that goes down sorts first, and a
+   * sync bringing it jumped every row under the pointer. It waits behind *Sort again*; a monitor a sync adds above
+   * waits behind *Show N new*. A row a press takes away (*Hide*) goes, and keeps its place for an *Undo*.
+   */
+  const rosterHold = new HeldOrder<(typeof kept.shown)[number]>((row) => row.entity_id, () => "", { keepLeft: false });
+  const heldRoster = $derived(
+    roster === null
+      ? { rows: [] as typeof kept.shown, waiting: 0, stale: false }
+      : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text])),
+  );
+  const heldBar = $derived({ waiting: heldRoster.waiting, stale: heldRoster.stale, show: () => rosterHold.release() });
+  const rows = $derived(markedRow !== null && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
+  const hiddenRows = $derived(markedRow === null ? kept.hidden : kept.hidden.filter((row) => row !== markedRow));
   const foldOpen = $derived(hiddenFoldOpen(hiddenFold.open, kept));
-  /** The roster's own size, for the count: a hidden monitor is counted apart. */
-  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
+  /** The roster's own size, for the count: a hidden monitor is counted apart, unless it is marked and so a row of the list. */
+  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden || row === markedRow).length);
 
   /** Only the reader's toggle is remembered, not the one the open attribute raises as the fold is drawn. */
   function toggleFold(event: Event) {
@@ -423,13 +499,58 @@
   }
 
   /** The header's line: how many checks, from which source, synced when. */
+  /** Assets nothing watches: their own band, over their name, type and owner. */
+  const unwatchedFilter = sessionFilter("monitors-unwatched");
+  const unwatchedConfig: FilterConfig = { id: "monitors-unwatched", placeholder: "Filter assets", noun: "assets", one: "asset" };
+  const shownUnwatched = $derived.by(() => {
+    const words = unwatchedFilter.text.trim().toLowerCase();
+    if (unwatched === null || words === "") return unwatched ?? [];
+    return unwatched.filter((asset) => [asset.name, asset.type_label, asset.owner ?? "", asset.environment ?? ""].join(" ").toLowerCase().includes(words));
+  });
+
+  /** Below 1240 px half-hour bars would be under a pixel wide: one bar an hour, the worse of its two half-hours. */
+  const hourlyBars = new MediaQuery("(max-width: 1240px)");
+
+  /**
+   * A row's 24-hour strip, one element (`stripPaint`): its bars painted through the CSSOM (CSP refuses an inline
+   * style), and the bar under the pointer named in its title, as each bar's own title did.
+   */
+  function paintStrip(bars: Bar[], hourly: boolean) {
+    return (node: HTMLElement) => {
+      const paint = stripPaint(bars, hourly);
+      node.style.setProperty("background-image", paint.image);
+      node.style.setProperty("width", `${paint.width}px`);
+      const name = (event: PointerEvent) => {
+        const bar = bars[Math.min(bars.length - 1, Math.max(0, Math.floor(event.offsetX / paint.pitch)))];
+        if (bar && node.title !== bar.title) node.title = bar.title;
+      };
+      const off = on(node, "pointermove", name, { passive: true });
+      return () => {
+        off();
+        node.style.removeProperty("background-image");
+        node.style.removeProperty("width");
+      };
+    };
+  }
+
+  /** A source of the roster's that can't sync says so over the page, with its fix, as a pipeline's does. */
+  const stale = $derived.by(() => {
+    if (roster === null || sources === null) return [];
+    const ids = [...new Set(roster.map((row) => row.source_id))];
+    return ids.flatMap((id) => {
+      const line = staleLine({ source_id: id, source_name: sourceNames[id] ?? id }, sources ?? [], syncRows, now, "Pauses and new monitors");
+      return line === null ? [] : [{ id, line }];
+    });
+  });
+
   const header = $derived.by(() => {
     if (roster === null) return "Checks from your monitoring source, each watching an asset.";
-    const sources = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
+    const names = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
     const newest = roster.map((row) => row.checked_at).sort().at(-1) ?? null;
-    const from = sources.length > 0 ? ` from ${sources.join(" and ")}` : "";
-    const synced = newest !== null ? `, synced ${ago(newest, now)}` : "";
-    return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset. Bars cover the last 24 hours in half-hours.`;
+    const from = names.length > 0 ? ` from ${names.join(" and ")}` : "";
+    // A check's own time is not a sync: where a source can't sync, the band says how old its data is.
+    const synced = newest !== null && sources !== null && stale.length === 0 ? `, synced ${ago(newest, now)}` : "";
+    return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset.`;
   });
 
   // -- a row's Refresh (#2138) -----------------------------------------------
@@ -442,8 +563,24 @@
     for (const id of ids) if (!refreshers.has(id)) refreshers.set(id, createDetailRefresh(untrack(() => ports.refresh)));
   }
 
-  type Entry = { row: MonitorRow; failed: string | null } | { row: null; failed: null };
+  type Entry = { row: MonitorRow; failed: string | null; held?: never } | { row: null; failed: null; held?: boolean };
   const FOLD_KEY = "\u0000hidden-fold";
+  const HELD_KEY = "\u0000held-row";
+  /** The row a mouse press on *Hide* sent to the fold, still holding its place under the pointer (F-138). */
+  let holding = $state.raw<{ id: string; row: MonitorRow; at: number; height: number } | null>(null);
+  /** Where its empty row stands: once it has left the list, and until *Undo* brings it back. */
+  const holdAt = $derived(holding !== null && !rows.some((row) => row.entity_id === holding?.id) ? holding.at : null);
+  $effect(() => {
+    if (holding === null) return;
+    return holdUnderPointer(() => document.querySelector(".tf-mon-held"), () => (holding = null));
+  });
+  /** The listed rows, the held row's empty one among them. */
+  const withHeld = (list: Entry[]): Entry[] => {
+    if (holdAt === null) return list;
+    const next = rows[holdAt];
+    const at = next === undefined ? list.length : list.findIndex((entry) => entry.row === next);
+    return [...list.slice(0, at), { row: null, failed: null, held: true }, ...list.slice(at)];
+  };
   const withFailures = (list: readonly MonitorRow[]): Entry[] =>
     list.flatMap((row) => {
       const failed = refreshers.get(row.entity_id)?.failed ?? null;
@@ -455,14 +592,32 @@
    * summary and, while it is open, those monitors the same way.
    */
   const entries = $derived<Entry[]>([
-    ...withFailures(rows),
-    ...(kept.hidden.length > 0 ? [{ row: null, failed: null }] : []),
-    ...(kept.hidden.length > 0 && foldOpen ? withFailures(kept.hidden) : []),
+    ...withHeld(withFailures(rows)),
+    ...(hiddenRows.length > 0 ? [{ row: null, failed: null }] : []),
+    ...(hiddenRows.length > 0 && foldOpen ? withFailures(hiddenRows) : []),
   ]);
-  /** Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. */
-  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42 });
+  /**
+   * Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. A row is 71 nodes with its bars,
+   * so past 100 rows: at the 300 every list starts at, 218 live monitors drew 15,316 nodes and a 140 ms frame (2026-11-10).
+   */
+  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42, from: 100 });
+
+  /** A mark comes into view once, as the address names it; a later read of the roster leaves the reader where they are. */
+  let broughtIn: string | null = null;
+  $effect(() => {
+    const id = markedId;
+    if (id === null) {
+      broughtIn = null;
+      return;
+    }
+    if (broughtIn === id || markedRow === null) return;
+    broughtIn = id;
+    win.reveal(untrack(() => entries).findIndex((entry) => entry.row?.entity_id === id && entry.failed === null));
+    void tick().then(() => document.querySelector(".tf-kept:not([hidden]) .tf-mon-at")?.scrollIntoView?.({ block: "center" }));
+  });
 
   function entryKey(entry: Entry): string {
+    if (entry.held) return HELD_KEY;
     if (entry.row === null) return FOLD_KEY;
     return entry.failed === null ? entry.row.entity_id : `${entry.row.entity_id}\u0000failed`;
   }
@@ -486,31 +641,78 @@
 
   // -- the row actions -------------------------------------------------------
 
+  /** *Acked* holds about two seconds after it says so (F-351): a double press is one ack, and *Undo* is there at once. */
+  const ackHold = new PressHold();
+
   async function ack(row: MonitorRow) {
     if (pressing[row.entity_id]) return;
     pressing[row.entity_id] = true;
     try {
       const alert = await ports.ackAlert(row.entity_id);
       acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
-      push({ text: "Acked in knobas. The alert stays open until the monitor recovers." });
+      ackHold.hold(row.entity_id);
+      ackToasts.set(row.entity_id, push({ text: "Acked. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row, true) } }));
     } catch (error) {
-      push({ text: ipcErrorMessage(error), tone: "err" });
+      refusedAck(row, error);
     } finally {
       delete pressing[row.entity_id];
     }
   }
 
+  /** *Acked* pressed, or *Undo* on the ack's toast (`undo`, which no hold stops): the alert asks again, in the inbox too. */
+  async function unack(row: MonitorRow, undo = false) {
+    if (pressing[row.entity_id] || (!undo && ackHold.held(row.entity_id))) return;
+    pressing[row.entity_id] = true;
+    try {
+      await ports.unackAlert(row.entity_id);
+      delete acked[row.entity_id];
+      dropAckToast(row);
+      push({ text: `${row.name} is asking again, in the Inbox too.` });
+    } catch (error) {
+      refusedAck(row, error);
+    } finally {
+      delete pressing[row.entity_id];
+    }
+  }
+
+  function dropAckToast(row: MonitorRow) {
+    const id = ackToasts.get(row.entity_id);
+    if (id !== undefined) dismiss(id);
+    ackToasts.delete(row.entity_id);
+  }
+
+  /**
+   * The alert closed while the row was drawn: not a failure, so it says what happened and the row is read again. Here
+   * that is the monitor recovering, which the page shows, not the Inbox, which a monitor with no asset never reached
+   * (an *Undo* after a real recovery, the live run 2026-11-09).
+   */
+  function refusedAck(row: MonitorRow, error: unknown) {
+    if (isIpcError(error) && error.code === "not_found") {
+      delete acked[row.entity_id];
+      dropAckToast(row);
+      push({ text: `${row.name} has recovered, so its alert is closed.` });
+      revision += 1;
+      return;
+    }
+    push({ text: ipcErrorMessage(error), tone: "err" });
+  }
+
   /** *Hide* or *Unhide*: knobas-local, so the row moves at once and the roster is read again. */
-  async function setHidden(row: MonitorRow, hidden: boolean) {
+  async function setHidden(row: MonitorRow, hidden: boolean, event?: MouseEvent) {
     if (pressing[row.entity_id]) return;
     pressing[row.entity_id] = true;
+    const box = hidden && heldByPointer(event) ? (event?.currentTarget as Element).closest("tr")?.getBoundingClientRect() : undefined;
+    if (box !== undefined) holding = { id: row.entity_id, row, at: rows.indexOf(row), height: box.height };
     try {
       await ports.setMonitorHidden(row.entity_id, hidden);
       if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
+      // A hidden monitor is not down as far as the nav says: there is nothing left to act on.
+      ports.badgesChanged?.();
       push({
         text: hidden
-          ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.`
+          ? `Hid ${row.name}. Its alerts stay quiet.`
           : `${row.name} is back on the roster, and its alerts reach the inbox again.`,
+        ...(hidden ? { action: { label: "Undo", run: () => void setHidden({ ...row, hidden: true }, false) } } : {}),
       });
       revision += 1;
     } catch (error) {
@@ -528,11 +730,11 @@
 
   async function toggle(row: MonitorRow, op: string) {
     const form = ROW_OPS[op];
-    if (!form || pressing[row.entity_id]) return;
+    if (!form || pressing[row.entity_id] || echoOn(row.entity_id, TOGGLE) !== null) return;
     pressing[row.entity_id] = true;
     try {
       const write = await ports.submitWrite(form.build(row.entity_id));
-      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? "" });
+      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? "" }, { write });
       echoWrite(row.entity_id, TOGGLE, form.label.toLowerCase(), {
         write,
         following: { name: `${form.label} ${row.name}` },
@@ -575,7 +777,7 @@
   function created(what: { name: string; write: QueuedWrite; source: WriteSource }) {
     const subject = creating;
     creating = null;
-    toastQueued(`create monitor for ${subject?.name ?? what.name}`, what.source);
+    toastQueued(`create monitor for ${subject?.name ?? what.name}`, what.source, { write: what.write });
     // Drawn at once, and followed by the effect above as the read will name it.
     // The re-read starts after the row was queued, and drops any read before it.
     markOnItsWay((_, row) => row.id === subject?.id, what.write);
@@ -598,10 +800,16 @@
 <header class="tf-fhead">
   <div>
     <h1>Monitors</h1>
-    <div class="tf-sub">{header}</div>
+    <div class="tf-sub">{tab === "unmonitored" ? "Containers, services, routes, databases and VMs that no monitor watches." : header}</div>
   </div>
   {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
+{#each stale as { id, line } (id)}
+  <div class="tf-stale tf-bstale">
+    {line.text}
+    {#if line.fix !== null}<a href={line.fix.href}>{line.fix.words}</a>{/if}
+  </div>
+{/each}
 <nav class="tf-tabs" aria-label="Monitors">
   <a href="#/monitors" aria-current={tab === "all" ? "page" : undefined}
     >Monitors{#if roster !== null && roster.length > 0}{" "}<span class="tf-count">{roster.length}</span>{/if}</a
@@ -613,34 +821,39 @@
   >
 </nav>
 {#if tab === "all"}
-  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal}>
-    {#snippet after()}{#if kept.hidden.length > 0}<span class="tf-mon-hidn">, {kept.hidden.length} hidden</span>{/if}{/snippet}
+  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal} held={heldBar}>
+    {#snippet after()}<span class="tf-mon-hidn">{#if hiddenRows.length > 0}, {hiddenRows.length} hidden{/if}</span>{/snippet}
   </FilterBar>
+{:else}
+  <FilterBar config={unwatchedConfig} filter={unwatchedFilter} shown={unwatched === null ? null : shownUnwatched.length} total={unwatched?.length ?? null} />
 {/if}
 <div class="tf-cbody">
   {#if failed !== null}
     <p class="tf-ifail">Could not read the monitors: {failed}</p>
   {/if}
-  {#if tab === "unmonitored"}
-    <p class="tf-dim tf-mon-lead">Containers, services, routes, databases and VMs that no monitor watches.</p>
-    {#if unwatched !== null && unwatched.length > 0}
-      <table class="tf-tbl">
+  {#if markedId !== null && roster !== null && markedRow === null}
+    <TfNothingHere message="knobas does not hold this monitor. It may not have synced yet." href="#/monitors" action="All monitors" />
+  {:else if tab === "unmonitored"}
+    {#if unwatched !== null && unwatched.length > 0 && shownUnwatched.length === 0}
+      <TfNoMatch noun="assets" filter={unwatchedFilter} />
+    {:else if unwatched !== null && unwatched.length > 0}
+      <table class="tf-tbl tf-mon-gaps">
         <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
-          {#each unwatched as asset (asset.id)}
+          {#each shownUnwatched as asset (asset.id)}
             {@const word = createWord(asset)}
             <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
-              <td class="tf-mono"><a href={addressOf(asset.id)}>{asset.name}</a></td>
+              <td><a href={addressOf(asset.id)}>{asset.name}</a></td>
               <td>{asset.type_label}</td>
               <td>{asset.environment ?? ""}</td>
-              <td>{asset.owner ?? ""}</td>
+              <td><span class="tf-rowval">{asset.owner ?? ""}</span></td>
               <td class="tf-mon-acts">
                 {#if word !== null}
-                  <span class="tf-chip tf-info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)}>Monitor {word}</span>
+                  <TfStateChip text="Monitor {word}" tone="info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)} />
                 {:else}
-                  <button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
-                    >Create monitor</button
-                  >
+                  <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
+                    >Create monitor…</button
+                  ></span></span>
                 {/if}
               </td>
             </tr>
@@ -653,21 +866,39 @@
   {:else if roster !== null}
     {#if entries.length > 0}
       <table class="tf-tbl tf-mon">
+        <!-- Fixed columns: an action taken on one row, or a filter, moves nothing in the others. -->
+        <colgroup><col class="tf-monc-name" /><col class="tf-monc-state" /><col class="tf-monc-watch" /><col class="tf-monc-bars" /><col class="tf-monc-num" /><col class="tf-monc-num" /><col class="tf-monc-acts" /></colgroup>
         <thead>
-          <tr><th>Monitor</th><th>State</th><th>Last 24 h</th><th>Response</th><th>30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
+          <tr><th>Monitor</th><th>State</th><th>Watches</th><th>Last 24 h<span class="tf-mbar-axis" aria-hidden="true"><span>24 h ago</span><span>now</span></span></th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th><span class="tf-sr">Actions</span></th></tr>
         </thead>
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
           {#each win.slice(entries) as entry (entryKey(entry))}
             {@const row = entry.row}
-            {#if row === null}
+            {#if row === null && entry.held}
+              <!-- Its words stay, dimmed, for as long as the pointer rests on it (F-064). Nothing in them can be pressed. -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <tr class="tf-mon-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(HELD_KEY)} {@attach heldHeight(holding?.height ?? 0)}>
+                {#if holding !== null}
+                  {@const was = holding.row}
+                  {@const chip = stateChip(was, now)}
+                  <td>{was.name}{#if was.monitor_type}{" "}<span class="tf-mon-type">{kindWord(was.monitor_type)}</span>{/if}</td>
+                  <td><div class="tf-mon-state"><TfStateChip text={chip.label} />{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
+                  <td>{#each was.assets as asset (asset.id)}<div><span class="tf-mon-asset">{asset.name}</span>{" "}<span class="tf-mon-type">{asset.type_label}</span></div>{/each}</td>
+                  <td><div class="tf-mon-24"><span class="tf-mon-figs">{responseText(was.response_time_ms)}, {uptimeText(was)}</span></div></td>
+                  <td class="tf-num"><span>{responseText(was.response_time_ms)}</span></td>
+                  <td class="tf-num"><span>{uptimeText(was)}</span></td>
+                  <td></td>
+                {:else}<td colspan="7"></td>{/if}
+              </tr>
+            {:else if row === null}
               <tr class="tf-mon-foldrow" {@attach win.row(FOLD_KEY)}>
                 <td colspan="7">
                   <!-- The summary alone, as Builds' folds: the hidden rows follow it while it is open. -->
                   <details class="tf-mon-fold" open={foldOpen} ontoggle={toggleFold}>
                     <summary
-                      ><span>{counted(kept.hidden.length, "hidden monitor", "hidden monitors")}</span>
-                      <span class="tf-dim">Their alerts don’t reach the inbox or notify you.</span></summary
+                      ><span>{counted(hiddenRows.length, "hidden monitor", "hidden monitors")}</span>
+                      <span class="tf-dim">{hiddenRows.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span></summary
                     >
                   </details>
                 </td>
@@ -683,45 +914,52 @@
               {@const down = tone === "err" && !row.tombstoned}
               {@const toggled = echoOn(row.entity_id, TOGGLE)}
               {@const refresher = refreshers.get(row.entity_id)}
-              <tr class:tf-mon-hid={row.hidden} {@attach win.row(entryKey(entry))}>
+              <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><span class="tf-chip" class:tf-ok={tone === "ok"} class:tf-warn={tone === "warn"} class:tf-err={tone === "err"} class:tf-info={tone === "info"}>{chip.label}</span></td>
-                <td>
-                  <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
-                    {#each segments(row, now.getTime()) as segment, at (at)}<i class="tf-seg-{segment}"></i>{/each}
-                  </span>
-                </td>
-                <td class="tf-num">{responseText(row.response_time_ms)}</td>
-                <td class="tf-num">{uptimeText(row)}</td>
+                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
+                <!-- Before the bars and figures, not after them: the row's actions stand in the last column's place on hover, and this column's links have to stay in reach. -->
                 <td>
                   {#each row.assets as asset (asset.id)}
-                    <div><a class="tf-mono tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
+                    <div><a class="tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
                   {:else}
                     <span class="tf-dim">no asset</span>
                   {/each}
                 </td>
-                <td class="tf-mon-acts"><div class="tf-trail">
+                <td>
+                  <div class="tf-mon-24">
+                    <span
+                      class="tf-mbar"
+                      class:tf-mbar-hourly={hourlyBars.current}
+                      role="img"
+                      aria-label="Last 24 hours of {row.name}"
+                      {@attach paintStrip(barsOf(segments(row, now.getTime()), hourlyBars.current), hourlyBars.current)}
+                    ></span>
+                    <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
+                    <span class="tf-mon-figs tf-rowval" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
+                  </div>
+                </td>
+                <td class="tf-num"><span class="tf-rowval">{responseText(row.response_time_ms)}</span></td>
+                <td class="tf-num"><span class="tf-rowval">{uptimeText(row)}</span></td>
+                <td class="tf-mon-acts"><div class="tf-rowend">
                   {#if down}
-                    <button type="button" class="tf-btn tf-sm" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
+                    <button type="button" class="tf-btn tf-sm tf-mon-ack" aria-pressed={row.entity_id in acked} title={row.entity_id in acked ? "Acked. Press to take it back, so the alert asks again." : undefined} onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}
                       >{row.entity_id in acked ? "Acked" : "Ack"}</button
                     >
                   {/if}
-                  {#if toggled !== null}
-                    <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
-                    <span class="tf-chip tf-info tf-queued-mark">{toggled.state}</span>
-                  {:else}
-                    {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
-                      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
-                    {/each}
-                  {/if}
+                  <span class="tf-rowacts">
+                  <!-- Unkeyed: when the read turns *Pause* into *Resume* it is one button, so focus stays on it. -->
+                  {#each row.actions.filter((op) => op in ROW_OPS) as op}
+                    <button type="button" class="tf-btn tf-sm tf-ghost" aria-disabled={toggled !== null ? "true" : undefined} title={toggled !== null ? "On its way. It settles when the roster reads the new state." : undefined} onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
+                  {/each}
                   <button
                     type="button"
                     class="tf-btn tf-sm tf-ghost"
                     disabled={pressing[row.entity_id] === true}
                     title={row.hidden ? "Show it on the roster and let its alerts reach the inbox again" : "Take it off the roster; its alerts stop reaching the inbox and stop notifying"}
-                    onclick={() => void setHidden(row, !row.hidden)}>{row.hidden ? "Unhide" : "Hide"}</button
+                    onclick={(event) => void setHidden(row, !row.hidden, event)}>{row.hidden ? "Unhide" : "Hide"}</button
                   >
                   {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small ghost />{/if}
+                  </span>
                 </div></td>
               </tr>
             {/if}
@@ -732,12 +970,11 @@
     {:else if roster.length === 0}
       <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
     {:else}
-      <div class="tf-empty">
-        No monitor matches.
-        {#if scope === "job"}
+      <TfNoMatch noun="monitors" {filter}>
+        {#if scope !== "all"}
           <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
         {/if}
-      </div>
+      </TfNoMatch>
     {/if}
   {/if}
 </div>

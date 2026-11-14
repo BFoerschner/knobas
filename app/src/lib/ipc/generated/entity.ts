@@ -282,6 +282,18 @@ note_count: number,
 last_note_at: string | null, };
 
 /**
+ * What [`card_reads`] answers: the ticket's reach, and each section's rows
+ * read through it, in the order the sections were asked.
+ */
+export type CardRows = { reached: Array<Reached>, 
+/**
+ * One list per section asked, in order: its page from offset 0. A
+ * section whose read failed answers no rows, as its row then draws
+ * nothing.
+ */
+sections: Array<Array<EntityRow>>, };
+
+/**
  * One pipeline of a chain (#857).
  */
 export type ChainStep = { 
@@ -379,6 +391,21 @@ pull_request_command?: string | null, };
 export type CheckoutFoundBy = "override" | "scan" | "nothing";
 
 /**
+ * One repo's or branch's checkout in [`views`]' answer.
+ *
+ * The scale pass (PR #2479, 2026-11-10).
+ */
+export type CheckoutOf = { 
+/**
+ * The id it was asked for.
+ */
+entity_id: string, 
+/**
+ * What [`view`] answers for it.
+ */
+checkout: CheckoutView, };
+
+/**
  * What Settings › Checkouts draws, and what every *Open in…* menu reads.
  *
  * Issue #844, R-13a.3.
@@ -456,6 +483,87 @@ value: string,
 label: string, };
 
 /**
+ * One clone of a run that failed.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllFailure = { entity_id: string, name: string, reason: string, };
+
+/**
+ * What *Clone all* would do, said before it starts.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllPlan = { 
+/**
+ * Where the clones go; `None` when no clones root is set, and nothing
+ * can be cloned.
+ */
+root: string | null, 
+/**
+ * The repositories it would clone, by name, in order.
+ */
+names: Array<string>, sources: Array<CloneAllSource>, 
+/**
+ * Repositories already on this machine, which it leaves alone.
+ */
+already: number, 
+/**
+ * Repositories it cannot clone, each with its reason.
+ */
+skipped: Array<CloneAllSkipped>, };
+
+/**
+ * A repository *Clone all* would not clone, and why.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllSkipped = { entity_id: string, name: string, reason: string, };
+
+/**
+ * One source's share of a plan.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllSource = { source_id: string, name: string, 
+/**
+ * Its repositories this run would clone.
+ */
+repositories: number, };
+
+/**
+ * Where a run of *Clone all* is: the `clone:all` payload and
+ * [`state`]'s answer.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type CloneAllState = { 
+/**
+ * Each run's own number, so the shell tells a new run from the last.
+ */
+run: number, 
+/**
+ * How many it set out to clone.
+ */
+total: number, 
+/**
+ * Cloned so far.
+ */
+cloned: number, 
+/**
+ * Found already cloned in the clones root when its turn came.
+ */
+adopted: number, failed: Array<CloneAllFailure>, 
+/**
+ * The repositories cloning right now, by name.
+ */
+current: Array<string>, 
+/**
+ * Every repository has had its turn.
+ */
+finished: boolean, };
+
+/**
  * What `clone_repo` answers.
  *
  * - `cloning`: The clone started, or was already running; events follow.
@@ -530,6 +638,13 @@ entity_id: string,
  */
 author: string | null, 
 /**
+ * The name to call [`author`](Self::author) by, through the kind's
+ * declared `reporter_name` (F-107): Gitea's profile name of a pull
+ * request's opener. Absent on the wire where the account is the only
+ * name, and a reader then draws the account.
+ */
+author_name?: string, 
+/**
  * Whether `author` is its own source's configured username, trimmed,
  * compared as the attention read compares it (#712). `false` for a
  * source with no username, whose rows are nobody's.
@@ -576,6 +691,12 @@ resolve: string | null,
  * not say. Absent on the wire reads as `None`.
  */
 head: string | null, };
+
+/**
+ * A mirrored commit's repository: what *By repository* on the Builds list
+ * groups a pipeline by, through the commits its runs built.
+ */
+export type CommitRepository = { commit_id: string, repo_id: string, repo_title: string, };
 
 /**
  * What kind of working set this is.
@@ -840,7 +961,9 @@ source: string,
  */
 verb: string, 
 /**
- * Why this line is here, as a sentence naming the source and the verb.
+ * Why this line is here, as a person says it, naming the source by its
+ * display name: *you merged it in Tidewater Gitea*, never an op code or
+ * a source id.
  */
 reason: string, 
 /**
@@ -1017,7 +1140,17 @@ export type DocNode = { entity_id: string, title: string,
  * The page above it, where its declared parent is a mirrored page of the
  * same space; `None` for a page at the top of what the mirror holds.
  */
-parent: string | null, };
+parent: string | null, 
+/**
+ * How many pages hang directly under it, so a fold is drawn as one
+ * before its pages are read (the instant-open pass, 2026-11-12).
+ */
+children?: number, 
+/**
+ * Where it comes in its space's [`DocSpace::pages`] read whole: what puts
+ * the pages read in parts back in the space's order.
+ */
+ord?: number, };
 
 /**
  * One page, as the reader draws it.
@@ -1152,7 +1285,13 @@ comment_by: string | null, segments: Array<{ text: string, hit: boolean, }>, };
 /**
  * One space and its pages.
  */
-export type DocSpace = { source_id: string, key: string, 
+export type DocSpace = { source_id: string, 
+/**
+ * What its source is called, its id where the name is blank: how Docs
+ * tells two spaces of one name apart, the live one and the mock's
+ * *Engineering* (the live run on #2479).
+ */
+source_name: string, key: string, 
 /**
  * The space's name, `None` where no page of it carries one knobas can
  * read.
@@ -1160,9 +1299,15 @@ export type DocSpace = { source_id: string, key: string,
 name: string | null, 
 /**
  * Every live page of the space, in the source's sibling order where it
- * gives one, else by title (#953).
+ * gives one, else by title (#953). An outline ([`outline`]) or a branch
+ * ([`nodes`]) holds some of them, and every page above each it holds.
  */
-pages: Array<DocNode>, };
+pages: Array<DocNode>, 
+/**
+ * How many live pages the space has, whether or not [`DocSpace::pages`]
+ * holds them all (the instant-open pass, 2026-11-12).
+ */
+page_count?: number, };
 
 /**
  * A space, named.
@@ -1230,6 +1375,24 @@ unknown_tokens: Array<string>,
 hits: Array<DocHit>, };
 
 /**
+ * What [`nodes`] reads: pages by id, each with the path to it drawn open.
+ */
+export type DocsNodesAsked = { 
+/**
+ * Pages whose branch is wanted: each page, every page above it, and the
+ * pages directly under each of those, so a tree draws the way to it open.
+ */
+pages: Array<string>, 
+/**
+ * Folds opened: the pages directly under each.
+ */
+folds: Array<string>, 
+/**
+ * Spaces wanted whole, as `<source>/<key>` (the front end's `spaceId`).
+ */
+spaces: Array<string>, };
+
+/**
  * Every space the mirror holds pages of, and the page read last.
  */
 export type DocsTree = { 
@@ -1239,7 +1402,7 @@ export type DocsTree = {
 spaces: Array<DocSpace>, 
 /**
  * The page the reader opened most recently (`visit_entity`), while it is
- * still a live page; `#/docs` opens it.
+ * still a live page; the Docs home's *Continue reading* opens it.
  */
 last_read: string | null, 
 /**
@@ -1258,6 +1421,23 @@ for_you: Array<DocForYou>, };
  * - `all`: Every artifact, as a zip.
  */
 export type DownloadTarget = { "kind": "log" } | { "kind": "file", path: string, } | { "kind": "folder", path: string, } | { "kind": "all" };
+
+/**
+ * One id, as a page draws it beside the id: what kind of thing it is, its
+ * title and its state chip. The same columns, read by the same rules, as
+ * the detail read's row ([`crate::detail`]), so a brief and a detail of
+ * one id agree.
+ */
+export type EntityBrief = { entity_id: string, kind: string, source_id: string, 
+/**
+ * Raw source text. Render it as text, never as markup (gotcha 7).
+ */
+title: string, 
+/**
+ * The state chip, by `crate::declared_state!` as every row reads it;
+ * `None` on the ADR-0007 miss.
+ */
+state: StateChip | null, };
 
 /**
  * Everything the slide-over draws for one entity (interfaces §2.5).
@@ -1369,6 +1549,17 @@ estimate_seconds: number | null,
  * the reader. Absent on the wire on a miss (ADR-0007).
  */
 reporter?: string, 
+/**
+ * The name to call the reporter by (F-107), through the declared
+ * `reporter_name` path. Absent where the account is the only name.
+ */
+reporter_name?: string, 
+/**
+ * The name to call [`author`](Self::author) by on a ticket, its assignee
+ * (F-107), through the declared `assignee_name` path: what the ticket's
+ * comments call the same person. Absent where the account is the only name.
+ */
+author_name?: string, 
 /**
  * When a ticket was filed (#2403), through the declared `created` path.
  * Absent on the wire on a miss.
@@ -1511,7 +1702,21 @@ reach?: string | null,
  * empty, never an error. `None` is unscoped, and absent on the wire
  * reads as `None`, as [`Self::reach`] does.
  */
-role?: string | null, };
+role?: string | null, 
+/**
+ * Only rows that name a parent by this name (#2479's query audit): a
+ * repository page asks for its own pull requests by the repository's
+ * name, `owner/name`, and not for every pull request of its source.
+ * Read from the stored parents (`sync.item_parent`, ADR-0019), the
+ * child arm, compared case-insensitively as `item_parent_name_idx`
+ * indexes it: every name a parent answers to, so a bare repository name
+ * two owners share matches both owners' rows. It narrows to a superset
+ * of the rows whose path line is that name, and a caller that wants the
+ * path line exactly keeps those (`repoPrs` in the app). `None` is
+ * unscoped, and absent on the wire reads as `None`, as [`Self::reach`]
+ * does.
+ */
+parent?: string | null, };
 
 /**
  * The orderings a room reads in: the two plain ones, and since #680 the two
@@ -1688,7 +1893,27 @@ export type Fact = { label: string, value: string,
 /**
  * Colour, only where something is wrong or moving (the Signal design).
  */
-tone: Tone | null, };
+tone: Tone | null, 
+/**
+ * The account of the person the fact names, where its label or value
+ * names them by the source's display name: what the app compares with
+ * the source's configured username, and what a write about them sends.
+ * A Gitea review's *approved by Mara Lindqvist* is `mara`. Absent on
+ * the wire when `None`, so a fact without one keeps its old shape.
+ */
+account?: string, };
+
+/**
+ * The `checkout:fetched` payload: a fetch behind a read landed, and the
+ * tree of `entity_id` can now be read at its checkout.
+ *
+ * The smoothness pass (PR #2479, ADR-0041).
+ */
+export type Fetched = { entity_id: string, 
+/**
+ * The commit that landed.
+ */
+commit: string, };
 
 /**
  * How an [`ActionField`] asks. Internally tagged (`{"type": "choice", ...}`),
@@ -1852,8 +2077,20 @@ title: string,
  * be shown is not shippable.
  *
  * Also raw text.
+ *
+ * **It leads with the subject or stays short (F-115).** Where the reason
+ * names the subject, the subject is its first word (*knobas-jira is down*,
+ * *Payout_IntegrationTests #1187 failed*); what would bury it goes in
+ * [`detail`](Self::detail).
  */
 reason: string, 
+/**
+ * What the row says after the subject, on its second line: an alert's
+ * asset path above the asset, a failed build's own status text. Reachable
+ * without leading the row (F-115). Raw text; absent on the wire where a
+ * rule has none.
+ */
+detail?: string, 
 /**
  * When the item last moved. The stream's ordering, and what *done* is
  * measured against.
@@ -1890,9 +2127,36 @@ snoozed_until: string | null, };
 export type InboxShelf = "stream" | "snoozed";
 
 /**
+ * The stream and the snoozed shelf together, and how many need you now:
+ * what the window's inbox holds, from one run of the derivation.
+ *
+ * `count` is the stream's length, the number [`inbox_count`] answers
+ * (`crate::commands::entity::inbox_count`): one statement decides both
+ * shelves, so the badge cannot disagree with the list under it.
+ */
+export type InboxShelves = { 
+/**
+ * What needs you now, newest first: `inbox_items` of the stream.
+ */
+stream: Array<InboxEntry>, 
+/**
+ * What you deferred, newest first: `inbox_items` of the snoozed shelf.
+ */
+snoozed: Array<InboxEntry>, 
+/**
+ * How many items are on the stream.
+ */
+count: number, };
+
+/**
  * One of a parent ticket's own links: the far end.
  */
-export type JobLink = { entity_id: string, kind: string, title: string | null, };
+export type JobLink = { entity_id: string, kind: string, title: string | null, 
+/**
+ * The state dot on its drawer row (F-036). Absent on the wire where the
+ * entity says none.
+ */
+state?: StateChip, };
 
 /**
  * What a job shows beside its own links (#867): the sets that apply, by
@@ -1925,7 +2189,12 @@ entity_kind: string | null, title: string | null,
 /**
  * Hidden on this ticket by *Hide here* (R-7.5).
  */
-hidden: boolean, };
+hidden: boolean, 
+/**
+ * The state dot on its drawer row (F-036), as the set's editor reads it.
+ * Absent on the wire where the entity says none.
+ */
+state?: StateChip, };
 
 /**
  * The parent whose own links a sub-task shows (R-7.3).
@@ -2063,9 +2332,16 @@ export type LaneField = "epic" | "assignee" | "priority" | "issuetype" | "label"
  */
 export type LineComment = { 
 /**
- * Who wrote it, as the source names them (a login).
+ * Who wrote it, as the source names them (a login): what the app
+ * compares with the source's configured username.
  */
-author: string, body: string, 
+author: string, 
+/**
+ * The name to call [`author`](Self::author) by, the profile's name where
+ * the source keeps one (F-107); absent on the wire where the login is
+ * the only name, and the shell then draws the login.
+ */
+author_name?: string, body: string, 
 /**
  * When, as the source's RFC 3339 instant; `None` where it sent none.
  */
@@ -2113,6 +2389,12 @@ id: string | null,
  * the wire reads as `None`.
  */
 resolved_by: string | null, 
+/**
+ * The name to call [`resolved_by`](Self::resolved_by) by, as
+ * [`LineComment::author_name`] is the author's (F-107). Absent on the
+ * wire where the login is the only name.
+ */
+resolved_by_name?: string, 
 /**
  * Whether the source takes a reply on this thread (#2277): Gitea places
  * a reply by line on the current head, so an outdated thread takes none.
@@ -2163,7 +2445,15 @@ title: string,
  * RFC 3339 on the wire. Not a reason to hide the row: §5a keeps the entity
  * so a link never dangles, and the panel marks it instead.
  */
-deleted_at: string | null, };
+deleted_at: string | null, 
+/**
+ * The state dot on its row in the Connections drawer (F-036): what the far
+ * end's own declared state says, or an asset's health. Not read here,
+ * because [`entries_of`] binds no declarations and most of its readers
+ * draw no dot; `get_entity` fills it for a ticket. Absent on the wire
+ * otherwise, and where the far end declares no state.
+ */
+state?: StateChip, };
 
 /**
  * One link, as a detail view draws it: the record, and its other end.
@@ -2469,6 +2759,93 @@ export type LinkSetRuleRow = { kind: LinkSetRuleKind, value: string,
 title: string | null, };
 
 /**
+ * One directory of a tree read at a checkout (the big-folder pass of PR
+ * #2479, 2026-11-13): what *Files* draws for a folder, read when it opens,
+ * instead of the whole tree at the tab's open.
+ */
+export type LocalDir = { 
+/**
+ * The whole sha the tree was read at.
+ */
+commit: string, 
+/**
+ * When the mirror last stored that tip (RFC 3339), for a read at the
+ * mirror's tip; `None` for a read at a commit named.
+ */
+as_of: string | null, 
+/**
+ * The directory, from the top (`""` the top itself).
+ */
+dir: string, 
+/**
+ * Its entries, each by its whole path, in git's order.
+ */
+entries: Array<LocalEntry>, 
+/**
+ * Every entry of the directory is here. `false` only where the read of
+ * a tree past [`KEPT_CAP`] was cut in or before it: the shell reads it
+ * from the source instead.
+ */
+complete: boolean, };
+
+/**
+ * One entry of a tree read at a checkout.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type LocalEntry = { 
+/**
+ * The whole path from the top (`src/lib.rs`).
+ */
+path: string, kind: EntryKind, 
+/**
+ * A file's size in bytes; `None` for a directory or a submodule.
+ */
+size: number | null, };
+
+/**
+ * Every file of a tree read at a checkout, by its whole path (the big-folder
+ * pass): what *Go to file* filters.
+ */
+export type LocalPaths = { 
+/**
+ * The whole sha the tree was read at.
+ */
+commit: string, 
+/**
+ * The files and links, in git's order.
+ */
+entries: Array<LocalEntry>, 
+/**
+ * The read stopped at [`KEPT_CAP`].
+ */
+truncated: boolean, };
+
+/**
+ * A repository's whole tree at one commit, as its checkout holds it.
+ *
+ * The smoothness pass (PR #2479).
+ */
+export type LocalTree = { 
+/**
+ * The whole sha it was read at: the mirror's tip of the branch.
+ */
+commit: string, 
+/**
+ * When the mirror last stored that tip (RFC 3339): how old the guess
+ * that it is still the tip is.
+ */
+as_of: string | null, 
+/**
+ * Every directory and file, in git's order.
+ */
+entries: Array<LocalEntry>, 
+/**
+ * [`ENTRY_CAP`] or the read's own cap stopped it short.
+ */
+truncated: boolean, };
+
+/**
  * One line of a log.
  */
 export type LogLine = { 
@@ -2603,6 +2980,12 @@ issue_type: string | null,
  */
 assignee: string | null, 
 /**
+ * The name to call that account by, at the declared `assignee_name` path
+ * (F-107), so the card's avatar is the one a ticket's page draws. Absent
+ * where the account is the only name; never matched against anything.
+ */
+assignee_name?: string, 
+/**
  * When the source last changed it, or `None` where it never said.
  *
  * RFC 3339 on the wire.
@@ -2699,6 +3082,22 @@ count: number,
  * Its statuses, in the board's column order; only those it has.
  */
 columns: Array<LaneColumn>, };
+
+/**
+ * The commit the mirror names for a branch's tree: its declared `commit`
+ * as the last sync stored it, and when that was.
+ *
+ * The smoothness pass (PR #2479, ADR-0041).
+ */
+export type MirrorTip = { 
+/**
+ * The whole sha the mirror holds for the branch's tip.
+ */
+commit: string, 
+/**
+ * When the mirror stored it (RFC 3339).
+ */
+as_of: string | null, };
 
 /**
  * What *New page* asks for (R-10.16).
@@ -3236,7 +3635,23 @@ publication: Publication | null,
  * #1966) rather than offering *Create ticket* again; the read links
  * each one whose ticket the mirror now holds, and names it no more.
  */
-owed_tickets: Array<ActionItemTicket>, };
+owed_tickets: Array<ActionItemTicket>, 
+/**
+ * Whether the note says something the page was not last sent (F-327):
+ * [`to_storage`] of its body against the newest body the queue carried to
+ * the page. `false` with no publication.
+ */
+changed_since: boolean, 
+/**
+ * Whether the mirror holds the page at a later version than knobas last
+ * wrote, so somebody edited it at the source since (F-327). *Publish
+ * again* would replace their edit, so it is refused while this is true.
+ */
+page_moved: boolean, 
+/**
+ * The newest *Publish again*, while it has not landed (F-327).
+ */
+again: Republication | null, };
 
 /**
  * What became of a date's publication, as far as knobas can tell.
@@ -3294,6 +3709,20 @@ source_id: string,
 parent: string, };
 
 /**
+ * An open pull request of a repository, by the branch it is opened from: what
+ * puts a branch in the Builds tab's *Pull requests* group.
+ */
+export type PullHead = { 
+/**
+ * The branch it is opened from, as the source names it (declared `head`).
+ */
+branch: string, entity_id: string, 
+/**
+ * Its key as the source writes it (`#142`), where the record carries one.
+ */
+cell: string | null, };
+
+/**
  * A worktree, as Settings › Checkouts lists it.
  *
  * - `closed`: The mirror holds the pull request closed or merged.
@@ -3328,7 +3757,75 @@ range: DiffRange | null,
  * Local git or the source. Whitespace is ignored only at `checkout`:
  * the source's API cannot return a diff with whitespace ignored.
  */
-read_at: DiffReadAt, };
+read_at: DiffReadAt, 
+/**
+ * Two branch names read at the checkout between the tips the mirror
+ * holds for them (ADR-0041): when the mirror stored the newer of the
+ * two (RFC 3339). The source may have moved since, so the page checks
+ * it with `entity_source_range_diff` behind the answer. `None` for a
+ * diff between two shas, and for every source read. Absent on the wire
+ * when `None`.
+ */
+predicted_at?: string, };
+
+/**
+ * One page of one file's lines.
+ */
+export type RangeFilePage = { 
+/**
+ * The file as the whole read parses it, `hunks` holding this page's
+ * lines only.
+ */
+file: DiffFile, 
+/**
+ * The line this page starts at, counted over all the file's hunks.
+ */
+from: number, 
+/**
+ * The page's first hunk goes on from the last page's last one: its
+ * lines belong at the end of that hunk, under no header of their own.
+ */
+continues: boolean, 
+/**
+ * Where the next page starts; `None` on the last.
+ */
+next: number | null, };
+
+/**
+ * The files a range changes, without their lines: what Compare, *Open as
+ * diff* and a pull request's *Files changed* list first.
+ */
+export type RangeFiles = { 
+/**
+ * Each file as the whole read parses it, with `hunks` empty: its paths,
+ * change, counts, modes and blob.
+ */
+files: Array<DiffFile>, 
+/**
+ * The list was cut (past 16 MiB of git's listing; the source's ceiling).
+ */
+truncated: boolean, 
+/**
+ * As [`RangeDiff::range`]: the two whole shas a file's lines are read
+ * between ([`range_file`]).
+ */
+range: DiffRange | null, 
+/**
+ * As [`RangeDiff::read_at`].
+ */
+read_at: DiffReadAt, 
+/**
+ * As [`RangeDiff::predicted_at`].
+ */
+predicted_at?: string, 
+/**
+ * The list is what knobas last read of the source's compare between
+ * these two branch names, held between visits and sessions (RFC 3339,
+ * when it was read; the forge-waits pass of PR #2479, 2026-11-13): the
+ * page draws it at once under the held line and asks the source's list
+ * behind it ([`source_range_files`]). Absent on every other answer.
+ */
+held_at?: string, };
 
 /**
  * Where a reached entity's path came from.
@@ -3387,6 +3884,46 @@ export type RefusedWrite = { entity: string, op: string,
  * The [`WriteAsk::field`] refused, or `None` for the write itself.
  */
 field?: string, reason: string, };
+
+/**
+ * A repository's Builds tab in one answer: the pipelines that built its
+ * commits ([`RepoPipelineRow`]) and its open pull requests' branches.
+ */
+export type RepoBuilds = { pipelines: Array<RepoPipelineRow>, pull_requests: Array<PullHead>, };
+
+/**
+ * One pipeline that builds a repository, for the repository's Builds tab
+ * (the repo-builds pass, 2026-11-13, `mockups/builds/repo-builds.md`): the
+ * pipeline as the Builds list names it, and its newest run on each branch
+ * among the runs that built one of the repository's mirrored commits.
+ *
+ * `latest` holds one run per branch, newest first; the branch is as the run
+ * spells it, so `refs/heads/main` and `main` are two entries where a source
+ * writes both.
+ */
+export type RepoPipelineRow = { entity_id: string, source_id: string, source_name: string, name: string, group: string | null, 
+/**
+ * The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+ */
+path: Array<string>, web_url: string | null, latest: Array<RunRow>, };
+
+/**
+ * A *Publish again* that has not landed (F-327): the newest `UpdatePage` on the
+ * date's page, pending, held or refused. A sent one is simply the page.
+ */
+export type Republication = { 
+/**
+ * The write queue row that carries it.
+ */
+write_id: number, 
+/**
+ * The queue's own word for where the write stands.
+ */
+state: WriteState, 
+/**
+ * The queue's or the source's sentence. Untrusted source text.
+ */
+detail: string | null, };
 
 /**
  * A ticket a rule or a set applies to.
@@ -3586,6 +4123,41 @@ inherited: boolean, secret: boolean,
  * Whether the block's `write_op` may change it.
  */
 editable: boolean, description: string | null, };
+
+/**
+ * A page's view as [`LiveSources::shown`] answers it (ADR-0042): the view,
+ * and when it was read where it is what knobas held rather than a read made
+ * now. On the wire it is the view's own object with `held_at` beside its
+ * fields, absent for a read made now.
+ */
+export type ShownView = { held_at?: string, 
+/**
+ * The rows ADR-0020 rule 7 drew as plain text because the mirror has not
+ * synced their entity yet, each with the id its adapter named for it
+ * (the third smoothness pass of PR #2479): a page may *read* through it,
+ * as the repository page reads a branch made on the forge since the last
+ * sync, but never link to it, since no item page holds it. Absent on the
+ * wire when empty.
+ */
+unsynced?: Array<Unsynced>, 
+/**
+ * Where the section is a branch's tree the sync does not store because
+ * it is past the cap (100,000 entries; the stored-trees pass of PR
+ * #2479), how many entries it holds at least: the page says so, and
+ * its folders are read from the source as before. Absent on the wire
+ * otherwise.
+ */
+tree_unkept?: number, sections: Array<ViewSection>, 
+/**
+ * What a reader can do to the entity, drawn as a toolbar between the
+ * detail's header and the tabs, on every tab (issue #702, spec #701).
+ * Empty draws no toolbar. Absent on the wire reads as empty, so a view
+ * drawn before the toolbar decodes.
+ *
+ * A [`Block::Actions`] is for an action that belongs to one section; an
+ * action is in one place or the other, never both.
+ */
+actions: Array<ViewAction>, };
 
 /**
  * One signal on one ticket: what the card and the list row draw.
@@ -4053,6 +4625,12 @@ untracked_truncated: boolean, };
 export type Unfilled = "not_mirrored" | "no_excerpt" | "too_deep" | "cycle";
 
 /**
+ * One row of a [`ShownView`] whose entity the mirror does not hold yet: its
+ * section, its title as drawn, and the id the adapter named for it.
+ */
+export type Unsynced = { section: string, title: string, entity_id: string, };
+
+/**
  * What a pasted URL resolved to: the entity, and the kind that says where it
  * opens (issue #496).
  *
@@ -4257,7 +4835,25 @@ url: string | null,
  * where the source has no such read, and on that answer itself.
  * Absent on the wire when `None`.
  */
-paths?: string, } | { "type": "file", trail: Array<Crumb>, path: string, 
+paths?: string, 
+/**
+ * The whole git sha of the commit the listing was read at, where the
+ * source has one (the smoothness pass, PR #2479): what the shell
+ * holds its checkout's copy of the same tree to, read first, so a
+ * branch that moved since the mirror's sync is noticed. Compared,
+ * never parsed or sent back. `None` where the source cannot say.
+ * Absent on the wire when `None`.
+ */
+commit?: string, 
+/**
+ * The listing was read on its own, because the whole tree the source
+ * reads at once (the one `paths` names) was cut before this
+ * directory (the big-folder pass of PR #2479, 2026-11-13): every entry
+ * is here, and the shell says that folders past the cut are read one
+ * at a time. `None` for a listing drawn from the whole tree, and where
+ * the source reads no whole tree. Absent on the wire when `None`.
+ */
+read_alone?: boolean, } | { "type": "file", trail: Array<Crumb>, path: string, 
 /**
  * Empty for a binary file.
  */
@@ -4301,7 +4897,14 @@ commit: string | null, };
  * was answered from memory was read again behind, and its answer moved, so
  * a page showing it reads it again (from memory, now the fresh answer).
  */
-export type ViewFresh = { entity_id: string, section: string | null, };
+export type ViewFresh = { entity_id: string, section: string | null, 
+/**
+ * The source's failure, where the read behind an answer older than
+ * [`HELD_AFTER`] failed (ADR-0042): the page keeps what it drew, says
+ * from when it is and why it was not read now, and reads nothing again.
+ * Absent on every other telling.
+ */
+failed?: string, };
 
 /**
  * One row of an [`Block::Entities`] list.

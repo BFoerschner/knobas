@@ -179,7 +179,11 @@ use crate::model;
 /// accurate count of what it walked ([`cap_reached`]) rather than being
 /// silently truncated.
 const MAX_LIST_PAGES: u32 = 21;
-const MAX_BRANCH_PAGES: u32 = 21;
+/// The branch walk's guard: 10,000 branches in one repository, as the issues' is (`MAX_ISSUE_PAGES`), plus the
+/// empty page that ends them. It was 1,000 with the repositories' until the extremes pass (PR #2479, 2026-11-13):
+/// a repository of 5,000 branches, which a real team's long-lived monorepo has, failed the whole source's run
+/// with `cap_reached`, so nothing of it was mirrored at all. Past 10,000 it still fails loudly.
+const MAX_BRANCH_PAGES: u32 = 201;
 // The two budgeted walks' page caps. Both sit at 1,000 records, which is
 // exactly the largest `prs_per_repo`/`commits_per_repo` the config schema
 // allows (`config::config_schema`, `"maximum": 1000`). Sitting them *there* is
@@ -203,7 +207,7 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
 // before any request for the empty page that would have confirmed the end.
 // That is why these two stayed at 20 when `MAX_LIST_PAGES` and
-// `MAX_BRANCH_PAGES` went to 21: a 21st request is one they never make.
+// `MAX_BRANCH_PAGES` went to 21 (the branches' since to 201): a 21st request is one they never make.
 /// Pull requests per repository, per run.
 const MAX_PR_PAGES: u32 = 20;
 /// Pages per walk of one branch. `commits_per_repo` is the whole-repository

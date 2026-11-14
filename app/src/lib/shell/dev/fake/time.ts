@@ -170,6 +170,8 @@ function fakeHorizon(): string {
 function fakeTime(params: URLSearchParams): Handlers {
   const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   let nextBlock = 501;
+  /** Offers a person took, as they were: the block deleting one brings back. */
+  const offered = new Map<number, FakeBlock>();
   let nextWorklog = 71;
   // The day's blocks are always there (#827); PAY-231's 09:40 to 11:50 is
   // also what a stop's draft adds up.
@@ -192,9 +194,14 @@ function fakeTime(params: URLSearchParams): Handlers {
   };
   const titleOf = (target: FakeTarget) =>
     target.kind === "entity" ? (CORPUS.find((row) => row.entity_id === target.entity_id)?.title ?? null) : null;
+  // Manual only, as the crate's `unlogged`: an offered block is logged by no one until it is added to the ticket.
   const unlogged = (entityId: string) =>
     blocks.filter(
-      (block) => block.worklog_id === null && block.target.kind === "entity" && block.target.entity_id === entityId,
+      (block) =>
+        block.worklog_id === null &&
+        block.kind === "manual" &&
+        block.target.kind === "entity" &&
+        block.target.entity_id === entityId,
     );
   const candidates = (from: string): Candidate[] => {
     const at = (minutes: number) => new Date(new Date(from).getTime() + minutes * 60_000).toISOString();
@@ -271,6 +278,7 @@ function fakeTime(params: URLSearchParams): Handlers {
     // The Day tab's edits (#827): in memory, so a click visibly does something.
     update_block: (args) => {
       const block = editable(args["id"]);
+      if (block.kind === "passive") offered.set(block.id, { ...block });
       Object.assign(block, {
         started_at: String(args["startedAt"]),
         ended_at: String(args["endedAt"]),
@@ -296,6 +304,12 @@ function fakeTime(params: URLSearchParams): Handlers {
     delete_block: (args) => {
       const block = editable(args["id"]);
       blocks = blocks.filter((candidate) => candidate !== block);
+      // An offer taken and then deleted is offered again, as the backend's next read derives it.
+      const was = offered.get(block.id);
+      if (was !== undefined) {
+        offered.delete(block.id);
+        blocks = [...blocks, was];
+      }
       return null;
     },
     // *Dismiss* (#900): only an offer, and it stays gone.

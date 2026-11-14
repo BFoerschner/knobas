@@ -5,6 +5,7 @@
 <script lang="ts">
   import type { KeyPanelMode } from "./key-panel.svelte";
   import { kindInSentence } from "./keys";
+  import { chordParts, keyHint } from "../shell/platform";
 
   let { panel }: { panel: KeyPanelMode } = $props();
 </script>
@@ -19,12 +20,12 @@
   </p>
   <div class="tf-ln-bind-keys" aria-live="polite">
     {#if panel.chord}
-      {#each [...panel.chord] as glyph, i (i)}<kbd class="tf-ln-bigkey">{glyph}</kbd>{/each}
+      {#each chordParts(panel.chord) as glyph, i (i)}<kbd class="tf-ln-bigkey">{glyph}</kbd>{/each}
     {:else if panel.held.length > 0}
-      {#each panel.held as glyph, i (i)}<kbd class="tf-ln-bigkey tf-ln-held">{glyph}</kbd>{/each}
+      {#each chordParts(panel.held.join("")) as glyph, i (i)}<kbd class="tf-ln-bigkey tf-ln-held">{glyph}</kbd>{/each}
       <span class="tf-ln-bind-hint">… and a letter or digit</span>
     {:else}
-      <span class="tf-ln-bind-hint">Press a modifier and a letter or digit, such as ⌘⇧O</span>
+      <span class="tf-ln-bind-hint">{keyHint("Press a modifier and a letter or digit, such as ⌘⇧O")}</span>
     {/if}
   </div>
   {#if panel.refused}<p class="tf-ln-bind-refused" role="alert">{panel.refused}</p>{/if}

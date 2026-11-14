@@ -24,7 +24,7 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import { actionPayload, missingFields } from "../../detail/view/actions";
   import { asReview, lineName, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
-  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
+  import { reviewSubject, toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { reviewChoices, type Verdict } from "./pr";
@@ -50,7 +50,7 @@
     /** The pull request's source: where the review goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    onqueued: (write: QueuedWrite) => void;
+    onqueued: (write: QueuedWrite, verdict: Verdict) => void;
     onclose: () => void;
     /** The head the pull request's diff is drawn at now, as its source says (`Commenting.head`); `null` where it does not. */
     headOf?: (() => Promise<string | null>) | null;
@@ -59,10 +59,10 @@
   const uid = $props.id();
   const drafts = $derived(pending.of(prId));
   const choices = $derived(reviewChoices(actions, drafts.length, base));
-  // The first sendable verdict, once, when the dialog opens: prototype-6 checks *Comment*.
-  let verdict = $state<Verdict | null>(
-    (() => reviewChoices(actions, pending.of(prId).length, base).find((choice) => choice.action !== null)?.verdict ?? null)(),
-  );
+  // Nothing is preselected (design system, the enabled rule): a press must not approve by default. The one verdict a
+  // reader has (one's own pull request takes only a comment) is no choice to make.
+  const offered = untrack(() => reviewChoices(actions, pending.of(prId).length, base));
+  let verdict = $state<Verdict | null>(offered.length === 1 && offered[0]!.action !== null ? offered[0]!.verdict : null);
   // The review's words are kept with its comments until it is sent (#2276), so a restart keeps them too.
   let summary = $state(untrack(() => pending.body(prId)));
   let busy = $state(false);
@@ -80,6 +80,9 @@
 
   const chosen = $derived(choices.find((choice) => choice.verdict === verdict) ?? null);
   const missing = $derived(chosen?.action ? missingFields(chosen.action, { body: summary }) : ["verdict"]);
+  const summaryRequired = $derived(chosen?.action?.fields.some((field) => field.name === "body" && field.required) ?? false);
+  /** What the primary waits for, in words beside it. */
+  const needs = $derived(missing.length === 0 ? null : chosen?.action ? `${chosen.label} needs a summary.` : "Pick a verdict.");
 
   async function send() {
     if (busy || !chosen?.action || missing.length > 0) return;
@@ -99,8 +102,8 @@
     try {
       const write = await submitWrite(payload);
       pending.settle(prId, sent, summary);
-      toastQueued(`submit review on ${name}`, source);
-      onqueued(write);
+      toastQueued(`submit review on ${name}`, source, { write, subject: reviewSubject(prId) });
+      onqueued(write, chosen.verdict);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the review: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -109,37 +112,36 @@
   }
 </script>
 
-<TfDialog title="Submit your review of {name}" {onclose} className="tf-pr-dialog">
+<TfDialog why={busy ? null : needs} title="Submit your review of {name}" {onclose} className="tf-pr-dialog">
   {#snippet body()}
     <form
       id="tf-prr-{uid}"
-      class="tf-pra"
+      class="tf-formgrid"
       onsubmit={(event) => {
         event.preventDefault();
         void send();
       }}
     >
-      <textarea
-        rows="3"
-        bind:value={summary}
-        oninput={() => pending.setBody(prId, summary)}
-        aria-label="Summary"
-        placeholder={chosen?.action?.fields.some((field) => field.name === "body" && field.required) ? "Summary" : "Summary (optional)"}
-      ></textarea>
+      <label for="tf-prr-{uid}-summary">{summaryRequired ? "Summary" : "Summary (optional)"}</label>
+      <textarea id="tf-prr-{uid}-summary" rows="3" bind:value={summary} oninput={() => pending.setBody(prId, summary)}></textarea>
+      <span>Verdict</span>
       <fieldset class="tf-radio">
         <legend class="tf-sr">Verdict</legend>
         {#each choices as choice (choice.verdict)}
           <label title={choice.why ?? undefined}
             ><input type="radio" name="tf-prr-{uid}-verdict" value={choice.verdict} disabled={choice.action === null} bind:group={verdict} />
-            <span>{choice.label}<small>{choice.meaning}</small></span></label
+            <span>{choice.label}<small>{choice.why ?? choice.meaning}</small></span></label
           >
         {/each}
       </fieldset>
       {#if drafts.length > 0}
-        <div class="tf-pane-h">{drafts.length} line {drafts.length === 1 ? "comment goes" : "comments go"} with it</div>
-        {#each drafts as d (d.id)}
-          <div class="tf-dim tf-prr-line"><span class="tf-mono">{d.path}</span>, {lineName(d.side, d.line)}: {d.body}</div>
-        {/each}
+        <!-- One block across the dialog: in the grid's two columns the first comment sat in the value column and the next under the label (F-258). -->
+        <div class="tf-fwide tf-prr-lines">
+          <div class="tf-pane-h">{drafts.length} line {drafts.length === 1 ? "comment goes" : "comments go"} with it</div>
+          {#each drafts as d (d.id)}
+            <div class="tf-dim tf-prr-line"><span class="tf-mono">{d.path}</span>, {lineName(d.side, d.line)}: {d.body}</div>
+          {/each}
+        </div>
       {/if}
     </form>
   {/snippet}

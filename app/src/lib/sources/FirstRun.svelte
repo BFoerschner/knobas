@@ -89,7 +89,7 @@
   It draws the run's **walk** instead (#1379): an adapter that reports how many
   units of its outer walk are done, and of how many, gets `<progress max={of}
   value={walked}>` and a reading that names the unit — *120 of 300
-  repositories · 0 items · 8.3 s*. That is what moves while an unchanged run
+  repositories · 0 items · 8s*. That is what moves while an unchanged run
   pushes nothing, the case a customer read as stuck (#1378). An adapter that
   reports no total, or no walk at all, keeps the indeterminate bar.
 -->
@@ -100,9 +100,11 @@
 
 <script lang="ts">
   import { Channel } from "@tauri-apps/api/core";
+  import { keyHint } from "../shell/platform";
   import { walkAfter, walkMax, type Walk } from "./walk";
 
   import { ipcErrorMessage } from "../ipc";
+  import { secondsLabel } from "../time/format";
   import { completeFirstRun } from "../ipc/app";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import {
@@ -564,7 +566,7 @@
               {/if}
               <p class="tf-fr-reading">
                 <b>{failed ? "failed" : phase}</b>
-                · {walkReading}{itemsReading} · {(elapsed / 1000).toFixed(1)} s
+                · {walkReading}{itemsReading} · {secondsLabel(Math.round(elapsed / 1000))}
               </p>
             </div>
 
@@ -595,7 +597,7 @@
               is only claimed when there is one (#137).
             -->
             knobas mirrored {#if mirrored === null}your items{:else}<b>{mirrored}</b> items{/if}. Press
-            <kbd>⌘K</kbd> to search everything you just synced.
+            <kbd>{keyHint("⌘K")}</kbd> to search everything you just synced.
           </p>
           <div class="tf-fr-acts">
             <button class="tf-btn tf-primary" disabled={finishing} onclick={() => void finish("tickets")}>

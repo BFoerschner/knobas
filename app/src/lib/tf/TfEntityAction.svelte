@@ -9,7 +9,11 @@
   A text is an input, a long text a text area, a choice radio buttons, a flag
   a checkbox. *Edit…* sends only what changed (#706): sent back as drawn, it
   closes without a write. Lifted from the pull request page (#1407), its
-  classes (`tf-pr-dialog`, `tf-pra`) kept with it.
+  class (`tf-pr-dialog`) kept with it.
+
+  Typed words outlive the dialog (the key table, `drafts`, F-238): `Esc` or × closes it and
+  keeps them for the next time it opens on this entity. *Cancel* throws them away. A choice
+  is not kept, because a pick stays a choice made fresh each time.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -18,6 +22,7 @@
   import { toastQueued, type WriteSource } from "../shell/queued-toast";
   import { push } from "../shell/toasts.svelte";
   import { actionName, actionPayload, answeredAsDrawn, initialValues, missingFields } from "../detail/view/actions";
+  import { drafts } from "./drafts.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
 
   let {
@@ -25,6 +30,7 @@
     entityId,
     title,
     what,
+    primary = null,
     source = null,
     submitWrite,
     onqueued,
@@ -35,27 +41,63 @@
     entityId: string;
     /** The dialog's heading. */
     title: string;
-    /** What the toast says was queued (`close PR #142`, `book repair on Quay crane 4 inspection`). */
-    what: string;
+    /** What the toast says was queued (`close PR #142`, `book repair on Quay crane 4 inspection`), or how to say it from what was chosen. */
+    what: string | ((chose: string) => string);
+    /** The primary's words where the action's own name is not what happens (*Save changes*); the name when omitted. */
+    primary?: string | null;
     /** The entity's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    /** Called once the write is queued, for a page that marks it (the pull request's chip). */
-    onqueued?: (write: QueuedWrite) => void;
+    /** Called once the write is queued, with the words of what was chosen, for a page that marks it (the pull request's chip). */
+    onqueued?: (write: QueuedWrite, chose: string) => void;
     onclose: () => void;
   } = $props();
 
   const uid = $props.id();
-  // The answers start as the source declared them, once, when the dialog opens.
-  let values = $state(initialValues((() => action)()));
+  /** The fields typed into: what a draft holds. */
+  const TYPED = ["text", "long_text"];
+  // svelte-ignore state_referenced_locally
+  const draftKey = `action:${entityId}:${action.write_op}:${action.label}`;
+  // svelte-ignore state_referenced_locally
+  const asDrawn = initialValues(action);
+  // The answers start as the source declared them, once, when the dialog opens, with any words kept from the last time.
+  let values = $state<Record<string, string>>({ ...asDrawn, ...(drafts.has(draftKey) ? (JSON.parse(drafts.get(draftKey)) as Record<string, string>) : {}) });
   let busy = $state(false);
 
+  /** What is typed differently from what the source drew is the draft. */
+  function keepWords() {
+    const typed = Object.fromEntries(action.fields.filter((field) => TYPED.includes(field.kind.type) && values[field.name] !== asDrawn[field.name]).map((field) => [field.name, values[field.name] ?? ""]));
+    if (Object.keys(typed).length === 0) drafts.forget(draftKey);
+    else drafts.put(draftKey, JSON.stringify(typed));
+  }
+
+  /** *Cancel*: the explicit discard. */
+  function cancel() {
+    drafts.forget(draftKey);
+    onclose();
+  }
+
+  /** The words of what was chosen in the choices, for a toast and a chip to name it. */
+  const chose = $derived(
+    action.fields
+      .flatMap((field) => (field.kind.type === "choice" ? field.kind.options.filter((option) => option.value === values[field.name]).map((option) => option.label) : []))
+      .join(", "),
+  );
+
   const missing = $derived(missingFields(action, values));
+  /** What the primary waits for, by the labels the reader sees. */
+  const stillNeeded = $derived.by(() => {
+    if (missing.length === 0) return null;
+    const fields = action.fields.filter((field) => missing.includes(field.name));
+    // A list to pick from is in front of the reader, so the line needs no name for it.
+    if (fields.length === 1 && fields[0]!.kind.type === "choice") return "Pick one first.";
+    return `Still needs ${fields.map((field) => field.label).join(" and ")}.`;
+  });
 
   async function send() {
     if (busy || missing.length > 0) return;
     if (answeredAsDrawn(action, values)) {
-      onclose();
+      cancel();
       return;
     }
     const payload = actionPayload(action, entityId, values);
@@ -66,9 +108,9 @@
     busy = true;
     try {
       const write = await submitWrite(payload);
-      toastQueued(what, source);
-      onqueued?.(write);
-      onclose();
+      toastQueued(typeof what === "function" ? what(chose) : what, source, { write });
+      onqueued?.(write, chose);
+      cancel();
     } catch (cause) {
       push({ text: `Could not queue the write: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;
@@ -76,11 +118,12 @@
   }
 </script>
 
-<TfDialog {title} {onclose} className="tf-pr-dialog">
+<TfDialog why={busy ? null : stillNeeded} {title} {onclose} className="tf-pr-dialog">
   {#snippet body()}
     <form
       id="tf-pra-{uid}"
-      class="tf-pra"
+      class="tf-formgrid"
+      oninput={keepWords}
       onsubmit={(event) => {
         event.preventDefault();
         void send();
@@ -90,10 +133,10 @@
       {#each action.fields as field (field.name)}
         {@const id = `tf-pra-${uid}-${field.name}`}
         {#if field.kind.type === "text"}
-          <label for={id}>{field.label}</label>
+          <label for={id}>{field.label}{#if field.required}{" "}<small class="tf-req">required</small>{/if}</label>
           <input {id} type="text" aria-label={field.label} autocomplete="off" placeholder={field.placeholder ?? undefined} bind:value={values[field.name]} />
         {:else if field.kind.type === "long_text"}
-          <label for={id}>{field.label}</label>
+          <label for={id}>{field.label}{#if field.required}{" "}<small class="tf-req">required</small>{/if}</label>
           <textarea {id} rows="6" aria-label={field.label} placeholder={field.placeholder ?? undefined} bind:value={values[field.name]}></textarea>
         {:else if field.kind.type === "choice"}
           <fieldset class="tf-radio">
@@ -116,13 +159,12 @@
     </form>
   {/snippet}
   {#snippet footer()}
-    <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button type="button" class="tf-btn tf-ghost" onclick={cancel}>Cancel</button>
     <button
       type="submit"
       class="tf-btn tf-primary" class:tf-danger={action.danger}
       form="tf-pra-{uid}"
-      aria-label={actionName(action.label)}
-      disabled={busy || missing.length > 0}>{actionName(action.label)}</button
+      disabled={busy || missing.length > 0}>{primary ?? actionName(action.label)}</button
     >
   {/snippet}
 </TfDialog>

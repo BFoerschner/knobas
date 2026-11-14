@@ -893,6 +893,7 @@ fn said(author: &str, at: &str, body: &str) -> LineComment {
         author: author.into(),
         body: body.into(),
         at: Some(at.into()),
+        author_name: None,
     }
 }
 
@@ -934,6 +935,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     6,
                     &[(DiffLineKind::Add, None, Some(7), "    loop {}")]
                 )),
+                resolved_by_name: None,
             },
         }],
         "{view:#?}"
@@ -955,6 +957,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 replies: true,
                 commit: None,
                 hunk: None,
+                resolved_by_name: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -970,6 +973,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 replies: true,
                 commit: None,
                 hunk: None,
+                resolved_by_name: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -989,6 +993,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                         (DiffLineKind::Add, None, Some(3), "    35"),
                     ]
                 )),
+                resolved_by_name: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -1004,6 +1009,7 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     39,
                     &[(DiffLineKind::Add, None, Some(40), "    gone")]
                 )),
+                resolved_by_name: None,
             },
         ],
         "{view:#?}"
@@ -1496,6 +1502,7 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
                 label: "Mergeable".into(),
                 value: format!("no: {lower}"),
                 tone: Some(Tone::Warn),
+                account: None,
             }),
             "{}",
             case.what
@@ -1589,6 +1596,7 @@ async fn what_does_not_stand_in_the_way_leaves_the_merge_enabled() {
             label: "Mergeable".into(),
             value: "yes, behind main".into(),
             tone: None,
+            account: None,
         })
     );
 
@@ -2140,6 +2148,7 @@ async fn the_overview_read_alone_says_the_same_mergeability() {
             label: "Mergeable".into(),
             value: "no: 1 of 2 required approvals".into(),
             tone: Some(Tone::Warn),
+            account: None,
         })
     );
     assert_eq!(mergeable_fact(&alone), mergeable_fact(&whole));
@@ -2160,13 +2169,17 @@ async fn a_section_read_carries_no_toolbar() {
     assert!(view.actions.is_empty(), "{view:#?}");
 }
 
-/// A pull request's tabs are read side by side over its one record (#703):
-/// once the record is in, the reviews, the commits, the comments, who the
-/// token is (#705), landing's three -- the base branch, the head branch,
-/// whether the head is behind (#708) -- the head commit's statuses (#710) and
-/// the repository's labels (#1194) and its organisation's (#1235), and who a
-/// review can be requested from (#2303) are in flight together. Read in
-/// turn, one is.
+/// A pull request's tabs are read side by side (#703), in two rounds of
+/// the forge's answers (the priority lane, 2026-11-13). Beside the record go
+/// the reads that need nothing of it: the reviews, the comments, who the
+/// token is (#705) and the repository's labels (#1194) and its
+/// organisation's (#1235). Then, beside each other, those that need the
+/// record or the reviews: the commits, landing's three -- the base branch,
+/// the head branch, whether the head is behind (#708) -- the head commit's
+/// statuses (#710), who a review can be requested from (#2303), and the
+/// reviews' line comments (#2277). Each read held 300 ms, the view takes two
+/// of them: three, the record and then the rest and then the line comments,
+/// was 900 ms; read in turn, a read at a time is in flight.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -2174,13 +2187,19 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     const FRESH: &str = "a-token-read-beside-the-tabs";
     let flight = InFlight::new(Duration::from_millis(300));
     let server = slow_gitea(open_pull(), reviews(), Some(&flight), FRESH).await;
+    let started = std::time::Instant::now();
     let view = built(&server, FRESH)
         .view(PR, None)
         .await
         .expect("reads")
         .expect("a pull request draws a view");
+    let took = started.elapsed();
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 11, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 6, "each round's reads in flight at once");
+    assert!(
+        took >= Duration::from_millis(600) && took < Duration::from_millis(890),
+        "two rounds of 300 ms, not {took:?}"
+    );
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
@@ -3595,4 +3614,158 @@ async fn a_diff_is_kept_only_when_the_record_read_after_it_names_the_same_head()
 
 fn source_of(server: &MockServer) -> Box<dyn Source> {
     knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).expect("builds")
+}
+
+// -- People by name (the live run on #2479, F-107) ---------------------------
+
+/// Where Gitea's profiles have names, the view calls people by them, as a
+/// ticket's card does, and keeps each login as the fact's account: the
+/// author, each reviewer's verdict, who said what, who merged, who a review
+/// can be asked of, and a commit Gitea matched to an account. A profile with
+/// no name keeps its login. The live run drew *jonas.becker* beside commits
+/// reading *Mara Lindqvist*.
+#[tokio::test]
+async fn people_are_named_by_their_profiles_and_keep_their_logins() {
+    let named = |login: &str, name: &str| json!({ "login": login, "full_name": name });
+    let mut pull = open_pull();
+    pull["user"] = named("mara.lindqvist", "Mara Lindqvist");
+    pull["base"]["repo"]["permissions"] = json!({ "push": true });
+    let reviews = json!([
+        { "id": 1, "user": named("priya.nair", "Priya Nair"), "state": "APPROVED",
+          "submitted_at": "2026-08-22T11:00:00Z", "body": "Looks right." },
+        { "id": 2, "user": named("lee", ""), "state": "REQUEST_CHANGES",
+          "submitted_at": "2026-08-22T12:00:00Z", "body": "" }
+    ]);
+    let server = gitea(pull.clone(), reviews).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/reviewers")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([named("sven", "Sven Ahlberg"), named("olu", " ")])),
+        )
+        .mount(&server)
+        .await;
+    let mut commits = pr_commits();
+    commits[1]["author"] = named("mara.lindqvist", "Mara L.");
+    answer(&server, format!("{REPO}/pulls/142/commits"), 200, commits).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+
+    let people: Vec<_> = facts_of(section(&view, "overview"))
+        .iter()
+        .filter(|f| f.label == "Author" || f.label == "Review")
+        .map(|f| (f.label.as_str(), f.value.as_str(), f.account.as_deref()))
+        .collect();
+    assert_eq!(
+        people,
+        [
+            ("Author", "Mara Lindqvist", Some("mara.lindqvist")),
+            ("Review", "approved by Priya Nair", Some("priya.nair")),
+            ("Review", "changes requested by lee", Some("lee")),
+        ]
+    );
+
+    let said: Vec<_> = section(&view, "conversation")
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Facts { facts } => Some((facts[0].label.clone(), facts[0].account.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        said.contains(&("Priya Nair".to_owned(), Some("priya.nair".to_owned()))),
+        "{said:?}"
+    );
+    assert!(
+        said.contains(&("jonas.becker".to_owned(), Some("jonas.becker".to_owned()))),
+        "a profile with no name keeps its login: {said:?}"
+    );
+
+    let FieldKind::Choice { options } = &request_of(&view).expect("offered").fields[0].kind else {
+        panic!("a choice");
+    };
+    assert_eq!(
+        options,
+        &[
+            ChoiceOption::new("sven", "Sven Ahlberg"),
+            ChoiceOption::new("olu", "olu")
+        ],
+        "sent by login, shown by name, and a blank name is the login"
+    );
+
+    let Block::Entities { rows, .. } = &section(&view, "commits").blocks[0] else {
+        panic!("commits are a list");
+    };
+    // This mock answers every page alike, so read the first page's two.
+    let authors: Vec<_> = rows.iter().take(2).map(|r| r.author.as_deref()).collect();
+    assert_eq!(
+        authors,
+        [Some("Mara Lindqvist"), Some("Mara L.")],
+        "an unmatched commit keeps git's name; a matched one takes the account's"
+    );
+
+    // Merged: who merged is named the same way.
+    let mut merged = pull;
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    merged["merged_at"] = json!("2026-08-23T08:00:00Z");
+    merged["merged_by"] = named("priya.nair", "Priya Nair");
+    let server = gitea(merged, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        fact(facts_of(section(&view, "overview")), "Merged").map(|f| f.value.as_str()),
+        Some("2026-08-23 08:00 +00:00 by Priya Nair")
+    );
+}
+
+/// **From the mirror's record** (ADR-0042): a pull request opened for the
+/// first time is drawn from the record the sync wrote, with no request --
+/// its state, author, branches, times and description, and *Files*' count --
+/// and says the tabs only Gitea's reads fill are not held. No action.
+#[tokio::test]
+async fn a_pull_request_is_drawn_from_its_record_with_no_request() {
+    let server = MockServer::builder().start().await;
+    let source = knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).unwrap();
+    let view = source
+        .mirror_view(PR, None, &open_pull())
+        .expect("a pull request's record draws");
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(view.actions.is_empty(), "no write before Gitea is read");
+    let ids: Vec<&str> = view.sections.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["overview", "files", "commits", "conversation"]);
+    let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+        panic!("facts first: {:?}", view.sections[0]);
+    };
+    let value = |label: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| f.value.clone())
+    };
+    assert_eq!(value("State").as_deref(), Some("open"));
+    assert_eq!(
+        value("Branches").as_deref(),
+        Some("feature/PAY-231-sepa-retry → main")
+    );
+    assert!(
+        matches!(&view.sections[0].blocks[1], Block::Text { text, .. } if text.starts_with("Refs PAY-231")),
+        "the description"
+    );
+    assert_eq!(view.sections[1].count, Some(2), "Files' count");
+    assert!(
+        source
+            .mirror_view(PR, Some("files"), &open_pull())
+            .is_none()
+    );
+    assert!(
+        source
+            .mirror_view(PR, None, &json!({ "not": "a pull request" }))
+            .is_none()
+    );
 }

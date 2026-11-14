@@ -37,7 +37,11 @@
 //!   (before a retry, it is what the source said the attempt before). A
 //!   caller that has to tell that failure from a refusal runs the call
 //!   under [`watch_local_quota`], which hands back the quota it stopped on
-//!   (#1729).
+//!   (#1729). **A person's request goes first**: a request sent under
+//!   [`on_lane`] with [`Lane::Background`] -- the sync, the write queue's
+//!   tick -- yields the next request the quota lets through to one a person
+//!   is waiting for, for at most [`BACKGROUND_FLOOR`]; the quota itself is
+//!   unchanged (the priority lane, 2026-11-13).
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
 //!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
 //!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
@@ -98,7 +102,10 @@ use tokio::time::Instant;
 
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
-pub use limiter::{InstanceLimiter, LocalQuota, watch_local_quota};
+pub use limiter::{
+    BACKGROUND_FLOOR, InstanceLimiter, Lane, LocalQuota, Sending, current_lane, on_lane,
+    watch_local_quota,
+};
 pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
@@ -603,7 +610,10 @@ impl HttpClient {
             // budget, because waiting for a token is part of what the call
             // costs, and bounded by what is left of it (SPI-11, #1630).
             let left = self.budget_left(started).unwrap_or_default();
-            let ready = self.limiter.until_ready_within(left).await;
+            // A person's request keeps its place among the origin's until
+            // this attempt's answer is in, so a sync stands aside for the
+            // whole of it (`limiter::Sending`, the priority lane).
+            let ready = self.limiter.until_ready_sending(left).await;
             // Out of budget in the wait, or with none left once it ended:
             // either way this attempt never left. A retry reports what the
             // source said the attempt before; a first attempt has only the
@@ -612,12 +622,12 @@ impl HttpClient {
             // error alone does not keep a backoff off, since a caller backs
             // off on a `Protocol` too; a caller tells a quota stop apart by
             // the mark below, under `watch_local_quota` (#1729, #1980).
-            let attempt_timeout = match (ready, self.attempt_timeout(started)) {
-                (Ok(()), Some(timeout)) => timeout,
+            let (attempt_timeout, sending) = match (ready, self.attempt_timeout(started)) {
+                (Ok(sending), Some(timeout)) => (timeout, sending),
                 (ready, _) => {
                     let quota = match ready {
                         Err(ran_out) => ran_out,
-                        Ok(()) => self.limiter.ran_out(left),
+                        Ok(_) => self.limiter.ran_out(left),
                     };
                     // Only a call that never reached the source is marked
                     // (#1729): a retry ends with what the source said.
@@ -765,6 +775,8 @@ impl HttpClient {
                 return Err(give_up);
             }
             tracing::debug!(attempt, ?delay, "retrying");
+            // Answered: the backoff is knobas' own wait, which holds no sync.
+            drop(sending);
             tokio::time::sleep(delay).await;
             request = next;
             previous = Some(give_up);

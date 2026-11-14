@@ -60,6 +60,9 @@ struct MockRegistry {
     /// What the built adapter's sync says it left out (`Sink::left_out`,
     /// #2374), on a run that otherwise succeeds.
     left_out: Mutex<Option<&'static str>>,
+    /// The lane each sync of an adapter this registry built ran in
+    /// ([`knobas_http::current_lane`]), in order.
+    lanes: Arc<Mutex<Vec<knobas_http::Lane>>>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -81,6 +84,7 @@ impl AdapterRegistry for MockRegistry {
             quota: *self.quota.lock().unwrap(),
             descriptor_calls: Arc::clone(&self.descriptor_calls),
             left_out: *self.left_out.lock().unwrap(),
+            lanes: Arc::clone(&self.lanes),
         }))
     }
 }
@@ -95,6 +99,7 @@ struct Renamed {
     quota: bool,
     descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
     left_out: Option<&'static str>,
+    lanes: Arc<Mutex<Vec<knobas_http::Lane>>>,
 }
 
 #[async_trait::async_trait]
@@ -125,6 +130,7 @@ impl Source for Renamed {
         sink: &mut (dyn knobas_source::Sink + Send),
     ) -> Result<knobas_source::Cursor, SourceError> {
         self.cursors.lock().unwrap().push(cursor.clone());
+        self.lanes.lock().unwrap().push(knobas_http::current_lane());
         if self.protocol {
             return Err(SourceError::protocol(
                 "simulated: the server answered and the adapter refused the answer",
@@ -316,6 +322,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
         quota: Mutex::new(false),
         descriptor_calls: Arc::default(),
         left_out: Mutex::new(None),
+        lanes: Arc::default(),
     });
 
     Harness {
@@ -366,6 +373,65 @@ async fn one_run_in(
         .unwrap()
         .remove(0);
     (row, result)
+}
+
+/// **A run's requests are the sync's** (the priority lane, 2026-11-13): an
+/// adapter's sync runs in [`knobas_http::Lane::Background`], so each request
+/// it sends yields to one a person is waiting for on the same origin. Both
+/// ways a run starts: [`knobas_sync::scheduler::execute_run`], and a
+/// trigger through the scheduler, which runs it on a task of its own. A
+/// request outside both is a person's.
+#[tokio::test]
+async fn a_runs_requests_wait_in_the_background_lane() {
+    struct Ended(tokio::sync::Notify);
+    impl knobas_sync::progress::ProgressSink for Ended {
+        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+            if matches!(
+                progress.phase,
+                knobas_sync::progress::SyncPhase::Finished
+                    | knobas_sync::progress::SyncPhase::Failed
+            ) {
+                self.0.notify_one();
+            }
+        }
+    }
+
+    let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
+    assert_eq!(knobas_http::current_lane(), knobas_http::Lane::Interactive);
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
+    assert_eq!(row.outcome, Some(SyncOutcome::Ok));
+
+    let scheduler = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
+        pool: h.deps.pool.clone(),
+        connections: Arc::new(TestConnections(
+            knobas_db::test_util::test_connector().await,
+        )),
+        registry: h.registry.clone(),
+        secrets: Arc::clone(&h.deps.secrets),
+        events: h.events.clone(),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
+    })
+    .await
+    .unwrap();
+    let ended = Arc::new(Ended(tokio::sync::Notify::new()));
+    scheduler
+        .trigger(
+            &h.id,
+            SyncTrigger::Manual,
+            Some(Arc::clone(&ended) as Arc<dyn knobas_sync::progress::ProgressSink>),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(30), ended.0.notified())
+        .await
+        .expect("the triggered run ended");
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        *h.registry.lanes.lock().unwrap(),
+        [knobas_http::Lane::Background, knobas_http::Lane::Background]
+    );
 }
 
 #[tokio::test]

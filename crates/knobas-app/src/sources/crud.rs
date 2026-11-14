@@ -380,6 +380,14 @@ pub async fn list(
     let mut misses = knobas_sync::role_check::misses(pool).await?;
     // Once, not once per row: `descriptors()` builds every template.
     let templates = registry.descriptors();
+    // Every source's last finished run in one read, not one per row.
+    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    let mut last_runs: std::collections::HashMap<String, _> =
+        knobas_sync::run_log::last_finished_of(pool, &ids)
+            .await?
+            .into_iter()
+            .map(|run| (run.source_id.clone(), run))
+            .collect();
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
@@ -403,7 +411,7 @@ pub async fn list(
                 .iter()
                 .find(|s| s.source_id == id)
                 .and_then(|s| s.next_run_at),
-            last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
+            last_run: last_runs.remove(&id),
             kinds: template.map(|t| t.entity_kinds).unwrap_or_default(),
             auth_kind: row.auth_kind.method(),
             id: row.id,
@@ -572,6 +580,7 @@ pub async fn set_secret(
     // The live reads' instance holds the credential it was built with
     // (#2240): the next read builds it again over this one.
     live.forget(id);
+    super::held::forget(pool, id).await;
     release_credential_waits(pool, id).await;
 
     let source = knobas_sync::scheduler::build_off_runtime(
@@ -943,9 +952,51 @@ pub async fn view(
     section: Option<&str>,
 ) -> Result<Option<knobas_source::view::SourceView>, SourcesError> {
     let source = live.source(pool, secrets, registry, entity_id).await?;
-    let Some(mut view) = live.view(&source, entity_id, section).await? else {
+    let Some(view) = live.view(&source, entity_id, section).await? else {
         return Ok(None);
     };
+    finish(pool, registry, view)
+        .await
+        .map(|(view, _)| Some(view))
+}
+
+/// [`view`] as a page draws it (ADR-0042): what knobas last read where it
+/// holds one, with when it was read, and the source read behind it
+/// ([`LiveSources::shown`]); the app's work on the answer as [`view`]'s.
+///
+/// # Errors
+///
+/// As [`view`], for a view knobas holds nothing of.
+pub async fn shown(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+    section: Option<&str>,
+) -> Result<Option<super::live::ShownView>, SourcesError> {
+    let source = live.source(pool, secrets, registry, entity_id).await?;
+    let (view, held_at, tree_unkept) = live.shown(&source, entity_id, section).await?;
+    let Some(view) = view else {
+        return Ok(None);
+    };
+    let (view, unsynced) = finish(pool, registry, view).await?;
+    Ok(Some(super::live::ShownView {
+        view,
+        held_at,
+        unsynced,
+        tree_unkept,
+    }))
+}
+
+/// The app's work on a view the adapter answered: rule 7 and the commit
+/// hints, as [`view`] says. Answers beside it each row rule 7 cleared, with
+/// the id the adapter named for it ([`super::live::Unsynced`]).
+async fn finish(
+    pool: &PgPool,
+    registry: &Arc<dyn AdapterRegistry>,
+    mut view: knobas_source::view::SourceView,
+) -> Result<(knobas_source::view::SourceView, Vec<super::live::Unsynced>), SourcesError> {
     resolve_commit_hints(pool, registry.as_ref(), &mut view).await?;
     let named: Vec<String> = view
         .sections
@@ -959,7 +1010,7 @@ pub async fn view(
         .filter_map(|row| row.entity_id.clone())
         .collect();
     if named.is_empty() {
-        return Ok(Some(view));
+        return Ok((view, Vec::new()));
     }
     let held: std::collections::HashSet<String> =
         sqlx::query_scalar("select entity_id from sync.item where entity_id = any($1)")
@@ -968,16 +1019,25 @@ pub async fn view(
             .await?
             .into_iter()
             .collect();
-    for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
-        if let knobas_source::view::Block::Entities { rows, .. } = block {
-            for row in rows {
-                if row.entity_id.as_ref().is_some_and(|id| !held.contains(id)) {
-                    row.entity_id = None;
+    let mut unsynced = Vec::new();
+    for section in &mut view.sections {
+        for block in &mut section.blocks {
+            if let knobas_source::view::Block::Entities { rows, .. } = block {
+                for row in rows {
+                    if row.entity_id.as_ref().is_some_and(|id| !held.contains(id))
+                        && let Some(id) = row.entity_id.take()
+                    {
+                        unsynced.push(super::live::Unsynced {
+                            section: section.id.clone(),
+                            title: row.title.clone(),
+                            entity_id: id,
+                        });
+                    }
                 }
             }
         }
     }
-    Ok(Some(view))
+    Ok((view, unsynced))
 }
 
 /// The bytes of the file at `path` in `entity_id`'s tree, at `commit` (a
@@ -1003,6 +1063,41 @@ pub async fn file_bytes(
     Ok(live.bytes(&source, entity_id, path, commit, cap).await?)
 }
 
+/// The adapter's answer for pipeline `entity_id`'s settings, a moving read
+/// (ADR-0042): what knobas last read when it holds one, and the source read
+/// behind it, told on `view:fresh` as the section `settings`; read now and
+/// waited for only the first time.
+///
+/// # Errors
+///
+/// As [`view`], on a read made now.
+async fn held_settings(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
+    let lent = live.source(pool, secrets, registry, entity_id).await?;
+    let source = Arc::clone(&lent.source);
+    let entity = entity_id.to_owned();
+    let read: super::live::ReadAgain = Arc::new(move || {
+        let (source, entity) = (Arc::clone(&source), entity.clone());
+        Box::pin(async move {
+            let settings = source.pipeline_settings(&entity).await?;
+            serde_json::to_value(settings)
+                .map_err(|error| knobas_source::SourceError::protocol(error.to_string()))
+        })
+    });
+    let (settings, _) = live
+        .moving_read(&lent, entity_id, PIPELINE_SETTINGS, read)
+        .await?;
+    Ok(settings)
+}
+
+/// The name a pipeline's settings are kept and told under (ADR-0042).
+pub const PIPELINE_SETTINGS: &str = "settings";
+
 /// A pipeline's settings, read live from its own source (ADR-0022, #851),
 /// routed like [`view`].
 ///
@@ -1024,8 +1119,7 @@ pub async fn pipeline_settings(
     live: &LiveSources,
     entity_id: &str,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
-    let Some(mut settings) = source.pipeline_settings(entity_id).await? else {
+    let Some(mut settings) = held_settings(pool, secrets, registry, live, entity_id).await? else {
         return Ok(None);
     };
     if settings.repositories.iter().any(|r| r.url.is_some()) {
@@ -1091,8 +1185,7 @@ pub async fn pipeline_commits(
     shas: &[String],
 ) -> Result<std::collections::HashMap<String, String>, SourcesError> {
     let mut found = std::collections::HashMap::new();
-    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
-    let Some(settings) = source.pipeline_settings(entity_id).await? else {
+    let Some(settings) = held_settings(pool, secrets, registry, live, entity_id).await? else {
         return Ok(found);
     };
     let urls: Vec<&str> = settings
@@ -1224,6 +1317,34 @@ pub async fn run_source(
     entity_id: &str,
 ) -> Result<Arc<dyn knobas_source::Source>, SourcesError> {
     adapter_for(pool, secrets, registry, live, entity_id).await
+}
+
+/// Whether the mirror says run `run` has finished: its declared `finished`
+/// instant is set (ADR-0042). A finished run's log, tests and artifacts can
+/// no longer change, so a page reads them from what knobas kept or held. A
+/// run the mirror lacks, or whose kind declares no `finished`, has not.
+pub(crate) async fn run_finished(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run: &knobas_core::entity::EntityRef,
+) -> bool {
+    let row: Option<(String, serde_json::Value)> =
+        sqlx::query_as("select kind, payload from sync.item where entity_id = $1")
+            .bind(run.to_string())
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    let Some((kind, payload)) = row else {
+        return false;
+    };
+    let Ok(declarations) = crate::sources::paths::declared_paths(pool, registry).await else {
+        return false;
+    };
+    declarations
+        .get(&run.namespace, &kind)
+        .and_then(|paths| knobas_core::payload::resolve_string(&payload, &paths.finished))
+        .is_some()
 }
 
 /// A repository's web page from a clone URL: its `.git` and trailing slash

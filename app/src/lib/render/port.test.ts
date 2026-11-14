@@ -112,7 +112,7 @@ test("D2's frame is hidden and sandboxed to scripts alone, and holds what is sen
 test("a D2 frame that never says hello fails as a worker does", async () => {
   const { worker, frame } = framed(20);
   const failed = new Promise<string>((resolve) => worker.addEventListener("error", (event) => resolve((event as ErrorEvent).message)));
-  expect(await failed).toBe("D2's frame did not load within 0.02 s.");
+  expect(await failed).toBe("D2's frame did not load within 0.02s.");
   worker.terminate();
   expect(frame.isConnected).toBe(false);
 });

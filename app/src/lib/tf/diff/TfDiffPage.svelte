@@ -3,17 +3,19 @@
   the diff between any two commits of a repository, as its own kept page
   (`page.ts`): linked, gone back to, and still drawn when shown again.
 
-  - **The header**: the repository's name (its mirror row, linking its
-    *Commits*), then `base … head` as written in the address, short shas
-    shortened, and *Open in…* on the range (#2274); each file's header has
-    its own, at its line.
+  - **The crumb** names the repository (its mirror row), which is what `Esc`
+    goes to where nothing opened the page.
+  - **The header**: `base … head` as written in the address, short shas
+    shortened, the repository's *Commits* under it, and *Open in…* on the
+    range (#2274); each file's header has its own, at its line.
   - **The diff**: `entity_range_diff` (#2272, ADR-0036): local read-only
     git when the repository's checkout holds both commits, else the
     repository's section `compare:<base>...<head>` (`address.ts`), drawn by
     the one diff component.
-  - **Ignore whitespace**: offered when the diff was read at the checkout;
-    shown disabled, saying why, when the source served it (no Gitea or
-    Forgejo endpoint returns a diff with whitespace ignored, #2253). Another address keeps
+  - **Ignore whitespace**: in the diff's toolbar, offered when the diff was read
+    at the checkout; disabled, with why as its title, when the source served it
+    (no Gitea or Forgejo endpoint returns a diff with whitespace ignored, #2253).
+    Another address keeps
     the last diff drawn, dimmed, while it is read (#2246). Where the answer
     names its range (#2310), context expands and an image diff renders, each
     side read whole at its sha (`context.ts` `rangeContext`). Where it names
@@ -30,6 +32,9 @@
     entityFileBytes,
     entityFilePiped,
     entityRangeDiff,
+    entityRangeFile,
+    entityRangeFiles,
+    cancelRead,
     entityView,
     getEntity,
     type EntityDetail,
@@ -50,6 +55,14 @@
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
     /** A file pipeline over a file at a commit, for pipelines on diffs (#2270). */
     piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
+    /**
+     * The range's files without their lines, then each file's a page at a time as it nears the view (the compare pass,
+     * 2026-11-13); the whole diff with `rangeDiff` when left out.
+     */
+    rangeFiles?: RangeFilesRead;
+    rangeFile?: RangeFileRead;
+    /** Calls a named read off at the backend. */
+    cancelRead?: (read: string) => Promise<boolean>;
   }
 
   /** Called through, not bound at load: a test's mock of the bridge may not carry every command. */
@@ -59,18 +72,27 @@
     getEntity: (entityId) => getEntity(entityId),
     fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
     piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
+    rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
+    rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+    cancelRead: (read) => cancelRead(read),
   };
 </script>
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { caretOf, isSha, shortEnd } from "./sha";
+  import { fillEnds, rangeFill, type RangeFileRead, type RangeFilesRead } from "./fill";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
+  import type { DiffFill } from "./diff";
+  import type { EscTarget } from "../escape";
+  import { namePage, parentPage } from "../page-name.svelte";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import { repoHash } from "../repo/repo";
   import { waitPhase } from "../waiting";
   import { onShownAgain } from "../while-shown.svelte";
   import TfDiffView from "./TfDiffView.svelte";
+  import TfWhitespaceBox from "./TfWhitespaceBox.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection } from "./address";
   import { rangeContext } from "./context";
@@ -81,6 +103,7 @@
     head,
     ready = true,
     visible = true,
+    back = null,
     ports = BRIDGE,
   }: {
     repoId: string;
@@ -88,25 +111,36 @@
     head: string;
     ready?: boolean;
     visible?: boolean;
+    /** Where `Esc` goes, which the breadcrumb's hint names. */
+    back?: EscTarget | null;
     ports?: DiffPagePorts;
   } = $props();
 
   let title = $state<string | null>(null);
-  let files = $state<DiffFile[] | null>(null);
+  // Raw: thousands of files, replaced whole on each read and never changed in place (the compare pass, 2026-11-13).
+  let files = $state.raw<DiffFile[] | null>(null);
   /** The diff hit the parser's ceiling (#2269). */
   let cut = $state(false);
   let reading = $state(false);
   let failed = $state<string | null>(null);
   /** What the drawn diff is between, where the source named it. */
-  let range = $state<DiffRange | null>(null);
+  let range = $state.raw<DiffRange | null>(null);
   /** Where the drawn diff was read; whitespace is ignored only at the checkout. */
   let readAt = $state<DiffReadAt | null>(null);
   let ignoreWhitespace = $state(false);
-  const uid = $props.id();
-  const why = `${uid}-ws-why`;
+  /** The box's press redraws the diff around it, so focus is put back. */
+  let boxPressed = $state(false);
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
 
   const section = $derived(compareSection(base, head));
+  const crumbs = $derived<Crumb[]>([
+    { name: "Code", href: "#/code" },
+    title === null ? { name: "Repository", href: repoHash(repoId) } : { name: title, href: repoHash(repoId), code: true },
+    { name: "Diff" },
+  ]);
+  namePage(() => "Diff");
+  // A diff sits under its repository, as its crumb has it.
+  parentPage(() => (title === null ? null : { hash: repoHash(repoId), name: title }));
 
   $effect(() => {
     if (!ready) return;
@@ -131,9 +165,11 @@
     const ws = ignoreWhitespace;
     let live = true;
     failed = null;
-    read(id, from, to, ws, () => live);
+    const name = newRead();
+    read(id, from, to, ws, () => live, false, name);
     return () => {
       live = false;
+      stopRead(name);
     };
   });
 
@@ -147,13 +183,27 @@
     },
   );
 
-  /** The diff between `from` and `to`; `again` keeps what the page drew when the read fails. */
-  function read(id: string, from: string, to: string, ws: boolean, alive: () => boolean, again = false): Promise<unknown> {
+  /** Each read named, so another range or a page left calls it off at the backend (the compare pass). */
+  const uid = $props.id();
+  let reads = 0;
+  const newRead = () => `diffpage-${uid}-${++reads}`;
+  const stopRead = (name: string) => void ports.cancelRead?.(name).catch(() => {});
+  /** The fill the drawn list's files are read by, a page of lines at a time; `null` while the diff drawn carries its lines. */
+  let fill = $state.raw<DiffFill | null>(null);
+
+  /**
+   * The diff between `from` and `to`; `again` keeps what the page drew when the read fails. Where the ports read a range
+   * a file at a time, its list, each file's lines read as it nears the view.
+   */
+  function read(id: string, from: string, to: string, ws: boolean, alive: () => boolean, again = false, name = newRead()): Promise<unknown> {
     reading = true;
-    return ports.rangeDiff(id, from, to, ws).then(
+    const listing = ports.rangeFiles;
+    const answer: Promise<RangeDiff> = listing !== undefined && ports.rangeFile !== undefined ? listing(id, from, to, ws, name) : ports.rangeDiff(id, from, to, ws);
+    return answer.then(
       (diff) => {
         if (!alive()) return;
         reading = false;
+        fill = listing !== undefined && ports.rangeFile !== undefined ? rangeFill(ports.rangeFile, id, fillEnds(diff, from, to), ws, stopRead) : null;
         files = diff.files;
         cut = diff.truncated;
         range = diff.range;
@@ -173,44 +223,54 @@
   const shown = shortEnd;
   /** Whether an end is a branch name (Spec 5): such a diff is never read at a checkout, whatever it holds. */
   const byName = $derived(!isSha(caretOf(base)[0]) || !isSha(head));
+  /** Why whitespace can't be left out here, where the source served the diff. */
+  const noWhitespace = $derived(
+    readAt === "checkout"
+      ? null
+      : byName
+        ? "A branch name is read at the source, which can't leave whitespace out. Open this diff from its commits to read it at a checkout."
+        : "Read at the source, which can't leave whitespace out. A checkout holding both commits can.",
+  );
 </script>
 
-<div class="tf-diffpage">
-  <h2 class="tf-cgroup-h">
-    <a href={repoHash(repoId, "commits")}>{title ?? repoId}</a>
-    <span class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</span>
-    <span class="tf-trail"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} /></span>
-  </h2>
-  {#if readAt !== null}
-    <div class="tf-diffws">
-      <label class="tf-ck">
-        <input
-          type="checkbox"
-          checked={readAt === "checkout" && ignoreWhitespace}
-          onchange={(event) => (ignoreWhitespace = event.currentTarget.checked)}
-          disabled={readAt !== "checkout"}
-          aria-describedby={readAt === "checkout" ? undefined : why} />
-        Ignore whitespace
-      </label>
-      {#if readAt !== "checkout"}
-        <span class="tf-cnote" id={why} data-testid="ws-why"
-          >{byName
-            ? "Read from the source, whose API cannot leave whitespace out. A branch name is read where it lives, never at a checkout; open the diff from its commits to read it locally."
-            : "Read from the source, whose API cannot leave whitespace out. A checkout holding both commits can."}</span
-        >
-      {/if}
+{#snippet whitespace()}
+  <TfWhitespaceBox
+    checked={readAt === "checkout" && ignoreWhitespace}
+    why={noWhitespace}
+    focus={boxPressed}
+    onleave={() => (boxPressed = false)}
+    onchange={(on) => {
+      boxPressed = true;
+      ignoreWhitespace = on;
+    }}
+  />
+{/snippet}
+
+<div class="tf-full tf-diffpage">
+  <TfCrumbs parts={crumbs} {back} />
+  <header class="tf-fhead">
+    <div>
+      <h1 class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</h1>
+      <div class="tf-sub">In <a class="tf-mono" href={repoHash(repoId, "commits")}>{title ?? repoId}</a></div>
     </div>
+    <div class="tf-acts"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} size="md" /></div>
+  </header>
+  <div class="tf-cbody">
+  <!-- With no diff drawn there is no toolbar, and a tick that left nothing to draw must still come off. -->
+  {#if readAt !== null && ignoreWhitespace && (files === null || files.length === 0)}
+    <div class="tf-diffws">{@render whitespace()}</div>
   {/if}
   <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
     {#if files !== null && files.length === 0}
       <div class="tf-empty">Nothing changes between {shown(base)} and {shown(head)}.</div>
     {:else if files !== null}
       {#if range === null}
-        <p class="tf-cnote" data-testid="no-range">Context does not expand here: which two commits this diff is between is not settled, as for a range from the repository's first commit or a branch that merged its base back in.</p>
+        <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
       {/if}
       {#key `${section}\n${range?.base}\n${range?.head}\n${ignoreWhitespace}`}
-        <TfDiffView {files} {cut} {context} openAt={{ entityId: repoId, at: head }} />
+        <TfDiffView {files} {cut} {context} {fill} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
       {/key}
     {/if}
   </TfWaiting>
+  </div>
 </div>

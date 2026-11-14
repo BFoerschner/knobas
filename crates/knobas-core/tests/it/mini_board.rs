@@ -934,6 +934,7 @@ fn ticket_declarations() -> Declarations {
             status_name: vec![PayloadPath::of(["fields", "status", "name"])],
             priority: vec![PayloadPath::of(["fields", "priority", "name"])],
             assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
+            assignee_name: vec![PayloadPath::of(["fields", "assignee", "displayName"])],
             issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
             comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
             parent: vec![knobas_core::payload::ParentPath {
@@ -961,7 +962,7 @@ async fn a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine() 
             "fields": {
                 "status": { "name": "In Progress" },
                 "issuetype": { "name": "Story" },
-                "assignee": { "name": "Mara.Lindqvist" }
+                "assignee": { "name": "Mara.Lindqvist", "displayName": "Mara Lindqvist" }
             },
             "epic": { "key": "PAY-200" }
         }),
@@ -994,6 +995,11 @@ async fn a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine() 
     let full = card("PAY-231");
     assert_eq!(full.issue_type.as_deref(), Some("Story"));
     assert_eq!(full.assignee.as_deref(), Some("Mara.Lindqvist"));
+    assert_eq!(
+        full.assignee_name.as_deref(),
+        Some("Mara Lindqvist"),
+        "what the ticket's comments call the same person (F-107)"
+    );
     assert_eq!(full.path.as_deref(), Some("PAY-200"));
     assert_eq!(
         full.updated_at.map(|at| at.to_rfc3339()),
@@ -1004,6 +1010,7 @@ async fn a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine() 
     let bare = card("PAY-1");
     assert_eq!(bare.issue_type, None);
     assert_eq!(bare.assignee, None);
+    assert_eq!(bare.assignee_name, None);
     assert_eq!(bare.path, None);
     assert!(!bare.mine, "an unassigned ticket is nobody's");
 }

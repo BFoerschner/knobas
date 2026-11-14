@@ -28,23 +28,38 @@
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { EVENTS, ipcErrorMessage } from "../ipc";
-import { ackAlert as realAck } from "../ipc/assets";
+import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
+import { ackAlert as realAck, unackAlert as realUnack } from "../ipc/assets";
 import {
   completeInboxItem as realComplete,
   inboxCount as realCount,
   inboxItems as realItems,
+  inboxShelves as realShelves,
   snoozeInboxItem as realSnooze,
   type InboxEntry,
   type InboxShelf,
+  type InboxShelves,
 } from "../ipc/entity";
+import type { SourceSyncStatus } from "../ipc/sources";
 import { coalesce } from "../shell/coalesce";
 import { keyOf } from "../time/format";
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
+/** An alert or item that was resolved at its source before a press reached it. The Inbox, Monitors and the launcher say the same. */
+export function leftTheInbox(name: string): string {
+  return `${name} has already left the inbox. It was resolved at its source.`;
+}
+
 export interface InboxPorts {
   inboxItems: (shelf: InboxShelf) => Promise<InboxEntry[]>;
   inboxCount: () => Promise<number>;
+  /**
+   * Both shelves and the count from one run of the derivation
+   * (`inbox_shelves`, the query audit of 2026-11-12). The window's own ports
+   * have it. Without it a read is the three it replaced, which is what a
+   * test's ports that predate it give.
+   */
+  inboxShelves?: () => Promise<InboxShelves>;
   snoozeInboxItem: (itemKey: string, until: string) => Promise<void>;
   completeInboxItem: (itemKey: string) => Promise<void>;
   /**
@@ -58,8 +73,18 @@ export interface InboxPorts {
    * is in the inbox now".
    */
   ackAlert: (monitorId: string) => Promise<void>;
-  listen: (event: string, handler: () => void) => Promise<() => void>;
+  /** *Undo* on an ack: the alert asks again, so the re-read brings the row back. */
+  unackAlert: (monitorId: string) => Promise<void>;
+  /** `handler` is handed the event's payload, where the bridge has one. */
+  listen: (event: string, handler: (payload?: unknown) => void) => Promise<() => void>;
 }
+
+/** Why an answer failed. `gone`: the item left the inbox at its source while the list was on screen. */
+export interface InboxRefusal {
+  reason: string;
+  gone: boolean;
+}
+export type Refused = (refusal: InboxRefusal) => void;
 
 export interface Inbox {
   /** What needs you now, newest first. */
@@ -87,8 +112,9 @@ export interface Inbox {
   refreshCount(): Promise<void>;
   /** Read both shelves and the count, together. */
   refresh(): Promise<void>;
-  snooze(itemKey: string, until: Date): Promise<void>;
-  complete(itemKey: string): Promise<void>;
+  /** `refused` hears why this answer failed, so the row that asked can say so where the reader is looking. */
+  snooze(itemKey: string, until: Date, refused?: Refused): Promise<void>;
+  complete(itemKey: string, refused?: Refused): Promise<void>;
   /**
    * Seen, not fixed: clears this alert's item and leaves the alert open.
    *
@@ -98,7 +124,9 @@ export interface Inbox {
    * bridge is here — beside the other two key-takers — rather than in a
    * component.
    */
-  ack(itemKey: string): Promise<void>;
+  ack(itemKey: string, refused?: Refused): Promise<void>;
+  /** Take an ack back: the alert asks again, and the re-read brings its row back. */
+  unack(itemKey: string, refused?: Refused): Promise<void>;
   /**
    * Subscribe to the two signals the inbox moves on. Returns the teardown;
    * calling `start` twice is harmless.
@@ -139,12 +167,16 @@ export function createInbox(ports?: InboxPorts): Inbox {
   const io: InboxPorts = ports ?? {
     inboxItems: (shelf) => realItems(shelf),
     inboxCount: () => realCount(),
+    inboxShelves: () => realShelves(),
     snoozeInboxItem: (itemKey, until) => realSnooze(itemKey, until),
     completeInboxItem: (itemKey) => realComplete(itemKey),
     ackAlert: async (monitorId) => {
       await realAck(monitorId);
     },
-    listen: (event, handler) => tauriListen(event, () => handler()),
+    unackAlert: async (monitorId) => {
+      await realUnack(monitorId);
+    },
+    listen: (event, handler) => tauriListen(event, (heard) => handler(heard.payload)),
   };
 
   // The shelves are raw (the perf audit after #2200): every answer replaces
@@ -174,16 +206,26 @@ export function createInbox(ports?: InboxPorts): Inbox {
     }
   }
 
+  /** Both shelves and the count, as one moment's answer. */
+  async function read(): Promise<InboxShelves> {
+    // One run of the derivation decides all three (the query audit of
+    // 2026-11-12). As three reads, the stream and its count each ran every
+    // rule, on two of the backend's five connections, at every sync's end.
+    if (io.inboxShelves) return io.inboxShelves();
+    // All three together: a badge reading 4 over a list of three rows is the
+    // two reads having been taken at different moments.
+    const [stream, snoozed, count] = await Promise.all([
+      io.inboxItems("stream"),
+      io.inboxItems("snoozed"),
+      io.inboxCount(),
+    ]);
+    return { stream, snoozed, count };
+  }
+
   async function refresh(): Promise<void> {
     const seen = answers;
     try {
-      // All three together: a badge reading 4 over a list of three rows is the
-      // two reads having been taken at different moments.
-      const [stream, snoozed, count] = await Promise.all([
-        io.inboxItems("stream"),
-        io.inboxItems("snoozed"),
-        io.inboxCount(),
-      ]);
+      const { stream, snoozed, count } = await read();
       // An answer made while this read was out is drawn already, and the
       // read after the last one in flight is the one that replaces it (#775).
       // A read that started before an answer was drawn or landed is older
@@ -220,7 +262,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
    * draw back the row the second one is still taking away. A failed answer
    * comes back with that re-read, and its reason stays said.
    */
-  async function act(draw: () => void, run: () => Promise<void>): Promise<void> {
+  async function act(draw: () => void, run: () => Promise<void>, refused?: Refused): Promise<void> {
     draw();
     answers += 1;
     inFlight += 1;
@@ -232,6 +274,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       // list was on screen, so the list is the stale thing that caused it —
       // which the re-read below fixes.
       refusal = ipcErrorMessage(error);
+      refused?.({ reason: refusal, gone: isIpcError(error) && error.code === "not_found" });
     }
     answers += 1;
     inFlight -= 1;
@@ -258,7 +301,10 @@ export function createInbox(ports?: InboxPorts): Inbox {
     const entry = take(key);
     if (!entry) return;
     if (until.getTime() <= Date.now()) {
-      streamRows = [{ ...entry, item: { ...entry.item, snoozed_until: null } }, ...streamRows];
+      // Where the re-read will put it, newest first: a row that jumped would lose the focus on it and the eye too.
+      const back = { ...entry, item: { ...entry.item, snoozed_until: null } };
+      const at = streamRows.findIndex((row) => row.item.occurred_at < back.item.occurred_at);
+      streamRows = at < 0 ? [...streamRows, back] : [...streamRows.slice(0, at), back, ...streamRows.slice(at)];
       state.count += 1;
     } else {
       snoozedRows = [...snoozedRows, { ...entry, item: { ...entry.item, snoozed_until: until.toISOString() } }];
@@ -286,13 +332,15 @@ export function createInbox(ports?: InboxPorts): Inbox {
     },
     refreshCount,
     refresh,
-    snooze: (itemKey, until) =>
+    snooze: (itemKey, until, refused) =>
       act(
         () => drawSnooze(itemKey, until),
         () => io.snoozeInboxItem(itemKey, until.toISOString()),
+        refused,
       ),
-    complete: (itemKey) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey)),
-    ack: (itemKey) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey))),
+    complete: (itemKey, refused) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey), refused),
+    ack: (itemKey, refused) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey)), refused),
+    unack: (itemKey, refused) => act(() => {}, () => io.unackAlert(subjectOf(itemKey)), refused),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*
@@ -307,7 +355,10 @@ export function createInbox(ports?: InboxPorts): Inbox {
       const reread = coalesce(refresh);
       for (const event of [EVENTS.activityNew, EVENTS.syncState, EVENTS.sourceHealth]) {
         void io
-          .listen(event, () => {
+          .listen(event, (payload) => {
+            // A run that is starting has moved nothing yet: its end says so
+            // again, and that is the event the mirror has changed under.
+            if (event === EVENTS.syncState && (payload as SourceSyncStatus | undefined)?.running === true) return;
             if (live) void reread();
           })
           .then((unlisten) => {

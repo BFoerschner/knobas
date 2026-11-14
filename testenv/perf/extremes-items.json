@@ -1,0 +1,14 @@
+{
+ "_": "The pages open.mjs --set extremes opens (the extremes pass of PR #2479, 2026-11-13): what testenv/seed-extremes.sh makes, as the live products on the WSL box hold it. `fixed` are the ids the seed fixes; the Confluence pages (by title in space XTRM) and the TeamCity run (the configuration's newest finished build) have ids the products give, read from them (`extremes.mjs`, `items`).",
+ "fixed": {
+  "ticket": "live-jira:XTRM-1",
+  "repo": "live-gitea:knobas-extremes/everything",
+  "pr": "live-gitea:knobas-extremes/everything#1",
+  "pipeline": "live-teamcity:buildType:Extremes_Everything"
+ },
+ "pages": {
+  "page": "A page with everything",
+  "hugePage": "A 5 MB page"
+ },
+ "config": "Extremes_Everything"
+}

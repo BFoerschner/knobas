@@ -87,16 +87,35 @@ async function draw(refuse?: (path: string | null) => Promise<void>) {
 
 test("the section draws the clones root, the git found and the applications, the default marked", async () => {
   await draw();
-  expect(text(target.querySelector("h1"))).toBe("Checkouts and Open in…");
+  expect(text(target.querySelector("h1"))).toBe("Checkouts and Open in");
   const rows = [...target.querySelectorAll(".tf-stg-row")].map(text);
   expect(rows[0]).toContain("Clones root");
   expect(rows[0]).toContain("/Users/mara/code");
   expect(rows[1]).toContain("git at /usr/bin/git");
   const apps = [...target.querySelectorAll("tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(apps).toEqual([
-    ["VS Code default", "code {path}", "code --goto {file}:{line}", ""],
-    ["Fork", "open -a Fork {path}", "opens the checkout", "Make default"],
+    ["VS Code Default", "code {path}", "code --goto {file}:{line}", "↑ Edit"],
+    ["Fork", "open -a Fork {path}", "opens the checkout", "Make default ↑ Edit"],
   ]);
+  // *Edit* opens the application's page (PR #2479, 2026-11-13), and *Add an application* the page to add one.
+  expect([...target.querySelectorAll<HTMLAnchorElement>("a.tf-btn")].map((a) => [text(a), a.getAttribute("href")])).toEqual([
+    ["Edit", "#/settings/checkouts/app/vscode"],
+    ["Edit", "#/settings/checkouts/app/fork"],
+    ["Add an application", "#/settings/checkouts/add"],
+  ]);
+});
+
+test("↑ moves an application one up and saves the list at once; the first has none to take", async () => {
+  await draw();
+  const ups = [...target.querySelectorAll<HTMLButtonElement>("button[aria-label$=' up']")];
+  expect(ups.map((up) => [up.getAttribute("aria-label"), up.disabled])).toEqual([
+    ["Move VS Code up", true],
+    ["Move Fork up", false],
+  ]);
+  ups[1]!.click();
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => draft.id)).toEqual(["fork", "vscode"]);
+  expect(saved.at(-1)![1]).toBe("vscode");
 });
 
 test("Make default saves the list with the new default, and Change… sets the clones root", async () => {
@@ -104,18 +123,39 @@ test("Make default saves the list with the new default, and Change… sets the c
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
   await settle();
   expect(saved.at(-1)![1]).toBe("fork");
-  expect(text(target.querySelector("tbody tr:nth-child(2) td"))).toBe("Fork default");
+  expect(text(target.querySelector("tbody tr:nth-child(2) td"))).toBe("Fork Default");
 
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
   flushSync();
-  const field = target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")!;
+  // A dialog, like every other *Change…* in Settings (F-605), with the footer's order and its primary held until there is a change.
+  const dialog = target.querySelector('[role="dialog"]')!;
+  expect(text(dialog.querySelector("h2"))).toBe("Change the clones root");
+  const field = dialog.querySelector<HTMLInputElement>("#tf-stg-root-in")!;
+  const save = () => [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Save")!;
+  expect(save().disabled, "nothing changed yet").toBe(true);
+  expect(text(dialog.querySelector(".tf-dwhy"))).toBe("This is the root already.");
   field.value = "~/src";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Save")!.click();
+  expect(save().disabled).toBe(false);
+  expect(dialog.querySelector(".tf-dwhy")).toBeNull();
+  save().click();
   await settle();
   expect(roots).toEqual(["~/src"]);
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
   expect(text(target.querySelector(".tf-stg-row"))).toContain("~/src");
+});
+
+test("Make default says so, with Undo back to the one before (F-639)", async () => {
+  await draw();
+  const was = stored.default_application;
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Fork is the default");
+  toast.action!.run();
+  await settle();
+  expect(saved.at(-1)![1]).toBe(was);
 });
 
 test("the section says the default is listed first and runs on Enter, and Make default keeps the row order (#1443)", async () => {
@@ -124,7 +164,7 @@ test("the section says the default is listed first and runs on Enter, and Make d
   expect(text(target.querySelector(".tf-stg-p"))).not.toContain("The first one is the default");
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
   await settle();
-  expect([...target.querySelectorAll("tbody tr")].map((tr) => text(tr.querySelector("td")))).toEqual(["VS Code", "Fork default"]);
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => text(tr.querySelector("td")))).toEqual(["VS Code", "Fork Default"]);
 });
 
 const inMono = (el: Element | null | undefined) => el?.closest(".tf-mono") != null;
@@ -147,25 +187,25 @@ test("with no clones root, Not set is not in the mono face (#1444)", async () =>
   expect(inMono(notSet)).toBe(false);
 });
 
-test("a clones root the setter refuses is said on the page, and the field stays open with what was typed (#1661)", async () => {
+test("a clones root the setter refuses is said in the dialog, which stays open with what was typed (#1661)", async () => {
   reset();
   await draw(() =>
     Promise.reject({ code: "invalid", message: 'the clones root must be an absolute path (or start with ~/), not "Code"', source_id: null }),
   );
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
   flushSync();
-  const field = target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")!;
+  const field = target.querySelector<HTMLInputElement>("#tf-stg-root-in")!;
   field.value = "Code";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Save")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>('[role="dialog"] footer button')].find((b) => text(b) === "Save")!.click();
   await settle();
-  expect(toasts.items.map((t) => t.text)).toEqual([expect.stringContaining("must be an absolute path")]);
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")?.value).toBe("Code");
+  expect(text(target.querySelector('[role="dialog"] [role="alert"]'))).toContain("must be an absolute path");
+  expect(target.querySelector<HTMLInputElement>("#tf-stg-root-in")?.value).toBe("Code");
   expect(roots).toEqual([]);
 });
 
-test("the pull request worktrees are listed, a closed one marked, and Remove removes one", async () => {
+test("the pull request worktrees are listed, a closed one marked, and Remove… confirms before it removes one", async () => {
   const at = (n: number) => `/Users/mara/code/pull-requests/tidewater/payout-service-${n}`;
   worktrees = [
     { repo_entity_id: "gitea:tidewater/payout-service", number: 7, path: at(7), closed: true },
@@ -174,26 +214,34 @@ test("the pull request worktrees are listed, a closed one marked, and Remove rem
   await draw();
   const section = [...target.querySelectorAll(".tf-stg-sec")].find((sec) => text(sec.querySelector("h2")) === "Pull request worktrees")!;
   const rows = () => [...section.querySelectorAll("tbody tr")].map((row) => [...row.querySelectorAll("td")].map(text).join(" | "));
-  expect(rows()).toEqual([`#7 closed | ${at(7)} | Remove`, `#8 | ${at(8)} | Remove`]);
+  expect(rows()).toEqual([`#7 Closed | ${at(7)} | Remove…`, `#8 | ${at(8)} | Remove…`]);
+  const confirm = async () => {
+    [...target.querySelectorAll<HTMLButtonElement>('[role="dialog"] footer button')].find((b) => text(b) === "Remove worktree")!.click();
+    await settle();
+  };
 
   section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(7)}"]`)!.click();
   await settle();
-  expect(rows()).toEqual([`#8 | ${at(8)} | Remove`]);
+  expect(rows(), "nothing goes before the dialog is answered").toHaveLength(2);
+  expect(text(target.querySelector('[role="dialog"] h2'))).toBe("Remove the worktree of #7?");
+  await confirm();
+  expect(rows()).toEqual([`#8 | ${at(8)} | Remove…`]);
 
   refuseRemove = true;
   section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(8)}"]`)!.click();
   await settle();
-  expect(rows()).toEqual([`#8 | ${at(8)} | Remove`]);
+  await confirm();
+  expect(rows()).toEqual([`#8 | ${at(8)} | Remove…`]);
   expect(toasts.items.map((toast) => toast.text)).toContain(
     `Could not remove the worktree: git would not remove ${at(8)}: it contains modified or untracked files`,
   );
 });
 
-test("the section's buttons are small, Edit applications… among them (#2343)", async () => {
+test("the section's buttons are small, Add an application among them (#2343)", async () => {
   await draw();
   const atDefault = [...target.querySelectorAll<HTMLElement>(".tf-btn")]
     .filter((b) => !b.closest('[role="dialog"]') && !b.classList.contains("tf-sm"))
     .map((b) => b.textContent!.trim());
-  expect([...target.querySelectorAll(".tf-btn")].map((b) => b.textContent!.trim())).toContain("Edit applications…");
+  expect([...target.querySelectorAll(".tf-btn")].map((b) => b.textContent!.trim())).toContain("Add an application");
   expect(atDefault).toEqual([]);
 });

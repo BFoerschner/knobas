@@ -1,51 +1,95 @@
 /* ---------- Tickets (#810): views, the ticket board or list, the preview ---------- */
 /* One row bounded by the page, never sized by its content: an `auto` row made any text
    change in the preview re-lay out the whole list table (perf audit after #2200). */
+.tf-board-title h1:focus { outline: none; }
 .tf-tickets { display: grid; grid-template-columns: 230px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .tf-views { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
-.tf-vlist { overflow: auto; padding: 12px 10px 14px; flex: 1; }
+.tf-vlist { overflow: auto; background: var(--sheet); padding: 12px 10px 14px; flex: 1; }
 .tf-views h2 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
 .tf-views a { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; text-decoration: none; color: var(--ink); }
 .tf-views a:hover { background: var(--sheet-2); }
-.tf-views a[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf-views a[aria-current="true"] { background: var(--fill); color: var(--sheet); }
 .tf-views a[aria-current="true"] .tf-count { background: rgba(255,255,255,.18); color: inherit; }
 .tf-views a .tf-count { margin-left: auto; }
-.tf-board-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; }
+.tf-board-wrap .tf-sbody { display: flex; flex-direction: column; }
 /* The board head is the canonical header (#2293): the title block left, `.tf-acts` right (the Board/List
    switch, the view's actions, Sync now), its items centred vertically since the switch is small. */
 .tf-fhead.tf-board-head { align-items: center; }
 .tf-board-head .tf-acts { align-items: center; }
 .tf-board-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .tf-lane { padding: 14px 22px; }
+/* `tf-lane-one` and `tf-lanes` are how many lanes the board draws (`TicketsPage`), one or more than one: classes, not
+   `:has(.tf-lane + .tf-lane)`, which made Chromium restyle the board's cards each time one was drawn (PR #2479).
+   One band fills the pane and scrolls inside itself, so the sideways scrollbar sits at the pane's foot and the heads stay
+   on screen, as under lanes. The body gives up its `auto` height here, or the band grows with its cards and that scrollbar
+   goes down with them. The columns' box runs to the pane's edges, so its bars stand where the page's would. */
+.tf-board-wrap.tf-lane-one .tf-sclip { height: 100%; }
+@media (min-width: 901px) {
+  .tf-board-wrap.tf-lane-one .tf-sbody { flex: 1 1 0; min-height: 0; }
+}
+.tf-board-wrap:not(.tf-lanes) .tf-sbody > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 0 0; }
+.tf-board-wrap:not(.tf-lanes) .tf-sbody > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; background: var(--paper); padding: 0 22px 14px; }
+.tf-board-wrap:not(.tf-lanes) .tf-col h3 { position: sticky; top: 0; z-index: 1; background: var(--paper); margin-bottom: 0; padding-bottom: 8px; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
-.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 6px 0 8px; }
-.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 12px; align-items: start; overflow-x: auto; }
+.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 6px 0 8px; }
+/* A lane's head stays in reach while the lanes scroll sideways together. */
+.tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
+/* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go
+   on, and the eye runs down a status. It goes by the window and not the board, so opening the preview reflows no card. At 1440 px
+   four columns fit beside the preview, with a sliver of a fifth, so the board says there is more (F-160). */
+.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: 232px; gap: 8px; align-items: start; overflow-x: auto; background: var(--paper); }
+@media (max-width: 1500px) { .tf-cols { grid-auto-columns: 195px; } }
+.tf-lanes-more { align-self: flex-start; position: sticky; left: 22px; margin: 0 22px 14px; }
+/* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. The body is as
+   wide as the lanes, so the heads have room to stay put at the scroller's left. */
+.tf-board-wrap.tf-lanes { overflow-x: auto; background: var(--paper); }
+.tf-board-wrap.tf-lanes .tf-sclip { overflow-x: visible; width: max-content; min-width: 100cqw; }
+.tf-board-wrap.tf-lanes .tf-sbody { width: auto; }
+.tf-board-wrap.tf-lanes .tf-sbody > .tf-lane { width: max-content; min-width: 100%; }
+.tf-board-wrap.tf-lanes .tf-sbody > .tf-lane > .tf-cols { overflow: visible; }
+.tf-board-wrap.tf-lanes .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs) { position: sticky; left: 0; width: 100cqw; }
+/* A long list keeps its column names and its sort under the filter bar. */
+.tf-list .tf-tbl { overflow: clip; }
+.tf-list .tf-tbl th { position: sticky; top: var(--tf-fbar-h, 47px); z-index: 3; }
+/* Focus on the chosen job's card keeps a second ring where the card's ink would melt into the dark page. */
+.tf-tcard.tf-card:focus-visible { box-shadow: 0 0 0 4px var(--sel-halo); }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
-.tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 6px; background: var(--sheet-2); border-radius: 6px; }
+.tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px; background: var(--sheet-2); border-radius: 6px; }
+/* A column's cards (`TicketStack`), its *Show more* below them: a long column draws only the cards near the screen and
+   pads this box with the room of the rest (the Windows pass, 2026-11-14), so the button stays under the last card. */
+.tf-cards { display: flex; flex-direction: column; gap: 6px; }
 .tf-nothing { font-size: var(--t-sm); padding: 6px; }
 .tf-more {
   border: 1px dashed var(--rule); background: none; border-radius: 4px; padding: 5px; cursor: pointer;
   color: var(--ink-2); font-size: var(--t-sm);
 }
 .tf-more:hover { border-color: var(--ink-2); color: var(--ink); }
+/* A long column's way to the list: a line under its *Show more*, not a second button like it. */
+.tf-more-list { border-color: transparent; text-decoration: underline; text-underline-offset: 2px; }
+.tf-more-list:hover { border-color: transparent; }
 .tf-tcard {
   display: block; width: 100%; text-align: left; background: var(--sheet); border: 1px solid var(--rule);
-  border-radius: 6px; padding: 8px 10px; cursor: pointer;
+  border-radius: 6px; padding: 8px 9px; cursor: pointer;
 }
 .tf-tcard:hover { border-color: var(--ink-2); }
 /* Yellow is the chosen job's card, selected or not (spec #2396, #2398). The selected card carries a two-pixel ink
    outline and is the one card that floats; on the yellow the outline is the card's ink. A ring, not `outline`, so
    the focus ring never replaces it. */
 .tf-tcard.tf-card { border-color: var(--card-2); }
+.tf .tf-tcard.tf-card:hover { background: var(--card-2); border-color: var(--card-ink-2); }
 .tf-tcard.tf-sel { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
-.tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), var(--shadow); }
+.tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), 0 0 0 4px var(--sel-halo), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
-.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
-.tf-tkind { font-size: var(--t-xs); margin-left: 4px; }
-/* The source, when another source holds the same key (#1476). */
-.tf-tsrc { font-size: var(--t-xs); margin-left: 4px; }
-.tf-tcard .tf-s { display: block; margin: 2px 0 6px; font-weight: 500; line-height: 1.3; }
+/* As on the ticket's own card: `--rule` and `--ink-2` are the paper's, and go faint on the yellow in either theme. */
+.tf-tcard.tf-card .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
+/* A card's first line never wraps: the key holds its width, and what follows it gives up first. */
+.tf-thead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; flex: 0 1 auto; min-width: 7ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tkind { font-size: var(--t-xs); flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The source, when another source holds the same key (#1476): a line of its own, or it splits the first. */
+.tf-tsrc { display: block; font-size: var(--t-xs); margin-top: 1px; }
+.tf-tcard .tf-s { display: block; margin: 4px 0 6px; font-weight: 500; line-height: 1.3; }
 .tf-cep { display: block; font-size: var(--t-xs); color: var(--ink-2); margin: -3px 0 6px; }
 .tf-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--t-xs); }
 .tf-meta .tf-av { margin-left: auto; }
@@ -55,7 +99,7 @@
 }
 .tf-av.tf-me { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-list { padding: 14px 22px 18px; display: flex; flex-direction: column; gap: 8px; }
-.tf-tbl { width: 100%; border-collapse: collapse; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.tf-tbl { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .tf-tbl th {
   font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); text-align: left; padding: 7px 10px;
   border-bottom: 1px solid var(--rule); background: var(--sheet-2); white-space: nowrap;
@@ -66,41 +110,67 @@
 .tf-tbl th button { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-weight: 600; color: inherit; }
 .tf-tbl th[aria-sort] button::after { content: " \25BE"; }
 .tf-tbl th[aria-sort="ascending"] button::after { content: " \25B4"; }
-.tf-sigs { display: flex; gap: 10px; flex-wrap: wrap; }
+.tf-sigs { display: flex; gap: 2px 10px; flex-wrap: wrap; }
 .tf-row { cursor: pointer; }
+/* A row's name is a link with no underline at rest (design system, Layout): the row answers the pointer, and it underlines then. */
+.tf .tf-row:hover a:not(.tf-btn):hover { text-decoration: underline; text-underline-offset: 2px; }
 .tf-row:hover td { background: var(--sheet-2); }
 .tf-row.tf-card td { background: var(--card); color: var(--card-ink); }
 .tf-row.tf-card .tf-dim, .tf-row.tf-card .tf-sub { color: var(--card-ink-2); }
 /* The selected row's outline, two pixels inside each edge of the row: its cells draw it, as a row cannot. */
 .tf-row.tf-sel td { --tf-sel-ink: var(--ink); box-shadow: inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-row.tf-card.tf-sel td { --tf-sel-ink: var(--card-ink); }
+.tf-row.tf-card.tf-sel { outline: 2px solid var(--sel-halo); outline-offset: -1px; }
 .tf-row.tf-sel td:first-child { box-shadow: inset 2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-row.tf-sel td:last-child { box-shadow: inset -2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
-.tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+/* A row's second line is words, even under a key: only a code value is mono. */
+.tf-tbl .tf-sub { display: block; font-family: var(--sans); font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
+.tf-tbl .tf-keycell { font-weight: 600; }
+.tf-tbl .tf-c-summary { font-weight: 500; }
+/* The List's columns stand still (F-151, F-144): a filter, a pill or a sort moves none of them, and each has its width here.
+   The summary is the column you read, so it takes the rest. A value too long for its column ends in an ellipsis, with the
+   whole of it in its title. A signal wraps instead, because each one is a sentence. */
+.tf-list .tf-tbl { table-layout: fixed; }
+.tf-list .tf-c-key { width: 116px; }
+.tf-list .tf-c-status { width: 92px; }
+.tf-list .tf-c-priority { width: 76px; }
+.tf-list .tf-c-signals { width: 136px; }
+.tf-list .tf-c-assignee { width: 92px; }
+.tf-list .tf-c-updated { width: 80px; }
+.tf-list .tf-c-epic { width: 96px; }
+.tf-list .tf-c-labels { width: 120px; }
+.tf-list tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-list tbody td:is(.tf-c-summary, .tf-c-signals) { white-space: normal; overflow-wrap: anywhere; }
+.tf-list .tf-keycell .tf-sub { overflow: hidden; text-overflow: ellipsis; }
+.tf-tbl .tf-sub { font-weight: 400; }
+/* A row's title (design system, *Type*): the name you scan a list by. */
+.tf-tbl .tf-rowt { font-size: var(--t-md); font-weight: 500; }
+.tf .tf-tbl td:first-child > a.tf-mono { font-size: var(--t-sm); font-weight: 500; }
+.tf-list { container-type: inline-size; }
+/* A narrow pane keeps the columns you scan by; the preview beside it has the priority and the assignee. */
+@container (max-width: 760px) { .tf-tbl :is(.tf-c-priority, .tf-c-assignee) { display: none; } }
+@container (max-width: 640px) { .tf-tbl .tf-c-signals { display: none; } }
+/* A view that adds the Epic or Labels column gives them the room of the two columns that matter least here, so the summary keeps its share. */
+@container (max-width: 900px) { .tf-tbl:is(.tf-has-epic, .tf-has-labels) :is(.tf-c-priority, .tf-c-signals) { display: none; } }
+@container (max-width: 760px) { .tf-tbl.tf-has-epic .tf-c-labels { display: none; } }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }
 .tf-preview {
-  border-left: 1px solid var(--rule); background: var(--sheet); overflow: auto; padding: 18px;
+  border-left: 1px solid var(--rule); background: var(--sheet); --under: var(--sheet); overflow: auto; padding: 18px;
   display: flex; flex-direction: column; gap: 14px; min-height: 0;
 }
 .tf-preview .tf-k { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 /* The ticket's title: the preview's `h2` (spec #2227). */
 .tf-preview .tf-ticket-title { font-size: var(--t-2xl); line-height: 1.2; margin: 2px 0 0; font-weight: 600; font-variation-settings: "wdth" 90; }
 .tf-preview p { color: var(--ink-2); }
-p.tf-desc { white-space: pre-line; }
+/* The description is what the pane is for: full ink, on the pane's own left edge. */
+.tf-preview p.tf-desc { white-space: pre-line; color: var(--ink); }
+.tf-preview .tf-desc .tf-md { padding: 0; font-size: var(--t-md); line-height: 1.5; color: var(--ink); }
+.tf-preview .tf-desc .tf-md p { color: inherit; }
 .tf-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: var(--t-sm); margin: 0; }
 .tf-facts dt { color: var(--ink-2); }
 .tf-facts dd { margin: 0; }
 .tf-pane-h { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 0 0 6px; }
-.tf .tf-small { font-size: var(--t-sm); }
-.tf-rollup { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; }
-.tf-rollup div {
-  display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--rule-2);
-  font-size: var(--t-sm); align-items: baseline;
-}
-.tf-rollup div:last-child { border-bottom: 0; }
-.tf-rollup b { font-weight: 600; color: var(--ink-2); font-size: var(--t-xs); }
-.tf-rollup .tf-bad { color: var(--err); }
 .tf-go { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; }
 .tf-go .tf-btn { justify-content: center; }
 .tf-go small { color: var(--ink-2); text-align: center; }
@@ -110,8 +180,16 @@ p.tf-desc { white-space: pre-line; }
 }
 @media (max-width: 900px) {
   .tf-tickets { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
-  .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); }
+  /* Stacked, the rail folds behind its bar (`.tf-railbar`); open, it is capped so the board stays in reach. */
+  .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
   .tf-fbar, .tf-board-head, .tf-lane, .tf-list { padding-left: 16px; padding-right: 16px; }
+  /* The page scrolls here, and the columns keep their box to a window's height, so their sideways bar stays in reach. */
+  .tf-board-wrap:not(.tf-lanes) .tf-sbody > .tf-lane { padding-left: 0; padding-right: 0; }
+  .tf-board-wrap:not(.tf-lanes) .tf-sbody > .tf-lane > .tf-cols { padding-left: 16px; padding-right: 16px; max-height: max(320px, calc(100vh - 250px)); }
+  /* The rail's words start on the page's 16 px edge, as the title under it does. */
+  .tf-vlist { padding-left: 8px; padding-right: 8px; }
+  .tf-laned > h2, .tf-lanes-more { left: 16px; }
+  .tf-lanes-more { margin-left: 16px; }
 }
 
 @keyframes tf-pulse { 50% { opacity: .35; } }

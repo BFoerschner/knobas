@@ -6,8 +6,10 @@
   knobas has no file picker and `restore_backup` takes an archive in the
   backup folder, so *Restore from a file…* and *Import…* open a dialog that
   lists the archives in that folder: backups for the one, share exports for
-  the other. The list is a pick, the first file picked, and the footer's
-  primary restores it (#2343), as Apply-set's does (#2289). Both restore only into a knobas that holds no data yet, which the
+  the other. The list is a pick and the footer's primary restores it (#2343), as
+  Apply-set's does (#2289). Newest first and nothing picked: restoring replaces
+  what is stored now, and what removes data is never preselected (Björn, 2026-11-06,
+  which reverses #2343's first file picked). Both restore only into a knobas that holds no data yet, which the
   dialog says, since a merge with a preview is not built.
 
   Every write re-reads, because an export also prunes past `keep`;
@@ -21,6 +23,8 @@
   `open_backup_folder` command picks the running profile's (#1704).
 -->
 <script lang="ts">
+  import type { Attachment } from "svelte/attachments";
+
   import { pageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
@@ -30,7 +34,8 @@
   import { formatBytes } from "../../sources/diagnostics";
   import type { Layers } from "../layers.svelte";
   import type { SectionPorts } from "./ports";
-  import { boundedNumber, lastBackupWords, scheduleWords, shareTicks } from "./sections";
+  import { SavedWord, savedField } from "./saved-field.svelte";
+  import { boundedNumber, clampNote, lastBackupWords, scheduleWords, shareTicks } from "./sections";
   import TfDialog from "./TfDialog.svelte";
 
   let {
@@ -154,14 +159,31 @@
       .catch(() => (savedTones = false));
   });
 
-  async function saveSchedule(next: BackupSchedule) {
+  /** Whether the schedule was stored. */
+  async function saveSchedule(next: BackupSchedule): Promise<boolean> {
     try {
       const saved = await ports.setBackupSchedule(next);
       // Read after the write, so newer than any read still in flight.
       await read(() => Promise.resolve(saved), { ok: (current) => (status = current), fail: () => {} });
+      return true;
     } catch (cause) {
       push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return false;
     }
+  }
+
+  /** *Keep*: a typed value (`saved-field.svelte.ts`). Answers whether a new value was stored. */
+  async function saveKeep(input: HTMLInputElement): Promise<boolean> {
+    const schedule = status?.schedule;
+    if (!schedule) return false;
+    const keep = boundedNumber(input.value, 1, 365, schedule.keep);
+    keepWhy = clampNote(input.value, 1, 365, keep);
+    input.value = String(keep);
+    if (keep === schedule.keep) return false;
+    const done = await saveSchedule({ ...schedule, keep });
+    // A refusal says so in its toast, and the field goes back to what is stored.
+    if (!done) input.value = String(schedule.keep);
+    return done;
   }
 
   async function backUpNow() {
@@ -217,8 +239,19 @@
 
   const uid = $props.id();
   let pickedFile = $state<string | null>(null);
-  /** The archive the primary restores: the one picked while the folder still lists it, else the first listed (#2343). */
-  const chosen = $derived(reading ? null : (listed.find((archive) => archive.file === pickedFile) ?? listed[0] ?? null));
+  /** The archive the primary restores: the one picked, while the folder still lists it. */
+  const chosen = $derived(reading ? null : (listed.find((archive) => archive.file === pickedFile) ?? null));
+  /**
+   * The list arrives after the dialog opens, so focus goes in when it does (Dialogs, arrival focus): on the × a reader's
+   * `Space` would close it. On the newest file, unpicked, so that `Space` is the one press that picks it.
+   */
+  const firstPickFocus: Attachment<HTMLElement> = (node) => {
+    node.querySelector<HTMLElement>("input")?.focus({ preventScroll: true });
+  };
+
+  /** Why *Keep* holds something other than what was typed (F-613). */
+  let keepWhy = $state<string | null>(null);
+  const keepSaid = new SavedWord();
 </script>
 
 <header class="tf-stg-h tf-stg-hline">
@@ -267,13 +300,13 @@
         max="365"
         class="tf-stg-in tf-stg-n70"
         value={current.schedule.keep}
-        onchange={(event) => {
-          const keep = boundedNumber(event.currentTarget.value, 1, 365, current.schedule.keep);
-          event.currentTarget.value = String(keep);
-          if (keep !== current.schedule.keep) void saveSchedule({ ...current.schedule, keep });
-        }}
+        aria-invalid={keepWhy !== null ? "true" : undefined}
+        aria-describedby={keepWhy !== null ? "tf-bak-keep-why" : undefined}
+        {@attach savedField({ saved: () => String(status?.schedule.keep ?? ""), save: saveKeep, word: keepSaid, restored: () => (keepWhy = null) })}
       />
       <span>backups</span>
+      <small class="tf-stg-saved" role="status">{keepSaid.shown ? "Saved" : ""}</small>
+      {#if keepWhy !== null}<small class="tf-stg-why" id="tf-bak-keep-why" role="alert">{keepWhy}</small>{/if}
     </div>
   </div>
   <div class="tf-stg-sec">
@@ -288,11 +321,12 @@
       <button class="tf-btn tf-sm tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
       <button class="tf-btn tf-sm tf-ghost" onclick={() => choose("share")}>Import…</button>
       <button class="tf-btn tf-sm tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
+      {#if nothingTicked}<p class="tf-dwhy" role="status">Tick what goes in the export.</p>{/if}
     </div>
   </div>
 
   {#if choosing !== null}
-    <TfDialog
+    <TfDialog why={busy || reading || chosen !== null ? null : listed.length === 0 ? "Put a file in the folder first." : "Pick a file."}
       title={choosing === "share" ? "Import a share export" : "Restore from a file"}
       onclose={() => (choosing = null)}
       {layers}
@@ -311,7 +345,7 @@
         {:else if listed.length === 0}
           <p class="tf-stg-note">{choosing === "share" ? "No share exports there yet." : "No backups there yet."}</p>
         {:else}
-          <div class="tf-picks tf-stg-gap" role="radiogroup" aria-label={choosing === "share" ? "Share exports" : "Backups"}>
+          <div class="tf-picks tf-stg-gap" role="radiogroup" aria-label={choosing === "share" ? "Share exports" : "Backups"} {@attach firstPickFocus}>
             {#each listed as archive (archive.file)}
               <label class="tf-pickrow">
                 <input
@@ -321,8 +355,8 @@
                   checked={chosen?.file === archive.file}
                   onchange={() => (pickedFile = archive.file)}
                 />
-                <span class="tf-mono">{archive.file}</span>
-                <span class="tf-dim tf-num">{formatBytes(archive.bytes)}</span>
+                <span class="tf-mono tf-bak-name" title={archive.file}>{archive.file.slice(archive.file.lastIndexOf("/") + 1)}</span>
+                <span class="tf-dim tf-num tf-bak-size">{formatBytes(archive.bytes)}</span>
               </label>
             {/each}
           </div>

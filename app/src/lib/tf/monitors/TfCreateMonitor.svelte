@@ -81,10 +81,10 @@
   }
 </script>
 
-<TfDialog title="Create a monitor for {subject.name}" {onclose}>
+<TfDialog why={writing ? null : name.trim() === "" ? "Name it first." : target.trim() === "" ? "Say what to check." : source === null ? "Needs a source that can create monitors." : null} title="Create a monitor for {subject.name}" {onclose}>
   {#snippet body()}
     <div class="tf-formgrid">
-      <label for="{uid}-name">Name</label>
+      <label for="{uid}-name">Name <small class="tf-req">required</small></label>
       <input id="{uid}-name" type="text" autocomplete="off" bind:value={name} />
       <label for="{uid}-kind">Type</label>
       <select id="{uid}-kind" bind:value={kind}>
@@ -92,7 +92,7 @@
           <option value={option.value}>{option.label}</option>
         {/each}
       </select>
-      <label for="{uid}-target">Target</label>
+      <label for="{uid}-target">Target <small class="tf-req">required</small></label>
       <input id="{uid}-target" class="tf-mono" type="text" autocomplete="off" bind:value={target} />
       {#if targets.length > 1}
         <label for="{uid}-src">Create it in</label>

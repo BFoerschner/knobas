@@ -22,6 +22,10 @@
   may name only a pipeline, and its output then picks the renderer by its own name. The command steps and the named
   pipelines are `TfPipelinesSettings`.
 
+  A renderer is added and edited in `TfDialog`, as a source is (F-618): focus goes to its first field, `Esc` closes it,
+  and focus comes back to what opened it. `Esc` and × keep what was typed, per renderer, and *Cancel* and a save end it, as
+  *New page* does (F-647). The test pane's sample is kept across a leave too.
+
   The test pane runs a *saved* renderer on pasted text: the webview never
   sends a program (ADR-0016), so a renderer is saved before it is tried, as
   *Try it* does for *Open in…* (#1643).
@@ -44,14 +48,21 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
+
+  import { drafts } from "../drafts.svelte";
   import { ipcErrorMessage } from "../../ipc";
+  import { secondsLabel } from "../../time/format";
   import type { CommandOutput, RendererDefault, RendererInput } from "../../ipc/app";
   import { COMMAND_PREFIX, installCommands } from "../../render/command";
   import { allRenderers, type Renderer } from "../../render/registry";
   import { withDefault } from "../../render/defaults";
   import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import { commandSteps, namedPipelines, type CommandSteps, type NamedPipelines } from "../../render/pipelines.svelte";
+  import TfDialog from "./TfDialog.svelte";
+  import { needsWords, secondsWhy } from "./form-words";
   import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
+  import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import { diffPipelines, type DiffPipelinesSetting } from "../diff/diff-pipelines.svelte";
@@ -76,10 +87,20 @@
   let editing = $state<number | "new" | null>(null);
   let form = $state({ name: "", command: "", patterns: "", fences: "", input: "text" as RendererInput, output: "svg" as CommandOutput, timeout: "10", diff: false });
   let refusal = $state<string | null>(null);
+  let saving = $state(false);
+  /** What the form's primary waits for, in words (Controls, the enabled rule). */
+  const formWhy = $derived(
+    needsWords([...(form.name.trim() === "" ? ["the name"] : []), ...(form.command.trim() === "" ? ["the command"] : [])]) ?? secondsWhy(form.timeout),
+  );
 
   /** The test pane: which saved renderer, the sample, and the run asked for. */
   let testId = $state("");
-  let sample = $state("");
+  const SAMPLE_DRAFT = "renderer-sample";
+  let sample = $state(untrack(() => drafts.get(SAMPLE_DRAFT)));
+  $effect(() => {
+    const words = sample;
+    untrack(() => drafts.put(SAMPLE_DRAFT, words));
+  });
   let trying = $state<{ renderer: Renderer; text: string; at: number } | null>(null);
 
   /** Counts installs, so the renderers a default can name are read again after one. */
@@ -137,9 +158,12 @@
     diff: r.diff,
   });
 
-  function edit(at: number | "new") {
+  type RendererForm = typeof form;
+
+  /** The form as it opens with nothing typed: the renderer's own values, or a new one's. */
+  function freshForm(at: number | "new"): RendererForm {
     const r = at === "new" ? null : saved![at]!;
-    form = {
+    return {
       name: r?.name ?? "",
       command: r?.command ?? "",
       patterns: r?.patterns.join(" ") ?? "",
@@ -149,8 +173,29 @@
       timeout: String(r?.timeout_secs ?? 10),
       diff: r?.diff ?? false,
     };
+  }
+
+  const draftKey = (at: number | "new") => `renderer:${at === "new" ? "new" : saved![at]!.id}`;
+
+  function edit(at: number | "new") {
+    const key = draftKey(at);
+    form = drafts.has(key) ? (JSON.parse(drafts.get(key)) as RendererForm) : freshForm(at);
     refusal = null;
     editing = at;
+  }
+
+  // What `Esc` or × left comes back when this renderer's dialog opens again. A form as it opened is no draft.
+  $effect(() => {
+    if (editing === null) return;
+    const words = JSON.stringify(form);
+    const at = editing;
+    untrack(() => drafts.put(draftKey(at), words === JSON.stringify(freshForm(at)) ? "" : words));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discardForm() {
+    if (editing !== null) drafts.forget(draftKey(editing));
+    editing = null;
   }
 
   async function store(list: UserRendererDraft[]): Promise<boolean> {
@@ -168,7 +213,7 @@
   }
 
   async function saveForm() {
-    if (saved === null || editing === null) return;
+    if (saved === null || editing === null || formWhy !== null || saving) return;
     const timeout = Number.parseInt(form.timeout, 10);
     const draft: UserRendererDraft = {
       id: editing === "new" ? null : saved[editing]!.id,
@@ -184,15 +229,35 @@
     const list = saved.map(draftOf);
     if (editing === "new") list.push(draft);
     else list[editing] = draft;
+    saving = true;
     if (await store(list)) {
       testId = editing === "new" ? (saved.at(-1)?.id ?? testId) : saved[editing]!.id;
+      // The press rule: an edit changes nothing else on the page that says it landed.
+      push({ text: `${editing === "new" ? "Added" : "Saved"} ${form.name.trim()}` });
+      drafts.forget(draftKey(editing));
       editing = null;
     }
+    saving = false;
   }
+
+  /** The removal rule: gone at once, with *Undo* on one toast however many went. */
+  const rendererRemoved = removalToast<UserRendererDraft>("renderers", (removed) => {
+    if (saved !== null) void store(putBack(saved.map(draftOf), removed));
+  });
+  const defaultRemoved = removalToast<RendererDefault>("defaults", (removed) => void storeDefaults(putBack(defaults.list, removed)));
 
   async function remove(at: number) {
     if (saved === null) return;
-    await store(saved.filter((_, i) => i !== at).map(draftOf));
+    const gone = saved[at]!;
+    if (!(await store(saved.filter((_, i) => i !== at).map(draftOf)))) return;
+    drafts.forget(`renderer:${gone.id}`);
+    refusal = null;
+    rendererRemoved({ name: gone.name, at, item: draftOf(gone) });
+  }
+
+  async function removeDefault(at: number) {
+    const gone = defaults.list[at]!;
+    if (await storeDefaults(defaults.list.filter((_, i) => i !== at))) defaultRemoved({ name: gone.pattern, at, item: gone });
   }
 
   function runTest() {
@@ -206,9 +271,8 @@
   }
 
   /** Stores *Run pipelines on diffs*; a refusal says so and the box goes back to what is stored. */
-  function setPiping(box: HTMLInputElement) {
-    piping.set(box.checked).catch((cause: unknown) => {
-      box.checked = piping.on;
+  function togglePiping() {
+    piping.set(!piping.on).catch((cause: unknown) => {
       push({ text: `Could not save Run pipelines on diffs: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }
@@ -226,7 +290,7 @@
     ></label
   >
   <div class="tf-stg-c tf-stg-inl">
-    <input id="tf-rnd-pipes" type="checkbox" checked={piping.on} onchange={(event) => setPiping(event.currentTarget)} /><span>On</span>
+    <button id="tf-rnd-pipes" type="button" class="tf-stg-sw" role="switch" aria-checked={piping.on} aria-label="Run pipelines on diffs" onclick={togglePiping}><i></i></button>
   </div>
 </div>
 {#if saved !== null}
@@ -239,7 +303,7 @@
     {#if saved.length === 0}
       <p class="tf-dim">No command renderers yet.</p>
     {:else}
-      <table class="tf-tbl">
+      <table class="tf-tbl tf-rnd-own">
         <thead><tr><th>Renderer</th><th>Command</th><th>Files</th><th>Fences</th><th>Reads → writes</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each saved as r, at (r.id)}
@@ -248,67 +312,72 @@
               <td class="tf-small"><span class="tf-mono">{r.command}</span></td>
               <td class="tf-small tf-mono">{r.patterns.join(" ")}</td>
               <td class="tf-small tf-mono">{r.fences.join(" ")}</td>
-              <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {r.timeout_secs} s</td>
+              <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {secondsLabel(r.timeout_secs)}</td>
               <td class="tf-right">
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => edit(at)}>Edit</button>
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => void remove(at)}>Remove</button>
+                <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {r.name}…" onclick={() => edit(at)}>Edit…</button>
+                <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {r.name}" onclick={() => void remove(at)}>Remove</button>
               </td>
             </tr>
           {/each}
         </tbody>
       </table>
     {/if}
-    {#if editing === null}
-      <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => edit("new")}>Add a renderer…</button></div>
-    {:else}
-      <div class="tf-stg-sec">
-        <h2>{editing === "new" ? "New renderer" : `Edit ${saved[editing]?.name ?? ""}`}</h2>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-name">Name</label>
-          <div class="tf-stg-c"><input id="tf-rnd-name" class="tf-stg-in" bind:value={form.name} placeholder="PlantUML" /></div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-cmd">Command<small>Quotes group words. No shell: <span class="tf-mono">|</span>, <span class="tf-mono">;</span> and <span class="tf-mono">$VAR</span> are plain text.</small></label>
-          <div class="tf-stg-c"><input id="tf-rnd-cmd" class="tf-stg-in tf-mono" bind:value={form.command} placeholder="plantuml -tsvg -pipe" /></div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-pat">File patterns<small>Separated by spaces, such as <span class="tf-mono">*.puml docs/*.uml</span>.</small></label>
-          <div class="tf-stg-c"><input id="tf-rnd-pat" class="tf-stg-in tf-mono" bind:value={form.patterns} /></div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-fence">Markdown fence languages<small>A fenced block in one of these draws with this renderer.</small></label>
-          <div class="tf-stg-c"><input id="tf-rnd-fence" class="tf-stg-in tf-mono" bind:value={form.fences} placeholder="plantuml puml" /></div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-in">Reads</label>
-          <div class="tf-stg-c">
-            <select id="tf-rnd-in" class="tf-select" bind:value={form.input}><option value="text">Text</option><option value="bytes">Bytes</option></select>
-          </div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-out">Writes</label>
-          <div class="tf-stg-c">
-            <select id="tf-rnd-out" class="tf-select" bind:value={form.output}
-              ><option value="svg">SVG</option><option value="html">HTML</option><option value="image">An image</option></select
-            >
-          </div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-time">Timeout<small>1 to 120 seconds; the command is stopped after it.</small></label>
-          <div class="tf-stg-c tf-stg-inl"><input id="tf-rnd-time" type="number" min="1" max="120" class="tf-stg-in tf-stg-n70" bind:value={form.timeout} /><span>seconds</span></div>
-        </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-rnd-diff">Diffs<small>A diff of a file it draws offers <i>Rendered</i>: before and after, each drawn by this command.</small></label>
-          <div class="tf-stg-c tf-stg-inl"><input id="tf-rnd-diff" type="checkbox" bind:checked={form.diff} /><span>Draws diffs</span></div>
-        </div>
-        {#if refusal !== null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
-        <div class="tf-stg-acts">
-          <button class="tf-btn tf-sm tf-primary" onclick={() => void saveForm()}>Save</button>
-          <button class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
-        </div>
-      </div>
-    {/if}
+    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => edit("new")}>Add a renderer…</button></div>
+    <!-- A removal or its Undo the backend refused, with no form open to say it in. -->
+    {#if refusal !== null && editing === null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
   </div>
+
+  {#if editing !== null}
+    <TfDialog title={editing === "new" ? "Add a renderer" : `Edit ${saved[editing]?.name ?? ""}`} why={formWhy} onclose={() => (editing = null)}>
+      {#snippet body()}
+        <form
+          class="tf-formgrid tf-sf-grid"
+          id="tf-rnd-form"
+          onsubmit={(event) => {
+            event.preventDefault();
+            void saveForm();
+          }}
+        >
+          <label for="tf-rnd-name">Name <small class="tf-req">required</small></label>
+          <input id="tf-rnd-name" aria-label="Name" autocomplete="off" required bind:value={form.name} placeholder="PlantUML" />
+          <label for="tf-rnd-cmd">Command <small class="tf-req">required</small></label>
+          <div class="tf-sf-c">
+            <input id="tf-rnd-cmd" aria-label="Command" class="tf-mono" autocomplete="off" spellcheck="false" required bind:value={form.command} placeholder="plantuml -tsvg -pipe" />
+            <small class="tf-sf-help">Quotes group words. No shell: <span class="tf-mono">|</span>, <span class="tf-mono">;</span> and <span class="tf-mono">$VAR</span> are plain text.</small>
+          </div>
+          <label for="tf-rnd-pat">File patterns</label>
+          <div class="tf-sf-c">
+            <input id="tf-rnd-pat" class="tf-mono" autocomplete="off" spellcheck="false" bind:value={form.patterns} placeholder="*.puml docs/*.uml" />
+            <small class="tf-sf-help">Separated by spaces.</small>
+          </div>
+          <label for="tf-rnd-fence">Markdown fence languages</label>
+          <div class="tf-sf-c">
+            <input id="tf-rnd-fence" class="tf-mono" autocomplete="off" spellcheck="false" bind:value={form.fences} placeholder="plantuml puml" />
+            <small class="tf-sf-help">A fenced block in one of these draws with this renderer.</small>
+          </div>
+          <label for="tf-rnd-in">Reads</label>
+          <select id="tf-rnd-in" bind:value={form.input}><option value="text">Text</option><option value="bytes">Bytes</option></select>
+          <label for="tf-rnd-out">Writes</label>
+          <select id="tf-rnd-out" bind:value={form.output}><option value="svg">SVG</option><option value="html">HTML</option><option value="image">An image</option></select>
+          <label for="tf-rnd-time">Timeout</label>
+          <div class="tf-sf-c">
+            <div class="tf-rnd-secs"><input id="tf-rnd-time" class="tf-rnd-secn" type="number" min="1" max="120" bind:value={form.timeout} /><span>seconds</span></div>
+            <small class="tf-sf-help">1 to 120; the command is stopped after it.</small>
+          </div>
+          <label for="tf-rnd-diff">Diffs</label>
+          <div class="tf-sf-c">
+            <label class="tf-ck"><input id="tf-rnd-diff" type="checkbox" bind:checked={form.diff} /> Draws diffs</label>
+            <small class="tf-sf-help">A diff of a file it draws offers <i>Rendered</i>: before and after, each drawn by this command.</small>
+          </div>
+        </form>
+        {#if refusal !== null}<p class="tf-dlg-note tf-stg-errt" role="alert" {@attach (node) => node.scrollIntoView?.({ block: "nearest" })}>{refusal}</p>{/if}
+      {/snippet}
+      {#snippet footer()}
+        <button class="tf-btn tf-ghost" onclick={discardForm}>Cancel</button>
+        <button class="tf-btn tf-primary" type="submit" form="tf-rnd-form" disabled={formWhy !== null || saving}>{editing === "new" ? "Add renderer" : "Save renderer"}</button>
+      {/snippet}
+    </TfDialog>
+  {/if}
 
   <div class="tf-stg-sec">
     <h2>Default renderers</h2>
@@ -354,7 +423,7 @@
                 {#if d.renderer !== "" && nameOf(d.renderer) === null}<span class="tf-small tf-dim">Not installed: the built-in default applies.</span>{/if}
               </td>
               <td class="tf-right">
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => void storeDefaults(defaults.list.filter((_, i) => i !== at))}>Remove</button>
+                <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove the default for {d.pattern}" onclick={() => void removeDefault(at)}>Remove</button>
               </td>
             </tr>
           {/each}
@@ -363,7 +432,7 @@
     {/if}
     <div class="tf-stg-row">
       <label class="tf-stg-l" for="tf-rnd-dpat">Add a default<small>A file pattern, such as <span class="tf-mono">*.md</span> or <span class="tf-mono">docs/*.mmd</span>.</small></label>
-      <div class="tf-stg-c tf-stg-inl">
+      <div class="tf-stg-c tf-stg-row1">
         <input id="tf-rnd-dpat" class="tf-stg-in tf-mono" bind:value={adding.pattern} placeholder="*.md" />
         <select class="tf-select" aria-label="Through" bind:value={adding.pipeline}>
           <option value="">No pipeline</option>
@@ -396,7 +465,10 @@
         <label class="tf-stg-l" for="tf-rnd-sample">Sample</label>
         <div class="tf-stg-c"><textarea id="tf-rnd-sample" class="tf-stg-in tf-mono" rows="6" bind:value={sample}></textarea></div>
       </div>
-      <div class="tf-stg-acts"><button class="tf-btn tf-sm" onclick={runTest}>Run</button></div>
+      <div class="tf-stg-acts">
+        <button class="tf-btn tf-sm" disabled={sample.trim() === ""} onclick={runTest}>Run</button>
+        {#if sample.trim() === ""}<p class="tf-dwhy" role="status">Paste some sample text first.</p>{/if}
+      </div>
       {#if trying !== null}
         {#key trying.at}
           <div class="tf-stg-test"><TfCommandOutput renderer={trying.renderer} text={trying.text} commands={ports.commands} /></div>

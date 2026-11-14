@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { keyHint } from "../shell/platform";
 
   import { createCapture, type CapturePorts } from "./capture.svelte";
 
@@ -68,7 +69,7 @@
     {...NO_AUTOCORRECT}
     autocapitalize="off"
     spellcheck="false"
-    placeholder="Type. Escape or ⌘Enter to keep it."
+    placeholder={keyHint("Type. Escape or ⌘Enter to keep it.")}
     value={capture.text}
     oninput={(event) => void capture.typed(event.currentTarget.value)}
   ></textarea>
@@ -122,7 +123,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--t-2xs, 11px);
   }
 
   .sub {

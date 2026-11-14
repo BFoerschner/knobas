@@ -109,6 +109,13 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
 }
 
 impl GiteaSource {
+    /// Which token on which server this is (a hash, never the secret): what a
+    /// cache that outlives the built source keys its reads by, so one token's
+    /// answers are never handed to another's reads (`view::files`' whole trees).
+    pub(crate) fn viewer_key(&self) -> u64 {
+        self.viewer_key
+    }
+
     /// The login the token belongs to, or `None` where Gitea would not say.
     ///
     /// Asked once per token and server for the life of the process
@@ -648,6 +655,97 @@ impl Source for GiteaSource {
     /// [`crate::view::standing`].
     fn view_standing(&self, entity: &str, section: Option<&str>) -> knobas_source::view::Standing {
         crate::view::standing(self, entity, section)
+    }
+
+    /// A pull request's whole view from the record the mirror holds (ADR-0042):
+    /// see [`crate::view::pr::from_record`].
+    fn mirror_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::view::SourceView> {
+        match (self.key_of(entity).ok()?, section) {
+            (crate::keys::GiteaKey::Pr { .. }, None) => crate::view::pr::from_record(payload),
+            _ => None,
+        }
+    }
+
+    /// A repository's branches and its last commit are drawn from the branch
+    /// records the sync wrote (the inner-pages pass, 2026-11-12): see
+    /// [`crate::view::from_branch_records`].
+    fn mirror_listing_kind(&self, entity: &str, section: Option<&str>) -> Option<&'static str> {
+        match self.key_of(entity).ok()? {
+            crate::keys::GiteaKey::Repo { .. } => {
+                crate::view::listed_from_branches(section).then_some(crate::KIND_BRANCH)
+            }
+            _ => None,
+        }
+    }
+
+    /// Every branch's tree is stored (the stored-trees pass of PR #2479):
+    /// where the records keep the default branch, a branch's head and a
+    /// pull request's head branch.
+    fn tree_shape(&self) -> Option<knobas_source::tree::TreeShape> {
+        Some(knobas_source::tree::TreeShape {
+            repository: crate::KIND_REPO,
+            default_branch: &["default_branch"],
+            branch: crate::KIND_BRANCH,
+            branch_name: &["name"],
+            branch_commit: &["commit", "id"],
+            pull: Some(knobas_source::tree::PullShape {
+                kind: crate::KIND_PR,
+                head: &["head", "ref"],
+                state: &["state"],
+                open: "open",
+            }),
+        })
+    }
+
+    async fn read_tree(
+        &self,
+        repository: &str,
+        commit: &str,
+        held: &dyn knobas_source::tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<knobas_source::tree::TreeRead>, SourceError> {
+        crate::view::read_tree(self, repository, commit, held, cap)
+            .await
+            .map(Some)
+    }
+
+    fn tree_ask(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::tree::TreeAsk> {
+        crate::view::tree_ask(self, entity, section, payload)
+    }
+
+    fn tree_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tree: &knobas_source::tree::StoredTree,
+    ) -> Option<knobas_source::view::SourceView> {
+        crate::view::tree_view(self, entity, section, payload, tree)
+    }
+
+    fn mirror_listing(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        under: &[serde_json::Value],
+    ) -> Option<knobas_source::view::SourceView> {
+        match self.key_of(entity).ok()? {
+            crate::keys::GiteaKey::Repo { owner, repo } => {
+                crate::view::from_branch_records(self, &owner, &repo, section, payload, under)
+            }
+            _ => None,
+        }
     }
 }
 

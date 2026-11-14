@@ -3,14 +3,24 @@ import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
-  aroundLines,
+  columnHead,
+  sentenceCase,
+  shortKey,
   boardLanes,
   columnDone,
   drawnCards,
   moreLanesLine,
+  assigneeName,
+  assigneeOptions,
+  firstName,
+  listName,
   initials,
   laneTitle,
   moreLine,
+  MORE_STEP,
+  shownCount,
+  listPointer,
+  columnWords,
   nextSort,
   previewAction,
   sharedKeys,
@@ -18,6 +28,7 @@ import {
   splitLanes,
   statusOrder,
   ticketAddress,
+  withoutTicket,
 } from "./tickets";
 
 function card(n: number, status: string | null = null): MiniBoardCard {
@@ -50,56 +61,77 @@ function named(name: string, statuses: (string | null)[]): MiniBoardColumn {
   return { status: name, cards: statuses.map((status, i) => card(i, status)), total: statuses.length };
 }
 
-test("a column draws eight, Done three, fifty of either while words filter, and every card once expanded", () => {
-  expect(drawnCards(column("To Do", 12), false, false)).toHaveLength(8);
-  expect(drawnCards(column("done", 12), false, false)).toHaveLength(3);
-  expect(drawnCards(column("To Do", 12), true, false)).toHaveLength(12);
-  expect(drawnCards(column("Done", 12), false, true)).toHaveLength(12);
-  expect(drawnCards(column("To Do", 60), false, true)).toHaveLength(50);
-  expect(drawnCards(column("Done", 60), false, true)).toHaveLength(50);
-  expect(drawnCards(column("Done", 60), true, true)).toHaveLength(60);
+test("a column draws eight, Done three, fifty of either while words filter, and fifty more a press of Show more", () => {
+  expect(drawnCards(column("To Do", 12), 0, false)).toHaveLength(8);
+  expect(drawnCards(column("done", 12), 0, false)).toHaveLength(3);
+  expect(drawnCards(column("To Do", 12), 1, false)).toHaveLength(12);
+  expect(drawnCards(column("Done", 12), 0, true)).toHaveLength(12);
+  expect(drawnCards(column("To Do", 60), 0, true)).toHaveLength(50);
+  expect(drawnCards(column("Done", 60), 0, true)).toHaveLength(50);
+  expect(drawnCards(column("Done", 60), 1, true)).toHaveLength(60);
+  // An 8,000-card column (2026-11-10): one press is fifty more, not all of them.
+  expect(drawnCards(column("Done", 500), 1, false)).toHaveLength(3 + MORE_STEP);
+  expect(drawnCards(column("To Do", 500), 3, false)).toHaveLength(8 + 3 * MORE_STEP);
+  expect(shownCount(8016, 2, false, true)).toBe(103);
+  expect(shownCount(20, 2, false, true)).toBe(20);
 });
 
 test("a column is done by its tickets' statuses or the statuses it lists, never by its name (#1423)", () => {
   const shipped = named("Shipped", Array(12).fill("Done"));
   expect(columnDone(shipped)).toBe(true);
-  expect(drawnCards(shipped, false, false)).toHaveLength(3);
+  expect(drawnCards(shipped, 0, false)).toHaveLength(3);
   expect(moreLine({ ...shipped, total: 20 }, 3)).toBe("Show 17 more done");
   const done = named("Done", [...Array(11).fill("Done"), "In Progress"]);
   expect(columnDone(done)).toBe(false);
-  expect(drawnCards(done, false, false)).toHaveLength(8);
+  expect(drawnCards(done, 0, false)).toHaveLength(8);
   // The view's own list decides where it has one: every status it gathers done.
   const closed = named("Closed", Array(12).fill("Done"));
-  expect(drawnCards(closed, false, false, columnDone(closed, ["Done"]))).toHaveLength(3);
+  expect(drawnCards(closed, 0, false, columnDone(closed, ["Done"]))).toHaveLength(3);
   expect(columnDone(named("Done", Array(12).fill("Done")), ["In Review", "Done"])).toBe(false);
   expect(columnDone(named("Done", []))).toBe(false);
 });
 
-test("Show N more counts what the column holds past what it draws, Done saying so", () => {
+test("Show N more counts what the column holds past what it draws, Done saying so, and a long one the fifty it adds", () => {
   expect(moreLine(column("To Do", 8, 30), 8)).toBe("Show 22 more");
   expect(moreLine(column("Done", 8, 40), 3)).toBe("Show 37 more done");
   expect(moreLine(column("To Do", 5), 5)).toBeNull();
+  expect(moreLine(column("To Do", 8, 58), 8)).toBe("Show 50 more");
+  expect(moreLine(column("Done", 8, 8016), 3)).toBe("Show 50 of 8013 more done");
+  expect(moreLine(column("To Do", 8, 300), 58)).toBe("Show 50 of 242 more");
 });
 
-test("initials are the account's two parts, or its first two letters, or a dash for nobody", () => {
-  expect(initials("mara.lindqvist")).toBe("ML");
+test("past 200 cards drawn a column also offers the list, filtered to its statuses (2026-11-10)", () => {
+  expect(listPointer(column("Done", 8, 8016), 199)).toBeNull();
+  expect(listPointer(column("Done", 8, 8016), 203)).toBe("See all 8016 in the list");
+  expect(listPointer(column("Done", 8, 203), 203)).toBeNull();
+  expect(columnWords(column("Done", 1), [])).toBe("status:Done");
+  expect(columnWords(column("Ready", 1), ["Ready for Release", "QA"])).toBe('status:"Ready for Release" status:QA');
+  expect(columnWords({ status: null, cards: [], total: 0 }, [])).toBe("");
+});
+
+test("initials are a person's first and last names' letters, an account's first two letters, or a dash for nobody", () => {
+  expect(initials("mara.lindqvist")).toBe("MA");
+  expect(initials("mara")).toBe("MA");
+  expect(initials("Lena Hoffmann")).toBe("LH");
   expect(initials("jonas")).toBe("JO");
   expect(initials(null)).toBe("–");
 });
 
-test("the preview's button: Start work, Resume work or Open job by the ticket's state", () => {
+test("the preview's button: Start work, Resume work or Open ticket by the ticket's state", () => {
   const mine = (status: string) => ({ assignee: "mara", mine: true, status });
   const theirs = { assignee: "jonas.becker", mine: false, status: "To Do" };
-  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: true });
+  // *Start work* shows the steps and chooses nothing until they run (F-130).
+  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: false, asks: "steps" });
   expect(previewAction(mine("In Progress"), false)).toEqual({
     label: "Resume work",
     note: "Starts the timer on this ticket.",
     chooses: true,
+    asks: "timer",
   });
-  expect(previewAction(mine("In Progress"), true).note).toBe("Your timer is running on this ticket.");
+  expect(previewAction(mine("In Progress"), true)).toEqual({ label: "Resume work", note: "Your timer is running on this ticket.", chooses: true });
   // *Open job* only reads (spec #2396): it goes to the ticket's page and chooses nothing.
-  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open job", chooses: false });
-  expect(previewAction(theirs, false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker.", chooses: false });
+  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open ticket", chooses: false });
+  expect(previewAction(theirs, false)).toEqual({ label: "Open ticket", note: "Assigned to jonas.becker.", chooses: false });
   expect(previewAction({ assignee: null, mine: false, status: "To Do" }, false).note).toBe("Unassigned.");
 });
 
@@ -108,38 +140,7 @@ test("the preview's button reads the card's status, not the column it stands in 
   const [ready] = named("Ready", ["To Do"]).cards;
   expect(previewAction({ ...ready!, assignee: "mara", mine: true }, false).label).toBe("Start work");
   const [shipped] = named("Shipped", ["Done"]).cards;
-  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open job");
-});
-
-test("Around this ticket groups the context's kinds as the room's tiles do, and counts what fails", () => {
-  expect(
-    aroundLines([
-      { kind: "ticket", tone: null, count: 3 },
-      { kind: "pr", tone: "info", count: 2 },
-      { kind: "commit", tone: null, count: 3 },
-      { kind: "build", tone: "err", count: 1 },
-      { kind: "build", tone: "ok", count: 6 },
-      { kind: "page", tone: null, count: 3 },
-      { kind: "monitor", tone: "err", count: 1 },
-    ]),
-  ).toEqual([
-    { section: "Code", count: "5 items", failing: null },
-    { section: "Builds", count: "7 builds", failing: "1 failing or down" },
-    { section: "Docs", count: "3 pages", failing: null },
-    { section: "Monitors", count: "1 monitor", failing: "1 failing or down" },
-  ]);
-  expect(aroundLines(null)).toEqual([]);
-});
-
-test("Around this ticket counts what the Builds read answered under Builds, whatever its run kind (#1256, #1300)", () => {
-  const tally = [
-    { kind: "build", tone: "ok" as const, count: 1, section: "builds" as const },
-    { kind: "workflow_run", tone: "err" as const, count: 2, section: "builds" as const },
-  ];
-  expect(aroundLines(tally)).toEqual([{ section: "Builds", count: "3 items", failing: "2 failing or down" }]);
-  // A line no section read counted is grouped by its kind alone.
-  const loose = tally.map(({ kind, tone, count }) => ({ kind, tone, count }));
-  expect(aroundLines(loose).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);
+  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open ticket");
 });
 
 function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {
@@ -282,4 +283,111 @@ test("a key two sources hold is shared, and every ticket opens at its source's a
   expect(ticketAddress(mock)).toBe("#/ticket/mock%3APAY-231");
   // A key one source holds names its source too.
   expect(ticketAddress(card(7))).toBe("#/ticket/jira%3APAY-7");
+});
+
+test("a forge's long key keeps its repository and number; other keys stay whole", () => {
+  expect(shortKey("tidewater/payout-service/issues/143")).toBe("payout-service#143");
+  expect(shortKey("tidewater/ledger#12")).toBe("ledger#12");
+  expect(shortKey("PAY-231")).toBe("PAY-231");
+});
+
+test("a source's lower-case word reads as a label, and a written one stays as it is", () => {
+  expect(sentenceCase("closed")).toBe("Closed");
+  expect(sentenceCase("In Progress")).toBe("In Progress");
+  expect(sentenceCase(null)).toBeNull();
+});
+
+test("a column's head reads as a state only when it is called after one it holds", () => {
+  const columns = [
+    { name: "In Progress", statuses: ["In Progress"] },
+    { name: "Waiting on Björn", statuses: ["Blocked"] },
+    { name: "Doing", statuses: ["In Progress", "In Review"] },
+  ];
+  expect(columnHead("In Progress", columns)).toBe("In progress");
+  expect(columnHead("Waiting on Björn", columns)).toBe("Waiting on Björn");
+  expect(columnHead("Doing", columns)).toBe("Doing");
+  expect(columnHead("To Do", [])).toBe("To do");
+  expect(columnHead(null, [])).toBe("No status");
+});
+
+test("the List calls someone by the first word of their name, else by their account's first part with a capital (F-107)", () => {
+  expect(listName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara");
+  expect(listName({ assignee: "mara" })).toBe("Mara");
+  expect(listName({ assignee: "jonas.becker" })).toBe("Jonas");
+  expect(listName({ assignee: "lena_h@example.com" })).toBe("Lena");
+  expect(listName({ assignee: null })).toBeNull();
+});
+
+test("*Assignee* offers the source's accounts and the cards' people by the name the column draws (F-161, F-165)", () => {
+  const people = new Map([
+    ["jonas.becker", { name: "Jonas Becker", mine: false }],
+    ["priya", { name: null, mine: false }],
+    ["mara", { name: "Mara Lindqvist", mine: true }],
+  ]);
+  const labels = (accounts: string[], known = people) => assigneeOptions(accounts, known).map((option) => [option.value, option.label]);
+  expect(labels(["@me", "jonas.becker"])).toEqual([
+    ["@me", "Me"],
+    ["jonas.becker", "Jonas"],
+    ["priya", "Priya"],
+  ]);
+  // Your own cards add no row beside *Me*, but an account the source offers stays.
+  expect(labels(["@me", "mara"]).map(([, label]) => label)).toEqual(["Me", "Jonas", "Mara", "Priya"]);
+  // Two people who share a first name: the whole name, or the account where there is none.
+  const twins = new Map([
+    ["jonas.becker", { name: "Jonas Becker", mine: false }],
+    ["jonas.k", { name: null, mine: false }],
+  ]);
+  expect(labels([], twins).map(([, label]) => label)).toEqual(["Jonas Becker", "jonas.k"]);
+});
+
+test("a card calls its assignee by name where the source keeps one, else by account (F-107)", () => {
+  expect(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara Lindqvist");
+  expect(assigneeName({ assignee: "mara" })).toBe("mara");
+  expect(assigneeName({ assignee: null })).toBeNull();
+  expect(firstName("Mara Lindqvist")).toBe("Mara");
+  expect(firstName("mara")).toBe("mara");
+  expect(firstName(null)).toBeNull();
+  expect(initials(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" }))).toBe(initials("Mara Lindqvist"));
+});
+
+/** A card of `key` in `source`, standing in `status`. */
+function held(source: string, key: string, status: string): MiniBoardCard {
+  return { ...card(0, status), entity_id: `${source}:${key}`, source_id: source, key };
+}
+
+test("a ticket is not its own sub-task, in any source that holds it (the live run, 2026-11-09)", () => {
+  // `under:PAY-219` as the real engine answered it: three sub-tasks, then the ticket itself from Jira and the mock.
+  const board: MiniBoard = {
+    columns: [
+      { status: "To Do", cards: [held("live-jira", "PAY-266", "To Do"), held("live-jira", "PAY-254", "To Do"), held("live-jira", "PAY-242", "To Do")], total: 3 },
+      { status: "Done", cards: [held("live-jira", "PAY-219", "Done"), held("mock", "PAY-219", "Done")], total: 2 },
+    ],
+    sources: [],
+    lanes: [
+      {
+        key: "mara",
+        count: 3,
+        columns: [
+          { status: "To Do", ids: ["live-jira:PAY-266"], total: 1 },
+          { status: "Done", ids: ["live-jira:PAY-219", "mock:PAY-219"], total: 2 },
+        ],
+      },
+      { key: "", count: 2, columns: [{ status: "To Do", ids: ["live-jira:PAY-254", "live-jira:PAY-242"], total: 2 }] },
+    ],
+    more_lanes: 0,
+  };
+  const kept = withoutTicket(board, "PAY-219");
+  expect(kept.columns.map((column) => [column.status, column.total, column.cards.map((c) => c.key)])).toEqual([
+    ["To Do", 3, ["PAY-266", "PAY-254", "PAY-242"]],
+  ]);
+  expect(kept.lanes.map((lane) => [lane.key, lane.count, lane.columns.map((cell) => [cell.status, cell.total])])).toEqual([
+    ["mara", 1, [["To Do", 1]]],
+    ["", 2, [["To Do", 2]]],
+  ]);
+
+  // A ticket with none: `under:PAY-236` answered only its two copies, and nothing is left.
+  const alone: MiniBoard = { columns: [{ status: "To Do", cards: [held("live-jira", "PAY-236", "To Do"), held("mock", "PAY-236", "To Do")], total: 2 }], sources: [], lanes: [], more_lanes: 0 };
+  expect(withoutTicket(alone, "PAY-236").columns).toEqual([]);
+  // A key that only starts the same is another ticket.
+  expect(withoutTicket(alone, "PAY-23").columns[0]!.total).toBe(2);
 });

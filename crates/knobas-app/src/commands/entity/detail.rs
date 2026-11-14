@@ -95,6 +95,17 @@ pub struct EntityDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reporter: Option<String>,
+    /// The name to call the reporter by (F-107), through the declared
+    /// `reporter_name` path. Absent where the account is the only name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reporter_name: Option<String>,
+    /// The name to call [`author`](Self::author) by on a ticket, its assignee
+    /// (F-107), through the declared `assignee_name` path: what the ticket's
+    /// comments call the same person. Absent where the account is the only name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author_name: Option<String>,
     /// When a ticket was filed (#2403), through the declared `created` path.
     /// Absent on the wire on a miss.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,9 +184,21 @@ pub async fn get_entity_inner(
     // a missing entity, and the two want different words on screen.
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let declarations = declared_paths(pool, registry).await?;
-    let detail = knobas_core::detail::read(pool, &declarations, &entity)
+    let mut detail = knobas_core::detail::read(pool, &declarations, &entity)
         .await?
         .ok_or_else(|| IpcError::not_found(format!("{entity} is not in the mirror")))?;
+    // The Connections drawer's dots (F-036). It only opens on a ticket, so no
+    // other kind pays for the read.
+    if detail.row.kind == "ticket" && !detail.links.is_empty() {
+        let ids = detail
+            .links
+            .iter()
+            .map(|entry| entry.other.entity_id.as_str());
+        let states = crate::link_sets::states_of(pool, &declarations.as_param(), ids).await?;
+        for entry in &mut detail.links {
+            entry.other.state = states.get(&entry.other.entity_id).cloned();
+        }
+    }
     Ok(EntityDetail {
         kind_info: kind_info_for(
             registry,
@@ -206,6 +229,8 @@ pub async fn get_entity_inner(
         priority: detail.priority,
         estimate_seconds: detail.estimate_seconds,
         reporter: detail.reporter,
+        reporter_name: detail.reporter_name,
+        author_name: detail.author_name,
         created: detail.created,
         time_spent_seconds: detail.time_spent_seconds,
         logged_by: detail.logged_by,
@@ -264,6 +289,41 @@ pub async fn get_entity(
 ) -> Result<EntityDetail, IpcError> {
     let pool = lifecycle.pool()?;
     get_entity_inner(&pool, lifecycle.registry(), &entity_id).await
+}
+
+/// [`get_entity`] less the two fields that carry the item's text: `body_text`
+/// empty and `payload` null. For a caller that reads the row, its source,
+/// links and banners and draws the body from a read of its own (Docs draws a
+/// page from `docs_page`): a 5 MB Confluence page was 9.5 MB of `get_entity`
+/// beside the 10 MB of its `docs_page`, both parsed on the page's thread as it
+/// opened (the extremes pass, PR #2479, 2026-11-13).
+///
+/// # Errors
+///
+/// As [`get_entity`].
+#[tauri::command]
+pub async fn entity_head(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<EntityDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    entity_head_inner(&pool, lifecycle.registry(), &entity_id).await
+}
+
+/// [`entity_head`] with the pool and the registry handed in, for a test.
+///
+/// # Errors
+///
+/// As [`get_entity_inner`].
+pub async fn entity_head_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<EntityDetail, IpcError> {
+    let mut detail = get_entity_inner(pool, registry, entity_id).await?;
+    detail.body_text = String::new();
+    detail.payload = serde_json::Value::Null;
+    Ok(detail)
 }
 
 // -- an attachment's bytes (spec #2396, #2405) -------------------------------
@@ -369,19 +429,44 @@ pub async fn attachment_bytes_inner(
     if let Some(size) = file.size.filter(|size| *size > ATTACHMENT_CAP) {
         return Err(too_large(&file.name, size));
     }
-    let read = source
-        .attachment_bytes(entity_id, &file.content_url, ATTACHMENT_CAP)
+    // An attachment's address names one file, which never changes: kept and
+    // held once read (ADR-0042), so a second look sends nothing. As JSON:
+    // `{"data": base64}`, `{"too_large": size}` or `{}` for a source that
+    // reads none.
+    let lent = live
+        .source(pool, secrets, registry, entity_id)
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&from.id)))?;
+    let read = async {
+        Ok(
+            match source
+                .attachment_bytes(entity_id, &file.content_url, ATTACHMENT_CAP)
+                .await?
+            {
+                Some(FileBytes::Read(bytes)) => serde_json::json!({
+                    "data": base64::engine::general_purpose::STANDARD.encode(bytes)
+                }),
+                Some(FileBytes::TooLarge { size }) => serde_json::json!({ "too_large": size }),
+                None => serde_json::json!({}),
+            },
+        )
+    };
+    let ask = format!("attachment:{}", file.content_url);
+    let read: serde_json::Value = live
+        .fixed_read(&lent, entity_id, &ask, true, read)
         .await
         .map_err(|error| attachment_failed(&from, &file, error))?;
-    match read {
-        Some(FileBytes::Read(bytes)) => Ok(AttachmentBytes {
+    if let Some(data) = read.get("data").and_then(serde_json::Value::as_str) {
+        return Ok(AttachmentBytes {
             mime: file
                 .mime
                 .clone()
                 .unwrap_or_else(|| "application/octet-stream".to_owned()),
-            data: base64::engine::general_purpose::STANDARD.encode(bytes),
-        }),
-        Some(FileBytes::TooLarge { size }) => Err(too_large(&file.name, size)),
+            data: data.to_owned(),
+        });
+    }
+    match read.get("too_large").and_then(serde_json::Value::as_u64) {
+        Some(size) => Err(too_large(&file.name, size)),
         None => Err(IpcError::invalid(format!(
             "{}'s source reads no attachments",
             from.display_name

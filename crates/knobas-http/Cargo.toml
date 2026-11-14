@@ -22,7 +22,6 @@ test-util = ["tokio/rt"]
 # For `Bytes`, the chunk type of a streamed body; already in the tree through
 # reqwest (issue #1012).
 bytes = "1"
-governor.workspace = true
 # The body cap (#1640): a response's body is re-wrapped through `http`'s
 # `Response` and read through an `http_body::Body` that counts it. Both are
 # the copies reqwest already resolves.
@@ -37,7 +36,9 @@ reqwest.workspace = true
 serde.workspace = true
 # The excerpting JSON read decodes a body it already holds as text (#1313).
 serde_json.workspace = true
-tokio = { workspace = true, features = ["time"] }
+# `sync` for the lane's hand-back to the sync once a person's requests
+# have gone (`limiter::Slot::yielded`).
+tokio = { workspace = true, features = ["time", "sync"] }
 tracing = "0.1"
 url = "2"
 

@@ -305,12 +305,14 @@ pub async fn proposals(
                 kind: row.from_kind,
                 title: row.from_title,
                 deleted_at: row.from_deleted_at,
+                state: None,
             },
             to: LinkEnd {
                 entity_id: row.to_entity_id,
                 kind: row.to_kind,
                 title: row.to_title,
                 deleted_at: row.to_deleted_at,
+                state: None,
             },
         })
         .collect())

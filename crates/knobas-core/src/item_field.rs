@@ -116,6 +116,40 @@ macro_rules! stored_join {
     };
 }
 
+/// Whether `sync.item_field` holds a `$field` row for `i` under the paths
+/// `$paths` (an expression: the candidates the statement's declarations give
+/// `i`'s source and kind), decided from the stored declarations alone and not
+/// from `i`'s own rows (the scale pass, 2026-11-10): a statement that tests a
+/// stored value against a set it built once, a hashed subplan, needs to know
+/// where that set answers without probing every item for its row.
+///
+/// The test is the one `sync.resolve_item_fields` (migration `0063`) writes
+/// by: a row exists for every item, field and non-empty array of candidates a
+/// stored declaration of the item's kind gives that field, whatever its
+/// value. The triggers keep that true in the transaction that writes an item
+/// or a declaration, so where this holds the row is there, and where it does
+/// not the statement walks, as [`stored_string!`] does. Pinned by
+/// `knobas-app`'s `tests/it/item_field.rs`.
+#[macro_export]
+macro_rules! stored_under {
+    ($field:literal, $paths:literal) => {
+        concat!(
+            "(i.kind, ",
+            $paths,
+            ") in (select kp.p->>'kind', kp.p->'",
+            $field,
+            "' from sync.parent_declaration spd cross join lateral jsonb_array_elements(\
+               case when jsonb_typeof(spd.payload_paths) = 'array' \
+                    then spd.payload_paths else '[]'::jsonb end) as kp(p) \
+              where jsonb_typeof(kp.p->'",
+            $field,
+            "') = 'array' and jsonb_array_length(kp.p->'",
+            $field,
+            "') > 0)"
+        )
+    };
+}
+
 /// [`stored_join!`]'s value where there is a row, `$walk` -- the read the
 /// statement made before, [`crate::first_string_of!`]'s rule over the same
 /// candidates -- where there is none.
@@ -130,6 +164,58 @@ macro_rules! stored_or {
             " else ",
             $alias,
             ".value end)"
+        )
+    };
+}
+
+/// The CTE `card_keys (source_id, k)`: for each source the declarations
+/// `$decl` name, the key a ticket's stored card (`sync.item_card`, migration
+/// `0075`) is read under for those declarations (`sync.card_key`), computed
+/// once a statement.
+#[macro_export]
+macro_rules! card_keys {
+    ($decl:literal) => {
+        concat!(
+            "card_keys as materialized (select d.source_id, sync.card_key(",
+            $decl,
+            "::jsonb -> d.source_id) as k from jsonb_object_keys(case when jsonb_typeof(",
+            $decl,
+            "::jsonb) = 'object' then ",
+            $decl,
+            "::jsonb else '{}'::jsonb end) as d(source_id))"
+        )
+    };
+}
+
+/// After a relation `$row` that carries `entity_id` and `source_id`: the
+/// ticket's stored card as `$alias` (migration `0075`), its row read under
+/// the key [`card_keys!`] gives its source, so a joined row holds every card
+/// field as the payload macros read it under the bound declarations. Null
+/// columns where there is no such row: a ticket not filled yet, a source whose
+/// declarations the database did not store, anything that is not a ticket.
+/// Read a field through `case when $alias.entity_id is null then <the walk>
+/// else $alias.<field> end`.
+#[macro_export]
+macro_rules! card_join {
+    ($alias:literal, $row:literal) => {
+        concat!(
+            " left join card_keys ",
+            $alias,
+            "_k on ",
+            $alias,
+            "_k.source_id = ",
+            $row,
+            ".source_id left join sync.item_card ",
+            $alias,
+            " on ",
+            $alias,
+            ".entity_id = ",
+            $row,
+            ".entity_id and ",
+            $alias,
+            ".paths_key = ",
+            $alias,
+            "_k.k "
         )
     };
 }

@@ -3,7 +3,7 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
 import { fillObject, isDiffEnd, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
@@ -72,6 +72,23 @@ function fakeRepoOf(entityId: string): string | null {
 function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): RangeDiff {
   const shas = isDiffEnd(base, true) && isDiffEnd(head, false);
   return fakeDiffOf(repoView(entityId, `compare:${base}...${head}`), shas && fakeCheckout(entityId).path !== null, ignoreWhitespace);
+}
+
+/** The fake compares listed, by repository and the ends their files are read between, as the backend keeps the source's. */
+const listedDiffs = new Map<string, RangeDiff>();
+
+/** `entity_range_files` (the compare pass, 2026-11-13): the fake compare's files, without their lines. */
+function fakeRangeFiles(entityId: string, base: string, head: string, diff: RangeDiff): RangeFiles {
+  listedDiffs.set(`${entityId}\n${diff.range?.base ?? base}\n${diff.range?.head ?? head}`, diff);
+  return { ...diff, files: diff.files.map((file) => ({ ...file, hunks: [], truncated: false })) };
+}
+
+/** `entity_range_file`: one file of the fake compare, whole in one page (the fake has no file long enough to page). */
+function fakeRangeFile(entityId: string, base: string, head: string, path: string, from: number, ignoreWhitespace: boolean): RangeFilePage {
+  const diff = listedDiffs.get(`${entityId}\n${base}\n${head}`) ?? fakeRangeDiff(entityId, base, head, ignoreWhitespace);
+  const file = diff.files.find((one) => one.path === path);
+  if (file === undefined) throw { code: "not_found", message: `the diff changes no file ${path}`, source_id: null };
+  return { file, from, continues: false, next: null };
 }
 
 /**
@@ -467,6 +484,60 @@ function fakeClone(args: Record<string, unknown>): CloneAnswer {
   return { status: "cloning", path };
 }
 
+/**
+ * *Clone all* (PR #2479): every repository of the corpus not on this machine,
+ * cloned one after another in 300 ms each, its run told on `clone:all` and
+ * each clone on `clone:progress`.
+ */
+let fakeCloneAll: CloneAllState | null = null;
+
+function fakeCloneAllPlan(): CloneAllPlan {
+  const missing = CORPUS.filter((entry) => entry.kind === "repo" && fakeCheckout(entry.entity_id).path === null);
+  const sources = new Map<string, number>();
+  for (const entry of missing) {
+    const source = entry.entity_id.slice(0, entry.entity_id.indexOf(":"));
+    sources.set(source, (sources.get(source) ?? 0) + 1);
+  }
+  return {
+    root: fakeClonesRoot,
+    names: fakeClonesRoot === null ? [] : missing.map((entry) => entry.title),
+    sources: [...sources].map(([source_id, repositories]) => ({ source_id, name: source_id === "mock" ? "Tidewater Git" : source_id, repositories })),
+    already: CORPUS.filter((entry) => entry.kind === "repo").length - missing.length,
+    skipped: [],
+  };
+}
+
+function fakeStartCloneAll(): CloneAllState {
+  if (fakeCloneAll !== null && !fakeCloneAll.finished) return fakeCloneAll;
+  if (fakeClonesRoot === null) throw { code: "invalid", message: "no clones root is set: choose where clones go in Settings › Checkouts", source_id: null };
+  const todo = CORPUS.filter((entry) => entry.kind === "repo" && fakeCheckout(entry.entity_id).path === null);
+  const run: CloneAllState = { run: (fakeCloneAll?.run ?? 0) + 1, total: todo.length, cloned: 0, adopted: 0, failed: [], current: [], finished: todo.length === 0 };
+  fakeCloneAll = run;
+  const tell = () => bridge?.emit("clone:all", { ...run, failed: [...run.failed], current: [...run.current] });
+  const next = () => {
+    const entry = todo.shift();
+    if (entry === undefined) {
+      run.finished = true;
+      tell();
+      return;
+    }
+    run.current = [entry.title];
+    tell();
+    // Quicker than one *Clone*'s eight steps, so a whole run fits under a trip's wait.
+    const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
+    emit(entry.entity_id, path, { state: "progress", phase: "Receiving objects", percent: 50 });
+    setTimeout(() => {
+      fakeCloned[entry.entity_id] = path;
+      emit(entry.entity_id, path, { state: "done" });
+      run.cloned += 1;
+      run.current = [];
+      next();
+    }, 300);
+  };
+  setTimeout(next, 0);
+  return { ...run };
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
@@ -514,6 +585,43 @@ export function handlers(): Handlers {
     entity_commit_diff: (args) =>
       fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
+    // The demo has no checkout on disk to read a tree at (ADR-0041): Files reads the fake source, as before.
+    entity_local_tree: () => null,
+    entity_local_dir: () => null,
+    entity_local_paths: () => null,
+    entity_local_file: () => null,
+    entity_source_range_diff: (args) =>
+      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),
+    entity_range_files: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, args["ignoreWhitespace"] === true));
+    },
+    entity_source_range_files: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, false));
+    },
+    entity_range_file: (args) =>
+      fakeRangeFile(
+        String(args["entityId"] ?? ""),
+        String(args["base"] ?? ""),
+        String(args["head"] ?? ""),
+        String(args["path"] ?? ""),
+        Number(args["from"] ?? 0),
+        args["ignoreWhitespace"] === true,
+      ),
+    cancel_read: () => false,
+    // *Clone all* (PR #2479): the corpus's repositories not on this machine, one after another.
+    clone_all_plan: () => fakeCloneAllPlan(),
+    clone_all: () => fakeStartCloneAll(),
+    clone_all_state: () => (fakeCloneAll === null ? null : { ...fakeCloneAll }),
+    entity_checkouts: (args) =>
+      ((args["entityIds"] as string[] | undefined) ?? []).flatMap((entityId) => {
+        try {
+          return [{ entity_id: entityId, checkout: fakeCheckout(entityId) }];
+        } catch {
+          return [];
+        }
+      }),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
@@ -547,6 +655,7 @@ const atLoad = seedOf({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fa
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
   fakeWorktrees = [];
+  fakeCloneAll = null;
   ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
-keepSeed(fakeOverrides, fakeCloning, fakeCloned);
+keepSeed(fakeOverrides, fakeCloning, fakeCloned, listedDiffs);

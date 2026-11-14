@@ -8,7 +8,7 @@
  */
 import { expect, test } from "vitest";
 
-import { ago } from "./time";
+import { ago, agoStamp } from "./time";
 
 const now = new Date("2026-08-22T14:32:00Z");
 
@@ -18,7 +18,8 @@ test.each([
   ["2026-08-22T13:33:00Z", "59 min ago"],
   ["2026-08-22T13:32:00Z", "1 h ago"],
   ["2026-08-22T11:32:00Z", "3 h ago"],
-  ["2026-08-19T09:00:00Z", "2026-08-19"],
+  ["2026-08-19T09:00:00Z", "19 Aug"],
+  ["2025-12-30T09:00:00Z", "30 Dec 2025"],
   // Clock skew: knobas' `synced_at` is the local clock and a source's
   // `updated_at` is a remote one, so a stamp in the future is ordinary.
   ["2026-08-22T14:33:00Z", "just now"],
@@ -33,7 +34,15 @@ test.each([
  */
 test("a day is where a duration becomes a date", () => {
   expect(ago("2026-08-21T15:32:00Z", now)).toBe("23 h ago");
-  expect(ago("2026-08-21T13:32:00Z", now)).toBe("2026-08-21");
+  expect(ago("2026-08-21T13:32:00Z", now)).toBe("21 Aug");
+});
+
+test("the date is UTC's, so a stamp reads the same on two machines, and the ISO stamp is for its title", () => {
+  expect(ago("2026-08-19T23:59:00Z", now)).toBe("19 Aug");
+  expect(agoStamp("2026-08-19T23:59:00Z", now)).toBe("2026-08-19");
+  expect(agoStamp("2026-08-22T11:32:00Z", now), "a duration has no stamp to add").toBeUndefined();
+  expect(agoStamp(null, now)).toBeUndefined();
+  expect(agoStamp("not a date", now)).toBeUndefined();
 });
 
 /**

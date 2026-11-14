@@ -38,10 +38,11 @@ import type {
   StateChip,
 } from "../../../ipc/entity";
 import { keyOf } from "../../../time/format";
+import { onePerKey } from "../../../tf/sets/sets";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { fakePipelines } from "./builds";
-import { CORPUS } from "./corpus";
+import { CORPUS, corpusRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { PARENTS, SET_REACH, fakeParentOwn } from "./job-reach";
 import { fakeMonitorRoster } from "./monitors";
@@ -139,7 +140,7 @@ function title(id: string): string | null {
 const TONES: Record<string, StateChip["tone"]> = { up: "ok", warn: "warn", down: "err", pending: "info" };
 
 /** Uptime Kuma's declared `state` chip (#1020): its four words, each in its tone. */
-const MONITOR_TONES: Record<string, StateChip["tone"]> = { up: "ok", down: "err", pending: "warn", maintenance: "muted" };
+const MONITOR_TONES: Record<string, StateChip["tone"]> = { up: "ok", down: "err", pending: "info", maintenance: "muted" };
 
 /** A member's row (#1008): its title, its line and its dot, off the fixture rows the views draw. */
 function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
@@ -161,7 +162,8 @@ function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
     return {
       ...row,
       line: monitor.monitor_type || null,
-      state: monitor.state && tone ? { text: monitor.state, tone } : null,
+      // A paused monitor isn't live, as Monitors says: its last sample is only what it read when it was paused.
+      state: monitor.tombstoned ? { text: "paused", tone: "muted" } : monitor.state && tone ? { text: monitor.state, tone } : null,
     };
   }
   const item = CORPUS.find((entry) => entry.entity_id === id);
@@ -173,6 +175,11 @@ function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
     return { ...row, line: teams || owner || null };
   }
   return { ...row, line: payload.path ?? null, state: payload.chip ?? null };
+}
+
+/** What an entity says of itself, as `states_of` reads it (F-036): the dot a member row draws. */
+export function fakeStateOf(id: string): StateChip | null {
+  return memberRow("repo", id).state;
 }
 
 /** The live items of a member kind a pattern can match, with what it reads: project, parents, name. */
@@ -262,6 +269,12 @@ function tickets() {
   return CORPUS.filter((row) => row.kind === "ticket" && row.deleted_at === null);
 }
 
+/** A live ticket by id, through the corpus's index rather than a walk of every ticket. */
+function ticketById(id: string | undefined): (typeof CORPUS)[number] | undefined {
+  const row = corpusRow(id);
+  return row !== undefined && row.kind === "ticket" && row.deleted_at === null ? row : undefined;
+}
+
 function matches(rule: LinkSetRule, ticket: (typeof CORPUS)[number]): boolean {
   const payload = ticket.payload as { epic?: string; fields?: { project?: { key?: string } } };
   switch (rule.kind) {
@@ -271,7 +284,7 @@ function matches(rule: LinkSetRule, ticket: (typeof CORPUS)[number]): boolean {
       return PARENTS[ticket.entity_id] === rule.value;
     case "epic": {
       if (payload.epic === keyOf(rule.value)) return true;
-      const parent = tickets().find((row) => row.entity_id === PARENTS[ticket.entity_id]);
+      const parent = ticketById(PARENTS[ticket.entity_id]);
       return parent !== undefined && parent !== ticket && matches(rule, parent);
     }
     case "project":
@@ -287,7 +300,8 @@ function ruleTickets(rules: readonly LinkSetRule[]): RuleTicket[] {
 }
 
 function rowOf(set: FakeSet): LinkSetRow {
-  const on = ruleTickets(set.rules);
+  // One per key, as the real read counts: two sources can hold the same key.
+  const on = onePerKey(ruleTickets(set.rules));
   return {
     id: set.id,
     name: set.name,
@@ -334,6 +348,12 @@ export function fakeSetReach(ticketId: string): Reached[] {
 
 SET_REACH.push(fakeSetReach);
 
+/** A state off the wire where the entity says none, as the real read leaves it. */
+function stateField(id: string): { state?: StateChip } {
+  const state = fakeStateOf(id);
+  return state === null ? {} : { state };
+}
+
 /** `job_link_sets`: every set whose rules match, by name, with its first matching rule, and the parent. */
 export function fakeJobLinkSets(ticketId: string): JobLinkSets {
   const ticket = tickets().find((row) => row.entity_id === ticketId);
@@ -355,6 +375,7 @@ export function fakeJobLinkSets(ticketId: string): JobLinkSets {
                   entity_kind: member.kind === "pipeline" ? "build_config" : member.kind,
                   title: title(member.entity_id),
                   hidden: HIDDEN.has(`${ticketId}|${member.entity_id}`),
+                  ...stateField(member.entity_id),
                 })),
             },
           ];
@@ -366,7 +387,7 @@ export function fakeJobLinkSets(ticketId: string): JobLinkSets {
     parent: parent && {
       ticket: parent.ticket,
       title: title(parent.ticket),
-      links: parent.reached.map((row) => ({ entity_id: row.entity_id, kind: row.kind, title: title(row.entity_id) })),
+      links: parent.reached.map((row) => ({ entity_id: row.entity_id, kind: row.kind, title: title(row.entity_id), ...stateField(row.entity_id) })),
     },
   };
 }
@@ -412,7 +433,7 @@ export function fakeLinkSetLines(): { id: string; name: string; description: str
 
 export function handlers(): Handlers {
   return {
-    link_sets: () => [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),
+    link_sets: () => (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes("sets") ? [] : [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),
     link_set: (args) => detailOf(found(String(args["id"] ?? ""))),
     save_link_set: (args) => {
       const draft = args["draft"] as LinkSetDraft;

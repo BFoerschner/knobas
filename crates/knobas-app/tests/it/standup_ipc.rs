@@ -677,6 +677,110 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
     }
 }
 
+/// **Every reason is in a person's words and names the source by its
+/// display name** (the live run on #2479): the digest said *you queued a
+/// source_action on it in live-gitea* and *live-teamcity attributes this
+/// build to you*, an op code and two source ids. A source action is named by
+/// the action the queue holds.
+#[tokio::test]
+async fn reasons_name_the_source_by_its_name_and_say_what_the_reader_did() {
+    let h = harness("standup-words").await;
+    for (id, name) in [(TRACKER, "Tidewater Jira"), (FORGE, "Tidewater Gitea")] {
+        sqlx::query("update knobas.source_config set display_name = $2 where id = $1")
+            .bind(id)
+            .bind(name)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+    let pr = h
+        .item(
+            FORGE,
+            "pr",
+            "tidewater/payout-service#142",
+            ME,
+            days_before(1, 9, 0),
+            serde_json::json!({}),
+        )
+        .await;
+    let labelled = h
+        .item(
+            FORGE,
+            "pr",
+            "tidewater/ledger-api#139",
+            "jonas",
+            days_before(1, 10, 0),
+            serde_json::json!({}),
+        )
+        .await;
+    let (write_id,): (i64,) = sqlx::query_as(
+        "insert into knobas.write_queue (source_id, entity_id, op, payload, target_snapshot)
+         values ($1, $2, 'source_action', $3, '{}'::jsonb) returning id",
+    )
+    .bind(FORGE)
+    .bind(&labelled)
+    .bind(serde_json::json!({ "SourceAction": {
+        "entity": labelled, "id": "add_label", "fields": { "label": "7" } } }))
+    .fetch_one(&h.pool)
+    .await
+    .unwrap();
+    h.activity(
+        "user",
+        "queued",
+        &labelled,
+        days_before(1, 10, 30),
+        serde_json::json!({ "op": "source_action", "source_id": FORGE, "write_id": write_id }),
+    )
+    .await;
+    let merged = h
+        .item(
+            FORGE,
+            "pr",
+            "tidewater/payout-service#140",
+            "jonas",
+            days_before(1, 11, 0),
+            serde_json::json!({}),
+        )
+        .await;
+    h.activity(
+        "user",
+        "queued",
+        &merged,
+        days_before(1, 11, 30),
+        serde_json::json!({ "op": "merge_pull_request", "source_id": FORGE, "write_id": write_id + 1 }),
+    )
+    .await;
+    let logged = h.ticket("PAY-240", ME, "In Progress").await;
+    h.worklog(&logged, days_before(1, 14, 0)).await;
+
+    let digest = h.digest().await;
+    let reasons: Vec<(&str, &str)> = digest
+        .yesterday
+        .iter()
+        .map(|l| {
+            (
+                l.entity_id.as_deref().unwrap_or_default(),
+                l.reason.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        reasons,
+        vec![
+            (logged.as_str(), "you logged work on it in Tidewater Jira"),
+            (merged.as_str(), "you merged it in Tidewater Gitea"),
+            (
+                labelled.as_str(),
+                "you asked Tidewater Gitea to add a label"
+            ),
+            (
+                pr.as_str(),
+                "Tidewater Gitea credits this pull request to you"
+            ),
+        ]
+    );
+}
+
 /// **The mirror half filters on whose the item is and on the day, and on
 /// nothing else -- the kind rides through** (issue #389).
 ///

@@ -7,9 +7,13 @@
  * - the ticket page, once it has resolved a `#/job/<key or id>` address to
  *   its ticket (a bookmark, history, a link, the timer chip, the Tickets
  *   preview's button), which then lands on the ticket's own address;
- * - the ticket page card's foot: *Work on this*, *Resume work*, *Start work*;
+ * - the ticket page card's foot: *Work on this*, *Resume work*;
  * - a timer start on a ticket (`App.svelte`, off `timer.started`);
- * - *Start work*'s run (`TfStartWork.svelte`).
+ * - *Start work*'s run (`TfStartWork.svelte`), and not its press: looking at the
+ *   steps and leaving changes nothing (F-130).
+ *
+ * A press that takes the choice from another ticket says so (`chooseSaying`), with
+ * the way back, because the yellow it moved may be nowhere on screen.
  *
  * It replaces the shell's "job you were last in", which whichever job page
  * was opened last fed. The timer chip's fallback (⌘T with nothing in front)
@@ -24,8 +28,10 @@
  */
 import { untrack } from "svelte";
 
+import { push } from "../../shell/toasts.svelte";
 import { keptValue, windowStorage, type KeptStorage } from "../kept-value";
-import { isEntityId } from "./job";
+import { ticketHash } from "../route";
+import { isEntityId, keyOf } from "./job";
 
 export const CHOSEN_KEY = "knobas.job.chosen";
 
@@ -70,3 +76,39 @@ export function createChosenJob(storage: () => KeptStorage | null): ChosenJob {
 
 /** The window's one chosen job, over this viewer's `localStorage` where there is one. */
 export const chosenJob: ChosenJob = createChosenJob(windowStorage);
+
+/** Choose `id`, and when that takes the choice from another ticket, say so with the way back. */
+export function chooseSaying(id: string, job: ChosenJob = chosenJob): void {
+  const before = untrack(() => job.id);
+  job.choose(id);
+  if (before === null || before === id) return;
+  push({
+    text: `On ${keyOf(id)} now.`,
+    action: {
+      label: `Back to ${keyOf(before)}`,
+      run: () => {
+        job.choose(before);
+        location.hash = ticketHash(before);
+      },
+    },
+  });
+}
+
+/**
+ * What a press elsewhere asks of a ticket's page, for when it arrives: *Start work*
+ * shows the steps, *Resume work* starts the timer, as the same words at the card's
+ * foot do (the Tickets preview's button). The page takes it once.
+ */
+let asked = $state<{ id: string; does: "steps" | "timer" } | null>(null);
+
+export const pageAsk = {
+  get current() {
+    return asked;
+  },
+  ask(id: string, does: "steps" | "timer"): void {
+    asked = { id, does };
+  },
+  clear(): void {
+    asked = null;
+  },
+};

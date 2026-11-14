@@ -5,9 +5,13 @@
  * A dialog or drawer opens itself here with the function that closes it and
  * unregisters on unmount. The Connections drawer and the shell's own dialogs
  * arrive in later tickets; this is the hook they register through.
+ *
+ * A `panel` is an inline panel on the page (*Request…*'s list, a file's
+ * *Pipeline*): `Esc` closes it before it leaves the page, but it does not own
+ * the keyboard as a dialog does, so the page's keys and history still work.
  */
 export interface Layer {
-  kind: "dialog" | "drawer";
+  kind: "dialog" | "drawer" | "panel";
   close: () => void;
 }
 

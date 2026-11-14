@@ -7,8 +7,8 @@
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import { createBoardReader, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
+import type { EntityFilter, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import { createBoardReader, LIST_SETTLE_MS, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -62,7 +62,7 @@ function board(...columns: MiniBoardColumn[]): MiniBoard {
 /** Twelve To Do (eight sent) and five Done (eight sent): the board an uncapped first read answers. */
 const FIRST = board(column("To Do", 12, 8), column("Done", 5));
 
-function fakes() {
+function fakes(previewPause?: number, cardReads?: BoardReaderPorts["cardReads"]) {
   const reads: Read[] = [];
   const details: { id: string; answer: (text: string) => void }[] = [];
   const reaches: string[] = [];
@@ -75,10 +75,13 @@ function fakes() {
       reaches.push(id);
       return Promise.resolve([]);
     },
+    ticketBoard: () => Promise.resolve({ columns: [], more_lanes: 0 } as unknown as MiniBoard),
+    entityCheckout: () => Promise.reject(new Error("no checkout")),
+    ...(cardReads ? { cardReads } : {}),
   };
   const sessions: ViewSessions = $state({ views: {} });
   const view: BoardView = $state({ columns: [], layout: "board", lanes: "none" });
-  const reader = createBoardReader(ports, { typingPause: 40, sessions, view: () => view });
+  const reader = createBoardReader(ports, { typingPause: 40, ...(previewPause === undefined ? {} : { previewPause }), sessions, view: () => view });
   /** What each read asked for, without its answer. */
   const asked = () => reads.map(({ perColumn, query, lanes }) => (lanes ? { perColumn, query, lanes } : { perColumn, query }));
   return { reader, reads, details, reaches, sessions, view, asked };
@@ -101,6 +104,35 @@ test("the keys typed inside the typing pause are one read of the whole word, fif
   await vi.advanceTimersByTimeAsync(1);
   expect(asked().slice(1)).toEqual([{ perColumn: 50, query: "sepa" }]);
   expect(reads[1]!.role).toBe("ticket-system");
+});
+
+test("the first key typed into a settled board reads at once; the keys typed within the pause after it wait (the broad-filters pass, 2026-11-13)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "p", words: true });
+  expect(asked().slice(1)).toEqual([{ perColumn: 50, query: "p" }]);
+  reads[1]!.answer(board(column("To Do", 3)));
+  await flush();
+  expect(reader.board?.columns[0]!.total).toBe(3);
+  // Typed 20 ms later, after "p" answered: within the pause, so it waits for the keys to stop.
+  await vi.advanceTimersByTimeAsync(20);
+  reader.setFilter({ query: "pa", words: true });
+  await vi.advanceTimersByTimeAsync(20);
+  reader.setFilter({ query: "pay", words: true });
+  expect(reads).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().slice(2)).toEqual([{ perColumn: 50, query: "pay" }]);
+  // A read still out holds the next key, however long ago the last was typed.
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads).toHaveLength(3);
+  reads[2]!.answer(board(column("To Do", 2)));
+  await flush();
+  expect(asked().slice(3)).toEqual([{ perColumn: 50, query: "payo" }]);
 });
 
 test("an older answer never lands: not one a later read overtook, nor one out when the next key was typed", async () => {
@@ -139,6 +171,16 @@ test("a failed read says why, and the next answer clears it", async () => {
   expect(reader.shown).toBe(17);
 });
 
+test("a ticket's sub-tasks read every card and leave the ticket out, so its count is theirs (the live run, 2026-11-09)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open({ key: "", base: "under:PAY-219", savedView: null, without: "PAY-219" }, { query: "under:PAY-219", words: false });
+  expect(asked()).toEqual([{ perColumn: null, query: "under:PAY-219" }]);
+  reads[0]!.answer(board({ status: "To Do", cards: [card("PAY-266"), card("PAY-254")], total: 2 }, { status: "Done", cards: [card("PAY-219")], total: 1 }));
+  await flush();
+  expect(reader.board?.columns.map((c) => [c.status, c.total])).toEqual([["To Do", 2]]);
+  expect(reader.total).toBe(2);
+});
+
 test("expand raises the cap to that column's count and draws it whole; the others keep theirs", async () => {
   const { reader, reads, asked } = fakes();
   reader.open(ALL, NO_WORDS);
@@ -152,6 +194,22 @@ test("expand raises the cap to that column's count and draws it whole; the other
   await flush();
   expect(reader.expanded).toEqual(["To Do"]);
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([12, 3]);
+});
+
+test("a long column's Show more reads and draws fifty more a press, never the whole board (2026-11-10)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  const long = { ...column("To Do", 8), total: 8016 };
+  reads[0]!.answer(board(long, column("Done", 5)));
+  await flush();
+  reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+  expect(asked().at(-1)).toEqual({ perColumn: 58, query: null });
+  reads[1]!.answer(board({ ...column("To Do", 58), total: 8016 }, column("Done", 5)));
+  await flush();
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([58, 3]);
+  reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+  expect(asked().at(-1)).toEqual({ perColumn: 108, query: null });
+  expect(reader.expanded).toEqual(["To Do", "To Do"]);
 });
 
 test("in lanes, expand raises the cap for that lane's column only", async () => {
@@ -194,6 +252,33 @@ test("the list's Show N more reads every column whole and the board keeps its ca
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([8, 3]);
 });
 
+test("a list showing every ticket reads fifty a column as words change, and all of them once the keys pause (2026-11-10)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.chooseLayout("list");
+  reader.expandAll();
+  reads[1]!.answer(board(column("To Do", 120), column("Done", 900)));
+  await flush();
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[2]!.perColumn).toBe(50);
+  reads[2]!.answer(board({ ...column("To Do", 50), total: 70 }, { ...column("Done", 50), total: 400 }));
+  await flush();
+  // Another key inside the pause starts it over: no whole read yet.
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[3]!.perColumn).toBe(50);
+  reads[3]!.answer(board({ ...column("To Do", 50), total: 60 }, { ...column("Done", 50), total: 300 }));
+  await flush();
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS - 1);
+  expect(reads).toHaveLength(4);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(reads[4]!.query).toBe("payo");
+  expect(reads[4]!.perColumn).toBe(300);
+});
+
 // #2200's class: the list's Show N more reads every ticket, and a deep proxy
 // over thousands of cards made each draw subscribe to every field it read.
 test("the board drawn is the answer as read, not a reactive copy of each card", async () => {
@@ -221,13 +306,42 @@ test("the total is counted once per base: from a base answer, or one count read 
   reader.setFilter({ query: "assignee:@me sep", words: true });
   await vi.advanceTimersByTimeAsync(40);
   expect(asked().slice(2)).toEqual([{ perColumn: 50, query: "assignee:@me sep" }]);
-  // A read of the base itself counts the whole as it draws it.
+  // A read of the base itself counts the whole as it draws it, once the read still out has answered.
   reader.setFilter({ query: "assignee:@me", words: false });
   await vi.advanceTimersByTimeAsync(40);
-  reads.at(-1)!.answer(board(column("To Do", 31, 8), column("Done", 4)));
+  expect(reads).toHaveLength(3);
+  reads[2]!.answer(board(column("To Do", 9)));
   await flush();
   expect(reads).toHaveLength(4);
+  reads[3]!.answer(board(column("To Do", 31, 8), column("Done", 4)));
+  await flush();
   expect(reader.total).toBe(35);
+});
+
+test("words typed while a read is out wait for it, then read once as they are by then; a hung read holds them 400 ms at most", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.setFilter({ query: "p", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().map((read) => read.query)).toEqual([null, "p"]);
+  // Two more keys while "p" is out: no read of "pa", one of "pay" when "p" answers, and its answer is not drawn.
+  reader.setFilter({ query: "pa", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().map((read) => read.query)).toEqual([null, "p"]);
+  reads[1]!.answer(board(column("To Do", 50)));
+  await flush();
+  expect(asked().map((read) => read.query)).toEqual([null, "p", "pay"]);
+  expect(reader.board).toBe(FIRST);
+  // "pay" never answers: "payo" waits for it, and goes 400 ms after "pay" was sent.
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked()).toHaveLength(3);
+  await vi.advanceTimersByTimeAsync(TYPED_WAIT_MOST);
+  expect(asked().map((read) => read.query)).toEqual([null, "p", "pay", "payo"]);
 });
 
 test("a laned board reads its first ten lanes, ten more each time, and ten again for another field", async () => {
@@ -278,7 +392,7 @@ test("the preview reads once per ticket and drops the answer of one no longer pr
   details[0]!.answer("One.");
   await flush();
   expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
-  expect(reader.around).toEqual([]);
+  expect(reader.around).toEqual({ rows: [], settled: true });
 
   reader.preview("jira:PAY-2");
   expect(reader.description).toBeNull();
@@ -333,4 +447,39 @@ test("a Jira view's column draws three when every status it lists is done, whate
     [3, true],
     [8, false],
   ]);
+});
+
+test("a moved selection draws at once and reads its preview once it stops moving; one selected again draws what it showed (the query audit, 2026-11-12)", async () => {
+  const sections: string[] = [];
+  const { reader, details, reaches } = fakes(120, async (id: string, asked: EntityFilter[]) => {
+    sections.push(`${id}:${asked.length}`);
+    return { reached: [], sections: asked.map(() => []) };
+  });
+  // The first selection is read at once: there is nothing to settle.
+  reader.preview("jira:PAY-1");
+  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1"]);
+  details[0]!.answer("One.");
+  await flush();
+  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
+  expect(reader.around).toEqual({ rows: [], settled: true });
+
+  // Held j over three rows: each draws at once, nothing is read until the last one has stood still for 120 ms.
+  for (const id of ["jira:PAY-2", "jira:PAY-3", "jira:PAY-4"]) {
+    reader.preview(id);
+    expect(reader.description).toBeNull();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  expect(details).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(70);
+  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1", "jira:PAY-4"]);
+  // The four sections and the reach in one read, never a `job_reach` of its own.
+  expect(sections).toEqual(["jira:PAY-1:4", "jira:PAY-4:4"]);
+  expect(reaches).toEqual([]);
+
+  // Back to the first: what it showed draws in the same frame, and it is read again behind it.
+  reader.preview("jira:PAY-1");
+  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
+  expect(reader.around).toEqual({ rows: [], settled: true });
+  await vi.advanceTimersByTimeAsync(120);
+  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1", "jira:PAY-4", "jira:PAY-1"]);
 });

@@ -169,21 +169,56 @@ pub async fn mini_board_laned(
         None => Vec::new(),
     };
     let declarations = declared_paths(pool, registry).await?;
-    let (only, identity) = tickets_matching(pool, registry, query).await?;
-    Ok(knobas_core::mini_board::read_scoped(
-        pool,
-        knobas_core::mini_board::Scope {
-            ctx_id,
-            sources: &sources,
-            project,
-            only: only.as_deref(),
-            identity: &identity,
-            lanes,
-        },
-        &declarations,
-        per_column,
-    )
-    .await?)
+    let (admits, identity) = tickets_admitted(pool, registry, query).await?;
+    let scope = |only| knobas_core::mini_board::Scope {
+        ctx_id,
+        sources: &sources,
+        project,
+        only,
+        identity: &identity,
+        lanes,
+    };
+    Ok(match admits {
+        knobas_search::Admits::Every => {
+            knobas_core::mini_board::read_scoped(pool, scope(None), &declarations, per_column)
+                .await?
+        }
+        knobas_search::Admits::Nothing => {
+            knobas_core::mini_board::read_scoped(pool, scope(Some(&[])), &declarations, per_column)
+                .await?
+        }
+        // The query narrows the board's own scan (the broad-keys pass,
+        // 2026-11-13): a filter that keeps most of the board read every
+        // ticket twice, once for its ids and once for the board of them.
+        knobas_search::Admits::Some(narrowing) => {
+            knobas_core::mini_board::read_scoped_narrowed(
+                pool,
+                scope(None),
+                &declarations,
+                per_column,
+                &*narrowing,
+            )
+            .await?
+        }
+    })
+}
+
+/// What a board's search admits of the tickets (`Every`: no search, nothing
+/// narrowed) and the identity `@me` resolves to, from **one** vocabulary
+/// read, as [`tickets_matching`] reads them; the mirror is not asked for the
+/// ids.
+async fn tickets_admitted(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    query: Option<&str>,
+) -> Result<(knobas_search::Admits, Vec<String>), IpcError> {
+    let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
+        return Ok((knobas_search::Admits::Every, identity_of(pool).await?));
+    };
+    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    let vocabulary = searcher.vocabulary().await?;
+    let admits = knobas_search::Searcher::admits_in(&vocabulary, query, "ticket")?;
+    Ok((admits, vocabulary.identity))
 }
 
 /// The ticket ids a board's search admits (`None`: no search, nothing

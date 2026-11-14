@@ -181,10 +181,14 @@ vi.mock("../ipc/entity", () => ({
       page_title: "2026-09-03",
       publication: null,
       owed_tickets: [],
+      changed_since: false,
+      page_moved: false,
+      again: null,
     }),
   standupPublishTarget: () => deferred(null),
   setStandupPublishTarget: () => deferred(null),
   publishStandupProtocol: () => deferred(null),
+  publishStandupProtocolAgain: () => deferred(null),
   createActionItemTicket: () => deferred(null),
   actionItemTicket: () => deferred(null),
   // The Tickets tile's read (#178). Deferred like the rest, so the tile is
@@ -193,6 +197,10 @@ vi.mock("../ipc/entity", () => ({
   // No source view (#661): the panel is the mirror's, as before.
   entityView: () => Promise.resolve(null),
   getEntity: () => deferred(DETAIL),
+  // What many ids are in one read (the query audit): deferred like `getEntity`.
+  entityBriefs: () => deferred([]),
+  batchedBrief: () => () => deferred(null),
+  cardReads: () => deferred({ reached: [], sections: [] }),
   getNote: () => deferred(NOTE),
   saveNote: () => deferred(NOTE),
   deleteNote: () => deferred(true),
@@ -272,6 +280,8 @@ vi.mock("../ipc/app", () => ({
   ping: () => deferred("pong"),
   pagesKeptOpen: () => deferred(5),
   setPagesKeptOpen: (count: number) => deferred(count),
+  smoothScrolling: () => deferred(true),
+  setSmoothScrolling: (on: boolean) => deferred(on),
   diffPipelines: () => deferred(true),
   setDiffPipelines: (on: boolean) => deferred(on),
   userRenderers: () => deferred([]),
@@ -341,6 +351,8 @@ const { createTestNav } = await import("../assets/test-nav.svelte");
 const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
+const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
+const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
@@ -359,6 +371,7 @@ const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfAppPage = (await import("../tf/openin/TfAppPage.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
@@ -373,6 +386,8 @@ const TfPipelinesSettings = (await import("../tf/settings/TfPipelinesSettings.sv
 const { createNamedPipelines, createCommandSteps } = await import("../render/pipelines.svelte");
 const { createRendererDefaults } = await import("../render/defaults.svelte");
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
+const TfCloneAll = (await import("../tf/openin/TfCloneAll.svelte")).default;
+const { createCloneAll } = await import("../tf/openin/clone-all.svelte");
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
 
@@ -410,6 +425,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
+const TfFindBar = (await import("../tf/TfFindBar.svelte")).default;
 const TfDiffRendered = (await import("../tf/diff/TfDiffRendered.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
@@ -438,6 +454,7 @@ const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).defaul
 const WriteQueuePanel = (await import("./WriteQueue.svelte")).default;
 const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
+const TfSecretPromptHost = (await import("../tf/settings/TfSecretPromptHost.svelte")).default;
 const TfInstalledAdapters = (await import("../tf/settings/TfInstalledAdapters.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
@@ -450,10 +467,14 @@ const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
 const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
+const TfDocTree = (await import("../tf/docs/TfDocTree.svelte")).default;
+const TfDocsSpace = (await import("../tf/docs/TfDocsSpace.svelte")).default;
 const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
+const TfDocBlocks = (await import("../tf/docs/TfDocBlocks.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
+const TfAssetTree = (await import("../tf/asset-tree/TfAssetTree.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
@@ -539,6 +560,8 @@ function sectionPorts() {
   return {
     pagesKeptOpen: () => deferred(5),
     setPagesKeptOpen: (count: number) => deferred(count),
+    smoothScrolling: () => deferred(true),
+    setSmoothScrolling: (on: boolean) => deferred(on),
     passiveAttribution: () => deferred(true),
     setPassiveAttribution: (on: boolean) => deferred(on),
     notify: () => deferred(undefined),
@@ -701,6 +724,8 @@ function setPorts() {
   return {
     linkSets: () => deferred([set]),
     linkSetHints: () => deferred([]),
+    assetTypeNames: () => deferred({}),
+    monitors: () => deferred([]),
     linkSet: () => deferred(set),
     saveLinkSet: () => deferred(set),
     deleteLinkSet: () => deferred(undefined),
@@ -728,6 +753,21 @@ const CASES: Case[] = [
     open: (target) => ({ app: mount(App, { target, props: {} }) }),
   },
   {
+    /** The one menu: its outside-click, address, scroll and resize listeners live while it is open. */
+    name: "TfMenu",
+    source: "lib/tf/TfMenu.svelte",
+    open: (target) => ({ app: mount(TfMenuFixture, { target, props: { layers: createLayers() } }) }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>(".face")?.click(),
+  },
+  {
+    /** The fold bar: an open fold is a panel on the layer stack (F-619). */
+    name: "TfRailBar",
+    source: "lib/tf/TfRailBar.svelte",
+    open: (target) => ({
+      app: mount(TfRailBar, { target, props: { label: "Section", value: "Sources", open: true, controls: "rail", onpress: () => {}, onclose: () => {}, layers: createLayers() } }),
+    }),
+  },
+  {
     /** A ticket view's ⋯ menu (#812): its outside-click listener lives while it is open. */
     name: "ViewMenu",
     source: "lib/tf/tickets/ViewMenu.svelte",
@@ -740,15 +780,41 @@ const CASES: Case[] = [
     /** The Docs reader's More menu (#2082): its outside-click listener lives while it is open. */
     name: "TfDocMore",
     source: "lib/tf/docs/TfDocMore.svelte",
-    open: (target) => ({ app: mount(TfDocMore, { target, props: { onexport: () => {} } }) }),
+    open: (target) => ({ app: mount(TfDocMore, { target, props: { oncopy: () => {}, onexport: () => {} } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
+    /** Docs' rail (the instant-open pass, 2026-11-12): a fold drawn open whose pages are not read yet asks for them. */
+    name: "TfDocTree",
+    source: "lib/tf/docs/TfDocTree.svelte",
+    open: (target) => ({
+      app: mount(TfDocTree, {
+        target,
+        props: {
+          space: { source_id: "c", source_name: "C", key: "OPS", name: null, page_count: 3, pages: [{ entity_id: "c:1", title: "Home", parent: null, children: 2, ord: 0 }] },
+          current: "c:1",
+          need: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** A space's page drawn before its every page is read: its list's skeleton waits on a timer. */
+    name: "TfDocsSpace",
+    source: "lib/tf/docs/TfDocsSpace.svelte",
+    open: (target) => ({
+      app: mount(TfDocsSpace, {
+        target,
+        props: { space: { source_id: "c", source_name: "C", key: "OPS", name: null, page_count: 3, pages: [] }, whole: false },
+      }),
+    }),
   },
   {
     /** The file header's More menu (#2311): its outside-click listener lives while it is open. */
     name: "TfFileMore",
     source: "lib/tf/repo/TfFileMore.svelte",
     open: (target) => ({
-      app: mount(TfFileMore, { target, props: { edit: "#/e", history: "#/h", page: null, sourceName: "Gitea" } }),
+      app: mount(TfFileMore, { target, props: { edit: "#/e", history: "#/h" } }),
     }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
@@ -1192,6 +1258,30 @@ const CASES: Case[] = [
     }),
   },
   {
+    /** The application page (PR #2479, 2026-11-13): it reads the repositories and their checkouts, and its leaving takes a try back. */
+    name: "TfAppPage",
+    source: "lib/tf/openin/TfAppPage.svelte",
+    open: (target) => ({
+      app: mount(TfAppPage, {
+        target,
+        props: {
+          at: { app: null, repo: "mock:tidewater/payout-service", kind: null, value: null },
+          apps: residueApps(),
+          reads: {
+            repos: () => Promise.resolve([]),
+            checkouts: () => Promise.resolve([]),
+            files: () => Promise.resolve(null),
+            commits: () => Promise.resolve([]),
+            prs: () => Promise.resolve([]),
+            prEnds: () => Promise.resolve(null),
+            page: () => Promise.resolve(null),
+          },
+          leave: () => {},
+        },
+      }),
+    }),
+  },
+  {
     /**
      * *Open in…* (#844): open, its menu registers a layer and a window click
      * listener; *Clone* (#846) subscribes to `clone:progress`.
@@ -1499,6 +1589,28 @@ const CASES: Case[] = [
     }),
   },
   {
+    /**
+     * *Clone all…* (PR #2479) reads where a run is when it is drawn. With none going it hears nothing: the store's
+     * ear is for a run, which outlives the button by design.
+     */
+    name: "TfCloneAll",
+    source: "lib/tf/openin/TfCloneAll.svelte",
+    open: (target) => ({
+      app: mount(TfCloneAll, {
+        target,
+        props: {
+          store: createCloneAll({
+            plan: () => deferred({ root: "~/code", names: [], sources: [], already: 0, skipped: [] }),
+            start: () => deferred({ run: 1, total: 0, cloned: 0, adopted: 0, failed: [], current: [], finished: true }),
+            state: () => deferred(null),
+            listen: () => deferred(() => {}),
+          }),
+          layers: createLayers(),
+        },
+      }),
+    }),
+  },
+  {
     /** The Connections drawer (#820) registers a drawer layer while it is open. */
     name: "TfConnections",
     source: "lib/tf/job/TfConnections.svelte",
@@ -1536,6 +1648,7 @@ const CASES: Case[] = [
             snoozeInboxItem: () => deferred(undefined),
             completeInboxItem: () => deferred(undefined),
             ackAlert: () => deferred(undefined),
+            unackAlert: () => deferred(undefined),
             listen: () => deferred(() => {}),
           }),
           ports: {
@@ -1583,7 +1696,7 @@ const CASES: Case[] = [
                 tally: null,
                 groups: null,
               }),
-            entityCheckout: () => deferred({ path: null } as never),
+            entityCheckouts: () => deferred([]),
             codeFacts: () => deferred([]),
             listSources: () => deferred([{ ...sourceFacts("jira"), base_url: "" }]),
             listContexts: () => deferred([]),
@@ -1607,6 +1720,7 @@ const CASES: Case[] = [
       ["TfRepoPrs", "lib/tf/repo/TfRepoPrs.svelte", ["prs"]],
       ["TfRepoBranches", "lib/tf/repo/TfRepoBranches.svelte", ["branches"]],
       ["TfRepoCompare", "lib/tf/repo/TfRepoCompare.svelte", ["compare", "feature", "PAY-231-x"]],
+      ["TfRepoBuilds", "lib/tf/repo/TfRepoBuilds.svelte", ["builds"]],
     ] as const
   ).map(
     ([name, source, tail]): Case => ({
@@ -1661,6 +1775,7 @@ const CASES: Case[] = [
               jobReach: () => deferred([]),
               submitWrite: () => deferred({} as never),
               codeFacts: () => deferred([]),
+              repoPipelines: () => deferred({ pipelines: [], pull_requests: [] }),
             },
           },
         }),
@@ -1897,6 +2012,12 @@ const CASES: Case[] = [
       }),
     }),
   },
+  // ⌘F's bar on a page with no box: on the ladder until it goes.
+  {
+    name: "TfFindBar",
+    source: "lib/tf/TfFindBar.svelte",
+    open: (target) => ({ app: mount(TfFindBar, { target, props: { root: () => target } }) }),
+  },
   // The one diff component (#2266): a highlight job per file side, cancelled with it.
   {
     name: "TfDiffView",
@@ -1955,6 +2076,7 @@ const CASES: Case[] = [
             unmonitoredAssets: () => deferred([]),
             openAlerts: () => deferred([]),
             ackAlert: () => deferred({} as never),
+            unackAlert: () => deferred({} as never),
             setMonitorHidden: () => deferred(false),
             submitWrite: () => deferred({ id: 1 } as never),
             getAsset: () => deferred({} as never),
@@ -2033,6 +2155,7 @@ const CASES: Case[] = [
           ticket: { entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200", title: "Retry failed SEPA payouts" },
           links: [],
           ports: {
+            linkSets: () => new Promise(() => {}),
             saveLinkSet: () => new Promise(() => {}),
             previewLinkSetRule: () => deferred([]),
             getEntity: () => new Promise(() => {}),
@@ -2150,6 +2273,17 @@ const CASES: Case[] = [
       }),
     }),
   },
+  {
+    /** The credential prompt over a page (F-048): its reads land after the unmount. */
+    name: "TfSecretPromptHost",
+    source: "lib/tf/settings/TfSecretPromptHost.svelte",
+    open: (target) => ({
+      app: mount(TfSecretPromptHost, {
+        target,
+        props: { sourceId: "jira", layers: createLayers(), ports: settingsPorts() },
+      }),
+    }),
+  },
   // The other Settings sections (#831): reads only, each landing late.
   sectionCase("TfTimeSection", "time"),
   sectionCase("TfNotificationsSection", "notifications"),
@@ -2258,11 +2392,34 @@ const CASES: Case[] = [
         props: {
           ports: {
             standupDigest: () => deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
-            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null, owed_tickets: [] }),
+            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null, owed_tickets: [], changed_since: false, page_moved: false, again: null }),
             getNote: () => deferred({ note: { id: "note:p", title: "", body_md: "", created_at: "", updated_at: "" }, refs: [], links: [] }),
             standupPublishTarget: () => deferred(null),
             follower: { follow: () => () => {} },
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * A page's blocks (#859): a long table's rows drawn a piece a task (the
+     * extremes pass, 2026-11-13), its one effect a timeout for the next piece,
+     * cleared with it; nothing is read.
+     */
+    name: "TfDocBlocks",
+    source: "lib/tf/docs/TfDocBlocks.svelte",
+    open: (target) => ({
+      app: mount(TfDocBlocks, {
+        target,
+        props: {
+          blocks: [{ type: "table", rows: Array.from({ length: 200 }, (_, r) => [{ header: false, colspan: 1, rowspan: 1, blocks: [{ type: "paragraph", text: [{ type: "text", text: `row ${r}` }] }] }]) }] as never,
+          entityId: "confluence:1",
+          sourceName: "Confluence",
+          webUrl: null,
+          whole: false,
+          onopen: () => {},
+          oncopy: () => {},
         },
       }),
     }),
@@ -2302,7 +2459,7 @@ const CASES: Case[] = [
       app: mount(TfNewPage, {
         target,
         props: {
-          tree: { spaces: [{ source_id: "c", key: "ENG", name: null, pages: [{ entity_id: "c:1", title: "Home", parent: null }] }], last_read: null, for_you: [] },
+          tree: { spaces: [{ source_id: "c", source_name: "c", key: "ENG", name: null, pages: [{ entity_id: "c:1", title: "Home", parent: null }] }], last_read: null, for_you: [] },
           space: "c/ENG",
           parent: null,
           job: "PAY-231",
@@ -2391,6 +2548,11 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    name: "TfAssetTree",
+    source: "lib/tf/asset-tree/TfAssetTree.svelte",
+    open: (target) => ({ app: mount(TfAssetTree, { target, props: { head: "asset", rest: ["asset:postgres"] } }) }),
   },
   {
     /**

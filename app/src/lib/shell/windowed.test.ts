@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Heights } from "./windowed";
+import { Heights, textHeight } from "./windowed";
 
 /** Ten rows keyed `r0` … `r9`, 50 px estimated, no gap. */
 const ten = () => new Heights(50, 0);
@@ -80,4 +80,43 @@ describe("Heights", () => {
     // Row 0 is above: scroll to its top.
     expect(h.reveal(0, 100, 100)).toBe(0);
   });
+
+  it("says drawn rows still cover a view only while it stays the margin inside them", () => {
+    const h = ten();
+    h.keys(keys);
+    // Rows 2 to 6 run 100 to 350 px. A view of 150 to 250 with 50 px to spare each side is inside.
+    expect(h.covers(2, 7, 150, 100, 50)).toBe(true);
+    // 20 px further down, the view's bottom margin runs past 350.
+    expect(h.covers(2, 7, 210, 100, 50)).toBe(false);
+    // The list's ends need no margin past them: rows 0 to 3 cover a view at the top.
+    expect(h.covers(0, 3, 0, 100, 50)).toBe(true);
+    expect(h.covers(7, 10, 400, 100, 50)).toBe(true);
+    // A measurement that moves the rows is read: row 2 grown to 120 px pushes row 7's top to 420.
+    h.set("r2", 120);
+    expect(h.covers(2, 7, 210, 100, 50)).toBe(true);
+    expect(h.around(2, 7)).toEqual({ start: 2, end: 7, before: 100, after: 150 });
+  });
 });
+
+describe("a row's own estimate (the extremes pass)", () => {
+  it("stands for an undrawn row, and a measurement still wins", () => {
+    // A comment of one line and one of a page: their room before they are drawn is their own.
+    const h = new Heights<string>(50, 10, (key) => (key === "long" ? 2000 : 60));
+    h.keys(["a", "long", "b"]);
+    expect(h.total()).toBe(60 + 10 + 2000 + 10 + 60);
+    expect(h.offsetOf(2)).toBe(60 + 10 + 2000 + 10);
+    h.set("long", 400);
+    expect(h.offsetOf(2)).toBe(60 + 10 + 400 + 10);
+  });
+});
+
+describe("textHeight", () => {
+  it("counts a line per newline and per `chars` of a long one", () => {
+    expect(textHeight("", { base: 40, line: 20, chars: 100 })).toBe(60);
+    expect(textHeight("one\ntwo", { base: 40, line: 20, chars: 100 })).toBe(80);
+    expect(textHeight("x".repeat(250), { base: 40, line: 20, chars: 100 })).toBe(100);
+    // A 300 KB comment's room is long, so the rows after it are placed near where they will be.
+    expect(textHeight("word ".repeat(60_000), { base: 46, line: 21, chars: 110 })).toBeGreaterThan(50_000);
+  });
+});
+

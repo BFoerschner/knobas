@@ -1,19 +1,29 @@
 /** The Docs reader's rules (#859): which page an address opens, the tree, the header's words. */
 import { expect, test } from "vitest";
 
+import { keyParts } from "../TfKeyed.svelte";
 import type { DocBlock, DocPage, DocsTree } from "../../ipc/entity";
 import {
   childrenByParent,
   docsSearchHash,
   foldsHolding,
   mentionText,
+  continueReading,
   pageToOpen,
+  spaceAt,
+  pagePlace,
+  pagesByLevel,
+  pagesByPath,
   placeOf,
   readingMinutes,
   sectionsOf,
   spaceHash,
   spaceId,
   spaceOfPage,
+  spaceLabel,
+  spaceSource,
+  spaceTitle,
+  scopeName,
   statusTone,
 } from "./docs";
 import { parseTfHash } from "../route";
@@ -22,6 +32,7 @@ const TREE: DocsTree = {
   spaces: [
     {
       source_id: "confluence",
+      source_name: "confluence",
       key: "ENG",
       name: "Engineering",
       pages: [
@@ -30,25 +41,24 @@ const TREE: DocsTree = {
         { entity_id: "confluence:3", title: "SEPA payout retry design", parent: "confluence:2" },
       ],
     },
-    { source_id: "confluence", key: "OPS", name: "Operations", pages: [{ entity_id: "confluence:5", title: "On-call handbook", parent: null }] },
+    { source_id: "confluence", source_name: "confluence", key: "OPS", name: "Operations", pages: [{ entity_id: "confluence:5", title: "On-call handbook", parent: null }] },
   ],
   last_read: "confluence:5",
   for_you: [],
 };
 
-test("the three addresses read as the page read last, a space, and a page with its section", () => {
-  expect(placeOf([])).toEqual({ kind: "last" });
+test("the three addresses read as the home, a space, and a page with its section", () => {
+  expect(placeOf([])).toEqual({ kind: "home" });
   expect(placeOf(["space", "OPS"])).toEqual({ kind: "space", source: null, key: "OPS" });
   expect(placeOf(["space", "wiki:OPS"])).toEqual({ kind: "space", source: "wiki", key: "OPS" });
   expect(placeOf(["confluence:3"])).toEqual({ kind: "page", id: "confluence:3", section: null });
   expect(placeOf(["confluence:3", "2"])).toEqual({ kind: "page", id: "confluence:3", section: 2 });
 });
 
-test("#/docs/search/<words> carries a search, and opens the page read last under its hits (#2425)", () => {
+test("#/docs/search/<words> carries a search and opens no page, so the home stays until a hit is opened (#2425, F-404)", () => {
   expect(placeOf(["search", "sepa retry"])).toEqual({ kind: "search", words: "sepa retry" });
-  expect(placeOf(["search"])).toEqual({ kind: "last" });
-  expect(pageToOpen({ kind: "search", words: "sepa" }, TREE)).toBe("confluence:5");
-  expect(pageToOpen({ kind: "search", words: "sepa" }, { ...TREE, last_read: null })).toBe("confluence:9");
+  expect(placeOf(["search"])).toEqual({ kind: "home" });
+  expect(pageToOpen({ kind: "search", words: "sepa" })).toBeNull();
 });
 
 test("a search's address round-trips through the router whatever the words hold (#2425)", () => {
@@ -60,15 +70,41 @@ test("a search's address round-trips through the router whatever the words hold 
   }
 });
 
-test("#/docs opens the page read last, else the first space's first top page", () => {
-  expect(pageToOpen({ kind: "last" }, TREE)).toBe("confluence:5");
-  expect(pageToOpen({ kind: "last" }, { ...TREE, last_read: null })).toBe("confluence:9");
-  expect(pageToOpen({ kind: "last" }, { spaces: [], last_read: null, for_you: [] })).toBeNull();
+test("#/docs is the home: it opens no page, whatever was read last", () => {
+  expect(pageToOpen({ kind: "home" })).toBeNull();
 });
 
-test("a space's address opens the page at the top of its tree, not the first by title", () => {
-  expect(pageToOpen(placeOf(["space", "ENG"]), TREE)).toBe("confluence:9");
-  expect(pageToOpen(placeOf(["space", "NOPE"]), TREE)).toBeNull();
+test("Continue reading is the page read last and where it sits, while the tree holds it", () => {
+  expect(continueReading(TREE)?.entity_id).toBe("confluence:5");
+  const held = spaceOfPage(TREE, "confluence:5")!;
+  expect(continueReading(TREE)?.where.startsWith(held.name ?? held.key)).toBe(true);
+  expect(continueReading({ ...TREE, last_read: null })).toBeNull();
+  expect(continueReading({ ...TREE, last_read: "confluence:gone" })).toBeNull();
+});
+
+test("a space's pages by level: the top of its tree, then each level below, then a page whose parent it does not hold (F-407)", () => {
+  const page = (id: string, parent: string | null) => ({ entity_id: id, title: id, parent });
+  const space = {
+    source_id: "c",
+    source_name: "c",
+    key: "ADR",
+    name: null,
+    pages: [page("deep", "one"), page("one", "index"), page("lost", "gone"), page("index", null), page("two", "index")],
+  };
+  expect(pagesByLevel(space).map((p) => p.entity_id)).toEqual(["index", "one", "two", "deep", "lost"]);
+});
+
+test("a page's place is one function: the space by name, then what is above it, and a page at the top of a space says only the space (F-410)", () => {
+  expect(pagePlace({ key: "ENG", name: "Engineering" }, "Payments")).toBe("Engineering › Payments");
+  expect(pagePlace({ key: "TEAM", name: "Payments team" }, null)).toBe("Payments team");
+  expect(pagePlace({ key: "ENG", name: null }, "Payments")).toBe("ENG › Payments");
+  expect(pagePlace(null, null)).toBe("");
+});
+
+test("a space's address names the space, and opens no page: the space has a page of its own", () => {
+  expect(pageToOpen(placeOf(["space", "ENG"]))).toBeNull();
+  expect(spaceAt(placeOf(["space", "ENG"]), TREE)?.key).toBe("ENG");
+  expect(spaceAt(placeOf(["space", "NOPE"]), TREE)).toBeUndefined();
 });
 
 /** A second source mirroring ENG too, as a Markdown wiki does during a move (D9). */
@@ -76,7 +112,7 @@ const TWO: DocsTree = {
   ...TREE,
   spaces: [
     ...TREE.spaces,
-    { source_id: "wiki", key: "ENG", name: "Engineering", pages: [{ entity_id: "wiki:home", title: "Eng (wiki)", parent: null }] },
+    { source_id: "wiki", source_name: "wiki", key: "ENG", name: "Engineering", pages: [{ entity_id: "wiki:home", title: "Eng (wiki)", parent: null }] },
   ],
 };
 
@@ -84,25 +120,25 @@ test("a space's address names its source where two sources hold the key, and ope
   const second = spaceOfPage(TWO, "wiki:home")!;
   const hash = spaceHash(TWO.spaces, second);
   expect(hash).toBe("#/docs/space/wiki%3AENG");
-  const opened = pageToOpen(placeOf(["space", decodeURIComponent(hash.split("/").at(-1)!)]), TWO)!;
-  expect(spaceId(spaceOfPage(TWO, opened)!)).toBe("wiki/ENG");
+  const opened = spaceAt(placeOf(["space", decodeURIComponent(hash.split("/").at(-1)!)]), TWO)!;
+  expect(spaceId(opened)).toBe("wiki/ENG");
   expect(spaceHash(TWO.spaces, TWO.spaces[0]!)).toBe("#/docs/space/confluence%3AENG");
 });
 
 test("a key one source holds keeps the bare address, and a bare key two hold opens the first", () => {
   expect(spaceHash(TREE.spaces, TREE.spaces[1]!)).toBe("#/docs/space/OPS");
   expect(spaceHash(TWO.spaces, TWO.spaces[1]!)).toBe("#/docs/space/OPS");
-  expect(pageToOpen(placeOf(["space", "ENG"]), TWO)).toBe("confluence:9");
-  expect(pageToOpen(placeOf(["space", "nope:ENG"]), TWO)).toBeNull();
+  expect(spaceAt(placeOf(["space", "ENG"]), TWO)?.source_id).toBe("confluence");
+  expect(spaceAt(placeOf(["space", "nope:ENG"]), TWO)).toBeUndefined();
 });
 
 test("a key holding a colon still opens by the bare address", () => {
   const odd: DocsTree = {
     ...TREE,
-    spaces: [{ source_id: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
+    spaces: [{ source_id: "wiki", source_name: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
   };
   expect(spaceHash(odd.spaces, odd.spaces[0]!)).toBe("#/docs/space/a%3Ab");
-  expect(pageToOpen(placeOf(["space", "a:b"]), odd)).toBe("wiki:1");
+  expect(spaceAt(placeOf(["space", "a:b"]), odd)?.key).toBe("a:b");
 });
 
 test("a fold holds every page below it, so the ones around the open page start open", () => {
@@ -173,6 +209,10 @@ import {
   forYouWhy,
   hitLine,
   hitsLine,
+  hitWhere,
+  OUTLINE_ROOM,
+  READING_MIN,
+  readerFit,
   markText,
   refusalReason,
   sectionMatches,
@@ -230,8 +270,12 @@ test("a collapsible's title and words count in its section's matches, as the fin
 });
 
 test("the hit's words: the header line, the snippet's place and the last line", () => {
-  expect(hitsLine(5, "all spaces", 0)).toBe("5 pages in all spaces, 1 ms");
-  expect(hitsLine(1, "Engineering", 3)).toBe("1 page in Engineering, 3 ms");
+  expect(hitsLine(5, "all spaces")).toBe("5 pages in all spaces");
+  expect(hitsLine(1, "Engineering")).toBe("1 page in Engineering");
+  expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: "Payments" }, true)).toBe("Engineering › Payments");
+  expect(hitWhere({ space: { key: "ENG", name: null }, path: null }, true)).toBe("ENG");
+  expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: null }, false)).toBe("");
+  expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: "Payments" }, false)).toBe("Payments");
   expect(snippetLabel({ section: "Backoff policy", comment_by: null, segments: [] })).toBe("Backoff policy:");
   expect(snippetLabel({ section: null, comment_by: "Priya Nair", segments: [] })).toBe("Comment by Priya:");
   expect(snippetLabel({ section: null, comment_by: null, segments: [] })).toBeNull();
@@ -256,4 +300,73 @@ test("For you says who asked, and a refused section says why", () => {
   expect(refusalReason("table", "Confluence")).toBe(
     "This section has a table, code or a macro. knobas edits text-only sections; edit this one in Confluence.",
   );
+});
+
+test("the reader's width decides its header: the outline folds first, and Sync now moves only when the row still would not fit (F-406)", () => {
+  const row = 700;
+  const sync = 92;
+  // Beside the outline with room to spare.
+  expect(readerFit(row + OUTLINE_ROOM, row, sync)).toEqual({ outlineFolds: false, syncInMore: false });
+  // One pixel short of that, and the outline folds; the row itself still fits.
+  expect(readerFit(row + OUTLINE_ROOM - 1, row, sync)).toEqual({ outlineFolds: true, syncInMore: false });
+  expect(readerFit(row, row, sync)).toEqual({ outlineFolds: true, syncInMore: false });
+  // Not even folded: Sync now moves, so no button wraps alone.
+  expect(readerFit(row - 1, row, sync)).toEqual({ outlineFolds: true, syncInMore: true });
+  // A header with no Sync now has nothing to move.
+  expect(readerFit(row - 1, row, 0)).toEqual({ outlineFolds: true, syncInMore: false });
+  // A short row still leaves the page a reading column.
+  expect(readerFit(READING_MIN + OUTLINE_ROOM - 1, 300, 0).outlineFolds).toBe(true);
+  expect(readerFit(READING_MIN + OUTLINE_ROOM, 300, 0).outlineFolds).toBe(false);
+});
+
+test("a sentence's ticket keys are told from its words", () => {
+  expect(keyParts("Linked to PAY-231")).toEqual(["Linked to ", "PAY-231", ""]);
+  expect(keyParts("Via Payout worker")).toEqual(["Via Payout worker"]);
+  expect(keyParts("Parent PAY-230, Engineering")).toEqual(["Parent ", "PAY-230", ", Engineering"]);
+});
+
+test("a space's pages are in order of their path, so a folder's pages stand together (F-452)", () => {
+  const pages = [
+    { entity_id: "a", title: "Carrier event model", parent: "t" },
+    { entity_id: "b", title: "Booking API v3 guide", parent: "bk" },
+    { entity_id: "t", title: "Tracking", parent: null },
+    { entity_id: "bk", title: "Booking", parent: null },
+    { entity_id: "bf", title: "Booking flow", parent: null },
+    { entity_id: "c", title: "Aardvark", parent: "t" },
+  ];
+  expect(pagesByPath({ pages }).map((row) => row.label)).toEqual([
+    "Booking",
+    "Booking › Booking API v3 guide",
+    "Booking flow",
+    "Tracking",
+    "Tracking › Aardvark",
+    "Tracking › Carrier event model",
+  ]);
+});
+
+test("a parent loop on a bad answer still ends a page's path", () => {
+  const pages = [
+    { entity_id: "x", title: "X", parent: "y" },
+    { entity_id: "y", title: "Y", parent: "x" },
+  ];
+  expect(pagesByPath({ pages }).map((row) => row.label)).toEqual(["X › Y", "Y › X"]);
+});
+
+test("a space names its source only where another source's space has its name (the live run, 2026-11-09)", () => {
+  const space = (source: string, name: string | null, key = "ENG") => ({ source_id: source, source_name: `Tidewater ${source}`, key, name, pages: [] });
+  const live = space("confluence", "Engineering");
+  const mock = space("mock", "Engineering", "DEV");
+  const ops = space("confluence", "Operations", "OPS");
+  const spaces = [live, mock, ops];
+  expect(spaceTitle(live, spaces)).toBe("Engineering on Tidewater confluence");
+  expect(spaceTitle(mock, spaces)).toBe("Engineering on Tidewater mock");
+  expect(spaceTitle(ops, spaces)).toBe("Operations");
+  expect(spaceSource(ops, spaces)).toBeNull();
+  // One source holding two spaces of one name is not a twin: the source would not tell them apart.
+  expect(spaceSource(live, [live, space("confluence", "Engineering", "ENG2")])).toBeNull();
+  // A space with no name is its key, compared as such.
+  expect(spaceTitle(space("a", null, "X"), [space("a", null, "X"), space("b", "X")])).toBe("X on Tidewater a");
+  expect(spaceLabel({ ...live, pages: [{ entity_id: "confluence:1", title: "Home", parent: null }] }, spaces)).toBe("Engineering on Tidewater confluence (1)");
+  expect(scopeName(live, spaces)).toBe("Engineering on Tidewater confluence");
+  expect(hitWhere({ entity_id: "mock:9", space: { key: "DEV", name: "Engineering" }, path: "Payments" }, true, spaces)).toBe("Engineering on Tidewater mock › Payments");
 });

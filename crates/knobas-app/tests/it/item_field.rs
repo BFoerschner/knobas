@@ -208,7 +208,9 @@ async fn a_stored_field_is_the_walks_answer() {
 
 /// The board's statuses and a view's count read the stored value, not the
 /// payload, and walk the payload where nothing is stored. Shown by a stored
-/// status nothing but this test would write.
+/// status nothing but this test would write, on a ticket with no stored card
+/// (`sync.item_card`, migration `0075`), which the board and a typed word
+/// take before these (`tests/it/item_card.rs`).
 #[tokio::test]
 async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     let pool = pool().await;
@@ -227,6 +229,11 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     )
     .await;
     let id = format!("{source}:T-1");
+    sqlx::query("delete from sync.item_card where entity_id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let registry = Registry::for_process();
     let declarations = knobas_app::sources::paths::declared_paths(&pool, &registry)
         .await
@@ -251,6 +258,8 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         let texts = [
             format!("project:{project} status:\"In Progress\""),
             format!("project:{project} assignee:mara"),
+            // A typed word reads the assignee too (2026-11-10: the walk was 400 of its 445 ms at 20,000 tickets).
+            format!("project:{project} mara"),
         ];
         let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
         let counts = searcher.readings(&texts, "ticket").await.unwrap();
@@ -267,7 +276,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     let walked = (
         vec![(Some("In Progress".to_owned()), "mara".to_owned())],
         vec!["In Progress".to_owned()],
-        vec![Reading::Count(1), Reading::Count(1)],
+        vec![Reading::Count(1), Reading::Count(1), Reading::Count(1)],
     );
     assert_eq!(read(&pool).await, walked, "stored as the walk reads it");
 
@@ -281,7 +290,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         (
             vec![(Some("Stored".to_owned()), "Stored".to_owned())],
             vec!["Stored".to_owned()],
-            vec![Reading::Count(0), Reading::Count(0)],
+            vec![Reading::Count(0), Reading::Count(0), Reading::Count(0)],
         ),
         "the reads take the stored value"
     );
@@ -291,10 +300,22 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         .execute(&pool)
         .await
         .unwrap();
+    // A typed word's first word asks the stored declarations, not the item,
+    // whether a stored assignee answers (`knobas_core::stored_under!`, the
+    // scale pass of 2026-11-10), and since the query audit of 2026-11-12 so
+    // do the keys, which read the stored values as a set
+    // (`knobas-search`'s `stored_field_in!`): the triggers keep a row
+    // wherever the declarations say so, and a row deleted from under them
+    // reads as no value there. The board's status reads still probe the item
+    // and walk.
     assert_eq!(
         read(&pool).await,
-        walked,
-        "nothing stored: the payload is walked"
+        (
+            walked.0.clone(),
+            walked.1.clone(),
+            vec![Reading::Count(0), Reading::Count(0), Reading::Count(0)],
+        ),
+        "nothing stored: the board walks the payload, the keys and the typed word ask the declarations"
     );
 }
 

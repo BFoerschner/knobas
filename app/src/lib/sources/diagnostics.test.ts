@@ -5,7 +5,7 @@
  */
 import { expect, test } from "vitest";
 
-import { countdown, formatBytes, formatDuration, formatInterval, runDuration } from "./diagnostics";
+import { countdown, formatBytes, formatInterval, runDuration } from "./diagnostics";
 
 test("formatBytes renders db_bytes the way the status bar reads it", () => {
   expect(formatBytes(222_298_112)).toBe("212 MB");
@@ -49,14 +49,10 @@ test("a run still in flight has no duration, rather than a duration of zero", ()
   // from an instant success, which is the exact row a reader is staring at
   // when they wonder whether it is stuck.
   expect(runDuration("2026-08-25T11:59:00Z", null)).toBeNull();
-  expect(formatDuration(null)).toBe("—");
 });
 
 test("a finished run reports the wall time between its two stamps", () => {
   expect(runDuration("2026-08-25T11:59:00Z", "2026-08-25T11:59:12Z")).toBe(12_000);
-  expect(formatDuration(12_000)).toBe("12.0 s");
-  expect(formatDuration(840)).toBe("840 ms");
-  expect(formatDuration(72_000)).toBe("1:12");
 });
 
 test("a run whose stamps are out of order reads as instant, not as negative", () => {

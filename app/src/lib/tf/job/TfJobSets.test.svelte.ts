@@ -3,6 +3,8 @@
  * R-7.9), mounted with stand-ins for every read and write. What the backend
  * does with a saved set is `crates/knobas-app/tests/it/link_sets_ipc.rs`'s.
  */
+import { pageContext } from "../kept-pages.svelte";
+import { takeTold } from "../opener";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -147,11 +149,16 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
   };
 }
 
+const deleted: string[] = [];
 const sets: JobSetPorts = {
   linkSets: () => Promise.resolve(SETS),
   saveLinkSet: (draft) => {
     saved.push(draft);
     return Promise.resolve(answer(draft));
+  },
+  deleteLinkSet: (id) => {
+    deleted.push(id);
+    return Promise.resolve();
   },
   previewLinkSetRule: (rule) =>
     Promise.resolve(
@@ -240,8 +247,8 @@ function pick(name: string) {
 
 const footer = () => [...dialog().querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [squash(b), b.className]);
 
-/** #2289: the dialog's primary says what Enter does, so the first set that can apply is picked from the start. */
-test("Apply a link set… has a primary that applies the picked set, the first one that can apply until another is picked", async () => {
+/** Nothing is picked on arrival (F-514, the enabled rule, which narrows #2289): the primary waits, and says so. */
+test("Apply a link set… picks nothing on arrival, and its primary waits with a line saying why", async () => {
   open(LEDGER_APPLIES);
   await settle();
   button(drawerOpen(), "Apply a link set…").click();
@@ -249,21 +256,79 @@ test("Apply a link set… has a primary that applies the picked set, the first o
   const radios = [...dialog().querySelectorAll<HTMLInputElement>("[role=radiogroup][aria-label='Link sets'] input[type=radio]")];
   expect(radios.map((r) => [r.checked, r.disabled])).toEqual([
     [false, true],
-    [true, false],
+    [false, false],
   ]);
   expect(footer()).toEqual([
     ["Manage link sets", "tf-btn tf-first"],
     ["Cancel", "tf-btn tf-ghost"],
-    ["Apply Payout stack", "tf-btn tf-primary"],
+    ["Apply", "tf-btn tf-primary"],
   ]);
+  expect(dialog().querySelector<HTMLButtonElement>("footer .tf-primary")!.disabled).toBe(true);
+  expect(squash(dialog().querySelector("footer .tf-dwhy"))).toBe("Pick a link set.");
+  pick("Payout stack");
+  expect(footer().at(-1)?.[0]).toBe("Apply Payout stack");
+  expect(dialog().querySelector("footer .tf-dwhy")).toBeNull();
 });
 
+test("back from Manage link sets, the page opens the drawer again, once, with focus in its filter", async () => {
+  const shown = $state({ now: true });
+  job = mount(TfJob, {
+    target,
+    context: pageContext(() => shown.now),
+    props: {
+      segment: "PAY-231",
+      timer: { current: null, elapsed: null },
+      layers: createLayers(),
+      ontimer: () => {},
+      onstarttimer: () => {},
+      ports: ports([]),
+      sets,
+      today: () => new Date(2026, 9, 15, 14, 0),
+    },
+  });
+  await settle();
+  button(drawerOpen(), "Apply a link set…").click();
+  await settle();
+  dialog().querySelector<HTMLAnchorElement>("footer a")!.click();
+  shown.now = false;
+  await settle();
+  const drawer = () => document.querySelector<HTMLElement>("[aria-label='Connections']");
+  expect(drawer()).toBeNull();
+  shown.now = true;
+  await settle();
+  expect(drawer()).not.toBeNull();
+  expect(document.activeElement).toBe(drawer()!.querySelector("[data-filter]"));
+  drawer()!.querySelector<HTMLButtonElement>(".tf-dclose")!.click();
+  await settle();
+  shown.now = false;
+  await settle();
+  shown.now = true;
+  await settle();
+  expect(drawer(), "only the trip that left from it").toBeNull();
+  location.hash = "";
+  await settle();
+});
+
+test("Manage link sets opens the sets' page to come back from, and the dialog and the drawer go with the move (F-520)", async () => {
+  open();
+  await settle();
+  button(drawerOpen(), "Apply a link set…").click();
+  await settle();
+  dialog().querySelector<HTMLAnchorElement>("footer a")!.click();
+  expect(takeTold(location.hash), "the shell stamps it as a visit").toBe("visit");
+  expect(location.hash).toBe("#/sets");
+  await settle();
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  expect(document.querySelector("[aria-label='Connections']"), "the drawer floats outside the page, so its page hiding would leave it").toBeNull();
+});
+
+/** #2289: typing is how the top match gets picked, so `Enter` in the filter still applies it. */
 test("Enter in the filter applies the first set the filter leaves", async () => {
   open();
   await settle();
   button(drawerOpen(), "Apply a link set…").click();
   await settle();
-  expect(footer().at(-1)?.[0]).toBe("Apply Ledger stack");
+  expect(footer().at(-1)?.[0]).toBe("Apply");
   const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
   field.value = "payout";
   field.dispatchEvent(new Event("input"));
@@ -312,9 +377,9 @@ test("Save as a link set… ticks the ticket's own items, offers the epic first 
   expect(dialog().querySelector<HTMLInputElement>("input[aria-label='Name']")!.value).toBe("SEPA payouts kit");
   const items = [...dialog().querySelectorAll<HTMLLabelElement>("[aria-label='What goes in'] label")];
   expect(items.map(squash)).toEqual([
-    "tidewater/payout-serviceRepositories",
-    "Payout_BuildPipelines",
-    "SEPA payout retry designPages",
+    "tidewater/payout-serviceRepository",
+    "Payout_BuildPipeline",
+    "SEPA payout retry designPage",
   ]);
   expect(items.every((label) => label.querySelector("input")!.checked)).toBe(true);
   expect(squash(dialog())).toContain("PRs, branches and commits belong to this one ticket, so they are not offered.");
@@ -343,9 +408,40 @@ test("Save as a link set… ticks the ticket's own items, offers the epic first 
     rules: [{ kind: "epic", value: "jira:PAY-200" }],
   });
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(document.querySelector("[aria-label='Connections']")).toBeNull();
+  expect(document.querySelector("[aria-label='Connections']"), "the drawer stays, to show the new group (F-544)").not.toBeNull();
   const toast = toasts.items.find((t) => t.text === "Saved SEPA payouts kit. Every ticket under epic PAY-200 now shows it.")!;
-  expect(toast.action?.label).toBe("Open it");
+  // `Enter` on arrival saves a rule that may reach many tickets, so the toast takes it back (F-536).
+  expect(toast.action?.label).toBe("Undo");
+  toast.action?.run();
+  await settle();
+  expect(deleted).toHaveLength(1);
+});
+
+test("Save link set waits for a name and a tick, and a line says which is missing", async () => {
+  open();
+  await settle();
+  drawerOpen();
+  flushSync();
+  button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
+  await settle();
+  const primary = () => button(dialog(), "Save link set");
+  const line = () => squash(dialog().querySelector("footer .tf-dwhy"));
+  expect(primary().disabled).toBe(false);
+  const name = dialog().querySelector<HTMLInputElement>("input[aria-label='Name']")!;
+  name.value = "   ";
+  name.dispatchEvent(new Event("input"));
+  flushSync();
+  expect([primary().disabled, line()]).toEqual([true, "Name it first."]);
+  for (const box of dialog().querySelectorAll<HTMLInputElement>("[aria-label='What goes in'] input")) box.click();
+  flushSync();
+  expect([primary().disabled, line()]).toEqual([true, "Name it, and tick what goes in."]);
+  name.value = "Kit";
+  name.dispatchEvent(new Event("input"));
+  flushSync();
+  expect([primary().disabled, line()]).toEqual([true, "Tick what goes in."]);
+  primary().click();
+  await settle();
+  expect(saved).toEqual([]);
 });
 
 test("Save as a link set… on a sub-task names the epic above its story, and saves the epic rule (#1064)", async () => {
@@ -397,7 +493,7 @@ test("a note and a route in the drawer open their own addresses, not Tickets (#1
   drawerOpen();
   flushSync();
   const hrefs = (title: string) =>
-    [...document.querySelectorAll<HTMLAnchorElement>("[aria-label='Connections'] a")].find((a) => squash(a) === title)?.getAttribute("href");
+    [...document.querySelectorAll<HTMLAnchorElement>("[aria-label='Connections'] a")].find((a) => squash(a.querySelector(".tf-lk-name")) === title)?.getAttribute("href");
   expect(hrefs("Call the bank")).toBe("#/note/note%3A0f2c1a");
   expect(hrefs("POST /payouts")).toBe("#/route/route%3A9a1b");
 });

@@ -14,8 +14,11 @@
   launcher reads (#2467).
 -->
 <script lang="ts">
+  import { kindTag } from "../assets/tree";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindLabel, kindMonogram } from "../shell/kinds";
+  import { keyHint } from "../shell/platform";
+  import { aimed } from "./aim";
   import type { LegendLine } from "./legend";
   import type { LauncherRow } from "./rows";
 
@@ -57,7 +60,7 @@
       role="option"
       aria-selected={i === selected}
       onclick={() => onopen(row)}
-      onmouseenter={() => onhover(i)}
+      onpointermove={aimed(() => onhover(i))}
     >
       <span class="tf-ln-tok">{entry.token}</span>
       <span class="tf-ln-s">{entry.summary}</span>
@@ -68,7 +71,7 @@
 {#if keys.length > 0}
   <div class="tf-ln-keys" aria-label="Keys">
     {#each keys as [key, what] (key)}
-      <span><kbd>{key}</kbd> {what}</span>
+      <span><kbd>{keyHint(key)}</kbd> {what}</span>
     {/each}
   </div>
 {/if}
@@ -82,7 +85,7 @@
         <span class="tf-ln-lgk">{kindLabel(line.kind, info)}</span>
         {#each line.tones as entry (entry.tone)}
           <span class="tf-ln-lgt"
-            ><span class="tf-ln-mg" data-tone={entry.tone} aria-hidden="true">{kindMonogram(line.kind, info)}</span><span
+            ><span class="tf-ln-mg" data-tone={entry.tone} aria-hidden="true">{kindTag(kindMonogram(line.kind, info))}</span><span
               >{entry.words.join(", ")}</span
             ></span
           >

@@ -19,6 +19,12 @@
 
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
+  // The windowed lists waiting to read where they sit (the Windows pass, 2026-11-14): a test's are read, or let go once unmounted.
+  "shell/windowed.svelte.ts#unplaced": async () => (await import("./windowed.svelte")).placeWindowsNow(),
+  // How many dialogs are open (PR #2479): a test that left one drawn would keep the toasts lowered for the next.
+  "tf/modals.svelte.ts#modals": async () => {
+    (await import("../tf/modals.svelte")).modals.open = 0;
+  },
   // The detail's session memory (#693): each test is a fresh session, or a
   // test would open on the entity the previous one left drawn.
   "detail/view-read.ts#viewMemory": async () => (await import("../detail/view-read")).viewMemory.clear(),
@@ -34,11 +40,20 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "launcher/keys.svelte.ts#launcherKeys": async () => (await import("../launcher/keys.svelte")).launcherKeys.reset(),
   // *Run pipelines on diffs* (#2270), stored in `localStorage`: each test starts with it on.
   "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
+  "tf/settings/secret-prompt.svelte.ts#secretPrompt": async () => (await import("../tf/settings/secret-prompt.svelte")).resetSecretPrompt(),
+  "tf/drafts.svelte.ts#typed": async () => (await import("../tf/drafts.svelte")).drafts.reset(),
+  // The blocks a press hid for its toast's life (F-356): each test starts with none.
+  "tf/time/held-blocks.svelte.ts#held": async () => (await import("../tf/time/held-blocks.svelte")).resetHeldBlocks(),
+  "tf/time/held-blocks.svelte.ts#dismissals": async () => (await import("../tf/time/held-blocks.svelte")).resetHeldBlocks(),
+  "tf/docs/docs.ts#reading": async () => (await import("../tf/docs/docs")).forgetReading(),
+  // What was typed on a source's page and not saved (F-617): each test starts with none.
+  "tf/settings/source-drafts.svelte.ts#sourceDrafts": async () => (await import("../tf/settings/source-drafts.svelte")).sourceDrafts.reset(),
   // The source list's role claims (#1196), held once per window.
   "tf/roles.svelte.ts#sourceRoles": async () => (await import("../tf/roles.svelte")).sourceRoles.forget(),
   // The stack and its dismiss timers, in one reset.
   "shell/toasts.svelte.ts#toasts": async () => (await import("./toasts.svelte")).reset(),
   "shell/toasts.svelte.ts#timers": async () => (await import("./toasts.svelte")).reset(),
+  "shell/toasts.svelte.ts#endings": async () => (await import("./toasts.svelte")).reset(),
   // The panel and the withdrawal subscribers, in one reset.
   "shell/write-queue.svelte.ts#writeQueuePanel": async () => (await import("./write-queue.svelte")).reset(),
   "shell/write-queue.svelte.ts#withdrawals": async () => (await import("./write-queue.svelte")).reset(),
@@ -64,14 +79,19 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
   // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
   "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
+  // What a press elsewhere asked of a ticket's page, taken once it shows the ticket.
+  "tf/job/chosen.svelte.ts#asked": async () => (await import("../tf/job/chosen.svelte")).pageAsk.clear(),
   // The ticket page card's width (#2402), kept in `localStorage`: each test starts at the default.
   "tf/job/card-width.svelte.ts#cardWidth": async () => (await import("../tf/job/card-width.svelte")).cardWidth.reset(),
   // A ticket a section view is narrowed to without choosing it (#2401): each test starts with none.
   "tf/job/scoped.svelte.ts#held": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
+  "tf/job/scoped.svelte.ts#before": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),
   "tf/openin/clones.svelte.ts#clones": async () => (await import("../tf/openin/clones.svelte")).clones.reset(),
+  // *Clone all*'s run and its listener (PR #2479).
+  "tf/openin/clone-all.svelte.ts#cloneAllStore": async () => (await import("../tf/openin/clone-all.svelte")).cloneAllStore.reset(),
   // `forgetEchoes` also stops the follows an echo started.
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
@@ -84,11 +104,21 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // Each view's filter and fold, and the set hints *Not now* put away (#1983).
   "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
   "tf/filter/filter-state.svelte.ts#folds": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
+  "tf/filter/filter-state.svelte.ts#values": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
   "tf/sets/hints.svelte.ts#putAway": async () => (await import("../tf/sets/hints.svelte")).forgetHints(),
   // A page's session memory, held in its component's `<script module>` (#1983).
   "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),
   "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
+  // Which repositories' headers have looked for a branch to propose (the inner-pages pass).
+  "tf/repo/TfRepo.svelte#searched": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderSearches(),
+  // In plain `.ts` files ({@link UNSCANNED}): the files Files drew, and the views read ahead of a press.
+  "tf/repo/drawn-files.ts#kept": async () => (await import("../tf/repo/drawn-files")).forgetAllDrawnFiles(),
+  "ipc/entity.ts#readsAhead": async () => (await import("../ipc/entity")).forgetReadsAhead(),
   "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
+  "tf/docs/TfDocs.svelte#openSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  // What was typed on an application's page and not saved (PR #2479, 2026-11-13): each test starts with none.
+  "tf/openin/app-drafts.svelte.ts#typedDrafts": async () => (await import("../tf/openin/app-drafts.svelte")).forgetAppDrafts(),
+  "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),
@@ -111,7 +141,11 @@ export const NOT_YET_RESET: readonly string[] = [];
  * `view-read.ts`) and components, not other plain `.ts` files. Each must still
  * be a key of {@link RESETS}.
  */
-export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens"];
+export const UNSCANNED: readonly string[] = [
+  // Made by a generic factory and held in a plain `.ts`: the scan reads neither.
+  "tf/drafts.svelte.ts#typed",
+  "tf/docs/docs.ts#reading","shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens",
+  "tf/repo/drawn-files.ts#kept", "ipc/entity.ts#readsAhead"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

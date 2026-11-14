@@ -50,11 +50,20 @@ pub use crate::run_log::SourceSyncStatus;
 /// a compiled-in adapter's plain [`DocProjection`](knobas_source::docs::DocProjection),
 /// or an external adapter's call into its component. Cheap to clone.
 #[derive(Clone)]
-pub struct Projection(Arc<ProjectFn>);
+pub struct Projection {
+    project: Arc<ProjectFn>,
+    /// The adapter's own read of a page's editor, where it gives one
+    /// ([`Projection::naming_editors_by`]).
+    editor: Option<EditorFn>,
+}
 
 /// What a [`Projection`] calls.
 type ProjectFn =
     dyn Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent> + Send + Sync;
+
+/// An adapter's read of a page's editor alone: a plain function, as a
+/// compiled-in adapter's projection is.
+type EditorFn = fn(kind: &str, payload: &serde_json::Value) -> Option<String>;
 
 impl Projection {
     /// A projection that calls `project`.
@@ -64,7 +73,19 @@ impl Projection {
         + Sync
         + 'static,
     ) -> Self {
-        Self(Arc::new(project))
+        Self {
+            project: Arc::new(project),
+            editor: None,
+        }
+    }
+
+    /// This projection, with [`Projection::editor_name`] answered by
+    /// `editor`: the adapter's own read of that one field, which must answer
+    /// what its projection's `editor_name` does for every record.
+    #[must_use]
+    pub fn naming_editors_by(mut self, editor: EditorFn) -> Self {
+        self.editor = Some(editor);
+        self
     }
 
     /// The record of entity kind `kind` whose payload is `payload`, drawn:
@@ -76,7 +97,26 @@ impl Projection {
         kind: &str,
         payload: &serde_json::Value,
     ) -> Option<knobas_source::docs::DocContent> {
-        (self.0)(kind, payload)
+        (self.project)(kind, payload)
+    }
+
+    /// The display name of who made the record's revision:
+    /// [`Projection::project`]'s `editor_name`, read without drawing the
+    /// page where the adapter gives a read of its own
+    /// ([`Projection::naming_editors_by`]), and off the drawn page where it
+    /// gives none (an external adapter's component draws the whole page
+    /// either way).
+    ///
+    /// The Docs search names fifty hits' editors a keystroke. Drawn, each
+    /// was a whole page read into blocks for one string: about 400 of a
+    /// keystroke's 470 ms on a mirror of 5,000 Confluence pages
+    /// (2026-11-12, a debug build).
+    #[must_use]
+    pub fn editor_name(&self, kind: &str, payload: &serde_json::Value) -> Option<String> {
+        match self.editor {
+            Some(editor) => editor(kind, payload),
+            None => self.project(kind, payload).and_then(|c| c.editor_name),
+        }
     }
 }
 
@@ -739,9 +779,14 @@ pub async fn execute_run(
     progress: Option<Arc<dyn ProgressSink>>,
     started: std::time::Instant,
 ) -> RunResult {
-    run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started)
-        .await
-        .0
+    // A run, so in the background lane as a scheduled one is
+    // ([`Inner::run_task_in_background`]).
+    knobas_http::on_lane(
+        knobas_http::Lane::Background,
+        run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started),
+    )
+    .await
+    .0
 }
 
 /// [`execute_run`], handing back the adapter of a run that committed, for
@@ -2013,17 +2058,20 @@ impl Scheduler {
 
     /// Refresh one item from its source (ADR-0031): [`crate::refresh::of_entity`]
     /// over this scheduler's deps. Waits behind a run of the source in
-    /// flight, and holds off the next until it commits. Tells no one: the
-    /// caller tells [`SyncEvents::refresh_ended`] once what follows the
-    /// refresh is written.
+    /// flight under [`crate::refresh::Lock::Wait`], or answers
+    /// [`crate::refresh::RefreshOutcome::RunInFlight`] at once under
+    /// [`crate::refresh::Lock::Try`]; holds off the next run until it
+    /// commits. Tells no one: the caller tells [`SyncEvents::refresh_ended`]
+    /// once what follows the refresh is written.
     ///
     /// # Errors
     /// [`crate::refresh::RefreshError`].
     pub async fn refresh(
         &self,
         entity_id: &str,
+        lock: crate::refresh::Lock,
     ) -> Result<crate::refresh::RefreshOutcome, crate::refresh::RefreshError> {
-        crate::refresh::of_entity(self.deps(), entity_id).await
+        crate::refresh::of_entity(self.deps(), entity_id, lock).await
     }
 
     /// Ask for a manual sync, wait for its ending, and say whether the run was
@@ -2571,13 +2619,37 @@ impl Inner {
         // waiting at the door, so the pool is still open for it.
         if self.cancel.is_cancelled() {
             drop(tasks);
-            inner.run_task(id, run_id, mode, watchers).await;
+            inner
+                .run_task_in_background(id, run_id, mode, watchers)
+                .await;
             return Err(TriggerError::ShuttingDown);
         }
-        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, watchers).await });
+        let handle = tokio::spawn(async move {
+            inner
+                .run_task_in_background(id, run_id, mode, watchers)
+                .await
+        });
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
         Ok(Triggered::Started(run_id))
+    }
+
+    /// [`run_task`](Self::run_task) in [`knobas_http::Lane::Background`]:
+    /// every request the run sends -- discovery, the sync, the pipelines'
+    /// latest logs after it -- yields to one a person is waiting for on the
+    /// same origin (the priority lane, 2026-11-13). Boxed, as the sync's
+    /// future is in [`attempt`], to keep the callers' futures shallow.
+    fn run_task_in_background(
+        self: Arc<Self>,
+        source_id: String,
+        run_id: i64,
+        mode: RunMode,
+        watchers: Arc<Watchers>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            self.run_task(source_id, run_id, mode, watchers),
+        ))
     }
 
     /// One spawned run: take a permit, do the work (or give up when cancelled),
@@ -2667,6 +2739,19 @@ impl Inner {
                 stored = crate::pipeline_logs::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
                     if let Err(error) = stored {
                         tracing::warn!(source_id, %error, "storing the pipelines' latest logs failed");
+                    }
+                }
+            }
+            // Every branch's tree, levels the store lacks only (the
+            // stored-trees pass of PR #2479): after the logs, in the same
+            // background lane, bounded (`stored_trees::BUDGET`); the quit
+            // cuts it, and what it left the next run reads.
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => {}
+                stored = crate::stored_trees::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
+                    if let Err(error) = stored {
+                        tracing::warn!(source_id, %error, "storing the branches' trees failed");
                     }
                 }
             }
@@ -2904,7 +2989,15 @@ async fn flush_loop(inner: Arc<Inner>) {
             () = inner.cancel.cancelled() => return,
             () = inner.flush_due.notified() => {}
         }
-        crate::write_queue::flush_all(&inner.deps).await;
+        // The tick's writes are retries nobody is watching: they yield to a
+        // person's requests. A write a person just pressed is flushed by its
+        // own submit, outside this task, in the interactive lane (the
+        // priority lane, 2026-11-13).
+        knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            crate::write_queue::flush_all(&inner.deps),
+        )
+        .await;
     }
 }
 

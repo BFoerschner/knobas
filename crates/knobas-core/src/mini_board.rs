@@ -88,14 +88,6 @@ macro_rules! status_paths {
     };
 }
 
-/// After `from sync.item i`: the ticket's stored status row as `sst`, which
-/// [`status_of_ticket!`] reads ([`crate::stored_join!`], #2184).
-macro_rules! status_join {
-    ($decl:literal) => {
-        $crate::stored_join!("sst", $decl, "status_name")
-    };
-}
-
 /// The lane a ticket stands in (#939), read once a row like its status:
 /// the field `$lane` names (`epic`, `assignee`, `priority`, `issuetype`,
 /// `label`), and `''` where the ticket has none of it or `$lane` is `null`.
@@ -106,7 +98,8 @@ macro_rules! status_join {
 /// label through `label_paths`, in the order [`crate::declared_list!`]
 /// yields the card's labels; the epic through [`crate::path_line_read!`].
 /// The assignee is read off `sync.item_field` where the database stored it
-/// ([`crate::stored_string!`], #2184), as the status is.
+/// ([`crate::stored_string!`], #2184), as the status is. Only where the
+/// ticket has no stored card ([`lane_of_ticket_probed!`]).
 macro_rules! lane_of_ticket {
     ($decl:literal, $lane:literal) => {
         concat!(
@@ -184,12 +177,14 @@ macro_rules! lane_paths {
     };
 }
 
-/// A ticket's status, at the path its own source declares (#277), through
-/// `status_paths` ([`status_paths!`]): [`crate::declared_string!`]'s rule,
-/// [`crate::first_string_of!`] being the one spelling both share. Read off
-/// `sync.item_field` where the database stored it for the declarations the
-/// statement binds, joined as `sst` ([`status_join!`], #2184): on 2,500 Jira
-/// tickets the walk cost about 20 µs a ticket.
+/// A ticket's status, at the path its own source declares (#277): its stored
+/// card's (`sync.item_card`, migration `0075`, joined as `crd` by
+/// [`crate::card_join!`]), and where it has none, the stored status of
+/// `sync.item_field` (#2184) or the walk through `status_paths`
+/// ([`status_paths!`]), [`crate::declared_string!`]'s rule,
+/// [`crate::first_string_of!`] being the one spelling both share. All three
+/// are the same answer: a card or a field is read only under the
+/// declarations the statement binds.
 ///
 /// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
 /// miss is visible, never a guess.** A ticket whose source declares no status
@@ -198,13 +193,53 @@ macro_rules! lane_paths {
 /// dropped or sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/it/mini_board.rs`.
+///
+/// **Read with no payload in the statement's own scan** (the scale pass,
+/// 2026-11-10): the walk goes through the ticket's primary key, a probe that
+/// rebinds `i` to the same row, which is what the payload macros read, and
+/// runs only where nothing stored answers. `k.eid` is the row's id, from
+/// `cross join lateral (select i.entity_id as eid) k` beside the scan. So the
+/// scan can be an index-only scan of `item_ticket_brief_idx` (migration
+/// `0074`). The cards' time falls back to `synced_at` the same way, through
+/// the key, since no index may hold that column (#2189's heap-only stamp).
 macro_rules! status_of_ticket {
-    () => {
-        $crate::stored_or!(
-            "sst",
-            $crate::first_string_of!(
-                "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
-            )
+    ($decl:literal) => {
+        concat!(
+            "(case when crd.entity_id is not null then crd.status else ",
+            $crate::stored_string!(
+                $decl,
+                "status_name",
+                "(select ",
+                $crate::first_string_of!(
+                    "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+                ),
+                " from sync.item i where i.entity_id = k.eid)"
+            ),
+            " end)"
+        )
+    };
+}
+
+/// The lane a ticket stands in, off its stored card (`crd`, migration
+/// `0075`) where it has one, the same fields [`lane_of_ticket!`] walks; and
+/// [`lane_of_ticket!`] behind the same probe as [`status_of_ticket!`] where
+/// it has none. `''` without reading anything when the board is not laned
+/// (`$lane` `null`), which is what the walk answers then.
+macro_rules! lane_of_ticket_probed {
+    ($decl:literal, $lane:literal) => {
+        concat!(
+            "(case when ",
+            $lane,
+            "::text is null then '' when crd.entity_id is not null then (case ",
+            $lane,
+            "::text when 'epic' then coalesce(crd.path, '') \
+               when 'label' then coalesce(crd.first_label, '') \
+               when 'assignee' then coalesce(crd.assignee, '') \
+               when 'priority' then coalesce(crd.priority, '') \
+               when 'issuetype' then coalesce(crd.issue_type, '') else '' end) \
+             else (select ",
+            lane_of_ticket!($decl, $lane),
+            " from sync.item i where i.entity_id = k.eid) end)"
         )
     };
 }
@@ -260,11 +295,27 @@ macro_rules! priority_read {
 /// the signals (#813, #815) only for the rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
 /// bridge and a card per ticket in the webview.
 ///
+/// **Every field off the ticket's stored card** (`sync.item_card`, migration
+/// `0075`, the scale pass of 2026-11-11): the status and the lane in the
+/// scan, through [`crate::card_join!`], and the kept cards' fields through
+/// their key. A kept card with no stored row (not filled yet, or read under
+/// declarations the database did not store) walks its payload as before, in
+/// the lateral `i`, which reads nothing for a card that has one. On 20,000
+/// Jira tickets the walk of 300 kept cards was about 25 ms of a typed word's
+/// 65.
+///
+/// The column's cap partitions by two integers, the lane's place and the
+/// status's position among the scope's statuses (`array_position`, which
+/// finds a null as `is not distinct from` does), where it partitioned by the
+/// two texts: the same groups, and a sort of 6,600 rows that took 7 ms with
+/// a text first takes 3.
+///
 /// The parent's title (#894) is one primary-key probe per kept card. The
-/// payload macros all read the alias `i`, so the probe rebinds `i` to the
-/// candidate parent item, and the lateral `par` carries the card's own
-/// `source_id` out beside the parent's kind and name, where the probe can
-/// still see it.
+/// parent answers to the name by its own stored card (`answers_to`) where it
+/// has one, and by its payload's declared names where not: the payload macros
+/// all read the alias `i`, so that probe rebinds `i` to the parent item. The
+/// lateral `par` carries the card's own `source_id` out beside the parent's
+/// kind and name, where the probe can still see it.
 ///
 /// `$6` lanes the board (#939, #1098): the field a lane shares, `null` for
 /// none. Each row's lane is read with its status ([`lane_of_ticket!`]), and
@@ -274,79 +325,368 @@ macro_rules! priority_read {
 /// first `$7` lanes' rows (`null` for all), and every row carries how many
 /// lanes there are and, laned, every status's count over the whole board
 /// (`column_totals`), which the lanes not kept still stand in.
-const CARDS: &str = concat!(
-    "with ",
-    status_paths!("$4"),
-    ", ",
-    lane_paths!("$4", "$6"),
-    ",
+///
+/// **The cut sorts what it ranks by** (the broad-filters pass, 2026-11-13):
+/// `scoped` holds a ticket's id, source, date, status and lane, and the title
+/// and the date sent are read for the kept cards alone. Sorting 23,000 rows
+/// that each carried a title was 23 ms of a broad filter's statement; 8 ms
+/// of it went with the title.
+///
+/// `$ranked` is the `ranked` CTE: [`CARDS`] in lanes, [`CARDS_UNLANED`]
+/// without.
+///
+/// **In pieces a search's narrowing goes between** ([`CardsStatement`], the
+/// broad-keys pass, 2026-11-13): `with `, [`cards_ctes!`] to where `scoped`
+/// opens, [`cards_select!`], its select list, [`cards_from!`], its `from`,
+/// [`cards_filter!`], its `where`, and [`cards_cut!`], the rest. Joined with
+/// nothing between them they are the statement as it always read.
+macro_rules! cards {
+    ($($ranked:tt)+) => {
+        concat!(
+            "with ",
+            cards_ctes!(),
+            cards_select!(),
+            cards_from!(),
+            cards_filter!(),
+            cards_cut!($($ranked)+)
+        )
+    };
+}
+
+/// [`cards!`]' CTEs before `scoped`, and `scoped`'s opening.
+macro_rules! cards_ctes {
+    () => {
+        concat!(
+            status_paths!("$4"),
+            ", ",
+            lane_paths!("$4", "$6"),
+            ", ",
+            crate::card_keys!("$4"),
+            ",
      scoped as materialized (
-       select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
-    status_of_ticket!(),
-    " as status, ",
-    lane_of_ticket!("$4", "$6"),
-    " as lane
-       from sync.item i",
-    status_join!("$4"),
-    "
+       "
+        )
+    };
+}
+
+/// `scoped`'s select list: what the cut ranks a ticket by.
+macro_rules! cards_select {
+    () => {
+        concat!(
+            "select i.entity_id, i.source_id,
+              coalesce(i.item_updated_at,
+                (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, ",
+            status_of_ticket!("$4"),
+            " as status, ",
+            lane_of_ticket_probed!("$4", "$6"),
+            " as lane"
+        )
+    };
+}
+
+/// `scoped`'s `from`: the scan of the tickets (`i`), the row's id for a
+/// probe (`k.eid`) and its stored card (`crd`).
+macro_rules! cards_from {
+    () => {
+        concat!(
+            "
+       from sync.item i cross join lateral (select i.entity_id as eid) k",
+            crate::card_join!("crd", "i")
+        )
+    };
+}
+
+/// [`cards!`]' `where` of `scoped`: the live tickets the room's scope
+/// admits.
+macro_rules! cards_filter {
+    () => {
+        concat!(
+            "
       where i.kind = 'ticket'
         and ",
-    crate::live_by_exclusion!("i"),
-    "
+            crate::live_by_exclusion!("i"),
+            "
         and ($1::text[] is null or i.entity_id in (select unnest($1::text[])))
         and ($2::text[] is null or i.source_id = any($2))
         and ($3::text is null or ",
-    crate::project_key_read!("$4"),
-    " = $3)
+            crate::project_key_read!("$4"),
+            " = $3)"
+        )
+    };
+}
+
+/// [`cards!`] past `scoped`: the cut (`$ranked`) and the kept cards' fields.
+macro_rules! cards_cut {
+    ($($ranked:tt)+) => {
+        concat!(
+    "
      ),
-     lanes as (
+",
+    $($ranked)+,
+    "     select r.entity_id, r.source_id, ti.title, r.status, r.lane, r.lane_count, r.place,
+            r.lanes, case when $6::text is null then null else
+              (select jsonb_agg(jsonb_build_array(c.status, c.n))
+                 from (select s.status, count(*) as n from scoped s group by s.status) c)
+            end as column_totals,
+            case when crd.entity_id is null then ",
+    priority_read!("$4"),
+    " else crd.priority end as priority,
+            case when crd.entity_id is null then ",
+    crate::declared_string!("$4", "issue_type"),
+    " else crd.issue_type end as issue_type,
+            case when crd.entity_id is null then ",
+    crate::declared_string!("$4", "assignee"),
+    " else crd.assignee end as assignee,
+            case when crd.entity_id is null then ",
+    crate::declared_string!("$4", "assignee_name"),
+    " else crd.assignee_name end as assignee_name,
+            case when crd.entity_id is null then ",
+    crate::path_line_read!("$4"),
+    " else crd.path end as path,
+            case when crd.entity_id is null then array(select l.value from ",
+    crate::declared_list!("$4", "labels"),
+    " l) else crd.labels end as labels,
+            case when crd.entity_id is null then ",
+    crate::declared_integer!("$4", "comment_count"),
+    " else crd.comment_count end as comment_count,
+            (select pi.title from sync.item pi",
+    crate::card_join!("pc", "pi"),
+    "where par.name is not null
+                and pi.entity_id = par.source_id || ':' || par.name
+                and pi.source_id = par.source_id and pi.kind = par.kind
+                and ",
+    crate::live_by_exclusion!("pi"),
+    "
+                and (case when pc.entity_id is not null then par.name = any(pc.answers_to)
+                          else par.name in (select n.name from sync.item i cross join lateral ",
+    crate::declared_names_as_parent!("$4"),
+    " n where i.entity_id = pi.entity_id) end)) as parent_title,
+            ti.item_updated_at as updated_at, r.total
+       from ranked r
+       join lateral (select t.title, t.item_updated_at from sync.item t
+                      where t.entity_id = r.entity_id offset 0) ti on true
+       left join lateral (select c.* from sync.item_card c
+                           where c.entity_id = r.entity_id
+                             and c.paths_key = (select k.k from card_keys k where k.source_id = r.source_id)
+                          offset 0) crd on true
+       left join lateral (select it.entity_id, it.source_id, it.kind,
+                                 it.payload #> '{}'::text[] as payload
+                            from sync.item it
+                           where it.entity_id = r.entity_id and crd.entity_id is null
+                          offset 0) i on true
+       left join lateral (select crd.parent_kind as kind, crd.parent_name as name, r.source_id
+                           where crd.entity_id is not null
+                          union all
+                          (select pn.kind, pn.name, i.source_id from ",
+    crate::declared_parent_names!("$4"),
+    " pn where i.entity_id is not null order by pn.pos desc, pn.name_ord limit 1)) par on true
+      where $5::bigint is null or r.rn <= $5
+      order by r.at desc, r.entity_id"
+        )
+    };
+}
+
+/// [`CARDS`]' `ranked`: the lanes ranked and each lane's columns cut and
+/// counted on their own.
+macro_rules! ranked_laned {
+    () => {
+    "     lanes as (
        select s.lane, count(*) as n,
               row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
               count(*) over () as lanes
          from scoped s group by s.lane
      ),
      ranked as (
-       select s.entity_id, s.at, s.status, s.lane, l.n as lane_count, l.place, l.lanes,
-              row_number() over (partition by s.lane, s.status
+       select s.entity_id, s.source_id, s.at, s.status, s.lane,
+              l.n as lane_count, l.place, l.lanes,
+              row_number() over (partition by l.place, array_position(
+                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
                                  order by s.at desc, s.entity_id) as rn,
-              count(*) over (partition by s.lane, s.status) as total
+              count(*) over (partition by l.place, array_position(
+                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
          from scoped s join lanes l on l.lane = s.lane
         where $7::bigint is null or l.place <= $7
      )
-     select i.entity_id, i.source_id, i.title, r.status, r.lane, r.lane_count, r.place,
-            r.lanes, case when $6::text is null then null else
-              (select jsonb_agg(jsonb_build_array(c.status, c.n))
-                 from (select s.status, count(*) as n from scoped s group by s.status) c)
-            end as column_totals, ",
-    priority_read!("$4"),
-    " as priority, ",
-    crate::declared_string!("$4", "issue_type"),
-    " as issue_type, ",
-    crate::declared_string!("$4", "assignee"),
-    " as assignee, ",
-    crate::path_line_read!("$4"),
-    " as path, array(select l.value from ",
-    crate::declared_list!("$4", "labels"),
-    " l) as labels, ",
-    crate::declared_integer!("$4", "comment_count"),
-    " as comment_count, (select i.title from sync.item i
-         where par.name is not null
-           and i.entity_id = par.source_id || ':' || par.name
-           and i.source_id = par.source_id and i.kind = par.kind
-           and ",
-    crate::live_by_exclusion!("i"),
-    "
-           and par.name in (select n.name from ",
-    crate::declared_names_as_parent!("$4"),
-    " n)) as parent_title, i.item_updated_at as updated_at, r.total
-       from ranked r
-       join sync.item i on i.entity_id = r.entity_id
-       left join lateral (select pn.kind, pn.name, i.source_id from ",
-    crate::declared_parent_names!("$4"),
-    " pn order by pn.pos desc, pn.name_ord limit 1) par on true
-      where $5::bigint is null or r.rn <= $5
-      order by r.at desc, r.entity_id"
-);
+"
+    };
+}
+/// The board's cards in lanes: [`cards!`] with [`ranked_laned!`].
+const CARDS: &str = cards!(ranked_laned!());
+
+/// [`CARDS`] in the pieces a narrowing goes between.
+const CARDS_PIECES: CardsStatement = CardsStatement {
+    with: "with ",
+    ctes: cards_ctes!(),
+    select: cards_select!(),
+    from: cards_from!(),
+    filter: cards_filter!(),
+    cut: cards_cut!(ranked_laned!()),
+    whole: CARDS,
+};
+
+/// [`CARDS_UNLANED`]' `ranked`: the one lane spelled out.
+macro_rules! ranked_unlaned {
+    () => {
+        "     columns as materialized (
+       select c.status, c.n, row_number() over () as pos
+         from (select s.status, count(*) as n from scoped s group by s.status) c
+     ),
+     numbered as (
+       select s.entity_id, s.source_id, s.at, s.status, s.lane, p.pos,
+              row_number() over (partition by p.pos order by s.at desc, s.entity_id) as rn
+         from scoped s
+        cross join lateral (select array_position(
+                 (select array_agg(c.status order by c.pos) from columns c), s.status) as pos) p
+     ),
+     ranked as (
+       select n.entity_id, n.source_id, n.at, n.status, n.lane,
+              (select sum(c.n) from columns c)::bigint as lane_count,
+              1::bigint as place, 1::bigint as lanes, n.rn, c.n as total
+         from numbered n join columns c on c.pos = n.pos
+        where $5::bigint is null or n.rn <= $5
+     )
+"
+    };
+}
+/// The board's cards without lanes, `$6` and `$7` null: [`CARDS`]' one lane
+/// spelled out, every row its place and the board its only lane (the
+/// broad-filters pass, 2026-11-13). Grouping 23,000 tickets by a lane they
+/// all share and joining it back to each was 10 ms of a broad filter's 60,
+/// for the same rows, `tests/it/item_card.rs` holding the two together.
+///
+/// **The columns are counted once, and only the cut is a window** (the
+/// broad-keys pass, 2026-11-13). `columns` groups the tickets by status in
+/// one hashed pass: each column's count, and the statuses themselves, which
+/// `numbered` places a ticket by. The count beside every row was two more
+/// windows over all 23,000 (one a column, one the board), and the statuses a
+/// sort of every ticket's to find eight: 9 ms of a broad key's 54, for the
+/// counts of the 300 rows kept. `ranked` reads them off `columns` for those
+/// rows alone.
+const CARDS_UNLANED: &str = cards!(ranked_unlaned!());
+
+/// [`CARDS_UNLANED`] in the pieces a narrowing goes between.
+const CARDS_UNLANED_PIECES: CardsStatement = CardsStatement {
+    with: "with ",
+    ctes: cards_ctes!(),
+    select: cards_select!(),
+    from: cards_from!(),
+    filter: cards_filter!(),
+    cut: cards_cut!(ranked_unlaned!()),
+    whole: CARDS_UNLANED,
+};
+
+/// The cards statement in the pieces a narrowing goes between (the
+/// broad-keys pass, 2026-11-13). With nothing between them they are `whole`,
+/// the statement [`read_scoped`] runs:
+///
+/// ```sql
+/// with <a narrowing's own CTEs, each ending in a comma>
+///      status_paths ..., scoped as materialized (         -- ctes
+///        select x.entity_id, x.source_id, x.at, x.status, x.lane from (
+///        select i.entity_id, ... as lane                  -- select
+///               , (<the narrowing's predicate>) as keep
+///          from sync.item i ... left join sync.item_card crd ...   -- from
+///               <what the predicate reads beside i>
+///         where i.kind = 'ticket' and ...                 -- filter
+///        offset 0) x where x.keep
+///      ), ranked as (...) select ...                      -- cut
+/// ```
+///
+/// **Why a search narrows the scan and hands over no ids.** A filter typed
+/// into Tickets was two statements, each over every ticket: the search's ids,
+/// then this one with the ids as `$1`. A letter that keeps 23,000 tickets
+/// read them twice and carried 17,000 ids out of the database and back, 21 ms
+/// and about 10 of a key's 82. In one scan the row a predicate keeps is the
+/// row the board ranks.
+///
+/// **Why the predicate is a column and not a `where`.** As a `where` it sits
+/// on the scan, and the planner, which cannot count what a search keeps,
+/// halves its estimate for each test: `-project:PAY` keeps 20,000 tickets,
+/// was counted as 1,489, and each ticket's card was then fetched by its key,
+/// 23,000 probes and 21 ms where one read of the cards takes 5. Behind
+/// `offset 0` the scan and its join to the cards are planned as the unfiltered
+/// board's, whatever the search, and the rows it keeps are cut above them.
+///
+/// The pieces name the ticket `i` (a `sync.item` row), its id for a probe
+/// `k.eid`, and its stored card `crd` under the declarations `$4`
+/// ([`crate::card_join!`]), and bind `$1` to `$7` as [`CardsBinds`] holds
+/// them; a narrowing's own binds follow.
+#[derive(Clone, Copy, Debug)]
+pub struct CardsStatement {
+    pub with: &'static str,
+    pub ctes: &'static str,
+    pub select: &'static str,
+    pub from: &'static str,
+    pub filter: &'static str,
+    pub cut: &'static str,
+    /// The six with nothing between them: the statement unnarrowed.
+    pub whole: &'static str,
+}
+
+/// What the cards statement binds, `$1` to `$7` in this order.
+#[derive(Clone, Copy, Debug)]
+pub struct CardsBinds<'a> {
+    /// `$1`: only these ids, or `None` for no such narrowing.
+    pub members: Option<&'a [String]>,
+    /// `$2`: only these sources, or `None` for every source.
+    pub sources: Option<&'a [String]>,
+    /// `$3`: a project key within `sources`.
+    pub project: Option<&'a str>,
+    /// `$4`: the declarations.
+    pub declared: &'a sqlx::types::Json<serde_json::Value>,
+    /// `$5`: each column's cap.
+    pub per_column: Option<i64>,
+    /// `$6`: the field a lane shares.
+    pub lanes: Option<&'a str>,
+    /// `$7`: only the first this many lanes.
+    pub lanes_first: Option<i64>,
+}
+
+/// Reads the board's card rows with a narrowing of its own in the scan
+/// ([`read_scoped_narrowed`]): `knobas-search`'s, for the Tickets view's
+/// filter. It builds its statement from the pieces and the binds it is
+/// handed, which is why it lives where runtime SQL is confined.
+///
+/// **The rows must be the statement's rows for the tickets the narrowing
+/// admits**: what [`CardsStatement::whole`] answers with `members` cut to
+/// those tickets. `knobas-app`'s `tests/it/board_narrowed.rs` holds the two
+/// together.
+pub trait CardsNarrowing: Sync {
+    /// The card rows of `statement` under `binds`, narrowed.
+    fn rows(
+        &self,
+        pool: &PgPool,
+        statement: CardsStatement,
+        binds: CardsBinds<'_>,
+    ) -> impl std::future::Future<Output = Result<Vec<CardRow>, sqlx::Error>> + Send;
+}
+
+/// No narrowing: [`read_scoped`]'s.
+struct Unnarrowed;
+
+impl CardsNarrowing for Unnarrowed {
+    async fn rows(
+        &self,
+        pool: &PgPool,
+        statement: CardsStatement,
+        binds: CardsBinds<'_>,
+    ) -> Result<Vec<CardRow>, sqlx::Error> {
+        // Planned for its parameters every time (#753): reused, the statement
+        // went to PostgreSQL's generic plan on its sixth execution and an All
+        // room of 15,000 tickets took 6 s where its own plan takes 0.1 s.
+        sqlx::query_as(statement.whole)
+            .persistent(false)
+            .bind(binds.members)
+            .bind(binds.sources)
+            .bind(binds.project)
+            .bind(binds.declared)
+            .bind(binds.per_column)
+            .bind(binds.lanes)
+            .bind(binds.lanes_first)
+            .fetch_all(pool)
+            .await
+    }
+}
 
 /// The signals of the cards a board keeps (#815): [`crate::signals`]' reader
 /// over the kept ids (`$3`), one statement for the whole board, the same
@@ -381,6 +721,14 @@ pub fn planned_statement() -> &'static str {
     CARDS
 }
 
+/// The board's card statement without lanes, for the same plan test: what
+/// [`read_scoped`] reads when no lanes are asked for.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_unlaned() -> &'static str {
+    CARDS_UNLANED
+}
+
 /// The board's status statement, for `knobas-app`'s plan test. It binds
 /// the source ids and the declarations.
 #[doc(hidden)]
@@ -396,24 +744,108 @@ pub fn planned_observed_statuses() -> &'static str {
 /// answers for the tickets on it, and a source nothing in this room came from
 /// is not one the detail here can be asked about.
 ///
-/// Live by [`crate::live_by_exclusion!`] over `sync.item`, as [`CARDS`] is,
-/// rather than through `sync.live_item` (#1149): on tables never analyzed the
-/// view's join probed `knobas.entity` once per ticket of the sources, 15,000
-/// probes and about 90 ms of the 22k probe's narrowed board, against about
-/// 25 ms with the tombstones read once.
+/// **Off the stored cards' index where a source's cards are whole** (the
+/// query audit of 2026-11-12). The statuses a source shows are a handful,
+/// and reading them meant joining every live ticket to its card, 17 ms of
+/// every board read on 20,000 Jira tickets. `item_card_status_idx`
+/// (migration `0078`) holds each card's source, key, status and id, so:
+///
+/// * `card_totals` counts the sources' cards by source and key, and
+///   `card_statuses` holds the statuses of the live ones
+///   ([`crate::live_by_exclusion!`], read off the card's own id and source),
+///   each one scan of that index and of no table;
+/// * `keyed` holds a source's cards whole where the cards under the key the
+///   declarations give it are as many as its tickets, counted off an index
+///   too: a card belongs to one ticket and carries its source;
+/// * `carded` is then the statuses of those sources' live cards;
+/// * `observed` is the read as it was, for the sources whose counts differ:
+///   tickets the fill has not reached, a source whose declarations the
+///   database did not store. It reads no row of a source whose cards are
+///   whole.
+///
+/// The same pairs either way, 11 ms where it took 16, and no subquery run per
+/// row: `knobas-app`'s `tests/it/item_card.rs` reads the board with every
+/// card, half of them and none, and holds this statement to
+/// [`OBSERVED_STATUSES_JOINED`] with a status only a withdrawn ticket holds.
 const OBSERVED_STATUSES: &str = concat!(
     "with ",
     status_paths!("$2"),
+    ", ",
+    crate::card_keys!("$2"),
+    ",
+     card_totals as materialized (
+       select c.source_id, c.paths_key, count(*) as n
+         from sync.item_card c
+        where ($1::text[] is null or c.source_id = any($1))
+        group by c.source_id, c.paths_key),
+     card_statuses as materialized (
+       select c.source_id, c.paths_key, c.status
+         from sync.item_card c
+        where ($1::text[] is null or c.source_id = any($1))
+          and c.status is not null
+          and ",
+    crate::live_by_exclusion!("c"),
+    "
+        group by c.source_id, c.paths_key, c.status),
+     ticket_counts as materialized (
+       select i.source_id, count(*) as n
+         from sync.item i
+        where i.kind = 'ticket'
+          and ($1::text[] is null or i.source_id = any($1))
+        group by i.source_id),
+     keyed as materialized (
+       select t.source_id, ck.k, coalesce(ct.n = t.n, false) as complete
+         from ticket_counts t
+         left join card_keys ck on ck.source_id = t.source_id
+         left join card_totals ct on ct.source_id = t.source_id and ct.paths_key = ck.k),
+     carded as materialized (
+       select cs.source_id, cs.status
+         from card_statuses cs
+         join keyed kd on kd.source_id = cs.source_id and kd.k = cs.paths_key
+        where kd.complete),
+     observed as materialized (
+       select i.source_id, ",
+    status_of_ticket!("$2"),
+    " as status
+         from keyed kd
+         join sync.item i on i.kind = 'ticket' and i.source_id = kd.source_id
+        cross join lateral (select i.entity_id as eid) k",
+    crate::card_join!("crd", "i"),
+    "
+        where not kd.complete
+          and ",
+    crate::live_by_exclusion!("i"),
+    "
+     )
+     select source_id, status from carded
+     union
+     select source_id, status from observed where status is not null"
+);
+
+/// [`OBSERVED_STATUSES`] as it read before it took the statuses off the
+/// cards' index: every live ticket of the sources joined to its card. The
+/// reference a test holds the statement to.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_observed_statuses_joined() -> &'static str {
+    OBSERVED_STATUSES_JOINED
+}
+
+const OBSERVED_STATUSES_JOINED: &str = concat!(
+    "with ",
+    status_paths!("$2"),
+    ", ",
+    crate::card_keys!("$2"),
     ",
      observed as materialized (
        select i.source_id, ",
-    status_of_ticket!(),
+    status_of_ticket!("$2"),
     " as status
-         from sync.item i",
-    status_join!("$2"),
+         from sync.item i cross join lateral (select i.entity_id as eid) k",
+    crate::card_join!("crd", "i"),
     "
         where i.kind = 'ticket'
-          and i.source_id = any($1)
+          and ($1::text[] is null or i.source_id = any($1))
           and ",
     crate::live_by_exclusion!("i"),
     "
@@ -577,6 +1009,12 @@ pub struct MiniBoardCard {
     /// spelling the source uses for an account; `None` for an unassigned
     /// ticket and on a miss.
     pub assignee: Option<String>,
+    /// The name to call that account by, at the declared `assignee_name` path
+    /// (F-107), so the card's avatar is the one a ticket's page draws. Absent
+    /// where the account is the only name; never matched against anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub assignee_name: Option<String>,
     /// When the source last changed it, or `None` where it never said.
     ///
     /// RFC 3339 on the wire.
@@ -624,9 +1062,10 @@ pub struct SourceStatuses {
     pub statuses: Vec<String>,
 }
 
-/// One row of [`CARDS`].
+/// One row of [`CARDS`]: what a [`CardsNarrowing`] reads and hands back,
+/// and nothing a caller looks into.
 #[derive(sqlx::FromRow)]
-struct CardRow {
+pub struct CardRow {
     entity_id: String,
     source_id: String,
     title: String,
@@ -634,6 +1073,7 @@ struct CardRow {
     priority: Option<String>,
     issue_type: Option<String>,
     assignee: Option<String>,
+    assignee_name: Option<String>,
     path: Option<String>,
     labels: Vec<String>,
     comment_count: Option<i64>,
@@ -785,6 +1225,24 @@ pub async fn read_scoped(
     declarations: &crate::payload::Declarations,
     per_column: Option<u32>,
 ) -> Result<MiniBoard, CoreError> {
+    read_scoped_narrowed(pool, scope, declarations, per_column, &Unnarrowed).await
+}
+
+/// [`read_scoped`] with the card rows read by `narrowing`, which admits only
+/// some tickets (the Tickets view's filter): the board of the tickets the
+/// scope and the narrowing both admit, as [`Scope::only`] of those tickets
+/// would draw it, read in one scan ([`CardsStatement`]).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn read_scoped_narrowed<N: CardsNarrowing>(
+    pool: &PgPool,
+    scope: Scope<'_>,
+    declarations: &crate::payload::Declarations,
+    per_column: Option<u32>,
+    narrowing: &N,
+) -> Result<MiniBoard, CoreError> {
     let Scope {
         ctx_id,
         sources,
@@ -808,26 +1266,41 @@ pub async fn read_scoped(
     }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
-    // Planned for its parameters every time (#753): reused, the statement
-    // went to PostgreSQL's generic plan on its sixth execution and an All room
-    // of 15,000 tickets took 6 s where its own plan takes 0.1 s.
-    let rows: Vec<CardRow> = sqlx::query_as(CARDS)
-        .persistent(false)
-        .bind(&members)
-        .bind(&scope)
-        .bind(project)
-        .bind(&declared)
-        .bind(per_column.map(i64::from))
-        .bind(lanes.map(|lanes| lanes.by.as_str()))
-        .bind(
-            lanes
-                .and_then(|lanes| lanes.first)
-                .map(|first| i64::from(first.max(1))),
-        )
-        .fetch_all(pool)
-        .await?;
-    let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
-    let mut signals = signals_of(pool, &kept, &declared, identity).await?;
+    let cards = async {
+        let rows: Vec<CardRow> = narrowing
+            .rows(
+                pool,
+                if lanes.is_some() {
+                    CARDS_PIECES
+                } else {
+                    CARDS_UNLANED_PIECES
+                },
+                CardsBinds {
+                    members: members.as_deref(),
+                    sources: scope.as_deref(),
+                    project,
+                    declared: &declared,
+                    per_column: per_column.map(i64::from),
+                    lanes: lanes.map(|lanes| lanes.by.as_str()),
+                    lanes_first: lanes
+                        .and_then(|lanes| lanes.first)
+                        .map(|first| i64::from(first.max(1))),
+                },
+            )
+            .await?;
+        let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
+        let signals = signals_of(pool, &kept, &declared, identity).await?;
+        Ok::<_, CoreError>((rows, signals))
+    };
+    // The statuses of every source the scope admits, read beside the cards
+    // rather than after them (the scale pass, 2026-11-10: 60 ms of a typed
+    // word's 400 on 20,000 tickets), and kept below for the sources a card
+    // came from. Per source the same answer [`observed_statuses`] gives,
+    // since each source's statuses are its own tickets'.
+    let (cards, observed) =
+        futures_util::future::try_join(cards, observed_among(pool, scope.as_deref(), declarations))
+            .await?;
+    let (rows, mut signals) = cards;
 
     // Grouped in the order the rows arrived, so the newest-first ordering the
     // statement asks for survives into each column; the columns themselves are
@@ -896,6 +1369,7 @@ pub async fn read_scoped(
                 identity.iter().any(|me| me.eq_ignore_ascii_case(assignee))
             }),
             assignee: row.assignee,
+            assignee_name: row.assignee_name,
             updated_at: row.updated_at,
             path: row.path,
             parent_title: row.parent_title,
@@ -919,7 +1393,7 @@ pub async fn read_scoped(
     };
 
     Ok(MiniBoard {
-        sources: observed_statuses(pool, &sources, declarations).await?,
+        sources: statuses_for(&sources, observed),
         columns,
         lanes,
         more_lanes,
@@ -938,14 +1412,16 @@ const STATUSES: &str = concat!(
     status_paths!("$2"),
     ", ",
     lane_paths!("$2", "$3"),
+    ", ",
+    crate::card_keys!("$2"),
     "
      select i.entity_id, i.source_id, ",
-    status_of_ticket!(),
+    status_of_ticket!("$2"),
     " as status, ",
-    lane_of_ticket!("$2", "$3"),
+    lane_of_ticket_probed!("$2", "$3"),
     " as lane, i.item_updated_at
-       from sync.item i",
-    status_join!("$2"),
+       from sync.item i cross join lateral (select i.entity_id as eid) k",
+    crate::card_join!("crd", "i"),
     "
       where i.kind = 'ticket'
         and ",
@@ -1201,33 +1677,95 @@ pub async fn observed_statuses(
         return Ok(Vec::new());
     }
     let ids: Vec<String> = sources.iter().cloned().collect();
+    let observed = observed_among(pool, Some(&ids), declarations).await?;
+    Ok(statuses_for(sources, observed))
+}
+
+/// Every status the live tickets of `among` show (every source's, for
+/// `None`), by source: [`OBSERVED_STATUSES`]' rows, unordered.
+async fn observed_among(
+    pool: &PgPool,
+    among: Option<&[String]>,
+    declarations: &crate::payload::Declarations,
+) -> Result<BTreeMap<String, Vec<String>>, CoreError> {
     let rows: Vec<(String, String)> = sqlx::query_as(OBSERVED_STATUSES)
         .persistent(false)
-        .bind(&ids)
+        .bind(among)
         .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
-
-    let mut by_source: BTreeMap<String, Vec<String>> =
-        ids.into_iter().map(|id| (id, Vec::new())).collect();
+    let mut by_source: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (source_id, status) in rows {
         by_source.entry(source_id).or_default().push(status);
     }
-    Ok(by_source
-        .into_iter()
-        .map(|(source_id, mut statuses)| {
+    Ok(by_source)
+}
+
+/// One [`SourceStatuses`] per source of `sources`, in their order, each its
+/// statuses out of `observed` in the board's order; a source that showed
+/// none has an empty list.
+fn statuses_for(
+    sources: &BTreeSet<String>,
+    mut observed: BTreeMap<String, Vec<String>>,
+) -> Vec<SourceStatuses> {
+    sources
+        .iter()
+        .map(|source_id| {
+            let mut statuses = observed.remove(source_id).unwrap_or_default();
             statuses.sort_by_key(|status| column_rank(Some(status)));
             SourceStatuses {
-                source_id,
+                source_id: source_id.clone(),
                 statuses,
             }
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A narrowing is spliced between the pieces, so with nothing between
+    /// them they must be the statement the board runs unnarrowed.
+    #[test]
+    fn the_pieces_of_a_cards_statement_are_the_statement() {
+        for pieces in [CARDS_PIECES, CARDS_UNLANED_PIECES] {
+            assert_eq!(
+                [
+                    pieces.with,
+                    pieces.ctes,
+                    pieces.select,
+                    pieces.from,
+                    pieces.filter,
+                    pieces.cut
+                ]
+                .concat(),
+                pieces.whole
+            );
+            // Where a narrowing goes: `scoped` opens at the end of `ctes`,
+            // its select list ends `select`, its joins end `from`, and `cut`
+            // closes it after `filter`.
+            assert!(pieces.ctes.trim_end().ends_with("scoped as materialized ("));
+            assert!(
+                pieces
+                    .select
+                    .starts_with("select i.entity_id, i.source_id,")
+            );
+            assert!(pieces.select.ends_with(" as lane"));
+            assert!(pieces.from.trim_start().starts_with("from sync.item i "));
+            assert!(pieces.from.ends_with("crd.paths_key = crd_k.k "));
+            assert!(
+                pieces
+                    .filter
+                    .trim_start()
+                    .starts_with("where i.kind = 'ticket'")
+            );
+            assert!(pieces.cut.trim_start().starts_with(')'));
+        }
+        assert_eq!(CARDS_PIECES.whole, CARDS);
+        assert_eq!(CARDS_UNLANED_PIECES.whole, CARDS_UNLANED);
+        assert_ne!(CARDS, CARDS_UNLANED);
+    }
 
     /// The order the board promises, over a set deliberately shuffled: the
     /// four lead in their own order rather than alphabetically, strays follow
@@ -1281,6 +1819,7 @@ mod tests {
             priority: None,
             issue_type: None,
             assignee: assignee.map(str::to_owned),
+            assignee_name: None,
             updated_at: None,
             path: None,
             parent_title: None,

@@ -10,7 +10,7 @@ import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
-import { EMBED_FRAME_BORDER, READER_DRAWER, READER_NARROW } from "./docs/docs";
+import { EMBED_FRAME_BORDER, OUTLINE_ROOM, READER_DRAWER } from "./docs/docs";
 
 const APP = process.cwd();
 /**
@@ -34,6 +34,17 @@ function block(source: string, selector: string): string {
   expect(at, `no rule for ${selector}`).toBeGreaterThan(-1);
   return source.slice(at, source.indexOf("}", at));
 }
+
+test("a field is on `--field`: `--paper` and `--sheet` read as disabled", () => {
+  const onPage = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(([, selectors, body]) => {
+    if (!/background:\s*var\(--(paper|sheet)\)/.test(body!)) return [];
+    return selectors!
+      .split(",")
+      .map((selector) => selector.trim())
+      .filter((selector) => /(^|[\s>+~])(input|textarea|select)\b[^\s>+~]*$/.test(selector) && !/checkbox|radio/.test(selector));
+  });
+  expect(onPage).toEqual([]);
+});
 
 /** `--token` → [light, dark], from the spec's colour table. */
 const COLOURS: [string, string, string][] = [...spec.matchAll(/^\| `(--[a-z0-9-]+)`(?: \/ `(--[a-z0-9-]+)`)? \| `(#[0-9A-F]{6})`(?: \/ `(#[0-9A-F]{6})`)? \| `(#[0-9A-F]{6})`(?: \/ `(#[0-9A-F]{6})`)? \|/gm)].flatMap(
@@ -234,7 +245,8 @@ test("the top bar's timer target is capped with an ellipsis, a label is sans and
   expect(band).toMatch(/\.tf-search \.tf-label, \.tf-search kbd\s*\{[^}]*display:\s*none/);
   expect(band).toMatch(/\.tf-timer-key\s*\{[^}]*max-width:\s*12ch/);
   expect(band).toMatch(/\.tf-nav a\s*\{[^}]*padding:/);
-  expect(band).toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
+  // A count is a state to act on (R-1.3): Inbox and Monitors keep theirs in the band.
+  expect(band).not.toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
 });
 
 /**
@@ -264,7 +276,8 @@ test("the launcher sets mono on a ticket's key cell and nowhere else (#1422, #24
   expect(mono).toEqual([".tf-ln-k.tf-ln-mono"]);
   // The key cell is drawn by the row, and only there.
   const row = LAUNCHER[6]!;
-  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\}>\{cell\}<\/span>/);
+  // A forge's issue key is cut to its repository and number there, the whole in its title (the live run, 2026-11-09).
+  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\} title=\{[^}]*\}>\{mono \? shortKey\(cell\) : cell\}<\/span>/);
   expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|mono)\b/);
 });
 
@@ -324,21 +337,26 @@ test("the Docs reader: tree and page, the outline the page's sticky right column
   expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) 268px;/);
   const outline = block(code, ".tf-rd-outline");
   expect(outline).toMatch(/position:\s*sticky/);
-  expect(outline).toMatch(/top:\s*0/);
-  // The band the component reads through `matchMedia` is the stylesheet's own.
-  const at = code.indexOf(`@media ${READER_NARROW} {`);
-  expect(at, `no rule band for ${READER_NARROW}`).toBeGreaterThan(-1);
-  const band = code.slice(at, code.indexOf("\n}", at));
-  expect(band).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
-  expect(band).toMatch(/\.tf-rd-sheet\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+  // Where it starts, under the pinned crumb row and the sheet's padding, so its heading does not move as the page scrolls (F-443).
+  expect(outline).toMatch(/top:\s*60px/);
+  // The outline folds by the sheet's own width (`readerFit`), and no window width in the stylesheet decides it.
+  expect(block(code, ".tf-rd-sheet")).toContain("column-gap: 56px");
+  expect(OUTLINE_ROOM).toBe(268 + 56);
+  expect(block(code, ".tf-rd-sheet.tf-rd-solo")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+  expect(code).not.toMatch(/@media \(max-width: 13\d\dpx\) \{\s*\.tf-rd-sheet/);
+  // The tree narrows at the shell's own 1240px breakpoint.
+  const rail = code.indexOf("@media (max-width: 1240px) {\n  .tf-rd {");
+  expect(rail, "no 1240px band for the tree").toBeGreaterThan(-1);
+  expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
 });
 
-test("nothing in the Docs reader's page is capped in width (#2081)", () => {
+test("beside the outline nothing in the Docs reader's page is capped in width, and folded its body stops at 730 px (#2081, F-432)", () => {
   const capped = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
     .filter(([, selector]) => /\.tf-(rd-page|rd-sheet|doc|cmts|sec-edit|compose|pre|callout|macro|rd-foot)\b/.test(selector!))
     .filter(([, , body]) => /max-width/.test(body!))
     .map(([, selector]) => selector!.trim());
-  expect(capped).toEqual([]);
+  expect(capped).toEqual([".tf-rd-solo :is(.tf-doc, .tf-rd-fold)"]);
+  expect(block(code, ".tf-rd-solo :is(.tf-doc, .tf-rd-fold)")).toMatch(/max-width:\s*730px/);
   expect(code).not.toContain("74ch");
 });
 
@@ -377,7 +395,14 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
-const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar"];
+test("no page's scroller reserves room for its bar: the page is as wide as the window, and a rail's own list may keep its room", () => {
+  const gutters = [...code.matchAll(/([^{}]*)\{[^}]*scrollbar-gutter[^}]*\}/g)].map(([, selector]) => selector!.trim().split("\n").at(-1)!.trim());
+  expect(gutters).toEqual([".tf-vfind + .tf-vlist"]);
+  expect(block(code, ".tf-main")).toMatch(/overflow:\s*hidden auto/);
+  expect(block(code, ".tf-sbody")).toMatch(/width:\s*100cqw/);
+});
+
+const STICKY_BARS = [":is(.tf-mon, .tf-mon-gaps) thead th", ".tf-fbar", ".tf-findbar", ".tf-findhold", ".tf-rd-crumbrow", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap.tf-lanes .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(.tf-lanes) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap.tf-lanes > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)", ".tf-laned > h2", ".tf-lanes-more", ".tf-newruns"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
@@ -389,7 +414,7 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
     expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline"]),
   );
   // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
-  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree" };
+  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree", ".tf-rbv > .tf-rbrail": ".tf-pl-list" };
   const scrolls = (selector: string, body: string) =>
     INNER[selector] === undefined
       ? /overflow(-y)?:\s*auto/.test(body)
@@ -488,13 +513,13 @@ test("on the Tickets board and list, yellow is the chosen job's card and row, an
     .map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }))
     .filter(({ selector }) => /\.tf-(tcard|row)\b/.test(selector));
   const yellow = rules.filter(({ body }) => /var\(--card(-2)?\)/.test(body)).map(({ selector }) => selector);
-  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf-row.tf-card td"]);
+  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf .tf-tcard.tf-card:hover", ".tf-row.tf-card td"]);
   const lifted = rules.filter(({ body }) => body.includes("var(--shadow)")).map(({ selector }) => selector);
   expect(lifted).toEqual([".tf-tcard.tf-sel", ".tf-tcard.tf-card.tf-sel"]);
 
   // The outline is a ring, not `outline`, so the focus ring (`.tf :focus-visible`) never replaces it.
   expect(block(code, ".tf-tcard.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--ink\), var\(--shadow\);/);
-  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), 0 0 0 4px var\(--sel-halo\), var\(--shadow\);/);
   expect(block(code, ".tf-tcard.tf-card")).not.toContain("box-shadow");
   // A row's outline is drawn inside its cells, two pixels on each edge of the row; on the yellow row, in its ink.
   expect(block(code, ".tf-row.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--ink\);[^}]*box-shadow:\s*inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);

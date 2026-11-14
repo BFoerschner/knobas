@@ -169,7 +169,7 @@ test("Esc empties Go to file and the tree is drawn again; nothing typed draws no
   typeIn(field(), "zzz");
   await settle();
   expect(found()).toEqual([]);
-  expect(target.querySelector(".tf-gonote")?.textContent).toBe("No file matches “zzz”.");
+  expect(target.querySelector(".tf-gonote")?.textContent).toBe("No file matches “zzz”. Clear");
   press("Escape", field());
   expect(field().value).toBe("");
   expect(row("README.md")).not.toBeNull();
@@ -285,7 +285,7 @@ test("the tree's footer names its keys", async () => {
   expect(target.querySelector(".tf-ftree-keys")?.textContent).toBe("T go to file↑↓ move←→ fold");
 });
 
-test("the file header says the size, the lines and the commit, and More holds Edit, History and the source's page", async () => {
+test("the file header says the size, the lines and the commit, and More holds Edit and History (the source's page is Open in… › Browser)", async () => {
   draw(stand());
   await settle();
   expect(target.querySelector(".tf-fileview header .tf-fmeta")?.textContent).toBe("15 B · 2 lines · at 4c1d0aa");
@@ -294,7 +294,7 @@ test("the file header says the size, the lines and the commit, and More holds Ed
   more.click();
   await settle();
   const items = [...target.querySelectorAll<HTMLElement>(".tf-fmore [role=menuitem]")];
-  expect(items.map((i) => i.textContent)).toEqual(["Edit", "History", "Open on the code host"]);
+  expect(items.map((i) => i.textContent)).toEqual(["Edit", "History"]);
   expect(items[0]!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/edit/README.md`);
   expect(document.activeElement).toBe(items[0]);
   press("ArrowDown");
