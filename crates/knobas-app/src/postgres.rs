@@ -14,7 +14,7 @@ use tauri::Manager;
 
 /// The folder of the bundle's resources that holds the archive, and of this
 /// crate that `bundle.resources` maps into it.
-pub const RESOURCE_FOLDER: &str = "postgresql";
+pub(crate) const RESOURCE_FOLDER: &str = "postgresql";
 
 /// What a start has to do before PostgreSQL can run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,13 +99,13 @@ pub(crate) fn explain(
     }
     match (provision, unpack_failure) {
         (Provision::Unpack(_), Some(unpack)) => format!(
-            "The PostgreSQL this copy of knobas carries could not be unpacked ({unpack}), \
-             and downloading it failed too. Free some disk space or reinstall knobas, then retry. {error}"
+            "The PostgreSQL this copy of knobas carries could not be unpacked, and downloading \
+             it failed too. Reinstall knobas or connect to the internet, then retry. {unpack}. {error}"
         ),
         _ => format!(
-            "knobas needs PostgreSQL and this copy carries none, so it tried to download it and \
-             could not. Connect to the internet (or set the proxy) and retry, or install knobas \
-             from a release installer, which needs no network. {error}"
+            "knobas needs PostgreSQL, and this copy carries none. It tried to download it and \
+             could not. Connect to the internet or set a proxy and retry, or install knobas from \
+             a release installer, which carries PostgreSQL. {error}"
         ),
     }
     .into()
@@ -217,7 +217,10 @@ mod tests {
     fn a_failed_download_says_what_a_person_can_do() {
         let said = explain(not_installed(), &Provision::Download, None).to_string();
         assert!(said.contains("this copy carries none"), "{said}");
-        assert!(said.contains("release installer"), "{said}");
+        assert!(
+            said.contains("a release installer, which carries PostgreSQL"),
+            "{said}"
+        );
         assert!(
             said.contains("PostgreSQL 18.6.0 is not installed"),
             "{said}"
