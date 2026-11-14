@@ -2742,6 +2742,19 @@ impl Inner {
                     }
                 }
             }
+            // Every branch's tree, levels the store lacks only (the
+            // stored-trees pass of PR #2479): after the logs, in the same
+            // background lane, bounded (`stored_trees::BUDGET`); the quit
+            // cuts it, and what it left the next run reads.
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => {}
+                stored = crate::stored_trees::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
+                    if let Err(error) = stored {
+                        tracing::warn!(source_id, %error, "storing the branches' trees failed");
+                    }
+                }
+            }
         }
     }
 

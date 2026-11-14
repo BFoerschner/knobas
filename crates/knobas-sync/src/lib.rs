@@ -56,6 +56,7 @@ pub mod samples;
 pub mod saved_views;
 pub mod scheduler;
 pub mod stats;
+pub mod stored_trees;
 pub mod write_queue;
 
 pub use health::{AuthState, CredentialHealth};
