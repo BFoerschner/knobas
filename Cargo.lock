@@ -3232,12 +3232,14 @@ name = "knobas-db"
 version = "3.2.8"
 dependencies = [
  "chrono",
+ "flate2",
  "knobas-db",
  "percent-encoding",
  "postgresql_archive",
  "postgresql_embedded",
  "serde_json",
  "sqlx",
+ "tar",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",

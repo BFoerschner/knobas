@@ -78,7 +78,11 @@ url = "2"
 chrono.workspace = true
 # Self-dev-dependency so this crate's own integration tests see `test_util`.
 knobas-db = { path = ".", features = ["test-util"] }
+# `install`'s tests pack an archive the way upstream's is laid out. Both are
+# what `postgresql_archive` unpacks one with, so neither adds to the build.
+flate2 = "1"
 serde_json.workspace = true
+tar = "0.4"
 tempfile = "3"
 # `net` for the embedded tests' `SilentPort`, a socket bound and never listened
 # on, and `io-util` for `tests/embedded/slow_answer.rs`'s proxy (#1815).

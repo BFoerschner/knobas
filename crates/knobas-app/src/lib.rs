@@ -48,6 +48,7 @@ pub mod live_sources;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;
+pub mod postgres;
 mod profile;
 pub mod protocol;
 pub mod reads;
@@ -928,25 +929,47 @@ async fn bring_up_app<R: tauri::Runtime>(
     // nothing unusual is: the boot screen shows this verbatim, so a
     // reassuring guess would be a lie in the one place the app is asking
     // for patience.
+    // `None` for `KNOBAS_DB_URL`'s server, which needs no PostgreSQL of ours.
+    let mut provision = None;
     let detail = if config.existing_url.is_some() {
         tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
         Some(format!("connecting to the server {DB_URL_ENV} points at"))
-    } else if tokio::fs::metadata(&config.root_dir).await.is_ok() {
+    } else {
         // `Path::exists` off the worker (`tokio::fs` runs under
         // `spawn_blocking`); a dropped bring-up does not cut the stat off.
-        tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
-        None
-    } else {
-        tracing::info!(root_dir = %config.root_dir.display(), "first run: provisioning postgres");
-        Some("first run: downloading and initialising PostgreSQL".to_owned())
+        let first_run = tokio::fs::metadata(&config.root_dir).await.is_err();
+        // Installed, carried by this build, or still to download
+        // (`postgres::Provision`): which of them the line below says.
+        let needs = postgres::Provision::of(handle).await;
+        if first_run {
+            tracing::info!(root_dir = %config.root_dir.display(), postgres = ?needs, "first run: provisioning postgres");
+        } else {
+            tracing::info!(root_dir = %config.root_dir.display(), postgres = ?needs, "starting the embedded postgres");
+        }
+        let detail = needs.detail(first_run);
+        provision = Some(needs);
+        detail
     };
     set_db_state(handle, DbState::Starting { detail });
 
     let lifecycle = handle.state::<Lifecycle>();
     let outcome = async {
+        // The PostgreSQL this build carries, unpacked on a machine that has
+        // none, so the start below downloads nothing. A failed unpack is not
+        // the start's failure: the start then downloads, as a build without
+        // the archive does.
+        let unpack_failure = match &provision {
+            Some(needs) => needs.install().await,
+            None => None,
+        };
         let db = knobas_db::EmbeddedDb::start(config)
             .await
-            .map_err(|error| naming_the_profile(error, profile))?;
+            .map_err(|error| match &provision {
+                Some(needs) if matches!(error, knobas_db::DbError::NotInstalled { .. }) => {
+                    postgres::explain(error, needs, unpack_failure.as_deref())
+                }
+                _ => naming_the_profile(error, profile),
+            })?;
         let pool = db.pool().clone();
         let connector = db.connector();
         // Taken now, while the server is the one this bring-up started, and

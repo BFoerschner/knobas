@@ -42,6 +42,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "postgresql/": "postgresql/"
+    },
     "windows": {
       "wix": {
         "version": "3.2.8"

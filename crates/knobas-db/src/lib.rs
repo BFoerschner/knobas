@@ -9,6 +9,7 @@
 pub mod backup;
 pub mod console;
 pub mod embedded;
+pub mod install;
 pub mod migrate;
 
 #[cfg(feature = "test-util")]

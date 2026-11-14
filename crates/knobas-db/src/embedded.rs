@@ -191,10 +191,39 @@ pub enum DbError {
     /// running instance's database with it.
     #[error("the database at {data_dir} is in use: {reason}")]
     AlreadyRunning { data_dir: PathBuf, reason: String },
+
+    /// PostgreSQL is not installed on this machine and the install failed:
+    /// the download, or unpacking what it fetched. `installation_dir` is
+    /// where the version was looked for.
+    ///
+    /// A release build installs from the archive it carries before the start
+    /// ([`install_from`](crate::install::install_from)), so this is a build
+    /// without one (`just dev`, a test run) on a machine that cannot reach
+    /// the release, or a release build whose archive did not unpack.
+    #[error(
+        "PostgreSQL {version} is not installed at {installation_dir}, and installing it from the network failed: {source}"
+    )]
+    NotInstalled {
+        version: String,
+        installation_dir: PathBuf,
+        /// What the install said: `postgresql_embedded`'s error, held as any
+        /// error so a caller needs no type of that crate to name this one.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// The archive a release build carries could not be unpacked
+    /// ([`install_from`](crate::install::install_from)).
+    #[error("the PostgreSQL archive at {archive} could not be unpacked: {source}")]
+    BundledArchive {
+        archive: PathBuf,
+        #[source]
+        source: Box<postgresql_archive::Error>,
+    },
 }
 
 impl DbError {
-    fn io(path: impl Into<PathBuf>, source: io::Error) -> Self {
+    pub(crate) fn io(path: impl Into<PathBuf>, source: io::Error) -> Self {
         DbError::Io {
             path: path.into(),
             source,
@@ -902,7 +931,7 @@ pub(crate) fn pg_ctl_stop_immediate(data_dir: &Path) -> Option<std::process::Com
 ///
 /// The managed half of [`EmbeddedDb::start`], split from it so the test
 /// server's start shares the recovery rather than a copy of it.
-async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbError> {
+pub(crate) async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbError> {
     let data_dir = settings.data_dir.clone();
 
     match start_managed(root_dir, settings.clone()).await? {
@@ -1127,7 +1156,12 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     // left, so the port is free for that long and no longer. See [`loopback_port`].
     settings.port = loopback_port().map_err(|source| DbError::io(&data_dir, source))?;
     let mut postgresql = PostgreSQL::new(settings);
-    postgresql.setup().await?;
+    // The data directory is initialised by now, so all this `setup()` can
+    // still do is install: for a profile whose PostgreSQL has gone (another
+    // machine's data directory, a removed `~/.theseus`).
+    if let Err(source) = postgresql.setup().await {
+        return Err(not_installed(&postgresql, source));
+    }
     let owned = adoption.clone();
     off_runtime(&data_dir, move || keep_to_owner(&owned)).await?;
 
@@ -1540,10 +1574,8 @@ pub(crate) fn installation_dir() -> PathBuf {
 /// (or, worse, succeed against the wrong server) for a reason nothing in
 /// knobas would explain.
 pub(crate) fn find_tool(installation_dir: &Path, name: &str) -> Option<PathBuf> {
-    // `PG_VERSION_REQ` is a semver *requirement* (`=18.6.0`); the directory is
-    // named after the version alone.
     let pinned = installation_dir
-        .join(PG_VERSION_REQ.trim_start_matches(['=', '^', '~', ' ']))
+        .join(crate::install::pinned_version())
         .join("bin")
         .join(name);
     if pinned.is_file() {
@@ -1580,7 +1612,7 @@ fn loopback_port() -> io::Result<u16> {
     Ok(probe.local_addr()?.port())
 }
 
-fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
+pub(crate) fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     std::fs::create_dir_all(root_dir).map_err(|source| DbError::io(root_dir, source))?;
 
     let mut settings = fresh_settings();
@@ -2049,13 +2081,25 @@ async fn install(root_dir: &Path, settings: &Settings) -> Result<PathBuf, DbErro
     let mut postgresql = PostgreSQL::new(install_settings);
     let installed = postgresql.setup().await;
     let binaries = postgresql.settings().binary_dir();
-    // Nothing to stop: the placeholder has no `postmaster.pid`.
-    drop(postgresql);
+    // The handle is kept for the error below. Its drop has nothing to stop:
+    // the placeholder has no `postmaster.pid`.
     if let Err(error) = tokio::fs::remove_dir_all(&placeholder).await {
         tracing::warn!(%error, placeholder = %placeholder.display(), "could not remove the install placeholder");
     }
-    installed?;
+    // The placeholder is initialised, so the install is all `setup()` did.
+    installed.map_err(|source| not_installed(&postgresql, source))?;
     Ok(binaries)
+}
+
+/// A `setup()` that had only the install left to do and failed at it, named
+/// as what it is ([`DbError::NotInstalled`]): the upstream error alone is a
+/// failed request to GitHub, which says nothing of PostgreSQL.
+fn not_installed(postgresql: &PostgreSQL, source: postgresql_embedded::Error) -> DbError {
+    DbError::NotInstalled {
+        version: crate::install::pinned_version().to_owned(),
+        installation_dir: postgresql.settings().installation_dir.clone(),
+        source: Box::new(source),
+    }
 }
 
 /// Write the superuser password `initdb --pwfile` reads, readable by its

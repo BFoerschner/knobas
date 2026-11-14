@@ -7,6 +7,10 @@ dist
 # Written by tauri-build on every compile: the permission schemas for the
 # capability files. Regenerated, never edited.
 crates/knobas-app/gen/
+# The PostgreSQL archive a release build carries, staged by
+# `scripts/fetch-postgres.sh` (54 MB on Windows): a build input, pinned by
+# `crates/knobas-app/postgresql/archives.sha256`, never committed.
+crates/knobas-app/postgresql/*.tar.gz
 
 # Local credentials for the live adapter suites (`just *-live`). Never
 # committed: a token in git history is a token to rotate, not a token to
