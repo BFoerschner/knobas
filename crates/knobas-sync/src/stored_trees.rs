@@ -379,7 +379,7 @@ branches as (
                             and ip.adapter_kind = (select kind from src)
    where i.source_id = $1 and i.kind = $4
 ),
-heads as (
+heads as materialized (
   select distinct lower(ip.name) as parent, i.payload #>> $8::text[] as head
     from sync.item i
     join knobas.entity e on e.id = i.entity_id and e.deleted_at is null
@@ -392,12 +392,12 @@ select b.entity_id, r.entity_id as repository_id, b.name as branch, b.commit,
   from branches b
   join repos r on r.name = b.parent
   left join sync.branch_tree bt on bt.entity_id = b.entity_id
+  left join heads h on h.parent = b.parent and h.head = b.name
  where b.name is not null
    and b.commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
    and bt.commit_sha is distinct from b.commit
  order by case when b.name = r.default_branch then 0
-               when b.author = (select me from src)
-                 or exists (select 1 from heads h where h.parent = b.parent and h.head = b.name) then 1
+               when b.author = (select me from src) or h.head is not null then 1
                else 2 end,
           b.item_updated_at desc nulls last,
           b.entity_id
