@@ -80,6 +80,7 @@ import type {
   RangeDiff,
   RangeFilePage,
   RangeFiles,
+  RangeNames,
   Reached,
   RefusedWrite,
   RuleTicket,
@@ -271,6 +272,7 @@ export type {
   RangeDiff,
   RangeFilePage,
   RangeFiles,
+  RangeNames,
   ReachOrigin,
   Reached,
   RefusedWrite,
@@ -1654,6 +1656,16 @@ export function entityRangeDiff(entityId: string, base: string, head: string, ig
  */
 export function entityRangeFiles(entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string | null = null): Promise<RangeFiles> {
   return invoke<RangeFiles>("entity_range_files", { entityId, base, head, ignoreWhitespace, read });
+}
+
+/**
+ * The names of the files `base`...`head` of a repository changes, without their counts — `entity_range_names` (the
+ * stored-compare pass, 2026-11-14): at the checkout, between the tips the mirror holds for two branch names, in one `git
+ * diff --raw -M` that reads no file's lines, compact on the wire (`namesList` makes its files); `null` where the checkout cannot answer or the counted list
+ * is kept already. A page draws it while {@link entityRangeFiles}, read beside it, brings the counts.
+ */
+export function entityRangeNames(entityId: string, base: string, head: string): Promise<RangeNames | null> {
+  return invoke<RangeNames | null>("entity_range_names", { entityId, base, head });
 }
 
 /**

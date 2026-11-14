@@ -123,6 +123,8 @@ export const QUIET: ReadonlySet<string> = new Set([
   "entity_source_range_diff",
   "entity_source_range_files",
   "cancel_read",
+  // A compare's names at the clone (the stored-compare pass, 2026-11-14): git, never the mirror.
+  "entity_range_names",
   "docs_search",
   "search",
   "launcher_home",

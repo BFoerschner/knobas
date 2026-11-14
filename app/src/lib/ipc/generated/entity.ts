@@ -3828,6 +3828,50 @@ predicted_at?: string,
 held_at?: string, };
 
 /**
+ * The names of the files a range changes, without their counts (the
+ * stored-compare pass, 2026-11-14, [`range_names`]): what Compare draws
+ * while the list with counts is read beside it. Compact on the wire, a
+ * tenth of [`RangeFiles`]' bytes per file at 10,000 files, since the page
+ * draws it on the way to its first frame: the page makes each file of it
+ * as the list with counts names it, `additions` and `deletions` `0`, no
+ * file `binary` and no blob.
+ */
+export type RangeNames = { 
+/**
+ * Each file's path (where it is after the change), in the list's order.
+ */
+paths: Array<string>, 
+/**
+ * Each file's change, one letter a file in the same order: `A` added,
+ * `D` deleted, `M` modified, `R` renamed.
+ */
+changes: string, 
+/**
+ * Each renamed file: its place in `paths`, where it was, and how alike
+ * the two sides are in percent.
+ */
+renamed: Array<[number, string, number | null]>, 
+/**
+ * Each file whose mode changed: its place in `paths`, and the mode
+ * before and after.
+ */
+modes: Array<[number, string, string]>, 
+/**
+ * The listing was cut (past 16 MiB of git's listing).
+ */
+truncated: boolean, 
+/**
+ * The two commits the files' lines are read between: the merge base
+ * and the head, as [`RangeFiles::range`] names them.
+ */
+range: DiffRange, 
+/**
+ * As [`RangeFiles::predicted_at`]: when the mirror last stored the two
+ * tips the names were read between.
+ */
+predicted_at: string, };
+
+/**
  * Where a reached entity's path came from.
  *
  * Tagged on `kind`; #866's link sets joined as the third arm without

@@ -50,6 +50,11 @@
   request* never waits for the check: a pull request sent before it
   answered and that the check then finds different is told in a toast.
 
+  **The names first** (the stored-compare pass of PR #2479, 2026-11-14): with a clone, the changed files' names are read
+  there beside the list with counts (`entity_range_names`, one `git diff --raw -M` that reads no file) and drawn under
+  the same line the moment they land; the counts and the commits fill the rows in place when the list lands, and each
+  file's lines are read meanwhile between the same two commits. Nothing moves: the names are the list less its counts.
+
   **A branch the list does not hold yet** (the third smoothness pass of PR
   #2479): one made on the forge since the list was read, or one this
   session's edit queued. Its compare is read straight from the source by
@@ -68,7 +73,7 @@
   import { proseMarkdown } from "../../render/prose";
   import type { DiffFile, DiffRange, RangeCommit, RangeDiff } from "../../ipc/entity";
   import type { DiffFill } from "../diff/diff";
-  import { fillEnds, rangeFill } from "../diff/fill";
+  import { fillEnds, namesList, rangeFill } from "../diff/fill";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
@@ -118,7 +123,7 @@
     guessed = null,
     onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "sourceRangeFiles" | "cancelRead" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -192,6 +197,11 @@
    * quietly, where it moved. `done` once that read answered; `failed` where it did not.
    */
   let held = $state<{ section: string; at: string; done: boolean; failed: string | null } | null>(null);
+  /**
+   * The drawn files carry their counts. False while the clone's names are drawn (`entity_range_names`, the
+   * stored-compare pass, 2026-11-14): the list with counts, read beside them, fills them in place.
+   */
+  let counted = $state(true);
   /** The source's compare differed from the predicted diff: a branch moved since the sync, and its diff now stands. */
   let moved = $state<string | null>(null);
   /** The check of the drawn predicted diff, by its section: whether the source's compare differed. */
@@ -395,6 +405,34 @@
     // The list the repository page asked early (`compare-early.ts`), answered or on its way; one that failed is read anew.
     const early = listing === undefined || again ? null : takeCompareEarly(repoId, from, to);
     if (listing !== undefined) compareReads(repoId, from, to);
+    // The clone's names, drawn while the list with counts is read beside them, where they land first (the stored-compare
+    // pass): one `git diff --raw` that reads no file's lines, where the counts cost git a read of every file.
+    let landed = false;
+    if (!again && listing !== undefined) {
+      void ports.rangeNames?.(repoId, from, to).then(
+        (names) => {
+          if (!alive() || landed || names === null) return;
+          const list = namesList(names);
+          reading = false;
+          failed = null;
+          missing = false;
+          files = list.files;
+          counted = false;
+          const at = fillEnds(list, from, to);
+          if (fillAt === null || fillAt.base !== at.base || fillAt.head !== at.head) fillAt = at;
+          cut = false;
+          range = list.range;
+          filesFor = asked;
+          keepCommits(asked, list);
+          moved = null;
+          // Read at the clone as of the last sync: the line the counted list keeps, so nothing under it moves.
+          predicted = { section: asked, checked: false };
+          held = null;
+          checking = null;
+        },
+        () => {},
+      );
+    }
     const answer: Promise<RangeDiff> =
       early !== null
         ? early.catch(() => listing!(repoId, from, to, false, read))
@@ -402,12 +440,16 @@
           ? listing(repoId, from, to, false, read)
           : (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false);
     return answer.then((diff) => {
+      landed = true;
       if (!alive()) return;
       reading = false;
       failed = null;
       missing = false;
       files = diff.files;
-      fillAt = listing === undefined ? null : fillEnds(diff, from, to);
+      counted = true;
+      // The same two ends keep the fill, so the lines read under the names stay.
+      const at = listing === undefined ? null : fillEnds(diff, from, to);
+      if (at === null || fillAt === null || fillAt.base !== at.base || fillAt.head !== at.head) fillAt = at;
       cut = diff.truncated;
       range = diff.range;
       filesFor = asked;
@@ -422,9 +464,12 @@
       if (diff.predicted_at !== undefined && checkable) checkPredicted(asked, from, to, diff, alive, `${read}-check`);
       else if (heldAt !== undefined && checkable) checkPredicted(asked, from, to, diff, alive, `${read}-check`, heldAt);
     }, (error) => {
+      landed = true;
       if (!alive()) return;
       reading = false;
       if (again) return;
+      // The clone's names drawn stand, as a prediction the source did not confirm.
+      if (!counted && filesFor === asked) return;
       fail(error);
       files = null;
     });
@@ -458,7 +503,10 @@
             if (heldAt === undefined) predicted = { section: asked, checked: true };
           } else {
             files = fresh.files;
-            if (fillAt !== null) fillAt = fillEnds(fresh, from, to);
+            if (fillAt !== null) {
+              const at = fillEnds(fresh, from, to);
+              if (fillAt.base !== at.base || fillAt.head !== at.head) fillAt = at;
+            }
             cut = fresh.truncated;
             range = fresh.range;
             predicted = null;
@@ -795,7 +843,7 @@
             <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
           {/if}
           {#key `${filesFor}\n${range?.base}\n${range?.head}`}
-            <TfDiffView {files} {cut} {context} {fill} openAt={head === null ? null : { entityId: repoId, at: head }} />
+            <TfDiffView {files} {cut} {context} {fill} {counted} openAt={head === null ? null : { entityId: repoId, at: head }} />
           {/key}
         {/if}
       </TfWaiting>

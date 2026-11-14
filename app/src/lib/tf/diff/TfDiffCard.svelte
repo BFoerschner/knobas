@@ -107,6 +107,7 @@
     onpipeline = () => {},
     place = null,
     waiting = false,
+    counted = true,
     more = null,
     onmore = () => {},
     failedLines = null,
@@ -151,6 +152,8 @@
     place?: Attachment<HTMLDivElement> | null;
     /** Its lines are being read (the view's `fill`): the card holds their room until they come. */
     waiting?: boolean;
+    /** Its counts are known: false for a file of a list of names alone (Compare's first draw), whose `+N −N` waits empty. */
+    counted?: boolean;
     /** Where the next page of its lines starts, while one is still to be read; `onmore` reads it, as the card's end nears the view. */
     more?: number | null;
     onmore?: () => void;
@@ -483,7 +486,7 @@
     >
     <span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}" title={file.change}>{badge}</span>
     <span class="tf-mono">{old ? `${old} → ${shownPath}` : shownPath}</span>{#if shownHow !== null}<span class="tf-state">{shownHow}</span>{/if}
-    {#if file.change !== "binary"}
+    {#if file.change !== "binary" && counted}
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>
     {/if}

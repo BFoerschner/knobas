@@ -122,6 +122,7 @@
     tools = null,
     me = null,
     fill = null,
+    counted = true,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -161,10 +162,20 @@
      * its end does. None: `files` carry their lines.
      */
     fill?: DiffFill | null;
+    /**
+     * The files carry their counts. False for a list of names alone (Compare's first draw, the stored-compare pass,
+     * 2026-11-14): each file's `+N −N` waits empty in its row, and its lines are read as its card nears the view all the
+     * same, until a counted list of the same files replaces it and keeps the lines read.
+     */
+    counted?: boolean;
   } = $props();
 
   let filter = $state("");
-  const shown = $derived(files.filter((file) => matchesPath(keyOf(file), filter)));
+  const shown = $derived.by(() => {
+    const words = filter;
+    // No filter, every file: a list of thousands asked the filter of each file (the stored-compare pass, 2026-11-14).
+    return words.trim() === "" ? files : files.filter((file) => matchesPath(keyOf(file), words));
+  });
   const tree = $derived(list ? treeOf(shown) : []);
   /** The rail's order, so a file's place in the list is its place on the page. */
   const drawn = $derived(list ? tree.flatMap((row) => (row.kind === "file" ? [row.file] : [])) : files);
@@ -430,11 +441,13 @@
    * collapsed. A generated file over the *Load diff* limit starts open on its *Load diff* line, its collapsed
    * form (ruling on #2252: `src/generated/schema.rs`).
    */
-  let folds = $state<Record<string, boolean>>({});
+  // Raw, each change a new record: a proxy made a signal for every file it was asked of, 10,000 of them as a list opened (the
+  // stored-compare pass, 2026-11-14).
+  let folds = $state.raw<Record<string, boolean>>({});
   const isClosed = (file: DrawnFile) =>
     folds[keyOf(file)] ?? (isViewed(file.path) || (collapsedAtFirst(file.path) && (isLock(file.path) || !needsLoad(file))));
   /** Files over the *Load diff* limit the reader loaded. */
-  let loads = $state<Record<string, true>>({});
+  let loads = $state.raw<Record<string, true>>({});
   /** Each file by its key. */
   const byKey = $derived(new Map(files.map((file) => [keyOf(file), file] as const)));
 
@@ -443,6 +456,21 @@
    * page starts, and why a read failed. A file of a change `fill` reads has none until its card comes near the view.
    */
   let lined = $state.raw<Record<string, { file: DrawnFile; next: number | null; failed: string | null }>>({});
+  // A list that replaced the one the lines were read for (Compare's names by the counted list, the stored-compare
+  // pass): each file read keeps its lines and takes the new listing's counts, change and modes.
+  $effect.pre(() => {
+    const now = byKey;
+    untrack(() => {
+      let next: typeof lined | null = null;
+      for (const [key, got] of Object.entries(lined)) {
+        const listed = now.get(key);
+        if (listed === undefined || (listed.additions === got.file.additions && listed.deletions === got.file.deletions && listed.change === got.file.change && listed.old_mode === got.file.old_mode && listed.new_mode === got.file.new_mode)) continue;
+        next ??= { ...lined };
+        next[key] = { ...got, file: { ...listed, hunks: got.file.hunks, truncated: got.file.truncated } };
+      }
+      if (next !== null) lined = next;
+    });
+  });
   /** The reads in flight, by file, each under the name `cancelRead` calls it off by; and the files waiting for a turn. */
   const filling = new Map<string, string>();
   const queued: { key: string; from: number }[] = [];
@@ -453,7 +481,7 @@
   /** The file with the lines read so far; `file` itself where nothing is read for it. */
   const lineOf = (file: DrawnFile): DrawnFile => lined[keyOf(file)]?.file ?? file;
   /** Its lines are still to be read: the card holds their room. */
-  const waits = (file: DrawnFile) => fill !== null && lined[keyOf(file)] === undefined && file.additions + file.deletions > 0 && file.change !== "binary";
+  const waits = (file: DrawnFile) => fill !== null && lined[keyOf(file)] === undefined && (!counted || file.additions + file.deletions > 0) && file.change !== "binary";
   /** Lines the card would draw now, were they here: open, as lines, not held behind *Load diff*. */
   const wantsLines = (file: DrawnFile) =>
     !isClosed(file) && modeOf(file) === "lines" && file.change !== "binary" && (loads[keyOf(file)] === true || !needsLoad(file));
@@ -525,16 +553,24 @@
    * diff*; each card's own lines are windowed as before.
    */
   const fileWin = new Windowed({ count: () => drawn.length, key: (i) => keyOf(drawn[i]!), estimate: 120, gap: 12, estimateOf: (key) => fileRoom.get(key) ?? 120 });
-  const fileRoom = $derived(
-    new Map(
+  const fileRoom = $derived.by(() => {
+    // What each file's room reads, read once for all of them: a list of 10,000 files asked each of every file (the
+    // stored-compare pass, 2026-11-14).
+    const [filling, read, shutBy, loaded, all] = [fill !== null, lined, folds, loads, counted];
+    const viewedNow = viewedSet;
+    return new Map(
       drawn.map((file) => {
         const key = keyOf(file);
-        const lines = waits(file) ? waitingRows(file) : lineOf(file).hunks.reduce((sum, hunk) => sum + hunk.lines.length + 1, 0);
-        const shut = isClosed(file) || (needsLoad(file) && loads[key] !== true);
+        const got = read[key];
+        const waiting = filling && got === undefined && (!all || file.additions + file.deletions > 0) && file.change !== "binary";
+        const lines = waiting ? waitingRows(file) : (got?.file ?? file).hunks.reduce((sum, hunk) => sum + hunk.lines.length + 1, 0);
+        const big = needsLoad(file);
+        const closed = shutBy[key] ?? (viewedNow.has(file.path) || (collapsedAtFirst(file.path) && (isLock(file.path) || !big)));
+        const shut = closed || (big && loaded[key] !== true);
         return [key, shut ? 44 : 42 + Math.min(lines, 400_000) * 21];
       }),
-    ),
-  );
+    );
+  });
   const treeKey = (row: (typeof tree)[number]) => (row.kind === "dir" ? `dir\n${row.path}` : keyOf(row.file));
   const railWin = new Windowed({ count: () => tree.length, key: (i) => treeKey(tree[i]!), estimate: 31, scrolls: true });
 
@@ -926,7 +962,7 @@
               onclick={() => pick(file)}
               {@attach railWin.row(treeKey(row))}
               ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
-                >{#if file.change !== "binary"}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
+                >{#if file.change !== "binary" && counted}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button
             >
           {/if}
@@ -951,6 +987,7 @@
         bind:this={cards[key]}
         file={piped?.file ?? lineOf(file)}
         waiting={waits(file)}
+        {counted}
         more={got?.next ?? null}
         onmore={() => {
           if (got?.next != null) ask(key, got.next);

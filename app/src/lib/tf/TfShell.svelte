@@ -53,7 +53,7 @@
   import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
   import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
   import { defaultPipeline } from "../render/defaults";
-  import { installPipelines } from "./diff/piped";
+  import { installPipelines, type DiffPipeline } from "./diff/piped";
   import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -569,10 +569,20 @@
 
   // Every diff's default pipeline per file (#2270) is the viewer's (#2265): read from the held stores at each ask, so a
   // pipeline edited in Settings, or a default saved from the viewer, reaches the diffs too. Installed once.
+  // Each path's answer is kept until either list is replaced (each change replaces it whole): a compare of 10,000 files
+  // asked it of every file each time its list landed (the stored-compare pass, 2026-11-14).
+  let pipelineAnswers: { defaults: unknown; pipelines: unknown; by: Map<string, DiffPipeline | null> } = { defaults: null, pipelines: null, by: new Map() };
   installPipelines({
     of: (path) => {
-      const found = defaultPipeline(path, heldDefaults.list, heldPipelines.list);
-      return found === null ? null : { name: found.pipeline.name, pattern: found.pattern, steps: found.pipeline.steps };
+      const [defaults, pipelines] = [heldDefaults.list, heldPipelines.list];
+      if (pipelineAnswers.defaults !== defaults || pipelineAnswers.pipelines !== pipelines) pipelineAnswers = { defaults, pipelines, by: new Map() };
+      const kept = pipelineAnswers.by.get(path);
+      if (kept !== undefined) return kept;
+      const found = defaultPipeline(path, defaults, pipelines);
+      const answer = found === null ? null : { name: found.pipeline.name, pattern: found.pattern, steps: found.pipeline.steps };
+      if (pipelineAnswers.by.size >= 50_000) pipelineAnswers.by.clear();
+      pipelineAnswers.by.set(path, answer);
+      return answer;
     },
   });
 

@@ -68,8 +68,17 @@ export function isGenerated(path: string): boolean {
   return GENERATED.test(path);
 }
 
+/** Each path's answer, kept: a list of 10,000 files asks every one of them each time it is drawn or filled. */
+const atFirst = new Map<string, boolean>();
+
 export function collapsedAtFirst(path: string): boolean {
-  return isLock(path) || isGenerated(path);
+  let shut = atFirst.get(path);
+  if (shut === undefined) {
+    if (atFirst.size >= 50_000) atFirst.clear();
+    shut = isLock(path) || isGenerated(path);
+    atFirst.set(path, shut);
+  }
+  return shut;
 }
 
 export function needsLoad(file: DiffFile): boolean {

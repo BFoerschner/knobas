@@ -596,6 +596,8 @@ export function handlers(): Handlers {
       const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
       return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, args["ignoreWhitespace"] === true));
     },
+    // The fake checkouts list their compares whole: Compare reads the list as before.
+    entity_range_names: () => null,
     entity_source_range_files: (args) => {
       const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
       return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, false));

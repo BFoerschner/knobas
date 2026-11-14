@@ -72,6 +72,7 @@
     RangeDiff,
     RangeFilePage,
     RangeFiles,
+    RangeNames,
     RefusedWrite,
     RepoBuilds,
     RunRow,
@@ -139,6 +140,8 @@
     sourceRangeFiles?: (entityId: string, base: string, head: string, read: string) => Promise<RangeFiles>;
     /** Calls off a named read at the backend (the compare pass). */
     cancelRead?: (read: string) => Promise<boolean>;
+    /** A compare's file names at the clone, no counts, `null` where it cannot say (the stored-compare pass, 2026-11-14): drawn while `rangeFiles` reads. */
+    rangeNames?: (entityId: string, base: string, head: string) => Promise<RangeNames | null>;
   }
 
   /**
@@ -182,6 +185,7 @@
     entityRangeFile,
     entityRangeFiles,
     entitySourceRangeFiles,
+    entityRangeNames,
     cancelRead,
     entityCommitDiff,
     entityLocalFile,
@@ -293,6 +297,7 @@
       rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
       sourceRangeFiles: (entityId, base, head, read) => entitySourceRangeFiles(entityId, base, head, read),
       cancelRead: (read) => cancelRead(read),
+      rangeNames: (entityId, base, head) => entityRangeNames(entityId, base, head),
     },
     now: fixedNow,
   }: {

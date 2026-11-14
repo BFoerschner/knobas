@@ -105,7 +105,7 @@ describe("the answer cache", () => {
     // The compare pass (2026-11-13): a diff of thousands of files reads a file's lines per card, and dropped every kept
     // answer each time; so did the check behind a predicted compare.
     await ask("docs_outline");
-    for (const cmd of ["entity_range_files", "entity_range_file", "entity_source_range_files", "entity_source_range_diff", "cancel_read"]) await ask(cmd, { read: "r" });
+    for (const cmd of ["entity_range_files", "entity_range_file", "entity_source_range_files", "entity_source_range_diff", "cancel_read", "entity_range_names"]) await ask(cmd, { read: "r" });
     await ask("docs_outline");
     expect(asked("docs_outline")).toBe(1);
   });
