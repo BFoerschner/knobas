@@ -164,6 +164,15 @@ impl Source for Forge {
         cap: u64,
     ) -> Result<Option<TreeRead>, SourceError> {
         self.asked.lock().unwrap().trees.push(commit.to_owned());
+        if commit == sha(0xee) {
+            return Err(SourceError::Unreachable("503 after its retries".to_owned()));
+        }
+        if commit == sha(0xdd) {
+            return Err(SourceError::Protocol {
+                status: Some(404),
+                message: "no such commit".to_owned(),
+            });
+        }
         if commit == sha(0xbb) {
             return Ok(Some(TreeRead::TooLarge {
                 entries: cap + 1,
@@ -678,6 +687,47 @@ async fn a_moved_branch_or_one_past_the_cap_is_read_from_the_forge() {
     );
     let wire = serde_json::to_value(&shown).unwrap();
     assert_eq!(wire["tree_unkept"], knobas_sync::stored_trees::TREE_CAP + 1);
+}
+
+/// A forge that does not answer stops the pass at its first failed read,
+/// which counts against the run's requests: every branch left for the next
+/// run, none read meanwhile. (The live pass, 2026-11-14: the pass skipped
+/// each failed branch uncounted, so a forge refusing tree reads was asked
+/// three times a branch, every branch, for the whole minute of every run.)
+/// A branch whose commit the forge does not have is that branch's failure:
+/// it is skipped and the rest are read.
+#[tokio::test]
+async fn a_forge_that_does_not_answer_stops_the_pass_and_a_missing_commit_skips_its_branch() {
+    let f = fixture().await;
+    f.move_branch("main", 0xee).await;
+    let filled = f.refresh().await;
+    assert_eq!(
+        f.trees_asked(),
+        [sha(0xee)],
+        "main first, and nothing after it"
+    );
+    assert_eq!(filled.requests, 1, "the failed read counted");
+    assert_eq!(filled.left, 4, "every owed branch left for the next run");
+    assert_eq!(filled.branches, 0);
+    assert!(f.rows().await.is_empty());
+
+    f.move_branch("main", 0xdd).await;
+    let filled = f.refresh().await;
+    assert_eq!(
+        f.trees_asked(),
+        [sha(0xdd), sha(0xc2), sha(0xc1), sha(0xc2)],
+        "main's missing commit skipped, the rest read"
+    );
+    assert_eq!(filled.branches, 3);
+    assert_eq!(filled.left, 0);
+    assert_eq!(
+        f.rows()
+            .await
+            .iter()
+            .map(|r| r.0.as_str())
+            .collect::<Vec<_>>(),
+        ["feat", "old", "stale"]
+    );
 }
 
 /// No index of the new tables holds a column a stamp moves.

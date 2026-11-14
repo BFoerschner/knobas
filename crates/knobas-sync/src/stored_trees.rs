@@ -201,7 +201,19 @@ pub async fn refresh_within(
                 }
                 // This adapter reads no tree.
                 Ok(Ok(None)) => break,
+                // The read failed after at least one request. A forge that
+                // is down, refuses the credential or is overloaded fails
+                // every branch alike: the pass stops and the next run tries
+                // again, rather than asking it (three times, with the
+                // client's retries) for every branch until the budget ends.
+                // A failure about this branch (its commit gone) skips it.
                 Ok(Err(error)) => {
+                    filled.requests += 1;
+                    if forge_failed(&error) {
+                        tracing::debug!(source_id, branch = branch.entity_id, %error, "the forge did not answer a tree; the pass stops");
+                        filled.left = 1 + owed.len();
+                        break;
+                    }
                     tracing::debug!(source_id, branch = branch.entity_id, %error, "a branch's tree was not read");
                     continue;
                 }
@@ -280,6 +292,20 @@ pub async fn refresh_within(
         tracing::debug!(source_id, ?filled, "stored trees");
     }
     Ok(filled)
+}
+
+/// Whether a failed tree read says the forge is not answering at all (down,
+/// the credential refused, a server error, too many requests), as opposed to
+/// a failure of the one branch (a commit it no longer has).
+fn forge_failed(error: &knobas_source::SourceError) -> bool {
+    use knobas_source::SourceError;
+    match error {
+        SourceError::Unreachable(_)
+        | SourceError::Unauthorized { .. }
+        | SourceError::Unconfirmed { .. } => true,
+        SourceError::Protocol { status, .. } => status.is_some_and(|s| s == 429 || s >= 500),
+        SourceError::Sink(_) | SourceError::Moved { .. } => false,
+    }
 }
 
 /// Each new level's entries in all, bottom up (its own and every level's
