@@ -4,7 +4,7 @@
 # its first visit, its return, its return after every other section, and its return after a sync, and fails when an
 # open's first useful frame or its settling is over its line in `budget-open.json`, or a row moved after it drew.
 #
-#   testenv/perf/open-budget.sh --real <port> [--inner] [--forge <ms>] [--syncing <source>] [--throttle 1,4]
+#   testenv/perf/open-budget.sh --real <port> [--inner] [--forge <ms>] [--syncing <source>] [--throttle 1,4,6]
 #                               [--only a,b] [--out <dir>]
 #
 # --real <port>  the windowless backend on the saved scale database (examples/headless_ipc.rs); the places are its
@@ -23,7 +23,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4" only="" out="" inner="" forge="" syncing="" extremes="" keep=""
+real="" throttle="" only="" out="" inner="" forge="" syncing="" extremes="" keep=""
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
@@ -38,6 +38,9 @@ while [ $# -gt 0 ]; do
     *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
+# The nav pages at 1x, 4x and 6x (Björn's three lines, 2026-11-14); the live-forge sets at 1x and 4x, the throttles
+# their items name (`inner-items.json`).
+[ -n "$throttle" ] || { if [ -n "$inner$extremes" ]; then throttle="1,4"; else throttle="1,4,6"; fi; }
 [ -n "$real" ] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ -z "$extremes" ] || [ -z "$inner" ] || { echo "open-budget: --extremes and --inner are two runs" >&2; exit 2; }
 [ -z "$forge" ] || [ -n "$inner" ] || { echo "open-budget: --forge measures the inner pages: add --inner" >&2; exit 2; }
@@ -49,6 +52,9 @@ port=${KNOBAS_PERF_PORT:-5362}
 KNOBAS_PERF=1 "$root/testenv/ui-checks/build-app.sh" "$root" "$out/app" || exit 1
 url="http://127.0.0.1:$port/?fake-ipc&fake-hooks&fake-real=$real#/time"
 set_args=() lines=real
+# open.mjs gives up after 45 minutes unless told otherwise; the nav pages at 1x, 4x and 6x outran that (2026-11-14), so they
+# get 45 a throttle.
+[ -n "$inner$extremes$forge" ] || set_args=(--max-minutes $((45 * $(echo "$throttle" | tr ',' '\n' | grep -c .))))
 if [ -n "$inner" ]; then
   set_args=(--set inner --rounds "first,return,synced")
   lines=inner

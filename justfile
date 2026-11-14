@@ -1333,14 +1333,14 @@ responsiveness-probe:
 
 # The frame budget (PR #2479, `testenv/perf/README.md`): builds the app as the probes measure it (`KNOBAS_PERF=1`: a
 # development build for `?fake-ipc`, with Svelte's runtime as released), drives it in a headless Chrome with the main
-# thread slowed 1x and 4x, and fails when a list scrolls, a filter key paints or a page switches slower than its line in
+# thread slowed 1x, 4x and 6x, and fails when a list scrolls, a filter key paints or a page switches slower than its line in
 # `testenv/perf/budget.json`, or when a box that scrolls has no opaque background. On the fixture at scale by default;
 # `--real <port>` runs it on the windowless backend over a saved database (`examples/headless_ipc.rs`).
 frame-budget *args:
     testenv/perf/frame-budget.sh {{args}}
 
 # The open budget (the instant-open pass of PR #2479, 2026-11-12, `testenv/perf/README.md`): presses every page's nav
-# entry or row in a headless Chrome at 1x and 4x, on its first visit, its return, its return after every other section
+# entry or row in a headless Chrome at 1x, 4x and 6x, on its first visit, its return, its return after every other section
 # and its return after a sync, and fails when its first useful frame or its settling is over its line in
 # `testenv/perf/budget-open.json`, or a row moved after it drew. On the windowless backend over the saved scale
 # database: `just open-budget --real <port>`. `--inner` presses a repository's tabs, files, a commit, Compare, a pull
@@ -1353,7 +1353,7 @@ open-budget *args:
 
 # The keys budget (the broad-filters pass of PR #2479, 2026-11-13, `testenv/perf/README.md`): presses the keys that keep
 # most of a page, Tickets' first letter, a `-project:` and a `-priority:`, and a single letter under Everything, as real
-# input in a headless Chrome at 1x and 4x, and fails when the rows a key asks for draw later than their line in
+# input in a headless Chrome at 1x, 4x and 6x, and fails when the rows a key asks for draw later than their line in
 # `testenv/perf/budget-keys.json` or anything drawn moves. On the saved scale database: `just keys-budget --real <port>`.
 keys-budget *args:
     testenv/perf/keys-budget.sh {{args}}

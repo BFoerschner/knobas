@@ -1,5 +1,5 @@
 {
- "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend. `long` is long.mjs's (the monitors-builds pass, 2026-11-12): Monitors shown while every source's run ends every 5 s, then kept hidden behind the Inbox. A hover is its handlers and the frame that draws it, not the wait for that frame; the 4x line is 33 ms. The real ipcP95 is a debug backend's. On the fixture the long lines hold growth and hovers only: the fixture answers each read with a query engine of its own in the page, so its main-thread time a minute and its long tasks are the fixture's work at every run's end, not the app's (on ff7b8f88, 1,763 ms a minute with a 109 ms task on the fixture against 628 and none over the saved database).",
+ "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend. `long` is long.mjs's (the monitors-builds pass, 2026-11-12): Monitors shown while every source's run ends every 5 s, then kept hidden behind the Inbox. A hover is its handlers and the frame that draws it, not the wait for that frame; the 4x line is 33 ms. The real ipcP95 is a debug backend's. On the fixture the long lines hold growth and hovers only: the fixture answers each read with a query engine of its own in the page, so its main-thread time a minute and its long tasks are the fixture's work at every run's end, not the app's (on ff7b8f88, 1,763 ms a minute with a 109 ms task on the fixture against 628 and none over the saved database). The render-cost pass (2026-11-14) added Björn's standing 6x line: scrolling with no visible stall (a list at 55 frames a second or more, no task over 60 ms, as at 4x), a key painted within 200 ms and a page switch within 300; docs/decisions/2026-11-14-what-a-page-costs-to-build.md.",
  "real": {
   "scroll": {
    "tickets-board": {
@@ -7,6 +7,10 @@
      "fps": 58
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -19,6 +23,10 @@
     "4": {
      "fps": 55,
      "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
     }
    },
    "inbox": {
@@ -26,6 +34,10 @@
      "fps": 58
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -38,6 +50,10 @@
     "4": {
      "fps": 55,
      "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
     }
    },
    "docs-space": {
@@ -46,6 +62,10 @@
      "styleElements": 700
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -57,6 +77,10 @@
     "4": {
      "fps": 55,
      "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
     }
    },
    "builds-main": {
@@ -64,6 +88,10 @@
      "fps": 58
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -75,6 +103,10 @@
     "4": {
      "fps": 55,
      "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
     }
    },
    "pipeline-history": {
@@ -82,6 +114,10 @@
      "fps": 58
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -94,6 +130,10 @@
      "workP99": 10
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -110,26 +150,41 @@
    "tickets-board-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    },
    "tickets-board-expanded-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    },
    "tickets-list-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    },
    "code-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    },
    "monitors-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    }
   },
@@ -137,56 +192,89 @@
    "#/tickets": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/inbox": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/code": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/builds": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/docs": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/monitors": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/time": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/page/live-confluence%3A362334": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/docs/space/SCLENG": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/settings": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    }
   },
@@ -221,6 +309,10 @@
     "4": {
      "fps": 55,
      "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
     }
    },
    "inbox": {
@@ -228,6 +320,10 @@
      "fps": 58
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -238,6 +334,10 @@
      "styleElements": 700
     },
     "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
      "fps": 55,
      "longestTask": 60
     }
@@ -252,6 +352,10 @@
     "4": {
      "fps": 55,
      "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
     }
    }
   },
@@ -259,11 +363,17 @@
    "code-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    },
    "monitors-filter": {
     "4": {
      "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
     }
    }
   },
@@ -271,21 +381,33 @@
    "#/inbox": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/docs": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/monitors": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    },
    "#/settings": {
     "4": {
      "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
     }
    }
   },

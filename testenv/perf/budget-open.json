@@ -1,5 +1,5 @@
 {
- "_": "Lines for testenv/perf/open.mjs --check (just open-budget --real <port>): per place and CPU throttle, the most ms from the press to the first frame with the place's own rows and nothing waiting, on every round (first visit 6 s after start, return, return after every other section, return after every source ended a run that changed something), and how many rows may move after that frame. From the instant-open pass of PR #2479 (2026-11-12), measured in headless Chrome on an M2 Pro over the saved scale database; docs/decisions/2026-11-12-opening-a-page-draws-what-the-mirror-holds.md. 100 ms at 1x and 200 ms at 4x is the pass's aim; the measured opens sit at 4 to 60 ms at 1x and 7 to 100 ms at 4x. The Windows pass (2026-11-14) held Builds' first open drawn at 4x to 220 ms: 270 to 280 with its rail and a day of 76 runs drawn whole, 136 to 196 windowed.",
+ "_": "Lines for testenv/perf/open.mjs --check (just open-budget --real <port>): per place and CPU throttle, the most ms from the press to the first frame with the place's own rows and nothing waiting, on every round (first visit 6 s after start, return, return after every other section, return after every source ended a run that changed something), and how many rows may move after that frame. From the instant-open pass of PR #2479 (2026-11-12), measured in headless Chrome on an M2 Pro over the saved scale database; docs/decisions/2026-11-12-opening-a-page-draws-what-the-mirror-holds.md. 100 ms at 1x and 200 ms at 4x is the pass's aim; the measured opens sit at 4 to 60 ms at 1x and 7 to 100 ms at 4x. The Windows pass (2026-11-14) held Builds' first open drawn at 4x to 220 ms: 270 to 280 with its rail and a day of 76 runs drawn whole, 136 to 196 windowed. The render-cost pass (2026-11-14) made 6x a standing line with Björn: every place usable and drawn within 300 ms at CPU 6x (drawnMs, the frame after the useful one, by which it is on screen), measured at 1x, 4x and 6x by default; docs/decisions/2026-11-14-what-a-page-costs-to-build.md.",
  "real": {
   "inbox": {
    "1": {
@@ -8,6 +8,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -19,6 +24,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "ticket-preview": {
@@ -28,6 +38,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -39,6 +54,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "code": {
@@ -48,6 +68,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -59,6 +84,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "pull-request": {
@@ -68,6 +98,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -79,6 +114,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "docs-space": {
@@ -88,6 +128,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -99,6 +144,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "docs-page-back": {
@@ -108,6 +158,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -120,6 +175,11 @@
     "usefulMs": 200,
     "moved": 0,
     "drawnMs": 220
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "pipeline": {
@@ -129,6 +189,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -140,6 +205,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "monitors": {
@@ -149,6 +219,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -160,6 +235,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "time": {
@@ -169,6 +249,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   },
@@ -180,6 +265,11 @@
    "4": {
     "usefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
    }
   },
   "launcher": {
@@ -189,6 +279,11 @@
    },
    "4": {
     "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
     "moved": 0
    }
   }

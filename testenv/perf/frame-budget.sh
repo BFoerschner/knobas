@@ -3,7 +3,7 @@
 # length of the run, drives it in a headless Chrome at each throttle, and fails when a list, a key or a page switch is
 # over its line in budget.json, or when a box that scrolls has no opaque background.
 #
-#   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4] [--only a,b | --all] [--out <dir>]
+#   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4,6] [--only a,b | --all] [--out <dir>]
 #
 # By default the lists and moments the smoothness targets name (`only` below, about 15 minutes); --all runs every
 # scenario of run.mjs, an hour or more on the fixture, whose own query engine runs in the page.
@@ -16,7 +16,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4" out=""
+real="" throttle="1,4,6" out=""
 only="monitors,code-prs,tickets-list,inbox,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings"
 while [ $# -gt 0 ]; do
   case $1 in

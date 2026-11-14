@@ -4,9 +4,27 @@ How smooth the app is, measured instead of felt, from the two smoothness reports
 WebView2 with the main thread slowed to stand in for a slower laptop, and the Mac in WKWebView at 120 Hz. Rulings in
 `docs/decisions/2026-11-11-smooth-on-slow-laptops.md`.
 
+## The speed targets (Björn, 2026-11-14)
+
+Three throttles, one weight each. On the saved scale database in headless Chrome, with the page's main thread slowed:
+
+| CPU | A page usable after its press | A key's rows drawn | Scrolling |
+|---|---|---|---|
+| 1x | 100 ms | 100 ms | the display's rate |
+| 4x | 200 ms | 200 ms | 55 frames a second, no task over 60 ms |
+| 6x, a slow work laptop | 300 ms, drawn | 200 ms | no visible stall: 55 frames a second, no task over 60 ms |
+
+`just open-budget --real`, `just keys-budget --real` and `just frame-budget` run all three by default and hold them
+(`budget-open.json`, `budget-keys.json`, `budget.json`); a pass that changes what the app draws runs them. At 6x an open is
+held by when it is drawn (`drawnMs`), not only when its first useful frame starts, since a long task after the rows
+holds the frame that shows them. The inner pages and the extremes (`--inner`, `--extremes`) stay at 1x and 4x: their
+items are per throttle and live on the forge, and a 6x round of them is the next pass on the live products. Windows runs
+the same pages in about twice the Mac's time (the Windows pass, 2026-11-14), so a line met with little room on the Mac
+is a line missed on a slow Windows laptop; `docs/decisions/2026-11-14-what-a-page-costs-to-build.md` has the numbers.
+
 ## `just frame-budget`
 
-Builds the app as the probes measure it, serves it on loopback, drives it in a headless Chrome at 1x and 4x, and
+Builds the app as the probes measure it, serves it on loopback, drives it in a headless Chrome at 1x, 4x and 6x, and
 fails when something is over its line in `budget.json` or a box that scrolls has no opaque background:
 
 ```sh
@@ -300,7 +318,7 @@ backend's own `--timings` splits `answered` into what it spent and what the IPC 
 what the app runs, and its number, not a debug build's, is the one the lines hold.
 
 The 1x lines are Björn's 100 ms since the broad-keys pass of the same day (90 for `-priority:`), the 4x lines 200,
-over the median of seven presses a case. They were measured at 71, 83, 64 and 91 ms with other agents' test runs and
+and since the render-cost pass (2026-11-14) the 6x lines 200 too, over the median of seven presses a case. They were measured at 71, 83, 64 and 91 ms with other agents' test runs and
 browsers on the machine, and a press feels that: a letter's backend read was 54 ms asked alone and 65 to 75 during a
 run, and one letter under *Everything*, which ranks its matches on four processes, slows most when something else has
 the cores. Read a miss of a few ms against the machine's load and the backend's `--timings` before the code.
