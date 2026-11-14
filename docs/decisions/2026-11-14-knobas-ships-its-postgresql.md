@@ -110,6 +110,14 @@ Two measurements on the PC would say whether to reopen it or do something smalle
 
 The 85 migrations from scratch cost 0.2 s and the background fills find nothing to fill, so neither is worth a change.
 
+## Not taken: a trimmed archive
+
+The Windows archive unpacks to 164 MB in 2,973 files, and the server uses perhaps half of it. ICU's data is 32 MB, and
+StackBuilder's wxWidgets libraries, the C headers, the import libraries and 24 MB of message catalogues come along
+unused. An archive repacked without them would shrink both Windows installers and the 1.6 s unpack. I kept upstream's
+bytes: one pinned hash covers what ships, the unpacked tree is the one every test has run on, and a keep-list for
+Windows can only be proven on Windows. Worth a ticket once the Windows number is in.
+
 ## Moving PostgreSQL to another version
 
 Change `PG_VERSION_REQ` in `knobas-db` and the three lines of `archives.sha256`. A test in `knobas-app` fails while
