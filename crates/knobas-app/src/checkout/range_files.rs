@@ -107,7 +107,12 @@ pub struct RangeNames {
 }
 
 impl RangeNames {
-    fn of(files: &[DiffFile], truncated: bool, range: knobas_source::view::DiffRange, predicted_at: String) -> Self {
+    fn of(
+        files: &[DiffFile],
+        truncated: bool,
+        range: knobas_source::view::DiffRange,
+        predicted_at: String,
+    ) -> Self {
         let mut names = RangeNames {
             paths: Vec::with_capacity(files.len()),
             changes: String::with_capacity(files.len()),
@@ -505,7 +510,10 @@ pub async fn range_names(
         branch_tip(pool, registry, &repo, head)
     );
     let (base_tip, head_tip) = (base_tip.ok()??, head_tip.ok()??);
-    let (a, b) = (base_tip.commit.to_ascii_lowercase(), head_tip.commit.to_ascii_lowercase());
+    let (a, b) = (
+        base_tip.commit.to_ascii_lowercase(),
+        head_tip.commit.to_ascii_lowercase(),
+    );
     if !whole(&a) || !whole(&b) {
         return None;
     }
@@ -522,7 +530,10 @@ pub async fn range_names(
         );
         Some((from?, named?))
     };
-    let (from, (files, truncated)) = tokio::time::timeout(super::range::TIMEOUT, all).await.ok().flatten()?;
+    let (from, (files, truncated)) = tokio::time::timeout(super::range::TIMEOUT, all)
+        .await
+        .ok()
+        .flatten()?;
     let predicted_at = match (base_tip.as_of, head_tip.as_of) {
         (Some(x), Some(y)) => Some(x.max(y)),
         (x, y) => x.or(y),
@@ -574,9 +585,13 @@ pub fn parse_raw(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
             continue;
         };
         let mut parts = meta.split(' ');
-        let (Some(old_mode), Some(new_mode), Some(old_blob), Some(new_blob), Some(status)) =
-            (parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
-        else {
+        let (Some(old_mode), Some(new_mode), Some(old_blob), Some(new_blob), Some(status)) = (
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+        ) else {
             dropped = true;
             break;
         };
@@ -827,7 +842,11 @@ fn listed_key(path: &Path, base: &str, head: &str, ignore_whitespace: bool) -> S
 
 impl Listed {
     fn has(&self, key: &str) -> bool {
-        self.0.lock().expect("the kept lists").iter().any(|(k, _)| k == key)
+        self.0
+            .lock()
+            .expect("the kept lists")
+            .iter()
+            .any(|(k, _)| k == key)
     }
 
     fn get(&self, key: &str) -> Option<LocalStat> {
@@ -1543,17 +1562,29 @@ mod tests {
         let range = format!("{base}...{head}");
         let (named, cut) = names(&git, p, &range).await.expect("the clone answers");
         assert!(!cut);
-        let (counted, _) = listing(&git, p, &range, None, false).await.expect("the clone answers");
+        let (counted, _) = listing(&git, p, &range, None, false)
+            .await
+            .expect("the clone answers");
         let less = |f: &DiffFile| DiffFile {
             additions: 0,
             deletions: 0,
             // Only the counts say a file is binary: its change as the raw record names it.
-            change: if f.change == DiffChange::Binary { DiffChange::Modified } else { f.change },
+            change: if f.change == DiffChange::Binary {
+                DiffChange::Modified
+            } else {
+                f.change
+            },
             ..f.clone()
         };
         assert_eq!(named, counted.iter().map(less).collect::<Vec<_>>());
         // And on the wire, as the page makes each file of it again (`names.ts`): the counted list less its counts and blobs.
-        let range = knobas_source::view::DiffRange { repository: "r".into(), base: base.clone(), head: head.clone(), commits: Vec::new(), reviewed: None };
+        let range = knobas_source::view::DiffRange {
+            repository: "r".into(),
+            base: base.clone(),
+            head: head.clone(),
+            commits: Vec::new(),
+            reviewed: None,
+        };
         let wire = RangeNames::of(&named, false, range, String::new());
         let made: Vec<DiffFile> = wire
             .paths
@@ -1585,13 +1616,30 @@ mod tests {
                 }
             })
             .collect();
-        assert_eq!(made, counted.iter().map(|f| DiffFile { blob: None, ..less(f) }).collect::<Vec<_>>());
-        assert!(named.iter().any(|f| f.change == DiffChange::Renamed && f.similarity.is_some_and(|s| s < 100)), "an edited rename is paired too");
+        assert_eq!(
+            made,
+            counted
+                .iter()
+                .map(|f| DiffFile {
+                    blob: None,
+                    ..less(f)
+                })
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            named
+                .iter()
+                .any(|f| f.change == DiffChange::Renamed && f.similarity.is_some_and(|s| s < 100)),
+            "an edited rename is paired too"
+        );
         // A cut read drops the record it may have stopped inside.
         let out = b":100644 100644 aaaaaaa bbbbbbb M\0a.txt\0:100644 100644 ccccccc ddddddd M\0b.t";
         let (files, dropped) = parse_raw(out, true);
         assert!(dropped);
-        assert_eq!(files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["a.txt"]);
+        assert_eq!(
+            files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            ["a.txt"]
+        );
     }
 
     #[test]
