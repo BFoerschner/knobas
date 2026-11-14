@@ -216,3 +216,25 @@ describe("the answer cache", () => {
     expect(asked("docs_outline")).toBe(2);
   });
 });
+
+describe("a kept answer's copy", () => {
+  it("is the answer, every level its own, and a value JSON never holds is cloned", async () => {
+    const { copy } = await import("./answer-cache");
+    const when = new Date(0);
+    const answer = { rows: [{ id: 1, tags: ["a", "b"], open: true, gone: null }, { id: 2, tags: [], open: false, gone: null }], total: 2, when };
+    const got = copy(answer);
+    expect(got).toEqual(answer);
+    expect(got).not.toBe(answer);
+    expect(got.rows).not.toBe(answer.rows);
+    expect(got.rows[0]).not.toBe(answer.rows[0]);
+    expect(got.rows[0]!.tags).not.toBe(answer.rows[0]!.tags);
+    expect(got.when).not.toBe(when);
+    expect(got.when.getTime()).toBe(0);
+    got.rows[0]!.tags.push("c");
+    got.rows.sort((a, b) => b.id - a.id);
+    expect(answer.rows.map((row) => row.id)).toEqual([1, 2]);
+    expect(answer.rows[0]!.tags).toEqual(["a", "b"]);
+    expect(copy("text")).toBe("text");
+    expect(copy(null)).toBeNull();
+  });
+});

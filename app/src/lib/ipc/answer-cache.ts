@@ -264,9 +264,26 @@ function rolesFor(cmd: string, args: unknown): readonly string[] | null {
   return SCOPE[cmd] ?? null;
 }
 
-/** A copy the caller may change: a page sorting or filling in what it was handed changes nothing kept. */
-function copy<T>(value: T): T {
-  return value === null || typeof value !== "object" ? value : structuredClone(value);
+/**
+ * A copy the caller may change: a page sorting or filling in what it was handed changes nothing kept.
+ *
+ * An answer is JSON off the bridge (objects, arrays, strings, numbers, booleans, null), so it is copied as JSON, by
+ * walking it: V8 does that five to eight times faster than `structuredClone`, which keeps shared references and
+ * every type a JSON answer never holds (the render-cost pass, 2026-11-14: a 5 MB Docs page's answer took 38.7 ms to
+ * clone at 1x and 4.7 to walk, Builds' 571 KB of pipelines 1.6 and 0.3, and every kept read is copied when it lands
+ * and again on each open that finds it). Anything else in it (a test's `Date`) is still cloned.
+ */
+export function copy<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    const out = new Array<unknown>(value.length);
+    for (let i = 0; i < value.length; i++) out[i] = copy(value[i]);
+    return out as T;
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype) return structuredClone(value);
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) out[key] = copy((value as Record<string, unknown>)[key]);
+  return out as T;
 }
 
 /** The last drops and what made them, for a probe (`window.__knobasAnswers`). */
