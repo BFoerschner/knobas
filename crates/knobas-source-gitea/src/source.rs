@@ -683,6 +683,56 @@ impl Source for GiteaSource {
         }
     }
 
+    /// Every branch's tree is stored (the stored-trees pass of PR #2479):
+    /// where the records keep the default branch, a branch's head and a
+    /// pull request's head branch.
+    fn tree_shape(&self) -> Option<knobas_source::tree::TreeShape> {
+        Some(knobas_source::tree::TreeShape {
+            repository: crate::KIND_REPO,
+            default_branch: &["default_branch"],
+            branch: crate::KIND_BRANCH,
+            branch_name: &["name"],
+            branch_commit: &["commit", "id"],
+            pull: Some(knobas_source::tree::PullShape {
+                kind: crate::KIND_PR,
+                head: &["head", "ref"],
+                state: &["state"],
+                open: "open",
+            }),
+        })
+    }
+
+    async fn read_tree(
+        &self,
+        repository: &str,
+        commit: &str,
+        held: &dyn knobas_source::tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<knobas_source::tree::TreeRead>, SourceError> {
+        crate::view::read_tree(self, repository, commit, held, cap)
+            .await
+            .map(Some)
+    }
+
+    fn tree_ask(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::tree::TreeAsk> {
+        crate::view::tree_ask(self, entity, section, payload)
+    }
+
+    fn tree_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tree: &knobas_source::tree::StoredTree,
+    ) -> Option<knobas_source::view::SourceView> {
+        crate::view::tree_view(self, entity, section, payload, tree)
+    }
+
     fn mirror_listing(
         &self,
         entity: &str,

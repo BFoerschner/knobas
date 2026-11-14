@@ -15,6 +15,7 @@ mod contract;
 mod grants;
 mod refresh;
 mod source_action;
+mod stored_tree;
 mod sync;
 mod sync_concurrent;
 mod sync_moving;

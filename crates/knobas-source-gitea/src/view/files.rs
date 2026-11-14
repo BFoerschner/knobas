@@ -1064,9 +1064,484 @@ fn trail(at: &At<'_>, path: &str, is_file: bool) -> Vec<Crumb> {
     crumbs
 }
 
+/// What a section of a branch's or repository's tree draws from a stored
+/// tree (the stored-trees pass of PR #2479): the branch it is read through
+/// (a repository's default, by its record), the commit its id names, and the
+/// place. A file, and a commit's tree, are not drawn from it.
+pub(super) fn stored_ask(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    of: Of<'_>,
+    id: &str,
+    payload: &serde_json::Value,
+) -> Option<knobas_source::tree::TreeAsk> {
+    use knobas_source::tree::{TreeAsk, TreePlace};
+    let named = Named::parse(id)?;
+    let place = match named.place {
+        Place::Dir(dir) => TreePlace::Dir(dir.to_owned()),
+        Place::Every => TreePlace::Every,
+        Place::File(_) => return None,
+    };
+    let branch = match of {
+        Of::Branch(branch) => branch.to_owned(),
+        Of::Repository => serde_json::from_value::<RepoRecord>(payload.clone())
+            .ok()?
+            .default_branch()
+            .to_owned(),
+        Of::Commit(_) => return None,
+    };
+    Some(TreeAsk {
+        branch: knobas_core::entity::EntityRef::new(
+            &source.id,
+            &crate::keys::branch_key(owner, repo, &branch),
+        )
+        .to_string(),
+        commit: named.sha.map(str::to_owned),
+        place,
+    })
+}
+
+/// The section `id` of a branch's or repository's tree drawn from `tree`, as
+/// [`read`] draws it from Gitea at the same commit: a directory's listing
+/// from its stored level ([`listing`], the entries a level of `git/trees`
+/// answers), every file from the stored levels in git's recursive order
+/// ([`every`]). `None` where the id names another commit or the levels do
+/// not hold the place.
+pub(super) fn stored_view(
+    of: Of<'_>,
+    id: &str,
+    tree: &knobas_source::tree::StoredTree,
+    payload: &serde_json::Value,
+) -> Option<ViewSection> {
+    let named = Named::parse(id)?;
+    if named.sha.is_some_and(|sha| sha != tree.commit) {
+        return None;
+    }
+    let sha = tree.commit.as_str();
+    let at = match (of, named.sha) {
+        (Of::Branch(branch), _) => At {
+            sha,
+            name: branch.to_owned(),
+            branch: Some(branch),
+            in_ids: true,
+        },
+        (Of::Repository, Some(_)) => At {
+            sha,
+            name: super::short(sha),
+            branch: None,
+            in_ids: true,
+        },
+        (Of::Repository, None) => At {
+            sha,
+            name: serde_json::from_value::<RepoRecord>(payload.clone())
+                .ok()?
+                .default_branch()
+                .to_owned(),
+            branch: None,
+            in_ids: true,
+        },
+        (Of::Commit(_), _) => return None,
+    };
+    let block = match named.place {
+        Place::Dir(dir) => {
+            let found = tree
+                .dir(dir)?
+                .iter()
+                .map(|item| (item.name.clone(), stored_kind(item), item.size))
+                .collect();
+            listing(
+                &at,
+                dir,
+                found,
+                web(tree.repository_url.as_deref(), sha, dir),
+                false,
+            )
+        }
+        Place::Every => {
+            let entries = tree
+                .walk()?
+                .into_iter()
+                .filter(|(_, item)| {
+                    !matches!(stored_kind(item), EntryKind::Dir | EntryKind::Submodule)
+                })
+                .map(|(path, item)| TreeEntry {
+                    section: Some(at.id(Place::File(&path))),
+                    kind: stored_kind(item),
+                    size: Some(item.size),
+                    name: path,
+                })
+                .collect();
+            Block::Tree {
+                trail: trail(&at, "", false),
+                entries,
+                truncated: false,
+                url: None,
+                paths: None,
+                commit: Some(sha.to_owned()),
+                read_alone: None,
+            }
+        }
+        Place::File(_) => return None,
+    };
+    Some(ViewSection {
+        id: id.to_owned(),
+        title: "Files".to_owned(),
+        count: None,
+        deferred: false,
+        blocks: vec![block],
+    })
+}
+
+/// What a listing draws a stored entry as, by its mode, as [`GitEntry::kind`]
+/// draws Gitea's.
+fn stored_kind(item: &knobas_source::tree::TreeItem) -> EntryKind {
+    use knobas_source::tree::{MODE_COMMIT, MODE_SYMLINK, MODE_TREE};
+    match item.mode {
+        MODE_TREE => EntryKind::Dir,
+        MODE_COMMIT => EntryKind::Submodule,
+        MODE_SYMLINK => EntryKind::Symlink,
+        _ => EntryKind::File,
+    }
+}
+
+impl GitEntry {
+    /// The entry as a stored tree keeps it, under `name`: its mode as a
+    /// number, a directory's and a submodule's by its type where Gitea's
+    /// mode says otherwise.
+    fn stored(&self, name: &str) -> knobas_source::tree::TreeItem {
+        use knobas_source::tree::{MODE_COMMIT, MODE_TREE};
+        let mode = match self.kind.as_str() {
+            "tree" => MODE_TREE,
+            "commit" => MODE_COMMIT,
+            _ => u32::from_str_radix(&self.mode, 8).unwrap_or(0o100_644),
+        };
+        knobas_source::tree::TreeItem {
+            name: name.to_owned(),
+            mode,
+            size: self.size,
+            sha: self.sha.clone(),
+        }
+    }
+}
+
+/// The levels of the tree at `commit` the store does not hold (the
+/// stored-trees pass of PR #2479), read the cheaper of two ways:
+///
+/// * **The whole tree** (`git/trees/{commit}?recursive=true`, a request a
+///   thousand entries), for a repository the store holds nothing of yet,
+///   and where a walk would cost more requests than it: every level is in
+///   it, each directory's sha with it.
+/// * **Level by level** (`git/trees/{sha}`, one level, no `recursive`): the
+///   commit's root first, which names its sha, then only the levels under
+///   it whose sha is not held, side by side. A branch pushed with one file
+///   changed five folders down costs six requests, and one whose root is
+///   held already (a push that changed nothing, a branch made from
+///   another) costs one. A walk that finds more new levels than the whole
+///   tree has pages (by the repository's last tree, `held.estimate()`)
+///   reads the whole tree instead.
+///
+/// A tree of more than `cap` entries in all (each directory counted, as
+/// Gitea's `total_count` counts) reads no further and says so.
+pub(super) async fn read_tree(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    commit: &str,
+    held: &dyn knobas_source::tree::HeldTrees,
+    cap: u64,
+) -> Result<knobas_source::tree::TreeRead, SourceError> {
+    use knobas_source::tree::TreeRead;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let sent = AtomicU32::new(0);
+    let level_page = |sha: String, page: u32| {
+        sent.fetch_add(1, Ordering::Relaxed);
+        async move {
+            source
+                .client
+                .git_tree_level_as::<GitTree>(owner, repo, &sha, page, TREE_PAGE)
+                .await
+        }
+    };
+    let Some(estimate) = held.estimate() else {
+        return whole_levels(source, owner, repo, commit, held, cap, &sent).await;
+    };
+    let first = level_page(commit.to_owned(), 1).await?;
+    let (entries, cut) = pages(first, LEVEL_PAGES, |page| {
+        level_page(commit.to_owned(), page)
+    })
+    .await?;
+    if cut {
+        return Ok(TreeRead::TooLarge {
+            entries: entries.len() as u64,
+            requests: sent.load(Ordering::Relaxed),
+        });
+    }
+    let stored: Vec<knobas_source::tree::TreeItem> =
+        entries.iter().map(|e| e.stored(&e.path)).collect();
+    let root = tree_key(&stored)?;
+    if held.held(&root).is_some() {
+        return Ok(TreeRead::Read {
+            root,
+            levels: Vec::new(),
+            requests: sent.load(Ordering::Relaxed),
+        });
+    }
+    // The levels a walk may read before the whole tree is cheaper.
+    let budget = estimate.div_ceil(TREE_PAGE as u64) + 1;
+    let mut total = entries.len() as u64;
+    let mut levels = vec![knobas_source::tree::TreeLevel {
+        sha: root.clone(),
+        entries: stored,
+    }];
+    let mut seen: std::collections::HashSet<String> =
+        std::collections::HashSet::from([root.clone()]);
+    let mut owed: VecDeque<String> = VecDeque::new();
+    let mut note = |entries: &[knobas_source::tree::TreeItem],
+                    owed: &mut VecDeque<String>,
+                    total: &mut u64| {
+        for item in entries.iter().filter(|item| item.is_tree()) {
+            match held.held(&item.sha) {
+                Some(below) => *total += below,
+                None => {
+                    if seen.insert(item.sha.clone()) {
+                        owed.push_back(item.sha.clone());
+                    }
+                }
+            }
+        }
+    };
+    note(&levels[0].entries, &mut owed, &mut total);
+    let mut walked: u64 = 0;
+    while !owed.is_empty() {
+        if total > cap {
+            return Ok(TreeRead::TooLarge {
+                entries: total,
+                requests: sent.load(Ordering::Relaxed),
+            });
+        }
+        if walked + owed.len().min(TREE_READS_AT_ONCE) as u64 > budget {
+            return whole_levels(source, owner, repo, commit, held, cap, &sent).await;
+        }
+        let some: Vec<String> = (0..TREE_READS_AT_ONCE)
+            .filter_map(|_| owed.pop_front())
+            .collect();
+        walked += some.len() as u64;
+        let reads = some
+            .iter()
+            .map(|sha| async {
+                let first = level_page(sha.clone(), 1).await?;
+                pages(first, LEVEL_PAGES, |page| level_page(sha.clone(), page)).await
+            })
+            .collect();
+        let answers = super::rows::all_of(reads).await?;
+        for (sha, (entries, cut)) in some.into_iter().zip(answers) {
+            if cut {
+                return Ok(TreeRead::TooLarge {
+                    entries: total + entries.len() as u64,
+                    requests: sent.load(Ordering::Relaxed),
+                });
+            }
+            total += entries.len() as u64;
+            let level = knobas_source::tree::TreeLevel {
+                sha,
+                entries: entries.iter().map(|e| e.stored(&e.path)).collect(),
+            };
+            note(&level.entries, &mut owed, &mut total);
+            levels.push(level);
+        }
+    }
+    if total > cap {
+        return Ok(TreeRead::TooLarge {
+            entries: total,
+            requests: sent.load(Ordering::Relaxed),
+        });
+    }
+    Ok(TreeRead::Read {
+        root,
+        levels,
+        requests: sent.load(Ordering::Relaxed),
+    })
+}
+
+/// The sha git names a tree of `entries` by: the hash of `tree <length>\0`
+/// and each entry's mode (octal, no leading zero), a space, its name, a NUL
+/// and its object's id as bytes; SHA-256 where the ids are 64 hex digits.
+/// What a stored tree's root is kept by, since Gitea answers a tree asked
+/// by a commit with the commit's sha (its `ResolvedID`), not the tree's.
+/// Gitea's own shas name every level below it. An id that is not hex is
+/// refused.
+fn tree_key(entries: &[knobas_source::tree::TreeItem]) -> Result<String, SourceError> {
+    use sha1::Digest as _;
+    let wide = entries.first().is_some_and(|e| e.sha.len() == 64);
+    let mut body = Vec::new();
+    for item in entries {
+        let id = unhex(&item.sha)
+            .filter(|id| id.len() == if wide { 32 } else { 20 })
+            .ok_or_else(|| {
+                SourceError::protocol(format!("gitea: {:?} names no object id", item.sha))
+            })?;
+        body.extend_from_slice(format!("{:o} ", item.mode).as_bytes());
+        body.extend_from_slice(item.name.as_bytes());
+        body.push(0);
+        body.extend_from_slice(&id);
+    }
+    let mut object = format!("tree {}\0", body.len()).into_bytes();
+    object.extend_from_slice(&body);
+    let digest: Vec<u8> = if wide {
+        sha2::Sha256::digest(&object).to_vec()
+    } else {
+        sha1::Sha1::digest(&object).to_vec()
+    };
+    Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn unhex(sha: &str) -> Option<Vec<u8>> {
+    let bytes = sha.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+    bytes
+        .chunks(2)
+        .map(|pair| {
+            let digit = |b: u8| (b as char).to_digit(16);
+            Some((digit(pair[0])? << 4 | digit(pair[1])?) as u8)
+        })
+        .collect()
+}
+
+/// The whole tree at `commit` as levels: Gitea's recursive tree, page by
+/// page, cut into each directory's level by the paths, each named by the
+/// sha its directory's entry gives (the root by the answer's own). Levels
+/// `held` holds are left out.
+async fn whole_levels(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    commit: &str,
+    held: &dyn knobas_source::tree::HeldTrees,
+    cap: u64,
+    sent: &std::sync::atomic::AtomicU32,
+) -> Result<knobas_source::tree::TreeRead, SourceError> {
+    use knobas_source::tree::{TreeLevel, TreeRead};
+    use std::sync::atomic::Ordering;
+    let page = |page| {
+        sent.fetch_add(1, Ordering::Relaxed);
+        source
+            .client
+            .git_tree_as::<GitTree>(owner, repo, commit, page, TREE_PAGE)
+    };
+    let first = page(1).await?;
+    if let Some(total) = first.total_count
+        && total as u64 > cap
+    {
+        return Ok(TreeRead::TooLarge {
+            entries: total as u64,
+            requests: sent.load(Ordering::Relaxed),
+        });
+    }
+    let most = u32::try_from(cap.div_ceil(TREE_PAGE as u64))
+        .unwrap_or(u32::MAX)
+        .max(1);
+    let (entries, cut) = pages(first, most, page).await?;
+    if cut || entries.len() as u64 > cap {
+        return Ok(TreeRead::TooLarge {
+            entries: entries.len() as u64,
+            requests: sent.load(Ordering::Relaxed),
+        });
+    }
+    let top: Vec<knobas_source::tree::TreeItem> = entries
+        .iter()
+        .filter(|e| !e.path.contains('/'))
+        .map(|e| e.stored(&e.path))
+        .collect();
+    let root = tree_key(&top)?;
+    // Each directory's sha by its path; its entries in the order read,
+    // which is its level's.
+    let mut sha_of: HashMap<&str, &str> = HashMap::from([("", root.as_str())]);
+    for entry in entries.iter().filter(|e| e.kind() == EntryKind::Dir) {
+        sha_of.insert(entry.path.as_str(), entry.sha.as_str());
+    }
+    let mut order: Vec<&str> = vec![""];
+    let mut by_dir: HashMap<&str, Vec<knobas_source::tree::TreeItem>> =
+        HashMap::from([("", Vec::new())]);
+    for entry in &entries {
+        let (up, name) = entry
+            .path
+            .rsplit_once('/')
+            .unwrap_or(("", entry.path.as_str()));
+        if entry.kind() == EntryKind::Dir && !by_dir.contains_key(entry.path.as_str()) {
+            by_dir.insert(entry.path.as_str(), Vec::new());
+            order.push(entry.path.as_str());
+        }
+        by_dir.entry(up).or_default().push(entry.stored(name));
+    }
+    let mut kept: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut levels = Vec::new();
+    for dir in order {
+        let Some(&sha) = sha_of.get(dir) else {
+            continue;
+        };
+        if held.held(sha).is_some() || !kept.insert(sha) {
+            continue;
+        }
+        levels.push(TreeLevel {
+            sha: sha.to_owned(),
+            entries: by_dir.remove(dir).unwrap_or_default(),
+        });
+    }
+    Ok(TreeRead::Read {
+        root,
+        levels,
+        requests: sent.load(Ordering::Relaxed),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stored tree's root is kept by the sha git names it by: a tree
+    /// `git rev-parse HEAD^{tree}` answered, from the entries `git ls-tree`
+    /// listed (a file, a symlink, an executable and a folder), and git's
+    /// empty tree.
+    #[test]
+    fn a_roots_key_is_the_sha_git_names_the_tree_by() {
+        use knobas_source::tree::TreeItem;
+        let item = |mode: u32, sha: &str, name: &str| TreeItem {
+            name: name.to_owned(),
+            mode,
+            size: 0,
+            sha: sha.to_owned(),
+        };
+        let entries = [
+            item(
+                0o100_644,
+                "78981922613b2afb6025042ff6bd878ac1994e85",
+                "README.md",
+            ),
+            item(
+                0o120_000,
+                "42061c01a1c70097d1e4579f29a5adf40abdec95",
+                "link",
+            ),
+            item(
+                0o100_755,
+                "1a2485251c33a70432394c93fb89330ef214bfc9",
+                "run.sh",
+            ),
+            item(0o040_000, "d0b5bae9918c3ebcf05b92275ad04ce3f76de837", "src"),
+        ];
+        assert_eq!(
+            tree_key(&entries).unwrap(),
+            "fed491db6fd52d560d7eb87cbe0a23907013ac60"
+        );
+        assert_eq!(
+            tree_key(&[]).unwrap(),
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        );
+        assert!(tree_key(&[item(0o100_644, "not-hex", "x")]).is_err());
+    }
 
     /// #2298: the scheme the shell builds a deep link's ids by is the one
     /// this tab parses, at the tip.

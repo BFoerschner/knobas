@@ -37,6 +37,7 @@ pub mod pipeline;
 pub mod query;
 pub mod role;
 pub mod run;
+pub mod tree;
 pub mod url_forms;
 pub mod view;
 pub mod watermark;
@@ -2190,6 +2191,59 @@ pub trait Source: Send + Sync {
         under: &[serde_json::Value],
     ) -> Option<view::SourceView> {
         let _ = (entity, section, payload, under);
+        None
+    }
+    /// Where this adapter's mirror records keep what the sync's tree pass
+    /// plans from ([`tree`], the stored-trees pass of PR #2479): its
+    /// repositories' default branches, its branches' heads, its pull
+    /// requests' head branches. `None`, the default, is an adapter that
+    /// stores no tree, and the pass asks it nothing. Pure.
+    fn tree_shape(&self) -> Option<tree::TreeShape> {
+        None
+    }
+    /// The levels of the tree at `commit` in `repository` (an entity id of
+    /// [`tree_shape`](Source::tree_shape)'s repository kind) that `held`
+    /// does not hold, read from the source: the root's sha, and every level
+    /// under it not held, each in git's order. A tree of more than `cap`
+    /// entries in all is [`tree::TreeRead::TooLarge`], read no further.
+    /// Called by the tree pass after a run, on the background lane.
+    ///
+    /// `Ok(None)` is **this adapter reads no tree**, and is the default.
+    async fn read_tree(
+        &self,
+        repository: &str,
+        commit: &str,
+        held: &dyn tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<tree::TreeRead>, SourceError> {
+        let _ = (repository, commit, held, cap);
+        Ok(None)
+    }
+    /// What `section` of `entity`'s view draws from a stored tree, where it
+    /// draws one: the branch, the commit the section names, the place.
+    /// `payload` is the entity's mirror record (a repository's names its
+    /// default branch). `None`, the default, reads no stored tree. Pure.
+    fn tree_ask(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<tree::TreeAsk> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// `section` of `entity`'s view drawn from `tree`, the stored levels
+    /// [`tree_ask`](Source::tree_ask) named, as the source's own read at the
+    /// same commit draws it: the same entries, ids, trail and page. `None`
+    /// where the levels do not hold the place. Pure.
+    fn tree_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tree: &tree::StoredTree,
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload, tree);
         None
     }
     /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234

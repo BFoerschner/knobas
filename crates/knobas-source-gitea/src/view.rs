@@ -133,6 +133,79 @@ pub(crate) fn standing(
     }
 }
 
+/// What a branch's or repository's tree section draws from a stored tree
+/// (the stored-trees pass of PR #2479): see [`files::stored_ask`].
+pub(crate) fn tree_ask(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+) -> Option<knobas_source::tree::TreeAsk> {
+    let id = section.filter(|id| files::owns(id))?;
+    match source.key_of(entity).ok()? {
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } => files::stored_ask(
+            source,
+            &owner,
+            &repo,
+            files::Of::Branch(&branch),
+            id,
+            payload,
+        ),
+        GiteaKey::Repo { owner, repo } if !compare::owns(id) => {
+            files::stored_ask(source, &owner, &repo, files::Of::Repository, id, payload)
+        }
+        _ => None,
+    }
+}
+
+/// A branch's or repository's tree section drawn from a stored tree, as
+/// Gitea's read at the same commit draws it: see [`files::stored_view`].
+pub(crate) fn tree_view(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+    tree: &knobas_source::tree::StoredTree,
+) -> Option<SourceView> {
+    let id = section.filter(|id| files::owns(id))?;
+    let section = match source.key_of(entity).ok()? {
+        GiteaKey::Branch { branch, .. } => {
+            files::stored_view(files::Of::Branch(&branch), id, tree, payload)?
+        }
+        GiteaKey::Repo { .. } if !compare::owns(id) => {
+            files::stored_view(files::Of::Repository, id, tree, payload)?
+        }
+        _ => return None,
+    };
+    Some(SourceView::new(vec![section]))
+}
+
+/// The levels of a repository's tree at `commit` the store lacks: see
+/// [`files::read_tree`].
+pub(crate) async fn read_tree(
+    source: &GiteaSource,
+    repository: &str,
+    commit: &str,
+    held: &dyn knobas_source::tree::HeldTrees,
+    cap: u64,
+) -> Result<knobas_source::tree::TreeRead, SourceError> {
+    let GiteaKey::Repo { owner, repo } = source.key_of(repository)? else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {repository:?} is not a repository"
+        )));
+    };
+    if !is_full_sha(commit) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {commit:?} is not a whole commit sha"
+        )));
+    }
+    files::read_tree(source, &owner, &repo, commit, held, cap).await
+}
+
 /// Whether a repository's `section` is drawn from its branch records
 /// ([`from_branch_records`]): its branches, and its latest commits, whose
 /// first is its default branch's tip.

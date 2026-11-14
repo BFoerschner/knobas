@@ -26,6 +26,12 @@ tokio = { workspace = true, features = ["macros"] }
 # task (#2159). Already in the tree through `reqwest`, at this version.
 futures-util.workspace = true
 tracing = "0.1"
+# A stored tree's root is keyed by git's own hash of its entries, computed
+# here (the stored-trees pass of PR #2479): Gitea answers a tree asked by a
+# commit with the commit's sha, not the root tree's. Already in the tree, at
+# these versions.
+sha1 = { version = "0.11", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 serde_json.workspace = true
