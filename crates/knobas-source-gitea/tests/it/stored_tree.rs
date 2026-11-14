@@ -296,7 +296,7 @@ async fn a_held_root_costs_one_request() {
         .read_tree(
             ENTITY,
             COMMIT,
-            &Held(HashMap::from([(root.clone(), 14)]), Some(14)),
+            &Held(HashMap::from([(root.clone(), 14)]), Some(5_000)),
             100_000,
         )
         .await
@@ -310,6 +310,39 @@ async fn a_held_root_costs_one_request() {
             requests: 1
         }
     );
+    assert_eq!(tree_reads(&server).await, [(COMMIT.to_owned(), false)]);
+}
+
+/// A repository whose trees fit one page of the whole tree is read whole,
+/// one request, whatever is held: a walk's root level alone costs as much,
+/// and a root not held then cost the whole tree too (the live pass,
+/// 2026-11-14: two requests a branch on every small repository).
+#[tokio::test]
+async fn a_tree_that_fits_a_page_is_read_whole_in_one_request() {
+    let held = Held(HashMap::from([(id(0xd1), 2), (id(0xd3), 4)]), Some(14));
+    let server = gitea().await;
+    let read = source(&server)
+        .read_tree(ENTITY, COMMIT, &held, 100_000)
+        .await
+        .unwrap()
+        .unwrap();
+    let TreeRead::Read {
+        root,
+        levels,
+        requests,
+    } = read
+    else {
+        panic!("{read:?}")
+    };
+    assert_eq!(requests, 1);
+    assert_eq!(tree_reads(&server).await, [(COMMIT.to_owned(), true)]);
+    assert_eq!(root, root_key().await);
+    let shas: Vec<&str> = levels.iter().map(|l| l.sha.as_str()).collect();
+    assert!(
+        !shas.contains(&id(0xd1).as_str()) && !shas.contains(&id(0xd3).as_str()),
+        "the levels held are left out: {shas:?}"
+    );
+    assert!(shas.contains(&root.as_str()) && shas.contains(&id(0xd5).as_str()));
 }
 
 /// A walk that would read more levels than the whole tree has pages reads
@@ -321,7 +354,7 @@ async fn a_walk_dearer_than_the_whole_tree_reads_the_whole_tree() {
         .read_tree(
             ENTITY,
             COMMIT,
-            &Held(HashMap::from([(id(0xff), 1)]), Some(1)),
+            &Held(HashMap::from([(id(0xff), 1)]), Some(2_500)),
             100_000,
         )
         .await

@@ -1230,8 +1230,12 @@ impl GitEntry {
 ///
 /// * **The whole tree** (`git/trees/{commit}?recursive=true`, a request a
 ///   thousand entries), for a repository the store holds nothing of yet,
-///   and where a walk would cost more requests than it: every level is in
-///   it, each directory's sha with it.
+///   for one whose trees fit a page (a walk's first request, the root
+///   level, already costs what the whole tree does: on the live Gitea,
+///   2026-11-14, nearly every branch of a small repository was read as its
+///   root level and then whole, two requests where one did), and where a
+///   walk would cost more requests than it: every level is in it, each
+///   directory's sha with it.
 /// * **Level by level** (`git/trees/{sha}`, one level, no `recursive`): the
 ///   commit's root first, which names its sha, then only the levels under
 ///   it whose sha is not held, side by side. A branch pushed with one file
@@ -1263,7 +1267,7 @@ pub(super) async fn read_tree(
                 .await
         }
     };
-    let Some(estimate) = held.estimate() else {
+    let Some(estimate) = held.estimate().filter(|e| *e > TREE_PAGE as u64) else {
         return whole_levels(source, owner, repo, commit, held, cap, &sent).await;
     };
     let first = level_page(commit.to_owned(), 1).await?;
