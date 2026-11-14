@@ -135,13 +135,19 @@ fn main() {
     });
 }
 
+/// One stored level as the database holds it: sha, names, modes, sizes, ids.
+type LevelRow = (Vec<u8>, Vec<String>, Vec<i32>, Vec<i64>, Vec<Vec<u8>>);
+
+/// A stored branch: its entity, commit, root, payload and repository page.
+type BranchRow = (String, String, Vec<u8>, serde_json::Value, Option<String>);
+
 /// The stored levels the root reaches, by sha.
 async fn levels_of(
     pool: &sqlx::PgPool,
     source_id: &str,
     root: &[u8],
 ) -> std::collections::HashMap<String, Vec<knobas_source::tree::TreeItem>> {
-    let rows: Vec<(Vec<u8>, Vec<String>, Vec<i32>, Vec<i64>, Vec<Vec<u8>>)> = sqlx::query_as(
+    let rows: Vec<LevelRow> = sqlx::query_as(
         "with recursive reached(sha) as (
            select $2::bytea
            union
@@ -192,7 +198,7 @@ async fn same_answer(
     repository: &str,
     branches: i64,
 ) {
-    let rows: Vec<(String, String, Vec<u8>, serde_json::Value, Option<String>)> = sqlx::query_as(
+    let rows: Vec<BranchRow> = sqlx::query_as(
         "select bt.entity_id, bt.commit_sha, bt.root, i.payload, r.web_url
            from sync.branch_tree bt
            join sync.item i on i.entity_id = bt.entity_id
