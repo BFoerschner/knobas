@@ -4139,7 +4139,15 @@ export type ShownView = { held_at?: string,
  * sync, but never link to it, since no item page holds it. Absent on the
  * wire when empty.
  */
-unsynced?: Array<Unsynced>, sections: Array<ViewSection>, 
+unsynced?: Array<Unsynced>, 
+/**
+ * Where the section is a branch's tree the sync does not store because
+ * it is past the cap (100,000 entries; the stored-trees pass of PR
+ * #2479), how many entries it holds at least: the page says so, and
+ * its folders are read from the source as before. Absent on the wire
+ * otherwise.
+ */
+tree_unkept?: number, sections: Array<ViewSection>, 
 /**
  * What a reader can do to the entity, drawn as a toolbar between the
  * detail's header and the tabs, on every tab (issue #702, spec #701).

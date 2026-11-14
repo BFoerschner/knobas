@@ -338,6 +338,7 @@ async fn a_pages_read_names_the_rows_the_mirror_has_not_synced_with_their_ids() 
         view: shown.view.clone(),
         held_at: None,
         unsynced: Vec::new(),
+        tree_unkept: None,
     };
     assert!(
         serde_json::to_value(&plain)

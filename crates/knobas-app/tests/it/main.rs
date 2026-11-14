@@ -95,6 +95,7 @@ mod standup_ipc;
 mod start_work;
 mod state_colours_ipc;
 mod status_move;
+mod stored_trees;
 mod suggestion_pass;
 mod suggestions_ipc;
 mod support;

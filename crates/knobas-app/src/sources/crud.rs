@@ -976,7 +976,7 @@ pub async fn shown(
     section: Option<&str>,
 ) -> Result<Option<super::live::ShownView>, SourcesError> {
     let source = live.source(pool, secrets, registry, entity_id).await?;
-    let (view, held_at) = live.shown(&source, entity_id, section).await?;
+    let (view, held_at, tree_unkept) = live.shown(&source, entity_id, section).await?;
     let Some(view) = view else {
         return Ok(None);
     };
@@ -985,6 +985,7 @@ pub async fn shown(
         view,
         held_at,
         unsynced,
+        tree_unkept,
     }))
 }
 

@@ -175,7 +175,20 @@ pub struct ShownView {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<Vec<Unsynced>>", optional)]
     pub unsynced: Vec<Unsynced>,
+    /// Where the section is a branch's tree the sync does not store because
+    /// it is past the cap (100,000 entries; the stored-trees pass of PR
+    /// #2479), how many entries it holds at least: the page says so, and
+    /// its folders are read from the source as before. Absent on the wire
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tree_unkept: Option<u64>,
 }
+
+/// What [`LiveSources::shown`] answers: the view, when knobas read what it
+/// draws where that was earlier, and where the section is a branch's tree
+/// past the stored cap, its entries.
+pub(crate) type Shown = (Option<SourceView>, Option<DateTime<Utc>>, Option<u64>);
 
 /// One row of a [`ShownView`] whose entity the mirror does not hold yet: its
 /// section, its title as drawn, and the id the adapter named for it.
@@ -440,7 +453,7 @@ impl LiveSources {
         lent: &Lent,
         entity: &str,
         section: Option<&str>,
-    ) -> Result<(Option<SourceView>, Option<DateTime<Utc>>), SourceError> {
+    ) -> Result<Shown, SourceError> {
         // A fixed view cannot move: kept and held like any other, never read
         // behind, and never said to be from earlier.
         let fixed = lent.source.view_standing(entity, section) == Standing::Fixed;
@@ -449,28 +462,74 @@ impl LiveSources {
             entity: entity.to_owned(),
             ask: Ask::View(section.map(str::to_owned)),
         };
+        let store = self.store();
         let kept = self.reads().get_at(&key);
         if let Some((Answer::View(kept), at)) = kept {
             if fixed {
-                return Ok((kept, None));
+                return Ok((kept, None, None));
             }
+            // A tree past the stored cap says so on every answer of its top.
+            let unkept = match store.as_ref() {
+                Some(pool) => {
+                    match super::stored_tree::stored(pool, lent.source.as_ref(), entity, section)
+                        .await
+                    {
+                        Some(super::stored_tree::Stored::TooLarge(entries)) => Some(entries),
+                        _ => None,
+                    }
+                }
+                None => None,
+            };
             self.read_behind(&lent.source, vec![key]);
-            return Ok((kept, Some(at)));
+            return Ok((kept, Some(at), unkept));
+        }
+        // A tree section the sync stored the branch's tree for (the
+        // stored-trees pass, 2026-11-14): at a commit its id names, fixed and
+        // drawn as such; at the branch's head, as of the sync that last saw
+        // it and read behind, unless a read held since is newer.
+        let stored = match store.as_ref() {
+            Some(pool) => {
+                super::stored_tree::stored(pool, lent.source.as_ref(), entity, section).await
+            }
+            None => None,
+        };
+        let unkept = match &stored {
+            Some(super::stored_tree::Stored::TooLarge(entries)) => Some(*entries),
+            _ => None,
+        };
+        let drawn = match stored {
+            Some(super::stored_tree::Stored::Drawn(view, at)) => Some((view, at)),
+            _ => None,
+        };
+        if fixed && let Some((view, _)) = drawn.as_ref() {
+            self.reads().put(key, Answer::View(Some(view.clone())));
+            return Ok((Some(view.clone()), None, None));
         }
         let recipe = self.recipe_of(lent.generation);
-        let store = self.store();
-        if let (Some(pool), Some((id, recipe))) = (store.as_ref(), recipe.as_ref())
-            && let Some((at, answer)) =
+        let held = match (store.as_ref(), recipe.as_ref()) {
+            (Some(pool), Some((id, recipe))) => {
                 super::held::get(pool, id, entity, &super::held::view_ask(section), recipe).await
+            }
+            _ => None,
+        };
+        if let Some((view, at)) = drawn
+            && held.as_ref().is_none_or(|(held_at, _)| *held_at < at)
+        {
+            self.reads()
+                .put_at(key.clone(), Answer::View(Some(view.clone())), at);
+            self.read_behind(&lent.source, vec![key]);
+            return Ok((Some(view), Some(at), None));
+        }
+        if let Some((at, answer)) = held
             && let Ok(view) = serde_json::from_value::<Option<SourceView>>(answer)
         {
             self.reads()
                 .put_at(key.clone(), Answer::View(view.clone()), at);
             if fixed {
-                return Ok((view, None));
+                return Ok((view, None, unkept));
             }
             self.read_behind(&lent.source, vec![key]);
-            return Ok((view, Some(at)));
+            return Ok((view, Some(at), unkept));
         }
         // Never read: what the mirror's own record draws, where the adapter
         // draws anything from it, as of the sync that wrote it; never held.
@@ -488,7 +547,7 @@ impl LiveSources {
             self.reads()
                 .put_at(key.clone(), Answer::View(Some(view.clone())), synced_at);
             self.read_behind(&lent.source, vec![key]);
-            return Ok((Some(view), Some(synced_at)));
+            return Ok((Some(view), Some(synced_at), unkept));
         }
         // Never read, and the record alone draws nothing: what the records
         // under it draw, a repository's branches (the inner-pages pass,
@@ -504,13 +563,13 @@ impl LiveSources {
             self.reads()
                 .put_at(key.clone(), Answer::View(Some(view.clone())), synced_at);
             self.read_behind(&lent.source, vec![key]);
-            return Ok((Some(view), Some(synced_at)));
+            return Ok((Some(view), Some(synced_at), unkept));
         }
         let view = lent.source.view(entity, section).await?;
         let read_at = Utc::now();
         self.reads().put(key.clone(), Answer::View(view.clone()));
         self.hold(&key, &view, read_at).await;
-        Ok((view, None))
+        Ok((view, None, unkept))
     }
 
     /// Hold `view`, read at `read_at` under `key`, for the next session,
