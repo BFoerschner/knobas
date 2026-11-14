@@ -14,7 +14,8 @@ quickstart. `testenv/README.md` covers the live suites against real products.
   `cargo install just`.
 
 The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
-`~/.theseus/postgresql/<version>` and runs `initdb`. Later runs reuse it.
+`~/.theseus/postgresql/<version>` and runs `initdb`. Later runs reuse it. A
+release installer does not download: it carries the archive (see *Releases*).
 
 ## The gate
 
@@ -118,6 +119,18 @@ gh workflow run release.yml --ref main -f tag=v1.2.0 -f platforms=all
 
 Name one platform when only one is in question. macOS minutes cost ten times
 Linux minutes.
+
+Each installer carries PostgreSQL, so a first start needs no network
+(`docs/decisions/2026-11-14-knobas-ships-its-postgresql.md`). Before
+`tauri build`, `scripts/fetch-postgres.sh` downloads the upstream archive for
+the runner's platform, checks it against
+`crates/knobas-app/postgresql/archives.sha256` and puts it in that folder,
+which `tauri.conf.json` bundles whole. After the build,
+`scripts/check-bundled-postgres.sh` (`.ps1` on Windows) opens every bundle and
+fails the run if one lacks the archive. To build a bundle by hand, run the
+fetch script first; without it the bundle still works and downloads on a
+machine's first start. Moving to another PostgreSQL version is
+`PG_VERSION_REQ` in `knobas-db` plus the three lines of `archives.sha256`.
 
 The workflow creates the release as a draft. Its body is only the note on
 unsigned bundles; the patch notes are written by hand. Before publishing, put

@@ -215,7 +215,9 @@ jobs:
       # left out: `tauri build` never runs here"). It does now, so they are here:
       # `librsvg2-dev` renders the icon, and `patchelf` is what the AppImage
       # bundler rewrites the interpreter path with. The `-dev` webkit and
-      # appindicator packages are what wry and the tray link against.
+      # appindicator packages are what wry and the tray link against. `rpm`
+      # and `cpio` build nothing: `scripts/check-bundled-postgres.sh` opens the
+      # `.rpm` with them, below.
       - name: Install Tauri's Linux bundling dependencies
         if: runner.os == 'Linux'
         run: |
@@ -225,7 +227,9 @@ jobs:
             libayatana-appindicator3-dev \
             libxdo-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            rpm \
+            cpio
 
       # `tauri build` runs `npm run build` itself (tauri.conf.json's
       # `beforeBuildCommand`), but nothing installs the modules that command and
@@ -233,6 +237,16 @@ jobs:
       - name: Install the frontend's dependencies
         shell: bash
         run: cd app && npm ci
+
+      # The PostgreSQL this platform's installers carry
+      # (docs/decisions/2026-11-14-knobas-ships-its-postgresql.md): the upstream
+      # archive, checked against the SHA-256 pinned in
+      # `crates/knobas-app/postgresql/archives.sha256` and put beside it, where
+      # `bundle.resources` picks the folder up. Before `tauri build`, which
+      # would bundle the folder without it and say nothing.
+      - name: Stage the PostgreSQL archive
+        shell: bash
+        run: scripts/fetch-postgres.sh
 
       # The Tauri CLI is a devDependency of `app/` and has to run from the crate
       # that owns `tauri.conf.json`. `just dev` bridges that by putting
@@ -259,6 +273,23 @@ jobs:
         run: |
           cd crates/knobas-app
           node ../../app/node_modules/@tauri-apps/cli/tauri.js build
+
+      # An installer without the archive installs and runs: it downloads
+      # PostgreSQL on a machine's first start, 15 s of it on Windows and no
+      # start at all without a network, and nothing else here would notice.
+      # So each bundle is opened with its own format's tool and the archive in
+      # it hashed against the pin, before anything is uploaded.
+      - name: Every bundle carries PostgreSQL
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/check-bundled-postgres.sh
+
+      # `msiexec /a` and 7-Zip, from PowerShell: a `/a` put through Git Bash
+      # arrives as a path.
+      - name: Both Windows installers carry PostgreSQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-bundled-postgres.ps1
 
       # A `gh release upload` given a glob that matched nothing succeeds,
       # silently, and the release is short an installer nobody notices until

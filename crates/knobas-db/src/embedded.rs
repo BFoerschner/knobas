@@ -1102,6 +1102,7 @@ enum Started {
 /// the password file and the data directory are kept to their owner
 /// ([`keep_to_owner`]).
 async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
+    let started = std::time::Instant::now();
     let _guard = bring_up_lock(root_dir).await?;
     let data_dir = settings.data_dir.clone();
     let root = root_dir.to_path_buf();
@@ -1210,7 +1211,11 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     let connector = Connector::parse(&url)?;
     let pool = connector.app_pool().await?;
 
-    tracing::info!(port = postgresql.settings().port, "embedded postgres ready");
+    tracing::info!(
+        port = postgresql.settings().port,
+        ms = started.elapsed().as_millis(),
+        "embedded postgres ready"
+    );
 
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
@@ -1968,7 +1973,15 @@ async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError>
     })
     .await??;
     let initdb = binaries.join(format!("initdb{}", std::env::consts::EXE_SUFFIX));
+    // Timed in the log: `initdb` is most of a first start once PostgreSQL is
+    // installed (4.7 s of one on Windows, 2026-11-14), and a slow one should
+    // be readable from a user's log file.
+    let started = std::time::Instant::now();
     run_initdb(&initdb, settings, COMMAND_TIMEOUT).await?;
+    tracing::info!(
+        ms = started.elapsed().as_millis(),
+        "initdb made the data directory"
+    );
     let data_dir = settings.data_dir.clone();
     off_runtime(&settings.data_dir, move || mark_finished(&data_dir)).await?;
     Ok(())
@@ -2062,7 +2075,9 @@ async fn off_runtime<T: Send + 'static>(
 /// their `bin` directory.
 ///
 /// The install is the crate's own `setup()`, so a cold machine downloads and
-/// unpacks exactly as before. It is pointed at a placeholder data directory
+/// unpacks exactly as before. A release build never gets that far cold: it
+/// has unpacked the archive it carries by now ([`crate::install`]), and this
+/// finds PostgreSQL installed. It is pointed at a placeholder data directory
 /// holding an empty `postgresql.conf`, which `setup()` takes for initialised,
 /// so it installs and runs no `initdb`. `PostgreSQL::new` and `setup()` are
 /// also what resolve the version directory the binaries live in.

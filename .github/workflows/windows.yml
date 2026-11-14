@@ -12,6 +12,10 @@
 # with CRLF checksums opens, and that the server's port is picked on the
 # loopback (a wildcard bind is what raised the firewall prompt on first start).
 #
+# And since 2026-11-14, the first start from the PostgreSQL archive a release
+# installer carries: unpacked, `initdb`, started and queried with no download
+# to fall back on, on the one platform whose programs a Mac cannot run.
+#
 # Narrow on purpose, unlike `check.yml`: one crate's tests filtered to these,
 # on a pull request that changes what they cover or this file, or by hand.
 name: windows
@@ -21,6 +25,7 @@ on:
     paths:
       - crates/knobas-db/src/console.rs
       - crates/knobas-db/src/embedded.rs
+      - crates/knobas-db/src/install.rs
       - crates/knobas-db/src/migrate.rs
       - crates/knobas-db/migrations/**
       - crates/knobas-db/migrations.sha384
@@ -77,3 +82,10 @@ jobs:
         run: |
           cargo test -p knobas-db --test schema -- line_endings --nocapture
           cargo test -p knobas-db --test embedded -- a_started_server_listens_on_the_ipv4_loopback_alone --nocapture
+
+      # A release installer's first start (`knobas_db::install`): this
+      # machine's PostgreSQL packed as upstream's archive is, unpacked into an
+      # empty place and started from there with no repository to download from.
+      - name: a first start from the carried archive needs no network
+        run: |
+          cargo test -p knobas-db --lib -- install:: --nocapture

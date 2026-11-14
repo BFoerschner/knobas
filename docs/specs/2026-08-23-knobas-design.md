@@ -349,7 +349,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time, activity)
 
 ## 16. Open questions — all answered with recommendations 2026-08-24 (Claude); **ratified 2026-08-27 (Björn), all twelve, with two amendments** (the notification tier in 10, and this tier mapping: **v1 = end of M4** on the roadmap; v1.5/v2 follow it)
 
-1. **Postgres: embedded** via `postgresql_embedded`, download-on-first-run, PG 18.6 pinned, TCP on 127.0.0.1; "use existing Postgres URL" as a setting. Not a user-installed prerequisite; not a Tauri sidecar (macOS notarization of external binaries is a known open Tauri bug — the crate's extract-to-home approach sidesteps it). → §3.
+1. **Postgres: embedded** via `postgresql_embedded`, download-on-first-run, PG 18.6 pinned, TCP on 127.0.0.1; "use existing Postgres URL" as a setting. Not a user-installed prerequisite; not a Tauri sidecar (macOS notarization of external binaries is a known open Tauri bug — the crate's extract-to-home approach sidesteps it). → §3. *Amended 2026-11-14 (ADR-0001, `docs/decisions/2026-11-14-knobas-ships-its-postgresql.md`): a release installer carries the archive and the first start unpacks it, so only a build without it downloads.*
 2. **Split-flaps: only on values that change while you watch** (timer, sync countdown, build/monitor transitions, inbox/alert counts); everything else plain mono. → §2.
 3. **Smart lists: built-ins + "save this search as a list" in v1**; query language v2. → §4. *(2026-11-02, spec #2419: the built-ins are gone; saved lists alone, behind `#l`.)*
 4. **Page editing: create-from-template + comment + macro-free section edits in v1**; *Open in browser* for everything else. No full editor. → §5.

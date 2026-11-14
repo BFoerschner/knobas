@@ -86,7 +86,7 @@ Your data syncs to a database on your computer, and your credentials stay in the
 
 ## Get it
 
-[Download the latest release](https://github.com/BFoerschner/knobas/releases/latest) for macOS (Apple Silicon), Windows or Linux. The first launch downloads PostgreSQL once, so it needs network.
+[Download the latest release](https://github.com/BFoerschner/knobas/releases/latest) for macOS (Apple Silicon), Windows or Linux. The installer carries its own PostgreSQL, so the first launch needs no network.
 
 Nothing is signed yet, so your system will object. On macOS, run this after installing:
 

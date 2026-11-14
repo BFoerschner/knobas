@@ -333,8 +333,8 @@ pub fn run() {
             manage_app_state(&handle, profile, backend);
 
             // And the database comes up on its own task. M0 blocked here,
-            // which froze the event loop for the length of a first run -- a
-            // PostgreSQL download plus an `initdb`, tens of seconds -- so the
+            // which froze the event loop for the length of a first run -- then
+            // a PostgreSQL download plus an `initdb`, tens of seconds -- so the
             // window had to be created hidden to avoid showing a white frame
             // that never repaints. It now appears immediately and renders the
             // boot screen, which is the M0 carry-over this discharges: the app
@@ -1343,9 +1343,10 @@ fn shutdown_database<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // Whatever stage bring-up reached (#1634): the lifecycle holds the
     // server from the moment it is up, so a quit during the migration stops
     // it too, and the bring-up that was using it fails on the closed pool.
-    // `None` before the server is up -- a quit during a first-run download
-    // leaves the download half-finished, which the next start resumes, the
-    // same as any other interrupted first run -- and after a failed bring-up,
+    // `None` before the server is up -- a quit during a first run's unpack
+    // or download leaves no PostgreSQL installed, and the next start installs
+    // it again, the same as any other interrupted first run -- and after a
+    // failed bring-up,
     // which stopped its own.
     // After a restart in flight (#1779), which holds this gate to its end.
     let server = tauri::async_runtime::block_on(async {
