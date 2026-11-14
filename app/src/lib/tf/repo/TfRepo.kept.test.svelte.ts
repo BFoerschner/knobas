@@ -531,6 +531,24 @@ test("with no clone, New pull request's compare is asked once the landing drew, 
   expect(text(target.querySelector(".tf-cdiff"))).toContain("feature/PAY-231-sepa-retry.txt");
 });
 
+test("a press quicker than the pointer's rest opens Compare, which reads the list once: the rest asks nothing after it", async () => {
+  forgetEarlyCompares();
+  const { asked, rangeFiles } = listing();
+  const cloned = async () => ({ repo_entity_id: REPO, repo_url: null, path: "/Users/me/code/payout-service", found_by: "clones_root", clones_root: null, clone_command: null, tree: null }) as never;
+  await drawLive([REPO], ports({ rangeFiles, entityCheckout: cloned }));
+  await settle();
+  expect(asked).toEqual([]);
+
+  // The pointer lands on New pull request and presses at once (the WSL block, 2026-11-14: every first Compare press of
+  // the open budget asked Gitea's compare twice, the page's read and the rest's 35 to 55 ms after it).
+  target.querySelector<HTMLAnchorElement>(".tf-repohead a.tf-primary")!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  await go(COMPARE("feature/PAY-231-sepa-retry"));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(asked.map((a) => [a.base, a.head]), "the list was asked once, by Compare").toEqual([["main", "feature/PAY-231-sepa-retry"]]);
+  expect(asked[0]!.read).not.toMatch(/^compare-early-/);
+});
+
 test("with a clone nothing is asked early at the landing; the pointer resting on New pull request asks it", async () => {
   forgetEarlyCompares();
   const { asked, rangeFiles } = listing();

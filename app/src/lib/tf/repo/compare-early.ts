@@ -37,6 +37,15 @@ export function askCompareEarly(list: ListRange | undefined, repoId: string, bas
   early.set(key, { at: Date.now(), answer });
 }
 
+/**
+ * Compare reads `base`...`head` itself: nothing asks it early after, as the backend holds its list from then. A press
+ * quicker than the pointer's rest (`COMPARE_REST_MS`) asked Gitea's compare twice, the page's read and the rest's
+ * (the WSL block, 2026-11-14).
+ */
+export function compareReads(repoId: string, base: string, head: string): void {
+  askedOnce.add(keyOf(repoId, base, head));
+}
+
 /** The early answer to `base`...`head`, or the read under way, once; `null` where none was asked or it is stale. */
 export function takeCompareEarly(repoId: string, base: string, head: string): Promise<RangeFiles> | null {
   const key = keyOf(repoId, base, head);

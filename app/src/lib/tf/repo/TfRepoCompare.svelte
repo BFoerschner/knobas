@@ -86,7 +86,7 @@
   import { onViewFresh } from "./view-fresh.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import TfHeldNote from "../TfHeldNote.svelte";
-  import { takeCompareEarly } from "./compare-early";
+  import { compareReads, takeCompareEarly } from "./compare-early";
   import { waitPhase } from "../waiting";
   import { shortEnd } from "../diff/sha";
   import {
@@ -394,6 +394,7 @@
     const listing = ports.rangeFiles;
     // The list the repository page asked early (`compare-early.ts`), answered or on its way; one that failed is read anew.
     const early = listing === undefined || again ? null : takeCompareEarly(repoId, from, to);
+    if (listing !== undefined) compareReads(repoId, from, to);
     const answer: Promise<RangeDiff> =
       early !== null
         ? early.catch(() => listing!(repoId, from, to, false, read))
