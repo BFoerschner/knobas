@@ -134,7 +134,13 @@
       ...group.branches.map((branch) => ({ key: `b:${branch.name}`, branch })),
     ]),
   );
-  const railWin = new Windowed({ count: () => railRows.length, key: (i) => railRows[i]!.key, estimate: 30 });
+  // A branch's row draws 26 px and a group's heading 33 (measured on the extreme repository, the WSL block, 2026-11-14).
+  const railWin = new Windowed({
+    count: () => railRows.length,
+    key: (i) => railRows[i]!.key,
+    estimate: 26,
+    estimateOf: (key) => (key.startsWith("h:") ? 33 : 26),
+  });
 
   /** The branch shown: the address's, else the one the tab opened on. */
   const current = $derived(branch ?? firstDraw?.opened ?? def);

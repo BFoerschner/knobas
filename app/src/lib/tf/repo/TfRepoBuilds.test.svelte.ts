@@ -205,6 +205,11 @@ test("a rail of thousands of branches draws the rows near its scroll, its headin
   expect(drawn.length).toBeLessThan(300);
   // The 5,002 listed, and the one a run names that the list does not (`spike/x`).
   expect(target.querySelector(".tf-rb-count")?.textContent).toBe("5003 branches");
+  // Each branch not drawn holds a drawn branch's 26 px, as the Builds page's rail does, so the scrollbar and a scroll
+  // land where every row drawn would (the WSL block, 2026-11-14: at 30 px the rail of 1,009 was 30,221 px for 26,321).
+  const undrawn = 5003 + 3 - drawn.length;
+  const room = parseFloat(target.querySelector<HTMLElement>(".tf-rbrail .tf-pl-rows")!.style.paddingBottom);
+  expect(room / undrawn).toBe(26);
   // One far down the list is a filter away.
   const box = target.querySelector<HTMLInputElement>('input[aria-label="Filter branches"]')!;
   box.value = "b-4321";
