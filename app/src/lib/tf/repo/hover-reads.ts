@@ -48,9 +48,20 @@ export function installHoverReads(root: EventTarget = document, read: Read = rea
       read(ask.entityId, ask.section).catch(() => {});
     }, restMs);
   };
+  // A press before the rest is over makes the page's own read: the rest's would go out beside it, the source asked
+  // twice (the WSL block, 2026-11-14: a pull request of 3,000 files read its 8 MB from Gitea twice at once).
+  const onDown = (event: Event) => {
+    const link = (event.target as Element | null)?.closest?.("a[href^='#/repo/'], a[href^='#/pr/']") ?? null;
+    const ask = link === null ? null : readOf(link.getAttribute("href") ?? "");
+    if (ask === null) return;
+    cancel();
+    asked.add(`${ask.entityId}\u0000${ask.section ?? ""}`);
+  };
   root.addEventListener("pointerover", onOver);
+  root.addEventListener("pointerdown", onDown);
   return () => {
     cancel();
     root.removeEventListener("pointerover", onOver);
+    root.removeEventListener("pointerdown", onDown);
   };
 }

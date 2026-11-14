@@ -70,6 +70,23 @@ test("the read starts once the pointer has stood on the link, and a pointer swep
   expect(sent).toEqual([{ cmd: "entity_view", args: { entityId: "gitea:tidewater/payout-service#142", section: "files" } }]);
 });
 
+test("a press before the pointer has stood its moment asks nothing more: the page's own read is the read", async () => {
+  // The WSL block, 2026-11-14: a press within the rest, as the open budget's and a quick hand's, left the rest's read
+  // to go out 80 ms later beside the page's, and a pull request of 3,000 files read its 8 MB from Gitea twice.
+  over("files");
+  vi.advanceTimersByTime(REST_MS - 70);
+  root.querySelector("#files")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  vi.advanceTimersByTime(REST_MS * 2);
+  await flush();
+  expect(sent).toEqual([]);
+  // Nor later in the session: the backend holds what the page read.
+  over("other");
+  over("files");
+  vi.advanceTimersByTime(REST_MS * 2);
+  await flush();
+  expect(sent).toEqual([]);
+});
+
 test("each link is read once a session", async () => {
   over("repo");
   vi.advanceTimersByTime(REST_MS);
