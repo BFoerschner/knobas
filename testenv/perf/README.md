@@ -211,6 +211,11 @@ node testenv/perf/stored-trees.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-h
 
 - **`stored_trees_fill`** runs the pass alone, on the background lane and at the adapter's quota, against the copy's
   database: one JSON line a pass (requests, time, branches and levels stored, branches left, the store's bytes).
+  Against a live forge it needs the profile's credential: `--secrets <profile>/dev-secrets.json` (the live pass,
+  2026-11-14). `--check live-gitea:<owner>/<name> [--check-branches 3]` fills nothing: it draws each stored branch's
+  top, every folder and *Go to file* from the store and compares each with the forge's own read of the same section,
+  one JSON line a branch with the sections that differ. Read both through the address the mirror was synced at: the
+  folders' links carry it.
 - **`stored-trees.mjs`** times a repository's Files tab with no clone: its first open from Code to the tree's rows, a
   deep folder's first press (the folders above it opened first), and *Go to file*'s first use to the frame listing the
   file with nothing left reading. Each is a read the backend has not made, so start a fresh backend (and a fresh copy)

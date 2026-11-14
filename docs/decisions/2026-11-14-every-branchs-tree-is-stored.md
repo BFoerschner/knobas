@@ -32,7 +32,12 @@ branch, fetched only where something changed, filled in order of use across sync
   requests, a branch whose root is held (made from another, pushed back) costs one. Chosen over always reading the
   whole tree because a whole read costs a request per thousand entries for every moved branch, where a walk costs one
   per changed directory; once the levels a walk knows it still owes reach the pages the whole tree would cost (by the
-  repository's largest stored tree), it reads the whole tree instead.
+  repository's largest stored tree), it reads the whole tree instead. A repository whose largest stored tree fits one
+  page of the whole tree is never walked: its root level alone costs what the whole tree does (measured on the live
+  Gitea, below: the walk cost such a branch two requests where one did).
+- **A forge that does not answer stops the pass.** A tree read that fails as unreachable, unauthorized, a 5xx or a 429
+  ends the pass with every owed branch left for the next run, and counts its request; one about the branch (a commit
+  the forge no longer has, a 404) skips that branch. Until the live pass each failure was skipped uncounted.
 - **In order of use, a batch a run.** Default branches first, then branches an open pull request is opened from and
   branches whose last commit is the source's configured username, then the rest, newest first. At most 300 requests
   inside 60 s a run (`stored_trees::REQUESTS_PER_RUN`, `BUDGET`), so a repository with thousands of branches fills over
@@ -156,27 +161,90 @@ syncs after it.
 - **The person's checkout's current branch** is not put ahead in the first fill: the sync does not see checkouts. Every
   branch is stored, so this orders the first fill only.
 
-## Owed on WSL
+## On the live forges (WSL, 2026-11-14)
 
-In order, on the WSL box once it is free, with this branch's head:
+Gitea 1.27.3 and Forgejo 17.0.0 on the WSL box, the backend and `stored_trees_fill` on the Mac through the tunnel, on
+APFS copies of the scale home (`scale-db/final-home`) with the profile's own credentials (`--secrets`). The Gitea
+source holds the scale estate (62 repositories, 1,206 branches) and a scratch repository made for the run
+(`knobas-scratch-trees/tree-shapes`: this repository's 2,369 paths with stand-in contents, a symlink, an executable, a
+name outside ASCII and a submodule, 2,577 entries in 203 folders; ten branches, eight of them one deep file changed),
+1,216 branches in all; Forgejo the seed's `tidewater` and the same scratch repository, 17. Every request was counted by
+a logging proxy in front of the forge. The real repositories are small: a scale repository's tree is 21 entries.
 
-1. `just gitea-live`
-2. `just gitea-live forgejo`
-3. The pass against the live Gitea, on a fresh APFS copy of the scale home with the dev profile's credentials: the
-   windowless backend (`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo build --release -p knobas-app --features
-   test-util --example headless_ipc --example stored_trees_fill --target-dir <scratch>`), started on the copy, then
-   `stored_trees_fill --db <its database url> --source live-gitea --until-done` (the first fill's requests, passes and
-   disk on the real repositories), the same again (nothing changed), a commit pushed to one branch and `sync_now`, the
-   same again (one push); then `--source live-forgejo`.
-4. The page, before (`09508034`) and after, each at 1x and 4x on a fresh copy and backend:
-   `node testenv/perf/stored-trees.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-hooks&fake-real=5411#/time" --repo
-   live-gitea:<a scale repository> --deep <a folder four deep> --find <a file only the whole tree finds> --throttle 1`
-   (and `4`), against the live forge and through `slow-forge.mjs --delay 1000`.
-5. `just open-budget --real 5411 --inner` after the fill, so its forge rows show the stored tree.
+**What the stand-in assumed, on the real forges.**
 
-What the Mac could not show: that Gitea 1.27 and Forgejo answer a tree asked by a commit with the commit's sha (the
-root's key is computed either way, pinned against `git` itself), the live forge's own time for a level, and a real
-estate's sharing between branches.
+- Both answer a tree asked by a commit, recursive or one level, with the commit's sha in `sha`, never the tree's. (Their
+  `git/commits/{sha}` answers the commit's sha as `tree.sha` too, so the root's key cannot be read from the forge.)
+  Every stored root equals `git rev-parse <commit>^{tree}` of a clone: all 149 branches of the scratch repository,
+  `scale-platform/ci-templates` and `scale-data/lakehouse-infra` on Gitea, the scratch repository's 10 on Forgejo.
+- A page holds at most 1,000 entries whatever is asked (5,000 asked: 1,000 and `truncated: true`), with `total_count`
+  the whole tree's (2,577: three pages). On the last page Gitea says `truncated: false` and Forgejo `true`; a page past
+  the last is `tree: null`. All as `pages` reads them.
+- **Same answer.** `stored_trees_fill --check` drew each branch's top, every folder and *Go to file* from the store and
+  compared each, as JSON, with the forge's own read of the same section: Gitea 34 branches of five repositories, 2,211
+  sections; Forgejo 17 branches, 2,080 sections; every one equal.
+
+**The sync's cost:**
+
+| Run | Gitea | Forgejo |
+|---|---|---|
+| First fill, as this pass shipped it | 2,381 requests, 8 passes, 237 s of pass time | 44 requests, 1 pass, 3.4 s |
+| First fill, one-page trees read whole (below) | 1,245 requests, 5 passes, 124 s, the same rows | 49, 3.9 s (two pushes later) |
+| Nothing changed | 0 requests, 69 to 72 ms | 0, 8 to 9 ms |
+| One push, a file four folders down | 5 requests (the root and four levels), 278 ms | 8 (both pushes' paths), 110 ms |
+
+A level took 30 to 40 ms on the live Gitea (median 35 ms, p90 42), so a pass is bound by the adapter's quota, ten
+requests a second: 300 a run is 30 s. At the five-minute interval the first fill of this estate is five runs, about 25
+minutes. **Disk** after both forges: 3.1 MiB for `sync.git_tree`, 0.6 MiB for `sync.branch_tree`; 29,800 entries
+stored for 1,233 branches whose lists would hold 75,096 (39.7 %: the scale branches each change a file of a 21-entry
+tree, so they share less than the stand-in's).
+
+**What the live pass found and fixed.**
+
+- **Two requests where one did.** 941 of the first fill's 1,982 tree requests were a branch's root level followed at
+  once by its whole tree at the same commit: a repository whose trees fit one page was walked, the walk's root level
+  showed a level not held, and the whole tree was then cheaper than the rest of the walk. A one-page tree read whole is
+  one request, which a walk never beats, so such a repository is read whole (`files.rs`'s `read_tree`; pinned by
+  `stored_tree::a_tree_that_fits_a_page_is_read_whole_in_one_request`). The fill halved; what it stores is the same,
+  row for row (a digest of both forges' levels and pointers, before and after).
+- **A forge that fails kept being asked.** With the forge refusing tree reads (a proxy answering 503), a pass asked
+  every owed branch in turn, three times each with the client's retries, for its whole minute: 238 requests over about
+  80 branches on Gitea, 51 over Forgejo's 17, none counted against the run's 300. A failure that says the forge is not
+  answering (unreachable, unauthorized, 5xx, 429) now stops the pass with every branch left for the next run, counting
+  its request; one about the branch (a 404) still skips it (`stored_trees::forge_failed`; pinned by
+  `a_forge_that_does_not_answer_stops_the_pass_and_a_missing_commit_skips_its_branch`).
+
+**The page on the live forge**, ms from the press (or the first key) to the frame showing the answer, the windowless
+backend of `09508034` and of this pass's head, each cell on a fresh copy and backend, the forge as it is and with every
+request held 1,000 ms (`slow-forge.mjs`). The scratch repository (`--deep crates/knobas-source-gitea/src/view`, `--find
+budget-keys.json`) and `scale-platform/ci-templates` (`--deep modules/kafka`, `--find onboarding-wizard.md`: no scale
+repository is four deep):
+
+| Step | forge | before 1x | after 1x | before 4x | after 4x |
+|---|---|---|---|---|---|
+| Scratch: the tab's first open, from Code | live | 321 | 92 | 305 | 120 |
+| Scratch: a folder four deep, first press | live | 60 | 46 | 75 | 55 |
+| Scratch: *Go to file*, first use | live | 183 | 53 | 216 | 51 |
+| Scale: the tab's first open | live | 388 | 71 | 411 | 125 |
+| Scale: a folder two deep | live | 159 | 54 | 158 | 47 |
+| Scale: *Go to file* | live | 68 | 38 | 72 | 65 |
+| Scratch: the tab's first open | 1,000 ms | 6,031 | 57 | 5,646 | 93 |
+| Scratch: a folder four deep | 1,000 ms | 1,061 | 45 | 1,075 | 42 |
+| Scratch: *Go to file* | 1,000 ms | 2,217 | 48 | 2,215 | 50 |
+| Scale: the tab's first open | 1,000 ms | 3,468 | 44 | 3,221 | 114 |
+| Scale: a folder two deep | 1,000 ms | 1,064 | 40 | 1,062 | 41 |
+| Scale: *Go to file* | 1,000 ms | 1,060 | 34 | 1,070 | 44 |
+
+**`just open-budget --real 5411 --inner`** on the filled copy, this pass's head (the Gitea source through
+`slow-forge.mjs`, the forge live): a folder of the repository with no clone now draws on its first press from the
+store, 25 to 46 ms at 1x and 23 to 66 ms at 4x for the 300, 3,000 and 12,000-entry folders (`forge-folder-*`; reading
+the folder's level from Gitea took 0.1 to 0.6 s), as fast as the cloned repository's (21 to 43 ms); `files-deep`'s
+folders answered in 8 to 12 ms, and its 558 ms (1x) is the file's own bytes from Gitea, which are not stored. 10 over:
+the run's three tabs at each throttle had nothing to press (TeamCity is down on the box and off in the copy), and the
+cloned big compares' first open, `compare-3000` 118 and `compare-10000` 204 ms at 1x (line 100), 244 and 324 at 4x (line
+200), measured live for the first time: the page waits for the clone's own list of the changed files (70 and 145 ms of
+backend time at 1x) and then the first file's lines. Nothing in this pass changes that path; it is left for a pass of
+its own.
 
 ## Reversing it
 
