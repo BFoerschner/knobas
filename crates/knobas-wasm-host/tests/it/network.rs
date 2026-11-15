@@ -810,25 +810,33 @@ async fn an_adapter_waits_on_the_burst_a_built_in_client_spent() {
 /// **An adapter's sync yields to a person's request for its instance** (the
 /// priority lane, 2026-11-13).
 ///
-/// The instance held to one request a second, its burst spent: the adapter,
+/// The instance held to two requests a second, its burst spent: the adapter,
 /// called in the background lane as a sync run is, waits for the next
-/// second, and a person's request through a built-in client arrives while
-/// it waits. The person's goes at the next second and the adapter's at the
-/// one after; before the lane the two tied, and either could go first.
+/// refill, and a person's request through a built-in client arrives while
+/// it waits. The person's goes at the refill and the adapter's at the one
+/// after. Two a second, not one: at one, the refill fell on the instant the
+/// adapter had waited `BACKGROUND_FLOOR`, which lets it go next, so the
+/// order was a race of two timers a few milliseconds apart (2026-11-16).
+/// Without the lane the adapter, waiting first, takes the refill.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_adapters_sync_yields_to_a_persons_request_for_its_instance() {
     let server = Server::start(None).await;
-    let client = built_in(&server, 1, 1);
+    let client = built_in(&server, 2, 1);
+    // Built before the burst is spent: building the component took 1.4 to
+    // 1.8 s on a loaded Mac (2026-11-16), so a burst spent before it had
+    // refilled by the time the adapter asked, and the adapter's request went
+    // at once, with nothing to yield to.
+    let source = hammering(&server, "/sync", 1, Limits::default());
     client
         .send(client.request(knobas_http::Method::GET, "/spent"))
         .await
         .expect("the burst");
-    let source = hammering(&server, "/sync", 1, Limits::default());
 
     let sync =
         async { knobas_http::on_lane(knobas_http::Lane::Background, answer(&*source)).await };
     let person = async {
-        // Sent once the adapter is surely waiting on the limiter.
+        // Sent once the adapter is surely waiting on the limiter, before the
+        // refill 500 ms after the burst.
         tokio::time::sleep(Duration::from_millis(300)).await;
         client
             .send(client.request(knobas_http::Method::GET, "/person"))
