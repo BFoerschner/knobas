@@ -5,7 +5,9 @@
   No scroller reserves room for its bar. The host is a size container, the scroller fills it, and the one body is as
   wide as the host (`100cqw`) whether or not a bar is showing, so nothing inside moves when one appears. The bar takes
   the last 8 px of the page's right padding, and the clip around the body holds what passes under it, so that is no
-  overflow to scroll to. A band ends at the bar only while there is something to scroll.
+  overflow to scroll to. A band ends at the bar only while there is something to scroll. Builds' host is no container
+  where the engine keeps a gutter: a size container lays out all it holds on every change, and its runs' window moves
+  on every scroll (`builds.css`, builds at 6x).
 
   `class` names the scroller, not the host, because `TfDiffView` and the tests look a scroller up by its name. A
   container name goes on the host from the stylesheet (`.tf-shost:has(> .tf-bmain)`). Attributes and attachments reach

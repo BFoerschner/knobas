@@ -222,14 +222,15 @@
 /* Builds' scroller holds no size container (builds at 6x, 2026-11-15). A size container lays out all it holds again
    whenever anything in it changes: each move of the runs' window laid out the whole page, 12 ms of a 6x frame where
    4 is left without it. So where the engine keeps a gutter, the body is as wide as the host by the gutter instead of by
-   `100cqw`: the scroller always keeps the bar's 8 px, the body takes them back and the clip holds what passes under the
-   bar, the same boxes as before with a bar or without one. The header is the container that names the width at which
+   `100cqw`: the scroller always keeps the bar's 8 px and the clip takes them back, so a band reaches the edge while
+   nothing scrolls and ends at the bar while something does, the same boxes and pixels as before. The header is the container that names the width at which
    *Open in* gives up its words: the host less the header's 44 px of padding. An engine with no gutter (WebKit before
    Safari 18.2) keeps the host's container, as before. */
 @supports (scrollbar-gutter: stable) {
   .tf-shost:has(> .tf-bmain) { container-type: normal; }
   .tf-shost > .tf-bmain { scrollbar-gutter: stable; }
-  .tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: calc(100% + 8px); }
+  .tf-shost > .tf-bmain > .tf-sclip { margin-right: -8px; }
+  .tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: 100%; }
   .tf-bmain .tf-fhead.tf-bhead { container: bhead / inline-size; }
   @container bhead (max-width: 1086px) {
     .tf-wide { display: none; }

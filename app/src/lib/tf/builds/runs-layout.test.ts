@@ -28,9 +28,11 @@ test("Builds' scroller holds no size container where the engine keeps a gutter, 
   const block = supportsBlock(flat(builds));
   // A size container lays out all it holds whenever anything in it changes: 12 ms of a 6x frame on each window move.
   expect(block).toContain(".tf-shost:has(> .tf-bmain) { container-type: normal; }");
-  // The bar's 8 px kept whether it shows or not, and taken back by the body: the boxes `100cqw` gave.
+  // The bar's 8 px kept whether it shows or not, and taken back by the clip, so a band reaches the edge while nothing
+  // scrolls (the spec's Layout): the boxes `100cqw` gave.
   expect(block).toContain(".tf-shost > .tf-bmain { scrollbar-gutter: stable; }");
-  expect(block).toContain(".tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: calc(100% + 8px); }");
+  expect(block).toContain(".tf-shost > .tf-bmain > .tf-sclip { margin-right: -8px; }");
+  expect(block).toContain(".tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: 100%; }");
   expect(flat(tokens)).toMatch(/::-webkit-scrollbar \{ width: 8px;/);
 });
 
