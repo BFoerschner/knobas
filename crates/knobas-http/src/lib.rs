@@ -103,8 +103,8 @@ use tokio::time::Instant;
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
 pub use limiter::{
-    BACKGROUND_FLOOR, InstanceLimiter, Lane, LocalQuota, Sending, current_lane, on_lane,
-    watch_local_quota,
+    BACKGROUND_FLOOR, InstanceLimiter, Lane, LocalQuota, STAND_ASIDE_CEILING, Sending,
+    current_lane, on_lane, watch_local_quota,
 };
 pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 
@@ -598,6 +598,10 @@ impl HttpClient {
         // Whether a read has been sent again after the server closed its
         // connection before answering: that happens once per call (#1818).
         let mut resent_after_close = false;
+        // How long this call's waits on the limiter stood aside for a
+        // person's requests: not the call's own time, so not counted against
+        // its budget (`InstanceLimiter::until_ready_counted`).
+        let mut aside = Duration::ZERO;
 
         for attempt in 1..=MAX_ATTEMPTS {
             // Cloned before sending, because sending consumes it. `None` for a
@@ -609,11 +613,18 @@ impl HttpClient {
             // limiter is the burst this crate exists to prevent. Inside the
             // budget, because waiting for a token is part of what the call
             // costs, and bounded by what is left of it (SPI-11, #1630).
-            let left = self.budget_left(started).unwrap_or_default();
+            let left = self.budget_left(started, aside).unwrap_or_default();
             // A person's request keeps its place among the origin's until
             // this attempt's answer is in, so a sync stands aside for the
             // whole of it (`limiter::Sending`, the priority lane).
-            let ready = self.limiter.until_ready_sending(left).await;
+            let ready = self
+                .limiter
+                .until_ready_counted(left)
+                .await
+                .map(|(sending, stood)| {
+                    aside += stood;
+                    sending
+                });
             // Out of budget in the wait, or with none left once it ended:
             // either way this attempt never left. A retry reports what the
             // source said the attempt before; a first attempt has only the
@@ -622,7 +633,7 @@ impl HttpClient {
             // error alone does not keep a backoff off, since a caller backs
             // off on a `Protocol` too; a caller tells a quota stop apart by
             // the mark below, under `watch_local_quota` (#1729, #1980).
-            let (attempt_timeout, sending) = match (ready, self.attempt_timeout(started)) {
+            let (attempt_timeout, sending) = match (ready, self.attempt_timeout(started, aside)) {
                 (Ok(sending), Some(timeout)) => (timeout, sending),
                 (ready, _) => {
                     let quota = match ready {
@@ -771,7 +782,10 @@ impl HttpClient {
             // This is the branch a `Retry-After` longer than the budget takes
             // -- a source asking for a minute is telling us to come back on
             // the next schedule, not to hold a transaction open for it.
-            if self.budget_left(started).is_none_or(|left| delay >= left) {
+            if self
+                .budget_left(started, aside)
+                .is_none_or(|left| delay >= left)
+            {
                 return Err(give_up);
             }
             tracing::debug!(attempt, ?delay, "retrying");
@@ -793,16 +807,21 @@ impl HttpClient {
     /// not clamped to the request timeout, because it also has to answer "is
     /// there room to wait this long before retrying?", where the per-request
     /// timeout is irrelevant.
-    fn budget_left(&self, started: Instant) -> Option<Duration> {
+    ///
+    /// `aside` is how long the call stood aside on the limiter for a
+    /// person's requests, which the budget does not count (the ux12 Windows
+    /// pass): a sync request behind a person's reads is waiting for them,
+    /// not for the source.
+    fn budget_left(&self, started: Instant, aside: Duration) -> Option<Duration> {
         self.send_budget
-            .checked_sub(started.elapsed())
+            .checked_sub(started.elapsed().saturating_sub(aside))
             .filter(|left| !left.is_zero())
     }
 
     /// How long the next attempt may take: the configured per-request timeout,
     /// or the rest of the budget if that is shorter.
-    fn attempt_timeout(&self, started: Instant) -> Option<Duration> {
-        Some(self.budget_left(started)?.min(self.request_timeout))
+    fn attempt_timeout(&self, started: Instant, aside: Duration) -> Option<Duration> {
+        Some(self.budget_left(started, aside)?.min(self.request_timeout))
     }
 
     /// GET a JSON document.
