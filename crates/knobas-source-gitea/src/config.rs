@@ -45,7 +45,9 @@ pub struct GiteaConfig {
     /// [`MAX_CONCURRENT_REPOS`]. Inside a repository the walk stays one
     /// request after another; this only lets repositories overlap, and the
     /// shared limiter `rate_limit_per_sec` sets stays the one bound on the
-    /// request rate. 1 walks them one after another, for an instance that
+    /// request rate. However many walk, at most two of their requests are
+    /// in flight at once (`knobas_http::BACKGROUND_IN_FLIGHT`, the ux13
+    /// Windows pass, 2026-11-15). 1 walks them one after another, for an instance that
     /// cannot take more than one request at a time.
     pub concurrent_repos: u32,
     /// Other addresses CI clones this server from (#683): a URL prefix such

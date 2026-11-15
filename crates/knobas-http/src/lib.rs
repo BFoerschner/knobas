@@ -103,8 +103,8 @@ use tokio::time::Instant;
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
 pub use limiter::{
-    BACKGROUND_FLOOR, InstanceLimiter, Lane, LocalQuota, STAND_ASIDE_CEILING, Sending,
-    current_lane, on_lane, watch_local_quota,
+    BACKGROUND_FLOOR, BACKGROUND_IN_FLIGHT, INTERACTIVE_LINGER, InstanceLimiter, Lane, LocalQuota,
+    STAND_ASIDE_CEILING, Sending, current_lane, on_lane, watch_local_quota,
 };
 pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 

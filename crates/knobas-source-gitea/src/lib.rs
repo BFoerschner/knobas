@@ -41,7 +41,12 @@
 //! one repository the walk is one request after another, and up to
 //! `concurrent_repos` repositories (default 8) are walked side by side
 //! (#2159), so a raised rate is not capped by one round trip at a time; at 1
-//! the run walks them one after another. The `owners`/`repos` allowlist is the
+//! the run walks them one after another. The walks share the origin's two
+//! places in flight for the sync (`knobas_http::BACKGROUND_IN_FLIGHT`, the
+//! ux13 Windows pass, 2026-11-15): at most two of a run's requests are on the
+//! server at once, so a person's read never queues behind eight, and a forge
+//! that takes 300 ms an answer is synced at about 6.7 requests a second rather
+//! than the quota's ten. The `owners`/`repos` allowlist is the
 //! lever when the request count is too much, and `include_pr_comments` is the
 //! one that costs a discussion.
 //!

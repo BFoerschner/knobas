@@ -92,6 +92,27 @@
 //! ([`InstanceLimiter::until_ready_sending`], and
 //! [`SEND_BUDGET`](crate::SEND_BUDGET) beside it), for at most
 //! [`STAND_ASIDE_CEILING`] more.
+//!
+//! **The sync keeps few requests on the server, and waits out a page's
+//! rounds** (the ux13 Windows pass, 2026-11-15). Standing aside holds back
+//! the sync's next requests, not the ones it already sent: with eight
+//! repositories walked at once, a person's read reached a Gitea busy with
+//! up to eight of the sync's, and a Gitea that answers a branch's view in
+//! 300 ms alone took one to three seconds for four at once. A page's read
+//! that needs two or three rounds, each sent on the answer of the one
+//! before, also let the sync's waiting requests through in the moment
+//! between them, so each round met a server freshly loaded. So an origin's
+//! background requests have at most [`BACKGROUND_IN_FLIGHT`] in flight at
+//! once (a request's place held from before its wait on the quota until its
+//! answer is in, [`Sending`]), and they stand aside for
+//! [`INTERACTIVE_LINGER`] past a person's last answer (of a request held
+//! over its answer: one that only waited on the quota has no next round to
+//! wait for). Neither changes what
+//! the quota lets through: the cap only lowers how many of the sync's are
+//! on the server when a person's arrives, and the linger is inside the
+//! [`BACKGROUND_FLOOR`] like any standing aside. Waiting for a place in
+//! flight is not the sync's own wait either: it is the server's time on the
+//! sync's earlier requests, which each request's own timeout bounds.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -188,7 +209,7 @@ impl InstanceLimiter {
     /// goes on counting until its answer is in is
     /// [`until_ready_sending`](Self::until_ready_sending)'s.
     pub async fn until_ready_within(&self, within: Duration) -> Result<(), LocalQuota> {
-        self.until_ready_sending(within).await.map(drop)
+        self.until_ready_sending(within).await.map(Sending::let_go)
     }
 
     /// [`until_ready_within`](Self::until_ready_within), handing back the
@@ -196,7 +217,8 @@ impl InstanceLimiter {
     /// dropped: held over the request until its answer is in, it keeps the
     /// origin's background requests standing aside for the whole of what a
     /// person waits for, not only its wait on the quota (the priority lane,
-    /// 2026-11-13). A background request's holds nothing.
+    /// 2026-11-13). A background request's holds its place among the
+    /// origin's [`BACKGROUND_IN_FLIGHT`] until it is dropped.
     ///
     /// # Errors
     ///
@@ -240,10 +262,19 @@ impl InstanceLimiter {
             };
         }
         let began = Instant::now();
+        // A place among the origin's background requests in flight first
+        // ([`BACKGROUND_IN_FLIGHT`]): the wait for it is the server's time on
+        // the sync's own earlier requests, not this one's, so `within` does
+        // not count it, for at most the ceiling.
+        let Ok(flight) = tokio::time::timeout(STAND_ASIDE_CEILING, Flight::enter(&self.slot)).await
+        else {
+            return Err(self.ran_out(began.elapsed()));
+        };
+        let room = began.elapsed();
         let held_before = self.slot.held_for();
         let mut wait = std::pin::pin!(self.slot.until_ready(lane));
         loop {
-            let aside = aside_since(&self.slot, held_before);
+            let aside = room + aside_since(&self.slot, held_before);
             let left = (within + aside).saturating_sub(began.elapsed());
             if left.is_zero() {
                 return Err(self.ran_out(began.elapsed()));
@@ -252,7 +283,8 @@ impl InstanceLimiter {
             // a person's requests meanwhile moved it on.
             if tokio::time::timeout(left, &mut wait).await.is_ok() {
                 self.slot.granted();
-                return Ok((Sending(None), aside_since(&self.slot, held_before)));
+                let aside = room + aside_since(&self.slot, held_before);
+                return Ok((Sending(Some(Place::Background(flight))), aside));
             }
         }
     }
@@ -376,6 +408,27 @@ pub const BACKGROUND_FLOOR: Duration = Duration::from_secs(1);
 /// estate's Gitea, every branch's tree stored, took about as long.
 pub const STAND_ASIDE_CEILING: Duration = Duration::from_secs(300);
 
+/// The most [`Lane::Background`] requests one origin has in flight at once
+/// (the ux13 Windows pass, 2026-11-15): from before a request's wait on the
+/// quota until its answer is in ([`Sending`]). Two: a person's read reaches
+/// a server busy with at most two of the sync's, where it met up to eight
+/// (a Gitea run's repositories at once). Two in flight keep a sync at a
+/// quota of ten a second against a server that answers in 200 ms; a slower
+/// one gets the sync's requests one after another, and a person's beside
+/// them.
+pub const BACKGROUND_IN_FLIGHT: usize = 2;
+
+/// How long past the answer to a person's last request on an origin its
+/// background requests go on standing aside (the ux13 Windows pass,
+/// 2026-11-15): a page's next round is sent on the answer of the one before
+/// (a file's entry, then its bytes; a pull request's record, then its
+/// compare), and the sync's waiting requests went in the moment between
+/// them. 150 ms: the backend sends a round within milliseconds of the answer
+/// before it, a page its next read within a frame or two at 4x. Only after a
+/// request held over its answer ([`InstanceLimiter::until_ready_sending`]),
+/// and inside [`BACKGROUND_FLOOR`] like any standing aside.
+pub const INTERACTIVE_LINGER: Duration = Duration::from_millis(150);
+
 tokio::task_local! {
     /// The lane of the requests sent on this task, where [`on_lane`] set one.
     static LANE: Lane;
@@ -466,6 +519,15 @@ struct Slot {
     /// Told when the last interactive request is answered or gives up: what
     /// a yielding background request wakes on.
     yielded: tokio::sync::Notify,
+    /// Nanoseconds from `born` to when the last interactive request was
+    /// answered or gave up with none left, plus one; `0` if none has:
+    /// [`INTERACTIVE_LINGER`] counts from it.
+    interactive_ended: AtomicU64,
+    /// How many [`Lane::Background`] requests hold a place in flight
+    /// ([`Flight`]), at most [`BACKGROUND_IN_FLIGHT`].
+    background_in_flight: AtomicUsize,
+    /// Told when a background request gives its place in flight back.
+    flight_room: tokio::sync::Notify,
     /// When interactive requests held the origin ([`held_for`](Self::held_for)).
     busy: Mutex<Busy>,
     /// How many [`Lane::Background`] requests wait on the quota right now
@@ -505,13 +567,24 @@ impl Drop for Queued<'_> {
     }
 }
 
-/// An interactive request's place among its origin's
-/// ([`InstanceLimiter::until_ready_sending`]): while it is held, the
-/// origin's background requests stand aside. Given back when dropped,
-/// however the request ends: answered, out of time, or cancelled. A
-/// background request's holds no place.
+/// A request's place among its origin's
+/// ([`InstanceLimiter::until_ready_sending`]), given back when dropped,
+/// however the request ends: answered, out of time, or cancelled. While an
+/// interactive request's is held, the origin's background requests stand
+/// aside; a background request's is one of the origin's
+/// [`BACKGROUND_IN_FLIGHT`].
 #[must_use = "dropping it ends the request's place at once"]
-pub struct Sending(Option<Arc<Slot>>);
+pub struct Sending(Option<Place>);
+
+/// What a [`Sending`] holds.
+enum Place {
+    /// One of the origin's interactive requests: counted until dropped, and
+    /// whether [`INTERACTIVE_LINGER`] follows it (it was held over its
+    /// answer, not only its wait on the quota).
+    Interactive(Arc<Slot>, bool),
+    /// One of the origin's background requests in flight.
+    Background(Flight),
+}
 
 impl Sending {
     fn enter(slot: &Arc<Slot>) -> Self {
@@ -520,31 +593,89 @@ impl Sending {
             busy.since = Some(Instant::now());
         }
         drop(busy);
-        Self(Some(Arc::clone(slot)))
+        Self(Some(Place::Interactive(Arc::clone(slot), true)))
+    }
+
+    /// Give the place back at once, as a request that only waited on the
+    /// quota does: no next round of it follows its answer, so no
+    /// [`INTERACTIVE_LINGER`] either.
+    fn let_go(mut self) {
+        if let Some(Place::Interactive(_, linger)) = &mut self.0 {
+            *linger = false;
+        }
     }
 }
 
 impl std::fmt::Debug for Sending {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (lane, origin) = match &self.0 {
+            Some(Place::Interactive(slot, _)) => (Some(Lane::Interactive), Some(&slot.origin)),
+            Some(Place::Background(Flight(slot))) => (Some(Lane::Background), Some(&slot.origin)),
+            None => (None, None),
+        };
         formatter
             .debug_tuple("Sending")
-            .field(&self.0.as_ref().map(|slot| &slot.origin))
+            .field(&lane)
+            .field(&origin)
             .finish()
     }
 }
 
 impl Drop for Sending {
     fn drop(&mut self) {
-        if let Some(slot) = self.0.take() {
+        // A background place gives itself back ([`Flight`]'s drop).
+        if let Some(Place::Interactive(slot, linger)) = self.0.take() {
             let mut busy = slot.busy.lock().unwrap_or_else(PoisonError::into_inner);
             if slot.interactive.fetch_sub(1, Ordering::SeqCst) == 1 {
                 if let Some(since) = busy.since.take() {
                     busy.total += since.elapsed();
                 }
+                if linger {
+                    let now = u64::try_from(slot.born.elapsed().as_nanos()).unwrap_or(u64::MAX - 1);
+                    slot.interactive_ended.store(now + 1, Ordering::SeqCst);
+                }
                 drop(busy);
                 slot.yielded.notify_waiters();
             }
         }
+    }
+}
+
+/// A background request's place among its origin's
+/// [`BACKGROUND_IN_FLIGHT`], given back when dropped.
+struct Flight(Arc<Slot>);
+
+impl Flight {
+    /// Wait for a place among `slot`'s background requests in flight, and
+    /// take it.
+    async fn enter(slot: &Arc<Slot>) -> Self {
+        loop {
+            let notified = slot.flight_room.notified();
+            let mut notified = std::pin::pin!(notified);
+            // Registered before the count is read, so a place given back
+            // between the read and the wait still wakes it.
+            notified.as_mut().enable();
+            let flying = slot.background_in_flight.load(Ordering::SeqCst);
+            if flying < BACKGROUND_IN_FLIGHT {
+                if slot
+                    .background_in_flight
+                    .compare_exchange(flying, flying + 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    return Self(Arc::clone(slot));
+                }
+                continue;
+            }
+            notified.await;
+        }
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        self.0.background_in_flight.fetch_sub(1, Ordering::SeqCst);
+        // Every waiter tries again; the ones that lose the race wait again.
+        self.0.flight_room.notify_waiters();
     }
 }
 
@@ -571,6 +702,9 @@ impl Slot {
             last_background: AtomicU64::new(0),
             interactive: AtomicUsize::new(0),
             yielded: tokio::sync::Notify::new(),
+            interactive_ended: AtomicU64::new(0),
+            background_in_flight: AtomicUsize::new(0),
+            flight_room: tokio::sync::Notify::new(),
             busy: Mutex::new(Busy::default()),
             background_waiting: AtomicUsize::new(0),
             queued_since: AtomicU64::new(0),
@@ -664,9 +798,10 @@ impl Slot {
         self.background_waiting.load(Ordering::SeqCst) > 0 && Instant::now() >= self.floor()
     }
 
-    /// Return once no interactive request waits on this origin, or once the
-    /// origin's background requests are past their [`floor`](Self::floor),
-    /// whichever is first.
+    /// Return once no interactive request waits on this origin and the last
+    /// one's answer is [`INTERACTIVE_LINGER`] behind, or once the origin's
+    /// background requests are past their [`floor`](Self::floor), whichever
+    /// is first.
     async fn yield_to_interactive(&self) {
         loop {
             let notified = self.yielded.notified();
@@ -674,12 +809,27 @@ impl Slot {
             // Registered before the count is read, so a last interactive
             // request that goes between the read and the wait still wakes it.
             notified.as_mut().enable();
-            if self.interactive.load(Ordering::SeqCst) == 0 {
+            let lingers = self.lingers_until();
+            let now = Instant::now();
+            if self.interactive.load(Ordering::SeqCst) == 0 && lingers.is_none_or(|end| now >= end)
+            {
                 return;
             }
             let until = self.floor();
-            if Instant::now() >= until {
+            if now >= until {
                 return;
+            }
+            if self.interactive.load(Ordering::SeqCst) == 0
+                && let Some(end) = lingers
+            {
+                // A person's next round may be on its way: woken at the
+                // linger's end to look again, or by a request of theirs
+                // that came and went meanwhile.
+                tokio::select! {
+                    () = notified => {}
+                    () = tokio::time::sleep_until(end.min(until)) => {}
+                }
+                continue;
             }
             // Woken at `until`, the floor is read again: another background
             // request let through meanwhile moved it.
@@ -687,6 +837,15 @@ impl Slot {
                 () = notified => {}
                 () = tokio::time::sleep_until(until) => {}
             }
+        }
+    }
+
+    /// When [`INTERACTIVE_LINGER`] past the last interactive request's
+    /// answer ends, if one has been answered.
+    fn lingers_until(&self) -> Option<Instant> {
+        match self.interactive_ended.load(Ordering::SeqCst) {
+            0 => None,
+            ended => Some(self.born + Duration::from_nanos(ended - 1) + INTERACTIVE_LINGER),
         }
     }
 
@@ -1222,7 +1381,10 @@ mod tests {
 
         use tokio::time::Instant;
 
-        use super::super::{BACKGROUND_FLOOR, InstanceLimiter, Lane, current_lane, on_lane};
+        use super::super::{
+            BACKGROUND_FLOOR, BACKGROUND_IN_FLIGHT, INTERACTIVE_LINGER, InstanceLimiter, Lane,
+            current_lane, on_lane,
+        };
         use super::Rate;
 
         /// Who was let through, and when, counted from the test's start.
@@ -1480,8 +1642,9 @@ mod tests {
         /// A person's request whose answer is not in holds the sync off as
         /// one waiting on the quota does ([`super::super::Sending`]): the
         /// quota has room, but a sync request sent while the person's is in
-        /// flight goes the moment its answer is in. One whose answer takes
-        /// five seconds holds it [`BACKGROUND_FLOOR`] and no longer.
+        /// flight goes [`INTERACTIVE_LINGER`] after its answer is in. One
+        /// whose answer takes five seconds holds it [`BACKGROUND_FLOOR`] and
+        /// no longer.
         #[tokio::test(start_paused = true)]
         async fn the_sync_stands_aside_until_a_persons_answer_is_in() {
             async fn held_for(origin: &str, flight: Duration) -> Duration {
@@ -1512,7 +1675,7 @@ mod tests {
 
             assert_eq!(
                 held_for("http://flight.invalid:2479", ms(300)).await,
-                ms(300)
+                ms(300) + INTERACTIVE_LINGER
             );
             assert_eq!(
                 held_for("http://long.invalid:2479", ms(5_000)).await,
@@ -1542,6 +1705,153 @@ mod tests {
             .expect("the burst has room");
             assert_eq!(start.elapsed(), Duration::ZERO);
             drop(sync);
+        }
+
+        /// The ux13 Windows pass (2026-11-15): a page's read in rounds, each
+        /// sent 20 ms after the answer to the one before, as a file's entry
+        /// and then its bytes are. The sync's request queued behind the
+        /// first round waits out the second too, rather than going in the
+        /// moment between them: red before the linger, when it went at
+        /// 300 ms, onto the server the second round then reached.
+        #[tokio::test(start_paused = true)]
+        async fn a_persons_next_round_finds_the_sync_still_aside() {
+            let url = url::Url::parse("http://rounds.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 5));
+            let start = Instant::now();
+            let round = || {
+                on_lane(
+                    Lane::Interactive,
+                    limiter.until_ready_sending(Duration::from_secs(60)),
+                )
+            };
+            let first = round().await.expect("the burst has room");
+            let sync = {
+                let limiter = limiter.clone();
+                tokio::spawn(on_lane(Lane::Background, async move {
+                    tokio::time::sleep(ms(10)).await;
+                    limiter
+                        .until_ready_within(Duration::from_secs(60))
+                        .await
+                        .expect("let through");
+                    start.elapsed()
+                }))
+            };
+            tokio::time::sleep(ms(300)).await;
+            drop(first);
+            tokio::time::sleep(ms(20)).await;
+            let second = round().await.expect("the burst has room");
+            tokio::time::sleep(ms(300)).await;
+            drop(second);
+            assert_eq!(
+                sync.await.expect("the sync"),
+                ms(620) + INTERACTIVE_LINGER,
+                "after the second round's answer, and the linger past it"
+            );
+        }
+
+        /// The linger never holds the sync past [`BACKGROUND_FLOOR`]: a
+        /// person whose answered requests come every 100 ms, each starting
+        /// a new linger before the last ends, still lets the sync's waiting
+        /// request through a floor after it began to wait.
+        #[tokio::test(start_paused = true)]
+        async fn the_linger_holds_the_sync_no_longer_than_the_floor() {
+            let url = url::Url::parse("http://linger.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(100, 100));
+            let start = Instant::now();
+            let person = {
+                let limiter = limiter.clone();
+                tokio::spawn(on_lane(Lane::Interactive, async move {
+                    for _ in 0..30 {
+                        let sending = limiter
+                            .until_ready_sending(Duration::from_secs(60))
+                            .await
+                            .expect("the quota has room");
+                        tokio::time::sleep(ms(10)).await;
+                        drop(sending);
+                        tokio::time::sleep(ms(90)).await;
+                    }
+                }))
+            };
+            tokio::time::sleep(ms(5)).await;
+            let synced = sync_within(&limiter, start, ms(20), Duration::from_secs(60));
+            assert_eq!(
+                synced.await.expect("the sync"),
+                (ms(20) + BACKGROUND_FLOOR, true)
+            );
+            person.await.expect("the person");
+        }
+
+        /// The ux13 Windows pass (2026-11-15): eight of a sync's requests
+        /// at once, as a Gitea run walks eight repositories, each answered
+        /// in a second, on a quota with room for all of them. At most
+        /// [`BACKGROUND_IN_FLIGHT`] are on the server at once, so a
+        /// person's request meets two of the sync's, not eight; and a
+        /// person's request beside them goes at once. Red before the cap:
+        /// all eight went at once.
+        #[tokio::test(start_paused = true)]
+        async fn a_sync_keeps_at_most_two_requests_in_flight() {
+            let url = url::Url::parse("http://flights.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(100, 100));
+            let start = Instant::now();
+            let flying = Arc::new(Mutex::new((0usize, 0usize)));
+            let mut handles = Vec::new();
+            for _ in 0..8 {
+                let (limiter, flying) = (limiter.clone(), Arc::clone(&flying));
+                handles.push(tokio::spawn(on_lane(Lane::Background, async move {
+                    let sending = limiter
+                        .until_ready_sending(Duration::from_secs(60))
+                        .await
+                        .expect("let through");
+                    {
+                        let mut flying = flying.lock().unwrap();
+                        flying.0 += 1;
+                        flying.1 = flying.1.max(flying.0);
+                    }
+                    tokio::time::sleep(ms(1_000)).await;
+                    flying.lock().unwrap().0 -= 1;
+                    drop(sending);
+                })));
+            }
+            tokio::time::sleep(ms(10)).await;
+            let person = Instant::now();
+            on_lane(
+                Lane::Interactive,
+                limiter.until_ready_within(Duration::from_secs(60)),
+            )
+            .await
+            .expect("the quota has room");
+            assert_eq!(person.elapsed(), Duration::ZERO);
+            all(handles).await;
+            assert_eq!(flying.lock().unwrap().1, BACKGROUND_IN_FLIGHT);
+            assert_eq!(start.elapsed(), ms(4_000), "two at a time, a second each");
+        }
+
+        /// A sync request waiting for a place in flight waits on the
+        /// server's time on the sync's earlier requests, not its own: two
+        /// that take ten seconds each leave a third, allowed one second of
+        /// waiting, to go once one of theirs is answered.
+        #[tokio::test(start_paused = true)]
+        async fn waiting_for_a_place_in_flight_does_not_count_against_the_wait() {
+            let url = url::Url::parse("http://place.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(100, 100));
+            let start = Instant::now();
+            let held = on_lane(Lane::Background, async {
+                let mut held = Vec::new();
+                for _ in 0..BACKGROUND_IN_FLIGHT {
+                    held.push(
+                        limiter
+                            .until_ready_sending(Duration::from_secs(60))
+                            .await
+                            .expect("a place"),
+                    );
+                }
+                held
+            })
+            .await;
+            let third = sync_within(&limiter, start, ms(0), Duration::from_secs(1));
+            tokio::time::sleep(ms(10_000)).await;
+            drop(held);
+            assert_eq!(third.await.expect("the sync"), (ms(10_000), true));
         }
 
         /// A person's request yields nothing on another origin: the sync of
