@@ -160,7 +160,7 @@ pub(crate) fn mock_tickets() -> Vec<(&'static str, &'static str, Value)> {
 }
 
 /// What each stored field is, in [`both`]'s arrays.
-const FIELDS: [&str; 15] = [
+const FIELDS: [&str; 20] = [
     "status",
     "assignee",
     "assignee_name",
@@ -176,6 +176,11 @@ const FIELDS: [&str; 15] = [
     "parent_text",
     "source_id",
     "sprint_active",
+    "title",
+    "item_updated_at",
+    "words",
+    "project_key",
+    "project_name",
 ];
 
 /// Every field of each of `source`'s tickets as the payload macros walk it
@@ -211,7 +216,12 @@ const WALKED: &str = concat!(
        where ip.entity_id = i.entity_id order by 1), i.source_id,
        exists (select 1 from ",
     knobas_core::declared_list!("$1", "sprint_state"),
-    " l where lower(l.value) = 'active'))
+    " l where lower(l.value) = 'active'), i.title, i.item_updated_at,
+       lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)) || chr(31) || lower(i.title), ",
+    knobas_core::project_key_read!("$1"),
+    ", ",
+    knobas_core::declared_string!("$1", "project_name"),
+    ")
        from sync.item i where i.source_id = $2 order by i.entity_id"
 );
 
@@ -223,7 +233,8 @@ const STORED: &str =
        c.first_label, c.comment_count, c.parent_kind, c.parent_name,
        array(select unnest(c.answers_to) order by 1),
        array(select x from unnest(string_to_array(c.parent_text, chr(31))) x order by 1),
-       c.source_id, c.sprint_active) end
+       c.source_id, c.sprint_active, c.title, c.item_updated_at, c.words, c.project_key,
+       c.project_name) end
        from sync.item i
        left join sync.item_card c
          on c.entity_id = i.entity_id and c.paths_key = sync.card_key($1::jsonb -> i.source_id)
@@ -296,6 +307,8 @@ async fn the_stored_rows_are_the_macros_expansions() {
         knobas_core::declared_string!("dd.decl", "assignee_name"),
         knobas_core::declared_string!("dd.decl", "priority"),
         knobas_core::declared_string!("dd.decl", "issue_type"),
+        knobas_core::declared_string!("dd.decl", "project_key"),
+        knobas_core::declared_string!("dd.decl", "project_name"),
         knobas_core::path_line_read!("dd.decl"),
         knobas_core::declared_list!("dd.decl", "labels"),
         knobas_core::declared_list!("dd.decl", "sprint_state"),
@@ -1012,4 +1025,325 @@ async fn a_declaration_change_drops_the_cards_and_the_fill_writes_them_again() {
             .unwrap();
     assert_eq!(status, "Synced meanwhile", "a card that was there is kept");
     assert_eq!(count(&pool).await, 4, "the one with none is written");
+}
+
+/// Mark the whole sources (`sync.mark_cards_whole`, migration `0089`), again
+/// while another test's write holds the key it takes or does nothing under.
+pub(crate) async fn mark_whole(pool: &PgPool) {
+    for _ in 0..200 {
+        if knobas_core::item_card::mark_whole(pool).await.unwrap() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the key stayed held for four seconds");
+}
+
+/// Whether `source` is whole under the key `declared` gives it.
+async fn is_whole(pool: &PgPool, source: &str, declared: &sqlx::types::Json<Value>) -> bool {
+    sqlx::query_scalar(
+        "select exists (select from sync.card_whole w
+                         where w.source_id = $1 and w.paths_key = sync.card_key($2::jsonb -> $1))",
+    )
+    .bind(source)
+    .bind(declared)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// The board off the cards alone (migration `0089`) is the board joined,
+/// row for row and in the same order, on one snapshot: with lanes by every
+/// field and without, cut and whole, narrowed to some ids and not, a project
+/// room, dates that tie, a withdrawn ticket. Where a source of the scope is
+/// not whole it answers one row of no ticket's id, and nothing else, and the
+/// fill makes it whole again.
+#[tokio::test]
+async fn the_board_off_the_cards_alone_is_the_board_joined() {
+    let pool = pool().await;
+    let jira = source(&pool, "jira").await;
+    let gitea = source(&pool, "gitea").await;
+    upsert(&pool, &jira, &jira_tickets()).await;
+    upsert(&pool, &gitea, &gitea_tickets()).await;
+    let more: Vec<(String, String, Value)> = (10..22)
+        .map(|n| {
+            let key = format!("PAY-{n}");
+            let status = if n % 3 == 0 { "Done" } else { "To Do" };
+            let payload = json!({ "key": key, "fields": { "status": { "name": status },
+                "project": { "key": if n % 2 == 0 { "PAY" } else { "OPS" }, "name": "Payments" },
+                "labels": if n % 4 == 0 { json!(["backend"]) } else { json!([]) } } });
+            (key.clone(), format!("Ticket {n}"), payload)
+        })
+        .collect();
+    let rows: Vec<(&str, &str, Value)> = more
+        .iter()
+        .map(|(k, t, p)| (k.as_str(), t.as_str(), p.clone()))
+        .collect();
+    upsert(&pool, &jira, &rows).await;
+    sqlx::query(
+        "update sync.item set item_updated_at = timestamptz '2026-11-01' + ((right(entity_id, 2)::int / 2) || ' hours')::interval
+          where source_id = $1 and entity_id ~ 'PAY-1[0-9]$|PAY-2[01]$'",
+    )
+    .bind(&jira)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("{jira}:PAY-11"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let sources = vec![jira.clone(), gitea.clone()];
+    let ids: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.item where source_id = any($1) order by entity_id",
+    )
+    .bind(&sources)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let declared = declarations(&pool).await.as_param();
+    let narrowed: Vec<String> = ids.iter().step_by(2).cloned().collect();
+    mark_whole(&pool).await;
+    assert!(is_whole(&pool, &jira, &declared).await);
+    assert!(is_whole(&pool, &gitea, &declared).await);
+
+    // Every shape of the board, each as `(statement joined, off the cards)`
+    // and the binds `$1` to `$7`.
+    type Binds = (
+        Option<Vec<String>>,
+        Option<Vec<String>>,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<i64>,
+    );
+    let mut shapes: Vec<(&str, &str, Binds)> = Vec::new();
+    for only in [None, Some(narrowed.clone())] {
+        for per_column in [None, Some(1_i64), Some(3)] {
+            shapes.push((
+                knobas_core::mini_board::planned_statement_unlaned(),
+                knobas_core::mini_board::planned_statement_unlaned_carded(),
+                (
+                    only.clone(),
+                    Some(sources.clone()),
+                    None,
+                    per_column,
+                    None,
+                    None,
+                ),
+            ));
+            for lane in ["epic", "label", "assignee", "priority", "issuetype"] {
+                for first in [None, Some(1_i64)] {
+                    shapes.push((
+                        knobas_core::mini_board::planned_statement(),
+                        knobas_core::mini_board::planned_statement_carded(),
+                        (
+                            only.clone(),
+                            Some(sources.clone()),
+                            None,
+                            per_column,
+                            Some(lane.to_owned()),
+                            first,
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    // A project room, within its source; one source alone. (Not every
+    // source of the database: other tests' are not whole.)
+    shapes.push((
+        knobas_core::mini_board::planned_statement_unlaned(),
+        knobas_core::mini_board::planned_statement_unlaned_carded(),
+        (
+            None,
+            Some(vec![jira.clone()]),
+            Some("PAY".to_owned()),
+            Some(3),
+            None,
+            None,
+        ),
+    ));
+    shapes.push((
+        knobas_core::mini_board::planned_statement_unlaned(),
+        knobas_core::mini_board::planned_statement_unlaned_carded(),
+        (None, Some(vec![gitea.clone()]), None, None, None, None),
+    ));
+
+    // Each row as text, its laned board's column counts as a set: neither
+    // statement orders them, and the board places its columns itself.
+    let read = async |statement: &str, binds: &Binds, tx: &mut sqlx::PgConnection| {
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+            "select (to_jsonb(t) - 'column_totals')::text || ' ' || coalesce((select string_agg(x::text, ',' order by x::text)
+                       from jsonb_array_elements(t.column_totals) x), '')
+               from ({statement}) t"
+        )))
+        .bind(&binds.0)
+        .bind(&binds.1)
+        .bind(&binds.2)
+        .bind(&declared)
+        .bind(binds.3)
+        .bind(&binds.4)
+        .bind(binds.5)
+        .fetch_all(tx)
+        .await
+        .unwrap()
+    };
+    // `unwhole`: the sources not whole; a scope with one answers one row.
+    let hold = async |when: &str, unwhole: Option<&str>| {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("set transaction isolation level repeatable read")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        for (joined, carded, binds) in &shapes {
+            let expected = read(joined, binds, &mut tx).await;
+            let got = read(carded, binds, &mut tx).await;
+            let whole = unwhole.is_none_or(|source| {
+                !binds
+                    .1
+                    .as_ref()
+                    .is_some_and(|sources| sources.iter().any(|s| s == source))
+            });
+            if whole {
+                assert!(!expected.is_empty(), "{when}: {binds:?}");
+                assert_eq!(got, expected, "{when}: {binds:?}");
+            } else {
+                assert!(
+                    got.len() == 1 && got[0].contains(r#""entity_id": "", "#),
+                    "{when}: one row of no ticket's id: {got:?}"
+                );
+            }
+        }
+    };
+    hold("every card stored", None).await;
+
+    // A title and a date a write changed without the payload: the card's.
+    sqlx::query(
+        "update sync.item set title = 'Renamed alone', item_updated_at = timestamptz '2026-11-02'
+          where entity_id = $1",
+    )
+    .bind(format!("{jira}:PAY-12"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    hold("a title changed alone", None).await;
+
+    sqlx::query("delete from sync.item_card where entity_id = $1")
+        .bind(format!("{jira}:PAY-13"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(!is_whole(&pool, &jira, &declared).await, "a card deleted");
+    assert!(
+        is_whole(&pool, &gitea, &declared).await,
+        "the other source's"
+    );
+    hold("one card gone", Some(&jira)).await;
+
+    knobas_core::item_card::fill(&pool).await.unwrap();
+    mark_whole(&pool).await;
+    assert!(is_whole(&pool, &jira, &declared).await, "filled");
+    hold("filled", None).await;
+}
+
+/// A source stays whole across the writes that keep each ticket's card
+/// (a ticket written, rewritten, renamed alone, deleted, made another kind)
+/// and stops being whole at the first one that leaves a ticket without its
+/// card under the key, which a mark finds and keeps.
+#[tokio::test]
+async fn a_source_is_whole_while_every_ticket_has_its_card() {
+    let pool = pool().await;
+    let jira = source(&pool, "jira").await;
+    upsert(&pool, &jira, &jira_tickets()).await;
+    let declared = declarations(&pool).await.as_param();
+    assert!(
+        !is_whole(&pool, &jira, &declared).await,
+        "nothing marked it"
+    );
+    mark_whole(&pool).await;
+    assert!(is_whole(&pool, &jira, &declared).await);
+
+    let more = [(
+        "PAY-40",
+        "Written after the mark",
+        json!({ "key": "PAY-40", "fields": { "status": { "name": "To Do" } } }),
+    )];
+    upsert(&pool, &jira, &more).await;
+    assert!(is_whole(&pool, &jira, &declared).await, "a ticket written");
+    let renamed = [(
+        "PAY-40",
+        "Written again",
+        json!({ "key": "PAY-40", "fields": { "status": { "name": "Done" } } }),
+    )];
+    upsert(&pool, &jira, &renamed).await;
+    assert!(
+        is_whole(&pool, &jira, &declared).await,
+        "a ticket rewritten"
+    );
+    sqlx::query("update sync.item set title = 'Renamed' where entity_id = $1")
+        .bind(format!("{jira}:PAY-40"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let card: (String, String) =
+        sqlx::query_as("select title, words from sync.item_card where entity_id = $1")
+            .bind(format!("{jira}:PAY-40"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        card,
+        ("Renamed".to_owned(), "pay-40\u{1f}renamed".to_owned())
+    );
+    assert!(is_whole(&pool, &jira, &declared).await, "a ticket renamed");
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(format!("{jira}:PAY-40"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(is_whole(&pool, &jira, &declared).await, "a ticket deleted");
+    sqlx::query("update sync.item set kind = 'page' where entity_id = $1")
+        .bind(format!("{jira}:PAY-2"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        is_whole(&pool, &jira, &declared).await,
+        "a ticket made a page"
+    );
+
+    // A card gone from under its ticket.
+    sqlx::query("delete from sync.item_card where entity_id = $1")
+        .bind(format!("{jira}:PAY-1"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(!is_whole(&pool, &jira, &declared).await, "a card deleted");
+    mark_whole(&pool).await;
+    assert!(
+        !is_whole(&pool, &jira, &declared).await,
+        "a mark finds the ticket without its card"
+    );
+    knobas_core::item_card::fill(&pool).await.unwrap();
+    assert!(is_whole(&pool, &jira, &declared).await, "the fill marks it");
+
+    // A ticket written while its source's declarations give it no card under
+    // the key the board reads: its card is under another, so the board's is
+    // not whole.
+    sqlx::query("update knobas.source_config set kind = 'gitea' where id = $1")
+        .bind(&jira)
+        .execute(&pool)
+        .await
+        .unwrap();
+    upsert(&pool, &jira, &more).await;
+    assert!(
+        !is_whole(&pool, &jira, &declared).await,
+        "a ticket with no card under jira's key"
+    );
+    sqlx::query("update knobas.source_config set kind = 'jira' where id = $1")
+        .bind(&jira)
+        .execute(&pool)
+        .await
+        .unwrap();
 }

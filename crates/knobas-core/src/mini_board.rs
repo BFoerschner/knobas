@@ -522,6 +522,7 @@ const CARDS_PIECES: CardsStatement = CardsStatement {
     filter: cards_filter!(),
     cut: cards_cut!(ranked_laned!()),
     whole: CARDS,
+    carded: false,
 };
 
 /// [`CARDS_UNLANED`]' `ranked`: the one lane spelled out.
@@ -573,6 +574,211 @@ const CARDS_UNLANED_PIECES: CardsStatement = CardsStatement {
     filter: cards_filter!(),
     cut: cards_cut!(ranked_unlaned!()),
     whole: CARDS_UNLANED,
+    carded: false,
+};
+
+/// [`cards_carded!`]' CTEs before `scoped`, and `scoped`'s opening: the key
+/// each source's cards are read under ([`crate::card_keys!`]), the sources
+/// with a ticket (`ticket_sources`, one probe of `item_ticket_brief_idx`
+/// each, the next source past the last), and `whole`, whether every one of
+/// them the scope admits is whole under its key (`sync.card_whole`,
+/// migration `0089`): every ticket of it has its card under the key, and no
+/// card of it is under another. A source with tickets and no declarations
+/// is not.
+macro_rules! cards_ctes_carded {
+    () => {
+        concat!(
+            crate::card_keys!("$4"),
+            ",
+     ticket_sources as materialized (
+       with recursive t(s) as (
+         (select i.source_id from sync.item i where i.kind = 'ticket' order by i.source_id limit 1)
+         union all
+         select (select i.source_id from sync.item i
+                  where i.kind = 'ticket' and i.source_id > t.s order by i.source_id limit 1)
+           from t where t.s is not null)
+       select t.s as source_id from t where t.s is not null),
+     whole as materialized (
+       select not exists (
+         select from ticket_sources ts
+          where ($2::text[] is null or ts.source_id = any($2))
+            and not exists (select from card_keys wk
+                              join sync.card_whole w on w.source_id = wk.source_id
+                                                    and w.paths_key = wk.k
+                             where wk.source_id = ts.source_id)) as whole),
+     scoped as materialized (
+       "
+        )
+    };
+}
+
+/// [`cards_select!`] off the card: its date, its status and its lane.
+macro_rules! cards_select_carded {
+    () => {
+        concat!(
+            "select i.entity_id, i.source_id,
+              coalesce(i.item_updated_at,
+                (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, \
+             crd.status as status, (case when $6::text is null then '' else (case $6::text \
+               when 'epic' then coalesce(crd.path, '') \
+               when 'label' then coalesce(crd.first_label, '') \
+               when 'assignee' then coalesce(crd.assignee, '') \
+               when 'priority' then coalesce(crd.priority, '') \
+               when 'issuetype' then coalesce(crd.issue_type, '') else '' end) end) as lane"
+        )
+    };
+}
+
+/// [`cards_from!`] off the cards alone: the cards as `crd`, and `i`, the
+/// ticket's mirror row as far as the card holds it (its id, source, kind,
+/// title and date), so what reads `i` reads the card. No join to a key: a
+/// whole source's cards are all under the key its declarations give, so
+/// where `whole` holds the cards of the scope's sources are the board's.
+/// (Joined to their keys, the cards were estimated at a few rows on tables
+/// never analyzed, and a laned board rescanned them once a lane.)
+macro_rules! cards_from_carded {
+    () => {
+        "
+       from sync.item_card crd
+       cross join lateral (select crd.entity_id, crd.source_id, 'ticket'::text as kind,
+                                  crd.title, crd.item_updated_at) i
+       cross join lateral (select i.entity_id as eid) k "
+    };
+}
+
+/// [`cards_filter!`] off the card, and only while the scope is `whole`.
+macro_rules! cards_filter_carded {
+    () => {
+        concat!(
+            "
+      where (select w.whole from whole w)
+        and ",
+            crate::live_by_exclusion!("i"),
+            "
+        and ($1::text[] is null or i.entity_id in (select unnest($1::text[])))
+        and ($2::text[] is null or i.source_id = any($2))
+        and ($3::text is null or crd.project_key = $3)"
+        )
+    };
+}
+
+/// [`cards_cut!`] off the kept cards alone, and one row more where the scope
+/// is not whole ([`UNWHOLE`]), which then holds no card.
+macro_rules! cards_cut_carded {
+    ($($ranked:tt)+) => {
+        concat!(
+    "
+     ),
+",
+    $($ranked)+,
+    ",
+     board as (
+     select r.entity_id, r.source_id, crd.title, r.status, r.lane, r.lane_count, r.place,
+            r.lanes, case when $6::text is null then null else
+              (select jsonb_agg(jsonb_build_array(c.status, c.n))
+                 from (select s.status, count(*) as n from scoped s group by s.status) c)
+            end as column_totals,
+            crd.priority, crd.issue_type, crd.assignee, crd.assignee_name, crd.path,
+            crd.labels, crd.comment_count,
+            (select pi.title from sync.item pi",
+    crate::card_join!("pc", "pi"),
+    "where crd.parent_name is not null
+                and pi.entity_id = r.source_id || ':' || crd.parent_name
+                and pi.source_id = r.source_id and pi.kind = crd.parent_kind
+                and ",
+    crate::live_by_exclusion!("pi"),
+    "
+                and (case when pc.entity_id is not null then crd.parent_name = any(pc.answers_to)
+                          else crd.parent_name in (select n.name from sync.item i cross join lateral ",
+    crate::declared_names_as_parent!("$4"),
+    " n where i.entity_id = pi.entity_id) end)) as parent_title,
+            crd.item_updated_at as updated_at, r.total, r.at
+       from ranked r
+       join lateral (select c.* from sync.item_card c
+                      where c.entity_id = r.entity_id
+                        and c.paths_key = (select k.k from card_keys k where k.source_id = r.source_id)
+                     offset 0) crd on true
+      where $5::bigint is null or r.rn <= $5
+     )
+     select b.entity_id, b.source_id, b.title, b.status, b.lane, b.lane_count, b.place, b.lanes,
+            b.column_totals, b.priority, b.issue_type, b.assignee, b.assignee_name, b.path,
+            b.labels, b.comment_count, b.parent_title, b.updated_at, b.total
+       from (select * from board
+             union all
+             select '', '', '', null, '', 0, 0, 0, null, null, null, null, null, null,
+                    '{}'::text[], null, null, null, 0, null
+               from whole w where not w.whole) b
+      order by b.at desc, b.entity_id"
+        )
+    };
+}
+
+/// The cards statement read off the cards alone (the card-store pass,
+/// 2026-11-15; migration `0089`): what [`cards!`] answers, while every source
+/// the scope admits is whole (`sync.card_whole`), and [`UNWHOLE`]'s one row
+/// when one is not, which [`read_scoped_narrowed`] then answers with
+/// [`cards!`] itself.
+///
+/// **Why.** [`cards!`]' scan reads each ticket's index entry for its title
+/// and date, hashes it with its key and probes the cards with it: 25 ms of a
+/// letter's 43 on 23,176 tickets, on top of a fallback for every field where
+/// a ticket has no card. Here `scoped` is one read of the cards, the card
+/// carrying the title, the date and the project (`0089`), and the statement
+/// carries none of the payload's walks, so it is planned in a third of the
+/// time: 31 to 33 ms where [`cards!`] took 42 to 45.
+///
+/// **The same rows.** A card holds what [`cards!`] reads where it has one:
+/// its fields are the payload macros' answers under the key the
+/// declarations give its source (`knobas-app`'s `tests/it/item_card.rs`), its
+/// title and date `sync.item`'s, written in the transaction that writes
+/// them. `whole` means every ticket of the source has its card, so no ticket
+/// is left out. `tests/it/item_card.rs` and `tests/it/board_narrowed.rs` hold
+/// the two statements to each other, every card stored, a third and none.
+macro_rules! cards_carded {
+    ($($ranked:tt)+) => {
+        concat!(
+            "with ",
+            cards_ctes_carded!(),
+            cards_select_carded!(),
+            cards_from_carded!(),
+            cards_filter_carded!(),
+            cards_cut_carded!($($ranked)+)
+        )
+    };
+}
+
+/// The id of the one row a cards-only statement answers where its scope is
+/// not whole: no ticket's.
+pub const UNWHOLE: &str = "";
+
+/// [`CARDS`] off the cards alone ([`cards_carded!`]).
+const CARDS_CARDED: &str = cards_carded!(ranked_laned!());
+
+/// [`CARDS_CARDED`] in the pieces a narrowing goes between.
+const CARDS_CARDED_PIECES: CardsStatement = CardsStatement {
+    with: "with ",
+    ctes: cards_ctes_carded!(),
+    select: cards_select_carded!(),
+    from: cards_from_carded!(),
+    filter: cards_filter_carded!(),
+    cut: cards_cut_carded!(ranked_laned!()),
+    whole: CARDS_CARDED,
+    carded: true,
+};
+
+/// [`CARDS_UNLANED`] off the cards alone ([`cards_carded!`]).
+const CARDS_UNLANED_CARDED: &str = cards_carded!(ranked_unlaned!());
+
+/// [`CARDS_UNLANED_CARDED`] in the pieces a narrowing goes between.
+const CARDS_UNLANED_CARDED_PIECES: CardsStatement = CardsStatement {
+    with: "with ",
+    ctes: cards_ctes_carded!(),
+    select: cards_select_carded!(),
+    from: cards_from_carded!(),
+    filter: cards_filter_carded!(),
+    cut: cards_cut_carded!(ranked_unlaned!()),
+    whole: CARDS_UNLANED_CARDED,
+    carded: true,
 };
 
 /// The cards statement in the pieces a narrowing goes between (the
@@ -621,6 +827,12 @@ pub struct CardsStatement {
     pub cut: &'static str,
     /// The six with nothing between them: the statement unnarrowed.
     pub whole: &'static str,
+    /// Whether it reads the cards alone ([`cards_carded!`]): the ticket `i`
+    /// is then its card's (id, source, kind `ticket`, title, date), every
+    /// row has its card `crd`, and no payload is walked, so a narrowing reads
+    /// the card where it would walk. A statement whose scope is not whole
+    /// answers one row, of the id [`UNWHOLE`].
+    pub carded: bool,
 }
 
 /// What the cards statement binds, `$1` to `$7` in this order.
@@ -727,6 +939,22 @@ pub fn planned_statement() -> &'static str {
 #[must_use]
 pub fn planned_statement_unlaned() -> &'static str {
     CARDS_UNLANED
+}
+
+/// [`planned_statement`] off the cards alone ([`cards_carded!`]), for the
+/// same plan test and the tests that hold it to [`planned_statement`]: one
+/// row of the id [`UNWHOLE`] where the scope is not whole.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_carded() -> &'static str {
+    CARDS_CARDED
+}
+
+/// [`planned_statement_unlaned`] off the cards alone ([`cards_carded!`]).
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_unlaned_carded() -> &'static str {
+    CARDS_UNLANED_CARDED
 }
 
 /// The board's status statement, for `knobas-app`'s plan test. It binds
@@ -1267,27 +1495,36 @@ pub async fn read_scoped_narrowed<N: CardsNarrowing>(
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
     let cards = async {
-        let rows: Vec<CardRow> = narrowing
-            .rows(
-                pool,
-                if lanes.is_some() {
-                    CARDS_PIECES
-                } else {
-                    CARDS_UNLANED_PIECES
-                },
-                CardsBinds {
-                    members: members.as_deref(),
-                    sources: scope.as_deref(),
-                    project,
-                    declared: &declared,
-                    per_column: per_column.map(i64::from),
-                    lanes: lanes.map(|lanes| lanes.by.as_str()),
-                    lanes_first: lanes
-                        .and_then(|lanes| lanes.first)
-                        .map(|first| i64::from(first.max(1))),
-                },
+        let binds = CardsBinds {
+            members: members.as_deref(),
+            sources: scope.as_deref(),
+            project,
+            declared: &declared,
+            per_column: per_column.map(i64::from),
+            lanes: lanes.map(|lanes| lanes.by.as_str()),
+            lanes_first: lanes
+                .and_then(|lanes| lanes.first)
+                .map(|first| i64::from(first.max(1))),
+        };
+        // Off the cards alone where every source of the scope is whole, and
+        // as the board always read where one is not (migration `0089`): a
+        // ticket the fill has not reached, declarations the database did not
+        // store. A mirror a sync made whole since the last mark is marked in
+        // the background, so the next read takes the cards.
+        let (carded, joined) = if lanes.is_some() {
+            (CARDS_CARDED_PIECES, CARDS_PIECES)
+        } else {
+            (CARDS_UNLANED_CARDED_PIECES, CARDS_UNLANED_PIECES)
+        };
+        let mut rows: Vec<CardRow> = narrowing.rows(pool, carded, binds).await?;
+        if rows.first().is_some_and(|row| row.entity_id == UNWHOLE) {
+            let (joined, _) = futures_util::future::join(
+                narrowing.rows(pool, joined, binds),
+                crate::item_card::mark_whole_soon(pool),
             )
-            .await?;
+            .await;
+            rows = joined?;
+        }
         let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
         let signals = signals_of(pool, &kept, &declared, identity).await?;
         Ok::<_, CoreError>((rows, signals))
@@ -1765,6 +2002,51 @@ mod tests {
         assert_eq!(CARDS_PIECES.whole, CARDS);
         assert_eq!(CARDS_UNLANED_PIECES.whole, CARDS_UNLANED);
         assert_ne!(CARDS, CARDS_UNLANED);
+    }
+
+    /// The cards-only statements in the same pieces, read off the card:
+    /// `scoped` opens where it opens in the others, `i` and `crd` are
+    /// joined by `from`, and no piece walks a payload.
+    #[test]
+    fn the_pieces_of_a_carded_statement_are_the_statement() {
+        for pieces in [CARDS_CARDED_PIECES, CARDS_UNLANED_CARDED_PIECES] {
+            assert!(pieces.carded);
+            assert_eq!(
+                [
+                    pieces.with,
+                    pieces.ctes,
+                    pieces.select,
+                    pieces.from,
+                    pieces.filter,
+                    pieces.cut
+                ]
+                .concat(),
+                pieces.whole
+            );
+            assert!(pieces.ctes.trim_end().ends_with("scoped as materialized ("));
+            assert!(
+                pieces
+                    .select
+                    .starts_with("select i.entity_id, i.source_id,")
+            );
+            assert!(pieces.select.ends_with(" as lane"));
+            assert!(
+                pieces
+                    .from
+                    .trim_start()
+                    .starts_with("from sync.item_card crd")
+            );
+            assert!(pieces.filter.trim_start().starts_with("where "));
+            assert!(pieces.cut.trim_start().starts_with(')'));
+            for piece in [pieces.select, pieces.from, pieces.filter] {
+                assert!(!piece.contains("payload"), "{piece}");
+            }
+        }
+        for pieces in [CARDS_PIECES, CARDS_UNLANED_PIECES] {
+            assert!(!pieces.carded);
+        }
+        assert_eq!(CARDS_CARDED_PIECES.whole, CARDS_CARDED);
+        assert_eq!(CARDS_UNLANED_CARDED_PIECES.whole, CARDS_UNLANED_CARDED);
     }
 
     /// The order the board promises, over a set deliberately shuffled: the

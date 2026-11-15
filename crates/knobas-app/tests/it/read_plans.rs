@@ -35,6 +35,12 @@ use crate::responsiveness_probe::Synthetic;
 const SMALL: &[&str] = &[
     "source_config",
     "card_keys",
+    // The sources with a ticket, whether each the scope admits is whole, and
+    // the table that says so (migration `0089`): one row a source, one row,
+    // and one row a source and key.
+    "ticket_sources",
+    "whole",
+    "card_whole",
     "grouped",
     "status_paths",
     "lane_paths",
@@ -437,6 +443,37 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     })
     .await;
     wrong.extend(shapes("mini_board in lanes", &plan));
+    // Off the cards alone (migration `0089`), the mirror's sources whole:
+    // without lanes, and in lanes by epic.
+    knobas_core::item_card::mark_whole(&pool).await.unwrap();
+    for (name, statement, per_column, lane, first) in [
+        (
+            "mini_board off the cards",
+            knobas_core::mini_board::planned_statement_unlaned_carded(),
+            50_i64,
+            None,
+            None,
+        ),
+        (
+            "mini_board off the cards in lanes",
+            knobas_core::mini_board::planned_statement_carded(),
+            8,
+            Some("epic".to_owned()),
+            Some(10_i64),
+        ),
+    ] {
+        let plan = explain(&pool, statement, |q| {
+            q.bind(None::<Vec<String>>)
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(per_column))
+                .bind(lane.clone())
+                .bind(first)
+        })
+        .await;
+        wrong.extend(shapes(name, &plan));
+    }
     // Narrowed to a third of the tickets (#1149), as `has:blocker` narrows
     // the probe's: the ids are a set probed per ticket, never an index
     // search per id.
