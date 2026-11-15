@@ -6,16 +6,18 @@
 //   node testenv/perf/moment.mjs --app <url> --setup '<js>' --act '<js>' [--throttle 6] [--task 30] [--attach <port>]
 //
 // Both scripts run in the page as the body of an async function, as profile.mjs runs them.
-import { attach, launch, sleep, tracer } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app"), setup = opt("--setup", ""), act = opt("--act", ""), rate = Number(opt("--throttle", "6")), least = Number(opt("--task", "30"));
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 10 * 60000).unref();
-const browser = opt("--attach") ? null : await launch();
+const browser = opt("--attach") ? null : await launch({ size });
 const c = await attach(browser ? browser.port : Number(opt("--attach")));
 await c.send("Page.enable");
-if (browser) await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+if (browser) await viewport(c, size);
 if (app) { const loaded = c.once("Page.loadEventFired"); await c.send("Page.navigate", { url: app }); await loaded; }
 for (let i = 0; i < 300; i++) { if (await c.js("!!document.querySelector('.tf-nav')").catch(() => false)) break; await sleep(100); }
 await sleep(1500);

@@ -154,3 +154,47 @@ export function longestTasks(events, fromUs, toUs) {
   const tasks = events.filter((e) => e.ph === "X" && (e.name === "RunTask" || e.name === "ThreadControllerImpl::RunTask") && e.ts >= fromUs && e.ts <= toUs && main && e.pid === main.pid && e.tid === main.tid).map((e) => (e.dur ?? 0) / 1000).sort((a, b) => b - a);
   return { maxMs: r1(tasks[0] ?? 0), top: tasks.slice(0, 5).map(r1), over50: tasks.filter((t) => t > 50).length };
 }
+
+/**
+ * What a frame costs past the main thread's script and style, which is what grows with the device pixels a window
+ * paints (the sizes pass, 2026-11-15): the main thread's paint (Paint, PrePaint, Layerize, the commit), raster
+ * (RasterTask on the tile workers), the compositor thread, and the GPU process's main and display compositor
+ * threads, each as its tasks' wall time in the window, total and per presented frame. `frames` is the presented
+ * frames in the window (`analyse`'s `presentedAll + presentedPartial`).
+ */
+export function pixelWork(events, fromUs, toUs, frames) {
+  const names = new Map();
+  for (const e of events) if (e.ph === "M" && e.name === "thread_name") names.set(`${e.pid}:${e.tid}`, e.args?.name ?? "");
+  const main = mainThread(events);
+  const inWin = (e) => e.ph === "X" && e.ts >= fromUs && e.ts <= toUs;
+  const ms = (pred) => events.filter((e) => inWin(e) && pred(e)).reduce((a, e) => a + (e.dur ?? 0), 0) / 1000;
+  const onMain = (e) => main && e.pid === main.pid && e.tid === main.tid;
+  const task = (e) => e.name === "ThreadControllerImpl::RunTask" || e.name === "RunTask";
+  // Toplevel tasks by thread name, so a thread's time is counted once however its tasks nest.
+  const busy = (re) => ms((e) => task(e) && re.test(names.get(`${e.pid}:${e.tid}`) ?? ""));
+  const n = Math.max(1, frames);
+  const res = {
+    paintMs: ms((e) => onMain(e) && (e.name === "Paint" || e.name === "PrePaint" || e.name === "Layerize" || e.name === "PaintImage")),
+    commitMs: ms((e) => onMain(e) && e.name === "Commit"),
+    rasterMs: ms((e) => e.name === "RasterTask"),
+    tileWorkersMs: busy(/^CompositorTileWorker/),
+    compositorMs: busy(/^Compositor$/),
+    gpuMainMs: busy(/^CrGpuMain$/),
+    vizMs: busy(/^VizCompositorThread$/),
+  };
+  const out = { frames };
+  for (const [k, v] of Object.entries(res)) { out[k] = r1(v); out[k.replace(/Ms$/, "PerFrameMs")] = Math.round((v / n) * 100) / 100; }
+  return out;
+}
+
+/**
+ * The page's composited layers from `LayerTree.layerTreeDidChange`: how many, how many draw, and their bounds' area in
+ * device megapixels (the domain gives a layer's bounds in device pixels under a scale; a scroller's contents layer is
+ * its whole height, of which the compositor rasters the tiles near the view).
+ */
+export function layerSummary(layers) {
+  const drawing = layers.filter((l) => l.drawsContent);
+  const area = (ls) => ls.reduce((a, l) => a + l.width * l.height, 0) / 1e6;
+  const big = [...drawing].sort((a, b) => b.width * b.height - a.width * a.height).slice(0, 3).map((l) => `${Math.round(l.width)}x${Math.round(l.height)}`);
+  return { n: layers.length, drawing: drawing.length, drawingMpx: r1(area(drawing)), biggest: big };
+}

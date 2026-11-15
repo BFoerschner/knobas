@@ -4,17 +4,19 @@
 //
 //   node testenv/perf/invalidations.mjs --app <url> --hash <route> [--sel <scroller>] [--throttle 1]
 import { readFileSync } from "node:fs";
-import { attach, launch, sleep, tracer } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 import { stylePasses } from "./frames.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 5 * 60000).unref();
-const browser = await launch();
+const browser = await launch({ size });
 const c = await attach(browser.port);
 await c.send("Page.enable");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(new URL("./probe.js", import.meta.url), "utf8") });
-await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+await viewport(c, size);
 const loaded = c.once("Page.loadEventFired");
 await c.send("Page.navigate", { url: opt("--app").replace(/#.*$/, "") + opt("--hash") });
 await loaded;

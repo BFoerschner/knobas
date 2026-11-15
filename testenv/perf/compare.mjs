@@ -18,9 +18,11 @@
 // in between with its length, the frames over 50 ms, and every IPC call with its start, end and arguments. `moved`: the
 // rows of the file list on screen at `files` that moved or went before settled.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const repo = opt("--repo");
@@ -117,12 +119,12 @@ const js = (code, timeout = 120000) =>
   Promise.race([c.js(code, { timeout }), new Promise((_, no) => setTimeout(() => no(new Error(`frozen: no answer in ${Math.round(timeout / 1000)} s`)), timeout + 2000))]);
 async function start() {
   if (browser) { try { c.close(); } catch {} browser.stop(); }
-  browser = await launch();
+  browser = await launch({ size });
   c = await attach(browser.port);
   await c.send("Page.enable");
   await c.send("Runtime.enable");
   await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-  await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+  await viewport(c, size);
 }
 await start();
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });

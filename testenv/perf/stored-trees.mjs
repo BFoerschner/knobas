@@ -14,9 +14,11 @@
 // rows, the folder's rows, the file among Go to file's rows with no "Reading every path" left; and the IPC calls
 // between, with each one's span.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const repo = opt("--repo");
@@ -64,13 +66,13 @@ const TAP = `(() => {
   };
 })()`;
 
-const browser = await launch();
+const browser = await launch({ size });
 const c = await attach(browser.port);
 const js = (code, timeout = 90000) => c.js(code, { timeout });
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+await viewport(c, size);
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 
 async function quiet(ms = 1200, limit = 30000) {

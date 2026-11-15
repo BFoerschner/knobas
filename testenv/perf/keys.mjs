@@ -23,9 +23,11 @@
 //   reads    every IPC call the key caused, with when it was sent and answered
 // The median over `--repeat` presses is the case's number; each press is set up again.
 import { writeFileSync, readFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name) => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
 const app = opt("--app");
 const out = opt("--out");
@@ -37,12 +39,12 @@ const settleMs = Number(opt("--settle") ?? 1500);
 const check = opt("--check");
 const lines = opt("--lines") ?? "real";
 
-const browser = await launch({ width: 1440, height: 900 });
+const browser = await launch({ size });
 const c = await attach(browser.port);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+await viewport(c, size);
 const js = c.js;
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 
@@ -244,7 +246,7 @@ async function press(key) {
 }
 
 const med = (xs) => { const s = xs.filter((x) => x !== null).sort((a, b) => a - b); return s.length ? s[Math.floor((s.length - 1) / 2)] : null; };
-const results = { app, at: new Date().toISOString(), cases: [] };
+const results = { app, at: new Date().toISOString(), size: size.name, cases: [] };
 for (const rate of throttles) {
   for (const k of picked) {
     const runs = [];

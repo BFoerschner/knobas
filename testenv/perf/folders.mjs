@@ -23,10 +23,12 @@
 // drawn, the main thread's time by kind in that span from the trace, its longest task, and `moved`: whether a row on
 // screen at drawn moved or went in the 700 ms after.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sleep, tracer } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 import { longestTasks, mainThreadBreakdown } from "./frames.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const repo = opt("--repo");
@@ -94,13 +96,13 @@ const PAGE = `(() => {
   };
 })()`;
 
-const browser = await launch();
+const browser = await launch({ size });
 const c = await attach(browser.port);
 const js = (code, timeout = 60000) => c.js(code, { timeout });
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+await viewport(c, size);
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 const trace = tracer(c);
 const CATS = ["devtools.timeline", "disabled-by-default-devtools.timeline", "v8.execute", "blink.user_timing"];

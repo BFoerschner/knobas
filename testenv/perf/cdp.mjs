@@ -10,11 +10,37 @@ import { join } from "node:path";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHROME = process.env.KNOBAS_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-/** A headless Chrome at 1440 x 900 CSS pixels, scale 1. Stopped with the process. Returns its debug port. */
-export async function launch({ width = 1440, height = 900, flags = [] } = {}) {
+/**
+ * The page's size: CSS pixels and device scale, `--size WxH@scale` on every probe that starts its own browser (the
+ * sizes pass, 2026-11-15). 1440 x 868 at scale 1 by default, the page both smoothness reports measured. The scale is
+ * the display's: 1.25 and 1.5 are Windows's 125 % and 150 %, 2 a 4K screen at 200 % or a Mac's Retina panel.
+ */
+export const DEFAULT_SIZE = { width: 1440, height: 868, scale: 1, name: "1440x868@1" };
+export function parseSize(text) {
+  if (!text) return DEFAULT_SIZE;
+  const m = /^(\d+)x(\d+)(?:@([\d.]+))?$/.exec(String(text).trim());
+  if (!m) throw new Error(`--size ${text}: want WxH or WxH@scale, as 1920x1080@1.25`);
+  const width = Number(m[1]), height = Number(m[2]), scale = Number(m[3] ?? 1);
+  if (!(width > 0 && height > 0 && scale > 0)) throw new Error(`--size ${text}: want positive numbers`);
+  return { width, height, scale, name: `${width}x${height}@${scale}` };
+}
+/** `--size` from a probe's arguments. */
+export const sizeFrom = (args) => { const i = args.indexOf("--size"); return parseSize(i >= 0 ? args[i + 1] : null); };
+/** The page drawn at `size`: its CSS pixels and device scale, so a scale of 2 rasters four device pixels a CSS pixel. */
+export const viewport = (c, size = DEFAULT_SIZE) => c.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: size.scale, mobile: false });
+
+/**
+ * A headless Chrome whose window holds a page of `size` (`viewport` then sets the page itself), at the size's device
+ * scale, so the compositor's surface is the size a full-screen window's is. The default size keeps the 1440 x 900
+ * window every probe ran in before the sizes pass. Stopped with the process. Returns its debug port.
+ */
+export async function launch({ size = DEFAULT_SIZE, flags = [] } = {}) {
   const profile = mkdtempSync(join(tmpdir(), "knobas-perf-"));
   const extra = (process.env.KNOBAS_CHROME_FLAGS ?? "").split(" ").filter(Boolean);
-  const chrome = spawn(CHROME, ["--headless=new", "--force-device-scale-factor=1", `--window-size=${width},${height}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", ...extra, ...flags, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", detached: true });
+  // A headless window keeps about 90 px of its height for a browser frame it does not draw: the window is that much
+  // taller than the page, so the page's override never reaches past the surface.
+  const [width, height] = size.name === DEFAULT_SIZE.name ? [1440, 900] : [size.width, size.height + 100];
+  const chrome = spawn(CHROME, ["--headless=new", `--force-device-scale-factor=${size.scale}`, `--window-size=${width},${height}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", ...extra, ...flags, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", detached: true });
   let stopped = false;
   const stop = () => {
     if (stopped) return;

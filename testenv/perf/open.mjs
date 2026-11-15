@@ -33,12 +33,14 @@
 // frame, and every IPC call between the press and settled with its start and end.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 import * as bigFolders from "./big-folders.mjs";
 import * as bigCompare from "./big-compare.mjs";
 import * as extremes from "./extremes.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const out = opt("--out") ?? "open.json";
@@ -201,14 +203,14 @@ if (set === "extremes") {
     process.exit(1);
   }
 }
-const browser = await launch();
+const browser = await launch({ size });
 const c = await attach(browser.port);
 const js = (code, timeout = 60000) => c.js(code, { timeout });
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(new URL("./open-probe.js", import.meta.url), "utf8") });
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+await viewport(c, size);
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 
 /** Until the shown page's DOM has been quiet `ms`, at most `limit`. */
@@ -287,7 +289,7 @@ async function leave(how) {
   await quiet(1200);
 }
 
-const results = { app, at: new Date().toISOString(), throttles, places: [] };
+const results = { app, at: new Date().toISOString(), size: size.name, throttles, places: [] };
 const save = () => writeFileSync(out, JSON.stringify(results, null, 1));
 const say = (r) => `useful ${r.usefulMs ?? "never"} ms, drawn ${r.drawnMs ?? "never"} ms, settled ${r.settledMs} ms, first frame ${r.firstFrameMs} ms, moved ${r.moved}${r.gone ? `, gone ${r.gone}` : ""}, ${r.ipc.length} calls (${r.ipcBeforeUseful} before useful)${r.longestTaskMs ? `, longest task ${r.longestTaskMs} ms` : ""}${Object.keys(r.marks ?? {}).length ? `, ${Object.entries(r.marks).map(([k, v]) => `${k} ${v ?? "never"}`).join(", ")}` : ""}`;
 

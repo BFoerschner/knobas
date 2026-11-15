@@ -6,17 +6,19 @@
 // Both scripts run in the page as the body of an async function, with run.mjs's helpers (`__s`) and the probe
 // (`__fr`). The tally is self time by function and source line, the frames that called the top ones beside them.
 import { readFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app"), setup = opt("--setup", ""), act = opt("--act", ""), rate = Number(opt("--throttle", "1")), top = Number(opt("--top", "25"));
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 10 * 60000).unref();
-const browser = opt("--attach") ? null : await launch();
+const browser = opt("--attach") ? null : await launch({ size });
 const c = await attach(browser ? browser.port : Number(opt("--attach")));
 await c.send("Page.enable");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(new URL("./probe.js", import.meta.url), "utf8") });
-if (browser) await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+if (browser) await viewport(c, size);
 if (app) { const loaded = c.once("Page.loadEventFired"); await c.send("Page.navigate", { url: app }); await loaded; }
 for (let i = 0; i < 300; i++) { if (await c.js("!!document.querySelector('.tf-nav')").catch(() => false)) break; await sleep(100); }
 await sleep(1500);

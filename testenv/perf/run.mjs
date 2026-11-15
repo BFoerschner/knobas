@@ -22,10 +22,12 @@
 // nav     each page switch twice (first visit, then return): ms to the first frame and the longest frame after it
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { attach, launch, sleep, tracer } from "./cdp.mjs";
-import { analyse, longestTasks, mainThreadBreakdown, stylePasses } from "./frames.mjs";
+import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
+import { analyse, layerSummary, longestTasks, mainThreadBreakdown, pixelWork, stylePasses } from "./frames.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const out = opt("--out") ?? "perf.json";
@@ -44,7 +46,7 @@ function guard() {
 }
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, Number(opt("--max-minutes", "60")) * 60000).unref();
 
-const browser = attachPort ? null : await launch();
+const browser = attachPort ? null : await launch({ size });
 const c = await attach(attachPort ? Number(attachPort) : browser.port, (t) => t.type === "page" && (!match || t.url.startsWith(match)));
 const js = (code, timeout = 180000) => c.js(code, { timeout });
 await c.send("Page.enable");
@@ -52,8 +54,9 @@ await c.send("Runtime.enable");
 const probe = readFileSync(new URL("./probe.js", import.meta.url), "utf8");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: probe });
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-// The page the size both reports measured, 1440 x 868 CSS pixels, when this run started the browser.
-if (browser) await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+// The page at `--size` (1440 x 868 CSS pixels at scale 1, the size both reports measured), when this run started the
+// browser; an attached browser keeps its own.
+if (browser) await viewport(c, size);
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 
 /** A fresh document at `url` (or the attached page reloaded), waited on until the nav has drawn. */
@@ -128,7 +131,7 @@ const TYPE = [
 const NAV = ["#/tickets", "#/inbox", "#/code", "#/builds", "#/docs", "#/monitors", "#/time", "#/page/live-confluence%3A362334", "#/docs/space/SCLENG", "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", "#/settings"];
 const picked = (name) => !only || only.some((w) => name.includes(w));
 
-const results = { label, app, at: new Date().toISOString(), throttles, scroll: [], wheel: [], type: [], nav: [] };
+const results = { label, app, at: new Date().toISOString(), throttles, size: browser ? size.name : null, scroll: [], wheel: [], type: [], nav: [] };
 const save = () => writeFileSync(out, JSON.stringify(results, null, 1));
 const r1 = (x) => Math.round(x * 10) / 10;
 
@@ -142,6 +145,19 @@ await js(`__fr.nominalMs = ${interval}; 1`);
 console.log(`${label}: ${results.ua.replace(/^Mozilla\/5.0 /, "").slice(0, 80)} | page ${results.page.w}x${results.page.h} dpr ${results.page.dpr} | idle ${display.hz} Hz`);
 const tr = tracer(c);
 const TRACE = ["devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame", "toplevel"];
+/** The page's composited layers now, from the LayerTree domain, which is turned off again before anything is timed. */
+async function layers() {
+  let last = null;
+  const off = c.on("LayerTree.layerTreeDidChange", (p) => { if (p.layers) last = p; });
+  await c.send("LayerTree.enable");
+  // The domain tells a tree only when it changes: a frame of the page's own, nudged by a class on the root.
+  await js("document.documentElement.classList.toggle('perf-layers'), requestAnimationFrame(() => document.documentElement.classList.toggle('perf-layers')), 1");
+  for (let i = 0; i < 30 && !last; i++) await sleep(100);
+  off();
+  const r = last;
+  await c.send("LayerTree.disable");
+  return r?.layers ? layerSummary(r.layers) : null;
+}
 
 for (const rate of throttles) {
   if (kinds.includes("scroll") || kinds.includes("wheel")) {
@@ -159,6 +175,7 @@ for (const rate of throttles) {
           if (!box || box.range < 40) { entry.skipped = "nothing to scroll"; console.log(`${rate}x ${kind} ${sc.name}: nothing to scroll`); results[kind].push(entry); continue; }
           entry.box = box;
           await js(`__fr.pick(${JSON.stringify(sel)}).scrollTop = 0; 1`);
+          entry.layers = await layers();
           await cpu(rate);
           await sleep(600);
           await tr.start(TRACE);
@@ -179,8 +196,9 @@ for (const rate of throttles) {
           entry.style = stylePasses(events, span.fromUs, span.toUs);
           entry.main = mainThreadBreakdown(events, span.fromUs, span.toUs);
           entry.longest = longestTasks(events, span.fromUs, span.toUs);
+          entry.pixels = pixelWork(events, span.fromUs, span.toUs, shown.presentedAll + shown.presentedPartial);
           entry.shown = { scrollThread: shown.scrollThread, movedFps: shown.movedFps, gapMs: shown.gapMs, gapsOver: shown.gapsOver, mainFrameMs: shown.stagesMs.SendBeginMainFrameToCommit };
-          console.log(`${rate}x ${kind} ${sc.name}: rAF ${page.fps} fps, dropped ${page.droppedPct}%, work p50/p99/max ${page.frameWork.p50}/${page.frameWork.p99}/${page.frameWork.max} ms | style ${entry.style.n} passes, elements p50/max ${entry.style.elements.p50}/${entry.style.elements.max} | longest task ${entry.longest.maxMs} ms | ${shown.scrollThread} thread, moved ${shown.movedFps} fps, gap max ${shown.gapMs.max} ms | ${Object.entries(entry.main.pct).slice(0, 4).map(([k, v]) => `${k} ${v}%`).join(" ")}`);
+          console.log(`${rate}x ${kind} ${sc.name}: rAF ${page.fps} fps, dropped ${page.droppedPct}%, work p50/p99/max ${page.frameWork.p50}/${page.frameWork.p99}/${page.frameWork.max} ms | style ${entry.style.n} passes, elements p50/max ${entry.style.elements.p50}/${entry.style.elements.max} | longest task ${entry.longest.maxMs} ms | ${shown.scrollThread} thread, moved ${shown.movedFps} fps, gap max ${shown.gapMs.max} ms | ${Object.entries(entry.main.pct).slice(0, 4).map(([k, v]) => `${k} ${v}%`).join(" ")} | a frame: paint ${entry.pixels.paintPerFrameMs}, raster ${entry.pixels.rasterPerFrameMs}, compositor ${entry.pixels.compositorPerFrameMs}, gpu ${entry.pixels.gpuMainPerFrameMs}, viz ${entry.pixels.vizPerFrameMs} ms | layers ${entry.layers?.drawing ?? "?"} drawing, ${entry.layers?.drawingMpx ?? "?"} Mpx`);
         } catch (e) { entry.error = String(e.message || e); console.log(`${rate}x ${kind} ${sc.name}: ERROR ${entry.error}`); await cpu(1); }
         results[kind].push(entry);
         save();

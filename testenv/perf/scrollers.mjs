@@ -7,18 +7,20 @@
 //
 // --strict exits 1 when any visible box with something to scroll has a background that is not opaque.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const attachPort = opt("--attach");
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 15 * 60000).unref();
-const browser = attachPort ? null : await launch();
+const browser = attachPort ? null : await launch({ size });
 const c = await attach(attachPort ? Number(attachPort) : browser.port);
 const js = (code) => c.js(code);
 await c.send("Page.enable");
-if (browser) await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+if (browser) await viewport(c, size);
 
 // The routes and the presses that open each scrolling surface; `null` hash stays where the last one left off.
 const STOPS = [

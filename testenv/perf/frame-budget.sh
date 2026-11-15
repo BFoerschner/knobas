@@ -3,7 +3,8 @@
 # length of the run, drives it in a headless Chrome at each throttle, and fails when a list, a key or a page switch is
 # over its line in budget.json, or when a box that scrolls has no opaque background.
 #
-#   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4,6] [--only a,b | --all] [--out <dir>]
+#   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4,6] [--only a,b | --all] [--sizes "WxH@s ..." | --sizes none]
+#                                [--out <dir>]
 #
 # By default the lists and moments the smoothness targets name (`only` below, about 15 minutes); --all runs every
 # scenario of run.mjs, an hour or more on the fixture, whose own query engine runs in the page. A pipeline's runs
@@ -12,13 +13,16 @@
 #
 # --real <port>  the windowless backend on a real database (examples/headless_ipc.rs) instead of the fixture at
 #                scale (?fake-scale); the budget's "real" lines then apply
+# --sizes        the pages run again at these sizes, at 4x and 6x, against the same lines (the sizes pass, 2026-11-15):
+#                by default a 4K screen at 200 % (1920x1080@2, the most device pixels) and a 1440p screen at 125 %
+#                (2560x1440@1.25, the most CSS pixels at a fractional scale); `none` runs 1440x868@1 alone
 #
 # Then the long-run probe (long.mjs): Monitors left open while every source's run ends every 5 s for 2 minutes, then
 # kept hidden behind the Inbox for 1, against the budget's `long` lines: growth, main-thread time, long tasks, hovers.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4,6" out=""
+real="" throttle="1,4,6" out="" sizes="1920x1080@2 2560x1440@1.25"
 only="monitors,code-prs,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings"
 while [ $# -gt 0 ]; do
   case $1 in
@@ -27,7 +31,8 @@ while [ $# -gt 0 ]; do
     --only) only=$2; shift 2 ;;
     --all) only=""; shift ;;
     --out) out=$2; shift 2 ;;
-    *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    --sizes) sizes=$2; shift 2 ;;
+    *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
 out=${out:-$(mktemp -d "${TMPDIR:-/tmp}/knobas-frame-budget.XXXXXX")}
@@ -43,6 +48,14 @@ scrollers=$?
 tail -1 "$out/scrollers.log"
 node "$here/budget.mjs" "$out/run.json" --lines "$lines" --md "$out/budget.md"
 budget=$?
+# The full-screen sizes at the throttles they are held at, 4x and 6x, of those asked for.
+size_throttle=$(echo "$throttle" | tr ',' '\n' | grep -xE '4|6' | paste -sd, -)
+[ "$sizes" != none ] && [ -n "$size_throttle" ] && for size in $sizes; do
+  echo "frame-budget: $size at ${size_throttle//,/x, }x"
+  "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/run.mjs" --app "$url" --out "$out/run-$size.json" --size "$size" \
+    --label "frame-budget $(git -C "$root" rev-parse --short HEAD) $size" --throttle "$size_throttle" --kinds scroll,type,nav ${only:+--only "$only"} || exit 1
+  node "$here/budget.mjs" "$out/run-$size.json" --lines "$lines" --md "$out/budget-$size.md" || budget=1
+done
 "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/long.mjs" --app "http://127.0.0.1:$port/?fake-ipc&fake-hooks&$corpus#/inbox" \
   --out "$out/long.json" --lines "$lines" --minutes 2 --every 5 --then-minutes 1 > "$out/long.log"
 long=$?

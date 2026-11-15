@@ -5,7 +5,7 @@
 # open's first useful frame or its settling is over its line in `budget-open.json`, or a row moved after it drew.
 #
 #   testenv/perf/open-budget.sh --real <port> [--inner [--no-big]] [--forge <ms>] [--syncing <source>] [--throttle 1,4,6]
-#                               [--only a,b] [--out <dir>]
+#                               [--only a,b] [--sizes "WxH@s ..." | none] [--out <dir>]
 #
 # --real <port>  the windowless backend on the saved scale database (examples/headless_ipc.rs); the places are its
 #                pages (the SCLENG space, a TeamCity pipeline), so there is no fixture run
@@ -22,29 +22,34 @@
 # --extremes     the extreme pages instead (`open.mjs --set extremes`, the extremes pass, 2026-11-13; README, *The
 #                extremes*): seeded on the live products for the run (`testenv/seed-extremes.sh`), synced through the
 #                profile's sources and removed after it, checked against `extremes` lines; `--keep-extremes` leaves them
+# --sizes        the nav pages pressed again at these sizes, at 4x and 6x, against the same lines (the sizes pass,
+#                2026-11-15): by default a 4K screen at 200 % (1920x1080@2, the most device pixels) and a 1440p screen
+#                at 125 % (2560x1440@1.25, the most CSS pixels at a fractional scale); `none` runs 1440x868@1 alone.
+#                The inner pages and the extremes run at 1440x868@1 unless --sizes names sizes for them
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="" only="" out="" inner="" forge="" syncing="" extremes="" keep="" nobig=""
+real="" throttle="" only="" out="" inner="" forge="" syncing="" extremes="" keep="" nobig="" sizes=""
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
     --throttle) throttle=$2; shift 2 ;;
     --only) only=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
+    --sizes) sizes=$2; shift 2 ;;
     --inner) inner=1; shift ;;
     --no-big) nobig=1; shift ;;
     --forge) forge=$2; shift 2 ;;
     --syncing) syncing=$2; shift 2 ;;
     --extremes) extremes=1; shift ;;
     --keep-extremes) keep=1; shift ;;
-    *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
 # The nav pages and the inner pages at 1x, 4x and 6x (Björn's three lines, 2026-11-14; the inner pages' 6x items since
 # the inner-6x pass, 2026-11-15); the extremes at 1x and 4x, the throttles their items name.
 [ -n "$throttle" ] || { if [ -n "$extremes" ]; then throttle="1,4"; else throttle="1,4,6"; fi; }
-[ -n "$real" ] || { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$real" ] || { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ -z "$extremes" ] || [ -z "$inner" ] || { echo "open-budget: --extremes and --inner are two runs" >&2; exit 2; }
 [ -z "$forge" ] || [ -n "$inner" ] || { echo "open-budget: --forge measures the inner pages: add --inner" >&2; exit 2; }
 [ -z "$nobig" ] || [ -n "$inner" ] || { echo "open-budget: --no-big leaves out the inner pages' big folders: add --inner" >&2; exit 2; }
@@ -97,5 +102,16 @@ fi
 "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/open.mjs" --app "$url" --out "$out/open.json" \
   --throttle "$throttle" ${only:+--only "$only"} "${set_args[@]}" --check "$here/budget-open.json" --lines "$lines"
 status=$?
+# The full-screen sizes (the nav pages' by default) at the throttles they are held at, 4x and 6x, of those asked for:
+# the same presses, rounds and lines.
+[ -n "$sizes" ] || { [ -n "$inner$extremes" ] && sizes=none || sizes="1920x1080@2 2560x1440@1.25"; }
+size_throttle=$(echo "$throttle" | tr ',' '\n' | grep -xE '4|6' | paste -sd, -)
+[ "$sizes" != none ] && [ -n "$size_throttle" ] && for size in $sizes; do
+  echo "open-budget: $size at ${size_throttle//,/x, }x"
+  size_args=("${set_args[@]}")
+  [ -n "$inner$extremes$forge" ] || size_args=(--max-minutes $((45 * $(echo "$size_throttle" | tr ',' '\n' | grep -c .))))
+  "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/open.mjs" --app "$url" --out "$out/open-$size.json" --size "$size" \
+    --throttle "$size_throttle" ${only:+--only "$only"} "${size_args[@]}" --check "$here/budget-open.json" --lines "$lines" || status=1
+done
 echo "open-budget: results in $out"
 exit $status

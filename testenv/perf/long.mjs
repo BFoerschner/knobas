@@ -21,9 +21,11 @@
 // it. Every third sample collects garbage first and reads the heap. Fails (exit 1) when a line in budget.json's `long`
 // is crossed: growth over the run, main-thread time a minute, a long task, or a hover's paint.
 import { readFileSync, writeFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
+/** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
+const size = sizeFrom(args);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const app = opt("--app");
 const out = opt("--out") ?? "long.json";
@@ -36,12 +38,12 @@ const lines = JSON.parse(readFileSync(new URL("./budget.json", import.meta.url),
 const attachPort = opt("--attach");
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, (minutes + thenMinutes + 10) * 60000).unref();
 
-const browser = attachPort ? null : await launch();
+const browser = attachPort ? null : await launch({ size });
 const c = await attach(attachPort ? Number(attachPort) : browser.port, (t) => t.type === "page" && (!opt("--match") || t.url.startsWith(opt("--match"))));
 const js = (code) => c.js(code);
 await c.send("Performance.enable", { timeDomain: "timeTicks" });
 if (browser) {
-  await c.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 868, deviceScaleFactor: 1, mobile: false });
+  await viewport(c, size);
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.enable");
   await c.send("Page.navigate", { url: app });
