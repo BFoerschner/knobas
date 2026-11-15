@@ -1881,15 +1881,17 @@ fn shape(data_dir: &Path) -> Shape {
     // missing one is a link to a volume not mounted, or a directory being
     // copied in, not a killed `initdb`.
     let empty_tablespaces = holds_only("pg_tblspc", &[]).unwrap_or(false);
-    if holds_only("base", &["1", "4"]).unwrap_or(false) && empty_tablespaces {
+    // A directory no server ran on, holding `initdb`'s databases alone, is
+    // unfinished even when complete (the ux12 Windows pass, Fable's ruling):
+    // with `initdb --no-sync`, only the marker written after the flush says
+    // it is on disk. It holds no knobas database, so redoing it loses
+    // nothing; and an older build's that a server ran on is still marked.
+    let initdb_alone = holds_only("base", &["1", "4"]).unwrap_or(false)
+        || (!present("postmaster.opts") && holds_only("base", &["1", "4", "5"]).unwrap_or(false));
+    if initdb_alone && empty_tablespaces {
         Shape::Unfinished
     } else if INITDB_FILES.iter().all(|name| present(name)) {
         Shape::HoldsDatabase
-    } else if !present("postmaster.opts")
-        && holds_only("base", &["1", "4", "5"]).unwrap_or(false)
-        && empty_tablespaces
-    {
-        Shape::Unfinished
     } else {
         Shape::Unrecognised
     }
@@ -1928,7 +1930,17 @@ fn served(data_dir: &Path) -> bool {
 fn mark_finished(data_dir: &Path) {
     let marker = data_dir.join(INITDB_FINISHED);
     let note = "initdb finished in this directory; knobas never removes it (#1819)\n";
-    if let Err(error) = std::fs::write(&marker, note) {
+    // On disk itself, and its directory entry (the ux12 Windows pass): a
+    // marker the operating system never wrote out leaves the directory
+    // unmarked, and the next launch redoes it, which loses nothing.
+    let written = std::fs::write(&marker, note).and_then(|()| {
+        flush_one(&marker, false)?;
+        if cfg!(unix) {
+            flush_one(data_dir, true)?;
+        }
+        Ok(())
+    });
+    if let Err(error) = written {
         tracing::warn!(%error, marker = %marker.display(), "could not mark the data directory finished");
     }
 }
@@ -1985,9 +1997,122 @@ async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError>
         ms = started.elapsed().as_millis(),
         "initdb made the data directory"
     );
+    // On disk before the marker says so and before any server runs on it
+    // (`INITDB_NO_SYNC`): a failed or timed-out flush fails the bring-up,
+    // and the next launch finds an unmarked directory and redoes it.
+    let flushed = std::time::Instant::now();
+    if INITDB_NO_SYNC {
+        let data_dir = settings.data_dir.clone();
+        let flush = off_runtime(&settings.data_dir, move || flush_data_dir(&data_dir));
+        match tokio::time::timeout(COMMAND_TIMEOUT, flush).await {
+            Ok(done) => done?.map_err(|source| DbError::io(&settings.data_dir, source))?,
+            Err(_) => {
+                return Err(DbError::io(
+                    &settings.data_dir,
+                    io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "the new data directory did not reach the disk in time",
+                    ),
+                ));
+            }
+        }
+        tracing::info!(
+            ms = flushed.elapsed().as_millis(),
+            "the data directory is on disk"
+        );
+    }
     let data_dir = settings.data_dir.clone();
     off_runtime(&settings.data_dir, move || mark_finished(&data_dir)).await?;
     Ok(())
+}
+
+/// Whether `initdb` runs with `--no-sync` and knobas flushes the directory
+/// itself ([`flush_data_dir`]) before marking it (the ux12 Windows pass,
+/// 2026-11-15, Fable's ruling).
+///
+/// On Björn's PC `initdb` took 4.1 s, 2.0 s of it the sync of its 970 files
+/// one after another, each a flush of the drive's cache; `--no-sync` 2.1 s.
+/// Flushing on [`FLUSH_THREADS`] threads lets the drive answer many waiting
+/// flushes with one. **Owed on Windows**: the flush timed by hand must come
+/// in at 0.7 s or less; if it does not, set this to `false`, which runs
+/// `initdb` with its own sync as before. The marker and the rule that redoes
+/// an unmarked directory no server ran on ([`shape`]) stay either way.
+const INITDB_NO_SYNC: bool = true;
+
+/// How many threads [`flush_data_dir`] flushes on.
+const FLUSH_THREADS: usize = 16;
+
+/// Write every file and directory under `data_dir` to disk, on
+/// [`FLUSH_THREADS`] threads, as `initdb`'s own sync would: what
+/// `initdb --no-sync` leaves to the caller.
+///
+/// A plain `fsync` on Unix, never std's `sync_all`, which is `F_FULLFSYNC`
+/// on macOS: initdb's own sync there takes 36 ms and a full one per file
+/// would take seconds. Windows has no other: each file is opened for writing
+/// and flushed (`FlushFileBuffers`). Symlinks are not followed. The first
+/// error is the answer, once every thread has stopped.
+fn flush_data_dir(data_dir: &Path) -> io::Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, PoisonError};
+    let mut entries = Vec::new();
+    let mut dirs = vec![data_dir.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                dirs.push(entry.path());
+            } else if kind.is_file() {
+                entries.push((entry.path(), false));
+            }
+        }
+        entries.push((dir, true));
+    }
+    let next = AtomicUsize::new(0);
+    let failed: Mutex<Option<io::Error>> = Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..FLUSH_THREADS.min(entries.len()) {
+            scope.spawn(|| {
+                loop {
+                    let at = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((path, is_dir)) = entries.get(at) else {
+                        return;
+                    };
+                    if let Err(error) = flush_one(path, *is_dir) {
+                        let mut first = failed.lock().unwrap_or_else(PoisonError::into_inner);
+                        first.get_or_insert(io::Error::new(
+                            error.kind(),
+                            format!("{}: {error}", path.display()),
+                        ));
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    match failed.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// Write one file, or on Unix one directory's entries, to disk.
+fn flush_one(path: &Path, is_dir: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = is_dir;
+        let file = std::fs::File::open(path)?;
+        rustix::fs::fsync(&file).map_err(io::Error::from)
+    }
+    #[cfg(not(unix))]
+    {
+        // A directory cannot be opened as a file on Windows, and NTFS
+        // journals its entries.
+        if is_dir {
+            return Ok(());
+        }
+        OpenOptions::new().write(true).open(path)?.sync_all()
+    }
 }
 
 /// The file `pg_ctl start -l` appends the server's output to, in the data
@@ -2191,7 +2316,8 @@ const MESSAGES_LOCALE: &str = "C";
 /// which leaves a directory with no marker, with `PG_VERSION` or, when it
 /// cuts the cleanup short, without (#1985). [`recover_or_mark`] classes
 /// either as unfinished, so the next launch removes it; a kill after
-/// `initdb` wrote its last file leaves a complete directory, which it marks.
+/// `initdb` wrote its last file leaves a complete directory, which the next
+/// launch removes too (the ux12 Windows pass: unmarked and never served).
 ///
 /// A failure reads as the crate's did: `DatabaseInitializationError` with the
 /// command's output, or *deadline has elapsed*.
@@ -2232,6 +2358,7 @@ async fn run_initdb_stopping(
         .env("LC_MESSAGES", MESSAGES_LOCALE)
         .arg("--pwfile")
         .arg(&settings.password_file)
+        .args(INITDB_NO_SYNC.then_some("--no-sync"))
         .arg("--username")
         .arg(postgresql_embedded::BOOTSTRAP_SUPERUSER)
         .stdin(std::process::Stdio::null())
@@ -3469,13 +3596,15 @@ mod tests {
                 });
                 terminate(pid)
             };
+            // Finished, so `Ok` for `initialise` to flush and mark; until
+            // then its shape is `Unfinished`, as any unmarked directory no
+            // server ran on is (the ux12 Windows pass).
             run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, INITDB_GRACE, stop)
                 .await
                 .unwrap_or_else(|error| panic!("signalled: {signalled}: {error}"));
-            assert_eq!(
-                shape(&settings.data_dir),
-                Shape::HoldsDatabase,
-                "signalled: {signalled}"
+            assert!(
+                settings.data_dir.join("PG_VERSION").is_file(),
+                "signalled: {signalled}: a complete directory"
             );
         }
     }
@@ -3839,11 +3968,48 @@ esac
         }
     }
 
-    /// #1819: a directory a finished `initdb` made is kept, from this build
-    /// and from the two older flows: #1637's `initdb`, which wrote no
-    /// marker, and the crate's own `setup()` before it, followed by the
-    /// launch that made the knobas database and a reader's row in it. An
-    /// older build's directory is marked the first time a launch sees it.
+    /// The flush after `initdb --no-sync` writes every file of a real data
+    /// directory, follows no symlink (a dangling one is no error), and
+    /// fails, naming the path, on a file it cannot open.
+    #[tokio::test]
+    async fn the_flush_writes_the_whole_data_directory_and_follows_no_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, initdb) = initdb_for(dir.path()).await;
+        run_initdb(&initdb, &settings, COMMAND_TIMEOUT)
+            .await
+            .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            dir.path().join("nowhere"),
+            settings.data_dir.join("dangling"),
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        flush_data_dir(&settings.data_dir).expect("flushed");
+        println!("flushed in {} ms", started.elapsed().as_millis());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = write(&settings.data_dir, "locked", "x");
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let error = flush_data_dir(&settings.data_dir).expect_err("an unreadable file");
+            assert!(error.to_string().contains("locked"), "{error}");
+        }
+    }
+
+    /// #1819: a directory a finished `initdb` made and a server ran on is
+    /// kept: the crate's own `setup()`, as every build before #1637 ran it,
+    /// followed by the launch that made the knobas database and a reader's
+    /// row in it, is marked the first time a launch sees it.
+    ///
+    /// **One no server ever ran on is redone** (the ux12 Windows pass,
+    /// 2026-11-15, Fable's ruling): `initdb` now runs with `--no-sync` and
+    /// knobas flushes the directory before it writes the marker, so a
+    /// complete directory without the marker may be one the operating
+    /// system never wrote out. Before, it was marked and trusted; that also
+    /// trusted one an OS crash left during `initdb`'s own sync. It holds no
+    /// knobas database, so redoing it loses nothing.
     #[tokio::test]
     async fn a_directory_a_finished_initdb_made_is_never_removed() {
         // #1637's flow, stopped after `initdb` and before any start.
@@ -3857,11 +4023,17 @@ esac
             root_dir: dir.path().to_path_buf(),
             existing_url: None,
         };
-        EmbeddedDb::start(cfg).await.unwrap().stop().await.unwrap();
-        assert!(sentinel.is_file(), "#1637's directory is kept");
+        let db = EmbeddedDb::start(cfg).await.unwrap();
+        let one: Result<(i32,), _> = sqlx::query_as("select 1").fetch_one(db.pool()).await;
+        db.stop().await.unwrap();
+        assert_eq!(one.unwrap().0, 1, "the redone cluster answers");
+        assert!(
+            !sentinel.exists(),
+            "an unmarked directory no server ran on is redone"
+        );
         assert!(
             settings.data_dir.join(INITDB_FINISHED).is_file(),
-            "and marked"
+            "and the new one marked"
         );
 
         // The crate's own `setup()`, as every build before #1637 ran it.

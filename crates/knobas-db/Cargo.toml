@@ -70,6 +70,13 @@ tokio = { workspace = true, features = ["process", "sync"] }
 tracing = "0.1"
 url = "2"
 
+# A plain `fsync` for the flush after `initdb --no-sync` (the ux12 Windows
+# pass, `embedded::flush_data_dir`): std's `sync_all` is `F_FULLFSYNC` on
+# macOS, which would turn initdb's 36 ms sync into seconds. Already in the
+# lockfile through `knobas-app`; safe calls, no `unsafe` here.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [dev-dependencies]
 # Only `tests/schema.rs` reaches for the column types the migrations declare;
 # nothing in `src/` mentions a timestamp. A dependency here rather than above
