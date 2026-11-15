@@ -1,12 +1,17 @@
 import { flushSync } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { placeWindowsNow, Windowed } from "./windowed.svelte";
+import { growWindowsNow, placeWindowsNow, Windowed } from "./windowed.svelte";
 
-/** Draws, then reads where each windowed list sits, as the end of the flush that attached it does, and draws again. */
+/**
+ * Draws, then reads where each windowed list sits, as the end of the flush that attached it does, and draws again;
+ * then draws the overscan below the view, as the second frame after the read does.
+ */
 function placed() {
   flushSync();
   placeWindowsNow();
+  flushSync();
+  growWindowsNow();
   flushSync();
 }
 
@@ -440,5 +445,67 @@ test("a list placed while its page is hidden draws a screenful from its top, and
   window.dispatchEvent(new Event("resize"));
   flushSync();
   expect([ahead.start, ahead.end]).toEqual([0, 55]);
+  stop();
+});
+
+// The sizes pass (2026-11-15): a first open builds what the screen shows; the rows below the fold wait for the frame
+// that shows the rows on screen, and the one after it.
+test("a list that reads where it sits draws the view, the overscan above it, a quarter of the view below and a row past it, and the overscan below once two frames have drawn", async () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 20_000, top: -1_000, bottom: 19_000, left: 0, right: 200, x: 0, y: -1_000, toJSON: () => ({}) }) as DOMRect,
+  );
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1_000);
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((fn) => frames.push(fn));
+  document.body.innerHTML = "<div></div>";
+  const list = document.querySelector("div")!;
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 400 });
+  const stop = $effect.root(() => {
+    win.list(list);
+  });
+  flushSync();
+  placeWindowsNow();
+  flushSync();
+  // Scrolled 1,000 px into it: the view is rows 50 to 100 and 400 px above it are drawn; below it a quarter of the
+  // view (250 px, rows 100 to 112) and one row past that, so the last drawn row is off screen.
+  expect([win.start, win.end]).toEqual([30, 114]);
+  // The frame that shows them, the one after, then a task: the 400 px below it too.
+  frames.shift()!(0);
+  frames.shift()!(0);
+  flushSync();
+  expect(win.end).toBe(114);
+  await new Promise((done) => setTimeout(done));
+  flushSync();
+  expect([win.start, win.end]).toEqual([30, 120]);
+  stop();
+});
+
+test("rows drawn before a list reads where it sits stay until the overscan below is drawn, where the overscan would hold them", () => {
+  // The list's top on screen, the view cut 100 px down by a box that clips it (a footer over a rail's end).
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const box = this.tagName === "SECTION" ? { top: 0, height: 100 } : { top: 0, height: 20_000 };
+    return { width: 200, height: box.height, top: box.top, bottom: box.top + box.height, left: 0, right: 200, x: 0, y: box.top, toJSON: () => ({}) } as DOMRect;
+  });
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+  document.body.innerHTML = '<section style="overflow-y: hidden"><div></div></section>';
+  Object.defineProperty(document.querySelector("section")!, "clientHeight", { value: 100 });
+  const list = document.querySelector("div")!;
+  const keys = $state({ of: Array.from({ length: 1000 }, (_, i) => i) });
+  const win = new Windowed({ count: () => keys.of.length, key: (i) => keys.of[i]!, estimate: 20, overscan: 200 });
+  const stop = $effect.root(() => {
+    void win.end;
+    win.list(list);
+  });
+  flushSync();
+  // Before the read, the overscan's 200 px from the top: rows 0 to 10.
+  expect([win.start, win.end]).toEqual([0, 10]);
+  // The page's rows are built again (a new array of the same keys) before the read.
+  keys.of = [...keys.of];
+  flushSync();
+  placeWindowsNow();
+  flushSync();
+  // The view is rows 0 to 5, a quarter of it below and a row past: the ten drawn before the read stay, as the
+  // overscan below would hold them.
+  expect([win.start, win.end]).toEqual([0, 10]);
   stop();
 });

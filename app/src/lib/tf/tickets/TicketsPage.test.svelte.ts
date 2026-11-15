@@ -19,6 +19,7 @@ import type {
 } from "../../ipc/entity";
 import type { QueryTranslation, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
 import { toasts } from "../../shell/toasts.svelte";
+import { growWindowsNow } from "../../shell/windowed.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { LANE_FIELDS, laneOf } from "./tickets";
@@ -448,7 +449,13 @@ test("a typed filter reads fifty a column under its total, a long column draws t
   await open(h);
   for (const char of "bulk") type(field(), char);
   await settle();
+  // The cards on screen, then the overscan below them once the frame that shows them has drawn (the sizes pass,
+  // 2026-11-15).
+  const onScreen = stacks()[0]!.cards;
+  growWindowsNow();
+  await settle();
   const drawn = stacks()[0]!.cards;
+  expect(drawn).toBeGreaterThan(onScreen);
   expect(drawn).toBeGreaterThan(5);
   expect(drawn).toBeLessThan(24);
   // Every undrawn card's room, at its 130 px estimate and the 6 px between cards, under the drawn ones.

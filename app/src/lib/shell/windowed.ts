@@ -66,13 +66,16 @@ export class Heights<K = string> {
     return n === 0 ? 0 : this.#layout()[n]! - this.#gap;
   }
 
-  /** The rows a viewport `top` to `top + height` (list pixels) needs, `overscan` pixels more each side. */
-  span(top: number, height: number, overscan: number): Span {
+  /**
+   * The rows a viewport `top` to `top + height` (list pixels) needs, `overscan` pixels more above it and `below` pixels
+   * more under it (`overscan` too unless given).
+   */
+  span(top: number, height: number, overscan: number, below = overscan): Span {
     const n = this.#keys.length;
     if (n === 0) return { start: 0, end: 0, before: 0, after: 0 };
     const at = this.#layout();
     const lo = Math.max(0, top - overscan);
-    const hi = top + height + overscan;
+    const hi = top + height + below;
     const start = Math.min(n - 1, Math.max(0, firstAbove(at, lo) - 1));
     const end = Math.min(n, Math.max(start + 1, firstAtLeast(at, hi)));
     return { start, end, before: at[start]!, after: at[n]! - at[end]! };

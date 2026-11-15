@@ -46,6 +46,12 @@
  *   every other list attached in that update (`placeWindowsNow` reads them at
  *   once, as `reveal` and `topOf` do first), so a page's first open lays itself
  *   out once for all its lists. Until then a list draws its overscan's rows.
+ * - The read draws the rows on screen, the overscan above them and a quarter
+ *   of the view below; the rest of the overscan below waits until two frames
+ *   have drawn after the last list was placed (`growSoon`), so a page's first
+ *   open builds about what the screen shows (the sizes pass, 2026-11-15: the
+ *   Inbox's and Monitors' first frames built 600 px of rows below the fold).
+ *   Rows drawn below the view move nothing on it.
  *
  * A folding list windows its flattened visible rows (headers of open folds
  * and their rows) with one key per row.
@@ -147,6 +153,10 @@ export class Windowed<K = string> {
   #held: { keys: readonly K[]; start: number; end: number } | null = null;
   /** Whether `list` has read where the list sits: rows drawn before that are the overscan's, and none are held. */
   #placed = false;
+  /** Whether the overscan below the view is drawn too: from two frames after the last list read where it sits. */
+  #grown = $state(false);
+  /** The last row drawn before the read: the read keeps those under the view that the overscan below would hold. */
+  #early: { key: K } | null = null;
 
   readonly #span = $derived.by((): Span & { on: boolean } => {
     const keys = this.#keys;
@@ -155,13 +165,31 @@ export class Windowed<K = string> {
       return { ...ALL, end: keys.length, on: false };
     }
     void this.#remeasured;
+    // Read before the held rows may answer, so the overscan below is drawn when it may be.
+    const grown = this.#grown;
     this.#sync(keys);
     const { overscan, margin } = this.#options;
     const held = this.#held;
     if (held !== null && held.keys === keys && this.#heights.covers(held.start, held.end, this.#viewTop, this.#viewHeight, margin))
       return { ...this.#heights.around(held.start, held.end), on: true };
-    const span = this.#heights.span(this.#viewTop, this.#viewHeight, overscan);
-    this.#held = this.#placed ? { keys, start: span.start, end: span.end } : null;
+    // Before the read, the overscan's rows from the top; after it, the view and the overscan above it, and once two
+    // frames have drawn, the overscan below too. Until then a quarter of the view's height below it, and a row past
+    // that: rows not yet measured stand at their estimate, which runs a sixth over the Inbox's, so a span of the view
+    // alone fell short of the screen's bottom for a frame; and the last drawn row stays off screen, where a list's
+    // `:last-child` rule (the Inbox's border) changes no row in view. The read takes away none of the rows drawn before
+    // it that the overscan would hold: a row under a clipping footer stays where it drew.
+    const below = this.#placed && !grown ? Math.min(overscan, this.#viewHeight / 4) : overscan;
+    let span = this.#heights.span(this.#viewTop, this.#viewHeight, overscan, below);
+    if (this.#placed && !grown) {
+      const full = this.#heights.span(this.#viewTop, this.#viewHeight, overscan);
+      const early = this.#early === null ? -1 : keys.indexOf(this.#early.key);
+      const end = Math.min(full.end, Math.max(span.end + 1, early + 1));
+      if (end > span.end) span = this.#heights.around(span.start, end);
+    }
+    if (!this.#placed && span.end > span.start) this.#early = { key: keys[span.end - 1]! };
+    // Held once the overscan below is in: rows held before would cover the view with the margin to spare, and the grow
+    // would draw nothing.
+    this.#held = this.#placed && grown ? { keys, start: span.start, end: span.end } : null;
     return { ...span, on: true };
   });
 
@@ -317,7 +345,14 @@ export class Windowed<K = string> {
       base.top = parseFloat(style.paddingTop) || 0;
       base.bottom = parseFloat(style.paddingBottom) || 0;
       base.read = true;
+      // The undrawn rows' room first: a box that clips the list and holds only it (the Inbox's sheet) ends at the rows
+      // drawn so far until the room is in, and read before it would take that for the view's bottom.
+      if (!(node instanceof HTMLTableSectionElement) && !own) {
+        pad(node, "padding-top", this.before && base.top + this.before);
+        pad(node, "padding-bottom", this.after && base.bottom + this.after);
+      }
       read();
+      if (!this.#grown) growSoon(() => (this.#grown = true));
       resized?.observe(node);
       for (const clip of clips) resized?.observe(clip);
     };
@@ -576,6 +611,42 @@ function placeSoon(place: () => void) {
 export function placeWindowsNow() {
   const all = [...unplaced];
   unplaced.clear();
+  for (const each of all) each();
+}
+
+/** The lists placed whose overscan below the view waits for the frame that shows their rows (`growSoon`). */
+const ungrown = new Set<() => void>();
+/** The frame or task the grow waits on, to start the wait again when another list is placed. */
+let growWait: { frame: number | null; task: ReturnType<typeof setTimeout> | null } | null = null;
+
+/**
+ * Draws `grow`'s list's overscan below the view once the frame that shows its rows, and the one after it, have drawn,
+ * counted from the last list placed: the rows nobody sees yet are built after the page's rows on screen are painted,
+ * in a task of their own, not in the ones that hold its first useful frame. A page whose lists are placed in turns
+ * (Builds' rail, then a pipeline's days once its runs answer) grows them all once the last has drawn.
+ */
+function growSoon(grow: () => void) {
+  ungrown.add(grow);
+  if (growWait !== null) {
+    if (growWait.frame !== null) cancelAnimationFrame(growWait.frame);
+    if (growWait.task !== null) clearTimeout(growWait.task);
+  }
+  const wait: { frame: number | null; task: ReturnType<typeof setTimeout> | null } = { frame: null, task: null };
+  growWait = wait;
+  const later = () => (wait.task = setTimeout(growWindowsNow, 0));
+  if (typeof requestAnimationFrame === "undefined") later();
+  else wait.frame = requestAnimationFrame(() => (wait.frame = requestAnimationFrame(() => ((wait.frame = null), later()))));
+}
+
+/** Draws now the overscan below the view of every list that waits for it (`growSoon`): when it is asked, and in tests. */
+export function growWindowsNow() {
+  if (growWait !== null) {
+    if (growWait.frame !== null) cancelAnimationFrame(growWait.frame);
+    if (growWait.task !== null) clearTimeout(growWait.task);
+    growWait = null;
+  }
+  const all = [...ungrown];
+  ungrown.clear();
   for (const each of all) each();
 }
 
