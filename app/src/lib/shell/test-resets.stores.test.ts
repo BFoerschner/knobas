@@ -28,9 +28,17 @@ afterEach(() => vi.useRealTimers());
 // A page's session memory lives in its component's `<script module>`, out of a
 // test's reach without mounting it; these stand in so the case below can see
 // that the reset reaches each one's own door.
-const pages = vi.hoisted(() => ({ forgetFolds: vi.fn(), forgetBranches: vi.fn(), forgetHeaderSearches: vi.fn(), forgetTicketsSession: vi.fn() }));
+const pages = vi.hoisted(() => ({
+  forgetFolds: vi.fn(),
+  forgetBranches: vi.fn(),
+  forgetHeaderSearches: vi.fn(),
+  forgetHeaderLooks: vi.fn(),
+  forgetPickWidth: vi.fn(),
+  forgetTicketsSession: vi.fn(),
+}));
 vi.mock("../tf/builds/TfBuilds.svelte", () => ({ forgetFolds: pages.forgetFolds }));
-vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches, forgetHeaderSearches: pages.forgetHeaderSearches }));
+vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches, forgetHeaderSearches: pages.forgetHeaderSearches, forgetHeaderLooks: pages.forgetHeaderLooks }));
+vi.mock("../tf/pr/TfPrFiles.svelte", () => ({ forgetPickWidth: pages.forgetPickWidth }));
 vi.mock("../tf/tickets/TicketsPage.svelte", () => ({ forgetTicketsSession: pages.forgetTicketsSession }));
 
 /** A listener that records when it is torn down. */

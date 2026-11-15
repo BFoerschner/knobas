@@ -43,6 +43,11 @@
 <script lang="ts" module>
   /** The commit picker's width as last measured, the same on the next pull request's tab while its words are (`pickRoom`). */
   let pickWidth: string | null = null;
+
+  /** Forget the picker's width: a new session, which is what each test is. */
+  export function forgetPickWidth(): void {
+    pickWidth = null;
+  }
 </script>
 
 <script lang="ts">

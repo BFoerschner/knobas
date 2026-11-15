@@ -159,6 +159,10 @@
   /** Forget which repositories' headers have looked for a branch to propose: a new session. */
   export function forgetHeaderSearches(): void {
     searched.clear();
+  }
+
+  /** Forget what each repository's header found: a new session. */
+  export function forgetHeaderLooks(): void {
     proposals.clear();
   }
 

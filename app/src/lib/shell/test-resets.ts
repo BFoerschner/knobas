@@ -111,6 +111,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
   // Which repositories' headers have looked for a branch to propose (the inner-pages pass).
   "tf/repo/TfRepo.svelte#searched": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderSearches(),
+  // What each repository's header found, kept for the next visit (the inner-6x pass).
+  "tf/repo/TfRepo.svelte#proposals": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderLooks(),
+  // The commit picker's width as last measured (the inner-6x pass).
+  "tf/pr/TfPrFiles.svelte#pickWidth": async () => (await import("../tf/pr/TfPrFiles.svelte")).forgetPickWidth(),
   // In plain `.ts` files ({@link UNSCANNED}): the files Files drew, and the views read ahead of a press.
   "tf/repo/drawn-files.ts#kept": async () => (await import("../tf/repo/drawn-files")).forgetAllDrawnFiles(),
   "ipc/entity.ts#readsAhead": async () => (await import("../ipc/entity")).forgetReadsAhead(),
