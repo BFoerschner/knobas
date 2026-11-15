@@ -324,6 +324,35 @@ test("an open tab reads again when a run of the repository's source ends with ne
   expect(commitReads()).toBe(before + 1);
 });
 
+// The Windows pass on ux13 (2026-11-15): a repository page left open sent 17 requests to the forge a minute, each run's end
+// reading the branch list and its checks again whether the run had found anything or not.
+test("a page left open reads nothing when a run changed nothing, and while the window is hidden reads a run's news once on its return", async () => {
+  await drawLive([REPO, "commits"]);
+  const before = reads.length;
+  for (let n = 0; n < 3; n++) await raise("sync:state", { source_id: "gitea", running: false, last_changed: false });
+  expect(reads.length).toBe(before);
+
+  await raise("sync:state", { source_id: "gitea", running: false, last_changed: true });
+  const one = reads.length - before;
+  expect(one).toBeGreaterThan(0);
+  expect(reads.slice(before).filter(([, section]) => section === "branches")).toHaveLength(1);
+
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  try {
+    await raise("sync:state", { source_id: "gitea", running: false, last_changed: true });
+    await raise("sync:state", { source_id: "gitea", running: false, last_changed: true });
+    expect(reads.length).toBe(before + one);
+  } finally {
+    delete (document as { visibilityState?: unknown }).visibilityState;
+  }
+  document.dispatchEvent(new Event("visibilitychange"));
+  await settle();
+  expect(reads.length).toBe(before + 2 * one);
+  document.dispatchEvent(new Event("visibilitychange"));
+  await settle();
+  expect(reads.length).toBe(before + 2 * one);
+});
+
 test("a branch made through New branch is offered at once, and Compare says it is being made until a read lists it", async () => {
   const follow = echoFollower();
   followed.follower = follow.follower;

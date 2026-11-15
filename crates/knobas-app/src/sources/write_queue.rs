@@ -585,6 +585,18 @@ where
             );
             return;
         }
+        // Refused: what the page was told the credential may write may be
+        // wrong, so its kept grants go (`live::GRANTS_FRESH`).
+        let refused: Option<String> =
+            sqlx::query_scalar("select state from knobas.write_queue where id = $1")
+                .bind(id)
+                .fetch_optional(&task.pool)
+                .await
+                .ok()
+                .flatten();
+        if refused.as_deref() == Some("refused") {
+            task.live.forget_grants(&source_id);
+        }
         after(task).await;
     });
     if !spawned {

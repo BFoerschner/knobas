@@ -18,7 +18,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use knobas_app::sources::live::LiveSources;
+use knobas_app::sources::live::{GRANTS_FRESH, LiveSources};
 use knobas_app::sources::{self, NewSource, Registry, SecretInput, SourcePatch, SourcesError};
 use knobas_secrets::{KeychainAccount, MemoryStore, Secret, SecretError, SecretStore};
 use knobas_source::instance::SourceInstance;
@@ -858,6 +858,35 @@ async fn a_read_behind_that_moved_is_told() {
     assert_eq!(heard[0].section.as_deref(), Some("branches"));
 }
 
+/// **The page's read of a view it was told of is not read behind again**
+/// (the ux13 Windows pass, 2026-11-15). A read behind that moved tells the
+/// shell, the page reads the view again at once, and that read is answered
+/// from what was just read: before, it sent a second read of the forge (the
+/// branch list twice a run). The ask after it is read behind as any is.
+#[tokio::test]
+async fn the_pages_read_of_a_told_view_is_not_read_behind_again() {
+    let f = fixture().await;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.push();
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    assert_eq!(heard.lock().unwrap().len(), 1, "the push is told");
+    assert_eq!(f.seen.reads(), 2, "the first read and one behind");
+
+    let echo = f.read("moving/repo", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    assert!(echo.contains("v1"), "the told answer: {echo}");
+    assert_eq!(f.seen.reads(), 2, "the echo reads nothing of the source");
+
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    assert_eq!(f.seen.reads(), 3, "the next ask is read behind");
+}
+
 /// A fixed view is never read behind (#2239's stay put).
 #[tokio::test]
 async fn a_fixed_view_is_never_read_behind() {
@@ -869,8 +898,10 @@ async fn a_fixed_view_is_never_read_behind() {
 }
 
 /// **Grants** (#2241): a moving answer is asked once while kept, read again
-/// behind, and a changed answer is the next ask's; a live one is asked
-/// every time.
+/// behind once it is [`GRANTS_FRESH`] old (the ux13 Windows pass,
+/// 2026-11-15: each ask was two probes on the forge), and a changed answer is
+/// the next ask's; a live one is asked every time. A source's kept grants go
+/// when one of its writes is refused, and the next ask asks.
 #[tokio::test]
 async fn grants_are_kept_and_read_again_behind() {
     let f = fixture().await;
@@ -879,9 +910,23 @@ async fn grants_are_kept_and_read_again_behind() {
     f.push();
     assert_eq!(f.refused("moving/repo").await, ["v0"], "kept");
     f.live.settled().await;
+    assert_eq!(
+        f.seen.grants.load(Ordering::SeqCst),
+        1,
+        "not read behind within a minute"
+    );
+    f.live.age_reads(GRANTS_FRESH);
+    assert_eq!(f.refused("moving/repo").await, ["v0"], "kept");
+    f.live.settled().await;
     assert_eq!(f.seen.grants.load(Ordering::SeqCst), 2, "once behind");
     assert_eq!(f.refused("moving/repo").await, ["v1"], "changed grants");
     f.live.settled().await;
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst), 2);
+
+    f.push();
+    f.live.forget_grants(&f.id);
+    assert_eq!(f.refused("moving/repo").await, ["v2"], "asked now");
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst), 3);
 
     let before = f.seen.grants.load(Ordering::SeqCst);
     f.refused("ticket/1").await;
@@ -898,6 +943,7 @@ async fn a_failed_grants_read_behind_keeps_the_refusal() {
     assert_eq!(f.refused("moving/repo").await, ["v0"]);
     f.seen.failing.store(true, Ordering::SeqCst);
     f.push();
+    f.live.age_reads(GRANTS_FRESH);
     assert_eq!(f.refused("moving/repo").await, ["v0"], "kept");
     f.live.settled().await;
     assert_eq!(

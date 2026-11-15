@@ -112,6 +112,10 @@ struct Inner {
     idle: tokio::sync::Notify,
     /// Told of a read behind whose answer moved.
     fresh: Mutex<Option<Listener>>,
+    /// The keys a read behind just told the shell of, and when: the page's
+    /// own read of the fresh answer, which follows within [`ECHO_WINDOW`],
+    /// is answered from it with no read behind ([`LiveSources::echo`]).
+    told: Mutex<HashMap<Key, std::time::Instant>>,
     /// Where reads are held between sessions, once the app says
     /// ([`LiveSources::hold_in`]); none in a test that does not.
     store: Mutex<Option<PgPool>>,
@@ -124,6 +128,20 @@ struct Inner {
 /// shell to be told how its read behind went (ADR-0042): a younger one is the
 /// read a moment ago, and says nothing.
 pub const HELD_AFTER: chrono::TimeDelta = chrono::TimeDelta::seconds(30);
+
+/// How soon after a read behind told the shell its view moved or was
+/// confirmed (`view:fresh`) the page's read of that view is its echo: the
+/// page reading the answer it was just told of, which is answered from it
+/// and not read behind again (the ux13 Windows pass, 2026-11-15: each such
+/// tell cost a second read of the forge, the branch list twice a run).
+pub const ECHO_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long a kept answer about what the credential may write is taken as it
+/// is, with no read behind (the ux13 Windows pass, 2026-11-15): Gitea's is
+/// two probes on the forge an ask, and grants change only when an
+/// administrator acts. A write the source refuses drops them at once
+/// ([`LiveSources::forget_grants`]), as a new credential does.
+pub const GRANTS_FRESH: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 
 type Listener = Arc<dyn Fn(ViewFresh) + Send + Sync>;
 
@@ -243,6 +261,7 @@ impl LiveSources {
             pending: AtomicUsize::new(0),
             idle: tokio::sync::Notify::new(),
             fresh: Mutex::new(None),
+            told: Mutex::new(HashMap::new()),
             store: Mutex::new(None),
             recipes: Mutex::new(HashMap::new()),
         }))
@@ -426,7 +445,7 @@ impl LiveSources {
             ask: Ask::View(section.map(str::to_owned)),
         };
         if let Some(Answer::View(kept)) = self.reads().get(&key) {
-            if behind {
+            if behind && !self.echo(&key) {
                 self.read_behind(&lent.source, vec![key]);
             }
             return Ok(kept);
@@ -480,7 +499,9 @@ impl LiveSources {
                 }
                 None => None,
             };
-            self.read_behind(&lent.source, vec![key]);
+            if !self.echo(&key) {
+                self.read_behind(&lent.source, vec![key]);
+            }
             return Ok((kept, Some(at), unkept));
         }
         // A tree section the sync stored the branch's tree for (the
@@ -725,7 +746,9 @@ impl LiveSources {
         if let Some((Answer::Json(kept), at)) = kept
             && let Ok(answer) = serde_json::from_value::<T>((*kept).clone())
         {
-            self.read_again_behind(key, read);
+            if !self.echo(&key) {
+                self.read_again_behind(key, read);
+            }
             return Ok((answer, Some(at)));
         }
         let recipe = self.recipe_of(lent.generation);
@@ -779,6 +802,7 @@ impl LiveSources {
                             .replace(&key, Answer::Json(Arc::new(json.clone())));
                         this.hold_json(&key, ask, &json, Utc::now()).await;
                         if moved || held {
+                            this.told(&key);
                             this.tell(told(None));
                         }
                     }
@@ -945,10 +969,13 @@ impl LiveSources {
                 }
                 Standing::Fixed | Standing::Moving => Key::of_ask(lent.generation, ask),
             };
-            match self.reads().get(&key) {
-                Some(Answer::Refused(kept)) => {
+            let kept = self.reads().get_at(&key);
+            match kept {
+                Some((Answer::Refused(kept), at)) => {
                     answered.extend(kept);
-                    if lent.source.refusal_standing(ask) == Standing::Moving {
+                    if lent.source.refusal_standing(ask) == Standing::Moving
+                        && Utc::now() - at >= GRANTS_FRESH
+                    {
                         kept_keys.push(key);
                     }
                 }
@@ -1049,6 +1076,7 @@ impl LiveSources {
                         let moved = this.reads().replace(key, Answer::View(view.clone()));
                         this.hold(key, &view, read_at).await;
                         if moved || held {
+                            this.told(key);
                             this.tell(ViewFresh {
                                 entity_id: key.entity.clone(),
                                 section,
@@ -1102,6 +1130,60 @@ impl LiveSources {
         #[cfg(feature = "test-util")]
         let work = knobas_http::counted::inherit(work);
         tokio::spawn(work);
+    }
+
+    /// Drop what is kept of `source`'s grants: a write it refused says the
+    /// kept answer may be wrong, so the next ask asks the source.
+    pub fn forget_grants(&self, source: &str) {
+        let generations: Vec<u64> = self
+            .0
+            .recipes
+            .lock()
+            .expect("the recipes")
+            .iter()
+            .filter(|(_, (id, _))| id == source)
+            .map(|(generation, _)| *generation)
+            .collect();
+        let mut reads = self.reads();
+        let gone: Vec<Key> = reads
+            .entries
+            .keys()
+            .filter(|key| {
+                generations.contains(&key.generation) && matches!(key.ask, Ask::Write { .. })
+            })
+            .cloned()
+            .collect();
+        for key in gone {
+            reads.remove(&key);
+        }
+    }
+
+    /// Every kept answer as read `by` earlier: a test's stand-in for time
+    /// passing.
+    #[cfg(feature = "test-util")]
+    pub fn age_reads(&self, by: chrono::TimeDelta) {
+        for kept in self.reads().entries.values_mut() {
+            kept.at -= by;
+        }
+    }
+
+    /// Note that a read behind of `key` is about to tell the shell its
+    /// answer: the page's read of it within [`ECHO_WINDOW`] is its echo.
+    fn told(&self, key: &Key) {
+        let mut told = self.0.told.lock().expect("the told keys");
+        let now = std::time::Instant::now();
+        told.retain(|_, at| now.duration_since(*at) < ECHO_WINDOW);
+        told.insert(key.clone(), now);
+    }
+
+    /// Whether this ask of `key` is the page's echo of a tell
+    /// ([`ECHO_WINDOW`]): the answer kept was read a moment ago, and the
+    /// page reads it because it was told so, so it is not read behind
+    /// again. Once a tell: the next ask is read behind as any other.
+    fn echo(&self, key: &Key) -> bool {
+        let mut told = self.0.told.lock().expect("the told keys");
+        told.remove(key)
+            .is_some_and(|at| at.elapsed() < ECHO_WINDOW)
     }
 
     fn tell(&self, fresh: ViewFresh) {

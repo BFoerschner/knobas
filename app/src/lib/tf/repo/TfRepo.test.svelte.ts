@@ -392,6 +392,45 @@ test("the header's look is kept: another tab, a return from Compare and a second
   expect(proposal()).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
 });
 
+// The ux13 forge-load pass (2026-11-15): after a run, the branch list and the pull requests landing a moment apart each
+// started the look again, and each look read every branch's whole view on the forge while the last one's were still out.
+test("a look started again while its branches' views are being read asks each branch once", async () => {
+  const base = ports();
+  const other = "gitea:tidewater/payout-service@refs/heads/spike/y";
+  const asked: string[] = [];
+  const held: (() => void)[] = [];
+  const stand = ports({
+    entityView: async (id, sectionId) => {
+      if (id === REPO && sectionId === "branches") return section("branches", [{ type: "entities", title: null, rows: [vrow(MAIN, "main", "default"), vrow(FEATURE, "feature/PAY-231-sepa-retry"), vrow(other, "spike/y")] }]);
+      if (sectionId === null && id.includes("@refs/heads/")) {
+        asked.push(id);
+        await new Promise<void>((release) => held.push(release));
+      }
+      if (id === FEATURE && sectionId === null) return WITH_PR();
+      if (id === other && sectionId === null) return { ...section("overview", []), actions: [{ write_op: "create_pull_request", disabled: null } as ViewAction] };
+      return base.entityView(id, sectionId);
+    },
+  });
+  const props = $state({ ready: true, rest: [REPO], job: null, ports: stand, now: NOW });
+  view = mount(TfRepo, { target, props });
+  await settle();
+  const first = [...asked];
+  expect(first.length).toBeGreaterThan(0);
+
+  // Another tab while they are out: the lists are read again and land, which starts the look again.
+  props.rest = [REPO, "commits"];
+  await settle();
+  props.rest = [REPO];
+  await settle();
+  expect(asked).toEqual(first);
+  while (held.length > 0) {
+    for (const release of held.splice(0)) release();
+    await settle();
+  }
+  expect(new Set(asked).size).toBe(asked.length);
+  expect(target.querySelector(".tf-fhead .tf-primary")?.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
+});
+
 test("until the branches answer, the primary keeps its room unseen, so it never changes its words under the pointer (the live run, 2026-11-09)", async () => {
   const base = ports();
   const held: (() => void)[] = [];

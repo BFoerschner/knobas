@@ -167,6 +167,7 @@
   /** Forget the branches' standings the header's looks read: a new session. */
   export function forgetHeaderLooks(): void {
     standings.clear();
+    looking.clear();
   }
 
   /**
@@ -192,6 +193,13 @@
    */
   const standings = new Map<string, { at: number; standing: BranchStanding }>();
   const STANDING_KEPT_MS = 5 * 60_000;
+  /**
+   * The branches' views a look is reading now, by branch: a look started again before they answer (the branch list and
+   * the pull requests landing a moment apart after a run, each starting one) waits for the same read rather than send a
+   * second. Before, a run's end read each branch's whole view twice, a branch list and its checks each time (the ux13
+   * forge-load pass, 2026-11-15).
+   */
+  const looking = new Map<string, Promise<BranchStanding | null>>();
 </script>
 
 <script lang="ts">
@@ -606,10 +614,13 @@
     return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
 
-  // A run of the repository's own source ended (a scheduled sync, *Start work*'s branch landing, a push the run brought in):
-  // the branches and the pull requests read again, over what the page drew. A run that brought something reads the open
-  // tab again too, as a refresh does: Commits left open through a run that mirrored a pushed commit listed what it had
-  // drawn 15 s after the run ended (the ux13 Windows pass, 2026-11-15). A run that changed nothing reads no tab.
+  // A run of the repository's own source ended with news (a scheduled sync, *Start work*'s branch landing, a push the run
+  // brought in): the branches and the pull requests read again, over what the page drew, and the open tab, as a refresh
+  // does: Commits left open through a run that mirrored a pushed commit listed what it had drawn 15 s after the run ended
+  // (the ux13 Windows pass, 2026-11-15). A run that changed nothing reads nothing: the page left open sent 17 requests to
+  // the forge a minute, each run's end reading the branch list and its checks whether the run had found anything or not
+  // (the same pass). While the window is hidden (minimised, another space) a run with news is noted and read once on
+  // its return.
   const sourceId = $derived(detail?.row.source_id ?? null);
   $effect(() => {
     const from = sourceId;
@@ -617,11 +628,16 @@
     const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
     let live = true;
     let stop: (() => void) | null = null;
+    let missed = false;
+    const news = () => {
+      untrack(rereadLists);
+      tabs = readShown(untrack(() => tabs));
+    };
     void listen(EVENTS.syncState, ({ payload }) => {
       const row = payload as SourceSyncStatus;
-      if (!live || row.running || row.source_id !== from) return;
-      untrack(rereadLists);
-      if (row.last_changed !== false) tabs = readShown(untrack(() => tabs));
+      if (!live || row.running || row.source_id !== from || row.last_changed === false) return;
+      if (document.visibilityState === "hidden") missed = true;
+      else news();
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;
@@ -629,9 +645,16 @@
       },
       () => {},
     );
+    const back = () => {
+      if (!live || !missed || document.visibilityState === "hidden") return;
+      missed = false;
+      news();
+    };
+    document.addEventListener("visibilitychange", back);
     return () => {
       live = false;
       stop?.();
+      document.removeEventListener("visibilitychange", back);
     };
   });
 
@@ -995,14 +1018,20 @@
           batch.map(({ id: branch }, i) =>
             got[at + i] !== undefined
               ? Promise.resolve(got[at + i]!)
-              : ports.entityView(branch, null).then(
-                  (view) => {
-                    const standing = branchStanding(view);
-                    standings.set(branch, { at: Date.now(), standing });
-                    return standing;
-                  },
-                  () => null,
-                ),
+              : (looking.get(branch) ??
+                (() => {
+                  const reading = ports.entityView(branch, null).then(
+                    (view) => {
+                      const standing = branchStanding(view);
+                      standings.set(branch, { at: Date.now(), standing });
+                      return standing;
+                    },
+                    () => null,
+                  );
+                  looking.set(branch, reading);
+                  void reading.finally(() => looking.delete(branch));
+                  return reading;
+                })()),
           ),
         );
         if (!live) return;
