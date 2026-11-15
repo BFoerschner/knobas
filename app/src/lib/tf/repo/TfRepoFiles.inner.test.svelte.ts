@@ -136,3 +136,73 @@ test("a pointer resting on a file in the tree reads it, and the press takes that
   expect(shownText()).toContain("fn b()");
   expect(reads.filter((id) => id === `file@${SHA}:src/b.rs`), "the press took the read under way").toHaveLength(1);
 });
+
+// The inner-6x pass (2026-11-15): the landing's README was asked only once the top listing had named it, a second round
+// of the forge. With no checkout's copy it is asked beside the listing, and the listing's file takes that read.
+test("a landing with no checkout asks its README beside the top listing, and draws it from that read", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  place.path = null;
+  view = mount(TfRepoFiles, {
+    target,
+    props: {
+      ports: {
+        entityView: async (at: string, section: string | null) => {
+          if (section === "files") await held;
+          return entityView(at, section);
+        },
+        localDir: async () => null,
+        submitWrite: async () => {
+          throw { code: "invalid", message: "no write here" };
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      get path() {
+        return place.path;
+      },
+      line: null,
+      changed: new Set<string>(),
+      treeSections: { dir: "files:", file: "file:" },
+    },
+  });
+  flushSync();
+  await settle();
+  // The top listing is still out, and the README already asked.
+  expect(target.querySelector(".tf-ftree a")).toBeNull();
+  expect(reads).not.toContain("files");
+  expect(reads).toContain("file:README.md");
+  release();
+  await settle();
+  expect(target.querySelector(".tf-fileview .tf-md")?.textContent).toContain("payout");
+  expect(reads.filter((id) => id.endsWith(":README.md")), "the listing's section was not asked again").toEqual(["file:README.md"]);
+});
+
+test("a landing whose checkout holds a copy guesses nothing at the source", async () => {
+  place.path = null;
+  view = mount(TfRepoFiles, {
+    target,
+    props: {
+      ports: {
+        entityView,
+        localDir: () => new Promise<never>(() => {}),
+        submitWrite: async () => {
+          throw { code: "invalid", message: "no write here" };
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      get path() {
+        return place.path;
+      },
+      line: null,
+      changed: new Set<string>(),
+      treeSections: { dir: "files:", file: "file:" },
+    },
+  });
+  flushSync();
+  await settle();
+  expect(reads).not.toContain("file:README.md");
+});

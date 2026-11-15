@@ -342,12 +342,22 @@ test("a 50,000-line file draws fewer than 500 of its lines", async () => {
   expect(lineText(0)).toEqual(["1", "let value_1 = 1;"]);
 });
 
-test("a 1,999-line file draws whole", async () => {
-  draw(openSource({ "BULK.rs": long(1_999) }).entityView, "BULK.rs");
+test("a 300-line file draws whole", async () => {
+  draw(openSource({ "BULK.rs": long(300) }).entityView, "BULK.rs");
   await settle();
 
-  expect(drawnLines()).toHaveLength(1_999);
-  expect(lineText(1_998)).toEqual(["1999", "let value_1999 = 1999;"]);
+  expect(drawnLines()).toHaveLength(300);
+  expect(lineText(299)).toEqual(["300", "let value_300 = 300;"]);
+});
+
+// The inner-6x pass (2026-11-15): drawn whole, a 400-line file was most of a return's build at 6x.
+test("a 400-line file draws the lines near the view, as every list past 300 rows does", async () => {
+  draw(openSource({ "BULK.rs": long(400) }).entityView, "BULK.rs");
+  await settle();
+
+  expect(drawnLines().length).toBeGreaterThan(0);
+  expect(drawnLines().length).toBeLessThan(400);
+  expect(lineText(0)).toEqual(["1", "let value_1 = 1;"]);
 });
 
 test("a link to line 40,000 of a long file draws and marks that line", async () => {
@@ -939,6 +949,75 @@ test("a deep link's guess that drew the file stands for the section its listing 
 });
 
 // -- The scroll a file opens at (#2260's merger) ---------------------------------
+
+// The inner-6x pass (2026-11-15): measured in the task that builds the file, the page was laid out half built and then
+// again whole. Where the engine has a resize observer, the file is measured in its first call, after the frame's layout.
+test("another file's scroll to its top is measured after the frame's layout, not while the file is built", async () => {
+  const main = document.createElement("div");
+  main.className = "tf-main";
+  target.appendChild(main);
+  const rect = (top: number) => ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) });
+  const real = Element.prototype.getBoundingClientRect;
+  let measured = 0;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this === main) return rect(100);
+    if (this.classList.contains("tf-fileview")) return (measured += 1), rect(100 + 300 - main.scrollTop);
+    return real.call(this);
+  };
+  // A stand-in observer that calls back only when told, as the engine does after a frame's layout.
+  const observers: { fire: () => void; on: boolean }[] = [];
+  const had = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    entry: { fire: () => void; on: boolean };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { fire: () => this.entry.on && callback([], this as unknown as ResizeObserver), on: false };
+      observers.push(this.entry);
+    }
+    observe() {
+      this.entry.on = true;
+    }
+    unobserve() {}
+    disconnect() {
+      this.entry.on = false;
+    }
+  } as unknown as typeof ResizeObserver;
+  try {
+    const props = $state({
+      ports: { ...openSource(DEEP_FILES), submitWrite: async () => ({}) as never },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: "README.md" as string | null,
+      line: null as number | null,
+      refreshed: 0,
+      changed: new Set<string>(),
+      defaults: createRendererDefaults(storedDefaults().port),
+    });
+    view = mount(TfRepoFilesRefreshed, { target: main, props: { props } });
+    await settle();
+    observers.forEach((o) => o.fire());
+
+    main.scrollTop = 1500;
+    measured = 0;
+    props.path = "src/psp/gateway/sepa/mod.rs";
+    await settle();
+    expect(text(main.querySelector(".tf-code"))).toContain("pub mod codes;");
+    // Built and drawn, and not measured yet: nothing has moved.
+    expect(measured).toBe(0);
+    expect(main.scrollTop).toBe(1500);
+    // The frame's layout done: the file's top comes to rest 12 px under the scroller's.
+    observers.forEach((o) => o.fire());
+    expect(main.scrollTop).toBe(300 - 12);
+    expect(measured).toBe(1);
+    // It asked once: a later layout moves nothing.
+    main.scrollTop = 1500;
+    observers.forEach((o) => o.fire());
+    expect(main.scrollTop).toBe(1500);
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+    globalThis.ResizeObserver = had;
+  }
+});
 
 test("another file opens at its top, not at the depth the last one was read to; a link to a line keeps its own scroll", async () => {
   // The shell's one scroller, with the file view 300 px down its content.

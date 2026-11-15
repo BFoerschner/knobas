@@ -45,7 +45,7 @@
   where the tip moved its sections are new, and the tree and the file are read
   at the new commit, the file drawn kept, dimmed, meanwhile.
 
-  A file over 2,000 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
+  A file over 300 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
   only the lines near the viewport are drawn, the rest are room above and
   below. A line link (`line/<n>/<path>`) draws its line, marks it and scrolls
   it to the middle. Copying a selection across lines copies their text from
@@ -380,13 +380,21 @@
    */
   function readLocal(where: string, mine: number) {
     const read = ports.localDir;
+    localNone = false;
     if (read === undefined) return;
+    const none = () => {
+      if (mine === generation && where === at) localNone = true;
+      return false;
+    };
     read(where, null, "").then(
-      (top) => (top === null ? false : land(top, where, mine)),
+      (top) => (top === null ? none() : land(top, where, mine)),
       // No checkout's copy: the source's reads draw the tree, as before.
-      () => false,
+      none,
     );
   }
+
+  /** The checkout said it holds no copy here: the source draws the tree and its files, and the landing's README is guessed. */
+  let localNone = $state(false);
 
   /**
    * The checkout's top `top`, at the mirror's tip, drawn as the tree: at once where nothing is drawn yet, or taking over
@@ -686,6 +694,27 @@
       return () => {
         live = false;
       };
+    });
+  });
+
+  // The landing names no file: its README is asked of the source beside the top listing, as a deep link's file is, once
+  // the checkout has said it holds no copy (the inner-6x pass, 2026-11-15: asked once the listing had named it, it was a
+  // second round of the forge, 130 ms of a landing's 330 at 6x). A Markdown README is the default `pickDefaultFile` takes
+  // first; where the listing names another file, or none, the guess goes unread and the listing's own section is read.
+  const LANDING_GUESS = "README.md";
+  $effect(() => {
+    const declared = treeSections;
+    if (path !== null || !localNone) return;
+    if (listings[""] !== undefined) {
+      // The listing names its own default: a guess it did not take goes, so no later open of that file takes a read from now.
+      untrack(() => {
+        if (shown !== LANDING_GUESS) early.delete(fileKey(LANDING_GUESS));
+      });
+      return;
+    }
+    untrack(() => {
+      const likely = likelySections(LANDING_GUESS, declared);
+      if (likely !== null && !early.has(fileKey(LANDING_GUESS)) && !hasDrawnFile(at, likely.file)) askEarly(likely.file, fileKey(LANDING_GUESS));
     });
   });
 
@@ -989,8 +1018,12 @@
 
   const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));
 
-  /** Files of more lines than this draw only the lines in view and a margin (#2251). */
-  const WHOLE_UP_TO = 2_000;
+  /**
+   * Files of more lines than this draw only the lines in view and a margin (#2251), as every windowed list does past 300
+   * rows: drawn whole, a 400-line file was 90 ms of a return's build at 6x, and its tokens landing as much again (the
+   * inner-6x pass, 2026-11-15). Copying, a line link and *Find in file* reach the lines not drawn.
+   */
+  const WHOLE_UP_TO = 300;
   // A line is 13 px at 1.6.
   const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
   let code = $state<HTMLElement | null>(null);
@@ -1108,9 +1141,20 @@
     const view = untrack(() => fileview);
     const main = view?.closest(".tf-main");
     if (!view || !main || untrack(() => line) !== null || !shownPage()) return;
-    // The tree's sticky top (`code.css`, `.tf-ftreebox`): the file's top comes to rest beside the tree's.
-    const above = view.getBoundingClientRect().top - main.getBoundingClientRect().top - 12;
-    if (above < 0) main.scrollTop += above;
+    const toTop = () => {
+      // The tree's sticky top (`code.css`, `.tf-ftreebox`): the file's top comes to rest beside the tree's.
+      const above = view.getBoundingClientRect().top - main.getBoundingClientRect().top - 12;
+      if (above < 0) main.scrollTop += above;
+    };
+    if (typeof ResizeObserver === "undefined") return void toTop();
+    // After the frame's layout, before its paint (an observer's first call): read in the task that builds the file, it laid
+    // the page out half built, and the rest of the build laid it all out again (the inner-6x pass, 2026-11-15).
+    // It ends itself: a cleanup on the effect's next run (the same file read again) would drop the scroll it is owed.
+    const once = new ResizeObserver(() => {
+      once.disconnect();
+      if (view.isConnected && shownPage()) toTop();
+    });
+    once.observe(view);
   });
 
   /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
