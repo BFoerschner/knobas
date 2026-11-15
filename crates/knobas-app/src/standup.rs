@@ -322,34 +322,48 @@ pub async fn digest(
     earlier: &[DayWindow],
 ) -> Result<StandupDigest, IpcError> {
     let names = SourceNames::read(pool).await?;
-    let mut today_lines = work_in(pool, identity, today, &names).await?;
-    if today.from <= now && now < today.to {
-        today_lines.extend(running_timer(pool, &names).await?);
-        sort_newest_first(&mut today_lines);
-    }
-
-    let mut yesterday_day = None;
-    let mut yesterday = Vec::new();
-    for window in in_reach(today.day, earlier) {
-        let lines = work_in(pool, identity, window, &names).await?;
-        if !lines.is_empty() {
-            yesterday_day = Some(window.day);
-            yesterday = lines;
-            break;
+    // The three lists that do not wait on each other are read at once (the
+    // ux12 Windows pass, 2026-11-15: 90 to 150 ms in series on the scale
+    // mirror, the blockers' statement 61 of it): today, the blockers, and
+    // yesterday followed by the alerts since it, which need its day.
+    let today_read = async {
+        let mut lines = work_in(pool, identity, today, &names).await?;
+        if today.from <= now && now < today.to {
+            lines.extend(running_timer(pool, &names).await?);
+            sort_newest_first(&mut lines);
         }
-    }
-
-    let since = earlier
-        .iter()
-        .find(|window| Some(window.day) == yesterday_day)
-        .map_or(today.from, |window| window.from);
+        Ok::<_, IpcError>(lines)
+    };
+    let yesterday_read = async {
+        let mut yesterday_day = None;
+        let mut yesterday = Vec::new();
+        for window in in_reach(today.day, earlier) {
+            let lines = work_in(pool, identity, window, &names).await?;
+            if !lines.is_empty() {
+                yesterday_day = Some(window.day);
+                yesterday = lines;
+                break;
+            }
+        }
+        let since = earlier
+            .iter()
+            .find(|window| Some(window.day) == yesterday_day)
+            .map_or(today.from, |window| window.from);
+        let infrastructure = infrastructure(pool, since, today.to).await?;
+        Ok::<_, IpcError>((yesterday_day, yesterday, infrastructure))
+    };
+    let (today_lines, blockers, (yesterday_day, yesterday, infrastructure)) = tokio::try_join!(
+        today_read,
+        blockers(pool, identity, declarations, &names),
+        yesterday_read
+    )?;
 
     Ok(StandupDigest {
         yesterday_day,
         yesterday,
         today: today_lines,
-        blockers: blockers(pool, identity, declarations, &names).await?,
-        infrastructure: infrastructure(pool, since, today.to).await?,
+        blockers,
+        infrastructure,
     })
 }
 
@@ -805,7 +819,84 @@ const BLOCKED_STATUSES: &str = "blocked_statuses";
 /// (the scale pass, 2026-11-10). It walked every live item's payload twice,
 /// 1.1 s of the digest's 1.2 s on 48,000 items; a kind with no blocked set
 /// could never match, since its set is empty.
+///
+/// **The user's items are found by their assignee first** (the ux12 Windows
+/// pass, 2026-11-15). Where the declarations' assignee is stored for a
+/// source and kind ([`knobas_core::stored_under!`], the triggers keeping a
+/// row for every item), the user's rows come off `item_field_value_idx`, a
+/// few hundred lookups; the payload is walked only for the kinds whose
+/// assignee is not stored. The statement before read every live item of
+/// those kinds and kept the user's after: 61 ms of the digest's 90 to 150 on
+/// the scale mirror ([`blocked_by_status_scanned!`]).
 macro_rules! blocked_by_status {
+    () => {
+        concat!(
+            "with blocking as materialized (
+               select sd.key as source_id, kd.key as kind,
+                      kd.value->'blocked_statuses' as blocked
+                 from jsonb_each(case when jsonb_typeof($2::jsonb) = 'object'
+                                      then $2::jsonb else '{}'::jsonb end) sd
+                cross join lateral jsonb_each(case when jsonb_typeof(sd.value) = 'object'
+                                                   then sd.value else '{}'::jsonb end) kd
+                where jsonb_typeof(kd.value->'blocked_statuses') = 'array'
+                  and jsonb_array_length(kd.value->'blocked_statuses') > 0),
+             aimed as materialized (
+               select bl.source_id, bl.kind, bl.blocked,
+                      $2::jsonb #> array[bl.source_id, bl.kind, 'assignee'] as apaths,
+                      ",
+            knobas_core::stored_under!(
+                "assignee",
+                "($2::jsonb #> array[bl.source_id, i.kind, 'assignee'])"
+            ),
+            " as stored
+                 from blocking bl cross join lateral (select bl.kind as kind) i)
+             select s.entity_id, s.kind, s.source_id, s.title, s.at, s.status
+               from (select i.entity_id, i.kind, i.source_id, i.title,
+                            coalesce(i.item_updated_at, i.synced_at) as at,
+                            ",
+            knobas_core::stored_or!("ss", knobas_core::declared_string!("$2", "status_name")),
+            " as status,
+                            a.blocked
+                       from aimed a
+                       join sync.item_field f
+                         on f.field = 'assignee' and f.paths = a.apaths
+                        and lower(f.value) = any(array(select lower(m) from unnest($1::text[]) as m))
+                        and f.value = any($1)
+                       join sync.live_item i
+                         on i.entity_id = f.entity_id and i.source_id = a.source_id and i.kind = a.kind",
+            knobas_core::stored_join!("ss", "$2", "status_name"),
+            " where a.stored
+                     union all
+                     select i.entity_id, i.kind, i.source_id, i.title,
+                            coalesce(i.item_updated_at, i.synced_at) as at,
+                            ",
+            knobas_core::stored_or!("ss", knobas_core::declared_string!("$2", "status_name")),
+            " as status,
+                            a.blocked
+                       from aimed a
+                       join sync.live_item i on i.source_id = a.source_id and i.kind = a.kind",
+            knobas_core::stored_join!("sa", "$2", "assignee"),
+            knobas_core::stored_join!("ss", "$2", "status_name"),
+            " where not a.stored
+                        and ",
+            knobas_core::stored_or!("sa", knobas_core::declared_string!("$2", "assignee")),
+            " = any($1)) s
+              where s.status is not null
+                and exists (select 1
+                              from jsonb_array_elements_text(s.blocked) as b(name)
+                             where lower(b.name) = lower(s.status))
+              order by s.at desc
+              limit $3"
+        )
+    };
+}
+
+/// [`blocked_by_status!`] as it read before the ux12 Windows pass: every
+/// live item of a kind with a blocked set, its assignee and status read
+/// beside it, the user's kept after. Kept for the test that holds the two
+/// to one answer.
+#[cfg(any(test, feature = "test-util"))]
+macro_rules! blocked_by_status_scanned {
     () => {
         concat!(
             "with blocking as materialized (
@@ -844,6 +935,43 @@ macro_rules! blocked_by_status {
 }
 
 const BLOCKED_BY_STATUS: &str = blocked_by_status!();
+
+/// [`blocked_by_status_scanned!`]'s statement.
+#[cfg(any(test, feature = "test-util"))]
+const BLOCKED_BY_STATUS_SCANNED: &str = blocked_by_status_scanned!();
+
+/// The user's blocked-status items as the digest reads them and as the
+/// statement before it read them: `(entity id, status)` in each one's order.
+/// **Tests only**: what holds [`blocked_by_status!`] to the read it replaced.
+///
+/// # Errors
+///
+/// [`IpcError::internal`] if either read fails.
+#[cfg(feature = "test-util")]
+pub async fn blocked_by_status_both_ways(
+    pool: &PgPool,
+    identity: &[String],
+    declarations: &Declarations,
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>), IpcError> {
+    let read = |statement: &'static str| async move {
+        let rows = sqlx::query_as::<_, BlockedStatusRow>(statement)
+            .bind(identity)
+            .bind(declarations.as_param())
+            .bind(MOST_LINES)
+            .fetch_all(pool)
+            .await
+            .map_err(IpcError::internal)?;
+        Ok::<_, IpcError>(
+            rows.into_iter()
+                .map(|row| (row.entity_id, row.status))
+                .collect(),
+        )
+    };
+    Ok((
+        read(BLOCKED_BY_STATUS).await?,
+        read(BLOCKED_BY_STATUS_SCANNED).await?,
+    ))
+}
 
 /// One blocker the source itself calls stuck.
 #[derive(sqlx::FromRow)]
@@ -919,21 +1047,21 @@ async fn blockers(
     declarations: &Declarations,
     names: &SourceNames,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let by_status = sqlx::query_as::<_, BlockedStatusRow>(BLOCKED_BY_STATUS)
-        .bind(identity)
-        .bind(declarations.as_param())
-        .bind(MOST_LINES)
-        .fetch_all(pool)
-        .await
-        .map_err(IpcError::internal)?;
-    let by_link = sqlx::query_as::<_, BlockedLinkRow>(BLOCKED_BY_LINK)
-        .bind(identity)
-        .bind(declarations.as_param())
-        .bind(BLOCKS_RELATION)
-        .bind(MOST_LINES)
-        .fetch_all(pool)
-        .await
-        .map_err(IpcError::internal)?;
+    // Side by side: neither reads the other's answer.
+    let (by_status, by_link) = tokio::try_join!(
+        sqlx::query_as::<_, BlockedStatusRow>(BLOCKED_BY_STATUS)
+            .bind(identity)
+            .bind(declarations.as_param())
+            .bind(MOST_LINES)
+            .fetch_all(pool),
+        sqlx::query_as::<_, BlockedLinkRow>(BLOCKED_BY_LINK)
+            .bind(identity)
+            .bind(declarations.as_param())
+            .bind(BLOCKS_RELATION)
+            .bind(MOST_LINES)
+            .fetch_all(pool),
+    )
+    .map_err(IpcError::internal)?;
 
     let mut lines: Vec<DigestLine> = by_status
         .into_iter()

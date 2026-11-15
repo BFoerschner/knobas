@@ -1479,3 +1479,79 @@ async fn infrastructure_without_a_last_working_day_starts_at_todays_midnight() {
         .collect();
     assert_eq!(titles, vec!["queue"]);
 }
+
+/// **The blocked-status read finds the user's items as the scan did** (the
+/// ux12 Windows pass, 2026-11-15): the statement now finds the user's items
+/// by their stored assignee first, and walks payloads only where the
+/// assignee is not stored. Held to the statement it replaced
+/// (`blocked_by_status_both_ways`) on items that would catch a difference:
+/// mine in the declared status and in it spelled in another case, someone
+/// else's, mine under an assignee spelled in another case (the index is
+/// case-folded, the match is not), mine in an undeclared status, with no
+/// status, and withdrawn. Once before the declarations are stored, where
+/// both walk, and once after, where the triggers stored every item's fields
+/// and the new read takes the index.
+#[tokio::test]
+async fn the_blocked_status_read_finds_the_users_items_as_the_scan_did() {
+    let h = harness("standup-blocked-both-ways").await;
+    let cases = [
+        (ME, DECLARED_BLOCKED),
+        (ME, "waiting FOR support"),
+        (THEM, DECLARED_BLOCKED),
+        ("Mara.Lindqvist", DECLARED_BLOCKED),
+        (ME, UNDECLARED_BLOCKED),
+        (ME, ""),
+        (ME, DECLARED_BLOCKED),
+    ];
+    let mut ids = Vec::new();
+    for (n, (assignee, status)) in cases.into_iter().enumerate() {
+        let back = i64::try_from(n).expect("a small number") + 1;
+        ids.push(
+            h.ticket_at(
+                &format!("PAY-{n}"),
+                assignee,
+                status,
+                days_before(back, 9, 0),
+            )
+            .await,
+        );
+    }
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ids[6])
+        .execute(&h.pool)
+        .await
+        .expect("the last one withdrawn");
+    let identity = vec![ME.to_owned()];
+    let both = || async {
+        let declarations = knobas_app::sources::paths::declared_paths(&h.pool, h.registry.as_ref())
+            .await
+            .expect("the declarations");
+        knobas_app::standup::blocked_by_status_both_ways(&h.pool, &identity, &declarations)
+            .await
+            .expect("both reads")
+    };
+
+    let (walked, scanned) = both().await;
+    assert_eq!(walked, scanned, "with nothing stored");
+    knobas_app::commands::search::declare(&h.pool, h.registry.as_ref())
+        .await
+        .expect("the declarations stored");
+    let stored: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_field where field = 'assignee' and entity_id = any($1)",
+    )
+    .bind(&ids)
+    .fetch_one(&h.pool)
+    .await
+    .expect("the stored assignees");
+    assert_eq!(stored, 7, "every item's assignee stored by the triggers");
+    let (indexed, scanned) = both().await;
+    assert_eq!(indexed, scanned, "with every assignee stored");
+    assert_eq!(
+        indexed,
+        vec![
+            (ids[0].clone(), DECLARED_BLOCKED.to_owned()),
+            (ids[1].clone(), "waiting FOR support".to_owned()),
+        ],
+        "mine in the declared status, either case, newest first"
+    );
+}

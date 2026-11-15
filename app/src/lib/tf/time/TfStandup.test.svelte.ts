@@ -143,6 +143,8 @@ function open(
     again?: Protocol["again"];
     /** *Publish again* is refused with this sentence. */
     againFails?: string;
+    /** What `standup_digest` answers; {@link DIGEST} when omitted. */
+    digest?: StandupDigest;
   } = {},
 ) {
   const calls: {
@@ -204,7 +206,7 @@ function open(
       ports: {
         standupDigest: async (today: { day: string }) => {
           calls.digests.push(today.day);
-          return DIGEST;
+          return over.digest ?? DIGEST;
         },
         standupProtocol: async (day: string) => {
           calls.days.push(day);
@@ -285,6 +287,24 @@ test("the digest draws each list, every line with an item a link into the new sh
   expect(links).toEqual(["#/ticket/jira%3APAY-231", "#/page/confluence%3A98401", "#/monitors/at/kuma%3Apayout-api"]);
   expect(text()).toContain("DB config (timer running)");
   expect(text()).toContain("Nothing of yours is blocked.");
+});
+
+test("a long yesterday draws the screen's lines in the frame its answer lands in, and the rest the frame after, below them (the ux12 Windows pass)", async () => {
+  const frames: FrameRequestCallback[] = [];
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+  const many = Array.from({ length: 200 }, (_, n) => line({ entity_id: `jira:PAY-${n}`, title: `Line ${n}` }));
+  open({ digest: { ...DIGEST, yesterday: many } });
+  await settle();
+  const drawn = () => target.querySelectorAll(".tf-su-dig a[href^='#/ticket/jira%3APAY-']").length;
+  expect(drawn()).toBe(24);
+  const first = target.querySelector(".tf-su-dig a[href='#/ticket/jira%3APAY-0']");
+
+  frames.splice(0).forEach((callback) => callback(0));
+  vi.advanceTimersByTime(0);
+  await settle();
+  expect(drawn()).toBe(200);
+  expect(target.querySelector(".tf-su-dig a[href='#/ticket/jira%3APAY-0']")).toBe(first);
+  raf.mockRestore();
 });
 
 test("Infrastructure sits under Blockers, every alert a link to its monitor", async () => {

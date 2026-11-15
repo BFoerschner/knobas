@@ -185,6 +185,47 @@
   let digest = $state<StandupDigest | null>(null);
   let digestFailure = $state<string | null>(null);
 
+  // -- a long list draws what the screen shows first (the ux12 Windows pass, 2026-11-15) --
+  /**
+   * The scale mirror's *yesterday* is 200 lines, each a link with its key read out of its words, built in the frame
+   * the answer lands in: a task of 74 ms at a sixth of the speed on the Mac and 208 on Björn's PC. That frame draws
+   * each list's first {@link FIRST_FRAME_LINES}, more than the panel shows, and the frame after draws the rest, below
+   * them, as the Tickets board's columns do. A list that already drew that many draws whole at once, so a digest read
+   * again never takes lines away from under the pointer.
+   */
+  const FIRST_FRAME_LINES = 24;
+  /** The digest every line of which has drawn; until the frame after an answer lands, the one before it. */
+  let wholeDigest = $state.raw<StandupDigest | null>(null);
+  /** How many lines each list drew when the last digest drew whole. */
+  const drewWhole = new Map<string, number>();
+  const firstFrame = $derived(digest !== null && digest !== wholeDigest);
+  $effect(() => {
+    const read = digest;
+    if (read === null || read === wholeDigest) return;
+    // After the frame that draws the first lines has painted: a task queued from inside the frame's callback.
+    let task: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => (task = setTimeout(() => (wholeDigest = read), 0)));
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(task);
+    };
+  });
+  $effect(() => {
+    const whole = wholeDigest;
+    if (whole === null || firstFrame) return;
+    drewWhole.clear();
+    for (const [list, lines] of Object.entries(listsOf(whole))) drewWhole.set(list, lines.length);
+  });
+  /** Each list of a digest by name, as {@link drawnNow} keys them. */
+  function listsOf(read: StandupDigest): Record<string, StandupDigest["today"]> {
+    return { yesterday: read.yesterday, today: read.today, blockers: read.blockers, infrastructure: read.infrastructure };
+  }
+  /** The lines a list draws now: the first frame's share of a list that grows past it, or every one. */
+  function drawnNow(list: string, lines: StandupDigest["today"]): StandupDigest["today"] {
+    if (!firstFrame || lines.length <= FIRST_FRAME_LINES || (drewWhole.get(list) ?? 0) >= FIRST_FRAME_LINES) return lines;
+    return lines.slice(0, FIRST_FRAME_LINES);
+  }
+
   async function readDigest() {
     const { today, earlier } = digestWindows(day);
     try {
@@ -787,13 +828,13 @@
       {#if digestFailure}
         <p class="tf-tm-fail" role="alert">{digestFailure}</p>
       {/if}
-      {#snippet list(heading: string, lines: StandupDigest["today"], silence: string, yesterday: boolean, alert = false)}
+      {#snippet list(id: string, heading: string, lines: StandupDigest["today"], silence: string, yesterday: boolean, alert = false)}
         <h4>{heading}</h4>
         {#if lines.length === 0}
           <p class="tf-su-none">{digest === null ? "Reading…" : silence}</p>
         {:else}
           <ul>
-            {#each lines as line, index (index)}
+            {#each drawnNow(id, lines) as line, index (index)}
               {@const href = lineHash(line)}
               {@const key = lineKey(line)}
               {#snippet words()}
@@ -811,14 +852,15 @@
         {/if}
       {/snippet}
       {@render list(
+        "yesterday",
         yesterdayHeading(digest?.yesterday_day ?? null),
         digest?.yesterday ?? [],
         `Nothing of yours in the last ${LOOKBACK_DAYS} days.`,
         true,
       )}
-      {@render list("Today", digest?.today ?? [], "Nothing touched yet today.", false)}
-      {@render list("Blockers", digest?.blockers ?? [], "Nothing of yours is blocked.", false)}
-      {@render list("Infrastructure", digest?.infrastructure ?? [], "No monitor alerts.", false, true)}
+      {@render list("today", "Today", digest?.today ?? [], "Nothing touched yet today.", false)}
+      {@render list("blockers", "Blockers", digest?.blockers ?? [], "Nothing of yours is blocked.", false)}
+      {@render list("infrastructure", "Infrastructure", digest?.infrastructure ?? [], "No monitor alerts.", false, true)}
     </div>
   </section>
 
