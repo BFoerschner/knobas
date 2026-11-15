@@ -162,6 +162,93 @@ pub(crate) fn tree_ask(
     }
 }
 
+/// The branch whose head a branch's or repository's tree section that names
+/// no commit reads (the forge-rounds pass, 2026-11-15): see
+/// [`files::tip_branch`].
+pub(crate) fn tip_branch(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+) -> Option<String> {
+    let id = section.filter(|id| files::owns(id))?;
+    match source.key_of(entity).ok()? {
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } => files::tip_branch(
+            source,
+            &owner,
+            &repo,
+            files::Of::Branch(&branch),
+            id,
+            payload,
+        ),
+        GiteaKey::Repo { owner, repo } if !compare::owns(id) => {
+            files::tip_branch(source, &owner, &repo, files::Of::Repository, id, payload)
+        }
+        _ => None,
+    }
+}
+
+/// A branch's or repository's tree section that names no commit, read at
+/// `tip`, the commit the mirror holds at the head of the branch
+/// [`tip_branch`] names: see [`files::read_at_tip`]. `None` for a section
+/// [`tip_branch`] names no branch for. Tree sections offer no write, so
+/// nothing is narrowed (`grants`).
+///
+/// # Errors
+///
+/// What Gitea's answer maps to.
+pub(crate) async fn at_tip(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+    tip: &str,
+) -> Result<Option<SourceView>, SourceError> {
+    let Some(id) = section.filter(|id| files::owns(id)) else {
+        return Ok(None);
+    };
+    let section = match source.key_of(entity)? {
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } if !files::names_sha(id) => {
+            files::read_at_tip(
+                source,
+                &owner,
+                &repo,
+                files::Of::Branch(&branch),
+                id,
+                &branch,
+                tip,
+            )
+            .await?
+        }
+        GiteaKey::Repo { owner, repo } if !compare::owns(id) && !files::names_sha(id) => {
+            let Ok(record) = serde_json::from_value::<rows::RepoRecord>(payload.clone()) else {
+                return Ok(None);
+            };
+            let branch = record.default_branch().to_owned();
+            files::read_at_tip(
+                source,
+                &owner,
+                &repo,
+                files::Of::Repository,
+                id,
+                &branch,
+                tip,
+            )
+            .await?
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(SourceView::new(vec![section])))
+}
+
 /// A branch's or repository's tree section drawn from a stored tree, as
 /// Gitea's read at the same commit draws it: see [`files::stored_view`].
 pub(crate) fn tree_view(

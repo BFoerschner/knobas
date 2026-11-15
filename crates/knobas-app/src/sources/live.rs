@@ -565,6 +565,20 @@ impl LiveSources {
             self.read_behind(&lent.source, vec![key]);
             return Ok((Some(view), Some(synced_at), unkept));
         }
+        // Never read, and it reads a branch's head: read at the commit the
+        // mirror holds there (the forge-rounds pass, 2026-11-15), one round
+        // of the forge where learning the tip took two more, as of the sync
+        // that saw it; read behind, and never held.
+        if !fixed
+            && let Some(pool) = store.as_ref()
+            && let Some((view, synced_at)) =
+                super::stored_tree::at_mirror_tip(pool, lent.source.as_ref(), entity, section).await
+        {
+            self.reads()
+                .put_at(key.clone(), Answer::View(Some(view.clone())), synced_at);
+            self.read_behind(&lent.source, vec![key]);
+            return Ok((Some(view), Some(synced_at), unkept));
+        }
         let view = lent.source.view(entity, section).await?;
         let read_at = Utc::now();
         self.reads().put(key.clone(), Answer::View(view.clone()));

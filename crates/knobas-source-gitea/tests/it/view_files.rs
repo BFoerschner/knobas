@@ -1691,3 +1691,86 @@ async fn mount_levels(server: &MockServer, sha: &str, src: &str, lib: &str) {
     )
     .await;
 }
+
+/// **A section read at the mirror's tip** (the forge-rounds pass,
+/// 2026-11-15): a folder or a file by its path, given the commit the mirror
+/// holds at the head of the branch it reads (`Source::tip_branch` names
+/// which), draws what the read that learns the tip draws, and sends no
+/// request for the repository or the branch: one round of a forge where
+/// there were three. A section naming its commit, or not this tab's, is not
+/// read so.
+#[tokio::test]
+async fn a_section_read_at_the_mirrors_tip_is_the_read_that_learns_the_tip() {
+    let server = gitea().await;
+    let feature = "feature/PAY-231-sepa-retry";
+    listing(
+        &server,
+        "",
+        "main",
+        json!([
+            entry("README.md", "README.md", "file", 6),
+            entry("src", "src", "dir", 0)
+        ]),
+    )
+    .await;
+    listing(
+        &server,
+        "src",
+        "main",
+        json!([entry("main.rs", "src/main.rs", "file", 3)]),
+    )
+    .await;
+    raw(&server, "README.md", "main", b"# Pay\n".to_vec()).await;
+    raw(&server, "retry.rs", feature, b"new\n".to_vec()).await;
+    let record = record(false);
+    let branch = json!({ "name": feature });
+    let cases = [
+        (ENTITY, "files", &record, "main"),
+        (ENTITY, "files:src", &record, "main"),
+        (ENTITY, "file:README.md", &record, "main"),
+        (BRANCH, "file:retry.rs", &branch, feature),
+    ];
+    for (entity, section, payload, at) in cases {
+        let source = source(&server);
+        assert_eq!(
+            source.tip_branch(entity, Some(section), payload).as_deref(),
+            Some(format!("gitea:tidewater/payout-service@refs/heads/{at}").as_str()),
+            "{section} reads {at}'s head"
+        );
+        let learned = source.view(entity, Some(section)).await.unwrap();
+        let before = server.received_requests().await.unwrap_or_default().len();
+        let source = self::source(&server);
+        let at_tip = source
+            .view_at_tip(entity, Some(section), payload, &tip(at))
+            .await
+            .unwrap();
+        assert_eq!(
+            at_tip, learned,
+            "{section} at the tip is the read that learns it"
+        );
+        let sent: Vec<String> = server.received_requests().await.unwrap_or_default()[before..]
+            .iter()
+            .map(|r| r.url.path().to_owned())
+            .collect();
+        assert!(
+            !sent.iter().any(|p| p == REPO || p.contains("/branches/")),
+            "{section}: no read of the repository or the branch: {sent:?}"
+        );
+        assert!(!sent.is_empty(), "{section}: the place's own read");
+    }
+
+    // A section that names its commit, and a page that is not the tree's, are
+    // not read at a tip.
+    let source = source(&server);
+    let named = named("main", "file:README.md");
+    assert_eq!(source.tip_branch(ENTITY, Some(&named), &record), None);
+    assert_eq!(source.tip_branch(ENTITY, Some("branches"), &record), None);
+    assert_eq!(source.tip_branch(ENTITY, None, &record), None);
+    assert_eq!(
+        source
+            .view_at_tip(ENTITY, Some(&named), &record, &tip("main"))
+            .await
+            .unwrap(),
+        None
+    );
+}

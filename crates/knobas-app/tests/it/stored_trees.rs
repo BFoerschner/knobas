@@ -107,6 +107,10 @@ fn commits() -> HashMap<String, (String, Vec<TreeLevel>)> {
 struct Asked {
     trees: Vec<String>,
     views: Vec<(String, Option<String>)>,
+    /// Whether the fake reads a section at the mirror's tip (`view_at_tip`),
+    /// and each such read: the entity, the section and the tip.
+    reads_at_tip: bool,
+    at_tip: Vec<(String, Option<String>, String)>,
 }
 
 struct Forge {
@@ -217,6 +221,43 @@ impl Source for Forge {
     ) -> Option<SourceView> {
         self.pure.tree_view(entity, section, payload, tree)
     }
+    fn tip_branch(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<String> {
+        self.pure.tip_branch(entity, section, payload)
+    }
+    async fn view_at_tip(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        _payload: &serde_json::Value,
+        tip: &str,
+    ) -> Result<Option<SourceView>, SourceError> {
+        let mut asked = self.asked.lock().unwrap();
+        if !asked.reads_at_tip {
+            return Ok(None);
+        }
+        asked.at_tip.push((
+            entity.to_owned(),
+            section.map(str::to_owned),
+            tip.to_owned(),
+        ));
+        Ok(Some(at_tip_view(tip)))
+    }
+}
+
+/// What the fake draws for a section read at `tip`.
+fn at_tip_view(tip: &str) -> SourceView {
+    SourceView::new(vec![knobas_source::view::ViewSection {
+        id: "at-tip".to_owned(),
+        title: tip.to_owned(),
+        count: None,
+        deferred: false,
+        blocks: Vec::new(),
+    }])
 }
 
 struct ForgeRegistry(Arc<Mutex<Asked>>);
@@ -748,4 +789,68 @@ async fn no_stored_tree_index_holds_synced_at() {
             .all(|d| !d.contains("synced_at") && !d.contains("read_at")),
         "{defs:#?}"
     );
+}
+
+/// **A file or folder by its path, at the mirror's tip** (the forge-rounds
+/// pass, 2026-11-15): a section of a branch's or repository's tree that the
+/// store cannot draw (a file, or a folder of a branch not stored) and was
+/// never read is read at the commit the mirror holds at the head of the
+/// branch it reads, as of the sync that saw it, and checked behind with the
+/// source's own read. A section naming its commit is the source's at once.
+#[tokio::test]
+async fn a_place_by_its_path_is_read_at_the_mirrors_tip_and_checked_behind() {
+    let f = fixture().await;
+    f.asked.lock().unwrap().reads_at_tip = true;
+    let feat = f.branch("feat");
+    let synced = |entity: String| {
+        let pool = f.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+                "select synced_at from sync.item where entity_id = $1",
+            )
+            .bind(entity)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    let readme = f.shown(&feat, "file:README.md").await;
+    assert_eq!(
+        readme.view,
+        at_tip_view(&sha(0xc2)),
+        "feat's head as the mirror holds it"
+    );
+    assert_eq!(readme.held_at, Some(synced(feat.clone()).await));
+    f.live.settled().await;
+    assert_eq!(
+        std::mem::take(&mut f.asked.lock().unwrap().at_tip),
+        [(feat.clone(), Some("file:README.md".to_owned()), sha(0xc2))]
+    );
+    assert_eq!(
+        f.views_asked(),
+        [(feat.clone(), Some("file:README.md".to_owned()))],
+        "checked behind with the source's own read"
+    );
+
+    // The repository's places read its default branch's head.
+    let top = f.shown(&f.repo, "files:docs").await;
+    assert_eq!(top.view, at_tip_view(&sha(0xc1)));
+    assert_eq!(top.held_at, Some(synced(f.branch("main")).await));
+    f.live.settled().await;
+    assert_eq!(
+        f.views_asked(),
+        [(f.repo.clone(), Some("files:docs".to_owned()))]
+    );
+    assert_eq!(
+        std::mem::take(&mut f.asked.lock().unwrap().at_tip),
+        [(f.repo.clone(), Some("files:docs".to_owned()), sha(0xc1))]
+    );
+
+    // A file naming its commit cannot move: the source's, at once.
+    let named = format!("file@{}:README.md", sha(0xc2));
+    let fixed = f.shown(&feat, &named).await;
+    assert_eq!(fixed.held_at, None);
+    assert_eq!(f.views_asked(), [(feat.clone(), Some(named))]);
+    assert!(f.asked.lock().unwrap().at_tip.is_empty());
 }

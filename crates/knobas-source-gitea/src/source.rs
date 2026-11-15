@@ -733,6 +733,25 @@ impl Source for GiteaSource {
         crate::view::tree_view(self, entity, section, payload, tree)
     }
 
+    fn tip_branch(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<String> {
+        crate::view::tip_branch(self, entity, section, payload)
+    }
+
+    async fn view_at_tip(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tip: &str,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        crate::view::at_tip(self, entity, section, payload, tip).await
+    }
+
     fn mirror_listing(
         &self,
         entity: &str,

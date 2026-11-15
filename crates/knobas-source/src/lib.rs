@@ -2246,6 +2246,40 @@ pub trait Source: Send + Sync {
         let _ = (entity, section, payload, tree);
         None
     }
+    /// The entity id of the branch whose head `section` of `entity`'s view
+    /// reads, where the section reads a branch's head and names no commit
+    /// (the forge-rounds pass, 2026-11-15): a branch's or repository's tree
+    /// section, a folder or a file by its path. `payload` is the entity's
+    /// mirror record (a repository's names its default branch). The app
+    /// looks up the commit the mirror holds at that branch's head and hands
+    /// it to [`view_at_tip`](Source::view_at_tip). `None`, the default, is a
+    /// section read only through [`view`](Source::view). Pure.
+    fn tip_branch(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<String> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// `section` of `entity`'s view read at `tip`, the commit the mirror holds
+    /// at the head of the branch [`tip_branch`](Source::tip_branch) named
+    /// (the forge-rounds pass, 2026-11-15): what [`view`](Source::view) draws
+    /// while the branch stands at `tip`, without the reads that learn the
+    /// tip. The app draws it as of the sync that read the tip and reads
+    /// [`view`](Source::view) behind it (ADR-0042). `Ok(None)`, the default,
+    /// is a section this source does not read so.
+    async fn view_at_tip(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tip: &str,
+    ) -> Result<Option<view::SourceView>, SourceError> {
+        let _ = (entity, section, payload, tip);
+        Ok(None)
+    }
     /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
     /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
     ///

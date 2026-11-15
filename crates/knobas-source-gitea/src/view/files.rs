@@ -238,6 +238,67 @@ pub(super) async fn read(
     of: Of<'_>,
     id: &str,
 ) -> Result<ViewSection, SourceError> {
+    read_with(source, owner, repo, of, id, None).await
+}
+
+/// A section of a branch's or repository's tree that reads the tip, read at
+/// `tip` (the forge-rounds pass, 2026-11-15): the commit the mirror holds at
+/// the head of the branch, and the branch's name (a repository's default, as
+/// its mirror record names it). [`read`] learns both from Gitea first, two
+/// rounds of a forge; given them, the read is the place's own requests, and
+/// draws what [`read`] draws while the branch stands at `tip`.
+pub(super) async fn read_at_tip(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    of: Of<'_>,
+    id: &str,
+    branch: &str,
+    tip: &str,
+) -> Result<ViewSection, SourceError> {
+    read_with(source, owner, repo, of, id, Some((branch, tip))).await
+}
+
+/// The branch whose head a section of `of`'s tree that names no commit reads
+/// (a repository's default, by its mirror record `payload`): what
+/// [`read_at_tip`] is given the tip of. `None` for a section naming its
+/// commit, or not this tab's.
+pub(super) fn tip_branch(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    of: Of<'_>,
+    id: &str,
+    payload: &serde_json::Value,
+) -> Option<String> {
+    if Named::parse(id)?.sha.is_some() {
+        return None;
+    }
+    let branch = match of {
+        Of::Branch(branch) => branch.to_owned(),
+        Of::Repository => serde_json::from_value::<RepoRecord>(payload.clone())
+            .ok()?
+            .default_branch()
+            .to_owned(),
+        Of::Commit(_) => return None,
+    };
+    Some(
+        knobas_core::entity::EntityRef::new(
+            &source.id,
+            &crate::keys::branch_key(owner, repo, &branch),
+        )
+        .to_string(),
+    )
+}
+
+async fn read_with(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    of: Of<'_>,
+    id: &str,
+    tip: Option<(&str, &str)>,
+) -> Result<ViewSection, SourceError> {
     let unnamed = || SourceError::protocol(format!("gitea: {id:?} names no place in the tree"));
     let named = Named::parse(id).ok_or_else(unnamed)?;
     match named.place {
@@ -266,21 +327,31 @@ pub(super) async fn read(
             in_ids: true,
         },
         (Of::Branch(_) | Of::Repository, None) => {
-            let name = match of {
-                Of::Branch(branch) => branch.to_owned(),
+            let name = match (of, tip) {
+                (Of::Branch(branch), _) => branch.to_owned(),
+                (_, Some((branch, _))) => branch.to_owned(),
                 _ => {
                     let record: RepoRecord = source.client.repo_as(owner, repo).await?;
                     record.default_branch().to_owned()
                 }
             };
-            let tip: Tip = source.client.branch_as(owner, repo, &name).await?;
-            resolved = tip
-                .commit
-                .map(|c| c.id)
-                .filter(|sha| super::is_full_sha(sha))
-                .ok_or_else(|| {
-                    SourceError::protocol(format!("gitea: {name:?} answered no tip commit"))
-                })?;
+            resolved = match tip {
+                Some((_, sha)) if super::is_full_sha(sha) => sha.to_ascii_lowercase(),
+                Some((_, sha)) => {
+                    return Err(SourceError::protocol(format!(
+                        "gitea: {sha:?} is not a whole commit id"
+                    )));
+                }
+                None => {
+                    let tip: Tip = source.client.branch_as(owner, repo, &name).await?;
+                    tip.commit
+                        .map(|c| c.id)
+                        .filter(|sha| super::is_full_sha(sha))
+                        .ok_or_else(|| {
+                            SourceError::protocol(format!("gitea: {name:?} answered no tip commit"))
+                        })?
+                }
+            };
             At {
                 sha: resolved.as_str(),
                 name,

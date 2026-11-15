@@ -100,6 +100,48 @@ pub(crate) async fn stored(
     Some(Stored::Drawn(view, row.synced_at))
 }
 
+/// `section` of `entity`'s view read at the commit the mirror holds at the
+/// head of the branch it reads (the forge-rounds pass, 2026-11-15), and when
+/// the sync last saw that head: a folder or a file by its path, which the
+/// source otherwise reads only after asking it for the repository and the
+/// branch's tip, two rounds of a forge before the place's own. `None` where
+/// the adapter reads no section so (`Source::tip_branch`), the mirror holds
+/// no tip for the branch, or the read fails: the page then waits for the
+/// source's own read, as before.
+pub(crate) async fn at_mirror_tip(
+    pool: &PgPool,
+    source: &dyn Source,
+    entity: &str,
+    section: Option<&str>,
+) -> Option<(SourceView, DateTime<Utc>)> {
+    let shape = source.tree_shape()?;
+    let payload: serde_json::Value =
+        sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
+            .bind(entity)
+            .fetch_optional(pool)
+            .await
+            .ok()??;
+    let branch = source.tip_branch(entity, section, &payload)?;
+    let commit_path: Vec<String> = shape
+        .branch_commit
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let (tip, synced_at): (Option<String>, DateTime<Utc>) = sqlx::query_as(
+        "select payload #>> $2::text[], synced_at from sync.live_item where entity_id = $1",
+    )
+    .bind(&branch)
+    .bind(&commit_path)
+    .fetch_optional(pool)
+    .await
+    .ok()??;
+    let view = source
+        .view_at_tip(entity, section, &payload, &tip?)
+        .await
+        .ok()??;
+    Some((view, synced_at))
+}
+
 /// One stored level as the database holds it.
 type LevelRow = (Vec<u8>, Vec<String>, Vec<i32>, Vec<i64>, Vec<Vec<u8>>);
 
