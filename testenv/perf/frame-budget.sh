@@ -6,7 +6,9 @@
 #   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4,6] [--only a,b | --all] [--out <dir>]
 #
 # By default the lists and moments the smoothness targets name (`only` below, about 15 minutes); --all runs every
-# scenario of run.mjs, an hour or more on the fixture, whose own query engine runs in the page.
+# scenario of run.mjs, an hour or more on the fixture, whose own query engine runs in the page. A pipeline's runs
+# (`builds-main`, `pipeline-history`) are held on the saved database (`--real`), at 1x, 4x and 6x; the fixture's
+# pipelines are short, and its own query engine's tasks fall in the scroll, so it holds no line for them.
 #
 # --real <port>  the windowless backend on a real database (examples/headless_ipc.rs) instead of the fixture at
 #                scale (?fake-scale); the budget's "real" lines then apply
@@ -17,7 +19,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 real="" throttle="1,4,6" out=""
-only="monitors,code-prs,tickets-list,inbox,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings"
+only="monitors,code-prs,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings"
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;

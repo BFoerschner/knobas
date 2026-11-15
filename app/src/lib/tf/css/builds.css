@@ -219,11 +219,39 @@
   .tf-wide { display: none; }
   .tf-narrow { display: inline; }
 }
+/* Builds' scroller holds no size container (builds at 6x, 2026-11-15). A size container lays out all it holds again
+   whenever anything in it changes: each move of the runs' window laid out the whole page, 12 ms of a 6x frame where
+   4 is left without it. So where the engine keeps a gutter, the body is as wide as the host by the gutter instead of by
+   `100cqw`: the scroller always keeps the bar's 8 px, the body takes them back and the clip holds what passes under the
+   bar, the same boxes as before with a bar or without one. The header is the container that names the width at which
+   *Open in* gives up its words: the host less the header's 44 px of padding. An engine with no gutter (WebKit before
+   Safari 18.2) keeps the host's container, as before. */
+@supports (scrollbar-gutter: stable) {
+  .tf-shost:has(> .tf-bmain) { container-type: normal; }
+  .tf-shost > .tf-bmain { scrollbar-gutter: stable; }
+  .tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: calc(100% + 8px); }
+  .tf-bmain .tf-fhead.tf-bhead { container: bhead / inline-size; }
+  @container bhead (max-width: 1086px) {
+    .tf-wide { display: none; }
+    .tf-narrow { display: inline; }
+  }
+}
 .tf-runs { padding: 0 22px 18px; container-type: inline-size; }
 .tf-runs .tf-run-no { width: 150px; }
 .tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }
 /* One layout for every day's table (#1452): the widths are the colgroup's, the branch takes what is left, and a long name wraps in its column. */
 .tf-runs .tf-runtbl { table-layout: fixed; }
+/* Each run row is a fixed table of its own, in a body that is a block (builds at 6x, 2026-11-15): the widths are the
+   cells' own, border box, as the colgroup's were, so the branch takes what the others leave at every width. One table
+   with a colgroup did not: where a container query hid the trigger's column, the columns came to less than the table and
+   every row stopped short of its right edge. The colgroup stays in the markup, undrawn, so the window freezes no
+   columns of its own (`freezeCols`). Containing each row would halve a scroll's paint, but snaps each row to a whole
+   pixel and moves its text by a fraction of one; not taken. */
+.tf-runs .tf-runtbl { display: block; width: auto; }
+.tf-runs .tf-runtbl > colgroup { display: none; }
+.tf-runs .tf-runtbl > tbody { display: block; }
+.tf-runs .tf-runtbl > tbody > tr { display: table; width: 100%; table-layout: fixed; }
+.tf-runs .tf-runtbl > tbody > tr > td { box-sizing: border-box; }
 /* A branch keeps one line and gives up its end; its title has the whole of it. The job's chip beside it never gives way (F-357). */
 .tf-runs .tf-run-br { font-size: var(--t-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-run-brin { display: flex; align-items: center; gap: 1ch; min-width: 0; }
@@ -238,10 +266,11 @@
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
 @media (max-width: 1240px) { .tf-bv { grid-template-columns: 240px minmax(0, 1fr); } }
 /* The run table sheds by its own width, not the window's: the duration drops its bar, then a column goes at a time. */
-/* The bar goes first, alone: that is the room a job's chip needs beside the longest branch. Trigger stays 170 px until 1000 (F-346, F-357). */
+/* The bar goes first, alone: that is the room a job's chip needs beside the longest branch. Trigger stays 170 px until 1000 (F-346, F-357).
+   A running run's progress bar goes with it: 70 px of bar and the word *running* ran over the start time in 70 px (builds at 6x, 2026-11-15). */
 @container (max-width: 1060px) {
   .tf-runs .tf-run-dur { width: 70px; }
-  .tf-durbar { display: none; }
+  .tf-durbar, .tf-runs .tf-run-dur .tf-progress { display: none; }
 }
 @container (max-width: 1000px) {
   .tf-runs .tf-run-no { width: 130px; }
@@ -249,7 +278,7 @@
   .tf-runs .tf-run-tests { width: 136px; }
   .tf-runs .tf-run-dur { width: 70px; }
   .tf-runs .tf-run-at { width: 140px; }
-  .tf-durbar { display: none; }
+  .tf-durbar, .tf-runs .tf-run-dur .tf-progress { display: none; }
 }
 /* Who started a run goes first: the branch is what you scan by, and keeps 190 px or more. */
 @container (max-width: 860px) { .tf-runs :is(col, td).tf-run-trig { display: none; } }
