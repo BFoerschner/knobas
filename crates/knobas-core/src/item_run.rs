@@ -75,27 +75,21 @@ macro_rules! run_join {
 
 /// Fill every item of the kinds `sync.item_run` keeps that has no row,
 /// [`BATCH`] at a time in id order, each batch its own transaction under the
-/// shared key the item triggers take (`sync.fill_item_runs`). A batch writes
-/// only the rows no one wrote meanwhile, so a sync running beside it keeps its
-/// own. Answers how many batches it ran.
+/// shared key the item triggers take (`sync.fill_item_runs_beside`, migration
+/// `0091`). A batch writes only the rows no one wrote meanwhile and steps past
+/// an item a running sync holds, and the fill passes again while it stepped
+/// past any ([`crate::fill`]): a sync running beside it keeps its own, and the
+/// two never deadlock. Answers how many batches it ran.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if a batch fails; the batches before it are kept, and
 /// the next fill goes on from the first item without a row.
 pub async fn fill(pool: &PgPool) -> Result<u32, CoreError> {
-    let mut after = String::new();
-    let mut batches = 0;
-    loop {
-        let next: Option<String> = sqlx::query_scalar("select sync.fill_item_runs($1, $2)")
-            .bind(&after)
-            .bind(BATCH)
-            .fetch_one(pool)
-            .await?;
-        let Some(next) = next else {
-            return Ok(batches);
-        };
-        batches += 1;
-        after = next;
-    }
+    crate::fill::walk(
+        pool,
+        "select last, skipped from sync.fill_item_runs_beside($1, $2)",
+        BATCH,
+    )
+    .await
 }

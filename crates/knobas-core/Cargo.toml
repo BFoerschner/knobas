@@ -26,6 +26,9 @@ serde_json.workspace = true
 ts-rs.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# The fills' pause before passing again over what a running sync held
+# (`src/fill.rs`, migration `0091`); already in the tree through sqlx.
+tokio.workspace = true
 tracing = "0.1"
 uuid.workspace = true
 
@@ -36,4 +39,3 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # The clones-root scan walks a real directory tree; `src/checkout.rs` itself
 # touches no test-only dependency.
 tempfile = "3"
-tokio.workspace = true

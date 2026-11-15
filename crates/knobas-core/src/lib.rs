@@ -9,6 +9,7 @@ pub mod detail;
 pub mod entity_list;
 mod error;
 pub mod evidence;
+pub(crate) mod fill;
 pub mod inbox;
 pub mod item_card;
 mod item_field;

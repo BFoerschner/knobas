@@ -20,30 +20,24 @@ pub const BATCH: i32 = 300;
 
 /// Fill every ticket that has no stored card, [`BATCH`] at a time in id
 /// order, each batch its own transaction under the shared key the item
-/// triggers take (`sync.fill_item_cards`), then mark the sources whose cards
-/// are whole ([`mark_whole`]). A batch writes only the rows no one wrote
-/// meanwhile, so a sync running beside it keeps its own. Answers how many
-/// batches it ran.
+/// triggers take (`sync.fill_item_cards_beside`, migration `0091`), then mark
+/// the sources whose cards are whole ([`mark_whole`]). A batch writes only
+/// the rows no one wrote meanwhile and steps past a ticket a running sync
+/// holds, passing over the tickets again while it stepped past any
+/// ([`crate::fill`]), so a sync running beside it keeps its own and the two
+/// never deadlock. Answers how many batches it ran.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if a batch fails; the batches before it are kept, and
 /// the next fill goes on from the first ticket without a card.
 pub async fn fill(pool: &PgPool) -> Result<u32, CoreError> {
-    let mut after = String::new();
-    let mut batches = 0;
-    loop {
-        let next: Option<String> = sqlx::query_scalar("select sync.fill_item_cards($1, $2)")
-            .bind(&after)
-            .bind(BATCH)
-            .fetch_one(pool)
-            .await?;
-        let Some(next) = next else {
-            break;
-        };
-        batches += 1;
-        after = next;
-    }
+    let batches = crate::fill::walk(
+        pool,
+        "select last, skipped from sync.fill_item_cards_beside($1, $2)",
+        BATCH,
+    )
+    .await?;
     // A sync holding the key now is marked by the next board that finds its
     // scope not whole ([`mark_whole_soon`]).
     mark_whole(pool).await?;

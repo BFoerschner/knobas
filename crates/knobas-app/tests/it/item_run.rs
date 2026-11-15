@@ -505,3 +505,55 @@ async fn the_runs_rows_follow_every_write_and_the_fill_restores_them() {
         "a filled row is left alone"
     );
 }
+
+/// **The fill steps past what a running sync holds** (migration `0091`, the
+/// ux13 forge-load pass, 2026-11-15): a sync started right after an upgrade
+/// deadlocked with the fill one run in three, each waiting on the other's
+/// uncommitted rows. With a run's transaction holding a build (locked and
+/// left unchanged, as a run that re-reads it does), the fill writes every
+/// other row without waiting on it, keeps passing while it holds it, and
+/// writes its row once the run has committed.
+#[tokio::test]
+async fn the_fill_steps_past_an_item_a_sync_holds_and_fills_it_after() {
+    let (pool, tc, ..) = mirror("item_run_fill_held").await;
+    let run = format!("{tc}:build:2");
+    sqlx::query("delete from sync.item_run")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut sync = pool.begin().await.unwrap();
+    sqlx::query("update sync.item set synced_at = now() where entity_id = $1")
+        .bind(&run)
+        .execute(&mut *sync)
+        .await
+        .unwrap();
+
+    let fill = tokio::spawn({
+        let pool = pool.clone();
+        async move { knobas_core::item_run::fill(&pool).await }
+    });
+    let mut others_filled = false;
+    for _ in 0..100 {
+        if held(&pool).await.unstored == 1 {
+            others_filled = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        others_filled,
+        "every other row, while the run holds its build"
+    );
+    assert_eq!(place(&pool, &run).await, None, "stepped past");
+    assert!(!fill.is_finished(), "passing again while the run holds it");
+
+    sync.commit().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), fill)
+        .await
+        .expect("the fill ends once the run committed")
+        .unwrap()
+        .unwrap();
+    assert!(place(&pool, &run).await.is_some(), "filled after");
+    let after = held(&pool).await;
+    assert_eq!((after.unstored, after.differing), (0, 0), "{after:?}");
+}
