@@ -299,6 +299,19 @@ node testenv/perf/stored-trees.mjs --app "http://127.0.0.1:5373/?fake-ipc&fake-h
   file with nothing left reading. Each is a read the backend has not made, so start a fresh backend (and a fresh copy)
   for each throttle.
 
+### Each open pull request's *Files*: `held_files_fill`
+
+From the held-files pass (2026-11-15, `docs/decisions/2026-11-15-the-files-a-pull-request-opens-are-held.md`): the
+sync's pass that holds each open pull request's *Files*, run alone against a copy's database, one JSON line a pass
+(requests, time, sections held, too large, refused, left, and the held store's size). Point the copy's Gitea row at
+the forge first (the held rows are keyed by the row's address), and give the stand-in every open pull request's record
+(`--pulls`, the mirror's payloads by `owner/name#n`; build their repositories with `standin-repos.py`). For the inner
+pages as an app that has run a sync draws them, fill a base this way and take copies of it.
+
+```sh
+cargo run --release -p knobas-app --example held_files_fill -- --db <the copy's database url> --source live-gitea --until-done
+```
+
 ### Big compares on the Mac: `compare.mjs` against the stand-in
 
 From the stored-compare pass (2026-11-14, `docs/decisions/2026-11-14-a-compare-lists-its-names-first.md`), with the live
