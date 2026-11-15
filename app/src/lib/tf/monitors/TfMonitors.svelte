@@ -598,9 +598,11 @@
   ]);
   /**
    * Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. A row is 71 nodes with its bars,
-   * so past 100 rows: at the 300 every list starts at, 218 live monitors drew 15,316 nodes and a 140 ms frame (2026-11-10).
+   * so past 40 rows: at the 300 every list starts at, 218 live monitors drew 15,316 nodes and a 140 ms frame (2026-11-10), and
+   * at 100 a typed word that narrowed the roster under it drew every match, a key 119 ms at CPU 4x in knobas's window on
+   * Björn's PC (the ux13 Windows pass, 2026-11-15).
    */
-  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42, from: 100 });
+  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42, from: 40 });
 
   /** A mark comes into view once, as the address names it; a later read of the roster leaves the reader where they are. */
   let broughtIn: string | null = null;

@@ -2183,6 +2183,24 @@ test("with no source filling the ticket system the board is read, empty, and say
   expect(target.querySelector(".tf-empty p")!.textContent).toBe("No tickets synced yet. Add a ticket system in Settings and they appear here.");
 });
 
+test("a list of 60 rows draws those near the viewport, not all 60: a typed word narrows the list into that range (the ux13-overs pass)", async () => {
+  const sixty = Array.from({ length: 60 }, (_, i) => ({
+    status: "To Do",
+    card: card(`PAY-${String(i + 1).padStart(4, "0")}`, `Ticket ${i + 1}`),
+  }));
+  await open(harness([], [], sixty));
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-list-more")?.click();
+  await settle();
+  expect(target.querySelector(".tf-list-more"), "every row is the list's").toBeNull();
+  // At the default 300 a narrowed list drew every match whole, a key of 145 ms at CPU 4x on Björn's PC.
+  const shown = target.querySelectorAll(".tf-tbl tbody tr[data-entity]").length;
+  expect(shown).toBeGreaterThan(5);
+  expect(shown).toBeLessThan(60);
+  expect(target.querySelectorAll(".tf-tbl tbody tr.tf-wgap").length).toBeGreaterThan(0);
+});
+
 test("a long list draws the rows near the viewport, and j/k walk past them, drawing and focusing each row they reach (#2209)", async () => {
   const many = Array.from({ length: 1000 }, (_, i) => ({
     status: "To Do",

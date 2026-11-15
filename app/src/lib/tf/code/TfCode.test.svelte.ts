@@ -557,6 +557,37 @@ test("Pull requests reads the newest 100 first, the rest once the filter wants t
   filter.text = "";
 });
 
+test("a typed word that narrows a pull request group to 60 draws those near the viewport, not all 60 (the ux13-overs pass)", async () => {
+  const { sessionFilter } = await import("../filter/filter-state.svelte");
+  const filter = sessionFilter("code-prs");
+  Object.assign(filter, { text: "", scope: "all", chips: {}, dropdowns: {} });
+  const settled = Array.from({ length: 90 }, (_, n) => pr(5000 - n, n < 60 ? `Retry change ${n}` : `Old change ${n}`, "merged", PAYOUT, `2026-07-${String(1 + (n % 28)).padStart(2, "0")}T10:00:00Z`));
+  const every = [...OPEN, ...settled];
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (wanted, limit, offset) => {
+        if (wanted.kinds.includes("repo")) return page(REPOS);
+        if (wanted.kinds.includes("branch")) return page([]);
+        if (wanted.order === "attention") return page(OPEN, GROUPS);
+        return { rows: every.slice(offset, offset + limit), total: every.length, tally: null, groups: null };
+      },
+    }),
+  );
+  filter.text = "Retry change";
+  flushSync();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  // At 100 a narrowed group drew every match whole, a key of 114 ms at CPU 4x on Björn's PC.
+  const shown = target.querySelectorAll(".tf-cprs tbody tr:not(.tf-wgap)").length;
+  expect(shown).toBeGreaterThan(5);
+  expect(shown).toBeLessThan(60);
+  expect(target.querySelectorAll(".tf-cprs tbody tr.tf-wgap").length).toBeGreaterThan(0);
+  filter.text = "";
+});
+
 test("once the page has drawn and the window is idle, the rest of the pull requests is read, and lands in one piece (the frame budget's code-filter, 2026-11-12)", async () => {
   const { sessionFilter } = await import("../filter/filter-state.svelte");
   Object.assign(sessionFilter("code-prs"), { text: "", scope: "all", chips: {}, dropdowns: {} });

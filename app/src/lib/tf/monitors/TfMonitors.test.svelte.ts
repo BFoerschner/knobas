@@ -926,6 +926,19 @@ test("a long roster draws the monitors near the viewport, spacer rows standing f
   expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["api-1999 /health HTTP"]);
 });
 
+test("a typed word that narrows the roster to 60 monitors draws those near the viewport, not all 60 (the ux13-overs pass)", async () => {
+  const bulk = Array.from({ length: 300 }, (_, i) => monitor(`kuma:bulk-${i}`, i < 60 ? `gate-${i} /health` : `api-${i} /health`));
+  await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = "gate-";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  // At 100 a narrowed roster drew every match whole, a key of 119 ms at CPU 4x on Björn's PC.
+  expect(rows().length).toBeGreaterThan(5);
+  expect(rows().length).toBeLessThan(60);
+  expect(target.querySelectorAll(".tf-mon tbody tr.tf-wgap")).toHaveLength(1);
+});
+
 const NO_TOKEN = { id: "kuma", health: { state: "missing_secret", checked_at: "2026-08-22T08:00:00Z" }, auth_kind: "ApiToken" };
 
 test("a source with no token draws the band with its fix, and the header stops saying synced", async () => {

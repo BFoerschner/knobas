@@ -641,8 +641,12 @@
     if (stacked === null) stackWins.delete(place);
     else stackWins.set(place, stacked);
   };
-  /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
-  const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52 });
+  /**
+   * The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps.
+   * From 40 rows, not the default 300: a typed word narrows the list into that range, and each key drew every match whole,
+   * its worst key 145 ms at CPU 4x in knobas's window on Björn's PC (the ux13 Windows pass, 2026-11-15), as Inbox windows from 40.
+   */
+  const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52, from: 40 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
   /** A card's source name when its key is shared, else `null`. */

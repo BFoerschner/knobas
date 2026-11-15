@@ -584,9 +584,10 @@
   const prWins = new Map(
     (["open", ...GROUP_ORDER] as const).map((name) => [
       name,
-      // From 100 rows: three groups of under 300 each drew whole, about 550 rows and a 140 ms frame as the tab opened
-      // on the live scale estate (2026-11-10).
-      new Windowed({ count: () => linesOf(name).length, key: (i) => linesOf(name)[i]!.row.entity_id, estimate: 51, from: 100 }),
+      // From 40 rows: three groups of under 300 each drew whole, about 550 rows and a 140 ms frame as the tab opened
+      // on the live scale estate (2026-11-10); at 100, a typed word that narrowed a group under it drew every match, a
+      // key 114 ms at CPU 4x in knobas's window on Björn's PC (the ux13 Windows pass, 2026-11-15).
+      new Windowed({ count: () => linesOf(name).length, key: (i) => linesOf(name)[i]!.row.entity_id, estimate: 51, from: 40 }),
     ]),
   );
 
