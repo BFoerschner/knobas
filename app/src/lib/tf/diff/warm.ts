@@ -32,7 +32,7 @@ export function warmFiles(): DiffFile[] {
 
 /** After the window has drawn and is idle; WebKit before 18.4 has no `requestIdleCallback`. Never under jsdom, which lays nothing out. */
 function whenIdle(go: () => void): void {
-  if (/jsdom/i.test(globalThis.navigator?.userAgent ?? "")) return;
+  if (typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent)) return;
   if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 4000 });
   else setTimeout(go, 1500);
 }

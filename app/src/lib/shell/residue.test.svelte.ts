@@ -1776,6 +1776,7 @@ const CASES: Case[] = [
               submitWrite: () => deferred({} as never),
               codeFacts: () => deferred([]),
               repoPipelines: () => deferred({ pipelines: [], pull_requests: [] }),
+              repoBranchPulls: () => deferred([]),
             },
           },
         }),
