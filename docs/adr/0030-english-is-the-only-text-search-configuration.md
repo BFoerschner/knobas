@@ -13,12 +13,16 @@ Every `fts` column in the mirror and every `websearch_to_tsquery` call in `crate
 - No accent folding: `Ueberweisung` does not match `Überweisung`, and `Uberweisung` matches neither.
 - Prefix matching is on the English lexeme, so for a German word prefixing works and stemming does not.
 
+## One typed character is read under `simple` (2026-11-15)
+
+The launcher answers one typed character from `sync.item_initial` (migration `0093`, `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`), which holds the first character of each `english` lexeme a row is named by. The typed character is lexed under `simple`, which lower-cases it as `english` does and drops no stop word, and is compared with those characters. So `s` and `a` name rows where `english` read them as stop words and matched nothing, and a row still matches a character exactly where `fts_a @@ 'c':*` would. The index side is `english` as before. A query of two characters or more is unchanged, stop words included.
+
 ## The migration shape a later change would take
 
 One migration and one amendment here:
 
 1. A new text-search configuration, created in the migration, with `create extension if not exists unaccent` if used, which the embedded server must ship.
-2. Every generated `fts` column altered by `alter column … set expression` to it, the shape migrations `0019` and `0048` used, and `sync.item`'s three stored name columns (`title_words`, `title_tail_words`, `key_words`, migration `0056`, #1650) altered the same way, or no mirror row is named what was typed.
+2. Every generated `fts` column altered by `alter column … set expression` to it, the shape migrations `0019` and `0048` used, and `sync.item`'s three stored name columns (`title_words`, `title_tail_words`, `key_words`, migration `0056`, #1650) altered the same way, or no mirror row is named what was typed. `sync.item_initial` (migration `0093`) written again from the new vectors, since a rewrite of `sync.item` fires no trigger.
 3. The query side in `crates/knobas-search/src/sql.rs` switched in the same PR.
 4. The ranking witness in `crates/knobas-search/tests/it/ranking.rs` re-run and `just search-perf` re-measured.
 

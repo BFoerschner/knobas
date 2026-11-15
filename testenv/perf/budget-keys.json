@@ -1,5 +1,5 @@
 {
- "_": "Lines for testenv/perf/keys.mjs (just keys-budget --real <port>): from a key pressed as real input to the first frame that draws the rows it asks for (rowsMs, the median of the presses), and how many frames after that moved or took away a row drawn on screen (moved). Björn's line is 100 ms at 1x and 200 ms at 4x, measured in headless Chrome on an M2 Pro over the saved scale database through a release build of examples/headless_ipc.rs. The broad-filters pass of PR #2479 (2026-11-13) measured 103 to 132 ms at 1x and set these lines at 130 to 160. The broad-keys pass of the same day brought every key under his line, so the 1x lines are his line: 71, 83, 64 and 91 ms measured as the median of seven presses, 93 to 104 at 4x. Those were taken with other agents' test runs and browsers on the machine, which a press feels: the backend's own read of a letter was 54 ms asked alone and 65 to 75 during a run, and single presses ran 20 ms either side of the median. A second run of five presses read 96, 75, 67 and 96. So a miss by a few ms on a loaded machine is the machine; read the backend's --timings beside it. docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md has both passes. The Windows pass (2026-11-14) added the expanded board (tickets-expanded-*: every column's Show more pressed four times, 1,243 cards on the scale database): 136 to 142 ms at 1x and 207 to 225 at 4x with every card drawn, 89 to 106 and 106 to 112 with each column windowed. Its read of 250 cards a column answers at 77 to 98 ms at 1x, which the page cannot go under, so its 1x line is the measure with margin, 115, not his 100; 140 at 4x. docs/decisions/2026-11-14-what-the-windows-pass-found.md. The render-cost pass (2026-11-14) added Björn's 6x line: every key's rows drawn within 200 ms at CPU 6x; docs/decisions/2026-11-14-what-a-page-costs-to-build.md.",
+ "_": "Lines for testenv/perf/keys.mjs (just keys-budget --real <port>): from a key pressed as real input to the first frame that draws the rows it asks for (rowsMs, the median of the presses), and how many frames after that moved or took away a row drawn on screen (moved). Björn's line is 100 ms at 1x and 200 ms at 4x, measured in headless Chrome on an M2 Pro over the saved scale database through a release build of examples/headless_ipc.rs. The broad-filters pass of PR #2479 (2026-11-13) measured 103 to 132 ms at 1x and set these lines at 130 to 160. The broad-keys pass of the same day brought every key under his line, so the 1x lines are his line: 71, 83, 64 and 91 ms measured as the median of seven presses, 93 to 104 at 4x. Those were taken with other agents' test runs and browsers on the machine, which a press feels: the backend's own read of a letter was 54 ms asked alone and 65 to 75 during a run, and single presses ran 20 ms either side of the median. A second run of five presses read 96, 75, 67 and 96. So a miss by a few ms on a loaded machine is the machine; read the backend's --timings beside it. docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md has both passes. The Windows pass (2026-11-14) added the expanded board (tickets-expanded-*: every column's Show more pressed four times, 1,243 cards on the scale database): 136 to 142 ms at 1x and 207 to 225 at 4x with every card drawn, 89 to 106 and 106 to 112 with each column windowed. Its read of 250 cards a column answers at 77 to 98 ms at 1x, which the page cannot go under, so its 1x line is the measure with margin, 115, not his 100; 140 at 4x. docs/decisions/2026-11-14-what-the-windows-pass-found.md. The render-cost pass (2026-11-14) added Björn's 6x line: every key's rows drawn within 200 ms at CPU 6x; docs/decisions/2026-11-14-what-a-page-costs-to-build.md. The one-letter pass (2026-11-15) answers one character under Everything by names, off an index, and draws an answer's first 24 rows in the frame it lands: 84, 121 and 125 ms before at 1x, 4x and 6x, 42, 63 and 94 after (medians of three rounds of seven presses, the two builds alternated, a load average of 7 to 13). His key targets are 100, 100 and 200 on his PC, where the page's share is as large as the Mac's and the read about 1.5 times it, so everything-letter's lines are 70, 100 and 130: the Mac with room for the machine. A run with other agents' builds on the cores read 74 at 1x; knobas-search's own tests hold the statement to the index, so a miss here is the page or the machine. docs/decisions/2026-11-15-one-letter-is-answered-by-names.md.",
  "real": {
   "keys": {
    "tickets-letter": {
@@ -46,15 +46,15 @@
    },
    "everything-letter": {
     "1": {
-     "rowsMs": 100,
+     "rowsMs": 70,
      "moved": 0
     },
     "4": {
-     "rowsMs": 200,
+     "rowsMs": 100,
      "moved": 0
     },
     "6": {
-     "rowsMs": 200,
+     "rowsMs": 130,
      "moved": 0
     }
    },

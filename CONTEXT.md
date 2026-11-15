@@ -418,7 +418,7 @@ A curated export in the backup's own format restricted to tables, named `knobas-
 ## Surfaces
 
 **Launcher**:
-The ⌘K box; one search over everything, under 100 ms. Its text search, and every full-text read of the [mirror](#mirror), runs under PostgreSQL's `english` configuration with no `unaccent`, on purpose and with named gaps (ADR-0030).
+The ⌘K box; one search over everything, under 100 ms. Its text search, and every full-text read of the [mirror](#mirror), runs under PostgreSQL's `english` configuration with no `unaccent`, on purpose and with named gaps (ADR-0030). One typed character is answered by names and no body, under *Titles* and *Everything* alike: the rows a word of whose title or key begins with it, those whose name begins with it first (a title past its stop words, the text after a title's last `/`, a ticket's key, a pull request's number, the key cell), then the newest, a row a kind at a time until the page is full. A stop-word letter answers as any other. It counts no match, so its totals are the rows it holds. A character no name holds is asked of the bodies under *Everything*, as two characters are. The ranking by words begins at the second character (2026-11-15, `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`).
 _Avoid_: command palette, spotlight
 
 **Section's place**:

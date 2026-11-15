@@ -383,6 +383,14 @@ browsers on the machine, and a press feels that: a letter's backend read was 54 
 run, and one letter under *Everything*, which ranks its matches on four processes, slows most when something else has
 the cores. Read a miss of a few ms against the machine's load and the backend's `--timings` before the code.
 
+`everything-letter` has lines of its own since the one-letter pass (2026-11-15,
+`docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`): 70, 100 and 130 ms at 1x, 4x and 6x, where it measured
+42, 63 and 94. One character is answered by names off an index, in about 10 ms of backend where the ranking took 57,
+and the list draws an answer's first 24 rows in the frame it lands. Björn's key targets are 100, 100 and 200 ms on his
+PC, whose read is about 1.5 times the Mac's, so the Mac's lines sit under his. With other agents' builds on the cores
+it read 74 at 1x. `knobas-search`'s own tests hold the statement to the index, so a miss here is the page or the
+machine: read the backend's `--timings` for `search`, which is about 10 ms.
+
 ### With a sync running: `just open-budget --inner --syncing <source>`
 
 The case a person's read used to queue behind (the priority lane, 2026-11-13, `docs/decisions/2026-11-13-a-persons-read-goes-ahead-of-the-sync.md`):

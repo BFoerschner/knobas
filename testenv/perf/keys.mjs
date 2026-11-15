@@ -172,7 +172,9 @@ const launcher = `
 
 // Each press is a key never asked before in the session, so the answer cache (`ipc/answer-cache.ts`) never answers it:
 // a person types something new. `before` is what the box holds when the key is pressed. The launcher's letters are none
-// of the English stopwords (a, d, i, m, o, s, t, y), which the search answers with nothing in a millisecond.
+// of the English stopwords (a, d, i, m, o, s, t, y), which the search answered with nothing in a millisecond until the
+// one-letter pass (2026-11-15); they answer as any letter now (`t` alone is the time prefix), and the set is kept so
+// the lines compare with the passes before.
 const BOARD = [["mini_board", "\"perColumn\"", "under:"]];
 const CASES = [
   { name: "tickets-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
