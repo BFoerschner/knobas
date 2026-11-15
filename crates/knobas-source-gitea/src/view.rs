@@ -162,6 +162,39 @@ pub(crate) fn tree_ask(
     }
 }
 
+/// The bytes of `path` in `repository`'s tree at `commit`, read whole as the
+/// file's own read reads them (`raw/{path}?ref={commit}`), or `None` past
+/// `cap` (the forge-rounds pass, 2026-11-15: a default branch's README, for
+/// the store).
+///
+/// # Errors
+///
+/// What Gitea's answer maps to.
+pub(crate) async fn read_blob(
+    source: &GiteaSource,
+    repository: &str,
+    commit: &str,
+    path: &str,
+    cap: u64,
+) -> Result<Option<Vec<u8>>, SourceError> {
+    let GiteaKey::Repo { owner, repo } = source.key_of(repository)? else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {repository:?} is not a repository"
+        )));
+    };
+    if !is_full_sha(commit) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {commit:?} is not a whole commit id"
+        )));
+    }
+    let cap = usize::try_from(cap).unwrap_or(usize::MAX);
+    let raw = source
+        .client
+        .raw_whole(&owner, &repo, path, commit, cap)
+        .await?;
+    Ok((!raw.cut).then_some(raw.bytes))
+}
+
 /// The branch whose head a branch's or repository's tree section that names
 /// no commit reads (the forge-rounds pass, 2026-11-15): see
 /// [`files::tip_branch`].

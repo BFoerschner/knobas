@@ -408,12 +408,13 @@ async fn stored() -> StoredTree {
         root,
         levels: levels.into_iter().map(|l| (l.sha, l.entries)).collect(),
         repository_url: Some(WEB.to_owned()),
+        blobs: std::collections::HashMap::new(),
     }
 }
 
 /// What a section of a branch's or repository's tree asks of the store: the
 /// branch (a repository's default, by its record), the commit its id names,
-/// and the place; a file and a compare ask nothing.
+/// and the place; a compare asks nothing.
 #[tokio::test]
 async fn a_tree_section_names_its_branch_commit_and_place() {
     let server = gitea().await;
@@ -445,8 +446,11 @@ async fn a_tree_section_names_its_branch_commit_and_place() {
         Some(TreePlace::Every)
     );
     assert_eq!(
-        source.tree_ask(ENTITY, Some(&format!("file@{COMMIT}:README.md")), &record()),
-        None
+        source
+            .tree_ask(ENTITY, Some(&format!("file@{COMMIT}:README.md")), &record())
+            .map(|ask| ask.place),
+        Some(TreePlace::File("README.md".to_owned())),
+        "a file, drawn where its bytes are stored (the forge-rounds pass)"
     );
     assert_eq!(source.tree_ask(ENTITY, Some("overview"), &record()), None);
     let commit = format!("{ENTITY}@{COMMIT}");
@@ -542,5 +546,120 @@ async fn the_store_draws_only_its_own_commit_and_places() {
             .values()
             .flatten()
             .any(|i: &TreeItem| i.mode == MODE_TREE)
+    );
+}
+
+/// The bytes of a stored file of the fixture, its entry's size long.
+fn bytes_of(path: &str, size: usize) -> Vec<u8> {
+    let mut out = format!("# {path}\n").into_bytes();
+    out.resize(size, b'x');
+    out
+}
+
+/// Gitea's own read of `file`: its `contents-ext` entry at the commit, as
+/// Gitea names its page (`/src/commit/{sha}/{path}`), and its raw bytes.
+async fn file_read(server: &MockServer, file: &str, blob: &str, size: usize) {
+    let name = file.rsplit('/').next().unwrap_or(file);
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/contents-ext/{file}")))
+        .and(query_param("ref", COMMIT))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "file_contents": {
+                "name": name, "path": file, "type": "file", "size": size, "sha": blob,
+                "html_url": format!("{WEB}/src/commit/{COMMIT}/{file}")
+            }})),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/raw/{file}")))
+        .and(query_param("ref", COMMIT))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes_of(file, size)))
+        .mount(server)
+        .await;
+}
+
+/// **Same answer for a stored file** (the forge-rounds pass, 2026-11-15): a
+/// file whose bytes the store holds (a default branch's README, migration
+/// `0090`) is drawn, on the wire, as Gitea's own read of it at the same
+/// commit: text, size, blob, page, trail and ids. A file whose bytes are not
+/// held, and a link, are not drawn from the store.
+#[tokio::test]
+async fn a_file_drawn_from_the_store_is_the_file_gitea_draws() {
+    let mut tree = stored().await;
+    let files = [
+        ("README.md", id(0xf1), 120),
+        ("run.sh", id(0xf3), 33),
+        ("src/main.rs", id(0xf8), 64),
+    ];
+    for (file, blob, size) in &files {
+        tree.blobs.insert(blob.clone(), bytes_of(file, *size));
+    }
+    for (file, blob, size) in &files {
+        for (entity, section) in [
+            (ENTITY, format!("file:{file}")),
+            (ENTITY, format!("file@{COMMIT}:{file}")),
+            (MAIN, format!("file:{file}")),
+            (MAIN, format!("file@{COMMIT}:{file}")),
+        ] {
+            let server = gitea().await;
+            file_read(&server, file, blob, *size).await;
+            let source = source(&server);
+            let read = source.view(entity, Some(&section)).await.unwrap().unwrap();
+            let payload = if entity == ENTITY {
+                record()
+            } else {
+                json!({})
+            };
+            let drawn = source
+                .tree_view(entity, Some(&section), &payload, &tree)
+                .unwrap_or_else(|| panic!("{entity} {section} drawn from the store"));
+            assert_eq!(
+                serde_json::to_value(&drawn).unwrap(),
+                serde_json::to_value(&read).unwrap(),
+                "{entity} {section}"
+            );
+        }
+    }
+    let source = source(&gitea().await);
+    for section in [
+        format!("file@{COMMIT}:src/lib.rs"),
+        format!("file@{COMMIT}:link"),
+    ] {
+        assert_eq!(
+            source.tree_view(ENTITY, Some(&section), &record(), &tree),
+            None,
+            "{section}"
+        );
+    }
+}
+
+/// A file's bytes for the store are its raw read at the commit, whole; one
+/// past the cap is none.
+#[tokio::test]
+async fn a_blob_is_read_raw_at_its_commit_and_none_past_the_cap() {
+    let server = gitea().await;
+    file_read(&server, "README.md", &id(0xf1), 120).await;
+    let source = source(&server);
+    assert_eq!(
+        source
+            .read_blob(ENTITY, COMMIT, "README.md", 1024)
+            .await
+            .unwrap(),
+        Some(bytes_of("README.md", 120))
+    );
+    assert_eq!(
+        source
+            .read_blob(ENTITY, COMMIT, "README.md", 100)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        source
+            .read_blob(ENTITY, "main", "README.md", 1024)
+            .await
+            .is_err(),
+        "a whole commit id only"
     );
 }

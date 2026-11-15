@@ -733,6 +733,16 @@ impl Source for GiteaSource {
         crate::view::tree_view(self, entity, section, payload, tree)
     }
 
+    async fn read_blob(
+        &self,
+        repository: &str,
+        commit: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        crate::view::read_blob(self, repository, commit, path, cap).await
+    }
+
     fn tip_branch(
         &self,
         entity: &str,

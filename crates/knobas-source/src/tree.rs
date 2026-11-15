@@ -126,6 +126,9 @@ pub enum TreePlace {
     Dir(String),
     /// Every file of the tree (*Go to file*).
     Every,
+    /// A file by its path from the top (the forge-rounds pass, 2026-11-15):
+    /// drawn only where its bytes are stored too ([`StoredTree::blobs`]).
+    File(String),
 }
 
 /// What a section of a view draws from the store, as the adapter names it
@@ -150,6 +153,10 @@ pub struct StoredTree {
     pub root: String,
     pub levels: HashMap<String, Vec<TreeItem>>,
     pub repository_url: Option<String>,
+    /// The bytes of the files the store holds among those the place needs,
+    /// by blob sha (a default branch's README, the forge-rounds pass,
+    /// 2026-11-15): whole, never cut.
+    pub blobs: HashMap<String, Vec<u8>>,
 }
 
 impl StoredTree {
@@ -233,6 +240,7 @@ mod tests {
                 ("tz".to_owned(), vec![item("ta-again", MODE_TREE, "ta")]),
             ]),
             repository_url: None,
+            blobs: std::collections::HashMap::new(),
         }
     }
 

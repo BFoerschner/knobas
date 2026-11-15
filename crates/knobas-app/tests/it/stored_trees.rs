@@ -111,6 +111,13 @@ struct Asked {
     /// and each such read: the entity, the section and the tip.
     reads_at_tip: bool,
     at_tip: Vec<(String, Option<String>, String)>,
+    /// Each file read for the store: the repository, the commit, the path.
+    blobs: Vec<(String, String, String)>,
+}
+
+/// What the fake answers for a file read for the store.
+fn blob_bytes(commit: &str, path: &str) -> Vec<u8> {
+    format!("# {path} at {commit}\n").into_bytes()
 }
 
 struct Forge {
@@ -228,6 +235,20 @@ impl Source for Forge {
         payload: &serde_json::Value,
     ) -> Option<String> {
         self.pure.tip_branch(entity, section, payload)
+    }
+    async fn read_blob(
+        &self,
+        repository: &str,
+        commit: &str,
+        path: &str,
+        _cap: u64,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        self.asked.lock().unwrap().blobs.push((
+            repository.to_owned(),
+            commit.to_owned(),
+            path.to_owned(),
+        ));
+        Ok(Some(blob_bytes(commit, path)))
     }
     async fn view_at_tip(
         &self,
@@ -651,6 +672,7 @@ async fn files_draws_from_the_store_without_waiting_on_the_forge() {
         root,
         levels: levels.into_iter().map(|l| (l.sha, l.entries)).collect(),
         repository_url: Some(WEB.to_owned()),
+        blobs: std::collections::HashMap::new(),
     };
     let pure = gitea(&f.id);
     let feat = f.branch("feat");
@@ -853,4 +875,106 @@ async fn a_place_by_its_path_is_read_at_the_mirrors_tip_and_checked_behind() {
     assert_eq!(fixed.held_at, None);
     assert_eq!(f.views_asked(), [(feat.clone(), Some(named))]);
     assert!(f.asked.lock().unwrap().at_tip.is_empty());
+}
+
+/// **A default branch's README, stored** (the forge-rounds pass, 2026-11-15,
+/// migration `0090`): the pass reads each default branch's README once, by
+/// the blob its stored top names, and keeps it by that sha; the landing then
+/// draws it from the store, at the head as of the sync and checked behind, or
+/// at a commit its id names with nothing read. A README no branch's top names
+/// goes with the levels.
+#[tokio::test]
+async fn a_default_branchs_readme_is_stored_once_and_drawn_from_the_store() {
+    let f = fixture().await;
+    let filled = f.refresh().await;
+    assert_eq!(filled.blobs, 1, "main's README, and no other branch's");
+    assert_eq!(
+        std::mem::take(&mut f.asked.lock().unwrap().blobs),
+        [(f.repo.clone(), sha(0xc1), "README.md".to_owned())]
+    );
+    let stored: Vec<String> =
+        sqlx::query_scalar("select encode(sha, 'hex') from sync.git_blob where source_id = $1")
+            .bind(&f.id)
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, [sha(0xf1)]);
+    assert_eq!(f.refresh().await.blobs, 0, "held: not read again");
+    assert!(f.asked.lock().unwrap().blobs.is_empty());
+    f.views_asked();
+
+    let text = |shown: &knobas_app::sources::live::ShownView| match shown.view.sections[0]
+        .blocks
+        .as_slice()
+    {
+        [
+            knobas_source::view::Block::File {
+                text, sha: blob, ..
+            },
+        ] => (text.clone(), blob.clone()),
+        other => panic!("one file block, not {other:?}"),
+    };
+    let synced: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("select synced_at from sync.item where entity_id = $1")
+            .bind(f.branch("main"))
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    let landing = f.shown(&f.repo, "file:README.md").await;
+    assert_eq!(
+        text(&landing),
+        (
+            String::from_utf8(blob_bytes(&sha(0xc1), "README.md")).unwrap(),
+            Some(sha(0xf1))
+        )
+    );
+    assert_eq!(
+        landing.held_at,
+        Some(synced),
+        "as of the sync that saw main's head"
+    );
+    f.live.settled().await;
+    assert_eq!(
+        f.views_asked(),
+        [(f.repo.clone(), Some("file:README.md".to_owned()))],
+        "checked behind with the source's own read"
+    );
+    let named = format!("file@{}:README.md", sha(0xc1));
+    let fixed = f.shown(&f.repo, &named).await;
+    assert_eq!(text(&fixed), text(&landing));
+    assert_eq!(fixed.held_at, None);
+    f.live.settled().await;
+    assert!(
+        f.views_asked().is_empty(),
+        "a commit's file cannot move: nothing read"
+    );
+
+    // main pushed: its new README is read; the old one stays while other tops name it.
+    f.move_branch("main", 0xc3).await;
+    assert_eq!(f.refresh().await.blobs, 1);
+    assert_eq!(
+        std::mem::take(&mut f.asked.lock().unwrap().blobs),
+        [(f.repo.clone(), sha(0xc3), "README.md".to_owned())]
+    );
+    // One no top names goes with the levels.
+    sqlx::query("insert into sync.git_blob (source_id, sha, bytes) values ($1, $2, 'x')")
+        .bind(&f.id)
+        .bind(vec![0xeeu8; 20])
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into sync.tree_gc (source_id) values ($1) on conflict do nothing")
+        .bind(&f.id)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    f.refresh().await;
+    let mut stored: Vec<String> =
+        sqlx::query_scalar("select encode(sha, 'hex') from sync.git_blob where source_id = $1")
+            .bind(&f.id)
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+    stored.sort();
+    assert_eq!(stored, [sha(0xf1), sha(0xf5)]);
 }

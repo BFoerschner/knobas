@@ -51,6 +51,10 @@ pub const REQUESTS_PER_RUN: u32 = 300;
 /// How long one run's pass spends reading trees, at most.
 pub const BUDGET: Duration = Duration::from_secs(60);
 
+/// The largest README the pass stores (migration `0090`): past it, the
+/// landing reads it from the forge, as before.
+pub const BLOB_CAP: u64 = 256 * 1024;
+
 /// The most entries the branches of one repository may add to the store.
 /// Dedup keeps most estates far under it; past it, the repository's
 /// remaining branches stay read on demand.
@@ -71,6 +75,8 @@ pub struct Filled {
     pub left: usize,
     /// Levels deleted because no branch reaches them.
     pub removed: u64,
+    /// READMEs newly stored (a default branch's, migration `0090`).
+    pub blobs: usize,
 }
 
 /// A branch whose stored row stands at another commit than the mirror's.
@@ -165,6 +171,10 @@ pub async fn refresh_within(
         .await?
         .rows_affected()
         > 0;
+    // The READMEs of default branches stored in a run before this one go
+    // first: one request a repository, before the branches' trees take the
+    // run's budget; those of default branches stored now, after them.
+    store_readmes(pool, source_id, source, &shape, requests, &mut filled).await?;
     let owed = owed(pool, source_id, &shape).await?;
     if !owed.is_empty() {
         let mut totals = held(pool, source_id).await?;
@@ -285,6 +295,7 @@ pub async fn refresh_within(
             }
         }
     }
+    store_readmes(pool, source_id, source, &shape, requests, &mut filled).await?;
     if sweep {
         filled.removed = remove_unreached(pool, source_id).await?;
     }
@@ -292,6 +303,136 @@ pub async fn refresh_within(
         tracing::debug!(source_id, ?filled, "stored trees");
     }
     Ok(filled)
+}
+
+/// The README a landing opens of a top level's entries, as the page picks it
+/// (`pickDefaultFile`): a file named `README` with or without an extension,
+/// a Markdown one before any other; its index among `names`.
+#[must_use]
+pub fn landing_readme(names: &[String], modes: &[i32]) -> Option<usize> {
+    let markdown = |name: &str| {
+        let lower = name.to_ascii_lowercase();
+        [".md", ".markdown", ".mdown", ".mkd"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
+    };
+    let readme = |name: &str| {
+        let lower = name.to_ascii_lowercase();
+        let Some(rest) = lower.strip_prefix("readme") else {
+            return false;
+        };
+        rest.is_empty()
+            || rest
+                .strip_prefix('.')
+                .is_some_and(|ext| !ext.is_empty() && ext.bytes().all(|b| b.is_ascii_lowercase()))
+    };
+    let mut best: Option<usize> = None;
+    for (at, name) in names.iter().enumerate() {
+        let mode = modes.get(at).copied().unwrap_or(0);
+        // A file git keeps as one: not a folder, a link or a submodule.
+        if mode != 0o100_644 && mode != 0o100_755 {
+            continue;
+        }
+        if !readme(name) {
+            continue;
+        }
+        if best.is_none_or(|b| markdown(name) && !markdown(&names[b])) {
+            best = Some(at);
+        }
+    }
+    best
+}
+
+/// Store each default branch's README the store does not hold yet, by its
+/// blob sha (migration `0090`): one request each, inside what is left of the
+/// run's `requests`. A forge that does not answer ends it; a README past
+/// [`BLOB_CAP`], or one the adapter reads no bytes of, is left to the forge.
+async fn store_readmes(
+    pool: &PgPool,
+    source_id: &str,
+    source: &dyn Source,
+    shape: &knobas_source::tree::TreeShape,
+    requests: u32,
+    filled: &mut Filled,
+) -> Result<(), sqlx::Error> {
+    let path: Vec<String> = shape
+        .default_branch
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    type Top = (
+        String,
+        String,
+        Vec<String>,
+        Vec<i32>,
+        Vec<i64>,
+        Vec<Vec<u8>>,
+    );
+    let tops: Vec<Top> = sqlx::query_as(
+        "select bt.repository_id, bt.commit_sha, t.names, t.modes, t.sizes, t.shas
+           from sync.branch_tree bt
+           join sync.item r on r.entity_id = bt.repository_id
+           join sync.git_tree t on t.source_id = bt.source_id and t.sha = bt.root
+          where bt.source_id = $1 and bt.branch = r.payload #>> $2::text[]",
+    )
+    .bind(source_id)
+    .bind(&path)
+    .fetch_all(pool)
+    .await?;
+    for (repository, commit, names, modes, sizes, shas) in tops {
+        let Some(at) = landing_readme(&names, &modes) else {
+            continue;
+        };
+        let (Some(size), Some(sha)) = (sizes.get(at), shas.get(at)) else {
+            continue;
+        };
+        if u64::try_from(*size).unwrap_or(u64::MAX) > BLOB_CAP {
+            continue;
+        }
+        let held: bool = sqlx::query_scalar(
+            "select exists (select 1 from sync.git_blob where source_id = $1 and sha = $2)",
+        )
+        .bind(source_id)
+        .bind(sha)
+        .fetch_one(pool)
+        .await?;
+        if held {
+            continue;
+        }
+        if filled.requests >= requests {
+            break;
+        }
+        // An adapter that stores no file answers none, having sent nothing.
+        let read = source
+            .read_blob(&repository, &commit, &names[at], BLOB_CAP)
+            .await;
+        if !matches!(read, Ok(None)) {
+            filled.requests += 1;
+        }
+        match read {
+            Ok(Some(bytes)) => {
+                sqlx::query(
+                    "insert into sync.git_blob (source_id, sha, bytes) values ($1, $2, $3)
+                     on conflict do nothing",
+                )
+                .bind(source_id)
+                .bind(sha)
+                .bind(&bytes)
+                .execute(pool)
+                .await?;
+                filled.blobs += 1;
+            }
+            Ok(None) => {}
+            Err(error) if forge_failed(&error) => {
+                tracing::debug!(source_id, repository, %error, "the forge did not answer a README; the pass stops");
+                break;
+            }
+            Err(error) => {
+                tracing::debug!(source_id, repository, %error, "a README was not read");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether a failed tree read says the forge is not answering at all (down,
@@ -560,8 +701,20 @@ select $1, l.sha,
 on conflict do nothing
 ";
 
-/// Delete the levels of `source_id` no branch's root reaches.
+/// Delete the levels of `source_id` no branch's root reaches, and the READMEs
+/// no branch's top names.
 async fn remove_unreached(pool: &PgPool, source_id: &str) -> Result<u64, sqlx::Error> {
+    sqlx::query(
+        "delete from sync.git_blob b
+          where b.source_id = $1
+            and not exists (
+              select 1 from sync.branch_tree bt
+                join sync.git_tree t on t.source_id = bt.source_id and t.sha = bt.root
+               where bt.source_id = $1 and b.sha = any(t.shas))",
+    )
+    .bind(source_id)
+    .execute(pool)
+    .await?;
     Ok(sqlx::query(
         "with recursive reached(sha) as (
            select root from sync.branch_tree where source_id = $1 and root is not null
@@ -637,6 +790,42 @@ mod tests {
         assert_eq!(all, 3 + 10 + 12);
         assert!(!new.contains_key("aa"), "a held level is not new");
         assert!(totals_of("r0", &levels[..1], &held).is_none(), "bb missing");
+    }
+
+    /// The README stored is the one the landing opens (`pickDefaultFile`): a
+    /// Markdown one before any other, a file and not a link or a folder.
+    #[test]
+    fn the_readme_stored_is_the_one_the_landing_opens() {
+        let names = |n: &[&str]| n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let file = 0o100_644;
+        assert_eq!(
+            landing_readme(
+                &names(&["README", "README.md", "src"]),
+                &[file, file, 0o040_000]
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            landing_readme(&names(&["Readme.txt"]), &[0o100_755]),
+            Some(0)
+        );
+        assert_eq!(
+            landing_readme(&names(&["README.md"]), &[0o120_000]),
+            None,
+            "a link"
+        );
+        assert_eq!(
+            landing_readme(&names(&["README"]), &[0o040_000]),
+            None,
+            "a folder"
+        );
+        assert_eq!(
+            landing_readme(
+                &names(&["readme2.md", "README.d0", "READMEs"]),
+                &[file, file, file]
+            ),
+            None
+        );
     }
 
     #[test]

@@ -2246,6 +2246,22 @@ pub trait Source: Send + Sync {
         let _ = (entity, section, payload, tree);
         None
     }
+    /// The bytes of the file at `path` of `repository`'s tree at `commit`
+    /// (`repository` an entity id of [`tree_shape`](Source::tree_shape)'s
+    /// repository kind), read whole the way the source's own read of the
+    /// file reads them, for the store (the forge-rounds pass, 2026-11-15: a
+    /// default branch's README). `Ok(None)` where the file is larger than
+    /// `cap`, and, the default, from a source that stores no file.
+    async fn read_blob(
+        &self,
+        repository: &str,
+        commit: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        let _ = (repository, commit, path, cap);
+        Ok(None)
+    }
     /// The entity id of the branch whose head `section` of `entity`'s view
     /// reads, where the section reads a branch's head and names no commit
     /// (the forge-rounds pass, 2026-11-15): a branch's or repository's tree

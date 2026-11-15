@@ -224,6 +224,7 @@ async fn same_answer(
             root: hex(&root),
             levels: levels_of(pool, source_id, &root).await,
             repository_url: web,
+            blobs: std::collections::HashMap::new(),
         };
         let walked = tree.walk().expect("every level below the root is stored");
         let mut sections = vec!["files".to_owned(), format!("paths@{commit}")];

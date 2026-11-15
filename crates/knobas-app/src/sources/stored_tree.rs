@@ -86,15 +86,47 @@ pub(crate) async fn stored(
     let Some(root) = row.root else {
         return Some(Stored::TooLarge(u64::try_from(row.entries).unwrap_or(0)));
     };
+    let mut blobs = HashMap::new();
     let levels = match &ask.place {
         TreePlace::Dir(dir) => way_down(pool, &row.source_id, &root, dir).await?,
         TreePlace::Every => every_level(pool, &row.source_id, &root).await?,
+        // A file: the levels down to its folder, and its bytes where the
+        // store holds them (a default branch's README, `0090`); none, and
+        // the section is the source's read.
+        TreePlace::File(path) => {
+            let (dir, name) = path.rsplit_once('/').unwrap_or(("", path.as_str()));
+            let levels = way_down(pool, &row.source_id, &root, dir).await?;
+            let tree = StoredTree {
+                commit: String::new(),
+                root: hex(&root),
+                levels,
+                repository_url: None,
+                blobs: HashMap::new(),
+            };
+            let sha = tree
+                .dir(dir)?
+                .iter()
+                .find(|item| item.name == name)?
+                .sha
+                .clone();
+            let bytes: Vec<u8> = sqlx::query_scalar(
+                "select bytes from sync.git_blob where source_id = $1 and sha = $2",
+            )
+            .bind(&row.source_id)
+            .bind(unhex(&sha))
+            .fetch_optional(pool)
+            .await
+            .ok()??;
+            blobs.insert(sha, bytes);
+            tree.levels
+        }
     };
     let tree = StoredTree {
         commit: row.commit_sha,
         root: hex(&root),
         levels,
         repository_url: row.repository_url,
+        blobs,
     };
     let view = source.tree_view(entity, section, &payload, &tree)?;
     Some(Stored::Drawn(view, row.synced_at))

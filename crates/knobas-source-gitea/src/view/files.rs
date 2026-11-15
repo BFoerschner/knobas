@@ -1138,7 +1138,9 @@ fn trail(at: &At<'_>, path: &str, is_file: bool) -> Vec<Crumb> {
 /// What a section of a branch's or repository's tree draws from a stored
 /// tree (the stored-trees pass of PR #2479): the branch it is read through
 /// (a repository's default, by its record), the commit its id names, and the
-/// place. A file, and a commit's tree, are not drawn from it.
+/// place. A file is drawn from it where its bytes are stored too (a default
+/// branch's README, the forge-rounds pass, 2026-11-15); a commit's tree is
+/// not.
 pub(super) fn stored_ask(
     source: &GiteaSource,
     owner: &str,
@@ -1152,7 +1154,7 @@ pub(super) fn stored_ask(
     let place = match named.place {
         Place::Dir(dir) => TreePlace::Dir(dir.to_owned()),
         Place::Every => TreePlace::Every,
-        Place::File(_) => return None,
+        Place::File(path) => TreePlace::File(path.to_owned()),
     };
     let branch = match of {
         Of::Branch(branch) => branch.to_owned(),
@@ -1253,7 +1255,35 @@ pub(super) fn stored_view(
                 read_alone: None,
             }
         }
-        Place::File(_) => return None,
+        // As [`file`] draws Gitea's read of it at the same commit: its bytes,
+        // whole; its size, blob and page from its entry. A link, a folder or
+        // a submodule is not drawn from the store.
+        Place::File(path) => {
+            let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
+            let item = tree.dir(dir)?.iter().find(|item| item.name == name)?;
+            if stored_kind(item) != EntryKind::File {
+                return None;
+            }
+            let bytes = tree.blobs.get(&item.sha)?;
+            let binary = is_binary(bytes);
+            let (text, truncated) = if binary {
+                (String::new(), false)
+            } else {
+                capped(bytes, false)
+            };
+            Block::File {
+                trail: trail(&at, path, true),
+                path: path.to_owned(),
+                text,
+                language: language_of(path).map(str::to_owned),
+                size: item.size,
+                truncated,
+                binary,
+                url: at.page(web(tree.repository_url.as_deref(), sha, path).as_deref()),
+                sha: Some(item.sha.clone()),
+                commit: Some(sha.to_owned()),
+            }
+        }
     };
     Some(ViewSection {
         id: id.to_owned(),
