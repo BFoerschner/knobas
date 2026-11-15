@@ -159,6 +159,7 @@
   /** Forget which repositories' headers have looked for a branch to propose: a new session. */
   export function forgetHeaderSearches(): void {
     searched.clear();
+    proposals.clear();
   }
 
   /**
@@ -170,6 +171,18 @@
    */
   const searched = new Set<string>();
   const FIRST_SEARCH_AFTER_MS = 1000;
+
+  /**
+   * What the header's look found, per repository, for the branches it asked and the writes asked before it: a look is up
+   * to eight branches' whole views, each some ten reads on the forge, and the page looked again on every visit and every
+   * tab shown, as its lists were read again: 2,179 requests to the forge in one run of the inner pages, most of a
+   * forge's quota of ten a second, with a person's own reads waiting behind them (the inner-6x pass, 2026-11-15). Kept
+   * {@link PROPOSAL_KEPT_MS} at most, and dropped on a refresh and a write. Not on a run's end: looked for again then, its
+   * eighty-odd reads went out as the run's own changes were read, and Commits waited a second for them; a pull request
+   * someone opened from the branch since is what Compare says when the button is pressed.
+   */
+  const proposals = new Map<string, { asked: string; writes: number; at: number; toPropose: string | null; openedFrom: BranchStanding["pr"] }>();
+  const PROPOSAL_KEPT_MS = 5 * 60_000;
 </script>
 
 <script lang="ts">
@@ -664,6 +677,7 @@
     const id = repoId;
     if (id === null) return;
     tabs = readShown(tabs);
+    proposals.delete(id);
     writesAsked += 1;
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
@@ -887,13 +901,30 @@
   $effect(() => {
     const choice = selected !== null && !selected.isDefault ? selected : null;
     const asking = (choice === null ? (known ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
-    void writesAsked;
+    const writes = writesAsked;
     let live = true;
     const asked = ready ? asking.slice(0, ASKED) : [];
+    const id = untrack(() => repoId);
+    const askedKey = asked.map((option) => `${option.name}\u0000${option.id}`).join("\u0001");
+    const kept = id === null || asked.length === 0 ? undefined : proposals.get(id);
+    if (kept !== undefined && kept.asked === askedKey && kept.writes === writes && Date.now() - kept.at < PROPOSAL_KEPT_MS) {
+      untrack(() => {
+        toPropose = kept.toPropose;
+        openedFrom = kept.openedFrom;
+        seeking = false;
+      });
+      return;
+    }
+    /** The look's answer, drawn and kept for the next visit. */
+    const found = (propose: string | null, opened: BranchStanding["pr"], keep = true) => {
+      toPropose = propose;
+      openedFrom = opened;
+      seeking = false;
+      if (keep && id !== null) proposals.set(id, { asked: askedKey, writes, at: Date.now(), toPropose: propose, openedFrom: opened });
+    };
     // Before the branches are read the page knows no branch to start on: *main* drew for half a second, then went.
     untrack(() => (seeking = asked.length > 0 || (ready && choice === null && branches === null)));
     void (async () => {
-      const id = untrack(() => repoId);
       if (asked.length > 0 && id !== null && !searched.has(id)) {
         searched.add(id);
         if (untrack(() => slot) === "files" && !treeDrew.done) await Promise.race([treeDrew.promise, new Promise((resolve) => setTimeout(resolve, FIRST_SEARCH_AFTER_MS))]);
@@ -910,24 +941,13 @@
         if (!live) return;
         for (const [i, standing] of standings.entries()) {
           // A branch that can't be read says nothing about what stands: *proposed* stays, as it was before anything was asked.
-          if (standing === null) {
-            toPropose = null;
-            openedFrom = first;
-            seeking = false;
-            return;
-          }
-          if (standing.pr === null && (choice !== null || standing.canOpenPr)) {
-            toPropose = batch[i]!.name;
-            openedFrom = null;
-            seeking = false;
-            return;
-          }
+          // Not kept: the next visit asks again.
+          if (standing === null) return found(null, first, false);
+          if (standing.pr === null && (choice !== null || standing.canOpenPr)) return found(batch[i]!.name, null);
           first ??= standing.pr;
         }
       }
-      toPropose = null;
-      openedFrom = first;
-      seeking = false;
+      found(null, first, asked.length > 0);
     })();
     return () => {
       live = false;

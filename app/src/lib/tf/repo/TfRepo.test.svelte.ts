@@ -340,6 +340,46 @@ test("New pull request starts on a branch with nothing open, past one that has (
   expect(primary.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
 });
 
+// The inner-6x pass (2026-11-15): the look read up to eight branches' whole views on every visit and every tab shown,
+// most of a forge's quota with a person's own reads waiting behind them.
+test("the header's look is kept: another tab and a second visit ask no branch again, and say the same", async () => {
+  const base = ports();
+  const other = "gitea:tidewater/payout-service@refs/heads/spike/y";
+  let asked = 0;
+  const stand = ports({
+    entityView: async (id, sectionId) => {
+      if (id === REPO && sectionId === "branches") return section("branches", [{ type: "entities", title: null, rows: [vrow(MAIN, "main", "default"), vrow(FEATURE, "feature/PAY-231-sepa-retry"), vrow(other, "spike/y")] }]);
+      if (sectionId === null && id.includes("@refs/heads/")) asked += 1;
+      if (id === FEATURE && sectionId === null) return WITH_PR();
+      if (id === other && sectionId === null) return { ...section("overview", []), actions: [{ write_op: "create_pull_request", disabled: null } as ViewAction] };
+      return base.entityView(id, sectionId);
+    },
+  });
+  const props = $state({ ready: true, rest: [REPO], job: null, ports: stand, now: NOW });
+  view = mount(TfRepo, { target, props });
+  await settle();
+  const looked = asked;
+  expect(looked).toBeGreaterThan(0);
+  const proposal = () => target.querySelector(".tf-fhead .tf-primary")?.getAttribute("href");
+  expect(proposal()).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
+
+  // Commits and back: the lists are read again, the look is not.
+  props.rest = [REPO, "commits"];
+  await settle();
+  props.rest = [REPO];
+  await settle();
+  expect(asked).toBe(looked);
+  expect(proposal()).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
+
+  // A second visit to the repository: drawn at once, nothing asked.
+  unmount(view);
+  view = mount(TfRepo, { target, props: { ready: true, rest: [REPO], job: null, ports: stand, now: NOW } });
+  await settle();
+  expect(asked).toBe(looked);
+  expect(target.querySelector(".tf-fhead .tf-repoheld")).toBeNull();
+  expect(proposal()).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
+});
+
 test("until the branches answer, the primary keeps its room unseen, so it never changes its words under the pointer (the live run, 2026-11-09)", async () => {
   const base = ports();
   const held: (() => void)[] = [];
