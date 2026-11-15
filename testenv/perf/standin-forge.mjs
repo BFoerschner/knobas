@@ -291,7 +291,7 @@ async function inner(url, res, owner, name, rest) {
     await sleep(delay);
     const p = pull(m[1]);
     await paged(url, res, await commitList(`${p.merge_base ?? p.base.sha}..${p.head.sha}`));
-  } else if ((m = rest.match(/^\/(pulls\/\d+\/(reviews|files)|issues\/\d+\/(comments|timeline)|reviewers|labels|pulls)$/))) {
+  } else if ((m = rest.match(/^\/(pulls\/\d+\/(reviews|files)|issues\/\d+\/(comments|timeline)|reviewers|labels|pulls|issues)$/))) {
     count("empty");
     await sleep(delay);
     json(res, [], 0);
@@ -313,6 +313,13 @@ http.createServer((req, res) => {
 async function answer(req, res) {
   const url = new URL(req.url, "http://x");
   if (req.method === "GET" && url.pathname === "/api/v1/user") return json(res, { id: 1, login: "knobas", username: "knobas", full_name: "knobas", email: "knobas@tidewater.test" });
+  // An organisation's labels, which a pull request's overview offers beside the repository's: none. Unanswered, the
+  // overview's own read failed, and its side panels never drew on the stand-in (the forge-rounds pass, 2026-11-15).
+  if (req.method === "GET" && /^\/api\/v1\/orgs\/[^/]+\/labels$/.test(url.pathname)) {
+    count("empty");
+    await sleep(delay);
+    return json(res, [], 0);
+  }
   const compare = url.pathname.match(/^\/api\/v1\/repos\/[^/]+\/[^/]+\/compare\/(.+)$/);
   if (req.method === "GET" && compare === null && (gitDir !== null || reposDir !== null)) {
     try {

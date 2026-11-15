@@ -164,7 +164,7 @@ very shas the saved database mirrors. `standin-forge.mjs --repos <dir>` then ans
 `<dir>/<owner>-<name>.git`: its record, branches and tips, trees, files, a commit and its diff, a path's commits, a
 commit's statuses, and with `--pulls <file.json>` (each pull request's record by `owner/name#n`, the mirror's payload as
 `get_entity` gives it) a pull request's record, commits and `.diff`. Reviews and comments answer empty, the account is
-`knobas`, and every other route 404 (`--log` prints every request with its status and time, so a slow page can be told
+`knobas`, an organisation's labels answer empty, and every other route 404 (`--log` prints every request with its status and time, so a slow page can be told
 from a slow stand-in: its git runs off the event loop, and a branch's commit records are read in one `git show`).
 
 ```sh
