@@ -87,6 +87,7 @@
   import { installRowRoom } from "./row-room";
   import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { loadEveryFace } from "../shell/faces";
+  import { warmDiffView } from "./diff/warm";
   import { installFindKey } from "./filter-keys";
   import { installPlainTyping } from "./plain-typing";
   import { installExternalLinks } from "../shell/external-links";
@@ -811,6 +812,8 @@
   onMount(() => installKeysHere());
   // So no page's first draw waits on a face and lays itself out again when it lands (the render-cost pass, 2026-11-14).
   onMount(() => loadEveryFace());
+  // So a pull request's first *Files changed* runs warm code (the forge-rounds pass, 2026-11-15).
+  onMount(() => warmDiffView());
   onMount(() => {
     const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);
