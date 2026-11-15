@@ -291,7 +291,7 @@ const SMALL: Record<string, string> = {
   "tf/time/TfStandup.svelte  form.attendees": "a handful by what it is: the standup's attendees",
   "tf/time/TfStandup.svelte  form.items": "a handful by what it is: the standup's items",
   "tf/time/TfStandup.svelte  known": "a handful by what it is: the standup's attendees",
-  "tf/time/TfStandup.svelte  lines": "a handful by what it is: one standup digest's lines",
+  "tf/time/TfStandup.svelte  drawnNow(id, lines)": "a handful by what it is: one standup digest's lines, the first frame's share of a long one",
   "tf/time/TfWeek.svelte  ready.held": "a handful by what it is: the week's notes",
   "tf/time/TfWeek.svelte  ready.week.days": "a set the code fixes: a week's days",
   "tf/time/TfWeek.svelte  row.cells": "a set the code fixes: a row's seven days",
