@@ -376,7 +376,7 @@ key's own event time:
 
 | Measure | What it is |
 |---|---|
-| `rows` | the first frame after the last read the key caused has answered and its rows are in the DOM: the answer, seen |
+| `rows` | the first frame after the reads the key sent at once (every read sent before the first answered) have answered and their rows are in the DOM: the answer, seen. A page's whole read once the keys pause (the list after *Show N more*, an expanded board: fifty a column on the key, the rest after `LIST_SETTLE_MS`, since the ux13-overs pass, 2026-11-15) is not waited for; it is in `reads` and `settled`, and `moved` fails a row on screen it moves |
 | `answered` | when that read answered, so `rows - answered` is the page's own work and `answered` the wait for the backend |
 | `moved` | the frames after `rows` in which a row drawn on screen in it moved or went; a row drawn later below them is none |
 | `late` | what changed after `rows`, by element, for a `moved` to be read against |

@@ -50,6 +50,14 @@ Björn, on PR #2479: "it's fast after the first load. but some sites take some t
 - **Not for reads past the mirror.** A checkout's state, a source's view and a search go to the backend every time, as above.
 - **Docs reads what it draws** rather than its whole tree (`docs_outline`, `docs_nodes`), and the backend keeps the tree it computed until a page's row moves (`docs::TreeCache`).
 
+## The main sections are built ahead of their first press (amended 2026-11-15)
+
+The ux13 Windows pass of PR #2479: Builds' first open drew in 282 ms at CPU 4x and 415 at 6x in knobas's window on Björn's PC, the Tickets board's in 202 at 4x, every return within its line. On the Mac a first open cost about twice a later mount of the same page, the engine running the page's code and working out its styles for the first time (`docs/decisions/2026-11-15-whats-over-on-the-pc-with-ux13.md`). Ruled by Fable, the pass's one decision agent, for Björn.
+
+- **Once the window is ready**, the shell opens Tickets, Builds, Code, Monitors, Inbox and Docs hidden, one at a time, each after a second with no key, press, pointer move, wheel or scroll and an idle moment (`app/src/lib/tf/ahead.ts`), at the address its nav entry goes to then, never the section shown. Each goes into a free room of *Pages kept open*, behind every page held, so it never drops a page the reader left, a later visit drops it first, and 0 opens none; the setting's words say so.
+- **A page held ahead is a kept page** in every other way: it reads what it draws, through the [answer cache](../../CONTEXT.md#answer-cache), pauses while hidden, takes no keys and marks nothing read (a Jira view marked new waits to be shown); a role view held ahead re-reads on its first show only if a run of its role ended since it mounted. Its first press is a return.
+- **Not taken:** warming each page's code off screen with made-up data (half the gain, made-up data per page, no page kept); one laid-out frame before a held page hides (measured: Builds' and the board's first show slower at 6x).
+
 ## A repository never opened draws its branches and last commit from the mirror (amended 2026-11-12)
 
 The inner-pages pass of PR #2479 (Björn: "did you check the inner pages as well, when opening a repository itself etc? that took a long time too"), measured against the live Gitea through a proxy (`docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md`). A repository opened for the first time waited on the forge for its branch list, which the header's *Branch*, *New pull request*, Compare and the tabs' bookkeeping all wait for, and for its last commit, which kept the landing waiting under its skeleton: 2.8 s and 3.9 s on the first open after start, with the sync of that start loading the forge.
