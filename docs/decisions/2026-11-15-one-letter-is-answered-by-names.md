@@ -92,7 +92,8 @@ Nothing looks different, so it did not go through the design skill.
 - **The upgrade.** One pass at the first start, 2.6 s on that mirror with the Mac busy (the rows 1.8 s, the key 0.2 s,
   the index 0.5 s). Migration `0077` took 1.5 s the same way.
 - **The sync.** A write of a row whose name or date changed lexes its key and its key cell once more and writes about
-  six narrow rows. A write that changes neither writes nothing.
+  six narrow rows. A write that changes neither writes nothing. On the scale copy, with the Mac busy, a date moved on
+  1,000 tickets spent 165 ms of the statement's 1,043 in the new trigger, and a stamp of 10,000 rows 12 ms of 1,381.
 - **The contract.** `SearchResponse.total` and `ResultGroup.total` are, for one typed character, the rows the answer
   holds. The generated mirror's two doc comments say so.
 

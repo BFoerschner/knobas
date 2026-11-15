@@ -351,7 +351,9 @@ enum KindCut {
     Window,
 }
 
-/// [`search_sql`], cutting each kind as `cut` says.
+/// [`search_sql`], cutting each kind as `cut` says and matching as
+/// `matching` does: the one builder behind the launcher's statements.
+#[allow(clippy::too_many_arguments)]
 fn build_search_sql(
     corpora: &[&Corpus],
     text: Option<&str>,
