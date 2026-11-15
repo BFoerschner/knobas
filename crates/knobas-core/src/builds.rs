@@ -159,45 +159,75 @@ macro_rules! frame_kinds_cte {
     };
 }
 
-/// A run's columns, read through its kind's declarations; the row alias is
-/// `i` and the declarations `$1`.
-macro_rules! run_columns {
+/// A run's columns, the row alias `i` and the declarations `$1`: each from the
+/// run's stored row (`sync.item_run`, migration `0088`, joined as `ru` by
+/// [`crate::run_join!`]) where it has one, and walked out of its payload
+/// through its kind's declarations where it has none: the same answer, since a
+/// row is read only under the declarations the statement binds. A statement that reads it holds
+/// [`crate::run_keys!`] among its CTEs and the join after its `i`.
+macro_rules! stored_run_columns {
     () => {
         concat!(
             "i.entity_id, i.source_id, i.web_url, i.item_updated_at, ",
-            crate::declared_string!("$1", "pipeline"),
+            crate::row_or!("ru", "pkey", crate::declared_string!("$1", "pipeline")),
             " as pkey, ",
-            crate::declared_string!("$1", "number"),
+            crate::row_or!("ru", "number", crate::declared_string!("$1", "number")),
             " as number, ",
-            crate::declared_state!("$1"),
+            crate::row_or!("ru", "state", crate::declared_state!("$1")),
             " as state, ",
-            crate::declared_string!("$1", "branch"),
+            crate::row_or!("ru", "branch", crate::declared_string!("$1", "branch")),
             " as branch, ",
-            crate::declared_string!("$1", "started"),
+            crate::row_or!("ru", "started", crate::declared_string!("$1", "started")),
             " as started, ",
-            crate::declared_string!("$1", "finished"),
+            crate::row_or!("ru", "finished", crate::declared_string!("$1", "finished")),
             " as finished, ",
-            crate::declared_trigger!("$1"),
+            crate::row_or!("ru", "trig", crate::declared_trigger!("$1")),
             " as trig, ",
-            crate::declared_string!("$1", "started_by"),
+            crate::row_or!(
+                "ru",
+                "started_by",
+                crate::declared_string!("$1", "started_by")
+            ),
             " as started_by, ",
-            crate::declared_string!("$1", "agent"),
+            crate::row_or!("ru", "agent", crate::declared_string!("$1", "agent")),
             " as agent, ",
-            crate::declared_string!("$1", "current_step"),
+            crate::row_or!(
+                "ru",
+                "current_step",
+                crate::declared_string!("$1", "current_step")
+            ),
             " as current_step, ",
-            crate::declared_integer!("$1", "tests_failed"),
+            crate::row_or!(
+                "ru",
+                "tests_failed",
+                crate::declared_integer!("$1", "tests_failed")
+            ),
             " as tests_failed, ",
-            crate::declared_integer!("$1", "tests_passed"),
+            crate::row_or!(
+                "ru",
+                "tests_passed",
+                crate::declared_integer!("$1", "tests_passed")
+            ),
             " as tests_passed, ",
-            crate::declared_integer!("$1", "tests_ignored"),
-            " as tests_ignored, (select l.value from ",
-            crate::declared_list!("$1", "revision"),
-            " l limit 1) as revision"
+            crate::row_or!(
+                "ru",
+                "tests_ignored",
+                crate::declared_integer!("$1", "tests_ignored")
+            ),
+            " as tests_ignored, ",
+            crate::row_or!(
+                "ru",
+                "revision",
+                "(select l.value from ",
+                crate::declared_list!("$1", "revision"),
+                " l limit 1)"
+            ),
+            " as revision"
         )
     };
 }
 
-/// A run of `r` (the alias [`run_columns!`] reads into) as one jsonb object in
+/// A run of `r` (the alias [`stored_run_columns!`] reads into) as one jsonb object in
 /// [`RawRun`]'s fields: what a pipeline's runs are aggregated into.
 macro_rules! run_object {
     () => {
@@ -285,6 +315,8 @@ macro_rules! newest_runs {
 pub const PIPELINES: &str = concat!(
     "with ",
     frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
     ",
 p as materialized (
   select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name,
@@ -310,13 +342,15 @@ pins as (
 ),
 r as materialized (
   select p.entity_id as pipeline, ",
-    run_columns!(),
+    stored_run_columns!(),
     "
     from p
     cross join lateral ",
     crate::newest_runs!("p", "$2"),
     " k
-    join sync.item i on i.entity_id = k.entity_id
+    join sync.item i on i.entity_id = k.entity_id",
+    crate::run_join!("ru", "i"),
+    "
    where p.pkey is not null and p.name is not null
 ),
 recent as materialized (
@@ -424,6 +458,8 @@ pub struct CommitRepository {
 pub const REPO_PIPELINES: &str = concat!(
     "with ",
     frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
     ",
 repo as (
   select i.source_id, lower(i.title) as name
@@ -474,11 +510,13 @@ p as materialized (
 ),
 r as materialized (
   select k.entity_id as pipeline, ",
-    run_columns!(),
+    stored_run_columns!(),
     "
     from built b
     join keyed k on k.source_id = b.source_id and k.pkey = b.pkey and k.adapter_kind = b.adapter_kind
-    join sync.item i on i.entity_id = b.entity_id
+    join sync.item i on i.entity_id = b.entity_id",
+    crate::run_join!("ru", "i"),
+    "
 ),
 latest as (
   select r.pipeline, jsonb_agg(",
@@ -545,6 +583,8 @@ select distinct ip.entity_id as commit_id, r.entity_id as repo_id, r.title as re
 const PIPELINE_RUNS_OF: &str = concat!(
     "with ",
     frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
     ",
 target as (
   select i.source_id, s.kind as adapter_kind, ",
@@ -558,12 +598,14 @@ target as (
 select t.pkey is not null as found, x.* from target t
   left join lateral (
     select ",
-    run_columns!(),
+    stored_run_columns!(),
     "
       from ",
     crate::newest_runs!("t", "$3"),
     " k
-      join sync.item i on i.entity_id = k.entity_id
+      join sync.item i on i.entity_id = k.entity_id",
+    crate::run_join!("ru", "i"),
+    "
      order by i.item_updated_at desc nulls last, i.entity_id desc) x on true
 "
 );
@@ -655,13 +697,36 @@ impl RunRow {
 /// live items of kind `commit` whose declared `commit` is that sha. Two rows
 /// for one sha are two mirrored repositories holding it, a fork or a mirror
 /// on a second forge (#1144).
+///
+/// A commit's sha is stored (`sync.item_run`, migration `0088`): the asked
+/// shas find their commits through `item_run_sha_idx`, and only a commit with
+/// no row under the bound declarations' key is walked, the walk it always
+/// was. Not one `= any($2)` over every commit: in the plan PostgreSQL keeps
+/// for a prepared statement the array is a parameter, and each of 5,636
+/// commits was compared with each of 600 shas one by one, 62 ms where the
+/// stored range answers in 2. The commits with no row are a fenced subquery
+/// (`offset 0`), so the sha test is not pushed down under the test for the
+/// row, which walked every commit again.
 const COMMITS_OF: &str = concat!(
-    "select c.sha, c.entity_id from (
-  select i.entity_id, ",
+    "with ",
+    crate::run_keys!("$1"),
+    "
+select c.sha, c.entity_id from (
+  select ru.sha, i.entity_id
+    from (select distinct s.sha from unnest($2::text[]) as s(sha)) s
+    join sync.item_run ru on ru.sha = s.sha
+    join sync.live_item i on i.entity_id = ru.entity_id and i.kind = 'commit'
+    join run_keys ru_k on ru_k.source_id = i.source_id and ru_k.kind = i.kind and ru_k.k = ru.paths_key
+  union all
+  select ",
     crate::declared_string!("$1", "commit"),
-    " as sha
-    from sync.live_item i
-   where i.kind = 'commit') c
+    " as sha, i.entity_id
+    from (select l.entity_id, l.source_id, l.kind, l.payload
+            from sync.live_item l",
+    crate::run_join!("ru", "l"),
+    "
+           where l.kind = 'commit' and ru.entity_id is null
+          offset 0) i) c
  where c.sha = any($2::text[])
  order by c.sha, c.entity_id"
 );

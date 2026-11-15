@@ -1050,6 +1050,18 @@ async fn bring_up_app<R: tauri::Runtime>(
                 ),
                 Err(error) => tracing::warn!(%error, "the lists' rows could not all be filled"),
             }
+            // Then what Builds reads of a run and a commit's sha (migration
+            // `0088`), the same way: Builds walks a run's payload until its
+            // batch has run.
+            let started = std::time::Instant::now();
+            match knobas_core::item_run::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the runs' rows are filled"
+                ),
+                Err(error) => tracing::warn!(%error, "the runs' rows could not all be filled"),
+            }
             // Then what the launcher reads of a match beside its vector
             // (migration `0084`), for the rows written before it: last, the
             // longest of the three and the one no page waits on, since the
