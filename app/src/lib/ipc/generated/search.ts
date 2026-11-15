@@ -397,7 +397,9 @@ left_out: Array<LeftOut>, };
  */
 export type ResultGroup = { kind: string, label: string, plural: string, monogram: string, 
 /**
- * Matches of this kind, before `limit` was applied.
+ * Matches of this kind, before `limit` was applied. For one typed
+ * character, at most the rows a kind may contribute: see
+ * [`SearchResponse::total`].
  */
 total: number, hits: Array<SearchHit>, };
 
@@ -616,7 +618,10 @@ titles: boolean, };
  */
 export type SearchResponse = { interpreted: ParsedQuery, groups: Array<ResultGroup>, 
 /**
- * Matches across every kind, before `limit` was applied.
+ * Matches across every kind, before `limit` was applied. For one typed
+ * character, the rows the answer holds: such an answer reads each
+ * kind's first rows and counts no match (the one-letter pass,
+ * 2026-11-15).
  */
 total: number, took_ms: number, 
 /**

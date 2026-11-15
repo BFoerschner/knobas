@@ -1258,6 +1258,22 @@ pub const LIVE_ITEM_MATCH: Corpus = Corpus {
     matched: None,
 };
 
+/// The mirror for **one typed character** (the one-letter pass, 2026-11-15):
+/// `sync.item_initial` (migration `0093`), one row for each first character
+/// of the words a mirror row is named by, in the order such an answer is
+/// given in. `crate::sql::letter_sql` reads each kind's first rows off its
+/// index and stops, so its liveness is two probes a row read
+/// (`knobas_core::live_by_key!`) and no set built for the statement.
+///
+/// **What it cannot answer.** It holds a row's kind, source and date and no
+/// more, as [`LIVE_ITEM_MATCH`] does: a query with `by:`, `name:`, `under:`,
+/// `reach:` or a ticket key is not asked of it.
+pub const LIVE_ITEM_INITIAL: Corpus = Corpus {
+    relation: "sync.item_initial sx",
+    scope: Some(knobas_core::live_by_key!("sx")),
+    ..LIVE_ITEM_MATCH
+};
+
 /// [`LIVE_ITEM`] on a mirror whose every search copy holds its six columns
 /// (migration `0084`): the same rows, its match stage read off the copy alone
 /// ([`LIVE_ITEM_MATCH`]). What [`mirror`] hands out once the fill is done.

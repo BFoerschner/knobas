@@ -24,6 +24,7 @@ mod key_cell;
 mod launcher_kinds;
 mod lists;
 mod name_glob;
+mod one_letter;
 mod parent_key_pin;
 mod path_line;
 mod pr_by_number;

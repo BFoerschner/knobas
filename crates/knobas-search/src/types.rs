@@ -131,7 +131,10 @@ pub enum Prefix {
 pub struct SearchResponse {
     pub interpreted: ParsedQuery,
     pub groups: Vec<ResultGroup>,
-    /// Matches across every kind, before `limit` was applied.
+    /// Matches across every kind, before `limit` was applied. For one typed
+    /// character, the rows the answer holds: such an answer reads each
+    /// kind's first rows and counts no match (the one-letter pass,
+    /// 2026-11-15).
     pub total: u32,
     pub took_ms: u32,
     /// Which sources could answer the filters this query narrowed by, for the
@@ -260,7 +263,9 @@ pub struct ResultGroup {
     pub label: String,
     pub plural: String,
     pub monogram: String,
-    /// Matches of this kind, before `limit` was applied.
+    /// Matches of this kind, before `limit` was applied. For one typed
+    /// character, at most the rows a kind may contribute: see
+    /// [`SearchResponse::total`].
     pub total: u32,
     pub hits: Vec<SearchHit>,
 }

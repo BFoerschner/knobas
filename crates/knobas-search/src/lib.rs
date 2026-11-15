@@ -358,6 +358,30 @@ impl Searcher {
     /// [`SearchError::Invalid`] for a query outside the engine's bounds,
     /// [`SearchError::Db`] if the statement fails.
     pub async fn search(&self, query: SearchQuery) -> Result<SearchResponse, SearchError> {
+        self.search_as(query, true).await
+    }
+
+    /// [`Self::search`] with one typed character ranked as longer words are
+    /// ([`sql::search_sql`]), as every query was answered before the
+    /// one-letter pass (2026-11-15): the reference
+    /// `tests/it/one_letter.rs` holds the queries of two characters and
+    /// more to, and shows a single one against.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::search`].
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn search_by_words(&self, query: SearchQuery) -> Result<SearchResponse, SearchError> {
+        self.search_as(query, false).await
+    }
+
+    /// [`Self::search`], one typed character answered by names where
+    /// `by_name` says so.
+    async fn search_as(
+        &self,
+        query: SearchQuery,
+        by_name: bool,
+    ) -> Result<SearchResponse, SearchError> {
         let started = Instant::now();
         let query = validate(query)?;
 
@@ -409,19 +433,43 @@ impl Searcher {
         let rows: Vec<RawHit> = if known_under.admits_nothing {
             Vec::new()
         } else {
-            // The mirror's match stage off its search copies alone, once
-            // every copy holds what the stage reads (migration `0084`).
-            let corpora =
-                corpus::with_mirror(corpus::searched(self.corpora(), filters.titles), mirror);
-            let built = sql::search_sql(
-                &corpora,
-                text,
-                parsed.prefix_last_term,
-                &filters,
-                PER_GROUP,
-                query.limit,
-            );
-            self.rows_of(built, text).await?
+            let named = self
+                .rows_by_name(
+                    text.filter(|_| by_name),
+                    parsed.prefix_last_term,
+                    &filters,
+                    query.limit,
+                )
+                .await?;
+            match named {
+                Named::Rows(rows) => rows,
+                words => {
+                    // The mirror's match stage off its search copies alone,
+                    // once every copy holds what the stage reads (migration
+                    // `0084`).
+                    let corpora = corpus::with_mirror(
+                        corpus::searched(self.corpora(), filters.titles),
+                        mirror,
+                    );
+                    let built = sql::search_sql(
+                        &corpora,
+                        text,
+                        parsed.prefix_last_term,
+                        &filters,
+                        PER_GROUP,
+                        query.limit,
+                    );
+                    match words {
+                        // A character no name holds is rare in the bodies
+                        // too: through the index, on the processes the
+                        // planner gives a word, where a letter read whole
+                        // starts three workers whatever it matches (31 to 37
+                        // ms each on Windows, `sql::LETTER_PLANNING`).
+                        Named::NoName => sql::fetch_matched(&self.pool, built).await?,
+                        _ => self.rows_of(built, text).await?,
+                    }
+                }
+            }
         };
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
@@ -449,11 +497,49 @@ impl Searcher {
         })
     }
 
+    /// The rows **one typed character** is answered with (the one-letter
+    /// pass, 2026-11-15; `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`):
+    /// the names that hold a word beginning with it, those that begin with
+    /// it first, then the newest ([`sql::letter_sql`]), under *Titles* and
+    /// under *Everything* alike.
+    ///
+    /// Where [`sql::search_sql`] is to answer instead, it says which way:
+    /// [`Named::NotAsked`] for words of more than one character, a finished
+    /// word (`p` and a space) or a query that asks what the stored
+    /// characters do not hold, and [`Named::NoName`] where, under
+    /// *Everything*, no name holds the character, so the bodies are asked
+    /// as before and *nothing matches* stays true of them too. Under
+    /// *Titles* the names were the whole question, and none is the answer.
+    async fn rows_by_name(
+        &self,
+        words: Option<&str>,
+        prefix_last: bool,
+        filters: &EffectiveFilters,
+        limit: u32,
+    ) -> Result<Named, sqlx::Error> {
+        let Some(letter) = words.filter(|text| prefix_last && text.chars().count() == 1) else {
+            return Ok(Named::NotAsked);
+        };
+        // Names, so no run log: a log is never one (`corpus::searched`).
+        let corpora = corpus::searched(self.corpora(), true);
+        let Some(built) = sql::letter_sql(&corpora, letter, filters, PER_GROUP, limit) else {
+            return Ok(Named::NotAsked);
+        };
+        let rows: Vec<RawHit> = sql::fetch_named(&self.pool, built).await?;
+        Ok(if rows.is_empty() && !filters.titles {
+            Named::NoName
+        } else {
+            Named::Rows(rows)
+        })
+    }
+
     /// The rows of a statement [`sql::search_sql`] built: through the indexes
     /// when it has words to match ([`sql::fetch_matched`]), the narrow table
     /// read whole for a single character
     /// ([`sql::fetch_matched_by_a_letter`]), as the planner chooses for a
-    /// browse.
+    /// browse. A single character reaches it from the Docs search, and from
+    /// the launcher only where no name holds it or it is a finished word
+    /// ([`Self::rows_by_name`]).
     async fn rows_of(
         &self,
         built: sql::SearchSql,
@@ -899,6 +985,18 @@ impl Searcher {
     pub async fn delete_list(&self, id: &str) -> Result<(), SearchError> {
         saved::delete(&self.pool, id).await
     }
+}
+
+/// What the names say of one typed character ([`Searcher::rows_by_name`]).
+enum Named {
+    /// The answer: the rows the names give, which under *Titles* may be none.
+    Rows(Vec<RawHit>),
+    /// No name holds the character, and under *Everything* the bodies are
+    /// still to ask.
+    NoName,
+    /// Not one typed character, or one asked with what the stored
+    /// characters do not hold: the words' ranking answers, as before.
+    NotAsked,
 }
 
 /// What a query admits of one kind ([`Searcher::admits_in`]).

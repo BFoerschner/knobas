@@ -34,7 +34,7 @@ async fn pool() -> sqlx::PgPool {
     pool
 }
 
-fn source(tag: &str) -> String {
+pub(super) fn source(tag: &str) -> String {
     format!("{tag}-{}", &uuid::Uuid::new_v4().simple().to_string()[..10])
 }
 
@@ -163,7 +163,7 @@ fn title(rng: &mut Rng) -> String {
 /// under `owner/repo` titles' key cells, and a fifth as many pages, each
 /// page's body long enough that its vector is stored out of line (over
 /// 2 kB), as a real page's is. The source they were written under.
-async fn seed_scale_words(pool: &sqlx::PgPool, tickets: usize) -> String {
+pub(super) async fn seed_scale_words(pool: &sqlx::PgPool, tickets: usize) -> String {
     let source = source("scalewords");
     let words: Vec<&str> = WORDS.split_whitespace().collect();
     let mut rng = Rng(0x5ca1e);
