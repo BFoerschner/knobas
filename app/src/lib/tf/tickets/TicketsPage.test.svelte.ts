@@ -480,11 +480,22 @@ test("a typed filter reads fifty a column under its total, a long column draws t
 test("a column a filter grows under 24 cards draws its first sixteen in the frame the answer lands, the rest the frame after (the broad-filters pass, 2026-11-13)", async () => {
   const h = harness([], [], [...CORPUS, ...bulk("To Do", 20, "Bulk")]);
   await open(h);
+  // The frames are the test's own: a loaded machine's five turns of `settle` outlasted jsdom's frame, which then drew
+  // the rest before the first look (the ux13-overs pass: a flake under load).
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
   for (const char of "bulk") type(field(), char);
   await settle();
   expect(columns()).toEqual([{ head: "To do 20", cards: 16, more: null }]);
   const firstCards = [...target.querySelectorAll(".tf-tcard")];
-  await nextFrame();
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(performance.now());
+  await settle();
+  vi.mocked(window.requestAnimationFrame).mockRestore();
+  vi.mocked(window.cancelAnimationFrame).mockRestore();
   expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
   expect(firstCards.every((card) => card.isConnected)).toBe(true);
   expect(stacks()).toEqual([{ cards: 20, room: "" }]);
