@@ -59,16 +59,23 @@ to 157 ms down to 91 to 94 at 6x; the drawn time moved less, as the cold code an
 **The stand-in.** It ran its git in line on its one thread, so one branch list held every other request: up to 5.8 s
 here, which first read as knobas (a commit at 2.4 s, Compare at 11 s). Its git now runs off the event loop and a
 branch's commit records come from one `git show`; with `--log` it prints every request's time, so the forge can be told
-from the page.
+from the page. And its branch list gave each branch's commit as a commit record (`sha`) where Gitea's branch record
+says `id`, so every branch's whole view failed on it: the paired runs below were taken so, before and after alike (the
+header's look ended on a branch it could not read), and the gate run on the head with it fixed.
 
 **The header's *New pull request* look flooded the forge.** To find a branch with nothing open, the header reads up to
 eight branches' whole views, four at a time, each about ten requests to Gitea, and it looked again on every visit to the
 repository and every tab shown (the page reads its lists again, which made a new list). One run of the inner pages sent
 2,179 requests to the stand-in, nearly all of them this, against a forge quota of ten a second; a person's own reads
-waited behind them (Commits after a sync, 0.6 to 1 s). What the look found is now kept per repository for the branches
-it asked and the writes asked since, five minutes at most, and dropped on a refresh. A run's end does not drop it:
-looked for again then, its reads went out with the run's own and Commits waited for them; a pull request someone opened
-from the branch since is what Compare says when the button is pressed ("PR #N is already open from this branch").
+waited behind them (Commits after a sync, 0.6 to 1 s). And on a return from Compare it looked again for the branch
+Compare had picked, holding the button for 2 to 5 s, which the probe read as nothing to press (the build before this
+pass as well, once the stand-in's branch views answered). Each branch's standing the look reads is now kept by the
+branch, five minutes at most; a refresh drops the repository's, a pull request sent from here takes its branch out of
+the look (`sentFrom`), and a look whose branches are all kept answers at once, with nothing held. A run's end does not
+drop them: looked for again then, the reads went out with the run's own and Commits waited for them; a pull request
+someone opened from the branch since is what Compare says when the button is pressed ("PR #N is already open from this
+branch"). A first look still holds the button while it reads: four whole views are about forty requests, four seconds
+of the forge's quota here; the live run of 2026-11-09 measured 2.5 s.
 
 **The landing's README waited for the top listing**, which names its section: a second round of the forge. Where the
 checkout has said it holds no copy, the README is asked by path beside the listing, as a deep link's file is (#2244), and
@@ -104,8 +111,34 @@ front end, after this pass's (one run each, so read a cell to within 10 to 20 ms
 | the repository's Builds tab, first | - | 80 → 72 | 98 → 83 |
 
 The small file at 4x and 6x is the `6` set's `Redis.java`, 97 lines (`inner-items.json`); at 1x it is `go.mod`, 400.
-Commits after a sync was 0.6 to 1.2 s in both builds, waiting on the forge behind the header's look; the last change
-above (the look kept across a run's end) came after these runs, and the gate run on the head is the measure of it.
+Commits after a sync was 0.6 to 1.2 s in both builds, waiting on the forge behind the header's look; the standings kept
+came after these runs, and on the head (below) it draws at 46, 54 and 77 ms.
+
+**On the head**, the gate run (`just open-budget --real <port> --inner --no-big`, one backend for the three throttles,
+each at its own items, the stand-in's branch views answering), drawn ms, first / return / after a sync:
+
+| Place | 1x | 4x | 6x |
+|---|---|---|---|
+| repository landing | 230 / 21 / 25 | 269 / 28 / 27 | 318 / 33 / 37 |
+| a deep file | 190 / 40 / 22 | 195 / 51 / 44 | 243 / 59 / 66 |
+| *Go to file* | 100 / 21 / 28 | 96 / 32 / 38 | 101 / 33 / 38 |
+| the small file | 87 / 33 / 25 | 198 / 20 / 28 | 207 / 40 / 44 |
+| the large file | 204 / 26 / 21 | 193 / 24 / 25 | 202 / 41 / 19 |
+| the README | 48 / 42 / 38 | 54 / 48 / 45 | 90 / 48 / 42 |
+| Branches | 46 / 46 / 46 | 106 / 46 / 62 | 108 / 62 / 44 |
+| Commits | 37 / 44 / 46 | 53 / 62 / 54 | 106 / 78 / 77 |
+| Builds tab | 35 / 36 / 42 | 94 / 45 / 48 | 90 / 49 / 40 |
+| a commit | 117 / 26 / 32 | 144 / 39 / 20 | 172 / 29 / 19 |
+| Compare | 68 / 40 / 39 | 152 / 46 / 45 | 226 / 61 / 64 |
+| *New pull request* | 59 / 46 / 36 | 174 / 46 / 61 | 227 / 63 / 78 |
+| a pull request's overview | 43 / 31 / 20 | 84 / 24 / 31 | 116 / 23 / 32 |
+| Conversation | 36 / 36 / 41 | 41 / 45 / 44 | 49 / 45 / 44 |
+| *Files changed* | 185 / 38 / 38 | 253 / 62 / 46 | 326 / 74 / 77 |
+| a pull request's Commits | 19 / 23 / 29 | 24 / 29 / 30 | 48 / 40 / 45 |
+| the larger *Files changed* | 189 / 43 / 42 | 263 / 62 / 41 | 312 / 62 / 78 |
+
+Every return and every after-a-sync is inside 80 ms at 6x on the Mac. `compare-large` reads "never" in every build, the
+probe's known selector fault (it wants three diff cards; the branch has fewer).
 
 ## Still over, and why
 
@@ -127,3 +160,26 @@ above (the look kept across a run's end) came after these runs, and the gate run
 
 `just open-budget --real <port> --inner` on the live Gitea at 1x, 4x and 6x on this head (the 6x lines are new), the big
 folders and compares included.
+
+## Gates
+
+**Owed on `cf2a729c`** (the Builds-at-6x pass's head), in a clean clone, on AC power, over a fresh clone of the scale
+home through a release build of the windowless backend at that head: the press trips with `--strict` 271 of 272 on the
+first run, the one (`reply-twice`, a focus check after a second Enter) passing alone, under a machine load of 6 to 17;
+`just frame-budget` on the fixture 45 within, 0 over, its 36 scrollers opaque and its long run within; `--real` 65
+within, 0 over, `builds-main` and `pipeline-history` at 60 frames a second at 1x, 4x and 6x (longest task at 6x 22.8 and
+24.3 ms); `just open-budget --real` every open within its line, 225 opens, no row moved, the slowest at 6x the board's
+first at 280 ms; `just keys-budget --real` 17 of 18 on the first run (the 1x letter under *Everything* at 109 ms, its
+first press 200 ms on a cold read) and 18 of 18 on the rerun of that case (80 ms); `just clippy-libs` clean.
+
+**On this pass's head**, in a clean clone rebased on the card store's commits: `just check-front` ok (svelte-check 1,466
+files, 0 errors, 0 warnings; vitest 333 files, 5,131 passed, 1 skipped); `testenv/desktop-witness-test.sh` 307 checks;
+the press trips with `--strict` 272 of 272, the 16 `rows-still` among them; `just frame-budget` on the fixture 45 within
+and its long run within, `--real` 65 within (`builds-main` and `pipeline-history` at 60 frames a second at 6x, longest
+task 20 and 22 ms); `just open-budget --real` every open within its line, 225 opens, no row moved, the slowest at 6x
+Builds' first at 216 ms, and after the header's last change the repository, Code and pull request places again, all
+within; `just open-budget --real --inner --no-big` against the stand-in every open within its line at 1x, 4x and 6x (162
+opens, the table above); `just keys-budget --real` 18 of 18, the slowest at 6x 98 ms; `pixel-same.py` over the nine
+screens this pass touches (*Files changed* first and on return, a pull request, the landing, a 400-line file, a file,
+Compare, Commits, Branches), seven the same and two by 58 and 22 pixels, what the same build shot twice differs by;
+`just check-scripts` ok. No Rust changed.
