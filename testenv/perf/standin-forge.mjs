@@ -11,7 +11,7 @@
 //   otherwise), and what a repository's other inner pages read (the inner-6x pass, 2026-11-15): its branches, a
 //   commit's record and its diff, a path's commits, a commit's statuses, and with `--pulls <file.json>` (records by
 //   `o/r#n`, as Gitea answers `pulls/{n}`, e.g. the mirror's payloads) a pull request's record, commits and `.diff`
-//   (`git diff <merge base>...<head>`), with no reviews or comments; the account is `knobas`;
+//   (`git diff <merge base>...<head>`), with no reviews or comments; the account is `knobas`, the version 1.27.3;
 //
 // - with `--sync` and `--repos`, the repository listing a Gitea run starts from (`/repos/search`): every repository the
 //   directory holds, so a scale profile's Gitea source can be kept syncing against the stand-in (the ux13 forge-load
@@ -387,6 +387,9 @@ async function answer(req, res) {
     return json(res, { ok: true, data: all.slice((page - 1) * limit, page * limit) }, all.length);
   }
   if (req.method === "GET" && url.pathname === "/api/v1/user") return json(res, { id: 1, login: "knobas", username: "knobas", full_name: "knobas", email: "knobas@tidewater.test" });
+  // The server's version, which a pull request's *Files* asks once a process to know whether threads resolve (the live
+  // Gitea's, 1.27.3): unanswered, the adapter asked it again on every read (the held-files pass, 2026-11-15).
+  if (req.method === "GET" && url.pathname === "/api/v1/version") return json(res, { version: "1.27.3" });
   // An organisation's labels, which a pull request's overview offers beside the repository's: none. Unanswered, the
   // overview's own read failed, and its side panels never drew on the stand-in (the forge-rounds pass, 2026-11-15).
   if (req.method === "GET" && /^\/api\/v1\/orgs\/[^/]+\/labels$/.test(url.pathname)) {
