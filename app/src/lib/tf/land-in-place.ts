@@ -6,14 +6,16 @@
  * much as that row moved, so it stays where it was. A reader at the top of
  * the page stays at the top and sees the new row come in.
  *
- * A row is an element marked `data-place` inside `within`. Rows keyed by
- * what they show keep their element across the read, so focus inside one
- * stays too; this keeps only the scroll.
+ * A row is an element marked `data-place` inside `within`, or what `marks`
+ * selects: a diff's lines and threads (the held-files pass, 2026-11-15), where
+ * a thread the read behind brings above the reader's line would push it down.
+ * Rows keyed by what they show keep their element across the read, so focus
+ * inside one stays too; this keeps only the scroll.
  */
 import { tick } from "svelte";
 
 /** Run `apply` (the read landing), keeping the first row on screen under `within` where it was. */
-export async function landInPlace(within: Element | null | undefined, apply: () => void): Promise<void> {
+export async function landInPlace(within: Element | null | undefined, apply: () => void, marks = "[data-place]"): Promise<void> {
   const scroller = within?.closest<HTMLElement>(".tf-main, .tf-scroller") ?? null;
   if (within === null || within === undefined || scroller === null || scroller.scrollTop === 0) {
     apply();
@@ -22,7 +24,7 @@ export async function landInPlace(within: Element | null | undefined, apply: () 
   const top = scroller.getBoundingClientRect().top;
   let mark: Element | null = null;
   let was = 0;
-  for (const row of within.querySelectorAll("[data-place]")) {
+  for (const row of within.querySelectorAll(marks)) {
     if (row.getClientRects().length === 0) continue;
     const box = row.getBoundingClientRect();
     if (box.bottom > top) {

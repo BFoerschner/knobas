@@ -56,6 +56,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import { entityFileBytes, entityFilePiped, entityRangeDiff, type LineThread, type PipeRun, type PipeStep, type RangeDiff, type ShownView, type SourceView } from "../../ipc/entity";
   import TfHeldNote from "../TfHeldNote.svelte";
+  import { landInPlace } from "../land-in-place";
   import { onViewFresh } from "../repo/view-fresh.svelte";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
@@ -173,12 +174,22 @@
     return out;
   };
 
-  /** The diff read (again, `again`): its head stamps new drafts (#2276), its blobs read *Viewed*. */
+  /** The files' box, which a read again lands in without moving the line the reader is on. */
+  let host = $state<HTMLElement | null>(null);
+  /** A diff's rows: its hunk heads, lines and threads, never a whole card (a thread lands inside one). */
+  const ROWS = ".tf-hunk, .tf-ln, .tf-srow, .tf-thread";
+
+  /**
+   * The diff read (again, `again`): its head stamps new drafts (#2276), its blobs read *Viewed*. Read again -- the
+   * source's answer behind what knobas held (ADR-0042), a reply landed -- it replaces the drawn one in place: a thread
+   * it brings above the reader's line moves the page by as much, so the line stays where it was.
+   */
   function read(id: string, live: () => boolean, again = false) {
     entityView(id, "files").then(
       (answer) => {
         if (!live()) return;
-        view = answer;
+        if (again) void landInPlace(host, () => (view = answer), ROWS);
+        else view = answer;
         heldFailed = null;
         const head = diffOf(answer)?.commentable?.head ?? null;
         if (head !== null) pending.seen(id, head);
@@ -436,7 +447,7 @@
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
 {:else if view !== undefined || predicted !== null}
   {#if view}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={sourceName ?? "the source"} failed={heldFailed} />{/if}
-  <div class="tf-prfiles" class:tf-with-tool={drawsDiff}>
+  <div class="tf-prfiles" class:tf-with-tool={drawsDiff} bind:this={host}>
   {#if range !== null}
     <div class="tf-pickbar" {@attach pickRoom}>
       <TfPrPicker {range} {choice} onchoose={(next) => (choice = next)} />
