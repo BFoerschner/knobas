@@ -47,6 +47,8 @@ pub mod attach;
 pub mod background;
 pub mod config;
 pub mod health;
+pub mod held_read;
+pub mod held_sections;
 pub mod pipeline_logs;
 pub mod progress;
 pub mod refresh;

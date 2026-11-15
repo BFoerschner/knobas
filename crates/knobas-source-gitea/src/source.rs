@@ -688,6 +688,20 @@ impl Source for GiteaSource {
     /// Every branch's tree is stored (the stored-trees pass of PR #2479):
     /// where the records keep the default branch, a branch's head and a
     /// pull request's head branch.
+    /// Each open pull request's *Files* (the held-files pass, 2026-11-15):
+    /// the `.diff` is the head's tree against the merge base's, so those two
+    /// say when a held copy no longer stands.
+    fn held_shape(&self) -> Option<knobas_source::held::HeldShape> {
+        Some(knobas_source::held::HeldShape {
+            kind: crate::KIND_PR,
+            section: "files",
+            state: &["state"],
+            open: "open",
+            base: &["merge_base"],
+            head: &["head", "sha"],
+        })
+    }
+
     fn tree_shape(&self) -> Option<knobas_source::tree::TreeShape> {
         Some(knobas_source::tree::TreeShape {
             repository: crate::KIND_REPO,

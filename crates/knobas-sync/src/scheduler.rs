@@ -2742,6 +2742,19 @@ impl Inner {
                     }
                 }
             }
+            // Each open pull request's *Files* whose commits moved (the
+            // held-files pass of PR #2479, 2026-11-15): after the logs, in the
+            // same background lane, bounded (`held_sections::BUDGET`), before
+            // the trees so a push's *Files* is held by the run after it.
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => {}
+                held = crate::held_sections::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
+                    if let Err(error) = held {
+                        tracing::warn!(source_id, %error, "holding the open pull requests' files failed");
+                    }
+                }
+            }
             // Every branch's tree, levels the store lacks only (the
             // stored-trees pass of PR #2479): after the logs, in the same
             // background lane, bounded (`stored_trees::BUDGET`); the quit

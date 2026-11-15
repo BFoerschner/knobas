@@ -49,6 +49,8 @@ mod external_adapter_release;
 mod external_docs;
 mod favourites_ipc;
 mod file_pipelines;
+mod held_files;
+mod held_store;
 mod inbox_ipc;
 mod ipc;
 mod item_card;

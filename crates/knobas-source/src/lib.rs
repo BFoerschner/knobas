@@ -32,6 +32,7 @@ pub mod docs;
 pub mod file_text;
 pub mod fingerprint;
 pub mod grants;
+pub mod held;
 pub mod instance;
 pub mod pipeline;
 pub mod query;
@@ -2191,6 +2192,14 @@ pub trait Source: Send + Sync {
         under: &[serde_json::Value],
     ) -> Option<view::SourceView> {
         let _ = (entity, section, payload, under);
+        None
+    }
+    /// Where this adapter's mirror records keep what the sync's held-sections
+    /// pass plans from ([`held`], the held-files pass of PR #2479): the kind
+    /// and section it holds, the state that is open, and the two commits the
+    /// section stands at. `None`, the default, is an adapter of which the
+    /// sync holds nothing, and the pass asks it nothing. Pure.
+    fn held_shape(&self) -> Option<held::HeldShape> {
         None
     }
     /// Where this adapter's mirror records keep what the sync's tree pass

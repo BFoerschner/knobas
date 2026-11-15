@@ -438,7 +438,7 @@ async fn store_readmes(
 /// Whether a failed tree read says the forge is not answering at all (down,
 /// the credential refused, a server error, too many requests), as opposed to
 /// a failure of the one branch (a commit it no longer has).
-fn forge_failed(error: &knobas_source::SourceError) -> bool {
+pub(crate) fn forge_failed(error: &knobas_source::SourceError) -> bool {
     use knobas_source::SourceError;
     match error {
         SourceError::Unreachable(_)

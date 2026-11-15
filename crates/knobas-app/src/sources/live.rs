@@ -391,12 +391,12 @@ impl LiveSources {
             generation,
             (
                 id.clone(),
-                serde_json::json!({
-                    "adapter": recipe.adapter_kind,
-                    "base_url": recipe.base_url,
-                    "method": recipe.method,
-                    "config": recipe.config,
-                }),
+                super::held::recipe(
+                    &recipe.adapter_kind,
+                    &recipe.base_url,
+                    recipe.method,
+                    &recipe.config,
+                ),
             ),
         );
         *slot = Some(Built {
