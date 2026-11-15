@@ -2633,6 +2633,15 @@ mod tests {
         );
         assert!(!built.sql.contains("ts_rank_cd"), "{}", built.sql);
         assert!(!built.matches_narrowly());
+        // A kind the query hides or does not ask for is left out before a
+        // row of it is read: its rows would each be read to be refused.
+        assert!(
+            built
+                .sql
+                .contains("where lk.kind is not null and lk.kind <> all($3) and lk.kind = any($5)"),
+            "{}",
+            built.sql
+        );
 
         // An author, a parent, a reach, a name glob or a ticket key reads the
         // mirror's own row, which the stored characters are not.
