@@ -155,7 +155,9 @@ syncs after it.
 - **A branch the pass has not read yet**, during the first fill or for the minutes after a push until the next run: the
   forge's reads, as before. The mirror's head and the pointer must agree, so a pushed branch is never drawn stale.
 - **A file**: its bytes are the forge's (or the clone's). Only the list is stored; storing the default branch's blobs
-  for code search would be a table keyed by the stored blob shas.
+  for code search would be a table keyed by the stored blob shas. *(2026-11-15, the forge-rounds pass,
+  `2026-11-15-first-opens-without-the-forge.md`: that table is `sync.git_blob`, migration `0090`, and holds each default
+  branch's README; another file by its path is read at the mirror's tip, one round.)*
 - **A commit's own tree** (a commit page's *Files*), and a branch outside the mirror: read as before.
 - **A tree past 100,000 entries**, and a repository's branches past a million stored entries: read as before.
 - **The person's checkout's current branch** is not put ahead in the first fill: the sync does not see checkouts. Every

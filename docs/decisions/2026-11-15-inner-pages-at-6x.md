@@ -148,6 +148,9 @@ probe's known selector fault (it wants three diff cards; the branch has fewer).
   commits (it waits for them to know whether a kept diff stands at their tip), and pinning a fetched diff after the
   answer rather than before it (the record is read again). Left: the adapter's diff cache rides on both.
 - **Code running for the first time**: about half of *Files changed*'s page time at 6x on a first open.
+- *(Taken up the same day, `2026-11-15-first-opens-without-the-forge.md`: *Files changed* reads in one round and its
+  code is warmed while the app is idle; the landing's top and README are read at the mirror's tip, the README stored;
+  the header's *New pull request* is decided from the mirror.)*
 
 ## Owed on Windows
 
