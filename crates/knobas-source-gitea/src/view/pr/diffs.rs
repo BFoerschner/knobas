@@ -70,6 +70,10 @@ impl DiffKey {
 #[derive(Debug, Default)]
 pub(crate) struct PullDiffs {
     kept: Mutex<Kept>,
+    /// The pull requests whose *Files* this built source has read, by
+    /// `owner/repo#number`: a first read reads the `.diff` beside the commits
+    /// and keeps nothing ([`Self::first_read`]).
+    read: Mutex<std::collections::HashSet<String>>,
 }
 
 #[derive(Debug, Default)]
@@ -90,6 +94,21 @@ impl Kept {
 impl PullDiffs {
     fn lock(&self) -> std::sync::MutexGuard<'_, Kept> {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether this is the first read of this pull request's *Files* by this
+    /// built source, which it then remembers (the forge-rounds pass,
+    /// 2026-11-15). Nothing can be kept for a pull request never read, so a
+    /// first read need not wait for the commits listing to ask whether one
+    /// is: it reads the `.diff` beside it, one round where there were three.
+    /// What it read is not kept, since only a `.diff` read after the listing
+    /// is known to stand at the listing's head; the next read, the one behind
+    /// the page on its return, reads in order and keeps.
+    pub(crate) fn first_read(&self, owner: &str, repo: &str, number: u64) -> bool {
+        self.read
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(format!("{owner}/{repo}#{number}"))
     }
 
     /// Whether a diff of this pull request is kept at `head`, at whatever

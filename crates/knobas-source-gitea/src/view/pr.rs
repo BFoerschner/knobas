@@ -254,11 +254,27 @@ impl PullView<'_> {
     /// from, not the diff: a failed read of them lists none and fails nothing.
     ///
     /// The `.diff` is read after the commits, and not at all where one is
-    /// kept at the head they end on (`diffs`, #2321).
+    /// kept at the head they end on (`diffs`, #2321); on the source's first
+    /// read of this pull request, where nothing can be kept, beside them, and
+    /// what it read is not kept ([`diffs::PullDiffs::first_read`]).
     async fn files(&self) -> Result<ViewSection, SourceError> {
+        let first = self
+            .source
+            .pull_diffs
+            .first_read(self.owner, self.repo, self.number);
         let (pull, (commits, fetched), reviews, resolves, viewer) = tokio::try_join!(
             self.pull(),
             async {
+                if first {
+                    let (listed, diff) = tokio::join!(
+                        self.listed(),
+                        self.source
+                            .client
+                            .pull_diff(self.owner, self.repo, self.number)
+                    );
+                    let commits = listed.map(|(c, _, _)| c).unwrap_or_default();
+                    return Ok((commits, Some(diff?)));
+                }
                 let commits = self.listed().await.map(|(c, _, _)| c).unwrap_or_default();
                 let kept = commits.first().is_some_and(|tip| {
                     self.source.pull_diffs.holds_at(
@@ -285,6 +301,8 @@ impl PullView<'_> {
             self.viewer(),
         )?;
         let (text, unpinned) = self.diff(&pull, &commits, fetched).await?;
+        // Read beside the listing, the `.diff` may stand before its head.
+        let unpinned = unpinned.filter(|_| !first);
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(
             &self.source.id,
@@ -334,9 +352,9 @@ impl PullView<'_> {
         })
     }
 
-    /// The diff *Files* draws: `fetched`, read after `commits` was, or the
-    /// one kept at the merge base the record names and the head `commits`
-    /// ends on. A diff read here comes with the key it is kept under once
+    /// The diff *Files* draws: `fetched`, read after `commits` was (beside
+    /// them on a first read), or the one kept at the merge base the record
+    /// names and the head `commits` ends on. A diff read here comes with the key it is kept under once
     /// [`Self::keep`] has pinned it; a kept one, or one with nothing to say
     /// what it stands at, comes with none.
     async fn diff(

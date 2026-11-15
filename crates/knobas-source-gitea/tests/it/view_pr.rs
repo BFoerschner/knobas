@@ -3540,21 +3540,21 @@ async fn a_pull_requests_diff_is_read_once_per_head_and_merge_base() {
     standing(&server, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
     let source = source(&server);
 
+    // The first read keeps nothing (`a_first_read_sends_the_diff_beside_the_commits`);
+    // the second, in order, keeps what it read.
     let first = files_tab(&*source).await;
     let again = files_tab(&*source).await;
-    assert_eq!(first, again, "the kept diff draws the same tab");
-    assert_eq!(
-        diffs_read(&server).await,
-        1,
-        "the second read sent no .diff"
-    );
+    let kept = files_tab(&*source).await;
+    assert_eq!(first, again, "the same tab");
+    assert_eq!(again, kept, "the kept diff draws the same tab");
+    assert_eq!(diffs_read(&server).await, 2, "the third read sent no .diff");
 
     standing(&server, PUSHED_SHA, PUSHED_SHA, PUSHED_DIFF, 2).await;
     let pushed = files_tab(&*source).await;
     assert!(pushed.contains("pushed.rs"), "{pushed}");
-    assert_eq!(diffs_read(&server).await, 2, "a pushed head is read again");
+    assert_eq!(diffs_read(&server).await, 3, "a pushed head is read again");
     files_tab(&*source).await;
-    assert_eq!(diffs_read(&server).await, 2, "and then kept");
+    assert_eq!(diffs_read(&server).await, 3, "and then kept");
 
     // No merge base: nothing names what the diff stands at, so nothing is kept.
     let unnamed = gitea(open_pull(), reviews()).await;
@@ -3598,18 +3598,84 @@ async fn a_diff_read_while_the_record_runs_ahead_of_it_is_not_kept() {
 async fn a_diff_is_kept_only_when_the_record_read_after_it_names_the_same_head() {
     let server = gitea(open_pull(), reviews()).await;
     standing(&server, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    let source = source(&server);
+    // The first read reads beside the listing and keeps nothing.
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 1);
+
     let mut pull = open_pull();
     pull["merge_base"] = json!(MERGE_BASE);
     record_says(&server, pull.clone(), 1, Some(1)).await;
     pull["head"]["sha"] = json!(PUSHED_SHA);
     record_says(&server, pull, 1, Some(1)).await;
+    files_tab(&*source).await;
+    files_tab(&*source).await;
+    assert_eq!(
+        diffs_read(&server).await,
+        3,
+        "the second .diff was not kept"
+    );
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 3, "the third was");
+}
+
+/// A source's first read of a pull request's *Files* cannot find a diff kept,
+/// so it sends the `.diff` beside the commits listing rather than after it
+/// (the forge-rounds pass, 2026-11-15): one round where there were three. It
+/// keeps nothing, and pins nothing, so the record is read once; the next read
+/// is in order and keeps.
+#[tokio::test]
+async fn a_first_read_sends_the_diff_beside_the_commits() {
+    let server = gitea(open_pull(), reviews()).await;
+    let mut pull = open_pull();
+    pull["merge_base"] = json!(MERGE_BASE);
+    record_says(&server, pull, 3, None).await;
+    let held = std::time::Duration::from_millis(400);
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142/commits")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Total-Count", "2")
+                .set_body_json(pr_commits())
+                .set_delay(held),
+        )
+        .with_priority(3)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142.diff")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(DIFF)
+                .set_delay(held),
+        )
+        .with_priority(3)
+        .mount(&server)
+        .await;
     let source = source(&server);
 
+    let started = std::time::Instant::now();
+    let first = files_tab(&*source).await;
+    let took = started.elapsed();
+    assert!(
+        took < held * 2 - std::time::Duration::from_millis(100),
+        "the .diff waited for the commits: {took:?}"
+    );
+    let records = paths(&server)
+        .await
+        .iter()
+        .filter(|p| p.ends_with("/pulls/142"))
+        .count();
+    assert_eq!(records, 1, "nothing pinned, so the record is read once");
+
+    let again = files_tab(&*source).await;
+    assert_eq!(first, again);
     files_tab(&*source).await;
-    files_tab(&*source).await;
-    assert_eq!(diffs_read(&server).await, 2, "the first .diff was not kept");
-    files_tab(&*source).await;
-    assert_eq!(diffs_read(&server).await, 2, "the second was");
+    assert_eq!(
+        diffs_read(&server).await,
+        2,
+        "the second read kept its .diff"
+    );
 }
 
 fn source_of(server: &MockServer) -> Box<dyn Source> {
