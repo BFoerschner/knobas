@@ -36,8 +36,10 @@ fn first() -> String {
 
 /// The `.diff` of pull request `n`: a file whose line 2 changed (the
 /// commented one), a rename with a change, a rename alone, a binary file, a
-/// name outside ASCII, and `bulk` more files of thirty lines each.
-fn diff_text(n: u64, bulk: usize) -> String {
+/// name outside ASCII, and `bulk` more files of thirty lines each, every line
+/// `wide` characters longer than its own.
+fn diff_text(n: u64, bulk: usize, wide: usize) -> String {
+    let pad = "x".repeat(wide);
     let mut out = format!(
         "diff --git a/src/retry.rs b/src/retry.rs
 index 1111111..2222222 100644
@@ -84,7 +86,7 @@ index 0000000..7777777
         ));
         for line in 0..30 {
             out.push_str(&format!(
-                "+pub const C{line}: u32 = {f} * {line}; // pull request {n}\n"
+                "+pub const C{line}: u32 = {f} * {line}; // pull request {n}{pad}\n"
             ));
         }
     }
@@ -114,6 +116,10 @@ struct Pull {
     base: String,
     head: String,
     bulk: usize,
+    /// How much longer each generated line is.
+    wide: usize,
+    /// The record's count of line comments.
+    comments: u64,
 }
 
 impl Pull {
@@ -128,7 +134,8 @@ impl Pull {
             "merge_base": self.base,
             "created_at": "2026-11-14T10:00:00Z", "updated_at": "2026-11-15T10:00:00Z",
             "html_url": format!("https://gitea.example/tidewater/svc/pulls/{}", self.number),
-            "changed_files": 5 + self.bulk, "comments": 0
+            "changed_files": 5 + self.bulk, "comments": 0,
+            "review_comments": self.comments
         })
     }
 }
@@ -198,7 +205,7 @@ async fn mount(server: &MockServer, pull: &Pull, priority: u8) {
         ),
         (
             format!("{p}.diff"),
-            ResponseTemplate::new(200).set_body_string(diff_text(n, pull.bulk)),
+            ResponseTemplate::new(200).set_body_string(diff_text(n, pull.bulk, pull.wide)),
         ),
     ] {
         at(route)
@@ -258,12 +265,17 @@ impl Fixture {
     }
 
     async fn refresh_within(&self, requests: u32, share: i64) -> Held {
+        self.refresh_budget(requests, held_sections::BUDGET, share)
+            .await
+    }
+
+    async fn refresh_budget(&self, requests: u32, budget: std::time::Duration, share: i64) -> Held {
         held_sections::refresh_within(
             &self.pool,
             &self.id,
             self.source().as_ref(),
             requests,
-            held_sections::BUDGET,
+            budget,
             share,
         )
         .await
@@ -432,6 +444,8 @@ async fn fixture() -> (Fixture, Pull) {
         base: sha(0xb1),
         head: sha(0xc1),
         bulk: 200,
+        wide: 0,
+        comments: 4,
     };
     f.open(&pull, 2).await;
     (f, pull)
@@ -543,6 +557,8 @@ async fn a_closed_pull_request_drops_what_only_the_sync_held() {
         base: sha(0xb8),
         head: sha(0xc8),
         bulk: 2,
+        wide: 0,
+        comments: 4,
     };
     f.open(&other, 3).await;
     f.refresh().await;
@@ -586,6 +602,8 @@ async fn the_pass_keeps_to_its_request_cap_and_its_share_of_the_store() {
             base: sha(0xb0 + u32::try_from(n).unwrap()),
             head: sha(0xc0 + u32::try_from(n).unwrap()),
             bulk: 3,
+            wide: 0,
+            comments: 4,
         };
         f.open(&pull, hours).await;
     }
@@ -608,20 +626,150 @@ async fn the_pass_keeps_to_its_request_cap_and_its_share_of_the_store() {
     );
 }
 
-/// A *Files* too large to hold is read once and noted, and not read again
-/// until its commits move.
+/// A *Files* over the ordinary 2 MiB cap is held too (up to 8 MiB, Fable's
+/// ruling), byte for byte the page's read of the forge; one over 8 MiB is read
+/// once and noted, and not read again until its commits move.
 #[tokio::test]
-async fn a_files_too_large_to_hold_is_not_read_again_every_run() {
+async fn a_large_files_is_held_and_one_too_large_is_not_read_again() {
     let (f, mut pull) = fixture().await;
     pull.bulk = 1_500;
     f.moved(&pull).await;
     let first = f.refresh().await;
-    assert_eq!((first.read, first.too_large), (0, 1), "{first:?}");
-    assert!(f.held().await.is_empty());
+    assert_eq!((first.read, first.too_large), (1, 0), "{first:?}");
+    assert!(
+        usize::try_from(first.bytes).unwrap() > knobas_sync::held_read::ROW_CAP,
+        "over the ordinary cap: {first:?}"
+    );
+    let holding = LiveSources::default();
+    holding.hold_in(f.pool.clone());
+    let drawn = f.shown(&holding, 7).await;
+    assert!(drawn.held_at.is_some());
+    holding.settled().await;
+    let now = f.shown(&LiveSources::default(), 7).await;
+    assert!(
+        wire(drawn) == wire(now),
+        "the large held answer is the forge's own, byte for byte"
+    );
+
+    pull.head = sha(0xc5);
+    pull.wide = 200;
+    f.moved(&pull).await;
+    let huge = f.refresh().await;
+    assert_eq!((huge.read, huge.too_large), (0, 1), "{huge:?}");
     let before = f.requests().await;
     let again = f.refresh().await;
     assert_eq!(again, Held::default());
     assert_eq!(f.requests().await, before);
+}
+
+/// Rows over 2 MiB take at most half the pass's share between them: a second
+/// large pull request past that half is noted, not held, so a few large ones
+/// never push the ordinary ones out.
+#[tokio::test]
+async fn large_rows_take_at_most_half_the_share() {
+    let (f, _) = fixture().await;
+    for (n, hours) in [(8, 0), (9, 1)] {
+        let pull = Pull {
+            number: n,
+            base: sha(0xb0 + u32::try_from(n).unwrap()),
+            head: sha(0xc0 + u32::try_from(n).unwrap()),
+            bulk: 1_500,
+            wide: 0,
+            comments: 4,
+        };
+        f.open(&pull, hours).await;
+    }
+    // A share whose half holds one large row and not two.
+    let share = 16 * 1024 * 1024;
+    let held = f
+        .refresh_within(held_sections::REQUESTS_PER_RUN, share)
+        .await;
+    assert_eq!(
+        (held.read, held.too_large),
+        (2, 1),
+        "#8 and #7 held, #9 noted: {held:?}"
+    );
+    let again = f
+        .refresh_within(held_sections::REQUESTS_PER_RUN, share)
+        .await;
+    assert_eq!((again.read, again.requests), (0, 0), "{again:?}");
+}
+
+/// A pull request whose count of line comments moved with no push is read
+/// again, whole; a note that names no count (held before counts were kept)
+/// takes the record's with no read.
+#[tokio::test]
+async fn a_new_line_comment_reads_the_files_again() {
+    let (f, mut pull) = fixture().await;
+    f.refresh().await;
+    pull.comments = 5;
+    f.moved(&pull).await;
+    let commented = f.refresh().await;
+    assert_eq!(commented.read, 1, "{commented:?}");
+    sqlx::query("update sync.held_section set count = null where source_id = $1")
+        .bind(&f.id)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let before = f.requests().await;
+    let adopted = f.refresh().await;
+    assert_eq!((adopted.noted, adopted.read), (1, 0), "{adopted:?}");
+    assert_eq!(f.requests().await, before);
+    let count: Option<String> =
+        sqlx::query_scalar("select count from sync.held_section where source_id = $1")
+            .bind(&f.id)
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(count.as_deref(), Some("5"));
+}
+
+/// A read that had the whole budget and did not end goes last in the runs
+/// after, as a failure does, so it does not take every run's budget.
+#[tokio::test]
+async fn a_read_that_took_the_whole_budget_goes_last() {
+    let (f, _) = fixture().await;
+    let slow = Pull {
+        number: 8,
+        base: sha(0xb8),
+        head: sha(0xc8),
+        bulk: 1,
+        wide: 0,
+        comments: 4,
+    };
+    f.open(&slow, 0).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/8.diff")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(diff_text(8, 1, 0))
+                .set_delay(std::time::Duration::from_secs(3)),
+        )
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    let budget = std::time::Duration::from_millis(800);
+    let first = f
+        .refresh_budget(
+            held_sections::REQUESTS_PER_RUN,
+            budget,
+            held_sections::SHARE,
+        )
+        .await;
+    assert_eq!(
+        (first.read, first.left, first.stopped_by),
+        (0, 2, Some("time")),
+        "{first:?}"
+    );
+    let second = f
+        .refresh_budget(
+            held_sections::REQUESTS_PER_RUN,
+            budget,
+            held_sections::SHARE,
+        )
+        .await;
+    assert_eq!(second.read, 1, "#7 first now: {second:?}");
+    assert_eq!(f.held().await, [(f.pr(7), true)]);
 }
 
 /// A *Files* a page read at the record's commits is noted with no request:
@@ -656,6 +804,8 @@ async fn a_pull_request_the_forge_fails_on_holds_up_no_other() {
         base: sha(0xb8),
         head: sha(0xc8),
         bulk: 1,
+        wide: 0,
+        comments: 4,
     };
     f.open(&failing, 1).await;
     Mock::given(method("GET"))
@@ -683,6 +833,8 @@ async fn a_pull_request_the_forge_fails_on_holds_up_no_other() {
         base: sha(0xb9),
         head: sha(0xc9),
         bulk: 1,
+        wide: 0,
+        comments: 4,
     };
     f.item(&f.pr(9), "pr", "Change 9", gone.record(), 0).await;
     let missing = f.refresh().await;

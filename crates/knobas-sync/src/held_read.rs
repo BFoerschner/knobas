@@ -32,6 +32,30 @@ pub const BOUND: i64 = 64 * 1024 * 1024;
 /// A read larger than this is answered and not held: a whole diff, a long log.
 pub const ROW_CAP: usize = 2 * 1024 * 1024;
 
+/// The ask of a pull request's *Files*, which the sync holds ahead of a page
+/// ([`crate::held_sections`]).
+pub const FILES_ASK: &str = "view:files";
+
+/// The cap of a [`FILES_ASK`] row, whoever writes it (the held-files pass,
+/// 2026-11-15, Fable's ruling): the diff view's own ceiling of 50,000 lines
+/// fits, so a pull request of thousands of files is held. Its first open is
+/// the one that costs seconds on a forge under load; held, its 4.6 MB answer
+/// for 3,000 files is 417 KB on disk and 13 ms to read back. A page's read
+/// behind of the same row writes under the same cap, so it can replace the
+/// sync's copy.
+pub const FILES_ROW_CAP: usize = 8 * 1024 * 1024;
+
+/// The largest answer held under `ask`: [`FILES_ROW_CAP`] for a pull
+/// request's *Files*, [`ROW_CAP`] for everything else.
+#[must_use]
+pub fn row_cap(ask: &str) -> usize {
+    if ask == FILES_ASK {
+        FILES_ROW_CAP
+    } else {
+        ROW_CAP
+    }
+}
+
 /// The ask a view is held under: `view:` and its section, `view:` alone for
 /// the whole view.
 #[must_use]
@@ -99,9 +123,9 @@ pub async fn get(
 }
 
 /// Hold `answer` to `ask` about `entity_id`, read at `read_at` through
-/// `recipe`, over whatever was held, as a person's read; a row over
-/// [`ROW_CAP`] is not written, and the speculative rows, then the oldest, go
-/// while the table is over [`BOUND`].
+/// `recipe`, over whatever was held, as a person's read; a row over its ask's
+/// cap ([`row_cap`]) is not written, and the speculative rows, then the
+/// oldest, go while the table is over [`BOUND`].
 pub async fn put(
     pool: &PgPool,
     source_id: &str,
@@ -122,7 +146,7 @@ pub async fn put(
 pub enum Put {
     /// Held.
     Held(usize),
-    /// Over [`ROW_CAP`], not written.
+    /// Over its ask's cap ([`row_cap`]), not written.
     TooLarge(usize),
     /// Not written: it does not serialize, or the store refused it (a text
     /// with a NUL, which `jsonb` cannot hold; a source removed meanwhile).
@@ -145,7 +169,7 @@ pub async fn put_as(
     let Ok(bytes) = serde_json::to_vec(answer).map(|b| b.len()) else {
         return Put::Refused;
     };
-    if bytes > ROW_CAP {
+    if bytes > row_cap(ask) {
         return Put::TooLarge(bytes);
     }
     let written = sqlx::query(

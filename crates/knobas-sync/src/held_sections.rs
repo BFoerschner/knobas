@@ -13,26 +13,38 @@
 //! ([`HeldShape`]: Gitea's pull requests' `files`), read through
 //! [`Source::view`], the read the page makes, so the held answer is the
 //! page's own; the app's own work on an answer (ADR-0020 rule 7) is done on
-//! every draw, as for every held read.
+//! every draw, as for every held read. A *Files* row may be up to
+//! [`held_read::FILES_ROW_CAP`], so a pull request of thousands of files is
+//! held too.
 //!
-//! **Only open records whose commits moved.** A record the mirror holds open
-//! is read when the two commits its section stands at (a pull request's merge
-//! base and head) are not those the held copy stands at, or nothing is held.
-//! An unchanged run costs no request and writes nothing. A reviewer's new
-//! thread with no push is the page's read behind's to bring, replacing the
-//! held one in place.
+//! **Only open records whose commits or threads moved.** A record the mirror
+//! holds open is read when the two commits its section stands at (a pull
+//! request's merge base and head) are not those the held copy stands at, when
+//! the record's count of line comments (`review_comments`) is not the one the
+//! copy was held at, or when nothing is held. The whole section is read again,
+//! never spliced. A note or a record that names no count takes the record's
+//! with no read (rows held before the count was kept, a forge that does not
+//! send it). What the count misses -- an edited comment, a resolved thread, a
+//! comment deleted and another added -- the page's read behind brings,
+//! replacing the held threads in place. An unchanged run costs no request and
+//! writes nothing.
 //!
 //! **Behind a person, capped.** The pass runs after a run, on the run's task,
 //! in the background lane: every request yields to a person's on the same
 //! server, and passes the per-server quota. At most [`REQUESTS_PER_RUN`]
-//! requests inside [`BUDGET`] a run, the most recently updated first.
+//! requests inside [`BUDGET`] a run, the most recently updated first; a record
+//! the forge failed on, or whose read had the whole budget and did not end,
+//! goes last in the runs after, so it holds up no other. Each pass that sent a
+//! request logs what it did and which bound stopped it.
 //!
 //! **Evicted first.** Its rows are `speculative` until a page draws one
 //! ([`crate::held_read`]): when the held store is full they go before any row
 //! a person read. The pass itself keeps them under [`SHARE`] of the store and
 //! under what a person's reads leave, so it never writes a row the bound
-//! would drop at once, and never reads one again every run for that reason.
-//! A record no longer open drops its speculative row.
+//! would drop at once, and never reads one again every run for that reason;
+//! rows over [`held_read::ROW_CAP`] take at most half that share between
+//! them, so a few large pull requests never push the ordinary ones out. A
+//! record no longer open drops its speculative row.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -63,15 +75,16 @@ pub const SHARE: i64 = held_read::BOUND / 2;
 pub struct Held {
     /// Sections read and held.
     pub read: usize,
-    /// Sections read and over [`held_read::ROW_CAP`], so not held: known, so
-    /// not read again until their commits move.
+    /// Sections read and not held for their size: over the ask's cap, or past
+    /// the large rows' half of the share. Noted, so not read again until
+    /// their commits or count move.
     pub too_large: usize,
     /// Sections the store refused (a text `jsonb` cannot hold) or the source
     /// answered about (a 404): noted, so not read again until their commits
     /// move.
     pub refused: usize,
-    /// Sections a person's read already holds at the record's commits: noted,
-    /// with no request.
+    /// Sections a person's read already holds at the record's commits, or a
+    /// note that took the record's count: noted, with no request.
     pub noted: usize,
     /// Requests sent.
     pub requests: u32,
@@ -84,7 +97,26 @@ pub struct Held {
     pub dropped: u64,
     /// Bytes of answers written.
     pub bytes: u64,
+    /// What stopped the pass short of every owed section: `requests`, `time`,
+    /// `forge` or `share`; `None` where nothing did.
+    pub stopped_by: Option<&'static str>,
 }
+
+/// A note's size where no row can be held at its commits: the store refused
+/// the answer, or the source answered about the record (a 404). Read again
+/// only when its commits or count move.
+const UNHOLDABLE: i32 = -1;
+
+/// A note's size where the source failed as a whole on this record (a 5xx, a
+/// refused credential, no answer, or a read that had the whole budget and did
+/// not end): the run stopped there, and the runs after it read this record
+/// last, so one that always fails holds up no other.
+const FAILED: i32 = -2;
+
+/// A note's size where the answer fits its ask's cap but the large rows
+/// already take their half of the share: not held, and read again only when
+/// its commits or count move.
+const PAST_LARGE: i32 = -3;
 
 /// One record the mirror holds open, with what the store holds of it.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -92,17 +124,37 @@ struct Open {
     entity_id: String,
     base: Option<String>,
     head: Option<String>,
-    /// The commits the pass last held its section at, under this recipe.
+    /// The record's count of what the section's threads are made of, where
+    /// the shape names one.
+    count: Option<String>,
+    /// The commits and count the pass last held its section at, under this
+    /// recipe, and its answer's size (or a sentinel above).
     held_base: Option<String>,
     held_head: Option<String>,
+    held_count: Option<String>,
     held_bytes: Option<i32>,
     /// The held row's size and whether it is speculative, where one is held
     /// under this recipe.
     row_bytes: Option<i32>,
     speculative: Option<bool>,
-    /// Where the pass's note does not stand but a row is held: whether the
-    /// row's own diff stands at the record's commits (a person read it).
+    /// Where the pass's note does not stand at the record's commits but a row
+    /// is held: whether the row's own diff does (a person read it).
     row_stands: Option<bool>,
+}
+
+/// What the store holds of one open record's section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stand {
+    /// Held at the record's commits and count, or known to be unholdable.
+    Held,
+    /// Held at the record's commits; the note names no count and the record
+    /// does: the note takes it, with no read.
+    Adopt,
+    /// A person's read holds it at the record's commits since the pass last
+    /// read it: noted, with no read.
+    PersonRead,
+    /// Read it.
+    Owed,
 }
 
 impl Open {
@@ -116,16 +168,26 @@ impl Open {
         }
     }
 
-    /// Whether the store holds the section at the record's commits: the
-    /// pass's note stands and the row is held, or the note says none can be
-    /// (too large, refused, or the source's answer about this record).
-    fn held(&self) -> bool {
-        let noted = self.held_base == self.base && self.held_head == self.head;
+    fn stand(&self, ask: &str) -> Stand {
+        let commits = self.held_base == self.base && self.held_head == self.head;
+        // A row, or a note that none can be.
         let row = self.row_bytes.is_some()
             || self.held_bytes.is_some_and(|b| {
-                b == UNHOLDABLE || usize::try_from(b).is_ok_and(|b| b > held_read::ROW_CAP)
+                b == UNHOLDABLE
+                    || b == PAST_LARGE
+                    || usize::try_from(b).is_ok_and(|b| b > held_read::row_cap(ask))
             });
-        noted && row
+        if commits && row {
+            return match (self.held_count.as_deref(), self.count.as_deref()) {
+                (Some(held), Some(now)) if held != now => Stand::Owed,
+                (None, Some(_)) => Stand::Adopt,
+                _ => Stand::Held,
+            };
+        }
+        if self.row_stands == Some(true) {
+            return Stand::PersonRead;
+        }
+        Stand::Owed
     }
 
     /// The bytes this record's speculative row takes in the store.
@@ -135,17 +197,17 @@ impl Open {
             _ => 0,
         }
     }
+
+    /// The bytes of its speculative row where it is over [`held_read::ROW_CAP`].
+    fn large_bytes(&self) -> i64 {
+        let bytes = self.speculative_bytes();
+        if usize::try_from(bytes).is_ok_and(|b| b > held_read::ROW_CAP) {
+            bytes
+        } else {
+            0
+        }
+    }
 }
-
-/// A note's size where no row can be held at its commits: the store refused
-/// the answer, or the source answered about the record (a 404). Read again
-/// only when its commits move.
-const UNHOLDABLE: i32 = -1;
-
-/// A note's size where the source failed as a whole on this record (a 5xx, a
-/// refused credential, no answer): the run stopped there, and the runs after
-/// it read this record last, so one that always fails holds up no other.
-const FAILED: i32 = -2;
 
 /// One pass at a time a source.
 fn passing() -> &'static Mutex<HashSet<String>> {
@@ -165,9 +227,9 @@ impl Drop for Passing {
 }
 
 /// Read and hold the section of each of `source_id`'s open records whose
-/// commits moved since it was held, most recently updated first, inside the
-/// run's budget and the store's share; drop the speculative rows of records
-/// no longer open or past the share.
+/// commits or count moved since it was held, most recently updated first,
+/// inside the run's budget and the store's share; drop the speculative rows of
+/// records no longer open or past the share.
 ///
 /// # Errors
 ///
@@ -218,68 +280,110 @@ pub async fn refresh_within(
     let ask = held_read::view_ask(Some(shape.section));
     let open = plan(pool, source_id, &shape, &ask, &recipe).await?;
     // What the pass may fill: its share, and no more than a person's reads
-    // leave of the store.
+    // leave of the store; the rows over the ordinary cap, half of that.
     let people: i64 = sqlx::query_scalar(
         "select coalesce(sum(bytes), 0)::bigint from sync.held_read where not speculative",
     )
     .fetch_one(pool)
     .await?;
     let allowance = share.min(held_read::BOUND - people);
-    let mut filled: i64 = 0;
+    let large_allowance = share / 2;
+    let (mut filled, mut large): (i64, i64) = (0, 0);
     let mut past: Vec<String> = Vec::new();
     let deadline = tokio::time::Instant::now() + budget;
-    let mut stopped = false;
     for record in &open {
         let Some((base, head)) = record.commits() else {
             continue;
         };
+        let count = record.count.as_deref();
+        let stand = record.stand(&ask);
         if filled >= allowance {
             if record.speculative == Some(true) || record.row_bytes.is_none() {
                 past.push(record.entity_id.clone());
             }
-            if !record.held() {
+            if stand == Stand::Owed {
                 done.past_share += 1;
+                done.stopped_by.get_or_insert("share");
             }
             continue;
         }
-        if record.held() {
-            filled += record.speculative_bytes();
-            continue;
+        match stand {
+            Stand::Held => {
+                filled += record.speculative_bytes();
+                large += record.large_bytes();
+                continue;
+            }
+            Stand::Adopt => {
+                sqlx::query(
+                    "update sync.held_section set count = $4
+                      where source_id = $1 and entity_id = $2 and ask = $3",
+                )
+                .bind(source_id)
+                .bind(&record.entity_id)
+                .bind(&ask)
+                .bind(count)
+                .execute(pool)
+                .await?;
+                done.noted += 1;
+                filled += record.speculative_bytes();
+                large += record.large_bytes();
+                continue;
+            }
+            Stand::PersonRead => {
+                let at = Note {
+                    base,
+                    head,
+                    count,
+                    bytes: record.row_bytes.unwrap_or(0),
+                    read_at: Utc::now(),
+                };
+                note(pool, source_id, &record.entity_id, &ask, &recipe, &at).await?;
+                done.noted += 1;
+                filled += record.speculative_bytes();
+                large += record.large_bytes();
+                continue;
+            }
+            Stand::Owed => {}
         }
-        if record.row_stands == Some(true) {
-            // A person read it at these commits since the pass last did.
-            note(
-                pool,
-                source_id,
-                &record.entity_id,
-                &ask,
-                &recipe,
-                base,
-                head,
-                record.row_bytes.unwrap_or(0),
-                None,
-            )
-            .await?;
-            done.noted += 1;
-            filled += record.speculative_bytes();
-            continue;
-        }
-        if stopped || done.requests >= requests || tokio::time::Instant::now() >= deadline {
+        if done.stopped_by.is_some() {
             done.left += 1;
-            stopped = true;
+            continue;
+        }
+        if done.requests >= requests {
+            done.left += 1;
+            done.stopped_by = Some("requests");
+            continue;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            done.left += 1;
+            done.stopped_by = Some("time");
             continue;
         }
         let read_at = Utc::now();
+        let whole_budget = done.requests == 0;
         let (read, sent) = knobas_http::counted::counted(tokio::time::timeout_at(
             deadline,
             source.view(&record.entity_id, Some(shape.section)),
         ))
         .await;
         done.requests += u32::try_from(sent).unwrap_or(u32::MAX);
+        let mut at = Note {
+            base,
+            head,
+            count,
+            bytes: FAILED,
+            read_at,
+        };
         let view = match read {
+            // The budget ran out under this read. One that had the whole
+            // budget would take it again every run: it goes last, as a
+            // failure does.
             Err(_) => {
                 done.left += 1;
-                stopped = true;
+                done.stopped_by = Some("time");
+                if whole_budget {
+                    note(pool, source_id, &record.entity_id, &ask, &recipe, &at).await?;
+                }
                 continue;
             }
             // A forge that is down, refuses the credential or is overloaded
@@ -287,28 +391,16 @@ pub async fn refresh_within(
             // last in the next. A failure about this record (a 404) is noted
             // at its commits and not asked again until they move.
             Ok(Err(error)) => {
-                let failed = crate::stored_trees::forge_failed(&error);
-                if failed {
+                if crate::stored_trees::forge_failed(&error) {
                     tracing::debug!(source_id, entity = record.entity_id, %error, "the forge did not answer a held section; the pass stops");
                     done.left += 1;
-                    stopped = true;
+                    done.stopped_by = Some("forge");
                 } else {
                     tracing::debug!(source_id, entity = record.entity_id, %error, "a held section was not read");
                     done.refused += 1;
+                    at.bytes = UNHOLDABLE;
                 }
-                let size = if failed { FAILED } else { UNHOLDABLE };
-                note(
-                    pool,
-                    source_id,
-                    &record.entity_id,
-                    &ask,
-                    &recipe,
-                    base,
-                    head,
-                    size,
-                    Some(read_at),
-                )
-                .await?;
+                note(pool, source_id, &record.entity_id, &ask, &recipe, &at).await?;
                 continue;
             }
             Ok(Ok(view)) => view,
@@ -319,53 +411,79 @@ pub async fn refresh_within(
         // What the answer stands at, where it says: the forge may have moved
         // past the mirror's record since the run.
         let (base, head) = stands_at(&answer).unwrap_or((base.to_owned(), head.to_owned()));
-        let put = held_read::put_as(
-            pool,
-            source_id,
-            &record.entity_id,
-            &ask,
-            &recipe,
-            read_at,
-            &answer,
-            true,
-        )
-        .await;
-        // Noted whatever became of it, so a section the store cannot hold is
-        // not read again every run: its size, or `-1` where it was refused.
         let size = |bytes: usize| i32::try_from(bytes).unwrap_or(i32::MAX);
-        let noted = match put {
+        let bytes = serde_json::to_vec(&answer).map_or(0, |b| b.len());
+        // A large row is held only inside the large rows' half of the share
+        // and the share itself; past either it is noted, not held.
+        let fits = bytes <= held_read::ROW_CAP || {
+            let more = i64::try_from(bytes).unwrap_or(i64::MAX);
+            large + more <= large_allowance && filled + more <= allowance
+        };
+        let put = if fits {
+            held_read::put_as(
+                pool,
+                source_id,
+                &record.entity_id,
+                &ask,
+                &recipe,
+                read_at,
+                &answer,
+                true,
+            )
+            .await
+        } else {
+            held_read::Put::TooLarge(bytes)
+        };
+        // Noted whatever became of it, so a section the store cannot hold is
+        // not read again every run.
+        at.bytes = match put {
             held_read::Put::Held(bytes) => {
                 done.read += 1;
                 done.bytes += bytes as u64;
                 // Speculative unless a person's row was there.
                 if record.speculative != Some(false) {
-                    filled += i64::from(size(bytes));
+                    let more = i64::from(size(bytes));
+                    filled += more;
+                    if bytes > held_read::ROW_CAP {
+                        large += more;
+                    }
                 }
                 size(bytes)
             }
             held_read::Put::TooLarge(bytes) => {
                 done.too_large += 1;
-                size(bytes)
+                if bytes > held_read::row_cap(&ask) {
+                    size(bytes)
+                } else {
+                    PAST_LARGE
+                }
             }
             held_read::Put::Refused => {
                 done.refused += 1;
                 UNHOLDABLE
             }
         };
-        note(
-            pool,
-            source_id,
-            &record.entity_id,
-            &ask,
-            &recipe,
-            &base,
-            &head,
-            noted,
-            Some(read_at),
-        )
-        .await?;
+        let at = Note {
+            base: &base,
+            head: &head,
+            ..at
+        };
+        note(pool, source_id, &record.entity_id, &ask, &recipe, &at).await?;
     }
     done.dropped = drop_unheld(pool, source_id, &ask, &open, &past).await?;
+    if done.requests > 0 || done.stopped_by.is_some() {
+        tracing::info!(
+            source_id,
+            read = done.read,
+            too_large = done.too_large,
+            refused = done.refused,
+            requests = done.requests,
+            left = done.left,
+            past_share = done.past_share,
+            stopped_by = done.stopped_by.unwrap_or("nothing"),
+            "held the open pull requests' files"
+        );
+    }
     Ok(done)
 }
 
@@ -391,36 +509,43 @@ fn stands_at(answer: &serde_json::Value) -> Option<(String, String)> {
     ))
 }
 
-/// Note that the section of `entity_id` is held at `base` and `head`, its
-/// answer `bytes` long, read at `read_at` (now where a person's read is
-/// noted).
-#[allow(clippy::too_many_arguments)]
+/// What the pass notes of a section: the commits and count it stands at, its
+/// answer's size (or a sentinel), and when it was read.
+#[derive(Debug, Clone, Copy)]
+struct Note<'a> {
+    base: &'a str,
+    head: &'a str,
+    count: Option<&'a str>,
+    bytes: i32,
+    read_at: DateTime<Utc>,
+}
+
+/// Note what the pass holds of the section of `entity_id`.
 async fn note(
     pool: &PgPool,
     source_id: &str,
     entity_id: &str,
     ask: &str,
     recipe: &serde_json::Value,
-    base: &str,
-    head: &str,
-    bytes: i32,
-    read_at: Option<DateTime<Utc>>,
+    at: &Note<'_>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "insert into sync.held_section (source_id, entity_id, ask, recipe, base, head, bytes, read_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
+        "insert into sync.held_section
+                (source_id, entity_id, ask, recipe, base, head, count, bytes, read_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          on conflict (source_id, entity_id, ask) do update
            set recipe = excluded.recipe, base = excluded.base, head = excluded.head,
-               bytes = excluded.bytes, read_at = excluded.read_at",
+               count = excluded.count, bytes = excluded.bytes, read_at = excluded.read_at",
     )
     .bind(source_id)
     .bind(entity_id)
     .bind(ask)
     .bind(recipe)
-    .bind(base)
-    .bind(head)
-    .bind(bytes)
-    .bind(read_at.unwrap_or_else(Utc::now))
+    .bind(at.base)
+    .bind(at.head)
+    .bind(at.count)
+    .bind(at.bytes)
+    .bind(at.read_at)
     .execute(pool)
     .await
     .map(|_| ())
@@ -484,26 +609,29 @@ async fn plan(
         .bind(path(shape.head))
         .bind(ask)
         .bind(recipe)
+        .bind(shape.count.map(path))
         .fetch_all(pool)
         .await
 }
 
-/// The plan: the open records of kind `$2`, their commits (`$5`, `$6`), the
-/// pass's note of the section `$7` under recipe `$8`, and the held row's size;
-/// where the note does not stand at the record's commits and a row is held,
-/// whether the row's own diff does (a person read it since). Only then is a
-/// held answer read, so an unchanged run reads no answer. The most recently
-/// updated first, but a record the forge failed on at these commits last.
+/// The plan: the open records of kind `$2`, their commits (`$5`, `$6`) and
+/// count (`$9`, none where the shape names none), the pass's note of the
+/// section `$7` under recipe `$8`, and the held row's size; where the note
+/// does not stand at the record's commits and a row is held, whether the
+/// row's own diff does (a person read it since). Only then is a held answer
+/// read, so an unchanged run reads no answer. The most recently updated
+/// first, but a record the forge failed on at these commits last.
 const PLAN: &str = r#"
 with open as (
   select i.entity_id, i.item_updated_at,
-         i.payload #>> $5::text[] as base, i.payload #>> $6::text[] as head
+         i.payload #>> $5::text[] as base, i.payload #>> $6::text[] as head,
+         i.payload #>> $9::text[] as count
     from sync.item i
     join knobas.entity e on e.id = i.entity_id and e.deleted_at is null
    where i.source_id = $1 and i.kind = $2 and i.payload #>> $3::text[] = $4
 )
-select o.entity_id, o.base, o.head,
-       s.base as held_base, s.head as held_head, s.bytes as held_bytes,
+select o.entity_id, o.base, o.head, o.count,
+       s.base as held_base, s.head as held_head, s.count as held_count, s.bytes as held_bytes,
        h.bytes as row_bytes, h.speculative,
        case when h.entity_id is not null
              and (s.base is distinct from o.base or s.head is distinct from o.head)

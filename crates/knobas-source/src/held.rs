@@ -5,7 +5,7 @@
 //!
 //! One section a kind, and only records that say they are open: Gitea holds
 //! each open pull request's *Files*, read again only when the two commits the
-//! diff is between moved. The adapter says where its mirror record keeps
+//! diff is between moved, or the record's count of line comments did. The adapter says where its mirror record keeps
 //! those (`payload #>> path`); the pass compares them with what the held
 //! answer's diff stands at ([`crate::view::DiffRange`]'s `base` and `head`),
 //! and reads the section through [`Source::view`](crate::Source::view), the
@@ -30,4 +30,8 @@ pub struct HeldShape {
     /// again only when either moved, and never for a record that names none.
     pub base: &'static [&'static str],
     pub head: &'static [&'static str],
+    /// Where the record counts what the section's threads are made of (a pull
+    /// request's line comments), where it does: a section is read again when
+    /// the count moved too. `None` reads it again for its commits alone.
+    pub count: Option<&'static [&'static str]>,
 }

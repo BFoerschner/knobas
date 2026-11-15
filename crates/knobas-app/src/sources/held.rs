@@ -9,4 +9,6 @@
 //! page reads or holds here is a person's, and stays in the store before any
 //! the sync held that no page drew.
 
-pub use knobas_sync::held_read::{BOUND, ROW_CAP, forget, get, put, recipe, view_ask};
+pub use knobas_sync::held_read::{
+    BOUND, FILES_ROW_CAP, ROW_CAP, forget, get, put, recipe, row_cap, view_ask,
+};

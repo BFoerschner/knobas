@@ -690,7 +690,8 @@ impl Source for GiteaSource {
     /// pull request's head branch.
     /// Each open pull request's *Files* (the held-files pass, 2026-11-15):
     /// the `.diff` is the head's tree against the merge base's, so those two
-    /// say when a held copy no longer stands.
+    /// say when a held copy no longer stands, and the record's count of line
+    /// comments when its threads no longer do.
     fn held_shape(&self) -> Option<knobas_source::held::HeldShape> {
         Some(knobas_source::held::HeldShape {
             kind: crate::KIND_PR,
@@ -699,6 +700,7 @@ impl Source for GiteaSource {
             open: "open",
             base: &["merge_base"],
             head: &["head", "sha"],
+            count: Some(&["review_comments"]),
         })
     }
 
