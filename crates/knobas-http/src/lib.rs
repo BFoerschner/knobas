@@ -86,7 +86,6 @@
 
 mod cap;
 pub mod classify;
-#[cfg(feature = "test-util")]
 pub mod counted;
 mod credential;
 mod limiter;
@@ -692,9 +691,9 @@ impl HttpClient {
                     (classify::once_sent(mapped, connected), !connected)
                 }
             };
-            // The request counter of a test that holds a read to a budget
-            // (#2239): this attempt goes on the wire.
-            #[cfg(feature = "test-util")]
+            // The request counter (#2239): this attempt goes on the wire, for
+            // a test that holds a read to a budget and the sync's held-sections
+            // pass, which holds its reads to a request cap.
             counted::sent();
             let answered = match deadline {
                 Deadline::Whole => request
