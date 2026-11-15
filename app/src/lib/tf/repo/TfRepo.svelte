@@ -753,6 +753,14 @@
    */
   const at = $derived(repoId === null ? null : (selected && !selected.isDefault ? selected.entityId : null) ?? repoId);
   const branchName = $derived(selected?.name ?? null);
+  /**
+   * Whether `one` is Files on a repository no branch was picked on this session: it reads at the repository itself,
+   * which is its default branch whatever the list or the mirror will name, so it starts its reads with the page's own
+   * and names the branch when one of them answers. Waiting for the name put its tree, and the README read after it,
+   * a round of reads behind the row and the branch list (the ux12 Windows pass, 2026-11-15: three rounds, 219 ms at
+   * 4x and 391 at 6x on Björn's PC).
+   */
+  const filesAtOnce = (one: string) => one === "files" && picked === null;
   const changed = $derived(changedPaths(local));
   const sentence = $derived(checkoutSentence(checkout));
   /** The line under the title in words, for its tooltip: one line on the page, a long clone path cut. */
@@ -1138,14 +1146,17 @@
       {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
       {:else}
+        <!-- Another repository mounts its tabs afresh (#2248): nothing the reader did on one carries into the next. -->
+        {#key repoId}
         {#each drawn as one (one)}
           {@const refreshed = held.reads[one] ?? 0}
           {#if one === "local"}
             <TfRepoTab shown={one === slot}>
               <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
             </TfRepoTab>
-          {:else if at !== null && branchName !== null}
-            <!-- The rest wait for the branch every tab reads at: the mirror's default, or the list's (#2243). -->
+          {:else if at !== null && (branchName !== null || filesAtOnce(one))}
+            <!-- The rest wait for the branch every tab reads at: the mirror's default, or the list's (#2243). Files
+                 does not on a repository no branch was picked on, where it reads at the repository (`filesAtOnce`). -->
             <TfRepoTab shown={one === slot}>
               {#if one === "files"}
                 <TfRepoFiles
@@ -1209,6 +1220,7 @@
             </TfRepoTab>
           {/if}
         {/each}
+        {/key}
       {/if}
     </div>
     {/if}

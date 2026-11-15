@@ -1106,14 +1106,43 @@ test("a deep file link reads by the tree sections the repository's detail declar
   expect(fileReads()).toBe(0);
 });
 
-test("a repository whose detail declares no default branch draws its tab once the branch list answers, whatever its payload says", async () => {
+test("a repository whose detail declares no default branch draws its tree at once and names the branch once the list answers, whatever its payload says", async () => {
   const { stand, release } = holdingBranches({});
   await draw([REPO], stand);
-  expect(target.querySelector(".tf-ftree")).toBeNull();
+  // Read at the repository, which is its default branch, before anything has named it (the ux12 Windows pass).
+  expect(tree()).toContain("README.md");
+  expect(branchSelect().options.length).toBe(0);
 
   await release();
   await settle();
   expect(tree()).toContain("README.md");
+  expect(branchSelect().value).toBe("main");
+});
+
+test("a first open asks for the Files tab's reads with the repository's own, not after them (the ux12 Windows pass)", async () => {
+  // The repository's row and its branch list both held: the landing's reads start in the same round anyway, at the
+  // repository, where they waited for one of the two to name the branch before (three rounds of reads on Windows).
+  const base = ports();
+  const detail = heldBack<EntityDetail>();
+  const branches = heldBack<SourceView | null>();
+  const stand: RepoPorts = {
+    ...base,
+    getEntity: (id) => (id === REPO ? detail.promise : base.getEntity(id)),
+    entityView: (id, sectionId) => {
+      if (id !== REPO || sectionId !== "branches") return base.entityView(id, sectionId);
+      viewReads.push([id, sectionId]);
+      return branches.promise;
+    },
+  };
+  await draw([REPO], stand);
+  expect(viewReads.filter(([id, sectionId]) => id === REPO && sectionId === "files").length).toBe(1);
+  expect(tree()).toContain("README.md");
+
+  detail.answer({ ...(await base.getEntity(REPO)), default_branch: "main" } as EntityDetail);
+  branches.answer(await base.entityView(REPO, "branches"));
+  await settle();
+  expect(branchSelect().value).toBe("main");
+  expect(viewReads.filter(([id, sectionId]) => id === REPO && sectionId === "files").length).toBe(1);
 });
 
 test("New branch… is the source's refused_writes answer, asked with the commit's, and the page never reads the whole repository view", async () => {
