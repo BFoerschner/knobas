@@ -1,5 +1,5 @@
 //! Each open pull request's *Files*, held before anyone opens it (the
-//! held-files pass of PR #2479, 2026-11-15; migration `0091`, ADR-0042 as
+//! held-files pass of PR #2479, 2026-11-15; migration `0092`, ADR-0042 as
 //! amended that day).
 //!
 //! **Why.** A pull request's *Files changed* was the one first open left that

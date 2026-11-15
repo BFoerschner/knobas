@@ -25,7 +25,7 @@ data scarcity.
   every draw, as for every held read.
 - **Only what moved.** A pull request is read again when its merge base or head is not what the held copy stands at,
   or its count of line comments moved (Fable, below), or nothing is held. Its note, `sync.held_section` (migration
-  `0091`), keeps the commits and count it was read at, so a run with nothing moved reads no held answer: **0 requests and
+  `0092`), keeps the commits and count it was read at, so a run with nothing moved reads no held answer: **0 requests and
   no write**, 27 to 46 ms of database time on the scale estate's 143 open pull requests. A pull request a person opened
   since the pass read it (the row's own diff stands at the record's commits) is noted with no request.
 - **In order, capped.** Most recently updated first; at most 200 requests inside 45 s a run (`REQUESTS_PER_RUN`,
@@ -103,7 +103,7 @@ estate's and the 3,000-file one), the stand-in at 30 ms a request:
 The four noted are `tidewater/*`, which the scale seed does not build, so the stand-in answers them 404; on the live
 forge they are held like the rest. **Disk:** 1.6 MiB for `sync.held_read` and 144 KiB for `sync.held_section` after
 the fill, the 3,000-file answer 417 KB of it; answers are 1.5 KB to 78 KB as JSON (median 11 KB) but that one's 4.6 MB.
-**First start:** migration `0091` (a column with a constant default, one empty table) took 40 ms on a copy of the scale
+**First start:** migration `0092` (a column with a constant default, one empty table) took 40 ms on a copy of the scale
 database, `psql`'s own start included. At the five-minute interval the first fill is four runs, about 20 minutes, the
 most recently updated first: the forty or so pull requests someone is likely to open are held after the first run.
 
@@ -168,7 +168,7 @@ Three decisions, with the measurements above:
 ## Reversing it
 
 The pass is one call in the scheduler; removing it holds nothing more, and a page reads as before. The rows can be
-deleted at any time (`speculative` ones and `sync.held_section`); `0091` stays.
+deleted at any time (`speculative` ones and `sync.held_section`); `0092` stays.
 
 ## Gates
 

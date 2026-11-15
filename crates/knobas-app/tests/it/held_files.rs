@@ -1,5 +1,5 @@
 //! Each open pull request's *Files*, held by the sync before anyone opens it
-//! (the held-files pass of PR #2479, 2026-11-15; migration `0091`):
+//! (the held-files pass of PR #2479, 2026-11-15; migration `0092`):
 //! `knobas_sync::held_sections::refresh` with the **real** Gitea adapter
 //! against a fake Gitea, then a page's reads through `sources::crud::shown`.
 //!

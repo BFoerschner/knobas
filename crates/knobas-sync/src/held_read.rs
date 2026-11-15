@@ -12,7 +12,7 @@
 //! the next read. A source's rows go with its configuration (the foreign key)
 //! and with a new credential ([`forget`]).
 //!
-//! **Speculative rows go first** (migration `0091`): a row the sync held that
+//! **Speculative rows go first** (migration `0092`): a row the sync held that
 //! no page has drawn yet is `speculative`, and leaves before every row a
 //! person read when the table is over [`BOUND`]. A page's read of it
 //! ([`get`]) makes it a person's.

@@ -1,5 +1,5 @@
 //! The held store's bound with the sync's rows in it (the held-files pass of
-//! PR #2479, 2026-11-15; migration `0091`): a row only the sync held leaves
+//! PR #2479, 2026-11-15; migration `0092`): a row only the sync held leaves
 //! the full store before any row a person read. In a file of its own, so
 //! filling the bound touches no other test's rows (a database a file).
 
