@@ -508,11 +508,12 @@
   }
 
   // A Jira view marked *new* stops saying so once it is opened (#878, R-3.20):
-  // asked once per view per visit, so an answer that still says *new* cannot loop.
+  // asked once per view per visit, so an answer that still says *new* cannot loop. Only once it is shown: a page the
+  // shell holds ahead of its press (`ahead.ts`) has opened nothing for the reader.
   const openedNew = new Set<string>();
   $effect(() => {
     const opened = view;
-    if (!opened || opened.saved_view_source?.new !== true || openedNew.has(opened.id)) return;
+    if (!opened || opened.saved_view_source?.new !== true || openedNew.has(opened.id) || !pageShown()) return;
     openedNew.add(opened.id);
     untrack(() => {
       ports

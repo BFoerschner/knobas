@@ -72,6 +72,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
   "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
   "tf/kept-pages.svelte.ts#keptPages": async () => (await import("../tf/kept-pages.svelte")).keptPages.reset(),
+  // The sections asked to be held ahead and not yet taken (the ux13-overs pass): a test's asks go with it.
+  "tf/kept-pages.svelte.ts#aheadMoves": async () => void (await import("../tf/kept-pages.svelte")).takeAhead(),
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   // Two stores in one file, each cleared through its own public door.

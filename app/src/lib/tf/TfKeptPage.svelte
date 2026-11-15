@@ -85,9 +85,11 @@
    * reads nothing while hidden, once on its return if either moved, and nothing on a return to what no run changed
    * (Björn, 2026-11-10). A number, so it tells the page only when it moves.
    */
-  let atHide = 0;
+  const runsNow = () => (roleSync === null ? 0 : roleSync.revision + roleSync.ran);
+  // A page mounted hidden (held ahead of its press, `ahead.ts`) holds the count it was mounted at: it read then.
+  let atHide = untrack(runsNow);
   const revision = $derived.by(() => {
-    const now = roleSync === null ? 0 : roleSync.revision + roleSync.ran;
+    const now = runsNow();
     if (visible) atHide = now;
     return atHide;
   });

@@ -54,6 +54,32 @@ export function hold<T>(held: readonly Held<T>[], next: { key: string; value: T 
 }
 
 /**
+ * The held pages with `next` held hidden behind them, least recently used, as a page opened ahead of its press is
+ * (`ahead.ts`): only where it is not held and a hidden page's room is free, so it never drops a page the reader left.
+ */
+export function holdBehind<T>(held: readonly Held<T>[], next: { key: string; value: T }, cap: number): Held<T>[] {
+  if (held.some((page) => page.key === next.key)) return [...held];
+  if (held.filter((page) => !page.visible).length >= cap) return [...held];
+  return [{ key: next.key, value: next.value, shows: 0, visible: false }, ...held];
+}
+
+/** The addresses asked to be held ahead and not yet taken by the page host. */
+const aheadAsked: string[] = [];
+let aheadMoves = $state(0);
+
+/** Ask the page host to hold the page at `hash` hidden, behind every page held (`ahead.ts`). */
+export function holdAhead(hash: string): void {
+  aheadAsked.push(hash);
+  aheadMoves += 1;
+}
+
+/** The addresses asked since the last take, for the page host; reading it ties its caller to the next ask. */
+export function takeAhead(): string[] {
+  void aheadMoves;
+  return aheadAsked.splice(0);
+}
+
+/**
  * The held pages once what every hidden one drew is out of date (the state
  * colours changed, spec #2463): the shown page alone. A hidden page reads
  * again on its return only if it is a role view, so the rest are dropped and

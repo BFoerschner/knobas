@@ -257,8 +257,21 @@ export class Windowed<K = string> {
       base.top +
       (own ? node.clientTop - node.scrollTop : 0);
     this.#origin = origin;
+    /** Whether the list has read a view while its page was shown. */
+    let viewed = false;
     const read = (event?: Event) => {
       if (!placed) return;
+      // In a page never shown yet (held ahead of its press, `tf/ahead.ts`, so hidden and without a box), a screenful
+      // from the list's top: read as the nothing a hidden box measures, the list drew its overscan alone and built its
+      // rows again on its first show, about 70 ms of a sixth-speed main thread on Builds (the ux13-overs pass,
+      // 2026-11-15). A list shown before still drops to its overscan as its page hides: kept whole, its return laid
+      // out every row it had drawn, Builds' at 6x 95 ms where it was 58.
+      if (!viewed && node.closest("[hidden]") !== null) {
+        this.#viewTop = 0;
+        this.#viewHeight = window.innerHeight;
+        return;
+      }
+      viewed = true;
       let top = 0;
       let bottom = window.innerHeight;
       for (const clip of clips) {

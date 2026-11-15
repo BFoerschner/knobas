@@ -403,3 +403,42 @@ test("a list too short to window reads nothing of the page; lists that window re
   expect(read).not.toContain("c");
   stop();
 });
+
+test("a list placed while its page is hidden draws a screenful from its top, and one shown before reads its hidden page as it always did (the ux13-overs pass)", () => {
+  // Each list sits in a scroller of its page's own (Builds' runs, the Tickets list). A hidden page lays out nothing;
+  // shown, the scroller is the 1,000 px screen and the list sits at its top.
+  const scrolled = 0;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const [top, height] = this.closest("[hidden]") ? [0, 0] : this.classList.contains("clip") ? [0, 1_000] : [-scrolled, 20_000];
+    return { width: 200, height, top, bottom: top + height, left: 0, right: 200, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  });
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return this.closest("[hidden]") || !this.classList.contains("clip") ? 0 : 1_000;
+  });
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1_000);
+  document.body.innerHTML =
+    '<div class="page"><section class="clip" style="overflow-y: auto"><div class="list"></div></section></div>' +
+    '<div class="ahead" hidden><section class="clip" style="overflow-y: auto"><div class="list"></div></section></div>';
+  const [shownList, aheadList] = [...document.querySelectorAll<HTMLElement>(".list")];
+  // Rows of 20 px, 100 px of overscan.
+  const shown = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 100 });
+  const ahead = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 100 });
+  const stop = $effect.root(() => {
+    shown.list(shownList!);
+    ahead.list(aheadList!);
+  });
+  placed();
+  expect([shown.start, shown.end], "shown: the screen and its overscan").toEqual([0, 55]);
+  expect([ahead.start, ahead.end], "placed hidden: as if the screen were over its top, not its overscan alone").toEqual([0, 55]);
+  // The shown page hides: its list reads the nothing a hidden box measures, as before, which its drawn rows cover.
+  document.querySelector<HTMLElement>(".page")!.hidden = true;
+  window.dispatchEvent(new Event("resize"));
+  flushSync();
+  expect([shown.start, shown.end]).toEqual([0, 55]);
+  // The page held ahead is shown: the rows it drew hidden cover the screen already.
+  document.querySelector<HTMLElement>(".ahead")!.hidden = false;
+  window.dispatchEvent(new Event("resize"));
+  flushSync();
+  expect([ahead.start, ahead.end]).toEqual([0, 55]);
+  stop();
+});

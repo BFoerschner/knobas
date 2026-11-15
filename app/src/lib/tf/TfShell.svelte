@@ -88,6 +88,7 @@
   import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { loadEveryFace } from "../shell/faces";
   import { warmDiffView } from "./diff/warm";
+  import { openAhead } from "./ahead";
   import { installFindKey } from "./filter-keys";
   import { installPlainTyping } from "./plain-typing";
   import { installExternalLinks } from "../shell/external-links";
@@ -814,6 +815,8 @@
   onMount(() => loadEveryFace());
   // So a pull request's first *Files changed* runs warm code (the forge-rounds pass, 2026-11-15).
   onMount(() => warmDiffView());
+  // So a section's first press shows a page already built (the ux13-overs pass, 2026-11-15).
+  onMount(() => openAhead(() => lifecycle.ready, () => sectionOf(route), (section) => untrack(() => navHref(section))));
   onMount(() => {
     const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);

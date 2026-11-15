@@ -6,7 +6,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import { createKeptPagesSetting, type KeptPagesSetting } from "./kept-pages.svelte";
+import { createKeptPagesSetting, holdAhead, type KeptPagesSetting } from "./kept-pages.svelte";
 import { definePage, type TfPageContext, type TfPageEntry } from "./page-entry";
 import type { RoleSyncs } from "./role-sync.svelte";
 import { parseTfHash, type Section, type TfRoute } from "./route";
@@ -238,4 +238,39 @@ test("when what every page drew goes stale, the hidden pages are dropped and eac
   // Pages held after the change are kept as before.
   go("#/sets");
   expect(count(log.mounts, "sets")).toBe(2);
+});
+
+test("a section held ahead mounts hidden behind the shown page, and its press shows that instance without mounting or reading again (the ux13-overs pass)", () => {
+  holdAhead("#/builds");
+  flushSync();
+  expect(held()?.sort()).toEqual(["builds", "inbox"]);
+  expect(shownPages(), "the reader's page stays in front").toEqual(["inbox"]);
+  expect(pageEl("builds").dataset["visible"]).toBe("false");
+  expect(pageEl("builds").dataset["shown"], "inside it too: it pauses what it does while hidden").toBe("false");
+  expect(count(log.mounts, "builds")).toBe(1);
+  go("#/builds");
+  expect(count(log.mounts, "builds"), "the press shows the page built ahead").toBe(1);
+  expect(count(log.reads, "builds"), "and reads nothing again: no run changed anything meanwhile").toBe(1);
+  expect(shownPages()).toEqual(["builds"]);
+});
+
+test("a section held ahead takes only a free room: it never drops a page the reader left, and at 0 none is held", () => {
+  setting.set(2);
+  flushSync();
+  for (const hash of ["#/docs", "#/sets", "#/time"]) go(hash);
+  holdAhead("#/builds");
+  flushSync();
+  expect(held(), "two hidden already: no room").not.toContain("builds");
+  expect(held()?.sort()).toEqual(["docs", "sets", "time"]);
+  setting.set(0);
+  flushSync();
+  holdAhead("#/monitors");
+  flushSync();
+  expect(held()).toEqual(["time"]);
+});
+
+test("an address no page has, or one its page does not know, is held ahead as nothing", () => {
+  holdAhead("#/nowhere");
+  flushSync();
+  expect(held()).toEqual(["inbox"]);
 });

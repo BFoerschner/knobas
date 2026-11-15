@@ -4,7 +4,8 @@
   when it is left, says *Saved*, and `Esc` puts the stored value back
   (`saved-field.svelte.ts`). What the backend stored goes to the page host at once
   (`kept-pages.svelte.ts`), so a lower number drops the surplus hidden pages
-  with no restart.
+  with no restart. The same rooms take the main sections the shell opens ahead of their first press (`ahead.ts`), and
+  the hint says so.
 
   *Smooth scrolling on 120 Hz displays* (2026-11-11, `crates/knobas-app/src/frame_rate.rs`): a switch over
   `smooth_scrolling` and `set_smooth_scrolling`, drawn only where the backend offers it (macOS; it answers
@@ -93,8 +94,9 @@
   <div class="tf-stg-row">
     <label class="tf-stg-l" for="tf-perf-kept"
       >Pages kept open<small
-        >Pages you visited recently stay loaded in the background, so going back to one is instant. 0 keeps none;
-        each one kept uses memory.</small
+        >Pages you visited recently stay loaded in the background, so going back to one is instant. Until you have
+        visited that many, knobas fills the rest with Tickets, Builds, Code, Monitors, Inbox and Docs once it is idle
+        after starting, so their first open is quick too. 0 keeps none; each page kept uses memory.</small
       ></label
     >
     <div class="tf-stg-c tf-stg-inl">

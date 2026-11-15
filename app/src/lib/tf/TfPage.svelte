@@ -33,10 +33,10 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
-  import { forgetHidden, keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
+  import { forgetHidden, keptPages, hold, holdBehind, takeAhead, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
   import type { TfPageContext, TfPageEntry } from "./page-entry";
   import { PAGES } from "./pages";
-  import { SECTION_NAME, sectionOf, type TfRoute } from "./route";
+  import { SECTION_NAME, parseTfHash, sectionOf, type TfRoute } from "./route";
   import TfNothingHere from "./TfNothingHere.svelte";
   import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfKeptPage from "./TfKeptPage.svelte";
@@ -99,6 +99,13 @@
     const next =
       entry === undefined ? null : { key: `${pages.indexOf(entry)}:${entry.address?.(at) ?? ""}`, value: { entry, route: at } };
     held = hold(held, next, kept.value);
+    // The pages the shell asked to open ahead of their press (`ahead.ts`): hidden, behind every page held.
+    for (const hash of takeAhead()) {
+      const ahead = parseTfHash(hash);
+      const one = pages.find((candidate) => candidate.matches(ahead));
+      if (one === undefined || (one.knows !== undefined && !one.knows(ahead))) continue;
+      held = holdBehind(held, { key: `${pages.indexOf(one)}:${one.address?.(ahead) ?? ""}`, value: { entry: one, route: ahead } }, kept.value);
+    }
     // Drawn in a fixed order, so showing a page again moves no element.
     return [...held].sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
   });
