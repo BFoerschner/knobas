@@ -1675,6 +1675,40 @@ test("two sources holding PAY-1: each card and row names its source and opens by
   }
 });
 
+test("a drawn card keeps whether it names its source until the person's next read: a read that only adds its twin grows no card under the pointer (the ux13-overs pass)", async () => {
+  const twin = { status: "To Do", card: card("PAY-1", "Retry failed SEPA payouts", { entity_id: "gitea:PAY-1", source_id: "gitea" }) };
+  sourceRoles.take([
+    { id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [] },
+    { id: "gitea", display_name: "Tidewater Gitea", roles: [], role_misses: [] },
+  ]);
+  const corpus = [...CORPUS];
+  const revision = $state({ n: 0 });
+  try {
+    const h = harness([], [], corpus);
+    page = mount(TicketsPage, {
+      target,
+      props: { ready: true, timedTicket: null, ports: h.ports, viewId: null, typingPause: 0, previewPause: 0, get syncRevision() { return revision.n; } },
+    });
+    await settle();
+    const named = (id: string) => target.querySelector(`.tf-tcard[data-entity="${CSS.escape(id)}"]`)?.querySelector(".tf-tsrc")?.textContent ?? null;
+    expect(named("jira:PAY-1"), "a unique key names none").toBeNull();
+    // A sync brings Gitea's PAY-1 (held behind *Show N new*, as a card that sorts above drawn ones is): the card drawn
+    // keeps its height.
+    corpus.unshift(twin);
+    revision.n += 1;
+    flushSync();
+    await settle();
+    expect(named("jira:PAY-1"), "drawn before its twin came: no line added under the pointer").toBeNull();
+    // The person's own read draws both as the key's twins.
+    for (const char of "PAY") type(field(), char);
+    await settle();
+    expect(named("jira:PAY-1")).toBe("Tidewater Jira");
+    expect(named("gitea:PAY-1")).toBe("Tidewater Gitea");
+  } finally {
+    sourceRoles.forget();
+  }
+});
+
 // ---- Make an editable copy (#880) ----
 
 const fromLine = () => dialog()!.querySelector(".tf-vw-from")!.textContent!.replace(/\s+/g, " ").trim();

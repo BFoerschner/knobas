@@ -650,8 +650,27 @@
   const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52, from: 40 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
+  /**
+   * Whether each drawn card named its source, held until the person's next read (`reader.asked`): a read that only adds
+   * cards (the whole read after a key's fifty a column, a sync's) can bring the twin of a card drawn above, and naming
+   * the source then grew that card by a line under the pointer (the ux13-overs pass, 2026-11-15). Plain, not state: it
+   * is worked out as each card draws.
+   */
+  let named = new Map<string, boolean>();
+  let namedAt = -1;
   /** A card's source name when its key is shared, else `null`. */
-  const sourceOf = (card: MiniBoardCard) => (shared.has(card.key) ? sourceRoles.nameOf(card.source_id) : null);
+  const sourceOf = (card: MiniBoardCard) => {
+    if (reader.asked !== namedAt) {
+      named = new Map();
+      namedAt = reader.asked;
+    }
+    let names = named.get(card.entity_id);
+    if (names === undefined) {
+      names = shared.has(card.key);
+      named.set(card.entity_id, names);
+    }
+    return names ? sourceRoles.nameOf(card.source_id) : null;
+  };
   /** The list's columns: the view's, in the list's order (R-3.16). */
   const listColumns = $derived(
     LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),

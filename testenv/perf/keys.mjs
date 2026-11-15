@@ -10,8 +10,11 @@
 //
 // Each case is set up, then its key is pressed as real input over the DevTools protocol (`Input.dispatchKeyEvent`).
 // In the page it records, from the key's own event time:
-//   rows     the first frame drawn after the last read the key caused has answered and its rows are in the DOM: what
-//            a person sees as the answer to the key
+//   rows     the first frame drawn after the reads the key sent at once have answered and their rows are in the DOM:
+//            what a person sees as the answer to the key. A read sent after the first of them answered is the page's
+//            own whole read once the keys pause (the list after *Show N more*, an expanded board: fifty a column on
+//            the key, the rest after `LIST_SETTLE_MS`, the ux13-overs pass, 2026-11-15): it is in `reads` and
+//            `settled`, and `moved` holds it to adding rows below the screen, but `rows` does not wait for it
 //   settled  the last frame in which the page's rows changed, up to `--settle` ms after the key
 //   moved    the frames after `rows` in which a row it drew on screen moved or went, which should be none
 //            (`2026-11-11-rows-stay-where-they-drew.md`); rows drawn later below them are not a move
@@ -62,7 +65,9 @@ const PAGE = `
   const frames = [];
   const ROWS = "[data-entity], [role=option]";
   const onScreen = (e) => { const b = e.getBoundingClientRect(); return b.height > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth; };
-  const answeredAt = (r) => { const mine = calls.filter((x) => r.key !== null && x.start >= r.key && x.end !== null && r.reads.some(([cmd, holds, lacks]) => x.cmd === cmd && (!holds || x.what.includes(holds)) && (!lacks || !x.what.includes(lacks)))); return mine.length ? Math.max(...mine.map((x) => x.end)) : null; };
+  /** The reads the key sent at once: every one sent before the first of them answered (rows, in the header). */
+  const atOnce = (mine) => { const ends = mine.filter((x) => x.end !== null).map((x) => x.end); if (!ends.length) return mine; const first = Math.min(...ends); return mine.filter((x) => x.start <= first); };
+  const answeredAt = (r) => { const mine = atOnce(calls.filter((x) => r.key !== null && x.start >= r.key && r.reads.some(([cmd, holds, lacks]) => x.cmd === cmd && (!holds || x.what.includes(holds)) && (!lacks || !x.what.includes(lacks))))); return mine.length && mine.every((x) => x.end !== null) ? Math.max(...mine.map((x) => x.end)) : null; };
   const tick = (t) => {
     if (!run || run.done) return;
     frames.push(t);
@@ -96,7 +101,7 @@ const PAGE = `
       r.obs.disconnect();
       if (r.key === null) return { error: "no key" };
       const mine = calls.filter((x) => x.start >= r.key && r.reads.some(([cmd, holds, lacks]) => x.cmd === cmd && (!holds || x.what.includes(holds)) && (!lacks || !x.what.includes(lacks))));
-      const answered = mine.filter((x) => x.end !== null);
+      const answered = atOnce(mine).filter((x) => x.end !== null);
       const lastEnd = answered.length ? Math.max(...answered.map((x) => x.end)) : null;
       const after = (t) => frames.find((f) => f >= t) ?? null;
       const changesAfter = lastEnd === null ? [] : r.changes.filter((t) => t >= lastEnd);

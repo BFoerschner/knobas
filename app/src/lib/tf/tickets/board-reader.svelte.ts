@@ -321,7 +321,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   function capFor(quick = false): number | null {
     if (state.scope.without) return null;
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
-    if (quick) return cap;
+    // A quick read (a key on the whole list or an expanded board) sends fifty a column whatever the words: at eight, a
+    // filter cleared would cut the columns to eight until the whole read (Fable's ruling, the ux13-overs pass).
+    if (quick) return TYPED_CAP;
     const answered = board;
     if ((expanded.length === 0 && !listAll) || answered === null) return cap;
     if (listAll && !laned) return Math.max(cap, ...answered.columns.map((column) => column.total));
@@ -351,6 +353,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    * column at most (R-3.4, #1024).
    */
   function read(quick = false, byPerson = true) {
+    const asked = capFor(quick);
     clearTimeout(pausing);
     const { base, savedView, without } = state.scope;
     if (base === null) return;
@@ -360,7 +363,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     out += 1;
     sentAt = Date.now();
     ports
-      .board(capFor(quick), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
+      .board(asked, query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
       .finally(() => {
         out -= 1;
         if (out === 0 && queued) {
@@ -373,6 +376,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         if (mine !== reading) return;
         const drawn = kept(answer);
         board = drawn;
+        // A quick answer that holds every card of every column is the whole read already: none follows it.
+        if (quick && drawn.columns.every((column) => column.cards.length >= column.total)) clearTimeout(settling);
         state.failed = null;
         // A read the person caused (a filter, *Show more*, lanes) sorts the cards again; a sync's does not (`held-order`).
         if (byPerson) state.asked += 1;
@@ -470,10 +475,15 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       reading += 1;
       // The list showing every ticket reads the capped board first, then all of it once the keys pause: every match
       // read on every key was 5.8 MB and 1.2 s a key at 20,000 tickets (2026-11-10).
-      const quick = listAll && !laned && layout === "list";
+      // So does a board whose *Show more* drew past fifty a column (the ux13-overs pass, 2026-11-15, Fable's ruling): a
+      // key on 1,243 cards read 610 KB in 54 to 62 ms, 109 to 117 ms to its rows at CPU 4x on Björn's PC; the screen
+      // shows the first fifty of a column, and the rest come once the keys pause. Lanes keep their one read.
+      const quick = !laned && ((listAll && layout === "list") || (layout === "board" && expanded.length > 0 && (capFor() ?? 0) > TYPED_CAP));
       const go = () => {
         read(quick);
-        if (quick) settling = setTimeout(() => read(), LIST_SETTLE_MS);
+        // The whole read finishes the key's own: it sorts nothing again (`held-order`), so the cards it adds join below
+        // those drawn and none drawn moves.
+        if (quick) settling = setTimeout(() => read(false, false), LIST_SETTLE_MS);
       };
       // The first key after the board settled reads at once: the pause made every first key wait 90 ms for keys that
       // were not coming (the broad-filters pass, 2026-11-13). A key typed within the pause of the last key or read

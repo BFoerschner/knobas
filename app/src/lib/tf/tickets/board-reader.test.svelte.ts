@@ -279,6 +279,53 @@ test("a list showing every ticket reads fifty a column as words change, and all 
   expect(reads[4]!.perColumn).toBe(300);
 });
 
+test("a board whose Show more drew past fifty a column reads fifty a column on a key, and the rest once the keys pause (the ux13-overs pass, Fable's ruling)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ ...column("To Do", 8), total: 900 }, column("Done", 5)));
+  await flush();
+  for (let press = 0; press < 4; press += 1) {
+    reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+    reads.at(-1)!.answer(board({ ...column("To Do", 8 + 50 * (press + 1)), total: 900 }, column("Done", 5)));
+    await flush();
+  }
+  expect(reads.at(-1)!.perColumn).toBe(208);
+  const before = reads.length;
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[before]!.perColumn, "the key: what the screen shows").toBe(50);
+  reads[before]!.answer(board({ ...column("To Do", 50), total: 400 }, column("Done", 5)));
+  await flush();
+  expect(reader.bands[0]!.drawn[0]!.cards).toHaveLength(50);
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS);
+  expect(reads[before + 1]!.query).toBe("pay");
+  expect(reads[before + 1]!.perColumn, "the pause: as many as its four presses of Show more draw under words").toBe(250);
+  // The words cleared: still fifty a column on the key, never the eight a column of a board not expanded.
+  reads[before + 1]!.answer(board({ ...column("To Do", 208), total: 400 }, column("Done", 5)));
+  await flush();
+  reader.setFilter({ query: "", words: false });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[before + 2]!.perColumn).toBe(50);
+});
+
+test("a quick read whose answer holds every card of every column is the whole read: no read follows it once the keys pause", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.chooseLayout("list");
+  reader.expandAll();
+  reads[1]!.answer(board(column("To Do", 120), column("Done", 900)));
+  await flush();
+  reader.setFilter({ query: "payout-17", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[2]!.perColumn).toBe(50);
+  reads[2]!.answer(board(column("To Do", 3), column("Done", 1)));
+  await flush();
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS * 2);
+  expect(reads).toHaveLength(3);
+});
+
 // #2200's class: the list's Show N more reads every ticket, and a deep proxy
 // over thousands of cards made each draw subscribe to every field it read.
 test("the board drawn is the answer as read, not a reactive copy of each card", async () => {
