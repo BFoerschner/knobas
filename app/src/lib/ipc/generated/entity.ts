@@ -202,6 +202,31 @@ data: string, };
 export type AttentionGroup = "review_requested" | "my_pull_requests" | "open_pull_requests" | "my_branches" | "branches" | "other_branches";
 
 /**
+ * A branch of a repository as the mirror holds it, with the open pull
+ * request opened from it (the forge-rounds pass, 2026-11-15): what the
+ * repository header's *New pull request* is decided on, with no read of the
+ * branch's own view.
+ */
+export type BranchPull = { entity_id: string, 
+/**
+ * Its name, as the branch's record is titled.
+ */
+name: string, 
+/**
+ * The commit at its head as the mirror holds it (declared `commit`).
+ */
+tip: string | null, 
+/**
+ * The repository's default branch, by the repository's declared
+ * `default_branch`.
+ */
+is_default: boolean, 
+/**
+ * The open pull request opened from it, as [`REPO_PULL_HEADS`] finds it.
+ */
+pull: PullHead | null, };
+
+/**
  * One half of the uncommitted diff, as a diff block carries it.
  *
  * Issue #824.

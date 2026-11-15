@@ -75,6 +75,7 @@
     RangeNames,
     RefusedWrite,
     RepoBuilds,
+    BranchPull,
     RunRow,
     ShownView,
     SourceView,
@@ -126,6 +127,8 @@
     sourceRangeDiff?: (entityId: string, base: string, head: string) => Promise<RangeDiff>;
     /** The Builds tab's read (the repo-builds pass): the pipelines that built the repository's commits; the bridge's when left out. */
     repoPipelines?: (repoId: string) => Promise<RepoBuilds>;
+    /** The branches as the mirror holds them, with the pull request open from each (the forge-rounds pass): the header's look; the bridge's when left out. */
+    repoBranchPulls?: (repoId: string) => Promise<BranchPull[]>;
     /** A pipeline's runs, for the Builds tab's pipeline; the bridge's when left out. */
     pipelineRuns?: (pipelineId: string) => Promise<RunRow[]>;
     /**
@@ -219,6 +222,7 @@
     listEntities,
     refusedWrites,
     repoPipelines,
+    repoBranchPulls,
     setCheckoutOverride,
     submitWrite,
     type EntityRow,
@@ -237,6 +241,7 @@
     MADE_PR,
     readAllRows,
     mirrorDefault,
+    mirrorStanding,
     readRepoRoute,
     repoAsks,
     repoHash,
@@ -249,6 +254,7 @@
     withMade,
     type BranchOption,
     type BranchStanding,
+    type LookStanding,
     type RepoTab,
     type RepoTabId,
   } from "./repo";
@@ -409,6 +415,7 @@
     local = null;
     prs = null;
     facts = undefined;
+    branchPulls = null;
     untrack(() => refresh.reset());
     readRepo(id, alive, false);
     readCheckout(id, alive);
@@ -456,7 +463,25 @@
       },
       () => {},
     );
-    await Promise.all([factsRead, readBranches(id, alive, again), readRow(id, alive, again)]);
+    await Promise.all([factsRead, readBranches(id, alive, again), readRow(id, alive, again), readBranchPulls(id, alive)]);
+  }
+
+  /**
+   * The branches as the mirror holds them, each with the pull request open from it (`repo_branch_pulls`, the forge-rounds
+   * pass, 2026-11-15): what the header's *New pull request* is decided on, so its look reads no branch's view on the forge
+   * for a branch the mirror holds. `null` while it has not answered; `"failed"` where it could not, and the look reads
+   * each branch's view as before.
+   */
+  let branchPulls = $state.raw<BranchPull[] | "failed" | null>(null);
+  function readBranchPulls(id: string, alive: () => boolean): Promise<void> {
+    return (ports.repoBranchPulls ?? repoBranchPulls)(id).then(
+      (answer) => {
+        if (alive()) branchPulls = Array.isArray(answer) ? answer : "failed";
+      },
+      () => {
+        if (alive() && branchPulls === null) branchPulls = "failed";
+      },
+    );
   }
 
   /** Each branch list read, so only the newest answer lands and `branchesReading` holds until it has. */
@@ -514,6 +539,7 @@
     const alive = () => repoId === id;
     void readBranches(id, alive, true);
     void readRow(id, alive, true);
+    void readBranchPulls(id, alive);
     readBuilds(id);
   }
 
@@ -912,18 +938,21 @@
     const choice = selected !== null && !selected.isDefault ? selected : null;
     const asking = (choice === null ? (known ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
     void writesAsked;
+    const pulls = branchPulls;
     let live = true;
     const asked = ready ? asking.slice(0, ASKED) : [];
     const id = untrack(() => repoId);
-    const keptOf = (branch: string): BranchStanding | undefined => {
-      const kept = standings.get(branch);
-      return kept !== undefined && Date.now() - kept.at < STANDING_KEPT_MS ? kept.standing : undefined;
+    /** A branch's standing as a look of the last few minutes read it, else as the mirror holds it (`mirrorStanding`). */
+    const keptOf = (branch: { name: string; id: string }): LookStanding | undefined => {
+      const kept = standings.get(branch.id);
+      if (kept !== undefined && Date.now() - kept.at < STANDING_KEPT_MS) return kept.standing;
+      return Array.isArray(pulls) ? mirrorStanding(pulls, branch.name) : undefined;
     };
     /**
      * The look over the branches in order: the first that stands free wins, a branch that can't be read (`null`) says nothing
      * about what stands, and *proposed* stays; `undefined` while a branch it needs is not read yet.
      */
-    const walk = (of: (i: number) => BranchStanding | null | undefined): { propose: string | null; opened: BranchStanding["pr"] } | undefined => {
+    const walk = (of: (i: number) => LookStanding | null | undefined): { propose: string | null; opened: BranchStanding["pr"] } | undefined => {
       let first: BranchStanding["pr"] = null;
       for (let i = 0; i < asked.length; i += 1) {
         const standing = of(i);
@@ -934,7 +963,7 @@
       }
       return { propose: null, opened: first };
     };
-    const got: (BranchStanding | null | undefined)[] = asked.map((option) => keptOf(option.id));
+    const got: (LookStanding | null | undefined)[] = asked.map(keptOf);
     const found = (answer: { propose: string | null; opened: BranchStanding["pr"] }) => {
       toPropose = answer.propose;
       openedFrom = answer.opened;
@@ -948,6 +977,8 @@
     }
     // Before the branches are read the page knows no branch to start on: *main* drew for half a second, then went.
     untrack(() => (seeking = asked.length > 0 || (ready && choice === null && branches === null)));
+    // The mirror's answer comes in a frame or two, and reads no forge: the look waits for it rather than read views.
+    if (pulls === null && asked.length > 0) return;
     void (async () => {
       if (asked.length > 0 && id !== null && !searched.has(id)) {
         searched.add(id);

@@ -407,6 +407,26 @@ pub struct PullHead {
     pub cell: Option<String>,
 }
 
+/// A branch of a repository as the mirror holds it, with the open pull
+/// request opened from it (the forge-rounds pass, 2026-11-15): what the
+/// repository header's *New pull request* is decided on, with no read of the
+/// branch's own view.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct BranchPull {
+    pub entity_id: String,
+    /// Its name, as the branch's record is titled.
+    pub name: String,
+    /// The commit at its head as the mirror holds it (declared `commit`).
+    pub tip: Option<String>,
+    /// The repository's default branch, by the repository's declared
+    /// `default_branch`.
+    pub is_default: bool,
+    /// The open pull request opened from it, as [`REPO_PULL_HEADS`] finds it.
+    pub pull: Option<PullHead>,
+}
+
 /// A repository's Builds tab in one answer: the pipelines that built its
 /// commits ([`RepoPipelineRow`]) and its open pull requests' branches.
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
@@ -562,6 +582,29 @@ select distinct on (p.branch) p.branch, p.entity_id, p.cell from (
  where p.branch is not null and lower(p.state->>'text') = 'open'
    and lower(p.head_repo) = p.repo_name
  order by p.branch, p.item_updated_at desc nulls last, p.entity_id
+"
+);
+
+/// The live branches of the repository `$2`, `$1` the declarations: those
+/// naming it as their parent (`item_parent_name_idx`), each with the commit
+/// its record names at its head and whether it is the repository's declared
+/// default branch, newest first.
+pub const REPO_BRANCHES: &str = concat!(
+    "with repo as (
+  select i.source_id, lower(i.title) as name, ",
+    crate::declared_string!("$1", "default_branch"),
+    " as default_branch
+    from sync.live_item i
+   where i.entity_id = $2
+)
+select i.entity_id, i.title as name, ",
+    crate::declared_string!("$1", "commit"),
+    " as tip, i.title = repo.default_branch as is_default
+  from repo
+  join sync.item_parent ip
+    on ip.arm = 'child' and lower(ip.name) = repo.name and ip.source_id = repo.source_id
+  join sync.live_item i on i.entity_id = ip.entity_id and i.kind = 'branch'
+ order by i.item_updated_at desc nulls last, i.entity_id
 "
 );
 
@@ -845,6 +888,54 @@ pub async fn repo_pipelines(
         pipelines,
         pull_requests,
     })
+}
+
+/// The branches of the repository `repo` ([`REPO_BRANCHES`]), each with the
+/// open pull request opened from it ([`REPO_PULL_HEADS`]), from the mirror
+/// alone. Empty for an id no live repository carries.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn repo_branch_pulls(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    repo: &EntityRef,
+) -> Result<Vec<BranchPull>, CoreError> {
+    let branches =
+        sqlx::query_as::<_, (String, String, Option<String>, Option<bool>)>(REPO_BRANCHES)
+            .bind(declarations.as_param())
+            .bind(repo.to_string())
+            .fetch_all(pool)
+            .await?;
+    let pulls = sqlx::query_as::<_, (String, String, Option<String>)>(REPO_PULL_HEADS)
+        .bind(declarations.as_param())
+        .bind(repo.to_string())
+        .fetch_all(pool)
+        .await?;
+    let mut by_branch: std::collections::HashMap<String, PullHead> = pulls
+        .into_iter()
+        .map(|(branch, entity_id, cell)| {
+            (
+                branch.clone(),
+                PullHead {
+                    branch,
+                    entity_id,
+                    cell,
+                },
+            )
+        })
+        .collect();
+    Ok(branches
+        .into_iter()
+        .map(|(entity_id, name, tip, is_default)| BranchPull {
+            pull: by_branch.remove(&name),
+            entity_id,
+            name,
+            tip,
+            is_default: is_default.unwrap_or(false),
+        })
+        .collect())
 }
 
 /// The repositories of the mirrored commits `commits` ([`COMMIT_REPOSITORIES`]).

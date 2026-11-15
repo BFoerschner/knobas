@@ -5,7 +5,9 @@ use super::*;
 // -- the Builds frame (ADR-0022, #848) -------------------------------------
 
 use knobas_core::builds::RawRun;
-pub(super) use knobas_core::builds::{CommitRepository, PipelineRow, RepoBuilds, RunRow};
+pub(super) use knobas_core::builds::{
+    BranchPull, CommitRepository, PipelineRow, RepoBuilds, RunRow,
+};
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
 /// list. The read is CI's by definition, so it narrows itself to the role's
@@ -63,6 +65,29 @@ pub async fn repo_pipelines_inner(
         knobas_core::builds::repo_pipelines(pool, &declarations, &identity, &fillers, &repo)
             .await?,
     )
+}
+
+/// The repository's branches as the mirror holds them, each with the open
+/// pull request opened from it (the forge-rounds pass, 2026-11-15,
+/// [`knobas_core::builds::repo_branch_pulls`]): what the header's *New pull
+/// request* is decided on, with no read of the source. Empty for an id no
+/// live repository carries.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not an entity
+/// id; [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn repo_branch_pulls_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    repo_id: &str,
+) -> Result<Vec<BranchPull>, IpcError> {
+    let repo = EntityRef::parse(repo_id).map_err(IpcError::invalid)?;
+    // As [`repo_pipelines_inner`]: the stored parents follow the stored
+    // declarations.
+    crate::commands::search::declare(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
+    Ok(knobas_core::builds::repo_branch_pulls(pool, &declarations, &repo).await?)
 }
 
 /// The repositories of mirrored commits, for *By repository* on the Builds
@@ -950,6 +975,22 @@ pub async fn repo_pipelines(
 ) -> Result<RepoBuilds, IpcError> {
     let pool = lifecycle.pool()?;
     repo_pipelines_inner(&pool, lifecycle.registry(), &repo_id).await
+}
+
+/// A repository's branches with the open pull request from each, from the
+/// mirror alone (the forge-rounds pass, 2026-11-15).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`repo_branch_pulls_inner`] refuses with.
+#[tauri::command]
+pub async fn repo_branch_pulls(
+    lifecycle: State<'_, Lifecycle>,
+    repo_id: String,
+) -> Result<Vec<BranchPull>, IpcError> {
+    let pool = lifecycle.pool()?;
+    repo_branch_pulls_inner(&pool, lifecycle.registry(), &repo_id).await
 }
 
 /// The repositories of mirrored commits (the repo-builds pass).

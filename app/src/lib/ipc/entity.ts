@@ -19,6 +19,7 @@ import type {
   LocalDir,
   LocalPaths,
   LocalTree,
+  BranchPull,
   RepoBuilds,
   ViewBlock,
   ArtifactEntry,
@@ -276,6 +277,7 @@ export type {
   ReachOrigin,
   Reached,
   RefusedWrite,
+  BranchPull,
   RepoBuilds,
   RepoPipelineRow,
   Republication,
@@ -413,6 +415,15 @@ export function pipelines(): Promise<PipelineRow[]> {
  */
 export function repoPipelines(repoId: string): Promise<RepoBuilds> {
   return invoke<RepoBuilds>("repo_pipelines", { repoId });
+}
+
+/**
+ * A repository's branches as the mirror holds them, each with its tip and the open pull request opened from it (the
+ * forge-rounds pass, 2026-11-15): what the header's *New pull request* is decided on, with no read of the source.
+ * Rejects with `invalid` for a non-id; a repository the mirror does not hold answers none.
+ */
+export function repoBranchPulls(repoId: string): Promise<BranchPull[]> {
+  return invoke<BranchPull[]>("repo_branch_pulls", { repoId });
 }
 
 /**

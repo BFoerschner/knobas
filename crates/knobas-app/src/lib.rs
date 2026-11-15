@@ -810,6 +810,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // A repository's Builds tab (the repo-builds pass, 2026-11-13): the
         // pipelines that built its commits, appended at the foot (§10.8).
         commands::entity::repo_pipelines,
+        commands::entity::repo_branch_pulls,
         // *By repository* on the Builds list: the repositories of the commits
         // its runs built, appended at the foot (§10.8).
         commands::entity::commit_repositories,

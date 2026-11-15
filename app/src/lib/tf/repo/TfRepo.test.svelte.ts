@@ -11,6 +11,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type {
+  BranchPull,
   CheckoutView,
   DiffRead,
   EntityDetail,
@@ -23,7 +24,7 @@ import type {
   ViewBlock,
   ViewRow,
 } from "../../ipc/entity";
-import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
+import TfRepo, { forgetHeaderLooks, forgetHeaderSearches, type RepoPorts } from "./TfRepo.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
@@ -430,6 +431,90 @@ test("a branch picked with a pull request open from it makes the primary Open PR
   const primary = target.querySelector(".tf-fhead .tf-primary")!;
   expect(text(primary)).toBe("Open PR #142");
   expect(primary.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
+});
+
+// The forge-rounds pass (2026-11-15): the look read each branch's whole view on the forge, about ten requests a branch,
+// and held the button for seconds on a first visit. The mirror holds the pull requests and each branch's tip.
+const SPIKE_Y = "gitea:tidewater/payout-service@refs/heads/spike/y";
+const SPIKE_Z = "gitea:tidewater/payout-service@refs/heads/spike/z";
+const MAIN_TIP = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
+function pulled(name: string, entity_id: string, tip: string, pull: number | null = null): BranchPull {
+  return {
+    entity_id,
+    name,
+    tip,
+    is_default: name === "main",
+    pull: pull === null ? null : { branch: name, entity_id: `${REPO}#${pull}`, cell: `#${pull}` },
+  };
+}
+function mirrorPorts(branches: string[][], mirror: BranchPull[], asked: string[]): RepoPorts {
+  const base = ports();
+  return ports({
+    entityView: async (id, sectionId) => {
+      if (id === REPO && sectionId === "branches")
+        return section("branches", [{ type: "entities", title: null, rows: branches.map(([name, id]) => vrow(id!, name!, name === "main" ? "default" : null)) }]);
+      if (sectionId === null && id.includes("@refs/heads/")) {
+        asked.push(id);
+        return { ...section("overview", []), actions: [{ write_op: "create_pull_request", disabled: null } as ViewAction] };
+      }
+      return base.entityView(id, sectionId);
+    },
+    repoBranchPulls: async () => mirror,
+  });
+}
+
+test("New pull request is decided from the mirror: no branch's view is read, and a branch at the default's tip is passed over", async () => {
+  forgetHeaderLooks();
+  forgetHeaderSearches();
+  const asked: string[] = [];
+  const branches = [
+    ["main", MAIN],
+    ["feature/PAY-231-sepa-retry", FEATURE],
+    ["spike/y", SPIKE_Y],
+    ["spike/z", SPIKE_Z],
+  ];
+  const mirror = [
+    pulled("main", MAIN, MAIN_TIP),
+    pulled("feature/PAY-231-sepa-retry", FEATURE, "a".repeat(40), 142),
+    pulled("spike/y", SPIKE_Y, MAIN_TIP),
+    pulled("spike/z", SPIKE_Z, "b".repeat(40)),
+  ];
+  await draw([REPO], mirrorPorts(branches, mirror, asked));
+  const primary = target.querySelector(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("New pull request");
+  expect(primary.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/z")}`);
+  expect(asked, "no branch's view read on the forge").toEqual([]);
+});
+
+test("where every branch the mirror holds has a pull request open, the primary is Open PR #N, with nothing read", async () => {
+  forgetHeaderLooks();
+  forgetHeaderSearches();
+  const asked: string[] = [];
+  const branches = [
+    ["main", MAIN],
+    ["feature/PAY-231-sepa-retry", FEATURE],
+    ["spike/y", SPIKE_Y],
+  ];
+  const mirror = [pulled("main", MAIN, MAIN_TIP), pulled("feature/PAY-231-sepa-retry", FEATURE, "a".repeat(40), 142), pulled("spike/y", SPIKE_Y, "b".repeat(40), 150)];
+  await draw([REPO], mirrorPorts(branches, mirror, asked));
+  const primary = target.querySelector(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("Open PR #142");
+  expect(asked).toEqual([]);
+});
+
+test("a branch the mirror does not hold yet is read from its view, as before; the rest are the mirror's", async () => {
+  forgetHeaderLooks();
+  forgetHeaderSearches();
+  const asked: string[] = [];
+  const branches = [
+    ["main", MAIN],
+    ["spike/z", SPIKE_Z],
+    ["feature/PAY-231-sepa-retry", FEATURE],
+  ];
+  const mirror = [pulled("main", MAIN, MAIN_TIP), pulled("feature/PAY-231-sepa-retry", FEATURE, "a".repeat(40), 142)];
+  await draw([REPO], mirrorPorts(branches, mirror, asked));
+  expect(asked).toEqual([SPIKE_Z]);
+  expect(target.querySelector(".tf-fhead .tf-primary")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/z")}`);
 });
 
 test("the compare page lights its own tab, Compare, and Pull requests stays dark (#2257)", async () => {

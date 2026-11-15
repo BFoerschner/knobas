@@ -817,6 +817,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         });
       return { pipelines, pull_requests: PULL_HEADS[repo] ?? [] };
     },
+    // The header's *New pull request*: the fixture's mirror says nothing of its branches, so the header reads each branch's
+    // view as it did before the mirror could answer (the forge-rounds pass, 2026-11-15).
+    repo_branch_pulls: () => [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
     commit_repositories: (args) =>
       ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {

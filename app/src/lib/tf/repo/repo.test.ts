@@ -5,8 +5,9 @@
  */
 import { expect, test } from "vitest";
 
-import type { DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
+import type { BranchPull, DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
 import {
+  mirrorStanding,
   ancestors,
   branchOptions,
   buildsHash,
@@ -594,4 +595,22 @@ test("Builds' address names the branch and the pipeline, each one segment howeve
   const hash = buildsHash(REPO, "feature/x", "tc:buildType:Payout_Build");
   expect(readRepoRoute(segments(hash))).toMatchObject({ tab: "builds", branch: "feature/x", pipeline: "tc:buildType:Payout_Build" });
   expect(readRepoRoute(segments(buildsHash(REPO, "main")))).toMatchObject({ tab: "builds", branch: "main", pipeline: null });
+});
+
+test("a branch's standing from the mirror: its open pull request, and none offered at the default branch's tip (the forge-rounds pass)", () => {
+  const tip = "c".repeat(40);
+  const row = (name: string, sha: string | null, pull: number | null = null): BranchPull => ({
+    entity_id: `gitea:o/r@refs/heads/${name}`,
+    name,
+    tip: sha,
+    is_default: name === "main",
+    pull: pull === null ? null : { branch: name, entity_id: `gitea:o/r#${pull}`, cell: `#${pull}` },
+  });
+  const pulls = [row("main", tip), row("open", "a".repeat(40), 7), row("even", tip), row("ahead", "b".repeat(40)), row("bare", null)];
+  expect(mirrorStanding(pulls, "open")).toEqual({ pr: { entityId: "gitea:o/r#7", number: "#7", state: "open", tone: null }, canOpenPr: false });
+  expect(mirrorStanding(pulls, "even")).toEqual({ pr: null, canOpenPr: false });
+  expect(mirrorStanding(pulls, "ahead")).toEqual({ pr: null, canOpenPr: true });
+  expect(mirrorStanding(pulls, "bare")?.canOpenPr, "no tip held: nothing said ahead").toBe(false);
+  expect(mirrorStanding(pulls, "main")?.canOpenPr).toBe(false);
+  expect(mirrorStanding(pulls, "gone"), "a branch the mirror lacks is read as before").toBeUndefined();
 });

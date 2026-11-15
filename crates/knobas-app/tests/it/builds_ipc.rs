@@ -7,8 +7,8 @@
 //! back are told apart by `source_id` from anything else in this database.
 
 use knobas_app::commands::entity::{
-    commit_repositories_inner, pipeline_runs_inner, pipelines_inner, repo_pipelines_inner,
-    set_pipeline_pinned_inner,
+    commit_repositories_inner, pipeline_runs_inner, pipelines_inner, repo_branch_pulls_inner,
+    repo_pipelines_inner, set_pipeline_pinned_inner,
 };
 
 /// A TeamCity source nothing else in this database uses.
@@ -1872,6 +1872,136 @@ async fn a_repositorys_open_pull_requests_name_their_branches() {
         .map(|p| (p.branch.as_str(), p.entity_id.as_str()))
         .collect();
     assert_eq!(heads, [("feature/x", open.as_str())]);
+}
+
+/// A branch of `full_name` at `tip`, as Gitea's branch record names both.
+async fn branch(
+    pool: &sqlx::PgPool,
+    gitea: &str,
+    full_name: &str,
+    name: &str,
+    tip: &str,
+    updated: &str,
+) -> String {
+    let entity = format!("{gitea}:branch:{full_name}/{name}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'branch', $2)")
+        .bind(&entity)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    let bare = full_name.rsplit('/').next().unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1, $2, 'branch', $3, '', $4, $5::timestamptz)",
+    )
+    .bind(&entity)
+    .bind(gitea)
+    .bind(name)
+    .bind(serde_json::json!({
+        "name": name, "commit": { "id": tip },
+        "repository": { "full_name": full_name, "name": bare, "default_branch": "main" }
+    }))
+    .bind(updated)
+    .execute(pool)
+    .await
+    .unwrap();
+    entity
+}
+
+/// **The header's *New pull request*, from the mirror** (the forge-rounds
+/// pass, 2026-11-15): a repository's branches, newest first, each with its
+/// tip, whether it is the default, and the open pull request opened from it.
+/// A closed one, a fork's from a branch of the same name, and another
+/// repository's branches name nothing here.
+#[tokio::test]
+async fn a_repositorys_branches_name_their_tips_and_open_pull_requests() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let gitea = format!("gitea{}", &tc[2..]);
+    crate::support::source_config(&pool, &gitea, "gitea", "Gitea", &serde_json::json!({})).await;
+    let own = "tidewater/payout-service";
+    let repo = repository(&pool, &gitea, own, &[]).await;
+    repository(&pool, &gitea, "tidewater/ledger-api", &[]).await;
+    let tip = "c".repeat(40);
+    let main = branch(&pool, &gitea, own, "main", &tip, "2026-08-20T00:00:00Z").await;
+    let x = branch(
+        &pool,
+        &gitea,
+        own,
+        "feature/x",
+        &"a".repeat(40),
+        "2026-08-22T00:00:00Z",
+    )
+    .await;
+    let old = branch(
+        &pool,
+        &gitea,
+        own,
+        "feature/old",
+        &tip,
+        "2026-08-21T00:00:00Z",
+    )
+    .await;
+    branch(
+        &pool,
+        &gitea,
+        "tidewater/ledger-api",
+        "feature/x",
+        &"b".repeat(40),
+        "2026-08-23T00:00:00Z",
+    )
+    .await;
+    let open = pull(&pool, &gitea, "142", "feature/x", own, "open").await;
+    pull(&pool, &gitea, "140", "feature/old", own, "closed").await;
+    pull(
+        &pool,
+        &gitea,
+        "141",
+        "feature/old",
+        "someone/payout-service",
+        "open",
+    )
+    .await;
+
+    let registry = knobas_app::sources::Registry::for_process();
+    let answered = repo_branch_pulls_inner(&pool, &registry, &repo)
+        .await
+        .unwrap();
+    let rows: Vec<_> = answered
+        .iter()
+        .map(|b| {
+            (
+                b.entity_id.as_str(),
+                b.name.as_str(),
+                b.tip.as_deref(),
+                b.is_default,
+                b.pull.as_ref().map(|p| p.entity_id.as_str()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                x.as_str(),
+                "feature/x",
+                Some("a".repeat(40).as_str()),
+                false,
+                Some(open.as_str())
+            ),
+            (old.as_str(), "feature/old", Some(tip.as_str()), false, None),
+            (main.as_str(), "main", Some(tip.as_str()), true, None),
+        ]
+    );
+    let none = repo_branch_pulls_inner(&pool, &registry, &format!("{gitea}:repo:tidewater/gone"))
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+    let refused = repo_branch_pulls_inner(&pool, &registry, "not an id")
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }
 
 /// **The repositories of commits** (*By repository*, the repo-builds pass):

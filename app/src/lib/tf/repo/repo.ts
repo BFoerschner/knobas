@@ -9,6 +9,7 @@
  * as one on this disk. Section ids are the source's and never taken apart.
  */
 import type {
+  BranchPull,
   CheckoutView,
   ChoiceOption,
   CodeFacts,
@@ -603,6 +604,25 @@ export function branchStanding(view: SourceView | null): BranchStanding {
     commits: viewRows(section("commits")),
     files: diff?.count ?? null,
   };
+}
+
+/** What the header's look over the branches reads of a standing: the pull request open from it, and whether one is offered. */
+export type LookStanding = Pick<BranchStanding, "pr" | "canOpenPr">;
+
+/**
+ * A branch's standing for the header's *New pull request* as the mirror holds it (`repo_branch_pulls`, the forge-rounds
+ * pass, 2026-11-15), with no read of the branch's view: the pull request open from it, and a pull request offered where
+ * none is and its tip is not the default branch's (a branch at that tip has nothing ahead). `undefined` for a branch the
+ * mirror does not hold, which the look reads as before. Ahead of a default branch it is behind on, or merged by a merge
+ * commit, a branch is offered still: what Compare says when the button is pressed, as for a pull request someone opened
+ * since the sync.
+ */
+export function mirrorStanding(pulls: readonly BranchPull[], name: string): LookStanding | undefined {
+  const row = pulls.find((candidate) => candidate.name === name);
+  if (row === undefined) return undefined;
+  const defaultTip = pulls.find((candidate) => candidate.is_default)?.tip ?? null;
+  const pr = row.pull === null ? null : { entityId: row.pull.entity_id, number: prNumber(row.pull.entity_id), state: "open", tone: null };
+  return { pr, canOpenPr: pr === null && !row.is_default && row.tip !== null && row.tip !== defaultTip };
 }
 
 /** One row of the *Branches* tab. */
