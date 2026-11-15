@@ -581,7 +581,9 @@
   });
 
   // A run of the repository's own source ended (a scheduled sync, *Start work*'s branch landing, a push the run brought in):
-  // the branches and the pull requests read again, over what the page drew.
+  // the branches and the pull requests read again, over what the page drew. A run that brought something reads the open
+  // tab again too, as a refresh does: Commits left open through a run that mirrored a pushed commit listed what it had
+  // drawn 15 s after the run ended (the ux13 Windows pass, 2026-11-15). A run that changed nothing reads no tab.
   const sourceId = $derived(detail?.row.source_id ?? null);
   $effect(() => {
     const from = sourceId;
@@ -591,7 +593,9 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.syncState, ({ payload }) => {
       const row = payload as SourceSyncStatus;
-      if (live && !row.running && row.source_id === from) untrack(rereadLists);
+      if (!live || row.running || row.source_id !== from) return;
+      untrack(rereadLists);
+      if (row.last_changed !== false) tabs = readShown(untrack(() => tabs));
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;

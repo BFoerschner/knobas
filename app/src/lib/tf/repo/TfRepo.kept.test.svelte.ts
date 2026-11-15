@@ -305,6 +305,25 @@ test("a run of the repository's source ending reads its branches and its pull re
   expect(text(target)).toContain("Instant SEPA");
 });
 
+// The Windows pass on ux13 (2026-11-15): Commits left open while a sync brought a pushed commit in still listed the
+// commits it drew 15 s after the run ended; leaving the page and coming back showed it.
+test("an open tab reads again when a run of the repository's source ends with news, and only then", async () => {
+  await drawLive([REPO, "commits"]);
+  const commitReads = () => reads.filter(([, section]) => section === "commits").length;
+  const before = commitReads();
+  expect(before).toBeGreaterThan(0);
+
+  await raise("sync:state", { source_id: "another-source", running: false, last_changed: true });
+  expect(commitReads()).toBe(before);
+  await raise("sync:state", { source_id: "gitea", running: false, last_changed: false });
+  expect(commitReads()).toBe(before);
+  await raise("sync:state", { source_id: "gitea", running: true, last_changed: null });
+  expect(commitReads()).toBe(before);
+
+  await raise("sync:state", { source_id: "gitea", running: false, last_changed: true });
+  expect(commitReads()).toBe(before + 1);
+});
+
 test("a branch made through New branch is offered at once, and Compare says it is being made until a read lists it", async () => {
   const follow = echoFollower();
   followed.follower = follow.follower;
