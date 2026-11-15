@@ -135,6 +135,9 @@ const json = (res, value, total = null) => {
 };
 const missing = (res, url = null) => {
   if (logMissing && url) console.log(`missing ${url.pathname}${url.search}`);
+  // A read that failed after its answer began is cut off, not answered again: a second answer threw, and the stand-in
+  // went down mid-run, so every page after it read nothing (the forge-rounds pass, 2026-11-15).
+  if (res.headersSent) return void res.destroy();
   res.writeHead(refuseRest ? 503 : 404, { "content-type": "application/json" });
   res.end('{"message":"not on the stand-in"}');
 };
@@ -257,8 +260,9 @@ async function inner(url, res, owner, name, rest) {
   } else if ((m = rest.match(/^\/git\/commits\/([0-9a-f]{40})\.diff$/))) {
     count("commit-diff");
     await sleep(delay);
+    const text = await commitDiff(m[1]);
     res.writeHead(200, { "content-type": "text/plain" });
-    res.end(await commitDiff(m[1]));
+    res.end(text);
   } else if ((m = rest.match(/^\/git\/commits\/([0-9a-f]{40})$/))) {
     count("commit");
     await sleep(delay);
@@ -275,8 +279,9 @@ async function inner(url, res, owner, name, rest) {
     count("pull-diff");
     await sleep(delay);
     const p = pull(m[1]);
+    const text = await git("diff", "--no-color", "--no-ext-diff", "-M", `${p.merge_base ?? p.base.sha}...${p.head.sha}`, "--");
     res.writeHead(200, { "content-type": "text/plain" });
-    res.end(await git("diff", "--no-color", "--no-ext-diff", "-M", `${p.merge_base ?? p.base.sha}...${p.head.sha}`, "--"));
+    res.end(text);
   } else if ((m = rest.match(/^\/pulls\/(\d+)$/)) && pull(m[1])) {
     count("pull");
     await sleep(delay);
@@ -326,8 +331,10 @@ async function answer(req, res) {
   if (realCompare && (gitDir !== null || reposDir !== null)) {
     try {
       if (url.searchParams.get("output") === "diff") {
+        // Read before answering: a git that fails is a 404, not a second answer.
+        const text = await git("diff", "--no-color", "--no-ext-diff", "-M", `${base}...${head}`, "--");
         res.writeHead(200, { "content-type": "text/plain" });
-        res.end(await git("diff", "--no-color", "--no-ext-diff", "-M", `${base}...${head}`, "--"));
+        res.end(text);
       } else json(res, await realCommits(base, head));
     } catch {
       missing(res);

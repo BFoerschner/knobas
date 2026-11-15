@@ -182,6 +182,12 @@ just open-budget --real 5472 --inner --no-big --throttle 6 --only repo-,files-,f
   what the live Gitea took for a file it had read (the Windows pass); `--delay` sets it.
 - **The saved home holds writes queued on the live products**: a backend whose Gitea source answers sends them (the
   stand-in refuses them, `POST …/branches`). Never point such a copy at a live forge you mean to keep as it is.
+- **The saved home stores no tree**: its sync never ran the stored-trees pass, so its landings are the first fill's,
+  read at the mirror's tip (the forge-rounds pass, 2026-11-15). For the landing as an app that has synced draws it,
+  make a base once: a backend on a copy (so its migrations run), then `stored_trees_fill --db <its url> --source
+  live-gitea --base-url http://127.0.0.1:3961 --passes 2` (each pass stores the stand-in repositories' default branches
+  and their READMEs first; `--until-done` never ends here, as the estate's other repositories answer 404), quit the
+  backend, and take copies of that copy. A backend older than the base's newest migration refuses it.
 - **Left out:** the big folders and compares (`--no-big`: they are made on the live Gitea for the run), the PDF
   (`tidewater/milestone-review` is seeded by `seed-gitea.sh`, not built here) and a run's tabs (TeamCity).
 
