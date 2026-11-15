@@ -418,7 +418,17 @@ impl PullView<'_> {
     /// merge base; anything else, a failed read too, keeps nothing, and the
     /// next read reads in order and keeps. Nothing is read where `pull` names
     /// no whole merge base and head, since nothing could be kept.
+    ///
+    /// Not behind a read on the background lane: those are the sync's (the
+    /// held-files pass, 2026-11-15), through an instance that ends with its
+    /// run, so nothing kept would be read again and the three requests would
+    /// be spent for nothing. The read left behind waits in its caller's lane:
+    /// a task spawned starts outside it.
     fn keep_behind(&self, pull: &Pull, keeping: diffs::Keeping) {
+        let lane = knobas_http::current_lane();
+        if lane == knobas_http::Lane::Background {
+            return;
+        }
         let head = pull.head.as_ref().and_then(|h| h.sha.clone());
         let (Some(base), Some(head)) = (pull.merge_base.clone(), head) else {
             return;
@@ -429,7 +439,7 @@ impl PullView<'_> {
         let client = std::sync::Arc::clone(&self.source.client);
         let kept = std::sync::Arc::clone(&self.source.pull_diffs);
         let (owner, repo, number) = (self.owner.to_owned(), self.repo.to_owned(), self.number);
-        tokio::spawn(async move {
+        tokio::spawn(knobas_http::on_lane(lane, async move {
             let _keeping = keeping;
             let Ok((commits, _, _)) = listed(&client, &owner, &repo, number).await else {
                 return;
@@ -452,7 +462,7 @@ impl PullView<'_> {
             if same && let Some(key) = diffs::DiffKey::of(&owner, &repo, number, &base, &head) {
                 kept.put(key, text.into());
             }
-        });
+        }));
     }
 
     /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on

@@ -259,9 +259,13 @@ impl Fixture {
     }
 
     async fn refresh(&self) -> Held {
-        held_sections::refresh(&self.pool, &self.id, self.source().as_ref())
-            .await
-            .unwrap()
+        // On the background lane, as the scheduler runs it.
+        knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            held_sections::refresh(&self.pool, &self.id, self.source().as_ref()),
+        )
+        .await
+        .unwrap()
     }
 
     async fn refresh_within(&self, requests: u32, share: i64) -> Held {
@@ -270,13 +274,16 @@ impl Fixture {
     }
 
     async fn refresh_budget(&self, requests: u32, budget: std::time::Duration, share: i64) -> Held {
-        held_sections::refresh_within(
-            &self.pool,
-            &self.id,
-            self.source().as_ref(),
-            requests,
-            budget,
-            share,
+        knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            held_sections::refresh_within(
+                &self.pool,
+                &self.id,
+                self.source().as_ref(),
+                requests,
+                budget,
+                share,
+            ),
         )
         .await
         .unwrap()
@@ -304,7 +311,10 @@ impl Fixture {
         mount(&self.server, pull, priority).await;
     }
 
+    /// What the fake was asked so far, once a page's first read has had the
+    /// time to send the keeping read it leaves behind (Gitea's `keep_behind`).
     async fn requests(&self) -> usize {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         self.server
             .received_requests()
             .await
@@ -465,7 +475,16 @@ fn wire(mut shown: ShownView) -> Vec<u8> {
 #[tokio::test]
 async fn the_held_files_are_what_the_page_draws_from_the_forge_byte_for_byte() {
     let (f, _) = fixture().await;
+    let before = f.requests().await;
     let held = f.refresh().await;
+    // Nothing is left reading behind the pass: a pull request's first read
+    // leaves a keeping read behind it for a page, never for the sync, whose
+    // instance ends with its run (and whose lane a spawned read would leave).
+    assert_eq!(
+        f.requests().await - before,
+        usize::try_from(held.requests).unwrap(),
+        "the forge saw what the pass counted"
+    );
     assert_eq!(
         (held.read, held.left, held.too_large),
         (1, 0, 0),

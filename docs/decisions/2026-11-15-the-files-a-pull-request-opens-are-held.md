@@ -131,6 +131,12 @@ Three decisions, with the measurements above:
   would have stopped every run at the same place. Fixed as above, with a test.
 - **The stand-in asked `version` on every read.** It had no `/api/v1/version`, so the adapter, which keeps the answer
   for the process, asked again on every *Files* read, one request in five of the first fill. It answers 1.27.3 now.
+- **A keeping read behind the sync's reads.** The pass of the same day that keeps a pull request's diff behind its
+  first *Files* read (`733dc1e9`) spawned that read on a task of its own. Every read the sync makes is a first read,
+  through an adapter instance that ends with its run, so each pull request would have cost three more requests, kept
+  nothing anyone reads, and been sent in the interactive lane (a spawned task starts outside its caller's). A read on
+  the background lane now leaves nothing behind, and the read left behind a page's waits in the page's lane
+  (`view/pr.rs`'s `keep_behind`). Pinned: the forge sees exactly the requests the pass counts (12 against 9 without it).
 - **The request counter ships.** `knobas_http::counted` was behind `test-util`; the pass holds its reads to an exact
   cap with it. Outside a counted task a request costs one failed task-local lookup.
 
