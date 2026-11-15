@@ -728,7 +728,7 @@ async fn a_withdrawn_row_and_a_source_switched_off_are_not_answered() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(ids(&ask(&pool, &s, "p", false).await), [kept.clone()]);
+    assert_eq!(ids(&ask(&pool, &s, "p", false).await), [kept.as_str()]);
     let plain = filters(&s);
     let (stored, unstored) = both(&pool, "p", &plain, 10, 40).await;
     assert_eq!(stored, unstored);
