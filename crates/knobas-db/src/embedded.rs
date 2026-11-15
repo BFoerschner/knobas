@@ -1664,6 +1664,9 @@ pub(crate) fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings
         .configuration
         .insert("shared_buffers".to_owned(), SHARED_BUFFERS.to_owned());
+    settings
+        .configuration
+        .insert("lc_messages".to_owned(), MESSAGES_LOCALE.to_owned());
     settings.timeout = Some(COMMAND_TIMEOUT);
 
     // The password `Settings::new()` invented is left in place here. Reading
@@ -2143,9 +2146,25 @@ fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
 /// that is fixed too: `C.UTF-8` where the C library has it, and on Windows,
 /// which has none, `en-US`, a name every Windows 10 and 11 install has.
 ///
-/// The other categories (`lc_messages`, `lc_numeric`, ...) are server
-/// settings, not fixed per database, and still come from the environment.
+/// The other categories (`lc_numeric`, ...) are server settings, not fixed
+/// per database, and still come from the environment, except
+/// [`MESSAGES_LOCALE`].
 const LIBC_LOCALE: &str = if cfg!(windows) { "en-US" } else { "C.UTF-8" };
+
+/// The language the server and `initdb` write their messages in: `C`, so
+/// English on every machine (the ux12 Windows pass, 2026-11-15).
+///
+/// Left to the environment, a German Windows got a German server log and
+/// German `initdb` output (`Dauer:` for `duration:`). Nothing knobas acts on
+/// reads a server's words -- every error it tells apart is told by its
+/// SQLSTATE -- but the reason a failed start gives is found by the `FATAL:`
+/// label of its line ([`start_reason`]), which some translations change, and
+/// the start log a user sends with a report should read the same everywhere.
+/// Passed as `-c lc_messages` at every start ([`build_settings`]), so a
+/// cluster an older build made under another language gets it too, and as
+/// `--lc-messages` and `LC_MESSAGES` to `initdb` ([`run_initdb`]), so the
+/// cluster's own `postgresql.conf` and `initdb`'s output say `C` as well.
+const MESSAGES_LOCALE: &str = "C";
 
 /// Run `initdb` into `settings.data_dir`, as `postgresql_embedded` would, with
 /// `kill_on_drop` and a bounded wait.
@@ -2207,6 +2226,10 @@ async fn run_initdb_stopping(
         .arg("--builtin-locale=C.UTF-8")
         .arg(format!("--lc-collate={LIBC_LOCALE}"))
         .arg(format!("--lc-ctype={LIBC_LOCALE}"))
+        .arg(format!("--lc-messages={MESSAGES_LOCALE}"))
+        // Its own output, which a failure carries: `LC_ALL` is not set over
+        // it, since that would also override the categories above.
+        .env("LC_MESSAGES", MESSAGES_LOCALE)
         .arg("--pwfile")
         .arg(&settings.password_file)
         .arg("--username")
@@ -2774,6 +2797,23 @@ mod tests {
                 Some(value)
             );
         }
+    }
+
+    /// Every start tells the server to write its messages in `C`, so a
+    /// cluster an older build made under another language, whose
+    /// `postgresql.conf` names that one, speaks English from its next start
+    /// (the ux12 Windows pass, 2026-11-15).
+    #[test]
+    fn build_settings_has_the_server_speak_c() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = build_settings(dir.path()).unwrap();
+        assert_eq!(
+            settings
+                .configuration
+                .get("lc_messages")
+                .map(String::as_str),
+            Some("C")
+        );
     }
 
     /// The port a fresh start hands the server comes from a bind on
