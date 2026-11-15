@@ -460,6 +460,7 @@ const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+const Results = (await import("../launcher/Results.svelte")).default;
 const LinkDialog = (await import("../detail/LinkDialog.svelte")).default;
 const TfLinkTo = (await import("../tf/job/TfLinkTo.svelte")).default;
 const TfBlockDialog = (await import("../tf/time/TfBlockDialog.svelte")).default;
@@ -2735,6 +2736,49 @@ const CASES: Case[] = [
       if (!input) return;
       input.value = "sep";
       input.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+  },
+  {
+    /**
+     * The launcher's list: an answer longer than its first frame's share waits on a frame and then a task for the
+     * rest (the one-letter pass, 2026-11-15), and a list taken away before either must leave neither.
+     */
+    name: "Results",
+    source: "lib/launcher/Results.svelte",
+    open: (target) => {
+      const group = {
+        kind: "ticket",
+        label: "Ticket",
+        plural: "Tickets",
+        monogram: "TK",
+        total: 30,
+        hits: Array.from({ length: 30 }, (_, n) => ({
+          entity_id: `jira:PAY-${n}`,
+          kind: "ticket",
+          source_id: "jira",
+          updated_at: null,
+          synced_at: "2026-08-25T11:56:00Z",
+          path: null,
+          state: null,
+          title: `Payout ${n}`,
+          rank: 1,
+          snippet: [],
+          excerpts: [],
+        })),
+      };
+      return {
+        app: mount(Results, {
+          target,
+          props: {
+            response: { ...EMPTY_SEARCH, groups: [group], total: 30 },
+            rows: group.hits.map((hit) => ({ kind: "hit" as const, id: `hit:ticket:${hit.entity_id}`, group, hit })),
+            selected: 0,
+            optionId: (index: number) => `option-${index}`,
+            onopen: () => {},
+            onhover: () => {},
+          },
+        }),
+      };
     },
   },
   {

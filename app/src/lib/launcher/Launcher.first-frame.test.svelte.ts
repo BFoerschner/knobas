@@ -35,7 +35,6 @@ function hit(kind: string, n: number, raw: string): SearchHit {
     synced_at: "2026-08-25T11:56:00Z",
     path: null,
     state: null,
-    cell: null,
     title: `${raw} ${kind} ${n}`,
     rank: 1,
     snippet: [],
