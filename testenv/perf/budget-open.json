@@ -299,6 +299,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
+    "moved": 0
    }
   },
   "files-go-to": {
@@ -310,6 +317,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
     "moved": 0
    }
   },
@@ -323,6 +337,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
+    "moved": 0
    }
   },
   "pr-overview": {
@@ -334,6 +355,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
     "moved": 0
    }
   },
@@ -347,6 +375,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 200,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
+    "moved": 0
    }
   },
   "repo-commits": {
@@ -358,6 +393,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
     "moved": 0
    }
   },
@@ -371,6 +413,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 0
    }
   },
   "files-deep": {
@@ -382,6 +431,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
     "moved": 0
    }
   },
@@ -395,6 +451,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 0
    }
   },
   "file-large": {
@@ -406,6 +469,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
     "moved": 0
    }
   },
@@ -419,6 +489,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 0
    }
   },
   "repo-commit": {
@@ -430,6 +507,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
     "moved": 0
    }
   },
@@ -443,6 +527,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 0
    }
   },
   "new-pull-request": {
@@ -454,6 +545,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
     "moved": 0
    }
   },
@@ -467,6 +565,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 2
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 2
    }
   },
   "pr-files-large": {
@@ -478,6 +583,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 5000,
+    "moved": 2
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
     "moved": 2
    }
   },
@@ -491,6 +603,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 0
    }
   },
   "run-tests": {
@@ -503,6 +622,13 @@
     "usefulMs": 200,
     "firstUsefulMs": 5000,
     "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
+    "moved": 0
    }
   },
   "run-artifacts": {
@@ -514,6 +640,13 @@
    "4": {
     "usefulMs": 200,
     "firstUsefulMs": 5000,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 5000,
+    "drawnMs": 300,
+    "firstDrawnMs": 5000,
     "moved": 0
    }
   },
@@ -698,6 +831,25 @@
     "firstUsefulMs": 5000,
     "drawnMs": 200,
     "firstDrawnMs": 5000,
+    "moved": 0
+   }
+  },
+  "repo-builds": {
+   "1": {
+    "usefulMs": 100,
+    "firstUsefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "firstUsefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "firstUsefulMs": 300,
+    "drawnMs": 300,
+    "firstDrawnMs": 300,
     "moved": 0
    }
   }
@@ -932,7 +1084,7 @@
    }
   }
  },
- "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; the repository holds about 31,400 entries, so the clone's folders past the 20,000th are pressed too. In a repository with no clone the first press of the 300, 3,000 and 12,000 ones reads the folder's own level of Gitea's tree (about 0.1, 0.2 and 0.6 s on the WSL box in round two, where `contents` took 0.7 s, 9 s and never): 2, 3 and 5 s, room for a loaded box; every round after is held to the aim.",
+ "_inner": "Lines for open.mjs --set inner (just open-budget --real <port> --inner, and --forge <ms> for `forge`), from the inner-pages pass of PR #2479 (2026-11-12, docs/decisions/2026-11-12-the-inner-pages-draw-what-knobas-holds.md), measured against the live Gitea on the WSL box: a return and a return after every source's run within the pass's aim (100 ms at 1x, 200 at 4x); a first open within `firstUsefulMs`, which for a place only the forge can answer the first time (no clone) is the forge's time, 5 s live and the probe's cap with every request held; the branch list, the last commit, Go to file, a README, a pull request's overview and commits are drawn from what knobas holds, so their first open is held to the aim too. No row may move, but Files changed's one or two lines, where the forge's diff replaces the clone's (known, not fixed in the pass). Compare on a branch with many changes and a pull request's Conversation at 4x have no line: their side panels wait on each branch's whole view, which the forge took longer than the probe's cap to answer under a sync's load. Big folders (the big-folder pass, 2026-11-13, docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md; `big-folders.mjs`): a folder of 300, 3,000 or 12,000 entries, or 800 ten directories down, in a repository knobas cloned is held to the aim on every round, first included, and so is `drawnMs`, the end of the frame that shows its rows; the repository holds about 31,400 entries, so the clone's folders past the 20,000th are pressed too. In a repository with no clone the first press of the 300, 3,000 and 12,000 ones reads the folder's own level of Gitea's tree (about 0.1, 0.2 and 0.6 s on the WSL box in round two, where `contents` took 0.7 s, 9 s and never): 2, 3 and 5 s, room for a loaded box; every round after is held to the aim. The 6x lines (the inner-6x pass, 2026-11-15, docs/decisions/2026-11-15-inner-pages-at-6x.md; `inner-items.json`'s `6` set): every return held to 300 ms used and drawn, a first open the forge answers to the same `firstUsefulMs` as at 1x and 4x and drawn by then, measured on the Mac against the stand-in forge (`standin-forge.mjs --repos`); and a repository's Builds tab (`repo-builds`), read from the mirror, held to the aim on every round.",
  "syncing": {
   "file-readme": {
    "1": {

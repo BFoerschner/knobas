@@ -7,10 +7,17 @@
 //   own entry (`contents-ext`) and its bytes (`raw`), for every repository, from that one local repository: what
 //   *Files* reads, so a file read from the forge and one read from a clone can be timed against each other;
 //
-// and every other route 404 at once.
+// - with `--repos <dir>`, each repository `o/r` from its own `<dir>/o-r.git` where there is one (the `--git` one
+//   otherwise), and what a repository's other inner pages read (the inner-6x pass, 2026-11-15): its branches, a
+//   commit's record and its diff, a path's commits, a commit's statuses, and with `--pulls <file.json>` (records by
+//   `o/r#n`, as Gitea answers `pulls/{n}`, e.g. the mirror's payloads) a pull request's record, commits and `.diff`
+//   (`git diff <merge base>...<head>`), with no reviews or comments; the account is `knobas`;
+//
+// and every other route 404 at once (`--log` prints every request, its status and its time, and why a route failed).
 //
 //   node testenv/perf/standin-forge.mjs --listen 3911 [--delay 650] [--files 300] [--git <dir>] [--control 3912]
-//                                       [--distinct] [--tips <file.json>] [--real-compare]
+//                                       [--distinct] [--tips <file.json>] [--real-compare] [--repos <dir>]
+//                                       [--pulls <file.json>] [--log]
 //
 // `--real-compare` (the stored-compare pass, 2026-11-14) answers the compare from the `--git` repository itself, as
 // Gitea does: the diff is `git diff -M <base>...<head>` and the commits `git log <base>..<head>` with their parents, so
@@ -29,8 +36,9 @@
 // and `GET /tree?sha=<sha>` whether that commit's tree has been answered.
 // Nothing is written anywhere.
 import http from "node:http";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
@@ -44,6 +52,16 @@ const distinct = args.includes("--distinct");
 const realCompare = args.includes("--real-compare");
 const refuseRest = args.includes("--refuse-rest");
 const tips = opt("--tips") ? JSON.parse(readFileSync(opt("--tips"), "utf8")) : {};
+const reposDir = opt("--repos");
+const pulls = opt("--pulls") ? JSON.parse(readFileSync(opt("--pulls"), "utf8")) : {};
+const logMissing = args.includes("--log");
+/** The local repository a request reads: its own under `--repos`, else `--git`'s. */
+const repoDir = new AsyncLocalStorage();
+const dirOf = (pathname) => {
+  const m = pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)/);
+  const own = m && reposDir ? `${reposDir}/${decodeURIComponent(m[1])}-${decodeURIComponent(m[2])}.git` : null;
+  return own && existsSync(own) ? own : gitDir;
+};
 /** Each alias the stand-in answered or can be asked by, to its object in the local repository. */
 const back = new Map();
 const aliased = new Set();
@@ -53,7 +71,7 @@ function real(repo, object) {
   if (!distinct) return object;
   if (!aliased.has(repo)) {
     aliased.add(repo);
-    for (const commit of git("rev-list", "--all").toString().split("\n").filter(Boolean)) back.set(alias(repo, commit), commit);
+    for (const commit of gitSync("rev-list", "--all").toString().split("\n").filter(Boolean)) back.set(alias(repo, commit), commit);
   }
   return back.get(object) ?? object;
 }
@@ -91,8 +109,8 @@ function commits(base, head) {
 }
 
 /** The commits `head` has that `base` lacks, newest first, with their parents, as Gitea lists a compare's. */
-function realCommits(base, head) {
-  const listed = git("log", "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1e", `${base}..${head}`, "--")
+async function realCommits(base, head) {
+  const listed = (await git("log", "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1e", `${base}..${head}`, "--"))
     .toString("utf8")
     .split("\x1e")
     .map((r) => r.trim())
@@ -104,19 +122,26 @@ function realCommits(base, head) {
   return { total_commits: listed.length, commits: listed };
 }
 
-const git = (...argv) => execFileSync("git", ["-C", gitDir, ...argv], { maxBuffer: 64 << 20 });
-const json = (res, value) => {
-  res.writeHead(200, { "content-type": "application/json" });
+// Off the event loop: one slow read (a branch list, a big diff) holds no other request (the inner-6x pass, 2026-11-15:
+// run in line, a page's requests waited seconds behind each other here, not on knobas).
+const git = (...argv) =>
+  new Promise((resolve, reject) =>
+    execFile("git", ["-C", repoDir.getStore() ?? gitDir, ...argv], { maxBuffer: 64 << 20, encoding: "buffer" }, (error, out) => (error ? reject(error) : resolve(out))),
+  );
+const gitSync = (...argv) => execFileSync("git", ["-C", repoDir.getStore() ?? gitDir, ...argv], { maxBuffer: 64 << 20 });
+const json = (res, value, total = null) => {
+  res.writeHead(200, { "content-type": "application/json", ...(total === null ? {} : { "x-total-count": String(total) }) });
   res.end(JSON.stringify(value));
 };
-const missing = (res) => {
+const missing = (res, url = null) => {
+  if (logMissing && url) console.log(`missing ${url.pathname}${url.search}`);
   res.writeHead(refuseRest ? 503 : 404, { "content-type": "application/json" });
   res.end('{"message":"not on the stand-in"}');
 };
 
 /** `git ls-tree -l` rows as Gitea's tree entries: a level's by name, a recursive one's by whole path. */
-function treeEntries(sha, recursive) {
-  const out = git("ls-tree", "-z", "-l", ...(recursive ? ["-r", "-t"] : []), sha).toString("utf8");
+async function treeEntries(sha, recursive) {
+  const out = (await git("ls-tree", "-z", "-l", ...(recursive ? ["-r", "-t"] : []), sha)).toString("utf8");
   return out.split("\0").filter(Boolean).map((row) => {
     const [meta, path] = row.split("\t");
     const [mode, type, object, size] = meta.split(/\s+/);
@@ -140,14 +165,14 @@ async function files(url, res) {
     count("branch");
     await sleep(delay);
     const tip = tips[`${owner}/${name}/${branch}`];
-    const sha = tip ?? git("rev-parse", "--verify", "-q", `refs/heads/${branch}`).toString().trim();
-    json(res, { name: branch, commit: { id: sha, message: git("log", "-1", "--format=%s", real(`${owner}/${name}`, sha)).toString().trim() } });
+    const sha = tip ?? (await git("rev-parse", "--verify", "-q", `refs/heads/${branch}`)).toString().trim();
+    json(res, { name: branch, commit: { id: sha, message: (await git("log", "-1", "--format=%s", real(`${owner}/${name}`, sha))).toString().trim() } });
   } else if ((m = rest.match(/^\/git\/trees\/([0-9a-f]+)$/))) {
     const recursive = url.searchParams.get("recursive") === "true";
     count(recursive ? "tree" : "level");
     await sleep(delay);
     const repoName = `${owner}/${name}`;
-    const all = treeEntries(real(repoName, m[1]), recursive).map((entry) => {
+    const all = (await treeEntries(real(repoName, m[1]), recursive)).map((entry) => {
       if (!distinct) return entry;
       const named = alias(repoName, entry.sha);
       back.set(named, entry.sha);
@@ -161,44 +186,147 @@ async function files(url, res) {
     const path = decodeURIComponent(m[1]);
     count("entry");
     await sleep(delay);
-    const [row] = treeEntries(`${real(`${owner}/${name}`, ref)}:${path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}`, false).filter((e) => e.path === path.slice(path.lastIndexOf("/") + 1));
+    const [row] = (await treeEntries(`${real(`${owner}/${name}`, ref)}:${path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}`, false)).filter((e) => e.path === path.slice(path.lastIndexOf("/") + 1));
     if (row === undefined) return missing(res), true;
     json(res, { file_contents: { name: row.path, type: "file", size: row.size, sha: alias(`${owner}/${name}`, row.sha), html_url: null } });
   } else if ((m = rest.match(/^\/raw\/(.+)$/)) && ref !== null) {
     const path = decodeURIComponent(m[1]);
     count("raw");
     await sleep(delay);
-    const bytes = git("cat-file", "blob", `${real(`${owner}/${name}`, ref)}:${path}`);
+    const bytes = await git("cat-file", "blob", `${real(`${owner}/${name}`, ref)}:${path}`);
     res.writeHead(200, { "content-type": "application/octet-stream", "content-length": bytes.length });
     res.end(bytes);
+  } else return inner(url, res, owner, name, rest);
+  return true;
+}
+
+/** Commits as Gitea's `git/commits/{sha}` and its commit lists answer them, read in one `git show`, kept by repository and sha. */
+const records = new Map();
+async function commitRecords(shas) {
+  const dir = repoDir.getStore() ?? gitDir;
+  const want = [...new Set(shas)].filter((sha) => !records.has(`${dir}\n${sha}`));
+  if (want.length > 0) {
+    const out = (await git("show", "-s", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%T%x1f%B%x1e", ...want)).toString("utf8");
+    const rows = out.split("\x1e").map((r) => r.replace(/^\n+/, "")).filter(Boolean);
+    rows.forEach((row, n) => {
+      const [full, parents, an, ae, ad, cn, ce, cd, tree, ...message] = row.split("\x1f");
+      const record = {
+        sha: full,
+        html_url: null,
+        created: ad,
+        commit: { message: message.join("\x1f").replace(/\n+$/, ""), author: { name: an, email: ae, date: ad }, committer: { name: cn, email: ce, date: cd }, tree: { sha: tree } },
+        author: null,
+        committer: null,
+        parents: parents.split(" ").filter(Boolean).map((p) => ({ sha: p })),
+        files: null,
+      };
+      records.set(`${dir}\n${want[n]}`, record);
+    });
+  }
+  return shas.map((sha) => records.get(`${dir}\n${sha}`));
+}
+const commitRecord = async (sha) => (await commitRecords([sha]))[0];
+const commitList = async (range, path = null) => (await git("rev-list", range, ...(path ? ["--", path] : []))).toString().split("\n").filter(Boolean);
+/** A page of `shas` as Gitea pages a list (`page`, `limit`), with its total. */
+async function paged(url, res, shas) {
+  const page = Number(url.searchParams.get("page") ?? "1");
+  const limit = Number(url.searchParams.get("limit") ?? url.searchParams.get("per_page") ?? "30");
+  json(res, await commitRecords(shas.slice((page - 1) * limit, page * limit)), shas.length);
+}
+/** A commit's change as Gitea's `.diff` prints it: against its first parent, or whole for a root. */
+async function commitDiff(sha) {
+  const parents = (await git("show", "-s", "--format=%P", sha)).toString().trim().split(" ").filter(Boolean);
+  return parents.length ? git("diff", "--no-color", "--no-ext-diff", "-M", `${parents[0]}`, sha, "--") : git("show", "--no-color", "--format=", sha);
+}
+
+/** What a repository's other inner pages read (`--repos`, `--pulls`); `false` for a route the stand-in does not answer. */
+async function inner(url, res, owner, name, rest) {
+  let m;
+  const pull = (n) => pulls[`${owner}/${name}#${n}`];
+  if (rest === "/branches") {
+    count("branches");
+    await sleep(delay);
+    const rows = (await git("for-each-ref", "--format=%(refname:short)%1f%(objectname)", "refs/heads")).toString().split("\n").filter(Boolean).map((r) => r.split("\x1f"));
+    const page = Number(url.searchParams.get("page") ?? "1");
+    const limit = Number(url.searchParams.get("limit") ?? "50");
+    const shown = rows.slice((page - 1) * limit, page * limit);
+    const commits = await commitRecords(shown.map(([, sha]) => sha));
+    json(res, shown.map(([branch], n) => ({ name: branch, commit: commits[n], protected: false })), rows.length);
+  } else if ((m = rest.match(/^\/git\/commits\/([0-9a-f]{40})\.diff$/))) {
+    count("commit-diff");
+    await sleep(delay);
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(await commitDiff(m[1]));
+  } else if ((m = rest.match(/^\/git\/commits\/([0-9a-f]{40})$/))) {
+    count("commit");
+    await sleep(delay);
+    json(res, await commitRecord(m[1]));
+  } else if ((m = rest.match(/^\/commits\/([^/]+)\/status$/))) {
+    count("status");
+    await sleep(delay);
+    json(res, { state: "", statuses: [], total_count: 0, sha: m[1] });
+  } else if (rest === "/commits") {
+    count("commits");
+    await sleep(delay);
+    await paged(url, res, await commitList(url.searchParams.get("sha") ?? "main", url.searchParams.get("path")));
+  } else if ((m = rest.match(/^\/pulls\/(\d+)\.diff$/)) && pull(m[1])) {
+    count("pull-diff");
+    await sleep(delay);
+    const p = pull(m[1]);
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(await git("diff", "--no-color", "--no-ext-diff", "-M", `${p.merge_base ?? p.base.sha}...${p.head.sha}`, "--"));
+  } else if ((m = rest.match(/^\/pulls\/(\d+)$/)) && pull(m[1])) {
+    count("pull");
+    await sleep(delay);
+    json(res, pull(m[1]));
+  } else if ((m = rest.match(/^\/pulls\/(\d+)\/commits$/)) && pull(m[1])) {
+    count("pull-commits");
+    await sleep(delay);
+    const p = pull(m[1]);
+    await paged(url, res, await commitList(`${p.merge_base ?? p.base.sha}..${p.head.sha}`));
+  } else if ((m = rest.match(/^\/(pulls\/\d+\/(reviews|files)|issues\/\d+\/(comments|timeline)|reviewers|labels|pulls)$/))) {
+    count("empty");
+    await sleep(delay);
+    json(res, [], 0);
   } else return false;
   return true;
 }
 
 const count = (kind) => (counts[kind] = (counts[kind] ?? 0) + 1);
 
-http.createServer(async (req, res) => {
+http.createServer((req, res) => {
+  // `--log`: every request, its status and its time here, so a slow page can be told from a slow stand-in.
+  if (logMissing) {
+    const t = performance.now();
+    res.on("finish", () => console.log(`${req.method} ${req.url} ${res.statusCode} ${Math.round(performance.now() - t)} ms`));
+  }
+  repoDir.run(dirOf(new URL(req.url, "http://x").pathname), () => answer(req, res));
+}).listen(listen, "127.0.0.1", () => console.log(`standin-forge: 127.0.0.1:${listen}, ${delay} ms a request, ${filesPerCompare} files a compare${gitDir ? `, files from ${gitDir}` : ""}${reposDir ? `, repositories from ${reposDir}` : ""}`));
+
+async function answer(req, res) {
   const url = new URL(req.url, "http://x");
+  if (req.method === "GET" && url.pathname === "/api/v1/user") return json(res, { id: 1, login: "knobas", username: "knobas", full_name: "knobas", email: "knobas@tidewater.test" });
   const compare = url.pathname.match(/^\/api\/v1\/repos\/[^/]+\/[^/]+\/compare\/(.+)$/);
-  if (req.method === "GET" && compare === null && gitDir !== null) {
+  if (req.method === "GET" && compare === null && (gitDir !== null || reposDir !== null)) {
     try {
       if (await files(url, res)) return;
-    } catch {
+    } catch (e) {
+      if (logMissing) console.log(`failed ${url.pathname}${url.search}: ${String(e.message ?? e).split("\n")[0]}`);
       return missing(res);
     }
   }
-  if (req.method !== "GET" || compare === null) return missing(res);
+  if (req.method !== "GET" || compare === null) return missing(res, url);
   const ends = decodeURIComponent(compare[1]);
   const cut = ends.indexOf("...");
   const [base, head] = cut < 0 ? [ends, ends] : [ends.slice(0, cut), ends.slice(cut + 3)];
   count("compare");
   await sleep(delay);
-  if (realCompare && gitDir !== null) {
+  if (realCompare && (gitDir !== null || reposDir !== null)) {
     try {
       if (url.searchParams.get("output") === "diff") {
         res.writeHead(200, { "content-type": "text/plain" });
-        res.end(git("diff", "--no-color", "--no-ext-diff", "-M", `${base}...${head}`, "--"));
-      } else json(res, realCommits(base, head));
+        res.end(await git("diff", "--no-color", "--no-ext-diff", "-M", `${base}...${head}`, "--"));
+      } else json(res, await realCommits(base, head));
     } catch {
       missing(res);
     }
@@ -211,7 +339,7 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(commits(base, head)));
   }
-}).listen(listen, "127.0.0.1", () => console.log(`standin-forge: 127.0.0.1:${listen}, ${delay} ms a request, ${filesPerCompare} files a compare${gitDir ? `, files from ${gitDir}` : ""}`));
+}
 
 if (control) {
   http.createServer((req, res) => {

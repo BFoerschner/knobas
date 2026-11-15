@@ -276,7 +276,7 @@ The window's memory of the [mirror](#mirror)'s answers to a page's reads (`app/s
 _Avoid_: read cache (the backend's, of source views), store, prefetch
 
 **Speed targets**:
-What a page, a key and a scroll must do on the saved scale database in headless Chrome with the page's main thread slowed (Björn, 2026-11-14): a page usable within 100 ms of its press at CPU 1x, 200 ms at 4x and 300 ms at 6x, a key's rows drawn within 100, 200 and 200 ms, and at 6x a list scrolling with no visible stall. 6x stands for a slow work laptop and weighs as much as the other two. `just open-budget`, `just keys-budget` and `just frame-budget` hold all three (`testenv/perf/README.md`), and a pass that changes what the app draws runs them.
+What a page, a key and a scroll must do on the saved scale database in headless Chrome with the page's main thread slowed (Björn, 2026-11-14): a page usable within 100 ms of its press at CPU 1x, 200 ms at 4x and 300 ms at 6x, a key's rows drawn within 100, 200 and 200 ms, and at 6x a list scrolling with no visible stall. 6x stands for a slow work laptop and weighs as much as the other two. `just open-budget`, `just keys-budget` and `just frame-budget` hold all three (`testenv/perf/README.md`), and a pass that changes what the app draws runs them. A repository's and a pull request's inner pages are held at all three too (`just open-budget --inner`, since 2026-11-15), against the live forge or, on the Mac, a stand-in serving the scale estate's own repositories built again from its seed.
 _Avoid_: performance budget (a budget is the file of lines that holds a target), fast enough
 
 **Stored card**:

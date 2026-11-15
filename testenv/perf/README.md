@@ -17,8 +17,9 @@ Three throttles, one weight each. On the saved scale database in headless Chrome
 `just open-budget --real`, `just keys-budget --real` and `just frame-budget` run all three by default and hold them
 (`budget-open.json`, `budget-keys.json`, `budget.json`); a pass that changes what the app draws runs them. At 6x an open is
 held by when it is drawn (`drawnMs`), not only when its first useful frame starts, since a long task after the rows
-holds the frame that shows them. The inner pages and the extremes (`--inner`, `--extremes`) stay at 1x and 4x: their
-items are per throttle and live on the forge, and a 6x round of them is the next pass on the live products. Windows runs
+holds the frame that shows them. The inner pages (`--inner`) run at 1x, 4x and 6x too, each throttle at items of its own
+(`inner-items.json`; the 6x set since the inner-6x pass, 2026-11-15); the extremes (`--extremes`) stay at 1x and 4x,
+their items living on the live products. Windows runs
 the same pages in about twice the Mac's time (the Windows pass, 2026-11-14), so a line met with little room on the Mac
 is a line missed on a slow Windows laptop; `docs/decisions/2026-11-14-what-a-page-costs-to-build.md` has the numbers.
 
@@ -53,6 +54,7 @@ trace on every state write, which made the measured app's filter keys several ti
 | `scrollers.mjs` | every box that scrolls on the app's pages, light and dark, with its own background and the colour under it; `--strict` fails on a transparent one |
 | `invalidations.mjs` | why a scroll restyles what it does, from Chromium's own invalidation records: for a rule that restyles far more than the rows that changed |
 | `profile.mjs` | a CPU profile of one moment (`--setup`, then `--act`), by function, for a slow key or page switch the frame probe names only by its task |
+| `moment.mjs` | the same moment under a Chrome trace (the inner-6x pass, 2026-11-15): each long task after `--act` split into script, style, layout and paint, and each style or layout pass in it with its elements or objects and, where script forced it, the frame that did. A profile's "(program)" is this |
 | `serve.mjs` | serves a built app on 127.0.0.1 where there is no Python (Windows) |
 | `cdp.mjs` | the DevTools-protocol client: `launch()` a headless Chrome of its own, or `attach(port)` to one listening |
 | `frame-budget.sh` | what `just frame-budget` runs |
@@ -151,6 +153,37 @@ just open-budget --real 5411 --inner --forge 1000   # every request held 1 s: `f
   `--timings` before blaming the page.
 - **What waits on the forge is named per call**: each IPC call in `open.json` carries its arguments (`what`), and
   `--timings` on the backend each command's time, so a slow open says which section of which entity it waited for.
+
+### The inner pages on the Mac: the stand-in forge
+
+From the inner-6x pass (2026-11-15, `docs/decisions/2026-11-15-inner-pages-at-6x.md`), with the live products someone
+else's. The scale estate's Gitea repositories are built from a seed, so they can be built again locally with the same
+commits: `testenv/scale/gitea.py`'s `History` for `scale-commerce/cart-service`, `payments-gateway` and `mobile-android`
+(the three item sets), at the seed's count of 10,000 and each person's address `<first name>@tidewater.test`, gives the
+very shas the saved database mirrors. `standin-forge.mjs --repos <dir>` then answers each repository from
+`<dir>/<owner>-<name>.git`: its record, branches and tips, trees, files, a commit and its diff, a path's commits, a
+commit's statuses, and with `--pulls <file.json>` (each pull request's record by `owner/name#n`, the mirror's payload as
+`get_entity` gives it) a pull request's record, commits and `.diff`. Reviews and comments answer empty, the account is
+`knobas`, and every other route 404 (`--log` prints every request with its status and time, so a slow page can be told
+from a slow stand-in: its git runs off the event loop, and a branch's commit records are read in one `git show`).
+
+```sh
+python3 -I testenv/perf/standin-repos.py --out <dir> scale-commerce/cart-service scale-commerce/payments-gateway scale-commerce/mobile-android
+cp -cR <saved home> "$TMPDIR/inner"           # keep only `source:live-gitea` in its dev-secrets.json
+node testenv/perf/standin-forge.mjs --listen 3961 --delay 30 --repos <dir> --pulls pulls.json --real-compare --log &
+HOME="$TMPDIR/inner" <headless_ipc built with debug assertions> --data-dir "$TMPDIR/inner/Library/Application Support/dev.knobas.desktop" --port 5472 &
+curl -X POST http://127.0.0.1:5472/invoke -d '{"cmd":"update_source","args":{"id":"live-gitea","patch":{"base_url":"http://127.0.0.1:3961"}}}'
+just open-budget --real 5472 --inner --no-big --throttle 6 --only repo-,files-,file-small,file-large,file-readme,new-pull-request,pr-
+```
+
+- **The pull requests' records** come from a backend on the saved database: `standin-repos.py --port <its port> --pulls
+  pulls.json --pr scale-commerce/cart-service#124 --pr …` (the items' `pr` and `prLarge`).
+- **One throttle a fresh copy and backend**, so each first open is a read the backend never made. 30 ms a request is
+  what the live Gitea took for a file it had read (the Windows pass); `--delay` sets it.
+- **The saved home holds writes queued on the live products**: a backend whose Gitea source answers sends them (the
+  stand-in refuses them, `POST …/branches`). Never point such a copy at a live forge you mean to keep as it is.
+- **Left out:** the big folders and compares (`--no-big`: they are made on the live Gitea for the run), the PDF
+  (`tidewater/milestone-review` is seeded by `seed-gitea.sh`, not built here) and a run's tabs (TeamCity).
 
 ### Big folders
 

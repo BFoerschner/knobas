@@ -206,7 +206,8 @@ Two things this pass found and did not change, both outside what a page costs to
   WebView2 at 100% scale does at 6x, and the frames a 240 Hz display shows, need the PC.
 - **The pages the live products feed:** a repository's Files and Branches, a pull request's *Files changed*, a run's
   Log and Tests. They read the forge or TeamCity, which this pass did not use; the inner pages' set (`--inner`) at 6x
-  is the next pass on the live products.
+  is the next pass on the live products. *Amended 2026-11-15:* measured on the Mac against a stand-in forge, and the
+  returns Windows found fixed (`2026-11-15-inner-pages-at-6x.md`); the live run is owed on WSL.
 
 ## Gates on the pass's head
 
