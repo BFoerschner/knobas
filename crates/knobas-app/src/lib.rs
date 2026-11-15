@@ -315,36 +315,26 @@ pub fn run() {
         )
         .manage(bundle.clone())
         .setup(move |app| {
-            // First, as Tauri's own config window would be (#2390).
-            bundle::open_main_window(app, &bundle)?;
-            // Both managed synchronously, before anything can call in, and
-            // both for the same reason: they are what a command asks when the
-            // database is *not* up yet. `Lifecycle` is the shared state's
-            // only door (see `commands::app::Lifecycle`), so managing it here
-            // rather than after bring-up is what makes `not_ready` reachable
-            // instead of Tauri's bare "state not managed".
-            let handle = app.handle().clone();
-            start_file_log(&handle, &log_sink);
-            let profile = Profile::new(demo, &handle.path().app_data_dir()?);
-            tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
-            // The desktop notification sender (#339) over the real backend.
-            let backend: std::sync::Arc<dyn notify::Backend> =
-                std::sync::Arc::new(notify::platform::show);
-            manage_app_state(&handle, profile, backend);
-
-            // And the database comes up on its own task. M0 blocked here,
-            // which froze the event loop for the length of a first run -- then
-            // a PostgreSQL download plus an `initdb`, tens of seconds -- so the
-            // window had to be created hidden to avoid showing a white frame
-            // that never repaints. It now appears immediately and renders the
-            // boot screen, which is the M0 carry-over this discharges: the app
-            // says what it is doing instead of not existing yet.
-            //
-            // Nothing is emitted from here (gotcha 9): the webview is not
-            // listening yet. `spawn_bring_up` emits as it goes and
-            // `frontend_ready` replays the current state to whoever missed it.
-            spawn_bring_up(handle);
-            Ok(())
+            start_before_the_window(
+                || {
+                    start_app(app, demo, &log_sink)?;
+                    Ok(())
+                },
+                || {
+                    // Made after the database's bring-up is on its way: on
+                    // Windows the WebView2 window took 0.3 to 0.75 s to
+                    // make, and bring-up waited for it (the ux12 Windows
+                    // pass, 2026-11-15). Timed, so a user's log says what
+                    // it cost.
+                    let started = std::time::Instant::now();
+                    bundle::open_main_window(app, &bundle)?;
+                    tracing::info!(
+                        ms = started.elapsed().as_millis(),
+                        "the main window is made"
+                    );
+                    Ok(())
+                },
+            )
         })
         .invoke_handler(invoke_handler())
         .build(context)
@@ -1362,6 +1352,52 @@ fn shutdown_database<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// Start everything that does not need the window: the log file, the
+/// profile, the state commands ask before the database is up, and the
+/// database's bring-up on its own task.
+fn start_app(app: &tauri::App, demo: bool, log_sink: &logging::Sink) -> tauri::Result<()> {
+    // Both managed synchronously, before anything can call in, and
+    // both for the same reason: they are what a command asks when the
+    // database is *not* up yet. `Lifecycle` is the shared state's
+    // only door (see `commands::app::Lifecycle`), so managing it here
+    // rather than after bring-up is what makes `not_ready` reachable
+    // instead of Tauri's bare "state not managed".
+    let handle = app.handle().clone();
+    start_file_log(&handle, log_sink);
+    let profile = Profile::new(demo, &handle.path().app_data_dir()?);
+    tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
+    // The desktop notification sender (#339) over the real backend.
+    let backend: std::sync::Arc<dyn notify::Backend> = std::sync::Arc::new(notify::platform::show);
+    manage_app_state(&handle, profile, backend);
+
+    // And the database comes up on its own task. M0 blocked here,
+    // which froze the event loop for the length of a first run -- then
+    // a PostgreSQL download plus an `initdb`, tens of seconds -- so the
+    // window had to be created hidden to avoid showing a white frame
+    // that never repaints. It now appears immediately and renders the
+    // boot screen, which is the M0 carry-over this discharges: the app
+    // says what it is doing instead of not existing yet.
+    //
+    // Nothing is emitted from here (gotcha 9): the webview is not
+    // listening yet. `spawn_bring_up` emits as it goes and
+    // `frontend_ready` replays the current state to whoever missed it.
+    spawn_bring_up(handle);
+    Ok(())
+}
+
+/// Run `start`, then `open` (the main window): the database's bring-up goes
+/// first so it runs beside the window's making, not after it (the ux12
+/// Windows pass, 2026-11-15). Nothing bring-up does needs the window: it
+/// emits as it goes and `frontend_ready` replays the state to a page that
+/// missed it (gotcha 9).
+fn start_before_the_window<E>(
+    start: impl FnOnce() -> Result<(), E>,
+    open: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    start()?;
+    open()
+}
+
 /// Start writing the log file (#747) and say what is running.
 ///
 /// A directory that cannot be opened leaves stderr logging as it was.
@@ -1402,6 +1438,37 @@ fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
+    /// The database's bring-up is started before the main window is made,
+    /// and a start that fails makes no window (the ux12 Windows pass: the
+    /// window took 0.3 to 0.75 s on Windows, and bring-up waited for it).
+    #[test]
+    fn the_database_starts_before_the_window_is_made() {
+        let order = std::cell::RefCell::new(Vec::new());
+        super::start_before_the_window::<()>(
+            || {
+                order.borrow_mut().push("bring-up");
+                Ok(())
+            },
+            || {
+                order.borrow_mut().push("window");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*order.borrow(), ["bring-up", "window"]);
+
+        let made = std::cell::Cell::new(false);
+        let failed = super::start_before_the_window(
+            || Err("no profile"),
+            || {
+                made.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(failed, Err("no profile"));
+        assert!(!made.get());
+    }
+
     /// The policy every module worker would need if Tauri sent it the CSP
     /// (#2312). Shiki (`highlight.worker.ts`) and Graphviz
     /// (`diagram.worker.ts`) need `'unsafe-eval'`; pdf.js's worker compiles
