@@ -779,6 +779,61 @@ pub(crate) const LIVE_ITEM_FIELDS_CARDED: &[(crate::query::FieldKey, &str)] = {
     ]
 };
 
+/// The mirror's ticket keys over a statement that reads the cards alone
+/// (`knobas_core::mini_board::CardsStatement::carded`, migration `0089`):
+/// every row is a ticket with its card `crd`, so each key is
+/// [`LIVE_ITEM_FIELDS_CARDED`]' card half, with no walk behind it for a row
+/// with none.
+///
+/// `project:` reads the card's project too (`project_key`, `project_name`,
+/// `knobas_core::declared_string!` under the card's declarations, the value
+/// [`LIVE_ITEM_FIELDS`]' stored set holds for the same paths) beside the
+/// chain [`LIVE_ITEM_FIELDS`] reads. `tests/it/board_narrowed.rs` holds every
+/// key to the board of the ids, every card stored.
+pub(crate) const LIVE_ITEM_FIELDS_CARD_ONLY: &[(crate::query::FieldKey, &str)] = {
+    use crate::query::FieldKey;
+    &[
+        (
+            FieldKey::Project,
+            concat!(
+                "(lower(crd.project_key) = any(fd.v) or lower(crd.project_name) = any(fd.v) \
+                  or i.entity_id in (select ip.entity_id from sync.item_project ip \
+                   join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind \
+                   where ip.path <> '[]'::jsonb and ",
+                knobas_core::project_chain_has!("ip.path", "fd.v"),
+                "))"
+            ),
+        ),
+        (FieldKey::Status, "lower(crd.status) = any(fd.v)"),
+        (FieldKey::IssueType, "lower(crd.issue_type) = any(fd.v)"),
+        (FieldKey::Priority, "lower(crd.priority) = any(fd.v)"),
+        (FieldKey::Assignee, "lower(crd.assignee) = any(fd.v)"),
+        (
+            FieldKey::Label,
+            "exists (select 1 from unnest(crd.labels) as l(value) where lower(l.value) = any(fd.v))",
+        ),
+        (FieldKey::Sprint, "crd.sprint_active"),
+        (
+            FieldKey::Assigned,
+            "(lower(crd.assignee) = any(fd.v) \
+              and i.item_updated_at >= now() - make_interval(days => fd.n))",
+        ),
+        (
+            FieldKey::Has,
+            concat!(
+                "i.entity_id in (select sg.tid from ",
+                knobas_core::ticket_signals!(
+                    "(select fdecl.d from fdecl)",
+                    "fd.u",
+                    knobas_core::signal_ends!("(select fdecl.d from fdecl)", "fd.u", "fd.v"),
+                    "fd.v"
+                ),
+                " sg where sg.kind = any(fd.v))"
+            ),
+        ),
+    ]
+};
+
 /// The eight keys [`LIVE_ITEM_FIELDS`] asks as sets, as they read before the
 /// query audit of 2026-11-12 and, for `sprint:`, before migration `0082`: a
 /// probe of `sync.item_field` or a walk of the payload for every row and
@@ -1137,6 +1192,19 @@ pub const LIVE_ITEM: Corpus = Corpus {
     fields: LIVE_ITEM_FIELDS,
     fields_carded: LIVE_ITEM_FIELDS_CARDED,
     matched: None,
+};
+
+/// The mirror as a ticket board that reads the cards alone sees it
+/// (`knobas_core::mini_board::CardsStatement::carded`, migration `0089`):
+/// [`LIVE_ITEM`], its row `i` the card's (id, source, kind, title, date) and
+/// its card `crd`, its keys [`LIVE_ITEM_FIELDS_CARD_ONLY`] and its author,
+/// which no card holds, read off the mirror row by its key where `by:` asks.
+/// Only `crate::sql::board_sql` reads it.
+pub(crate) const LIVE_ITEM_CARD: Corpus = Corpus {
+    author: Some("(select ax.author from sync.item ax where ax.entity_id = i.entity_id)"),
+    fields: LIVE_ITEM_FIELDS_CARD_ONLY,
+    fields_carded: LIVE_ITEM_FIELDS_CARD_ONLY,
+    ..LIVE_ITEM
 };
 
 /// The mirror for the launcher's **match stage** (the broad-keys pass,

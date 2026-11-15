@@ -243,7 +243,8 @@ fn narrowing(vocab: &Vocabulary, raw: &str) -> Narrowing {
 
 /// The boards of the `n`th query, `raw`, read with the narrowing in the
 /// board's scan and from the ids, the two held equal. `board` are the
-/// declarations the board binds. How many boards drew a card.
+/// declarations the board binds. How many boards drew a card, and each board
+/// as its answer's text.
 #[allow(clippy::too_many_arguments)]
 async fn hold(
     pool: &PgPool,
@@ -254,13 +255,14 @@ async fn hold(
     n: usize,
     raw: &str,
     when: &str,
-) -> usize {
+) -> (usize, Vec<String>) {
     let narrowing = narrowing(vocab, raw);
     let identity = vec!["mara".to_owned()];
     let some: Vec<String> = ids.iter().step_by(2).cloned().collect();
     let mut matched = narrowing.ids(pool).await.unwrap();
     matched.retain(|id| ids.contains(id));
     let mut drew = 0;
+    let mut boards = Vec::new();
     for (lanes, per_column, narrowed) in shapes(n) {
         let only = narrowed.then_some(&some);
         // What `Scope::only` of the ids admits: the tickets the query keeps,
@@ -297,26 +299,31 @@ async fn hold(
              the board narrowed in its scan is the board of the ids"
         );
         drew += usize::from(in_scan.columns.iter().any(|c| !c.cards.is_empty()));
+        boards.push(serde_json::to_string(&in_scan).unwrap());
     }
-    drew
+    (drew, boards)
 }
 
 /// Every query's every board, under the declarations the search was parsed
-/// with: the narrowing is in the board's scan.
+/// with: the narrowing is in the board's scan. Each board's text, in order.
 async fn hold_every(
     pool: &PgPool,
     sources: &[String],
     ids: &[String],
     vocab: &Vocabulary,
     when: &str,
-) {
+) -> Vec<String> {
     let mut drew = 0;
+    let mut boards = Vec::new();
     for (n, raw) in QUERIES.iter().enumerate() {
         assert!(
             narrowing(vocab, raw).in_scan_under(&vocab.declarations),
             "{raw}: read in the board's scan"
         );
-        drew += hold(pool, sources, ids, vocab, &vocab.declarations, n, raw, when).await;
+        let (n_drew, n_boards) =
+            hold(pool, sources, ids, vocab, &vocab.declarations, n, raw, when).await;
+        drew += n_drew;
+        boards.extend(n_boards);
     }
     // A query that kept nothing would hold trivially: most keep a card.
     let asked = QUERIES.len() * 3;
@@ -324,6 +331,7 @@ async fn hold_every(
         drew * 2 > asked,
         "{when}: {drew} of {asked} boards drew a card"
     );
+    boards
 }
 
 async fn vocabulary(pool: &PgPool) -> Vocabulary {
@@ -357,7 +365,17 @@ async fn a_board_narrowed_in_its_scan_is_the_board_of_the_ids() {
         ids.len() as i64,
         "every ticket written has its card"
     );
-    hold_every(&pool, &sources, &ids, &vocab, "every card stored").await;
+    // Every source whole (migration `0089`): the boards read the cards
+    // alone, the narrowing in that scan.
+    crate::item_card::mark_whole(&pool).await;
+    let whole: i64 =
+        sqlx::query_scalar("select count(*) from sync.card_whole where source_id = any($1)")
+            .bind(&sources)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(whole, sources.len() as i64, "every source is whole");
+    let carded = hold_every(&pool, &sources, &ids, &vocab, "every card stored").await;
 
     let half: Vec<&String> = ids.iter().step_by(3).collect();
     sqlx::query("delete from sync.item_card where entity_id = any($1)")
@@ -365,7 +383,7 @@ async fn a_board_narrowed_in_its_scan_is_the_board_of_the_ids() {
         .execute(&pool)
         .await
         .unwrap();
-    hold_every(&pool, &sources, &ids, &vocab, "a third of the cards gone").await;
+    let third = hold_every(&pool, &sources, &ids, &vocab, "a third of the cards gone").await;
 
     sqlx::query("delete from sync.item_card where entity_id = any($1)")
         .bind(&ids)
@@ -373,7 +391,14 @@ async fn a_board_narrowed_in_its_scan_is_the_board_of_the_ids() {
         .await
         .unwrap();
     assert_eq!(cards(&pool).await, 0);
-    hold_every(&pool, &sources, &ids, &vocab, "no card stored").await;
+    let none = hold_every(&pool, &sources, &ids, &vocab, "no card stored").await;
+    // Off the cards alone, joined to a third and walking every payload: the
+    // same boards.
+    for (n, (carded, (third, none))) in carded.iter().zip(third.iter().zip(&none)).enumerate() {
+        assert_eq!(carded, third, "board {n}: off the cards, and a third gone");
+        assert_eq!(carded, none, "board {n}: off the cards, and none stored");
+    }
+    assert_eq!((carded.len(), third.len()), (none.len(), none.len()));
 }
 
 /// Under declarations the database never stored, each stored key and each
@@ -421,7 +446,9 @@ async fn a_board_bound_to_other_declarations_reads_the_ids_first() {
             !narrowing(vocab, raw).in_scan_under(board),
             "{raw}: the ids first"
         );
-        drew += hold(&pool, &sources, &ids, vocab, board, n, raw, when).await;
+        drew += hold(&pool, &sources, &ids, vocab, board, n, raw, when)
+            .await
+            .0;
     }
     assert!(drew > QUERIES.len(), "{drew} boards drew a card");
 }

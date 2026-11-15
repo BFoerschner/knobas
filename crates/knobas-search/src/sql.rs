@@ -590,6 +590,43 @@ fn narrow(
     }
 }
 
+/// [`narrow`] over a statement that reads the cards alone
+/// (`knobas_core::mini_board::CardsStatement::carded`): the row `i` is a
+/// ticket's card's (`corpus::LIVE_ITEM_CARD`) and `crd` its card, so the keys
+/// read the card ([`crate::corpus::LIVE_ITEM_FIELDS_CARD_ONLY`]) and the words
+/// its stored words ([`row_holds_word_carded`]), and nothing walks a payload:
+/// no join beside `i`, and of a ticket key's CTEs only `fdecl`, which `has:`
+/// reads. Placeholders in [`narrow`]'s order, less the words' declarations,
+/// which nothing reads here.
+fn narrow_carded(
+    builder: &mut Builder,
+    alternatives: &[WordAlternative],
+    filters: &EffectiveFilters,
+) -> Narrow {
+    let mut bound = bind_filters(builder, filters);
+    bound.carded = true;
+    let mut ctes = match (&bound.declarations, bound.fields.is_empty()) {
+        (Some(declarations), false) => format!("fdecl as (select {declarations}::jsonb as d),\n"),
+        _ => String::new(),
+    };
+    ctes.push_str(&reaches(&bound));
+    let mut predicates = corpus_predicates(&crate::corpus::LIVE_ITEM_CARD, None, &bound);
+    if !alternatives.is_empty() {
+        predicates.push(words_predicate_with(
+            builder,
+            alternatives,
+            row_holds_word_carded,
+            row_holds_word_carded,
+        ));
+    }
+    Narrow {
+        ctes,
+        joins: String::new(),
+        predicates,
+        cards: None,
+    }
+}
+
 /// [`ids_sql`]'s statement, its placeholders allocated on `builder`, so that
 /// several can share one statement ([`ids_counts_sql`]).
 fn ids_body(
@@ -680,12 +717,16 @@ pub(crate) fn board_sql(
         ],
         declarations: Some("$4".to_owned()),
     };
-    let narrow = narrow(
-        &mut builder,
-        &crate::corpus::LIVE_ITEM,
-        alternatives,
-        filters,
-    );
+    let narrow = if statement.carded {
+        narrow_carded(&mut builder, alternatives, filters)
+    } else {
+        narrow(
+            &mut builder,
+            &crate::corpus::LIVE_ITEM,
+            alternatives,
+            filters,
+        )
+    };
     let mut sql = String::with_capacity(statement.whole.len() + narrow.ctes.len() + 4096);
     sql.push_str(statement.with);
     sql.push_str(&narrow.ctes);
@@ -719,6 +760,18 @@ pub(crate) fn board_sql(
 /// neither admits every row, though `query::word_alternatives` never
 /// returns one.
 fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> String {
+    words_predicate_with(builder, alternatives, row_holds_first_word, row_holds_word)
+}
+
+/// [`words_predicate`] with the tests of a row's first word and of each
+/// other word it is handed: [`row_holds_first_word`] and [`row_holds_word`]
+/// over the mirror's row, [`row_holds_word_carded`] for both over a card.
+fn words_predicate_with(
+    builder: &mut Builder,
+    alternatives: &[WordAlternative],
+    row_holds_first_word: fn(&str) -> String,
+    row_holds_word: fn(&str) -> String,
+) -> String {
     debug_assert!(!alternatives.is_empty(), "no alternative is no word filter");
     let predicates: Vec<String> = alternatives
         .iter()
@@ -817,6 +870,23 @@ fn row_holds_word(word: &str) -> String {
             " from sync.item i where i.entity_id = o.eid)"
         ),
         parents_hold(word)
+    )
+}
+
+/// [`row_holds_word`] over a ticket's card (`crd`, read alone, migration
+/// `0089`): the same answer, every row having its card. The key and the title
+/// are one stored, lowered text (`crd.words`, the key, U+001F, the title), in
+/// which a word without U+001F is found exactly where it is in one of them; a
+/// word with one is tested against the two as [`row_holds_word`] tests them.
+/// Then the card's assignee and parents ([`card_holds`]). On 23,176 tickets
+/// the two `lower()`s a row were 4 to 5 ms of a letter's board.
+fn row_holds_word_carded(word: &str) -> String {
+    format!(
+        "((case when strpos({word}, chr(31)) = 0 then strpos(crd.words, {word}) > 0 \
+               else strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), {word}) > 0 \
+                    or strpos(lower(i.title), {word}) > 0 end) \
+          or {})",
+        card_holds(word)
     )
 }
 
