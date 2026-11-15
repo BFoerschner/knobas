@@ -174,8 +174,8 @@ From the forge-waits pass (2026-11-13, `docs/decisions/2026-11-13-a-file-after-a
 measured on the Mac while the live products were in use. A scratch copy of a saved home has every source turned off
 but Gitea, pointed at `standin-forge.mjs` (`base_url` `http://127.0.0.1:3911`): Gitea's compare for any two refs after
 `--delay`, and with `--git <repo>` the routes *Files* reads, served from that local repository. Turn the sources off in
-the copy's database before the backend first starts: a saved home's sources point at the WSL box's tunnels, and the
-scheduler syncs at start.
+the copy's database before the backend first starts: a saved home's sources point at the WSL box's tunnels. The
+scheduler starts no run on the saved home (*On a real database*), but a page's reads behind still reach the products.
 
 ```sh
 node testenv/perf/standin-forge.mjs --listen 3911 --delay 1000 --git <repo> --control 3912 &
@@ -328,6 +328,15 @@ node testenv/perf/lane-probe.mjs --port 5411 --probes jira.json --source live-ji
 ```
 
 ## On a real database
+
+**The saved home** is `~/Library/Caches/knobas-perf/scale-db/final-home`, Björn's scale (`testenv/README.md`,
+*Björn's scale*): 39,770 items (20,007 Jira tickets, 5,032 Confluence pages, 62 Gitea repositories with 2,886 issues
+and 1,707 pull requests, 2,620 TeamCity builds, 218 monitors), at the head's schema. Its sources keep the live
+products' addresses, their credentials are in the profile's `dev-secrets.json` and none of them syncs by itself (a
+ten-year interval). `<saved home>` below means that path. Its dump is beside it (`scale-final-home.dump`), and
+`testenv/scale-db-restore.sh <dump> <new home>` rebuilds the home from the dump, migrated to the checkout's head, in
+about a minute. That is the way to bring it to a newer schema, and the way back after a loss: the first copy, under
+`/private/tmp`, was deleted by macOS's periodic clean-up on 2026-11-15.
 
 ```sh
 cp -cR <saved home> "$TMPDIR/home"                        # an APFS clone, never the original

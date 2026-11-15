@@ -1791,9 +1791,58 @@ TeamCity at 2,613 builds, undated, and Forgejo at about 40 of its 58
 repositories.
 
 **The saved database** of that run is a whole scratch `HOME`, outside the
-repository, with a README of its own: open a clone with `HOME=<clone>
-target/debug/knobas-app --demo`, never the binary without `--demo` and `HOME`
-(that opens the default profile).
+repository, at **`~/Library/Caches/knobas-perf/scale-db/final-home`**, with
+its dump beside it (`scale-db/scale-final-home.dump`, `pg_dump -Fc`, 63 MB,
+taken 2026-11-14 at migration 73). The folder is Björn's and holds only this.
+Every perf pass on PR #2479 measures on it (`testenv/perf/README.md`, *On a
+real database*). Never open the original. Make an APFS clone (`cp -cR`) and
+open the clone with `HOME=<clone>`: the windowless backend with `--data-dir
+"<clone>/Library/Application Support/dev.knobas.desktop"`, or
+`target/debug/knobas-app --demo`. Never run the binary without `--demo` and
+`HOME`: that opens the default profile.
+
+It holds 39,770 items: Jira 20,007 tickets and 9 views; Confluence 5,032
+pages; Gitea 62 repositories, 2,886 issues, 1,707 pull requests, 5,625 commits
+and 1,206 branches; Forgejo 3 repositories, 283 issues, 3 pull requests, 11
+commits and 7 branches; TeamCity 2,620 builds and 91 build configurations;
+Kuma 218 monitors. The database is 698 MB. The six sources keep the live
+products' addresses (Gitea `https://127.0.0.1:3443`, Forgejo `:3445`, Jira
+`http://127.0.0.1:8080`, Confluence `:8090`, TeamCity `:8111`, Kuma `:3001`).
+Their credentials are in the profile's `dev-secrets.json`, taken from the seed
+state, and a debug build reads them there. **No run starts by itself**: every
+source's interval is ten years (315,360,000 s), so the scheduler never finds
+one due, while *Sync now* and `sync_now` still run one. A measurement that
+must not reach a product also moves `dev-secrets.json` out of its clone (*On
+a real database*). Mind Confluence: it no longer holds the scale spaces, so a
+Confluence sync would empty that part of the mirror.
+
+**Rebuilding it: `testenv/scale-db-restore.sh <dump> <home>`.** macOS's
+periodic clean-up deleted the first copy, kept under `/private/tmp`, on
+2026-11-15. The script rebuilt it from the dump on 2026-11-15 at `ff99673d`.
+It starts the windowless backend once on the empty `<home>`, so knobas makes
+its cluster as on any first start: initdb with its locale, the superuser and
+its `.pgpass`, a loopback port. Then it drops `knobas`, creates it again with
+the locale knobas gave it (builtin `C.UTF-8`) and restores the dump into it.
+It sets the ten-year interval and writes `dev-secrets.json` from this
+checkout's `seed-state.json`, `seed-state-forgejo.json` and `kuma-api-key`
+(Jira and Confluence take the admin pair above). Last, it starts the backend
+again, which migrates the database to the checkout's head, checks the rows
+per source and kind against the restored dump's and runs `vacuum analyze`.
+It asks no product anything. It is idempotent: the home gets a
+`scale-db-restore.json` (the dump's sha256, the head, the migrations), a
+second run with the same dump changes nothing, and a non-empty home without
+that file is refused. To move the saved database to a newer schema, rebuild
+it from the dump into a new home on that head, then swap the folders:
+
+```sh
+testenv/scale-db-restore.sh ~/Library/Caches/knobas-perf/scale-db/scale-final-home.dump "$TMPDIR/final-home-new"
+```
+
+The rebuild takes about a minute once the backend is built. The old
+scratchpad path that earlier briefs name
+(`/private/tmp/claude-501/-Users-dev-knobas/70d44bab-…/scratchpad/scale-db/final-home`)
+holds an APFS clone of it, which the same clean-up will delete after three
+days unread. Treat the `Caches` folder as the durable copy.
 
 ## The extremes (`testenv/seed-extremes.sh`)
 
