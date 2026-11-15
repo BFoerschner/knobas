@@ -80,7 +80,21 @@ From the key pressed to its rows on screen, `just keys-budget --real`, median of
 | expanded, `-project:` | 90 / 68 | 106 / 92 | 110 / 98 |
 | Everything, one letter | 82 / 83 | 98 / 98 | 106 / 108 |
 
-The board's open, `just open-budget --real --only tickets-board,ticket-preview,ticket,standup`: OPEN_TABLE.
+The board's open, `just open-budget --real --only tickets-board,ticket-preview,ticket,standup`, before and after on
+the two backends (ms; the 4x and 6x first opens draw what the answer cache warmed, so their reads are a few ms):
+
+| Tickets board | useful | drawn | settled | the board's read |
+|---|---|---|---|---|
+| 1x, first open | 143 / 60 | 159 / 77 | 143 / 81 | 48 / 39 |
+| 1x, after a sync | 31 / 31 | 47 / 48 | 63 / 59 | 42 / 37 |
+| 4x, first open | 32 / 18 | 182 / 168 | 172 / 165 | 3 / 3 |
+| 4x, after a sync | 27 / 33 | 44 / 49 | 80 / 77 | 44 / 35 |
+| 6x, first open | 18 / 21 | 252 / 237 | 230 / 223 | 5 / 4 |
+| 6x, after a sync | 19 / 29 | 68 / 62 | 95 / 88 | 46 / 37 |
+
+The 1x first open before was over its 100 ms line: the first read of a fresh backend, it waited for
+`filter_suggestions` (117 ms cold; 41 after; it reads the cards' values among others, and one cold read is the
+noisiest number here). A ticket's page and Standup are within a few ms either way.
 
 **Expected on the PC.** The Tickets reads that took 81 to 115 ms there were 54 to 72 here; at the PC's 1.5 times the
 reads after are about 56 to 60 ms for a letter, `-project:` and `-priority:`, and 80 to 84 for the expanded board,
@@ -113,6 +127,20 @@ after it. Until a source's tickets are all filled its boards read as before. The
   construction and in its list: `sync.card_whole`, one row a source, and the two CTEs `ticket_sources` and `whole`.
   The first version joined the cards to their keys, which on tables never analyzed was estimated at a few rows and
   rescanned once a lane; that is why the scan reads the cards with no key and `whole` asks for one key a source.
+
+## Gates
+
+On this head, in a clone of its own: `just check-front` ok; `bash testenv/desktop-witness-test.sh` ok (307 checks);
+vitest 5,123 passed in 333 files (1 skipped); `svelte-check --threshold error` 0 errors in 1,466 files; the press trips
+with `--strict`, `rows-still` among them, 272 of 272; `just frame-budget` 45 within and `--real` 65 within; `just
+open-budget --real` every open within its line (225 opens); `just keys-budget --real` every key within its line;
+`just check-scripts` ok; `just clippy`, `just clippy-libs` and `cargo fmt --all --check` clean; `just wasm-fixture` then
+`just test` 4,909 passed with one failure, the known flaky `coverage_plans::a_probe_never_reads_a_table_to_prove_a_source_has_nothing`,
+which passed alone three times out of three.
+
+`just test` rewrites `app/src/lib/ipc/generated/entity.ts` without `RangeNames` and 43 more lines in the clone (ts-rs
+exports from several test binaries into one file), which `svelte-check` then fails on; the file was restored from the
+head before `svelte-check`. Not this change's; noted for whoever next runs both.
 
 ## Left
 
