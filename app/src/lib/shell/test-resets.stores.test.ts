@@ -33,11 +33,12 @@ const pages = vi.hoisted(() => ({
   forgetBranches: vi.fn(),
   forgetHeaderSearches: vi.fn(),
   forgetHeaderLooks: vi.fn(),
+  forgetHeaderReads: vi.fn(),
   forgetPickWidth: vi.fn(),
   forgetTicketsSession: vi.fn(),
 }));
 vi.mock("../tf/builds/TfBuilds.svelte", () => ({ forgetFolds: pages.forgetFolds }));
-vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches, forgetHeaderSearches: pages.forgetHeaderSearches, forgetHeaderLooks: pages.forgetHeaderLooks }));
+vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches, forgetHeaderSearches: pages.forgetHeaderSearches, forgetHeaderLooks: pages.forgetHeaderLooks, forgetHeaderReads: pages.forgetHeaderReads }));
 vi.mock("../tf/pr/TfPrFiles.svelte", () => ({ forgetPickWidth: pages.forgetPickWidth }));
 vi.mock("../tf/tickets/TicketsPage.svelte", () => ({ forgetTicketsSession: pages.forgetTicketsSession }));
 

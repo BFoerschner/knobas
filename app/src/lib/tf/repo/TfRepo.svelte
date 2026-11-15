@@ -167,6 +167,10 @@
   /** Forget the branches' standings the header's looks read: a new session. */
   export function forgetHeaderLooks(): void {
     standings.clear();
+  }
+
+  /** Forget the branches' views the header's looks are reading now: a new session. */
+  export function forgetHeaderReads(): void {
     looking.clear();
   }
 

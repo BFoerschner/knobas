@@ -113,6 +113,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/repo/TfRepo.svelte#searched": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderSearches(),
   // Each branch's standing the header's looks read, kept for the next look (the inner-6x pass).
   "tf/repo/TfRepo.svelte#standings": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderLooks(),
+  // The branches' views a look is reading now, shared by a look started again (the ux13 forge-load pass).
+  "tf/repo/TfRepo.svelte#looking": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderReads(),
   // The commit picker's width as last measured (the inner-6x pass).
   "tf/pr/TfPrFiles.svelte#pickWidth": async () => (await import("../tf/pr/TfPrFiles.svelte")).forgetPickWidth(),
   // In plain `.ts` files ({@link UNSCANNED}): the files Files drew, and the views read ahead of a press.
