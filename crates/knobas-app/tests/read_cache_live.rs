@@ -726,9 +726,17 @@ async fn a_pull_requests_range_is_picked_from_and_read_whole_at_its_shas() {
 /// session. *Files* carries the reviews' threads, which move, so the tab is
 /// read again; the `.diff` inside it is not, while the record names the same
 /// merge base and the commits listing the same head (#2321). A rebuilt source
-/// keeps nothing: read cold after a forget, then warm. The cold read sends
-/// the `.diff` and, to keep it, the record again after it; the warm read
-/// sends neither, so exactly two requests fewer.
+/// keeps nothing: read cold after a forget, then warm, then again.
+///
+/// The cold read is the rebuilt source's first: it sends the `.diff` beside
+/// the record, the reviews and the commits, one round, and keeps nothing of
+/// its own (the forge-rounds pass, 2026-11-15). The read it leaves behind it,
+/// on a task of its own the counter does not see, sends the listing, the
+/// `.diff` and the record, and keeps. The warm read waits for that one and
+/// sends neither the `.diff` nor a record to pin it: one request fewer than
+/// the cold read, as every read after it. Before that pass the reads sent 6,
+/// 4, 4 here; with it and before the read behind, 5, 6, 4 (its decision
+/// note, *Found after: the second open sent the `.diff` again*).
 #[tokio::test]
 #[ignore = "needs the testenv Gitea: just gitea-live"]
 async fn a_pull_requests_diff_is_read_once_at_its_head() {
@@ -739,14 +747,17 @@ async fn a_pull_requests_diff_is_read_once_at_its_head() {
     app.live.forget(&app.source);
     let (cold, sent_cold, _) = app.view_of(&pull, "files").await;
     let (warm, sent_warm, took) = app.view_of(&pull, "files").await;
-    println!("files: cold {sent_cold}, warm {sent_warm} requests ({took:?})");
+    let (again, sent_again, _) = app.view_of(&pull, "files").await;
+    println!("files: cold {sent_cold}, warm {sent_warm}, again {sent_again} requests ({took:?})");
     assert_eq!(cold, first, "a rebuilt source reads the same tab");
     assert_eq!(warm, cold, "the kept diff draws the same tab");
+    assert_eq!(again, cold);
     assert_eq!(
-        sent_warm + 2,
+        sent_warm + 1,
         sent_cold,
-        "neither the .diff nor the record after it is asked again"
+        "the warm read asks neither the .diff nor the record to pin it"
     );
+    assert_eq!(sent_again, sent_warm, "nor any read after it");
 }
 
 /// Spec #2234 story 16: a text file past Gitea's file view (10,000 lines or

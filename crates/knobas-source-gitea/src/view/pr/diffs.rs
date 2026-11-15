@@ -19,6 +19,15 @@
 //! base and the listing's newest commit, and `PullView::files` keeps a diff
 //! only when that commit is the record's head both before and after the
 //! `.diff` was read.
+//!
+//! **A first read keeps behind itself.** A built source's first read of a
+//! pull request's *Files* sends the `.diff` beside the commits listing, one
+//! round of the forge, since nothing can be kept for a pull request never
+//! read. That `.diff` cannot be kept (it may stand before the listing's
+//! head), so the read leaves a keeping read behind it on a task of its own:
+//! the listing, then the `.diff`, then the record, kept under the same rule.
+//! A later read of the same pull request waits for it before it asks whether
+//! a diff is kept, so it neither races it nor sends the `.diff` again.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -71,9 +80,18 @@ impl DiffKey {
 pub(crate) struct PullDiffs {
     kept: Mutex<Kept>,
     /// The pull requests whose *Files* this built source has read, by
-    /// `owner/repo#number`: a first read reads the `.diff` beside the commits
-    /// and keeps nothing ([`Self::first_read`]).
-    read: Mutex<std::collections::HashSet<String>>,
+    /// `owner/repo#number`, each with the lock its first read's keeping read
+    /// holds until it ends ([`Self::first_read`], [`Self::kept_behind`]).
+    read: Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+/// Held by a pull request's first *Files* read, then by the keeping read it
+/// leaves behind it, until that ends: a later read waits for it
+/// ([`PullDiffs::kept_behind`]). Dropped, by a read that failed too, it lets
+/// them go.
+#[derive(Debug)]
+pub(crate) struct Keeping {
+    _held: tokio::sync::OwnedMutexGuard<()>,
 }
 
 #[derive(Debug, Default)]
@@ -96,19 +114,40 @@ impl PullDiffs {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether this is the first read of this pull request's *Files* by this
-    /// built source, which it then remembers (the forge-rounds pass,
-    /// 2026-11-15). Nothing can be kept for a pull request never read, so a
-    /// first read need not wait for the commits listing to ask whether one
-    /// is: it reads the `.diff` beside it, one round where there were three.
-    /// What it read is not kept, since only a `.diff` read after the listing
-    /// is known to stand at the listing's head; the next read, the one behind
-    /// the page on its return, reads in order and keeps.
-    pub(crate) fn first_read(&self, owner: &str, repo: &str, number: u64) -> bool {
-        self.read
+    /// On the first read of this pull request's *Files* by this built source,
+    /// which it then remembers (the forge-rounds pass, 2026-11-15), the
+    /// [`Keeping`] that read holds; `None` on any later one. Nothing can be
+    /// kept for a pull request never read, so a first read need not wait for
+    /// the commits listing to ask whether one is: it reads the `.diff` beside
+    /// it, one round where there were three. What it read is not kept, since
+    /// only a `.diff` read after the listing is known to stand at the
+    /// listing's head; the keeping read it leaves behind it reads in order
+    /// and keeps (the module's docs), so no open after the first sends the
+    /// `.diff` again.
+    pub(crate) fn first_read(&self, owner: &str, repo: &str, number: u64) -> Option<Keeping> {
+        let mut read = self.read.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = format!("{owner}/{repo}#{number}");
+        if read.contains_key(&key) {
+            return None;
+        }
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let held = Arc::clone(&lock).try_lock_owned().ok()?;
+        read.insert(key, lock);
+        Some(Keeping { _held: held })
+    }
+
+    /// Once the keeping read behind this pull request's first *Files* read
+    /// has ended, kept or not: at once where none is under way.
+    pub(crate) async fn kept_behind(&self, owner: &str, repo: &str, number: u64) {
+        let lock = self
+            .read
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(format!("{owner}/{repo}#{number}"))
+            .get(&format!("{owner}/{repo}#{number}"))
+            .cloned();
+        if let Some(lock) = lock {
+            drop(lock.lock().await);
+        }
     }
 
     /// Whether a diff of this pull request is kept at `head`, at whatever

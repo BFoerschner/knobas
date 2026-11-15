@@ -17,11 +17,13 @@ knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
-# Two items: `tokio::try_join!`, which reads a view's sections side by side in
-# the one task that asked (#703), and `tokio::time::sleep`, the wait between a
-# merge Gitea answered "Please try again later" and the next (#721; the
-# workspace's `time` feature). It spawns nothing.
-tokio = { workspace = true, features = ["macros"] }
+# `tokio::try_join!`, which reads a view's sections side by side in the one
+# task that asked (#703), and `tokio::time::sleep`, the wait between a merge
+# Gitea answered "Please try again later" and the next (#721; the workspace's
+# `time` feature). It spawns one task: the read that keeps a pull request's
+# diff behind its first *Files* read, and the `sync` lock a later read waits
+# on for it (`view::pr::diffs`). A sync spawns nothing.
+tokio = { workspace = true, features = ["macros", "sync"] }
 # `FuturesUnordered`, the repositories a sync walks side by side in its one
 # task (#2159). Already in the tree through `reqwest`, at this version.
 futures-util.workspace = true

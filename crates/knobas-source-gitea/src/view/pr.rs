@@ -12,6 +12,7 @@ use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::rows::{self, ListedCommit};
 use super::{fact, login, name_of, person_fact, when_of};
+use crate::client::GiteaClient;
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
@@ -182,17 +183,7 @@ struct PullView<'a> {
 
 impl PullView<'_> {
     async fn pull(&self) -> Result<Pull, SourceError> {
-        let raw = self
-            .source
-            .client
-            .pull(self.owner, self.repo, self.number)
-            .await?;
-        serde_json::from_value(raw).map_err(|error| {
-            SourceError::protocol(format!(
-                "gitea: {}/{}#{} is not a pull request record: {error}",
-                self.owner, self.repo, self.number
-            ))
-        })
+        record(&self.source.client, self.owner, self.repo, self.number).await
     }
 
     /// Every review Gitea lists, oldest first; one it cannot read as a review
@@ -255,8 +246,10 @@ impl PullView<'_> {
     ///
     /// The `.diff` is read after the commits, and not at all where one is
     /// kept at the head they end on (`diffs`, #2321); on the source's first
-    /// read of this pull request, where nothing can be kept, beside them, and
-    /// what it read is not kept ([`diffs::PullDiffs::first_read`]).
+    /// read of this pull request, where nothing can be kept, beside them:
+    /// what it read is not kept, and a keeping read is left behind it
+    /// ([`diffs::PullDiffs::first_read`], [`Self::keep_behind`]), which a
+    /// later read waits for before it asks whether a diff is kept.
     async fn files(&self) -> Result<ViewSection, SourceError> {
         let first = self
             .source
@@ -265,7 +258,7 @@ impl PullView<'_> {
         let (pull, (commits, fetched), reviews, resolves, viewer) = tokio::try_join!(
             self.pull(),
             async {
-                if first {
+                if first.is_some() {
                     let (listed, diff) = tokio::join!(
                         self.listed(),
                         self.source
@@ -276,6 +269,12 @@ impl PullView<'_> {
                     return Ok((commits, Some(diff?)));
                 }
                 let commits = self.listed().await.map(|(c, _, _)| c).unwrap_or_default();
+                // What the keeping read behind a first read keeps decides
+                // whether the `.diff` is read: done long since, as a rule.
+                self.source
+                    .pull_diffs
+                    .kept_behind(self.owner, self.repo, self.number)
+                    .await;
                 let kept = commits.first().is_some_and(|tip| {
                     self.source.pull_diffs.holds_at(
                         self.owner,
@@ -301,8 +300,15 @@ impl PullView<'_> {
             self.viewer(),
         )?;
         let (text, unpinned) = self.diff(&pull, &commits, fetched).await?;
-        // Read beside the listing, the `.diff` may stand before its head.
-        let unpinned = unpinned.filter(|_| !first);
+        // Read beside the listing, the `.diff` may stand before its head: it
+        // is kept by the read left behind this one.
+        let unpinned = match first {
+            Some(keeping) => {
+                self.keep_behind(&pull, keeping);
+                None
+            }
+            None => unpinned,
+        };
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(
             &self.source.id,
@@ -403,6 +409,52 @@ impl PullView<'_> {
         }
     }
 
+    /// Keep this pull request's diff behind its first *Files* read, which
+    /// read the `.diff` beside the commits and kept nothing: on a task of its
+    /// own, holding `keeping` until it ends, the listing, then the `.diff`,
+    /// then the record, kept as [`Self::keep`] keeps a read in order. Kept
+    /// when the listing ends on the head `pull` (the first read's record)
+    /// names and the record read after the `.diff` names the same head and
+    /// merge base; anything else, a failed read too, keeps nothing, and the
+    /// next read reads in order and keeps. Nothing is read where `pull` names
+    /// no whole merge base and head, since nothing could be kept.
+    fn keep_behind(&self, pull: &Pull, keeping: diffs::Keeping) {
+        let head = pull.head.as_ref().and_then(|h| h.sha.clone());
+        let (Some(base), Some(head)) = (pull.merge_base.clone(), head) else {
+            return;
+        };
+        if diffs::DiffKey::of(self.owner, self.repo, self.number, &base, &head).is_none() {
+            return;
+        }
+        let client = std::sync::Arc::clone(&self.source.client);
+        let kept = std::sync::Arc::clone(&self.source.pull_diffs);
+        let (owner, repo, number) = (self.owner.to_owned(), self.repo.to_owned(), self.number);
+        tokio::spawn(async move {
+            let _keeping = keeping;
+            let Ok((commits, _, _)) = listed(&client, &owner, &repo, number).await else {
+                return;
+            };
+            // The listing lags the record, or the head moved: not this read's.
+            if !commits
+                .first()
+                .is_some_and(|tip| tip.record.sha.eq_ignore_ascii_case(&head))
+            {
+                return;
+            }
+            let Ok(text) = client.pull_diff(&owner, &repo, number).await else {
+                return;
+            };
+            let Ok(after) = record(&client, &owner, &repo, number).await else {
+                return;
+            };
+            let same = after.merge_base.as_deref() == Some(base.as_str())
+                && after.head.as_ref().and_then(|h| h.sha.as_deref()) == Some(head.as_str());
+            if same && let Some(key) = diffs::DiffKey::of(&owner, &repo, number, &base, &head) {
+                kept.put(key, text.into());
+            }
+        });
+    }
+
     /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on
     /// a note where Gitea has more (#678).
     async fn commits(&self, pull: Option<&Pull>) -> Result<ViewSection, SourceError> {
@@ -440,32 +492,7 @@ impl PullView<'_> {
     /// them the server's own count, where it sent one, counting the records
     /// read where they outnumber it, and whether the cap cut the walk.
     async fn listed(&self) -> Result<(Vec<ListedCommit>, Option<usize>, bool), SourceError> {
-        let mut records = Vec::new();
-        let mut total = None;
-        let mut cut = true;
-        for page in 1..=rows::COMMIT_PAGES {
-            let (batch, count) = self
-                .source
-                .client
-                .pull_commits(self.owner, self.repo, self.number, page)
-                .await?;
-            total = count.or(total);
-            // Ends on an empty page or on the server's own count, never on a
-            // short page (`client::PAGE_SIZE`'s rule).
-            let done = batch.is_empty();
-            records.extend(batch);
-            if done || total.is_some_and(|t| records.len() >= t) {
-                cut = false;
-                break;
-            }
-        }
-        let read = records.len();
-        let total = total.map(|t| t.max(read));
-        let records = records
-            .into_iter()
-            .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
-            .collect();
-        Ok((records, total, cut))
+        listed(&self.source.client, self.owner, self.repo, self.number).await
     }
 
     /// The discussion Gitea keeps on the issue of the same index, oldest
@@ -537,6 +564,53 @@ impl PullView<'_> {
     async fn viewer(&self) -> Result<Option<String>, SourceError> {
         Ok(self.source.viewer().await)
     }
+}
+
+/// The pull request's record, through `client` (a read behind one that
+/// outlives the [`PullView`] holds its own).
+async fn record(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<Pull, SourceError> {
+    let raw = client.pull(owner, repo, number).await?;
+    serde_json::from_value(raw).map_err(|error| {
+        SourceError::protocol(format!(
+            "gitea: {owner}/{repo}#{number} is not a pull request record: {error}"
+        ))
+    })
+}
+
+/// [`PullView::listed`], through `client`.
+async fn listed(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<(Vec<ListedCommit>, Option<usize>, bool), SourceError> {
+    let mut records = Vec::new();
+    let mut total = None;
+    let mut cut = true;
+    for page in 1..=rows::COMMIT_PAGES {
+        let (batch, count) = client.pull_commits(owner, repo, number, page).await?;
+        total = count.or(total);
+        // Ends on an empty page or on the server's own count, never on a
+        // short page (`client::PAGE_SIZE`'s rule).
+        let done = batch.is_empty();
+        records.extend(batch);
+        if done || total.is_some_and(|t| records.len() >= t) {
+            cut = false;
+            break;
+        }
+    }
+    let read = records.len();
+    let total = total.map(|t| t.max(read));
+    let records = records
+        .into_iter()
+        .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
+        .collect();
+    Ok((records, total, cut))
 }
 
 /// The discussion: each comment and each review, in time order, as its

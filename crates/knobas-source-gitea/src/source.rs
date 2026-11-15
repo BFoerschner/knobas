@@ -23,13 +23,15 @@ pub struct GiteaSource {
     pub(crate) id: String,
     display_name: String,
     pub(crate) config: GiteaConfig,
-    pub(crate) client: GiteaClient,
+    /// Shared with the keeping read a pull request's first *Files* read
+    /// leaves behind it (`view::pr::diffs`), which outlives the read.
+    pub(crate) client: std::sync::Arc<GiteaClient>,
     /// Which token on which server this is, for [`Self::viewer`]'s cache: a
     /// hash of the instance id, the base URL and the secret, never the secret.
     viewer_key: u64,
     /// Pull requests' diffs at what they stand at, for this built
-    /// source's life (`view::pr::diffs`).
-    pub(crate) pull_diffs: crate::view::pr::diffs::PullDiffs,
+    /// source's life (`view::pr::diffs`); shared the same way.
+    pub(crate) pull_diffs: std::sync::Arc<crate::view::pr::diffs::PullDiffs>,
 }
 
 /// Who each token is, by [`GiteaSource::viewer_key`], for the life of the
@@ -102,7 +104,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         id: instance.id,
         display_name: instance.display_name,
         config,
-        client,
+        client: std::sync::Arc::new(client),
         viewer_key,
         pull_diffs: Default::default(),
     }))
