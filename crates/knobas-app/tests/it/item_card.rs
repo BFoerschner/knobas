@@ -1253,7 +1253,10 @@ async fn the_board_off_the_cards_alone_is_the_board_joined() {
 /// card under the key, which a mark finds and keeps.
 #[tokio::test]
 async fn a_source_is_whole_while_every_ticket_has_its_card() {
-    let pool = pool().await;
+    // Its own database: it gives its source another adapter for a while,
+    // which changes the declarations every other test binds, and no other
+    // test's mark or write meets its own.
+    let pool = scratch("item-card-whole").await;
     let jira = source(&pool, "jira").await;
     upsert(&pool, &jira, &jira_tickets()).await;
     let declared = declarations(&pool).await.as_param();
