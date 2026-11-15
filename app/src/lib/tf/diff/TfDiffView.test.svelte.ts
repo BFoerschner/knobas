@@ -240,10 +240,79 @@ test("a re-read with the same texts keeps its tokens and starts no job; a change
   expect(squash(target.querySelectorAll(".tf-ln")[2]!)).toBe("2+ 7");
 });
 
+test("one file's tokens landing redraws that file's lines, not another file's", () => {
+  // Each side's job, by its text; answered by hand.
+  const asked = new Map<string, { onLines: (from: number, lines: readonly (readonly (readonly [string, string])[])[]) => void }>();
+  const port: RenderPort = { highlight: (request, handlers) => (asked.set(request.text, handlers), { focus: () => {}, cancel: () => {} }) };
+  // The other file's line texts, counted as they are read: a redraw of its card reads them again.
+  let reads = 0;
+  const counted = (line: DiffLine): DiffLine => {
+    const { text, ...rest } = line;
+    return Object.defineProperty({ ...rest }, "text", { enumerable: true, get: () => ((reads += 1), text) }) as DiffLine;
+  };
+  const other: DiffFile = { ...RETRY, path: "src/other.rs", hunks: [{ ...RETRY.hunks[0]!, lines: RETRY.hunks[0]!.lines.map(counted) }] };
+  draw({ files: [SPANNING, other], layout: createDiffLayout(() => null), render: port });
+  flushSync();
+  expect(asked.size).toBe(4);
+  // The other file's sides answer first, so its drawn lines hold tokens a redraw would check against their texts.
+  for (const [text, handlers] of asked) if (text.startsWith("fn retry")) handlers.onLines(0, text.split("\n").map((line) => [[line, "kw"]]));
+  flushSync();
+  expect(kinds(cardOf("src/other.rs").querySelectorAll(".tf-ln")[0]!)).toEqual(["kw:fn retry() {"]);
+  const before = reads;
+  // The first file's new side answers, line by line.
+  const side = [...asked.keys()].find((text) => text.startsWith("const LIMIT: u32 = 5;"))!;
+  asked.get(side)!.onLines(0, [[["const", "kw"], [" LIMIT: u32 = 5;", ""]]]);
+  flushSync();
+  asked.get(side)!.onLines(1, [[['const MESSAGE: &str = "retry', ""]]]);
+  flushSync();
+  expect(kinds(cardOf("src/message.rs").querySelectorAll(".tf-ln")[1]!)).toEqual(expect.arrayContaining(["kw:const"]));
+  expect(reads).toBe(before);
+});
+
 // #2267, #2268, #2269: word marks, expanded context, the tree, collapse, keys, Load diff, the ceiling.
 
 const file = (path: string, more: Partial<DiffFile> = {}): DiffFile => ({ ...RETRY, path, ...more });
 const cardOf = (path: string) => [...target.querySelectorAll(".tf-diff")].find((card) => card.querySelector(".tf-fh .tf-mono")?.textContent?.endsWith(path))!;
+
+test("the file the scroll is in is measured after the frame's layout, not while the diff is built", () => {
+  // The inner-6x pass (2026-11-15): read as the files were attached, it laid the half-built page out (a style pass of
+  // 1,200 elements in a return to *Files changed* at 6x).
+  const main = document.createElement("div");
+  main.className = "tf-main";
+  target.appendChild(main);
+  let measured = 0;
+  const real = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this === main) measured += 1;
+    return real.call(this);
+  };
+  const fires: (() => void)[] = [];
+  const had = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    on = false;
+    constructor(callback: ResizeObserverCallback) {
+      fires.push(() => this.on && callback([], this as unknown as ResizeObserver));
+    }
+    observe() {
+      this.on = true;
+    }
+    unobserve() {}
+    disconnect() {
+      this.on = false;
+    }
+  } as unknown as typeof ResizeObserver;
+  try {
+    draw({ files: [RETRY, file("src/other.rs")], layout: createDiffLayout(() => null) }, main);
+    flushSync();
+    expect(measured).toBe(0);
+    fires.forEach((fire) => fire());
+    expect(measured).toBeGreaterThan(0);
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+    globalThis.ResizeObserver = had;
+  }
+});
+
 /** A tree row: a directory's name, or a file's badge, name and counts. */
 const treeRows = () => [...target.querySelectorAll(".tf-flist > *")].map((row) => (row.children.length > 0 ? [...row.children].map(squash).join(" ").trim() : squash(row)));
 const key = (name: string, on: EventTarget = window) => {

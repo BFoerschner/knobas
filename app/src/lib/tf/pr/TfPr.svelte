@@ -156,6 +156,7 @@
   import { diffOf, rangeOf } from "./files";
   import { BY_POINTER_MS } from "../press-guard";
   import TfPrFiles from "./TfPrFiles.svelte";
+  import TfRepoTab from "../repo/TfRepoTab.svelte";
   import TfPrCommitRows from "./TfPrCommitRows.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { textHeight } from "../../shell/windowed";
@@ -204,6 +205,11 @@
   const route = $derived(readPrRoute(rest));
   const prId = $derived(route.prId);
   const tab = $derived<PrTab>(route.tab);
+  /** The pull request whose *Files changed* has been opened on this visit: it stays mounted, hidden, while another tab shows. */
+  let filesFor = $state<string | null>(null);
+  $effect.pre(() => {
+    if (tab === "diff" && prId !== null) filesFor = prId;
+  });
   /** The address names a tab the page has; one it does not have is said under the tabs, not drawn as Overview. */
   const tabKnown = $derived(knowsPrTab(rest));
 
@@ -914,26 +920,31 @@
       <TfNothingHere message="This pull request has no such tab." href={prHash(prId)} action="Overview" />
     {:else}
     <div class="tf-cbody" class:tf-pr={tab !== "diff"}>
-      {#if tab === "diff"}
-        <TfPrFiles
-          {prId}
-          entityView={ports.entityView}
-          viewedFiles={ports.prViewedFiles}
-          setViewed={ports.setPrFileViewed}
-          {pending}
-          submitWrite={ports.submitWrite}
-          source={detail?.source?.id ?? null}
-          sourceName={detail?.source?.display_name ?? null}
-          predict={repo !== null && header.state?.text === "open" && header.base !== null && header.head !== null ? { repoId: repo.entity_id, base: header.base, head: header.head } : null}
-          listen={ports.listen}
-          {follower}
-          openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
-          {me}
-          rangeFiles={ports.rangeFiles ?? null}
-          rangeFile={ports.rangeFile ?? null}
-          cancelRead={ports.cancelRead ?? null}
-        />
-      {:else}
+      {#if prId !== null && (tab === "diff" || filesFor === prId)}
+        <!-- Kept for the visit to this pull request once opened, as a repository's tabs are (#2248): a return shows it as it
+             was left, its reads behind it, with nothing built again (the inner-6x pass, 2026-11-15). -->
+        <TfRepoTab shown={tab === "diff"}>
+          <TfPrFiles
+            {prId}
+            entityView={ports.entityView}
+            viewedFiles={ports.prViewedFiles}
+            setViewed={ports.setPrFileViewed}
+            {pending}
+            submitWrite={ports.submitWrite}
+            source={detail?.source?.id ?? null}
+            sourceName={detail?.source?.display_name ?? null}
+            predict={repo !== null && header.state?.text === "open" && header.base !== null && header.head !== null ? { repoId: repo.entity_id, base: header.base, head: header.head } : null}
+            listen={ports.listen}
+            {follower}
+            openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
+            {me}
+            rangeFiles={ports.rangeFiles ?? null}
+            rangeFile={ports.rangeFile ?? null}
+            cancelRead={ports.cancelRead ?? null}
+          />
+        </TfRepoTab>
+      {/if}
+      {#if tab !== "diff"}
         <div>
           <!-- A long conversation holds comments back from the drawn text: the count is a floor there. -->
           <TfFindBar root={() => pageEl} more={() => tab === "conversation" && convoWin.before + convoWin.after > 0} />

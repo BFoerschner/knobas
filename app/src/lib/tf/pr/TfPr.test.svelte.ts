@@ -1810,3 +1810,65 @@ test("a source that does not answer behind a held view is named with its reason,
   expect(text(".tf-heldnote")).toBe("As knobas read it 3 h ago. Tidewater Gitea did not answer: unreachable: connection refused");
   expect(text(".tf-fhead .tf-sub")).toContain("feature/PAY-231-sepa-retry into main");
 });
+
+// The inner-6x pass (2026-11-15): built afresh on each return, *Files changed* was a 110 ms task at 6x on the Mac and
+// 324 ms drawn on Björn's PC. It is kept for the visit as a repository's tabs are (#2248).
+test("Files changed stays mounted for the visit: a return shows it as left with nothing built again; another pull request starts afresh", async () => {
+  let filesRead = 0;
+  const files: SourceView = {
+    sections: [
+      {
+        id: "files",
+        title: "Files",
+        count: 1,
+        deferred: false,
+        blocks: [
+          {
+            type: "diff",
+            files: [
+              {
+                path: "src/sepa/retry.rs",
+                old_path: null,
+                change: "modified",
+                additions: 1,
+                deletions: 1,
+                hunks: [{ header: "@@ -1,2 +1,2 @@", lines: [{ kind: "del", old: 1, new: null, text: "    3" }, { kind: "add", old: null, new: 1, text: "    5" }] }],
+                truncated: false,
+                threads: [],
+              },
+            ],
+            truncated: false,
+            commentable: null,
+            gone: [],
+          },
+        ],
+      },
+    ],
+    actions: [],
+  };
+  const with_ = ports({ entityView: async (_id, section) => (section === "files" ? ((filesRead += 1), files) : prView()) });
+  const props = $state({ ready: true, rest: [PR, "diff"], back: { hash: "#/code", name: "Code" }, ports: with_, pending });
+  view = mount(TfPr, { target, props });
+  await settle();
+  const card = target.querySelector(".tf-diff");
+  expect(card).not.toBeNull();
+  expect(filesRead).toBe(1);
+
+  // Overview: the diff is hidden, not taken down.
+  props.rest = [PR];
+  await settle();
+  expect(card!.isConnected).toBe(true);
+  expect(card!.closest("[hidden]")).not.toBeNull();
+
+  // Back: the same nodes, shown, with no second read.
+  props.rest = [PR, "diff"];
+  await settle();
+  expect(target.querySelector(".tf-diff")).toBe(card);
+  expect(card!.closest("[hidden]")).toBeNull();
+  expect(filesRead).toBe(1);
+
+  // Another pull request: this one's diff goes.
+  props.rest = [`${REPO}#150`];
+  await settle();
+  expect(card!.isConnected).toBe(false);
+});

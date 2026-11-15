@@ -40,6 +40,11 @@
     whole at its sha, bytes too for a rendered image diff (#2279). A new pick
     draws a new diff component, so no side read at one range is kept for another.
 -->
+<script lang="ts" module>
+  /** The commit picker's width as last measured, the same on the next pull request's tab while its words are (`pickRoom`). */
+  let pickWidth: string | null = null;
+</script>
+
 <script lang="ts">
   import { untrack } from "svelte";
 
@@ -357,9 +362,21 @@
    * its focus, has to outlive that. The toolbar leaves room for however wide the picker's words are.
    */
   function pickRoom(bar: HTMLElement) {
-    const read = () => bar.parentElement?.style.setProperty("--tf-pick-w", `${bar.offsetWidth}px`);
-    read();
-    if (typeof ResizeObserver === "undefined") return;
+    const host = bar.parentElement;
+    // The width the picker last had stands from the start, so the tab's first style already holds it: the property is
+    // inherited, and each write restyles every element of the diff (1,200 of them in a return at 6x).
+    let set = pickWidth;
+    if (set !== null) host?.style.setProperty("--tf-pick-w", set);
+    const read = () => {
+      const width = `${bar.offsetWidth}px`;
+      pickWidth = width;
+      if (width === set) return;
+      set = width;
+      host?.style.setProperty("--tf-pick-w", width);
+    };
+    // Read in the observer's first call, after the frame's layout and before its paint: read as the bar is attached, it laid
+    // out the half-built tab in the task that builds it (38 ms of a return's 110 at 6x, the inner-6x pass, 2026-11-15).
+    if (typeof ResizeObserver === "undefined") return void read();
     const watch = new ResizeObserver(read);
     watch.observe(bar);
     return () => watch.disconnect();

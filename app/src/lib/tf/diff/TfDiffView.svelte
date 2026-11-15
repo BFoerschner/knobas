@@ -101,6 +101,7 @@
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
   import TfWrittenAt from "./TfWrittenAt.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { SvelteMap } from "svelte/reactivity";
 
   let {
     files,
@@ -339,31 +340,32 @@
       }),
     ),
   );
-  let tokens = $state.raw<Record<string, (LineTokens | undefined)[]>>({});
+  // Each side's tokens under its own key (the inner-6x pass, 2026-11-15): an answer redraws the lines of the card it is
+  // for. One record for all of them redrew every card drawn on each of a diff's answers, two a file, as each landed.
+  const tokens = new SvelteMap<string, (LineTokens | undefined)[]>();
   const jobs = new Map<string, { text: string; port: RenderPort; job: HighlightJob }>();
   $effect(() => {
     const port = render;
     const want = new Map<string, SideText>();
     for (const [key, both] of sides) for (const side of ["old", "new"] as const) want.set(`${side}\n${key}`, both[side]);
-    const had = untrack(() => tokens);
-    const kept: Record<string, (LineTokens | undefined)[]> = {};
-    for (const [name, made] of jobs) {
-      // A file that left the view keeps its tokens for its return; one whose text changed is highlighted anew.
-      if ((want.get(name)?.text ?? made.text) === made.text && made.port === port) {
-        if (had[name]) kept[name] = had[name];
-      } else {
+    untrack(() => {
+      for (const [name, made] of jobs) {
+        // A file that left the view keeps its tokens for its return; one whose text changed is highlighted anew.
+        if ((want.get(name)?.text ?? made.text) === made.text && made.port === port) continue;
         made.job.cancel();
         jobs.delete(name);
+        tokens.delete(name);
       }
-    }
-    tokens = kept;
+    });
     for (const [name, side] of want) {
       if (jobs.has(name)) continue;
       const got: (LineTokens | undefined)[] = [];
+      // Its entry is there before any answer: a read of a key the map lacks wakes on every key added.
+      untrack(() => tokens.set(name, got));
       const job = port.highlight(side, {
         onLines(from, lines) {
           lines.forEach((line, n) => (got[from + n] = line));
-          tokens = { ...tokens, [name]: [...got] };
+          tokens.set(name, [...got]);
         },
       });
       jobs.set(name, { text: side.text, port, job });
@@ -381,7 +383,7 @@
     const number = side === "old" ? cell.line.old : cell.line.new;
     const row = both.whole[side] ? (number === null ? null : number - 1) : cell.at >= 0 ? both.index[cell.at]?.[side] : null;
     if (row === null || row === undefined) return undefined;
-    const toks = tokens[`${side}\n${key}`]?.[row];
+    const toks = tokens.get(`${side}\n${key}`)?.[row];
     return toks && toks.map(([part]) => part).join("") === cell.line.text ? toks : undefined;
   };
 
@@ -771,9 +773,23 @@
       const first = fileWin.slice(drawn)[0];
       current = at ?? (first === undefined ? null : keyOf(first));
     };
-    read();
     found.addEventListener("scroll", read, { passive: true });
-    return () => found.removeEventListener("scroll", read);
+    // The first read waits for the files' first layout (a resize observer's first call, before the frame paints): read as
+    // they are attached, its visibility and boxes laid out the half-built page in the task that builds it (the inner-6x
+    // pass, 2026-11-15: a style pass of 1,200 elements in a return to *Files changed* at 6x).
+    if (typeof ResizeObserver === "undefined") {
+      read();
+      return () => found.removeEventListener("scroll", read);
+    }
+    const first = new ResizeObserver(() => {
+      first.disconnect();
+      read();
+    });
+    first.observe(host);
+    return () => {
+      first.disconnect();
+      found.removeEventListener("scroll", read);
+    };
   }
 
   function onkey(event: KeyboardEvent) {
