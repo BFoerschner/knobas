@@ -169,3 +169,26 @@ Three decisions, with the measurements above:
 
 The pass is one call in the scheduler; removing it holds nothing more, and a page reads as before. The rows can be
 deleted at any time (`speculative` ones and `sync.held_section`); `0091` stays.
+
+## Gates
+
+On this pass's head, in a clean clone, on AC power, each `--real` gate on a fresh copy of the saved home with its
+secrets moved out (the inner one on a copy of the filled base, Gitea at the stand-in), through a release build of this
+head's windowless backend with debug assertions: `just check-front` ok (vitest 335 files, 5,139 passed, 1 skipped; the
+build); `svelte-check --threshold error` 1,469 files, 0 errors, 0 warnings; `testenv/desktop-witness-test.sh` 307
+checks; the press trips with `--strict` 272 of 272, the 16 `rows-still` among them; `just open-budget --real` every
+open within its line, 225 opens; `just open-budget --real --inner --no-big` against the stand-in 162 opens within their
+lines, and the 18 the README leaves out over (the PDF, which the stand-in does not build, and a run's tabs, with
+TeamCity off in the copy); `pixel-same.py` over four screens (*Files changed*, a return to it, the pull request and its
+*Conversation*), all the same; `just check-scripts` ok; `just clippy`, `just clippy-libs` and `cargo fmt --all --check`
+clean; `just wasm-fixture` then `just test` 61 binaries, 4,928 passed, 1 failed, 263 ignored, the one
+`link_sets_ipc::the_name_roles_move_no_derived_row_either_way`, a known flake that passed alone, and
+`app/src/lib/ipc/generated/` unchanged after it.
+
+Three timing gates went over under other agents' load (a load of 8 to 22) on pages this pass does not touch, and were
+run again on this head and on `ffb89ed2` side by side: `just frame-budget` on the fixture, 44 within and Monitors at 6x
+53 fps against 55 (again: 57 and 57 on this head, 48 on `ffb89ed2` at a load of 44); `--real`, 63 within and two over,
+Inbox's longest task at 4x 73 ms against 60 and the Code filter's slowest key at 4x 138 against 100 (again: 17 and 20,
+87 and 82 on this head; 21 and 91 on `ffb89ed2`); `just keys-budget --real`, Everything's first letter at 1x 107 ms
+against 100 (again: 95 on this head at a load of 7, 212 at a load of 49; 83 on `ffb89ed2` at 12). Each within its line
+when the machine was quieter.
