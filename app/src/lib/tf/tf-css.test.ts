@@ -574,3 +574,22 @@ test("an embed's frame has the border its height counts, inside a border-box (#2
   expect(rule).not.toMatch(/box-sizing|(^|[;{\s])(border-width|border-top|border-bottom|padding)\b/);
   expect(code).toMatch(/^\* \{ box-sizing: border-box;/m);
 });
+
+// The Windows pass on ux13 (2026-11-15): Builds' scroller keeps its bar's gutter (`scrollbar-gutter: stable`), and with
+// it WebView2 judged the scroller not opaque and scrolled it on the main thread: its runs and a pipeline's history
+// moved at 73 and 47 pictures a second under a wheel at 4x on Björn's PC, 26 and 27 at 6x, where ux12 held 229 and 222.
+// Painting the clip inside it in the page's colour gives the compositor the scroll back (235 at 4x) and keeps ClearType.
+test("a scroller that keeps its bar's gutter paints its clip in --paper, so WebView2 scrolls it on the compositor", () => {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selectors: selector!.split(",").map((s) => s.trim()), body: body! }));
+  // `TfScroller`'s scrollers, whose body sits in a clip (`.tf-sclip`): Tickets' views rail keeps a gutter with no clip.
+  const clips = (scroller: string) => rules.filter((rule) => rule.selectors.includes(`${scroller} > .tf-sclip`));
+  const gutters = rules
+    .filter((rule) => /scrollbar-gutter:\s*stable/.test(rule.body))
+    .flatMap((rule) => rule.selectors)
+    .filter((scroller) => clips(scroller).length > 0);
+  expect(gutters, "Builds' scroller keeps a gutter, so this test checks something").toContain(".tf-shost > .tf-bmain");
+  for (const scroller of gutters) {
+    expect(clips(scroller).some((rule) => /background(-color)?:\s*var\(--paper\)/.test(rule.body)), `${scroller} > .tf-sclip`).toBe(true);
+  }
+});

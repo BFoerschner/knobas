@@ -230,6 +230,11 @@
   .tf-shost:has(> .tf-bmain) { container-type: normal; }
   .tf-shost > .tf-bmain { scrollbar-gutter: stable; }
   .tf-shost > .tf-bmain > .tf-sclip { margin-right: -8px; }
+  /* The clip is painted in the page's colour: with the gutter kept, WebView2 took the scroller for one it cannot
+     composite with ClearType and scrolled it on the main thread, its runs at 73 pictures a second under a wheel at 4x
+     on Björn's PC and 26 at 6x (ux12: 229 and 207). Painted, the compositor scrolls it again, 235 at 4x, with the same
+     ClearType pixels (the ux13 Windows pass, 2026-11-15). `will-change` gave the scroll back too, but without ClearType. */
+  .tf-shost > .tf-bmain > .tf-sclip { background: var(--paper); }
   .tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: 100%; }
   .tf-bmain .tf-fhead.tf-bhead { container: bhead / inline-size; }
   @container bhead (max-width: 1086px) {
