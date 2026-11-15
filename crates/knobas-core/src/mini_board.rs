@@ -615,8 +615,7 @@ macro_rules! cards_ctes_carded {
 /// [`cards_select!`] off the card: its date, its status and its lane.
 macro_rules! cards_select_carded {
     () => {
-        concat!(
-            "select i.entity_id, i.source_id,
+        "select i.entity_id, i.source_id,
               coalesce(i.item_updated_at,
                 (select st.synced_at from sync.item st where st.entity_id = k.eid)) as at, \
              crd.status as status, (case when $6::text is null then '' else (case $6::text \
@@ -625,7 +624,6 @@ macro_rules! cards_select_carded {
                when 'assignee' then coalesce(crd.assignee, '') \
                when 'priority' then coalesce(crd.priority, '') \
                when 'issuetype' then coalesce(crd.issue_type, '') else '' end) end) as lane"
-        )
     };
 }
 
