@@ -185,6 +185,15 @@ clean; `just wasm-fixture` then `just test` 61 binaries, 4,928 passed, 1 failed,
 `link_sets_ipc::the_name_roles_move_no_derived_row_either_way`, a known flake that passed alone, and
 `app/src/lib/ipc/generated/` unchanged after it.
 
+After rebasing onto the branch's newer commits (the fills' pass took `0091`, so this pass's migration is `0092`):
+`just clippy`, `just clippy-libs` and `cargo fmt --all --check` clean; the held-files and held-store tests 11 and 1 passed;
+the pull request's front-end tests 9 files, 155 passed; `just wasm-fixture` then `just test` 61 binaries, 4,942 passed,
+1 failed, 263 ignored, and `app/src/lib/ipc/generated/` unchanged. The one is
+`knobas-wasm-host`'s `network::an_adapters_sync_yields_to_a_persons_request_for_its_instance` ("the sync's request went
+first, 1.0 s ahead"), every run: it fails the same on the branch's head without this pass's commits (`fc6b7939`), and
+came with the limiter's in-flight cap and linger (`285c654b`, another pass of the same day). Not fixed here: an attempt
+to start the test's sync after the linger did not change it, and the limiter is that pass's frozen surface.
+
 Three timing gates went over under other agents' load (a load of 8 to 22) on pages this pass does not touch, and were
 run again on this head and on `ffb89ed2` side by side: `just frame-budget` on the fixture, 44 within and Monitors at 6x
 53 fps against 55 (again: 57 and 57 on this head, 48 on `ffb89ed2` at a load of 44); `--real`, 63 within and two over,
