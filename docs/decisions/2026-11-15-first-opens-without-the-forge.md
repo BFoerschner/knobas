@@ -30,8 +30,10 @@ the record again, to pin the fetched diff for keeping: three rounds of the forge
 - **A source's first read of a pull request's *Files* sends the `.diff` beside the commits** (`PullDiffs::first_read`):
   nothing can be kept for a pull request never read, so there is nothing to wait for. What it read is not kept, and not
   pinned, so the record is read once: only a `.diff` read after the listing is known to stand at the listing's head
-  (`refs/pull/N/head` moves through a queue after a push; #2321). The next read, the one behind the page on its return
-  or a refresh, reads in order and keeps, as before. 133 ms of backend time became 53 to 57.
+  (`refs/pull/N/head` moves through a queue after a push; #2321). ~~The next read, the one behind the page on its
+  return or a refresh, reads in order and keeps, as before.~~ The read leaves a keeping read behind it, which reads in
+  order and keeps (*Found after: the second open sent the `.diff` again*, below). 133 ms of backend time became 53 to
+  57.
 - **The diff view's code runs once while the app is idle** (`tf/diff/warm.ts`, from the shell's mount): the view, its
   cards and lines and the file list drawn off screen, hidden and inert, with a small made-up diff, and taken down two
   frames later. The module is in the app's one bundle already, so loading it early would do nothing; what was cold is
@@ -168,6 +170,21 @@ read failed (fixed in the stand-in after this run).
   first-fill case, not Björn's app after a few syncs. `stored_trees_fill --until-done` against the stand-in never ends
   (the estate's other repositories answer 404 and are owed again each pass); `--passes 1` or a few, then a copy, is
   what the README's *The inner pages on the Mac* now says.
+
+- **Found after: the second open sent the `.diff` again.** The WSL run of `just gitea-live` and `just gitea-live
+  forgejo` on `0998d62d` failed `read_cache_live.rs`'s `a_pull_requests_diff_is_read_once_at_its_head` (cold 5, warm 6).
+  Counted on the live Gitea through the app's own read (`sources::crud::view`), a rebuilt source's reads of the SEPA
+  pull request's *Files*, one after another: before this pass (`c0ab0fe2^`) **6, 4, 4, 4**; on `0998d62d` **5, 6, 4,
+  4**. The first read kept nothing, so the second (the read behind the page's next open) sent the `.diff` again and the
+  record to pin it: every open after the first is to send at most what it did before. Fixed: the first read, still one
+  round, leaves a keeping read behind it on a task of its own (`PullView::keep_behind`): the commits listing, then the
+  `.diff` only where the listing ends on the head the first read's record named, then the record, kept under the same
+  rule as a read in order. A later read of the same pull request waits for it (`PullDiffs::kept_behind`) before it asks
+  whether a diff is kept, so it neither races it nor sends the `.diff` again; it has long ended by a person's next open.
+  Now **5, 4, 4** on the live Gitea and Forgejo, with 3 requests behind the first (the listing, the `.diff`, the record;
+  `view_pr.rs`'s `a_first_read_sends_the_diff_beside_the_commits` counts them on the stand-in): two requests more a
+  pull request a session than before this pass, spent behind the first open, none on any later one. The adapter's
+  first spawned task; a sync still spawns nothing.
 
 ## Owed on Windows
 
