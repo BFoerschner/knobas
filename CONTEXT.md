@@ -279,6 +279,10 @@ _Avoid_: read cache (the backend's, of source views), store, prefetch
 What a page, a key and a scroll must do on the saved scale database in headless Chrome with the page's main thread slowed (Björn, 2026-11-14): a page usable within 100 ms of its press at CPU 1x, 200 ms at 4x and 300 ms at 6x, a key's rows drawn within 100, 200 and 200 ms, and at 6x a list scrolling with no visible stall. 6x stands for a slow work laptop and weighs as much as the other two. `just open-budget`, `just keys-budget` and `just frame-budget` hold all three (`testenv/perf/README.md`), and a pass that changes what the app draws runs them.
 _Avoid_: performance budget (a budget is the file of lines that holds a target), fast enough
 
+**Stored card**:
+Each ticket's card as the database keeps it beside the [mirror](#mirror) (migration `0075`, `sync.item_card`; since 2026-11-15, `0089`, with its title, its date, its key and title lowered, and its project): every field a [ticket board](#ticket-board) draws, filters and cuts by, under the key of the declarations it was read with, written with the ticket and filled at start for what was there before. A source is **whole** (`sync.card_whole`) when every ticket of it has its card under the key and none is under another; a board whose sources are all whole reads the cards and nothing else, and one with a source that is not reads the mirror as before, walking the payload of a ticket with no card. The same answer either way.
+_Avoid_: card cache, ticket snapshot, tile (the retired dashboard piece)
+
 **Stored run**:
 What Builds reads of a run, and a commit's own sha, as the database keeps them beside the [mirror](#mirror) (2026-11-15, migration `0088`, `sync.item_run`): a run's fifteen declared fields and a commit's declared sha, under the key of the declarations they were read with, written with the item and filled at start for what was there before. Builds' list, a pipeline's runs and a repository's Builds tab read a run's row where it has one and its payload where it has none, the same answer either way; a run's commit is found by the stored sha.
 _Avoid_: run cache, build snapshot

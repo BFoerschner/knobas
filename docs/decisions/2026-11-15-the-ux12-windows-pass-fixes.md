@@ -84,8 +84,10 @@ statuses beside it 10 ms on a second connection; signals 3 ms after; the rest sm
 - Each column's newest by a bounded sort: 3 ms of 42, the same rows; it rescans `scoped` once a column, which
   `read_plans.rs` refuses and which a mirror with many statuses would pay for.
 
-**Left, with what it would take.** Carrying the ticket's title, kind and dates on its stored card, so `scoped` reads
-cards alone where every ticket has one: bounded on the Mac at 24 ms to 8 for that step, about 40% of the statement. It
+**Left, with what it would take.** (The first of these was taken later the same day, with the project and the words
+lowered beside the title and date: migration `0089`, `2026-11-15-a-tickets-key-reads-cards-alone.md`. A letter's read
+54 ms to 39 on the Mac, `-project:` 54 to 40, `-priority:` 46 to 37.) Carrying the ticket's title, kind and dates on its
+stored card, so `scoped` reads cards alone where every ticket has one: bounded on the Mac at 24 ms to 8 for that step, about 40% of the statement. It
 needs a migration, the card triggers on title and date updates (a re-synced item rewrites its card row), the board
 statement and the search's narrowing pieces rewritten together, and the board's equivalence suites. Cancelling a stale
 key's statement helps typed words, not single keys, and needs a cancel the pool does not offer. The statuses beside the
