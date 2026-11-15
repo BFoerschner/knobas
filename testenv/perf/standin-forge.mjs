@@ -13,11 +13,24 @@
 //   `o/r#n`, as Gitea answers `pulls/{n}`, e.g. the mirror's payloads) a pull request's record, commits and `.diff`
 //   (`git diff <merge base>...<head>`), with no reviews or comments; the account is `knobas`;
 //
+// - with `--sync` and `--repos`, the repository listing a Gitea run starts from (`/repos/search`): every repository the
+//   directory holds, so a scale profile's Gitea source can be kept syncing against the stand-in (the ux13 forge-load
+//   pass, 2026-11-15), its walk reading the routes above and the pull requests and issues empty;
+//
 // and every other route 404 at once (`--log` prints every request, its status and its time, and why a route failed).
+//
+// `--workers <n>` (the ux13 forge-load pass, 2026-11-15) answers at most `n` requests at a time, the rest waiting their
+// turn in the order they came, as a forge does that takes its requests in turn: the WSL Gitea answered a branch's view in
+// 300 ms alone and four at once in 1.0 to 2.8 s. With it, a person's read waits for whatever the sync has on the forge
+// ahead of it, which is what the lane's cap on the sync's requests in flight bounds. `--heavy <ms>` holds the forge that
+// long for a listing a run walks (the repository search, a repository's branches, commits, pull requests and issues, a
+// whole tree), where every other route takes `--delay`: on the WSL box a page's read took 50 to 240 ms alone, while a
+// run kept eight requests on Gitea at ten a second, so each of the run's took about 800 ms there (Little's law), the
+// forge working through a queue of them.
 //
 //   node testenv/perf/standin-forge.mjs --listen 3911 [--delay 650] [--files 300] [--git <dir>] [--control 3912]
 //                                       [--distinct] [--tips <file.json>] [--real-compare] [--repos <dir>]
-//                                       [--pulls <file.json>] [--log]
+//                                       [--pulls <file.json>] [--sync] [--workers <n>] [--heavy <ms>] [--log]
 //
 // `--real-compare` (the stored-compare pass, 2026-11-14) answers the compare from the `--git` repository itself, as
 // Gitea does: the diff is `git diff -M <base>...<head>` and the commits `git log <base>..<head>` with their parents, so
@@ -37,7 +50,7 @@
 // Nothing is written anywhere.
 import http from "node:http";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 
@@ -55,6 +68,14 @@ const tips = opt("--tips") ? JSON.parse(readFileSync(opt("--tips"), "utf8")) : {
 const reposDir = opt("--repos");
 const pulls = opt("--pulls") ? JSON.parse(readFileSync(opt("--pulls"), "utf8")) : {};
 const logMissing = args.includes("--log");
+const listing = args.includes("--sync");
+const workers = Number(opt("--workers", "0"));
+const heavy = Number(opt("--heavy", "0"));
+/** A listing a run walks, which `--heavy` holds the forge longer for. */
+const listingRoute = (url) =>
+  url.pathname === "/api/v1/repos/search" ||
+  /^\/api\/v1\/repos\/[^/]+\/[^/]+\/(branches|commits|pulls|issues)$/.test(url.pathname) ||
+  (/\/git\/trees\//.test(url.pathname) && url.searchParams.get("recursive") === "true");
 /** The local repository a request reads: its own under `--repos`, else `--git`'s. */
 const repoDir = new AsyncLocalStorage();
 const dirOf = (pathname) => {
@@ -162,7 +183,7 @@ async function files(url, res) {
   if (rest === "") {
     count("repo");
     await sleep(delay);
-    json(res, { full_name: `${owner}/${name}`, html_url: null, default_branch: "main", empty: false });
+    json(res, repoRecord(owner, name));
   } else if ((m = rest.match(/^\/branches\/(.+)$/))) {
     const branch = decodeURIComponent(m[1]);
     count("branch");
@@ -301,17 +322,70 @@ async function inner(url, res, owner, name, rest) {
 
 const count = (kind) => (counts[kind] = (counts[kind] ?? 0) + 1);
 
+/** A repository's record as Gitea answers it: what a run's walk and a page's reads take from it. */
+const repoRecord = (owner, name) => ({
+  id: Number.parseInt(sha(owner, name).slice(0, 8), 16),
+  name,
+  full_name: `${owner}/${name}`,
+  owner: { login: owner, username: owner },
+  description: null,
+  html_url: null,
+  default_branch: "main",
+  empty: false,
+  mirror: false,
+  has_pull_requests: true,
+  has_issues: true,
+  updated_at: "2026-11-01T09:00:00Z",
+});
+
+/** `--workers`: the requests being answered, and the ones waiting their turn. */
+let answering = 0;
+const turns = [];
+const take = () => (workers > 0 && answering >= workers ? new Promise((go) => turns.push(go)) : Promise.resolve()).then(() => void (answering += 1));
+const done = () => {
+  answering -= 1;
+  turns.shift()?.();
+};
+
 http.createServer((req, res) => {
   // `--log`: every request, its status and its time here, so a slow page can be told from a slow stand-in.
+  // With `--workers`, also how long it waited its turn and how many were ahead of it when it came.
+  let began = null;
   if (logMissing) {
     const t = performance.now();
-    res.on("finish", () => console.log(`${req.method} ${req.url} ${res.statusCode} ${Math.round(performance.now() - t)} ms`));
+    const ahead = answering + turns.length;
+    res.on("finish", () => {
+      const turn = workers > 0 && began !== null ? ` (waited ${Math.round(began - t)} ms, ${ahead} ahead)` : "";
+      console.log(`${req.method} ${req.url} ${res.statusCode} ${Math.round(performance.now() - t)} ms${turn}`);
+    });
   }
-  repoDir.run(dirOf(new URL(req.url, "http://x").pathname), () => answer(req, res));
+  if (workers <= 0) return void repoDir.run(dirOf(new URL(req.url, "http://x").pathname), () => answer(req, res));
+  void take().then(async () => {
+    began = performance.now();
+    res.on("close", done);
+    const url = new URL(req.url, "http://x");
+    if (heavy > delay && listingRoute(url)) await sleep(heavy - delay);
+    repoDir.run(dirOf(url.pathname), () => answer(req, res));
+  });
 }).listen(listen, "127.0.0.1", () => console.log(`standin-forge: 127.0.0.1:${listen}, ${delay} ms a request, ${filesPerCompare} files a compare${gitDir ? `, files from ${gitDir}` : ""}${reposDir ? `, repositories from ${reposDir}` : ""}`));
 
 async function answer(req, res) {
   const url = new URL(req.url, "http://x");
+  if (req.method === "GET" && listing && reposDir !== null && url.pathname === "/api/v1/repos/search") {
+    count("search");
+    await sleep(delay);
+    const page = Number(url.searchParams.get("page") ?? "1");
+    const limit = Number(url.searchParams.get("limit") ?? "50");
+    const all = readdirSync(reposDir)
+      .filter((d) => d.endsWith(".git"))
+      .sort()
+      .map((d) => d.slice(0, -4))
+      .map((d) => {
+        const cut = d.indexOf("-", d.indexOf("-") + 1);
+        return repoRecord(d.slice(0, cut), d.slice(cut + 1));
+      });
+    return json(res, { ok: true, data: all.slice((page - 1) * limit, page * limit) }, all.length);
+  }
   if (req.method === "GET" && url.pathname === "/api/v1/user") return json(res, { id: 1, login: "knobas", username: "knobas", full_name: "knobas", email: "knobas@tidewater.test" });
   // An organisation's labels, which a pull request's overview offers beside the repository's: none. Unanswered, the
   // overview's own read failed, and its side panels never drew on the stand-in (the forge-rounds pass, 2026-11-15).

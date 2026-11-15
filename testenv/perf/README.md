@@ -191,6 +191,27 @@ just open-budget --real 5472 --inner --no-big --throttle 6 --only repo-,files-,f
 - **Left out:** the big folders and compares (`--no-big`: they are made on the live Gitea for the run), the PDF
   (`tidewater/milestone-review` is seeded by `seed-gitea.sh`, not built here) and a run's tabs (TeamCity).
 
+### A person's read beside a running sync, and a page left open
+
+From the ux13 forge-load pass (2026-11-15, `docs/decisions/2026-11-15-a-persons-read-beside-a-running-sync.md`). The
+stand-in can model a forge that answers in turn: `--workers 1` answers one request at a time, the rest waiting in the
+order they came (`--log` prints each one's wait and how many were ahead of it), and `--heavy <ms>` holds it longer for
+the listings a run walks than `--delay` for a page's routes. `--sync` answers `/repos/search` with every repository of
+`--repos`, so a scale profile's Gitea source runs whole against it.
+
+```sh
+node testenv/perf/standin-forge.mjs --listen 3987 --delay 40 --heavy 100 --workers 1 --repos <dir> --pulls pulls.json \
+  --real-compare --sync --control 3988 --log &
+node testenv/perf/lane-probe.mjs --port <backend port> --probes probes.json --source live-gitea --mode backfill
+node testenv/perf/page-requests.mjs --app "http://127.0.0.1:5980/?fake-ipc&fake-hooks&fake-real=<port>#/repo/<id>" \
+  --control 3988 --seconds 120 --every 40 --news alternate [--hide 10]
+```
+
+`page-requests.mjs` opens a page, lets it settle, then counts what the stand-in answers while the page is told a run of
+its source ended every `--every` seconds (`--news` says which ended with something), hidden from `--hide` on. Build the
+before and after backends into **separate target directories**: cargo's dep-info names sources relative to the
+workspace, so a second checkout built into the first's target directory takes the first's crates as fresh.
+
 ### Big folders
 
 Part of every `--inner` run (the big-folder pass, 2026-11-13, `docs/decisions/2026-11-13-a-big-folder-opens-in-a-frame.md`).
