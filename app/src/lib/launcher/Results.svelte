@@ -7,6 +7,14 @@
   `label`, `plural` and `monogram`: they come off the group, which the engine
   filled from the adapter's declared `KindInfo` (§3a), never from a table here.
 -->
+<script lang="ts" module>
+  /**
+   * How many rows the frame an answer lands in draws: what the tallest list shows (*Everything*'s 840 px dialog, a
+   * row 31 px), so the rows drawn a frame later are all below the fold.
+   */
+  export const FIRST_FRAME_ROWS = 24;
+</script>
+
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
   import { clockLabel } from "../time/format";
@@ -64,6 +72,38 @@
     }
     return out;
   });
+
+  // -- an answer draws what the list shows first (the one-letter pass, 2026-11-15) --
+  /**
+   * The first key into an empty box takes the list from nothing to forty rows in one frame, where it shows two dozen
+   * at most: about 1 ms a row of a quarter-speed main thread. In the frame the answer lands the list draws its first
+   * {@link FIRST_FRAME_ROWS}, and the rest the frame after, below them: nothing drawn moves. A list that already drew
+   * that many draws whole at once, so an answer that replaces a full one never takes rows away for a frame.
+   */
+  /** The answer every row of which has drawn; until the frame after an answer lands, the one before it. */
+  let wholeAnswer = $state.raw<SearchResponse | null>(null);
+  /** How many rows the list drew when the last answer drew whole. */
+  let drewWhole = 0;
+  const firstRowsOnly = $derived(response !== wholeAnswer && drewWhole < FIRST_FRAME_ROWS);
+  $effect(() => {
+    const answer = response;
+    if (answer === wholeAnswer) return;
+    // After the frame that draws the first rows has painted: a task queued from inside the frame's callback.
+    let task: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(
+      () =>
+        (task = setTimeout(() => {
+          drewWhole = answer.groups.reduce((all, group) => all + group.hits.length, 0);
+          wholeAnswer = answer;
+        }, 0)),
+    );
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(task);
+    };
+  });
+  /** Whether the hit at a flat-list index draws now: every one, or the first frame's share. */
+  const drawsNow = (index: number) => !firstRowsOnly || index < placeCount + FIRST_FRAME_ROWS;
 
   /**
    * The sources this query's author filter could not be asked (#141).
@@ -126,11 +166,14 @@
 
 <!-- No count on a heading (#2421): the list is quiet, and the rows are what is read. -->
 {#each ticketsFirst(response) as group, g (group.kind)}
-  <div class="tf-ln-h"><span class="tf-ln-lab">{group.plural}</span></div>
+  <!-- A kind whose rows the first frame leaves for the next draws its heading with them. -->
+  {#if drawsNow(offsets[g] ?? 0)}
+    <div class="tf-ln-h"><span class="tf-ln-lab">{group.plural}</span></div>
+  {/if}
   {#each group.hits as hit, h (hit.entity_id)}
     {@const index = (offsets[g] ?? 0) + h}
     {@const row = rows[index]}
-    {#if row}
+    {#if row && drawsNow(index)}
       {@const cells = cellsOf(hit, group.label)}
       <Row
         monogram={group.monogram}
