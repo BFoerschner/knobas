@@ -161,9 +161,9 @@
     searched.clear();
   }
 
-  /** Forget what each repository's header found: a new session. */
+  /** Forget the branches' standings the header's looks read: a new session. */
   export function forgetHeaderLooks(): void {
-    proposals.clear();
+    standings.clear();
   }
 
   /**
@@ -177,16 +177,18 @@
   const FIRST_SEARCH_AFTER_MS = 1000;
 
   /**
-   * What the header's look found, per repository, for the branches it asked and the writes asked before it: a look is up
-   * to eight branches' whole views, each some ten reads on the forge, and the page looked again on every visit and every
-   * tab shown, as its lists were read again: 2,179 requests to the forge in one run of the inner pages, most of a
-   * forge's quota of ten a second, with a person's own reads waiting behind them (the inner-6x pass, 2026-11-15). Kept
-   * {@link PROPOSAL_KEPT_MS} at most, and dropped on a refresh and a write. Not on a run's end: looked for again then, its
-   * eighty-odd reads went out as the run's own changes were read, and Commits waited a second for them; a pull request
-   * someone opened from the branch since is what Compare says when the button is pressed.
+   * Each branch's standing as the header's look last read it, by the branch's id: a look is up to eight branches' whole
+   * views, each some ten reads on the forge, and the page looked again on every visit, every tab shown and every return
+   * from Compare (asking then for the branch Compare had picked): 2,179 requests to the forge in one run of the inner
+   * pages, most of a forge's quota of ten a second, with a person's own reads waiting behind them, and the button held
+   * for seconds on each return (the inner-6x pass, 2026-11-15). A standing is kept {@link STANDING_KEPT_MS} at most, and
+   * a refresh drops the repository's; a look whose branches are all kept answers at once. Not dropped when a run of the
+   * source ends: looked for again then, the reads went out with the run's own and Commits waited a second for them; a
+   * pull request someone opened from the branch since is what Compare says when the button is pressed, and one sent from
+   * here takes its branch out of the look (`sentFrom`).
    */
-  const proposals = new Map<string, { asked: string; writes: number; at: number; toPropose: string | null; openedFrom: BranchStanding["pr"] }>();
-  const PROPOSAL_KEPT_MS = 5 * 60_000;
+  const standings = new Map<string, { at: number; standing: BranchStanding }>();
+  const STANDING_KEPT_MS = 5 * 60_000;
 </script>
 
 <script lang="ts">
@@ -681,7 +683,7 @@
     const id = repoId;
     if (id === null) return;
     tabs = readShown(tabs);
-    proposals.delete(id);
+    for (const branch of standings.keys()) if (branch.startsWith(`${id}@`)) standings.delete(branch);
     writesAsked += 1;
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
@@ -905,27 +907,41 @@
   $effect(() => {
     const choice = selected !== null && !selected.isDefault ? selected : null;
     const asking = (choice === null ? (known ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
-    const writes = writesAsked;
+    void writesAsked;
     let live = true;
     const asked = ready ? asking.slice(0, ASKED) : [];
     const id = untrack(() => repoId);
-    const askedKey = asked.map((option) => `${option.name}\u0000${option.id}`).join("\u0001");
-    const kept = id === null || asked.length === 0 ? undefined : proposals.get(id);
-    if (kept !== undefined && kept.asked === askedKey && kept.writes === writes && Date.now() - kept.at < PROPOSAL_KEPT_MS) {
-      untrack(() => {
-        toPropose = kept.toPropose;
-        openedFrom = kept.openedFrom;
-        seeking = false;
-      });
+    const keptOf = (branch: string): BranchStanding | undefined => {
+      const kept = standings.get(branch);
+      return kept !== undefined && Date.now() - kept.at < STANDING_KEPT_MS ? kept.standing : undefined;
+    };
+    /**
+     * The look over the branches in order: the first that stands free wins, a branch that can't be read (`null`) says nothing
+     * about what stands, and *proposed* stays; `undefined` while a branch it needs is not read yet.
+     */
+    const walk = (of: (i: number) => BranchStanding | null | undefined): { propose: string | null; opened: BranchStanding["pr"] } | undefined => {
+      let first: BranchStanding["pr"] = null;
+      for (let i = 0; i < asked.length; i += 1) {
+        const standing = of(i);
+        if (standing === undefined) return undefined;
+        if (standing === null) return { propose: null, opened: first };
+        if (standing.pr === null && (choice !== null || standing.canOpenPr)) return { propose: asked[i]!.name, opened: null };
+        first ??= standing.pr;
+      }
+      return { propose: null, opened: first };
+    };
+    const got: (BranchStanding | null | undefined)[] = asked.map((option) => keptOf(option.id));
+    const found = (answer: { propose: string | null; opened: BranchStanding["pr"] }) => {
+      toPropose = answer.propose;
+      openedFrom = answer.opened;
+      seeking = false;
+    };
+    // Every branch it needs is kept: drawn now, nothing held and nothing asked.
+    const answered = asked.length > 0 ? walk((i) => got[i]) : undefined;
+    if (answered !== undefined) {
+      untrack(() => found(answered));
       return;
     }
-    /** The look's answer, drawn and kept for the next visit. */
-    const found = (propose: string | null, opened: BranchStanding["pr"], keep = true) => {
-      toPropose = propose;
-      openedFrom = opened;
-      seeking = false;
-      if (keep && id !== null) proposals.set(id, { asked: askedKey, writes, at: Date.now(), toPropose: propose, openedFrom: opened });
-    };
     // Before the branches are read the page knows no branch to start on: *main* drew for half a second, then went.
     untrack(() => (seeking = asked.length > 0 || (ready && choice === null && branches === null)));
     void (async () => {
@@ -937,21 +953,29 @@
           return;
         }
       }
-      let first: BranchStanding["pr"] = null;
       // In order, a batch at a time: the first branch in order that stands free wins, as when they were read one by one.
       for (let at = 0; at < asked.length; at += ASKED_AT_ONCE) {
         const batch = asked.slice(at, at + ASKED_AT_ONCE);
-        const standings = await Promise.all(batch.map(({ id }) => ports.entityView(id, null).then(branchStanding, () => null)));
+        const read = await Promise.all(
+          batch.map(({ id: branch }, i) =>
+            got[at + i] !== undefined
+              ? Promise.resolve(got[at + i]!)
+              : ports.entityView(branch, null).then(
+                  (view) => {
+                    const standing = branchStanding(view);
+                    standings.set(branch, { at: Date.now(), standing });
+                    return standing;
+                  },
+                  () => null,
+                ),
+          ),
+        );
         if (!live) return;
-        for (const [i, standing] of standings.entries()) {
-          // A branch that can't be read says nothing about what stands: *proposed* stays, as it was before anything was asked.
-          // Not kept: the next visit asks again.
-          if (standing === null) return found(null, first, false);
-          if (standing.pr === null && (choice !== null || standing.canOpenPr)) return found(batch[i]!.name, null);
-          first ??= standing.pr;
-        }
+        read.forEach((standing, i) => (got[at + i] = standing));
+        const answer = walk((i) => (i < at + batch.length ? got[i] : undefined));
+        if (answer !== undefined) return found(answer);
       }
-      found(null, first, asked.length > 0);
+      found(walk((i) => got[i]) ?? { propose: null, opened: null });
     })();
     return () => {
       live = false;

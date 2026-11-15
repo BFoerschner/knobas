@@ -342,7 +342,7 @@ test("New pull request starts on a branch with nothing open, past one that has (
 
 // The inner-6x pass (2026-11-15): the look read up to eight branches' whole views on every visit and every tab shown,
 // most of a forge's quota with a person's own reads waiting behind them.
-test("the header's look is kept: another tab and a second visit ask no branch again, and say the same", async () => {
+test("the header's look is kept: another tab, a return from Compare and a second visit ask no branch again, and say the same", async () => {
   const base = ports();
   const other = "gitea:tidewater/payout-service@refs/heads/spike/y";
   let asked = 0;
@@ -371,11 +371,22 @@ test("the header's look is kept: another tab and a second visit ask no branch ag
   expect(asked).toBe(looked);
   expect(proposal()).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
 
+  // Compare from the button (which reads the branch's view for itself), and back: the branch Compare picked is one the
+  // look read, so the header asks nothing and holds nothing.
+  props.rest = [REPO, "compare", "spike/y"];
+  await settle();
+  const atCompare = asked;
+  props.rest = [REPO];
+  flushSync();
+  expect(target.querySelector(".tf-fhead .tf-repoheld")).toBeNull();
+  await settle();
+  expect(asked).toBe(atCompare);
+
   // A second visit to the repository: drawn at once, nothing asked.
   unmount(view);
   view = mount(TfRepo, { target, props: { ready: true, rest: [REPO], job: null, ports: stand, now: NOW } });
   await settle();
-  expect(asked).toBe(looked);
+  expect(asked).toBe(atCompare);
   expect(target.querySelector(".tf-fhead .tf-repoheld")).toBeNull();
   expect(proposal()).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
 });

@@ -251,7 +251,9 @@ async function inner(url, res, owner, name, rest) {
     const limit = Number(url.searchParams.get("limit") ?? "50");
     const shown = rows.slice((page - 1) * limit, page * limit);
     const commits = await commitRecords(shown.map(([, sha]) => sha));
-    json(res, shown.map(([branch], n) => ({ name: branch, commit: commits[n], protected: false })), rows.length);
+    // A branch's commit as Gitea's branch record gives it: `id`, not a commit record's `sha`.
+    const branchCommit = (c) => ({ id: c.sha, message: c.commit.message, url: null, author: c.commit.author, committer: c.commit.committer, timestamp: c.commit.committer.date });
+    json(res, shown.map(([branch], n) => ({ name: branch, commit: branchCommit(commits[n]), protected: false })), rows.length);
   } else if ((m = rest.match(/^\/git\/commits\/([0-9a-f]{40})\.diff$/))) {
     count("commit-diff");
     await sleep(delay);
