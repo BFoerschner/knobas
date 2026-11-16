@@ -53,6 +53,9 @@ for (const thing of THINGS) {
   if (!at) { console.log(`${thing.name}: nothing to press at ${thing.route}`); results.rows.push({ thing: thing.name, missing: true }); continue; }
   await c.js(`(() => {
     window.__rc = [];
+    // Once a document: the things are pages of one document, and a second listener would count each press twice.
+    if (window.__rcOn) return 1;
+    window.__rcOn = true;
     window.addEventListener("contextmenu", (e) => {
       const from = e.timeStamp;
       const seen = () => {

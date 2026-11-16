@@ -71,6 +71,8 @@ The judgment calls went to Fable (xhigh), whose rulings are followed here.
 - Rust: `checkout_ipc.rs`, a folder opens with the repository's command at the folder (a space in its name is one argument), a folder outside the checkout (by `..`, a root, a symlink out, a file, one not there, the checkout itself, `.git`) runs nothing, and a repository with no clone refuses it by name.
 - Press trips (`right-click`): a real right press on a ticket card, a ticket by Shift+F10, a field, a repository row, a tree folder (and *Open in… › Terminal* by pointer), a tree file, a commit, an Inbox line, selected words (and the launcher with them), a heading of nothing, a monitor, a run's heading.
 
+- Timing, on the Mac, against the windowless backend on a copy of the saved scale database: `testenv/perf/right-click.mjs`, a real right press on a ticket card, an Inbox line, a monitor row, a repository row and a Docs tree page, 7 each, from the press to the end of the frame that draws the menu: medians 21 to 38 ms, worst 40 ms, at 1x, 4x and 6x, at 1440x868@1 and 2560x1440@1.25 (the Mac's lines are 50, 50 and 100 ms). `just open-budget --real` on the pages whose rows took a tag (Inbox, the Tickets board, Monitors, Code): every open within its line at both sizes; worst useful frame 34, 68 and 100 ms at 1440x868@1, 82 and 112 ms at 2560x1440@1.25 at 4x and 6x.
+
 ## Owed on Windows
 
 WebView2's own menu: that `preventDefault()` stops it on the page, a link and selected words in the installed app; that a field's is the platform's with spelling; what a Docs embed or a renderer's frame shows inside it (no *Refresh* or *Back* that reloads the app); the context menu key on a Windows keyboard, which WebView2 also answers with a `contextmenu` of its own.
