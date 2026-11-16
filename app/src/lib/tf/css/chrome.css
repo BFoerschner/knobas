@@ -349,11 +349,12 @@
 .tf-signbubble-drawn b { font-weight: 600; }
 .tf-signbubble-state { color: var(--ink-2); font-size: var(--t-xs); }
 .tf-signbubble-acts { display: flex; flex-wrap: wrap; gap: var(--control-gap); margin-top: 2px; }
-/* A path on one line (`TfPath`, design system, Paths): its start gives way first, then its end, so the folder it names
-   stays in view; the whole path is its title. */
+/* A path on one line (`TfPath`, design system, Paths): its start gives way, all of it if need be, and its end does not
+   until it alone is wider than the box, so the folder it names stays in view; the whole path is its title. The end
+   shrinks by none of it: a share of the shrink as small as 0.3 px put an ellipsis on its last letters. */
 .tf-path { display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; white-space: nowrap; }
-.tf-path-head { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tf-path-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-path-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-path-tail { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* A path that wraps whole, alone or inside a sentence, anywhere rather than run past its box; over the code face's
    one-line rule (`tokens.css`). */
 .tf-wrapall, .tf-wrapall .tf-mono { overflow-wrap: anywhere; }

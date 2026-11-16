@@ -160,7 +160,7 @@
     </div>
     <div class="tf-stg-c">
       {#if settings.git.status === "found"}
-        <span class="tf-stg-ok"><span class="tf-dot tf-ok"></span> git at <TfPath path={settings.git.path} /></span>
+        <span class="tf-stg-ok"><span class="tf-dot tf-ok"></span> <span class="tf-nowrap">git at</span> <TfPath path={settings.git.path} /></span>
       {:else if settings.git.status === "no_git"}
         <span><span class="tf-dot tf-warn"></span> git was not found on this machine</span>
       {:else}

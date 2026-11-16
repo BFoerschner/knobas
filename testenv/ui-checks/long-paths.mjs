@@ -102,7 +102,8 @@ const CHECK = String.raw`(() => {
   }
   // A path an ellipsis cuts: Chrome reports such a run as only what shows, so the boxes above can't see it.
   for (const root of roots) for (const e of root.querySelectorAll("*")) {
-    if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth + 1 || !MARK.test(e.textContent)) continue;
+    // Strict: an ellipsis shows for a shortfall under a pixel, which rounds away in a +1 margin.
+    if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth || !MARK.test(e.textContent)) continue;
     const s = getComputedStyle(e);
     if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.closest(".tf-sr")) continue;
     misses.push({ kind: "cut", at: where(e), text: e.textContent.trim().slice(-48), over: e.scrollWidth - e.clientWidth });
