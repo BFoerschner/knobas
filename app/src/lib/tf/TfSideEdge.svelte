@@ -98,7 +98,8 @@
     const draw = () => {
       frame = 0;
       const next = clampWidth(side, from + sign * (x - x0), at.grid);
-      if (next === width && moved) return;
+      // Only a width that changes is written, and only a drag that changed it is kept.
+      if (next === width) return;
       moved = true;
       width = next;
       grid.style.setProperty(property, cssWidth(side, next));

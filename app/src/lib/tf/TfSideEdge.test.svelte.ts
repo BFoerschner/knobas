@@ -245,6 +245,17 @@ describe("the edge", () => {
     expect(storage.getItem("knobas.side.settings")).toBeNull();
   });
 
+  test("a drag that ends where it started keeps nothing", async () => {
+    await draw("settings", "230px 1210px");
+    pointer("pointerdown", 230, edge());
+    pointer("pointermove", 231);
+    pointer("pointermove", 230);
+    pointer("pointerup", 230);
+    flushSync();
+    expect(sideWidths.px("settings")).toBeNull();
+    expect(drawn("settings")).toBe("");
+  });
+
   test("a double click returns the sidebar to its default: nothing kept, the CSS draws it", async () => {
     await draw("repo-tree", "280px 1142px");
     pointer("pointerdown", 280, edge());
@@ -351,6 +362,61 @@ describe("every sidebar is wired", () => {
     expect(edgeCss).toMatch(new RegExp(`@property --side-${id} \\{ syntax: "\\*"; inherits: false; \\}`));
     // Each read has the default as its fallback, so a page at its defaults draws as it did.
     for (const { text } of reads) expect(text).toMatch(new RegExp(`var\\(--side-${id}, \\d+px\\)`));
+  });
+
+  /** Each sidebar's grid, by the selector of its rules. */
+  const GRIDS: Record<SideId, string> = {
+    "tickets-views": ".tf-tickets",
+    "tickets-preview": ".tf-tickets",
+    "ticket-card": ".tf-ticketpage .tf-ws",
+    builds: ".tf-bv",
+    "repo-tree": ".tf-repo",
+    "repo-builds": ".tf-rbv",
+    compare: ".tf-compare",
+    "diff-files": ".tf-dgrid",
+    "docs-tree": ".tf-rd",
+    "docs-outline": ".tf-rd-sheet",
+    settings: ".tf-stg",
+    pr: ".tf-cbody.tf-pr",
+    set: ".tf-cbody.tf-set",
+    assets: ".tree",
+  };
+  /** Every rule's selector, its declarations and the at-rules around it, from CSS (a component's `<style>` alone). */
+  function rules(text: string, component: boolean): { selector: string; body: string; within: string[] }[] {
+    const css = component ? (text.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? "") : text;
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const out: { selector: string; body: string; within: string[] }[] = [];
+    const stack: string[] = [];
+    let start = 0;
+    for (let i = 0; i < clean.length; i++) {
+      const ch = clean[i];
+      if (ch === "{") {
+        const prelude = clean.slice(start, i).trim();
+        const close = clean.indexOf("}", i);
+        const next = clean.indexOf("{", i + 1);
+        if (!prelude.startsWith("@") && (next === -1 || close < next)) {
+          out.push({ selector: prelude, body: clean.slice(i + 1, close), within: [...stack] });
+          i = close;
+        } else stack.push(prelude);
+        start = i + 1;
+      } else if (ch === "}") {
+        stack.pop();
+        start = i + 1;
+      } else if (ch === ";" && stack.length === 0) start = i + 1;
+    }
+    return out;
+  }
+  const styled = sources.filter(({ path }) => path.endsWith(".css") || path.endsWith("AssetsView.svelte")).flatMap(({ path, text }) => rules(text, path.endsWith(".svelte")));
+
+  test.each(SIDE_IDS)("%s: its grid's own rule reads the width, and no rule above 900 px holds a fixed sidebar track", (id) => {
+    const mine = styled.filter((rule) => rule.selector === GRIDS[id] && /grid-template-columns:/.test(rule.body));
+    expect(mine.length, `no rule of ${GRIDS[id]} sets its columns`).toBeGreaterThan(0);
+    const wide = mine.filter((rule) => !rule.within.some((at) => /max-width:\s*(8\d\d|9[0-0]\d)px/.test(at)));
+    expect(wide.some((rule) => rule.body.includes(`var(--side-${id}, `))).toBe(true);
+    for (const rule of wide) {
+      const columns = rule.body.match(/grid-template-columns:\s*([^;]+)/)![1]!.replace(/var\(--side-[\w-]+, \d+px\)/g, "SIDE");
+      expect(columns, `${GRIDS[id]} { grid-template-columns: ${columns} }`).not.toMatch(/(^|\s)\d+px/);
+    }
   });
 
   test("no sidebar is left out of the list", () => {
