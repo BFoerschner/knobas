@@ -115,6 +115,7 @@
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
   import TfToasts from "./TfToasts.svelte";
+  import TfContextMenu from "./context/TfContextMenu.svelte";
   import TfTopBar from "./TfTopBar.svelte";
   import "./tf.css";
 
@@ -881,4 +882,12 @@
   {/if}
   <TfToasts />
   <div class="tf-floats"></div>
+  <!-- The right-click menu (2026-11-16): one for the window, in the float host. -->
+  <TfContextMenu
+    {onsearch}
+    {onstarttimer}
+    canTime={ontimer !== undefined}
+    job={chosen === null ? null : { entityId: chosen.entityId, label: chosen.key }}
+    {layers}
+  />
 </div>

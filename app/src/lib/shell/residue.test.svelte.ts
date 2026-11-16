@@ -353,6 +353,8 @@ const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
+const TfContextMenu = (await import("../tf/context/TfContextMenu.svelte")).default;
+const { realMenuPorts } = await import("../tf/context/ports");
 const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
@@ -760,6 +762,18 @@ const CASES: Case[] = [
     source: "lib/tf/TfMenu.svelte",
     open: (target) => ({ app: mount(TfMenuFixture, { target, props: { layers: createLayers() } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>(".face")?.click(),
+  },
+  {
+    /** The right-click menu: its window listeners, and while it is open its menu's and its submenu's. */
+    name: "TfContextMenu",
+    source: "lib/tf/context/TfContextMenu.svelte",
+    open: (target) => {
+      target.innerHTML = '<a class="ctx-t" href="#/ticket/jira%3APAY-1">PAY-1</a>';
+      return {
+        app: mount(TfContextMenu, { target, props: { onsearch: () => {}, layers: createLayers(), ports: { ...realMenuPorts, sources: () => Promise.resolve([]), head: () => Promise.reject(new Error("none")) } } }),
+      };
+    },
+    exercise: (target) => target.querySelector(".ctx-t")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })),
   },
   {
     /** The fold bar: an open fold is a panel on the layer stack (F-619). */

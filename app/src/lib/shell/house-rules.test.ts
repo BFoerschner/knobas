@@ -452,6 +452,10 @@ test("only the launcher resolves a pasted URL to an entity", () => {
     "lib/launcher/session.svelte.ts",
     // Not a pasted text (#841): a pull request's check links its run, and the
     // page opens the run the mirror holds at that link. No text is rewritten.
+    // Not a pasted text either (2026-11-16): a right-click's *Open in knobas* on a link to a mirrored source opens
+    // what the mirror holds at it, when chosen. No text is rewritten.
+    "lib/tf/context/TfContextMenu.svelte",
+    "lib/tf/context/ports.ts",
     "lib/tf/pr/TfPr.svelte",
   ]);
 });

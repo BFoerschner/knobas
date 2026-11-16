@@ -67,6 +67,7 @@ const SMALL: Record<string, string> = {
   "shell/WriteQueue.svelte  writeWords(row, (id) => names[id] ?? null)": "the runs of one line's or one name's words",
   "tf/TfCreateTicket.svelte  projects": "a handful by what it is: the projects the sources sync: tens",
   "tf/TfCrumbs.svelte  parts": "a handful by what it is: a page's crumbs: a few levels",
+  "tf/context/TfContextMenu.svelte  list": "a handful by what it is: one right-click menu's rows, or Settings › Open in…'s applications",
   "tf/TfEntityAction.svelte  action.fields": "a handful by what it is: one action's fields, as the source declares them",
   "tf/TfEntityAction.svelte  field.kind.options": "a handful by what it is: one field's choices, as the source declares them",
   "tf/TfKeyed.svelte  parts": "the runs of one line's or one name's words",
