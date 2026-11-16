@@ -381,6 +381,9 @@ mod tests {
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            // Years back, so "6 years ago" reads the same a second later.
+            .env("GIT_AUTHOR_DATE", "1600000000 +0000")
+            .env("GIT_COMMITTER_DATE", "1600000000 +0000")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_INDEX_FILE")
