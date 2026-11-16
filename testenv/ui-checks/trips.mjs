@@ -179,19 +179,19 @@ const GROW_TICKET = `window.__fake.corpus.push({ entity_id: "mock:PAY-9001", kin
 // The right-click menu's cases (2026-11-16): one per kind of thing a person right-clicks daily, a field, and nothing.
 const RIGHT_CLICK = [
   { page: "Right-click, Tickets", route: "tickets", trips: [
-    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
-    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "web", "copy-key", "copy-key-title", "copy-link"] },
+    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "link", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
+    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "link", "web", "copy-key", "copy-key-title", "copy-link"] },
     { id: "rc-field", kind: "right-click", finding: "right-click", platform: true, on: { sel: ".tf-main input" } },
   ] },
   { page: "Right-click, Code", route: "code", trips: [
-    { id: "rc-repo-row", kind: "right-click", finding: "right-click", on: { sel: "tbody tr.tf-row td:last-child" }, items: ["open", "prs", "branches", "commits", "open-default", "open-in", "web", "copy-name", "copy-full", "copy-link"], pick: "prs", hash: "#/repo/" },
+    { id: "rc-repo-row", kind: "right-click", finding: "right-click", on: { sel: "tbody tr.tf-row td:last-child" }, items: ["open", "prs", "branches", "commits", "link", "open-default", "open-in", "web", "copy-name", "copy-full", "copy-link"], pick: "prs", hash: "#/repo/" },
   ] },
   { page: "Right-click, a repository's files", route: `${REPO}/files`, trips: [
     { id: "rc-folder", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows .tf-fdir" }, items: ["open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "open-in", sub: "app-terminal", toast: "Started " },
     { id: "rc-file", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows a" }, items: ["open", "history", "open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "copy-path", toast: "Copied " },
   ] },
-  { page: "Right-click, a repository's commits", route: `${REPO}/commits`, trips: [
-    { id: "rc-commit", kind: "right-click", finding: "right-click", on: { sel: "a[href*='/commits/']" }, items: ["open", "open-default", "open-in", "web", "copy-sha", "copy-short", "copy-link"], pick: "copy-short", toast: "Copied " },
+  { page: "Right-click, a pull request's commits", route: "pr/mock%3Apayout-service%23142/commits", trips: [
+    { id: "rc-commit", kind: "right-click", finding: "right-click", on: { sel: "a[href*='/commits/mock']" }, starts: ["open", "open-default", "open-in", "web", "copy-sha", "copy-short", "copy-link"], pick: "copy-short", toast: "Copied c90d11e" },
   ] },
   { page: "Right-click, Inbox", route: "inbox", trips: [
     { id: "rc-inbox-line", kind: "right-click", finding: "right-click", on: { sel: ".tf-ib a" }, starts: ["open"] },

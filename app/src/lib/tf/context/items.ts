@@ -148,11 +148,16 @@ const SHEET_KIND: Partial<Record<Thing["kind"], string>> = {
 /** The sheet's one-press actions the menu takes (`sheet.ts`), by id: the kind's own, and the pair with the job. */
 const FROM_SHEET = new Set(["work", "timer", "diff", "talk", "prs", "branches", "run", "link"]);
 
-/** The sheet's actions for an entity, as the menu takes them. */
-function fromSheet(kind: string, id: string, title: string, ctx: MenuContext): Entry[] {
+/**
+ * The sheet's actions for an entity, as the menu takes them, with `extras` (the menu's own pages for the kind) after
+ * the kind's own and before *Link to ⟨job⟩*, which ends the group on every kind.
+ */
+function fromSheet(kind: string, id: string, title: string, ctx: MenuContext, extras: Item[] = []): Entry[] {
   const sheet: SheetContext = { job: ctx.job, canTime: ctx.canTime, apps: [], favourites: new Set() };
   const actions = sheetActions({ kind: "entity", entityId: id, entityKind: kind, title, sourceId: sourceOf(id), path: null }, sheet);
-  return actions.filter((action) => FROM_SHEET.has(action.id)).flatMap((action) => sheetItem(action, id));
+  const items = actions.filter((action) => FROM_SHEET.has(action.id)).flatMap((action) => sheetItem(action, id));
+  const link = items.filter((item) => item.id === "link");
+  return [...items.filter((item) => item.id !== "link"), ...extras, ...link];
 }
 
 function sheetItem(action: SheetAction, id: string): Item[] {
@@ -221,7 +226,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
     case "repo": {
       const name = keyOf(thing.id);
       return grouped(
-        [...open(thing.hash, ctx), ...fromSheet("repo", thing.id, title, ctx), { id: "commits", label: "Commits", act: { do: "go", hash: repoHash(thing.id, "commits") } }],
+        [...open(thing.hash, ctx), ...fromSheet("repo", thing.id, title, ctx, [{ id: "commits", label: "Commits", act: { do: "go", hash: repoHash(thing.id, "commits") } }])],
         [...openIn(thing.id, thing.id, { kind: "repository" }, ctx, facts), inSource(thing.id, ctx)],
         [
           { id: "copy-name", label: "Copy name", hint: name, act: { do: "copy", text: name, said: `Copied ${name}` } },

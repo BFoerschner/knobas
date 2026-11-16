@@ -59,6 +59,11 @@ test("a pull request: its pages, never Approve or Merge, which others see and on
   expect(ids(entries)).not.toContain("merge");
 });
 
+test("Link to the job ends the first group on every kind, after the menu's own pages", () => {
+  const job = { entityId: "jira:PAY-9", label: "PAY-9" };
+  expect(ids(menuFor({ kind: "repo", id: "gitea:t/pay", hash: "#/r" }, null, ctx({ job }))).slice(0, 6)).toEqual(["open", "prs", "branches", "commits", "link", "|"]);
+});
+
 test("a repository: Open in its default application flat, the rest in Open in…, and its copies", () => {
   const entries = menuFor({ kind: "repo", id: "gitea:t/pay", hash: "#/repo/gitea%3At%2Fpay" }, null, ctx());
   expect(ids(entries)).toEqual(["open", "prs", "branches", "commits", "|", "open-default", "open-in", "web", "|", "copy-name", "copy-full", "copy-link"]);
