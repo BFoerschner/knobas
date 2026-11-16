@@ -20,6 +20,8 @@
   import { clockLabel } from "../time/format";
   import { aimed } from "./aim";
   import Row from "./Row.svelte";
+  import { thingOfHash } from "../tf/context/thing";
+  import { entityAddress } from "../tf/address";
   import { stateWord } from "../tf/state-word";
   import { sentence } from "../tf/inbox/inbox";
   import { cellsOf } from "./cells";
@@ -188,6 +190,7 @@
         selected={index === selected}
         onopen={() => onopen(row)}
         onhover={() => onhover(index)}
+        thing={() => thingOfHash(entityAddress(hit.kind, hit.entity_id, hit.title))}
       />
     {/if}
   {/each}

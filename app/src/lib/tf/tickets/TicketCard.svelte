@@ -21,6 +21,8 @@
   import TfKeyed from "../TfKeyed.svelte";
   import Signals from "./Signals.svelte";
   import { assigneeName, commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
+  import { menuThing } from "../context/thing";
+  import { ticketHash } from "../route";
 
   let {
     card,
@@ -68,6 +70,7 @@
   onclick={onselect}
   ondblclick={onopen}
   {@attach row}
+  {@attach menuThing(() => ({ kind: "ticket", id: card.entity_id, hash: ticketHash(card.entity_id) }))}
 >
   <span class="tf-thead">
     <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>

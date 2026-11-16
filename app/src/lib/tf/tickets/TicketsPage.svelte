@@ -107,7 +107,8 @@
   import { stamped, stampOf } from "../opener";
   import { HeldOrder } from "../held-order.svelte";
   import { rowInView } from "../return-place";
-  import { parseTfHash } from "../route";
+  import { parseTfHash, ticketHash } from "../route";
+  import { menuThing } from "../context/thing";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -1150,6 +1151,7 @@
                 aria-current={current?.card.entity_id === card.entity_id ? "true" : undefined}
                 data-entity={card.entity_id}
                 tabindex="0"
+                {@attach menuThing(() => ({ kind: "ticket", id: card.entity_id, hash: ticketHash(card.entity_id) }))}
                 onclick={() => clicked(card)}
                 ondblclick={() => openTicket(card)}
               >

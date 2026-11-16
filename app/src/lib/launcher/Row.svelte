@@ -18,6 +18,7 @@
   import { aimed } from "./aim";
   import { chordLabel } from "../shell/platform";
   import { shortKey } from "../tf/tickets/tickets";
+  import { menuThing, type Thing } from "../tf/context/thing";
   import type { Tone } from "../ipc/entity";
 
   let {
@@ -33,6 +34,7 @@
     selected,
     onopen,
     onhover,
+    thing = () => null,
   }: {
     monogram: string;
     /** The state's tone, which colours the monogram; `null` for a row with no state. */
@@ -53,6 +55,8 @@
     selected: boolean;
     onopen: () => void;
     onhover: () => void;
+    /** What the row is to a right-click (2026-11-16), read when one comes: an entity's address names it. */
+    thing?: () => Thing | null;
   } = $props();
 </script>
 
@@ -64,6 +68,7 @@
   aria-selected={selected}
   onclick={onopen}
   onpointermove={aimed(onhover)}
+  {@attach menuThing(() => thing())}
 >
   <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{kindTag(monogram)}</span>
   <!-- A forge's issue key is told apart by its repository and number, which the cell's ellipsis cut: ten Gitea issues
