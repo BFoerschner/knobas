@@ -20,7 +20,7 @@ import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
 import type { EntityDetail, ProposalEvidence, SuggestionPage } from "../../ipc/entity";
 import type { SearchResponse } from "../../ipc/search";
-import { demoHandlers } from "./fake-tauri";
+import { demoHandlers, installFakeTauri } from "./fake-tauri";
 import { FIXTURE_SOURCES, seed as seedSources } from "./fake/sources";
 
 test("the three suggestion commands are answered", () => {
@@ -1321,4 +1321,42 @@ test("fake-answers.ts types every barrel command, and only those", () => {
   const source = readFileSync(join(REPO_ROOT, "app/src/lib/shell/dev/fake-answers.ts"), "utf8");
   const typed = [...source.matchAll(/^ {2}([a-z0-9_]+): Answer</gm)].map((match) => match[1]!).sort();
   expect(typed).toEqual([...barrelCommands().keys()].sort());
+});
+
+/**
+ * The hover-lag pass (2026-11-16): the bridge kept every listener's callback after the listener was dropped, so a page
+ * that had ever listened was held, state and nodes, for the window's life, and a soak over the bridge measured growth
+ * the app's own window never has. Tauri's `unregisterListener` drops the callback with the listener.
+ */
+test("a listener dropped lets its callback go, as Tauri's own bridge does", async () => {
+  const had = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__");
+  const hadEvents = Object.getOwnPropertyDescriptor(window, "__TAURI_EVENT_PLUGIN_INTERNALS__");
+  try {
+    const bridge = installFakeTauri({});
+    const internals = (window as unknown as { __TAURI_INTERNALS__: { transformCallback(callback: (event: { payload: unknown }) => void): number; invoke(cmd: string, args: unknown): Promise<number> } }).__TAURI_INTERNALS__;
+    const events = (window as unknown as { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener(event: string, id: number): void } }).__TAURI_EVENT_PLUGIN_INTERNALS__;
+    const heard: unknown[] = [];
+    const handler = internals.transformCallback((event) => heard.push(event.payload));
+    const first = await internals.invoke("plugin:event|listen", { event: "sync:state", handler });
+    bridge.emit("sync:state", "heard");
+    events.unregisterListener("sync:state", first);
+    bridge.emit("sync:state", "after the drop");
+    // The callback went with its listener: nothing can listen through its id again.
+    await internals.invoke("plugin:event|listen", { event: "sync:state", handler });
+    bridge.emit("sync:state", "through a dropped callback");
+    expect(heard).toEqual(["heard"]);
+
+    // The command alone drops both too, for a caller that sends only it.
+    const other = internals.transformCallback((event) => heard.push(event.payload));
+    const second = await internals.invoke("plugin:event|listen", { event: "sync:state", handler: other });
+    await internals.invoke("plugin:event|unlisten", { event: "sync:state", eventId: second });
+    await internals.invoke("plugin:event|listen", { event: "sync:state", handler: other });
+    bridge.emit("sync:state", "through a dropped callback");
+    expect(heard).toEqual(["heard"]);
+  } finally {
+    if (had) Object.defineProperty(window, "__TAURI_INTERNALS__", had);
+    else delete (window as unknown as Record<string, unknown>)["__TAURI_INTERNALS__"];
+    if (hadEvents) Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", hadEvents);
+    else delete (window as unknown as Record<string, unknown>)["__TAURI_EVENT_PLUGIN_INTERNALS__"];
+  }
 });

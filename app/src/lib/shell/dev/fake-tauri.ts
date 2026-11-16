@@ -82,6 +82,8 @@ export type Handlers = { [K in keyof Answers]?: (args: Record<string, unknown>) 
 interface Listener {
   event: string;
   callback: (payload: unknown) => void;
+  /** The callback's id (`transformCallback`), dropped with the listener. */
+  handler: number;
 }
 
 /** What a fake bridge hands back to whoever installed it. */
@@ -101,17 +103,29 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
   const callbacks = new Map<number, (payload: unknown) => void>();
   const listeners = new Map<number, Listener>();
 
+  // A listener dropped lets its callback go too, as Tauri's own `unregisterListener` does
+  // (`unregisterCallback(listeners[id].handlerId)`). Kept, every `listen()` a page ever made held its handler, and
+  // through it the page's state and nodes, for the window's life: a soak over this bridge grew by 2,500 nodes and
+  // 1.2 MB a minute that the app's own window never held (the hover-lag pass, 2026-11-16).
+  const drop = (eventId: number) => {
+    const listener = listeners.get(eventId);
+    if (listener === undefined) return;
+    listeners.delete(eventId);
+    callbacks.delete(listener.handler);
+  };
+
   const invoke = async (cmd: string, args: Record<string, unknown> = {}) => {
     if (cmd === "plugin:event|listen") {
       const id = ++nextEventId;
-      const callback = callbacks.get(args["handler"] as number);
+      const handler = args["handler"] as number;
+      const callback = callbacks.get(handler);
       if (callback) {
-        listeners.set(id, { event: String(args["event"]), callback });
+        listeners.set(id, { event: String(args["event"]), callback, handler });
       }
       return id;
     }
     if (cmd === "plugin:event|unlisten") {
-      listeners.delete(args["eventId"] as number);
+      drop(args["eventId"] as number);
       return null;
     }
     const handler = handlers[cmd];
@@ -156,7 +170,7 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
   Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
     value: {
       unregisterListener(_event: string, eventId: number) {
-        listeners.delete(eventId);
+        drop(eventId);
       },
     },
     configurable: true,
