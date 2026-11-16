@@ -608,7 +608,9 @@
     let stop: (() => void) | null = null;
     const later = (then: () => void) => {
       if (typeof requestIdleCallback === "function") {
-        const id = requestIdleCallback(then, { timeout: 2000 });
+        // Within 300 ms whatever else the page is doing: the diff's own read-ahead of lines takes the idle turns too, and
+        // a pick's names are worth more than a far file's lines.
+        const id = requestIdleCallback(then, { timeout: 300 });
         stop = () => cancelIdleCallback(id);
       } else {
         const id = setTimeout(then, 100);
@@ -963,7 +965,7 @@
             <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
           {/if}
           {#key `${filesFor}\n${range?.base}\n${range?.head}`}
-            <TfDiffView {files} {cut} {context} {fill} {counted} openAt={head === null ? null : { entityId: repoId, at: head }} />
+            <TfDiffView {files} {cut} {context} {fill} {counted} calm={!reading} openAt={head === null ? null : { entityId: repoId, at: head }} />
           {/key}
         {/if}
       </TfWaiting>

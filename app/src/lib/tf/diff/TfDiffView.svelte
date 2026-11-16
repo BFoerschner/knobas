@@ -126,6 +126,7 @@
     me = null,
     fill = null,
     counted = true,
+    calm = true,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -171,6 +172,11 @@
      * same, until a counted list of the same files replaces it and keeps the lines read.
      */
     counted?: boolean;
+    /**
+     * Nothing else is being read for the page: the view reads ahead only then (the big-compare pass, 2026-11-16).
+     * Compare clears it while another pick's list is read, so the diff it dims sends nothing beside that read.
+     */
+    calm?: boolean;
   } = $props();
 
   let filter = $state("");
@@ -619,7 +625,7 @@
   $effect(() => {
     const port = fill;
     const all = drawn;
-    if (port === null || port.ahead !== true || port.pages === undefined || port.cached === undefined || !counted || all.length === 0) return;
+    if (port === null || port.ahead !== true || port.pages === undefined || port.cached === undefined || !counted || !calm || all.length === 0) return;
     let live = true;
     let reading: string | null = null;
     let wait: (() => void) | null = null;
