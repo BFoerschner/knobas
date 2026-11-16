@@ -19,7 +19,9 @@
 //! - `git rev-parse --verify --quiet <sha>^{commit}`, which checks the
 //!   checkout holds the commit;
 //! - `git ls-tree -r -t -z --long --full-tree <sha>`, the whole tree once,
-//!   kept in memory by checkout and commit (it cannot change);
+//!   kept in memory by checkout and commit (it cannot change), the tree
+//!   least recently used dropped first, and read once however many ask for
+//!   it at the same time;
 //! - `git cat-file blob <blob sha>`, a file's bytes by the sha the tree
 //!   gave, so a path never reaches git either.
 //!
@@ -59,7 +61,8 @@ pub const KEPT_CAP: usize = 2_000_000;
 /// The most of `ls-tree`'s answer read: about two million long paths.
 const LISTING_BYTES: usize = 256 * 1024 * 1024;
 
-/// How many trees are kept in memory: a few repositories' current branch.
+/// How many trees are kept in memory: a few repositories' current branch,
+/// the one least recently used dropped first.
 const KEPT: usize = 8;
 
 /// One entry of a tree read at a checkout.
@@ -229,12 +232,10 @@ pub fn paths(tree: &LocalTree) -> LocalPaths {
 /// A tree kept at `sha` at any checkout: a commit's tree is the same wherever
 /// it is read, so a folder of a tree read once needs no checkout found again.
 pub fn kept_at(sha: &str) -> Option<Arc<LocalTree>> {
-    let trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
-    trees
-        .iter()
-        .rev()
-        .find(|(_, commit, tree)| commit == sha || tree.commit == sha)
-        .map(|(_, _, tree)| tree.clone())
+    let mut trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
+    used(&mut trees, |(_, commit, tree)| {
+        commit == sha || tree.commit == sha
+    })
 }
 
 /// One kept tree: the checkout it was read at, the sha asked, and the tree.
@@ -244,21 +245,50 @@ type Kept = (PathBuf, String, Arc<LocalTree>);
 static TREES: LazyLock<Mutex<VecDeque<Kept>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
 
 fn kept(path: &Path, sha: &str) -> Option<Arc<LocalTree>> {
-    let trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
-    trees
-        .iter()
-        .find(|(at, commit, _)| at == path && commit == sha)
-        .map(|(_, _, tree)| tree.clone())
+    let mut trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
+    used(&mut trees, |(at, commit, _)| at == path && commit == sha)
+}
+
+/// The newest of `trees` that `is` accepts, moved to the newest end: a tree
+/// a reader is in stays kept while they are in it, whatever else is read
+/// meanwhile (the hover-lag pass of PR #2479, 2026-11-16). Kept by when they
+/// were read, the ninth tree read dropped the one in use, and its next folder
+/// ran `git ls-tree` over the whole repository again.
+fn used(trees: &mut VecDeque<Kept>, is: impl Fn(&Kept) -> bool) -> Option<Arc<LocalTree>> {
+    let at = trees.iter().rposition(is)?;
+    let entry = trees.remove(at)?;
+    let tree = entry.2.clone();
+    trees.push_back(entry);
+    Some(tree)
+}
+
+/// `entry` kept as the newest of `trees`, the oldest dropped past [`KEPT`].
+fn put(trees: &mut VecDeque<Kept>, entry: Kept) {
+    trees.push_back(entry);
+    while trees.len() > KEPT {
+        trees.pop_front();
+    }
 }
 
 fn keep(path: &Path, tree: Arc<LocalTree>) {
     let mut trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
     trees.retain(|(at, commit, _)| !(at == path && *commit == tree.commit));
-    trees.push_back((path.to_owned(), tree.commit.clone(), tree));
-    while trees.len() > KEPT {
-        trees.pop_front();
-    }
+    put(&mut trees, (path.to_owned(), tree.commit.clone(), tree));
 }
+
+/// One read of a tree under way: what it answers, for everyone who asked
+/// meanwhile.
+type Reading = Arc<tokio::sync::OnceCell<Option<Arc<LocalTree>>>>;
+
+/// The whole-tree reads under way, by checkout and sha asked: a second ask
+/// for a tree being read waits for that read and takes its answer (the
+/// hover-lag pass of PR #2479, 2026-11-16). Each ask ran its own `git
+/// ls-tree` over the whole repository: sixty folders of a tree no longer
+/// kept, asked at once as a page's refresh asked them, were sixty git
+/// processes and sixty trees parsed (351 ms on the Mac for a tree of 9,700
+/// files, where one read is 24). Gone from here once it has answered.
+static READING: LazyLock<Mutex<HashMap<(PathBuf, String), Reading>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The tree at `sha` in the checkout at `path`, or `None` when it cannot be
 /// read here: no git, no repository, a sha the checkout does not hold, git
@@ -276,6 +306,36 @@ pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<Loc
     if let Some(tree) = kept(path, sha) {
         return Some(tree);
     }
+    let key = (path.to_owned(), sha.to_owned());
+    let reading = READING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry(key.clone())
+        .or_default()
+        .clone();
+    // Each asker waits `TIMEOUT` at most, whoever runs the read: one whose
+    // wait ends leaves the read to the next still waiting.
+    let tree = tokio::time::timeout(
+        TIMEOUT,
+        reading.get_or_init(|| read_tree(search, path, sha)),
+    )
+    .await
+    .ok()
+    .cloned()
+    .flatten();
+    let mut under_way = READING.lock().unwrap_or_else(PoisonError::into_inner);
+    if under_way
+        .get(&key)
+        .is_some_and(|held| Arc::ptr_eq(held, &reading))
+    {
+        under_way.remove(&key);
+    }
+    tree
+}
+
+/// [`tree_with`]'s read itself: git over the whole tree, kept when it
+/// answers.
+async fn read_tree(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<LocalTree>> {
     let git = locate(
         search,
         Path::new(APPLE_SHIM),
@@ -287,16 +347,13 @@ pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<Loc
     if !is_dir_off_runtime(path).await {
         return None;
     }
-    let read = async {
-        let whole = commit(&git, path, sha).await?;
-        let mut command = git_read(&git, path);
-        command.args(["ls-tree", "-r", "-t", "-z", "--long", "--full-tree"]);
-        command.arg(&whole);
-        let (out, cut) = run_capped(command, usize::MAX, LISTING_BYTES).await.ok()?;
-        let (entries, short) = parse_listing(&out);
-        Some(Arc::new(LocalTree::new(whole, entries, cut || short)))
-    };
-    let tree = tokio::time::timeout(TIMEOUT, read).await.ok().flatten()?;
+    let whole = commit(&git, path, sha).await?;
+    let mut command = git_read(&git, path);
+    command.args(["ls-tree", "-r", "-t", "-z", "--long", "--full-tree"]);
+    command.arg(&whole);
+    let (out, cut) = run_capped(command, usize::MAX, LISTING_BYTES).await.ok()?;
+    let (entries, short) = parse_listing(&out);
+    let tree = Arc::new(LocalTree::new(whole, entries, cut || short));
     keep(path, tree.clone());
     // A short sha asked for answers under the whole one too.
     if tree.commit != sha {
@@ -307,10 +364,7 @@ pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<Loc
 
 fn keep_alias(path: &Path, sha: &str, tree: &Arc<LocalTree>) {
     let mut trees = TREES.lock().unwrap_or_else(PoisonError::into_inner);
-    trees.push_back((path.to_owned(), sha.to_owned(), tree.clone()));
-    while trees.len() > KEPT {
-        trees.pop_front();
-    }
+    put(&mut trees, (path.to_owned(), sha.to_owned(), tree.clone()));
 }
 
 /// `ls-tree -r -t -z --long`'s records: `<mode> <type> <object> <size>\t<path>`,
@@ -655,6 +709,98 @@ mod tests {
         assert_eq!(sent.entries.len(), ENTRY_CAP);
         assert!(sent.truncated, "the old answer is cut where it was");
         assert!(kept_at(&sha).is_some(), "kept by its commit");
+    }
+
+    /// The hover-lag pass (PR #2479, 2026-11-16): every ask of a tree not
+    /// kept ran its own `git ls-tree` over the whole repository, so a page
+    /// that asked sixty of its folders at once started sixty.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn folders_asked_at_once_read_the_tree_once() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (dir, first, _) = repo();
+        // A `git` that notes each call it gets, then is git.
+        let bin = tempfile::tempdir().unwrap();
+        let calls = bin.path().join("calls");
+        let real = String::from_utf8(
+            std::process::Command::new("sh")
+                .args(["-c", "command -v git"])
+                .output()
+                .expect("sh runs")
+                .stdout,
+        )
+        .unwrap();
+        let shim = bin.path().join("git");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+                calls.display(),
+                real.trim()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let search = std::env::join_paths(std::iter::once(bin.path().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))
+        .unwrap();
+
+        let asks: Vec<_> = (0..24)
+            .map(|_| {
+                let (search, path, sha) = (search.clone(), dir.path().to_owned(), first.clone());
+                tokio::spawn(async move { tree_with(&search, &path, &sha).await })
+            })
+            .collect();
+        for ask in asks {
+            let tree = ask.await.unwrap().expect("each ask is answered");
+            assert_eq!(tree.commit, first);
+        }
+        let said = std::fs::read_to_string(&calls).unwrap();
+        assert_eq!(
+            said.lines().filter(|line| line.contains("ls-tree")).count(),
+            1,
+            "one read of the tree for the twenty-four asks:\n{said}"
+        );
+        assert!(
+            READING
+                .lock()
+                .unwrap()
+                .keys()
+                .all(|(path, _)| path != dir.path()),
+            "nothing is held for a read that answered"
+        );
+    }
+
+    /// A tree found is the newest again: the trees read since do not push
+    /// out the one a reader keeps coming back to.
+    #[test]
+    fn a_tree_in_use_outlives_the_trees_read_since() {
+        let tree = |n: usize| -> Kept {
+            let sha = format!("{n:040x}");
+            (
+                PathBuf::from("/clones/one"),
+                sha.clone(),
+                Arc::new(LocalTree::new(sha, Vec::new(), false)),
+            )
+        };
+        let holds = |trees: &VecDeque<Kept>, n: usize| {
+            trees.iter().any(|(_, sha, _)| *sha == format!("{n:040x}"))
+        };
+        let mut trees = VecDeque::new();
+        put(&mut trees, tree(0));
+        for n in 1..=KEPT * 2 {
+            // The reader opens a folder of the first tree between the others.
+            assert!(used(&mut trees, |(_, sha, _)| *sha == format!("{:040x}", 0)).is_some());
+            put(&mut trees, tree(n));
+        }
+        assert!(holds(&trees, 0), "the tree in use is kept");
+        assert_eq!(trees.len(), KEPT);
+        // Left alone, it goes when its turn comes.
+        for n in 100..100 + KEPT {
+            put(&mut trees, tree(n));
+        }
+        assert!(!holds(&trees, 0));
     }
 
     /// A tree the read cut says which directories it does not hold whole: the
