@@ -382,28 +382,34 @@ async fn few_names_are_followed_by_the_text_and_names_that_fill_a_kind_are_not()
 }
 
 /// **Characters no name holds.** Under *Everything* the text is asked, as
-/// it was, and its answer is the one the words' ranking gives, whole; under
-/// *Titles* the names were the question and none is the answer.
+/// it was, and its answer is the one the words' ranking gives, whole: its
+/// ten rows of a kind and its count of every match, where an answer by
+/// names counts the rows it holds. Under *Titles* the names were the
+/// question and none is the answer.
 #[tokio::test]
 async fn characters_no_name_holds_are_asked_of_the_text_under_everything() {
     let pool = pool().await;
     let s = source("unnamed");
-    let ticket = item(
-        &pool,
-        &s,
-        "ticket",
-        "OPS-1",
-        "Queue backlog",
-        "a zebra crossing",
-        at(0),
-    )
-    .await;
+    // Thirteen bodies hold the word, and no name does: more than a kind
+    // shows, so the count of the matches is not the rows drawn.
+    for n in 0..13 {
+        let key = format!("OPS-{n}");
+        item(
+            &pool,
+            &s,
+            "ticket",
+            &key,
+            "Queue backlog",
+            "a zebra crossing",
+            at(n),
+        )
+        .await;
+    }
     for raw in ["ze", "zeb"] {
         let everything = ask(&pool, &s, raw, false).await;
-        assert_eq!(
-            ids(&everything),
-            [("ticket".to_owned(), vec![ticket.clone()])]
-        );
+        assert_eq!(everything.groups.len(), 1, "{raw:?}");
+        assert_eq!(everything.groups[0].hits.len(), 10, "{raw:?}");
+        assert_eq!(everything.total, 13, "{raw:?}: every match is counted");
         assert_eq!(
             said(&everything),
             said(&by_words(&pool, &s, raw, false).await),

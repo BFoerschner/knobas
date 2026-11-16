@@ -1976,6 +1976,108 @@ async fn zero_twenty_seven_reaches_a_row_mirrored_before_it() {
     assert_eq!(synced_after, synced_before, "and nothing wrote it again");
 }
 
+/// An existing install (the two-letters pass, 2026-11-16): a row mirrored
+/// before `0094` holds the first two and three characters of its names once
+/// the migration runs, without a sync writing it again, and its single
+/// characters are the rows `0093` wrote, where they were. The table has its
+/// key, its foreign key and its index again, which the migration takes off
+/// for its pass, and `0093`'s function is gone. Its own database, because
+/// the wind-back drops a function.
+#[tokio::test]
+async fn zero_ninety_four_gives_a_row_mirrored_before_it_its_first_two_and_three_characters() {
+    let pool = knobas_db::test_util::scratch_database("initial94-existing")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    let id = "gitea:acme/ledger";
+    mirror_row(&pool, id, "The payout service", "ledger").await;
+
+    // Wind back to an install that predates 0094: only the single
+    // characters stored, `0093`'s function in the place of this one's, and
+    // the runner's record of 0094 gone.
+    for statement in [
+        "delete from sync.item_initial where length(initial) > 1",
+        "drop function sync.name_prefixes(tsvector, text, text, text, text)",
+        "create function sync.name_initials(fts_a tsvector, title text, kind text,
+                                            entity_id text, key_cell text)
+         returns table (initial text, leads boolean) language sql immutable
+         as 'select null::text, null::boolean where false'",
+        "delete from public._sqlx_migrations where version = 94",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+    let stored = async |pool: &sqlx::PgPool| -> Vec<(String, bool, String)> {
+        sqlx::query_as(
+            "select initial, leads, ctid::text from sync.item_initial
+              where entity_id = 'gitea:acme/ledger' order by initial",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    };
+    let named = |rows: &[(String, bool, String)]| -> Vec<(String, bool)> {
+        rows.iter()
+            .map(|(initial, leads, _)| (initial.clone(), *leads))
+            .collect()
+    };
+    let own = |rows: &[(&str, bool)]| -> Vec<(String, bool)> {
+        rows.iter()
+            .map(|(initial, leads)| ((*initial).to_owned(), *leads))
+            .collect()
+    };
+    // `payout` and `servic`: `The` is no lexeme.
+    let before = stored(&pool).await;
+    assert_eq!(named(&before), own(&[("p", true), ("s", false)]));
+
+    migrate::run(&pool).await.unwrap();
+
+    let after = stored(&pool).await;
+    assert_eq!(
+        named(&after),
+        own(&[
+            ("p", true),
+            ("pa", true),
+            ("pay", true),
+            ("s", false),
+            ("se", false),
+            ("ser", false),
+        ]),
+    );
+    for row in &before {
+        assert!(
+            after.contains(row),
+            "a single character's row was written again: {row:?} of {after:?}"
+        );
+    }
+
+    let (key, foreign, index, old_function): (bool, bool, bool, bool) = sqlx::query_as(
+        "select exists (select from pg_constraint
+                         where conrelid = 'sync.item_initial'::regclass and contype = 'p'),
+                exists (select from pg_constraint
+                         where conrelid = 'sync.item_initial'::regclass and contype = 'f'),
+                exists (select from pg_indexes
+                         where schemaname = 'sync' and indexname = 'item_initial_newest_idx'),
+                exists (select from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                         where n.nspname = 'sync' and p.proname = 'name_initials')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(key, "the primary key is back");
+    assert!(foreign, "the foreign key is back");
+    assert!(index, "the index of the answer's order is back");
+    assert!(!old_function, "0093's function is dropped");
+
+    // The foreign key still takes a row's characters with the row.
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(stored(&pool).await.is_empty());
+}
+
 /// The app's pool cancels a statement that runs past thirty seconds (#745).
 ///
 /// Every connection of [`knobas_db::embedded::Connector::app_pool`] carries
