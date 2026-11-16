@@ -312,6 +312,35 @@ test("an action's chord runs it on the selected row of its kind without opening 
   expect(lastToast()).toBe("Started VS Code: code /src/svc");
 });
 
+/**
+ * A chord bound to an action runs on the selected row, so pressed before the answer to the box's text lands it waits
+ * for it, as Enter does (2026-11-16): typed and pressed with no turn between, it runs on the row the word finds and
+ * not on whatever the list held.
+ */
+test("an action's chord pressed before the answer lands waits for it, and runs on the answer's row", async () => {
+  const calls = mountIt(keyBackend([], [{ kind: "repo", chord: "⌘⇧O", action_id: "open-code" }]));
+  await settle();
+  input().value = "repo";
+  input().dispatchEvent(new Event("input", { bubbles: true }));
+  expect(chord("o", { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+  expect(calls.openCheckout, "the search is still out").not.toHaveBeenCalled();
+  await settle();
+  expect(calls.openCheckout).toHaveBeenCalledWith("gitea:acme/svc", { application: "code" });
+});
+
+/** Tab waits the same way, and opens the sheet on the row the word finds. */
+test("Tab pressed before the answer lands opens the sheet on the answer's row", async () => {
+  mountIt();
+  await settle();
+  input().value = "pr";
+  input().dispatchEvent(new Event("input", { bubbles: true }));
+  expect(press("Tab").defaultPrevented).toBe(true);
+  expect(sheet(), "no sheet while the search is out").toBeNull();
+  await settle();
+  expect(sheet()).not.toBeNull();
+  expect(target.querySelector(".tf-ln-pinned")?.textContent).toContain("#142");
+});
+
 test("one chord means another action on another kind, and nothing on a kind it is not bound on", async () => {
   const calls = mountIt(keyBackend([], [{ kind: "repo", chord: "⌘⇧O", action_id: "open-code" }]));
   await settle();

@@ -686,7 +686,8 @@
       // untracked, so typing into the box does not run this again.
       untrack(() => {
         seed = seedName(query) === null ? null : query;
-        if (session.raw !== query) session.set(query);
+        // The list holds nothing of the opening before: the board at once, or words whose rows draw when they land.
+        if (session.raw !== query) session.begin(query);
       });
       void tick().then(() => box?.focus());
     } else {
@@ -735,6 +736,53 @@
 
   /** When `Enter` was last pressed in the box. */
   let enterAt = Number.NEGATIVE_INFINITY;
+
+  // -- a key that acts on a row waits for the answer to what the box holds (2026-11-16) --
+  /**
+   * The keys pressed while the answer to the box's text was owed, in order: ↑, ↓, Enter, Tab and a chord bound to an
+   * action. Each acts on a row, and the rows drawn answer older text (the board, or the word before this one), so
+   * acting at once would open something nobody asked for. They wait and are pressed again when the answer lands:
+   * `pay⏎` opens the first row of what `pay` finds however fast it was typed, and `pay↓⏎` the second. A key that
+   * changes the box's text, closes it or opens another mode lets them go; a click opens the row it was aimed at.
+   * `docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`.
+   */
+  let held: KeyboardEvent[] = [];
+
+  /** Whether `event` acts on a result row, with the box on the search and no list of suggestions open over it. */
+  function actsOnARow(event: KeyboardEvent): boolean {
+    if (overlay || naming !== null || sheet.current) return false;
+    if (sheet.actsOnTheRow(event)) return true;
+    if (offer.length > 0) return false;
+    return event.key === "Enter" || event.key === "Tab" || stepOf(event) !== 0;
+  }
+
+  /** Keep `event` for the answer, if one is owed and the key acts on a row. Asks at once: the typing is done. */
+  function waitsForTheAnswer(event: KeyboardEvent): boolean {
+    if (!session.owed || !actsOnARow(event)) return false;
+    event.preventDefault();
+    held.push(event);
+    session.flush();
+    return true;
+  }
+
+  /** The answer landed: the keys that waited, in the order they were pressed. A search that failed opens nothing. */
+  $effect(() => {
+    if (session.owed || held.length === 0) return;
+    const keys = held;
+    held = [];
+    if (session.error) return;
+    untrack(() => {
+      for (const event of keys) {
+        // A key that closed the box, or opened a mode over the results, ends the row of keys.
+        if (!open || !actsOnARow(event)) return;
+        onkeydown(event);
+      }
+    });
+  });
+  /** A close lets them go, as it ends every mode. */
+  $effect.pre(() => {
+    if (!open) held = [];
+  });
 
   /**
    * The second `Enter` of a double press must not fall through the closed box (F-340's trip): focus went back to what held it,
@@ -964,6 +1012,10 @@
     if (event.key === "Enter") enterAt = performance.now();
     // The key panel takes every key first: its chords are what is being bound.
     if (sheet.current?.panel) return sheet.current.panel.press(event);
+    if (waitsForTheAnswer(event)) return;
+    // Any other key lets the waiting ones go (Esc, a mode's key, a list's chord, the caret's arrows), but not a
+    // modifier going down on the way to a chord.
+    if (held.length > 0 && !["Shift", "Meta", "Control", "Alt"].includes(event.key)) held = [];
     if (isBoxChord(event, "d")) {
       // Before the webview's own ⌘D (a bookmark) and anything else the box does.
       event.preventDefault();
@@ -1166,6 +1218,8 @@
           controls={controlled.list}
           active={controlled.option}
           oninput={(value) => {
+            // The text changed: a key that waited for the answer to the text before has nothing to act on.
+            held = [];
             if (naming !== null) naming = value;
             else if (overlay) overlay = { filter: value, selected: 0 };
             else if (sheet.current) sheet.type(value);
@@ -1232,7 +1286,8 @@
           <SheetList {sheet} id={sheetId} optionId={sheetOptionId} {onkeydown} onclick={() => box?.focus()} />
         {/if}
       {:else}
-      <div class="tf-ln-split" class:tf-ln-two={split}>
+      <!-- Rows kept past the wait's threshold answer older text: dimmed and out of the pointer's reach, as any replaced read is (#2246). -->
+      <div class="tf-ln-split" class:tf-ln-two={split} class:tf-wait-dim={session.outdated && !overlay}>
       <div id={resultsId} class="tf-ln-list" class:tf-ln-palette={session.mode === "actions" && !overlay} role="listbox" tabindex="-1" aria-label="Results">
         {#if overlay}
           <Help
@@ -1261,7 +1316,8 @@
             answer, so what is left here is the wait and the miss.
           -->
           {#if !session.urlAnswer}
-            <p class="tf-ln-none">Looking up the link…</p>
+            <!-- A wait is said once it has lasted (`WAIT_SAID_MS`): under that the list keeps its place. -->
+            {#if session.late}<p class="tf-ln-none">Looking up the link…</p>{/if}
           {:else}
             <div class="tf-ln-miss">
               <!--
@@ -1288,7 +1344,7 @@
               onopen={activate}
               onhover={(index) => (session.selected = index)}
             />
-          {:else}
+          {:else if session.late}
             <p class="tf-ln-none">Reading the mirror…</p>
           {/if}
         {:else if session.mode === "help"}
@@ -1328,14 +1384,15 @@
             chordOf={listChord}
             {sourceOf}
             within={seedLabel}
-            filtered={narrowed(session.raw, session.response.interpreted.text)}
+            filtered={narrowed(session.answered, session.response.interpreted.text)}
             selected={session.selected}
             {optionId}
             {now}
             onopen={activate}
             onhover={(index) => (session.selected = index)}
           />
-        {:else}
+        {:else if session.late}
+          <!-- Only a list that drew nothing says it: one that drew rows keeps them until the answer lands. -->
           <p class="tf-ln-none">Searching…</p>
         {/if}
       </div>

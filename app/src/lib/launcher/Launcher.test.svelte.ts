@@ -27,7 +27,7 @@ import type { KindStateColours, StateWordColour } from "../ipc/sources";
 import { EVENTS } from "../ipc";
 import { toasts } from "../shell/toasts.svelte";
 import Launcher from "./Launcher.svelte";
-import { DEBOUNCE_MS } from "./session.svelte";
+import { DEBOUNCE_MS, WAIT_SAID_MS } from "./session.svelte";
 import { createScope } from "./scope.svelte";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
@@ -310,6 +310,10 @@ test("groups render in the engine's order", async () => {
  */
 test("the box says which store it is reading while the board is in flight", () => {
   open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
+  // Once the wait has lasted (2026-11-16): a board that arrives in a frame or two has no line before it.
+  expect(target.textContent).not.toContain("Reading the mirror");
+  vi.advanceTimersByTime(WAIT_SAID_MS + 1);
+  flushSync();
   expect(target.textContent).toContain("Reading the mirror\u2026");
 });
 
@@ -2014,14 +2018,22 @@ test("a launcher_home that is rejected shows the reason and a retry, not an empt
   expect(target.textContent).toContain("Reconcile mandates");
 });
 
-test("a search that never answers says Searching, never 'Nothing matches'", async () => {
+test("a search that never answers keeps what the list drew, dimmed once the wait has lasted, and never says 'Nothing matches'", async () => {
   open({
     ports: { launcherHome: async () => HOME, search: () => new Promise<never>(() => {}) },
   });
   await settle();
   typeInBox("sepa");
   await debounced();
-  expect(target.textContent).toContain("Searching");
+  // The board stands until the answer lands (2026-11-16): no line takes its place.
+  expect(target.textContent).toContain("Reconcile mandates");
+  expect(target.textContent).not.toContain("Searching");
+  expect(target.textContent).not.toContain("Nothing matches");
+  expect(target.querySelector(".tf-ln-split.tf-wait-dim")).toBeNull();
+  vi.advanceTimersByTime(WAIT_SAID_MS);
+  flushSync();
+  expect(target.querySelector(".tf-ln-split.tf-wait-dim")).not.toBeNull();
+  expect(target.textContent).toContain("Reconcile mandates");
   expect(target.textContent).not.toContain("Nothing matches");
 });
 

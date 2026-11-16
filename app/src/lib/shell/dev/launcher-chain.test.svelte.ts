@@ -75,14 +75,20 @@ function launcher(): HTMLElement | null {
   return target.querySelector<HTMLElement>('.tf [role="dialog"].tf-launch');
 }
 
-/** ⌘K, as the window receives it, then `text` typed into the box and its debounce waited out. */
+/**
+ * ⌘K, as the window receives it, then `text` typed into the box and its answer waited for: a row that names what was
+ * typed. A row alone is no sign of it: the board's rows stand until the answer lands (2026-11-16).
+ */
 async function search(text: string): Promise<void> {
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
   await until(() => launcher() !== null, "⌘K never opened the launcher");
   const box = launcher()!.querySelector("input")!;
   box.value = text;
   box.dispatchEvent(new Event("input", { bubbles: true }));
-  await until(() => (launcher()?.querySelectorAll(".tf-ln-res").length ?? 0) > 0, `no result for ${text}`);
+  await until(
+    () => [...(launcher()?.querySelectorAll(".tf-ln-res") ?? [])].some((row) => row.textContent?.includes(text)),
+    `no result for ${text}`,
+  );
 }
 
 function press(key: string): void {

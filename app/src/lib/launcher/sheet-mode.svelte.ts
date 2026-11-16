@@ -309,6 +309,19 @@ export class SheetMode {
   }
 
   /**
+   * Whether `event` is a chord bound to an action, from the results: it runs on the selected row, so while the
+   * answer to the box's text is owed it waits for it, as Enter does (`Launcher.svelte`). A list's chord applies its
+   * text whatever is selected and is no such key, and in the sheet the row is the one it pinned.
+   */
+  actsOnTheRow(event: KeyboardEvent): boolean {
+    if (this.current || refusalOf(event) !== null) return false;
+    const chord = chordOf(event);
+    if (chord === null) return false;
+    const { keys } = this.#host;
+    return keys.listOf(chord) === undefined && keys.actions.some((key) => key.chord === chord);
+  }
+
+  /**
    * A bound chord, from the results or the sheet's actions: a list's applies
    * it, an action's runs on the selected row when it is bound on that row's
    * kind. `true` when the chord was one; every other key goes on as before.
