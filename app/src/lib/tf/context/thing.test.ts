@@ -46,6 +46,13 @@ test("the nearest link or tag up from the press wins, so a button inside a row g
   expect(thingAt(root.querySelector(".act"), "#/monitors", ORIGIN)).toMatchObject({ thing: { kind: "pr", id: "p1" }, node: root.querySelector("a") });
 });
 
+test("a tag that claims its row wins over the links inside it: an Inbox line's sentence links what it is about", () => {
+  const root = page(`<div class="line"><a class="s" href="#/ticket/jira%3APAY-1">PAY-1 was assigned to you</a></div>`);
+  const inbox = { kind: "inbox", key: "k1", title: "PAY-1", open: "#/ticket/jira%3APAY-1", ops: ["done"], entityId: null, sourceId: "jira" } as const;
+  menuThing(() => inbox, { claims: true })(root.querySelector(".line")!);
+  expect(thingAt(root.querySelector(".s"), "", ORIGIN)?.thing).toEqual(inbox);
+});
+
 test("a link to a place is passed over for the row around it; a web link is a web thing", () => {
   const root = page(`<div class="r"><a class="tab" href="#/code/prs">PRs</a> <a class="out" href="https://gitea.example/x">x</a> <a class="self" href="${ORIGIN}/#/x">s</a></div>`);
   menuThing(() => ({ kind: "test", name: "retries" }))(root.querySelector(".r")!);

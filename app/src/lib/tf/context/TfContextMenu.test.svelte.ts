@@ -213,8 +213,10 @@ test("Shift+F10 and the context menu key open it on the focused thing, under it,
     await settle();
     expect(rows()[0]).toBe("open");
     expect(document.activeElement).toBe(row("open"));
-    // The platform's own `contextmenu` for the same key press only stops its menu.
+    // The platform's own `contextmenu` for the same key press only stops its menu: the one standing stays, focused.
     expect(rightClick(link).defaultPrevented).toBe(true);
+    await settle();
+    expect(document.activeElement).toBe(row("open"));
     key("Escape");
     await settle();
     expect(document.activeElement).toBe(link);
@@ -244,9 +246,16 @@ test("it closes on a press elsewhere, a scroll and the window losing focus", asy
   window.dispatchEvent(new Event("blur"));
   flushSync();
   expect(menu()).toBeNull();
-  // A press on the row it was opened on is a press elsewhere too.
+  // A press on the row it was opened on is a press elsewhere too, and so is one on what had focus, which focus goes back to.
   rightClick(link);
   link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  flushSync();
+  expect(menu()).toBeNull();
+  const other = page.querySelector<HTMLElement>(".else")!;
+  other.tabIndex = -1;
+  other.focus();
+  rightClick(link);
+  other.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
   flushSync();
   expect(menu()).toBeNull();
 });
@@ -310,9 +319,12 @@ test("a folder's Open in…: → opens the applications, each opens the folder a
   await settle();
   expect(menus()).toHaveLength(1);
   expect(document.activeElement).toBe(row("open-in"));
-  // Resting the pointer on it opens it too, and the pick runs the folder's.
+  // Resting the pointer on it opens it too, and the pick runs the folder's: a press in the submenu is no press elsewhere.
   row("open-in").dispatchEvent(new PointerEvent("pointerenter"));
   await settle();
+  row("app-terminal", menus()[1]!).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  flushSync();
+  expect(menus()).toHaveLength(2);
   row("app-terminal", menus()[1]!).click();
   await settle();
   expect(calls["openFolder"]).toEqual([[REPO, "terminal", "src/sepa"]]);
@@ -391,6 +403,17 @@ test("a tagged row: a monitor with an open alert offers Acknowledge, with Undo o
   toast.action!.run();
   await settle();
   expect(calls["unackAlert"]).toEqual([["kuma:7"]]);
+});
+
+test("a monitor row's Acknowledge is the row's own Ack, so its Acked and its toast follow", async () => {
+  await draw(`<table><tr class="m"><td>payout-api</td></tr></table>`);
+  const pressed: string[] = [];
+  menuThing(() => ({ kind: "monitor", id: "kuma:7", hash: "#/monitors/at/kuma%3A7", alerting: true, ack: () => void pressed.push("kuma:7") }))(page.querySelector(".m")!);
+  rightClick(page.querySelector(".m td")!);
+  row("ack").click();
+  await settle();
+  expect(pressed).toEqual(["kuma:7"]);
+  expect(calls["ackAlert"]).toBeUndefined();
 });
 
 test("a web link on a mirrored source opens in knobas when it resolves, else says so and offers the browser", async () => {
