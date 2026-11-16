@@ -161,4 +161,25 @@ the build's (the Mac's draws above are about half the PC's). **Not taken:** `kee
 
 ## Gates
 
-On the final head (in a clean clone):
+The trimmed gates (Björn, 2026-11-16), in a clean clone. On the final head (b45492c5, rebased on the right-click
+menus): `just check-front` ok (svelte-check 1,486 files, 0 errors, 0 warnings; vitest whole, 345 files, 5,287 passed, 1
+skipped); `just clippy` ok; `cargo test -p knobas-sync` ok (42, 258, 38); the app's `stored_trees` tests (10) and
+`console_choke_point` (2) ok. `just check-scripts` ok and `cargo fmt --all --check` ok on the head before the rebase,
+whose scripts and Rust are the same. On 0853b5f3, whose front end the final head carries unchanged but for the right-click
+menus (whose own agent ran its trips): the press trips with `--strict` 272 of 272, the `rows-still` trips among them;
+`testenv/desktop-witness-test.sh` 307 checks; `just test` 5,019 passed, 1 failed (`console_choke_point`, naming
+`checkout/reader.rs` from the git-reads work, fixed upstream since and passing on the final head); `app/src/lib/ipc/generated/`
+unchanged.
+
+`pixel-same.py`, the commit before this pass against this pass, ten screens (the board at rest, after `e`, after `pay`,
+scrolled, two repositories' landings, Builds, the Inbox, Code's pull requests, a Docs space) at `1440x900@1`,
+`1920x1080@2` and `2560x1440@1.25`: every change is within the noise line but the board's columns' scrollbar thumb
+(824 to 1,632 px, the undrawn cards' room now reckoned at their floor); cards, words and layout are the same. Nothing else
+visible changed, so nothing went to the design review.
+
+Timing, under the Mac's lock, for what this pass touched: the board's letter (`just keys-budget --real`, every key and
+size, load 5 to 9: every key within its line, no row moved; `tickets-letter` at 5120x1440 85.4 ms at 4x and 87.3 at
+6x), a repository's first open (the A/B above; in `just open-budget --real` within at 1440x868 and 4K at 200 %; at
+2560x1440@1.25 and 5120x1440 over during another agent's build at a load of up to 119, and not run again alone: the lock
+was taken), and Builds' scroll start (the traces above; no code changed). The keys budget was also run once at a load
+of 50 to 65 before the lock existed: thrown away.
