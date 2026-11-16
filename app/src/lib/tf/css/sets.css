@@ -50,7 +50,7 @@
 .tf-rule-add { padding: 8px 12px 10px; }
 .tf-keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 12px; align-items: baseline; }
 /* A chip that names a ticket is neutral: yellow is only the ticket you are on. Yours carry an outline. */
-.tf-keys a { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; background: var(--sheet-2); color: var(--ink-2); text-decoration: none; }
+.tf-keys a { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; background: var(--sheet-2); color: var(--ink-2); text-decoration: none; }
 .tf-keys a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .tf-keys a.tf-mine { border-color: var(--ink-2); color: var(--ink); }
 .tf-keys .tf-dim { font-size: var(--t-xs); }
@@ -100,7 +100,7 @@
 .tf-pattern details { min-width: 0; }
 .tf-pattern summary { cursor: pointer; list-style: none; min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .tf-pattern summary::-webkit-details-marker { display: none; }
-.tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-pattern ul { margin: 6px 0 2px; padding-left: 18px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-pat-intro, .tf-pat-query { margin: 0; font-size: var(--t-sm); }
 .tf-pat-query { font-size: var(--t-xs); }

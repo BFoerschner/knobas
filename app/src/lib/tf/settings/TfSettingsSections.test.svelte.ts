@@ -218,10 +218,11 @@ function rowValue(label: string): string {
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
 
-test("Appearance draws State colours below Theme, one section per kind with a state (#2466)", async () => {
+test("Appearance draws Code font and its ligatures, then State colours, below Theme, one section per kind with a state (#2466)", async () => {
   await open("appearance");
-  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.textContent?.trim());
-  expect(heads).toEqual(["Theme", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+  // A row's label without its hint.
+  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.firstChild?.textContent?.trim());
+  expect(heads).toEqual(["Theme", "Code font", "Ligatures in code", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
 });
 
 test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
@@ -234,6 +235,8 @@ test("Appearance's State colours waits for the database; Theme does not (#2466)"
   });
   await settle();
   expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
+  // Code font is the webview's own setting: it needs no database either.
+  expect(target.querySelector('[aria-label="Ligatures in code"]')).not.toBeNull();
   expect(target.querySelector(".tf-sc")).toBeNull();
   expect(read).not.toHaveBeenCalled();
 });

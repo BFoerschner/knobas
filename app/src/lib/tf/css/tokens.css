@@ -13,7 +13,13 @@
   --on-ink-ok: #6FCF97; --on-ink-warn: #E5B04D; --on-ink-err: #FF8A80; --on-ink-info: #8AA6FF; --on-ink-muted: #94A0AC;
   --sans: "Archivo Variable", system-ui, sans-serif;
   --serif: "Source Serif 4 Variable", Georgia, serif;
-  --mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Code's face (2026-11-16): the family chosen in Settings › Appearance first (`--mono-chosen`, which
+     `code-face.svelte.ts` sets on <html>), then the bundled JetBrains Mono, its stand-ins while it loads (the
+     `@font-face` rules at the end of this file), and the system's monospace, so a font missing on this machine draws
+     in JetBrains Mono and never in a proportional face. `--mono-ligatures` is *Ligatures in code*, off until set:
+     every rule that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
+  --mono: var(--mono-chosen, "JetBrains Mono"), "JetBrains Mono", "JetBrains Mono over Menlo", "JetBrains Mono over Consolas", ui-monospace, monospace;
+  --mono-ligatures: none;
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
@@ -62,8 +68,12 @@
 html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
 /* Archivo's word space is narrow: at 11 to 15 px words run together, so the interface opens it a little. */
 body { font: var(--t-sm)/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; accent-color: var(--ink); }
+/* Code is drawn in code's face wherever it appears: a fence, a macro's block, a `{noformat}`, an inline `code` or `tt`
+   in any rendered text, a key. A rule that styles one names `--mono` too, or inherits this; at no specificity, so
+   such a rule wins without a fight (`code-face.test.ts`). */
+:where(pre, code, kbd, samp, tt) { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* Code keeps its columns, and the reading face its own fit. */
-:is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
+:is(pre, code, kbd, samp, tt, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
 /* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. It is told from the words by its
    face, so it carries no underline until pointed at; a link made of words always does. */
 :is(span, a).tf-mono { white-space: nowrap; }
@@ -113,7 +123,7 @@ a { color: var(--info); text-decoration: none; }
 .tf [hidden] { display: none !important; }
 
 /* A step under its context, whole pixels: 14 to 13, 13 to 12, 12 to 11, so it stays on the type scale. */
-.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; font-size: round(.93em, 1px); }
+.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: .9em; font-size: round(.93em, 1px); }
 .tf .tf-dim { color: var(--ink-2); }
 .tf .tf-num { font-variant-numeric: tabular-nums; }
 
@@ -126,3 +136,18 @@ a { color: var(--info); text-decoration: none; }
 /* The yellow card: the ticket you are on, and nothing else. */
 .tf .tf-card { background: var(--card); color: var(--card-ink); }
 
+/* ---------- JetBrains Mono's stand-ins (2026-11-16): the system's own monospace, sized to JetBrains Mono's
+   metrics, drawn in the moment before the bundled face has loaded (`shell/faces.ts` loads it once the app is
+   idle), so a line of code is as wide and sits where it will when the face lands, and nothing moves.
+   JetBrains Mono: 600 of 1000 units an advance, ascent 1020, descent 300, no line gap. `size-adjust` matches the
+   advance (Menlo 1233 of 2048, Consolas 1126 of 2048); the overrides are JetBrains Mono's, divided by it, since
+   `size-adjust` scales them too. WebKit takes `size-adjust` and not yet the overrides; every code view sets a
+   line height of its own, so they move nothing there either way. ---------- */
+@font-face {
+  font-family: "JetBrains Mono over Menlo"; src: local("Menlo"), local("Menlo-Regular");
+  size-adjust: 99.66%; ascent-override: 102.35%; descent-override: 30.1%; line-gap-override: 0%;
+}
+@font-face {
+  font-family: "JetBrains Mono over Consolas"; src: local("Consolas");
+  size-adjust: 109.13%; ascent-override: 93.47%; descent-override: 27.49%; line-gap-override: 0%;
+}

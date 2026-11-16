@@ -9,7 +9,7 @@
 .tf-md h4, .tf-md h5, .tf-md h6 { font-size: var(--t-md); font-weight: 700; margin-top: 16px; }
 .tf-md a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
 .tf-md a.tf-ext::after { content: " ↗"; font-size: var(--t-2xs); }
-.tf-md code { font: .88em var(--mono); font-size: round(.88em, 1px); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
+.tf-md code { font: .88em var(--mono); font-size: round(.88em, 1px); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
 .tf-md ul, .tf-md ol { padding-left: 24px; }
 .tf-md li + li { margin-top: 3px; }
 /* A task item's box, here and in a Docs page's task list (spec #2432): a picture of the state, never a control. */
@@ -31,8 +31,8 @@
 .tf-md .tf-fence { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); }
 .tf-md .tf-fence > header { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 32px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); background: var(--sheet-2); }
 .tf-md .tf-fence > header .tf-fence-copy { margin-left: auto; }
-.tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; padding: 10px 14px; overflow: auto; background: var(--paper); margin: 0; }
-.tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: none; background: none; border: 0; padding: 0; }
+.tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 10px 14px; overflow: auto; background: var(--paper); margin: 0; }
+.tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: var(--mono-ligatures); background: none; border: 0; padding: 0; }
 .tf-md .tf-md-noimg { display: inline-block; font-size: var(--t-sm); color: var(--ink-2); border: 1px dashed var(--rule); border-radius: 3px; padding: 2px 8px; }
 /* A ticket attachment the wiki drew inline (#2406), as the ticket-page mockup's `.tf-tkfig`: at most the panel's width, nothing under it. */
 .tf-md img.tf-md-att { display: block; max-width: 100%; max-height: 280px; margin: 8px 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet-2); }
@@ -41,7 +41,7 @@
 .tf-md .tf-md-noimg.tf-md-attnone { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; }
 /* A diagram fence (#2258), as the mockup's `.fence .diagram`. */
 .tf-md .tf-fence .tf-diagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
-.tf-md .tf-fence .tf-stepfail pre { font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; padding: 8px 10px; white-space: pre-wrap; }
+.tf-md .tf-fence .tf-stepfail pre { font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 8px 10px; white-space: pre-wrap; }
 /* Markdown inside a panel or a comment (#2261, the mockup's `.cmt .md`): the holder pads it, and the type is the panel's. */
 .tf-prdesc .tf-md, .tf-msg-body .tf-md, .tf-item-textp .tf-md { padding: 0; font-size: var(--t-md); }
 .tf-thread .tf-md { padding: 0; font-size: var(--t-sm); line-height: 1.5; }

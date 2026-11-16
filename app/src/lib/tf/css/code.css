@@ -29,7 +29,7 @@
 .tf-bsel svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tf-bsel select {
   height: 100%; border: 0; background: none; color: inherit; cursor: pointer; min-width: 64px; max-width: 220px; padding-right: 6px;
-  font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none;
+  font: 600 var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures);
 }
 .tf-bsel select:focus-visible { outline: none; }
 .tf-bsel:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -74,7 +74,7 @@
 .tf .tf-ftree:focus-visible { outline: none; }
 .tf-ftree a, .tf-ftree .tf-fdir, .tf-ftree .tf-fsub {
   display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; text-align: left; padding: 0 6px; border-radius: 4px; text-decoration: none;
-  font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; color: var(--ink);
+  font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; color: var(--ink);
 }
 .tf-ftree .tf-ficon { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--ink-2); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tf-ftree .tf-fdir { border: 0; background: none; cursor: pointer; font-weight: 600; }
@@ -114,7 +114,7 @@
   display: flex; gap: 10px; align-items: center; min-height: 42px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--rule);
   background: var(--sheet-2); flex-wrap: wrap;
 }
-.tf-fileview > header .tf-p, .tf-fileview > .tf-waiting > header .tf-p { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; }
+.tf-fileview > header .tf-p, .tf-fileview > .tf-waiting > header .tf-p { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* The file's directory dim before its name (mockups/code-area `.fileview > header .p .dim`). */
 .tf-fileview .tf-p .tf-pdir { color: var(--ink-2); font-weight: 400; }
 .tf-fileview .tf-fpad { padding: 12px; }
@@ -126,7 +126,7 @@
 .tf-refresh-failed .tf-btn { flex: none; margin-left: auto; color: var(--ink); }
 /* On a pipeline or a run, a banner sits on the page's edges, as the stale notice under it does. */
 .tf-bmain .tf-sbody > .tf-banner { margin: 0 22px 10px; border-radius: 4px; }
-.tf-code { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; overflow: auto; background: var(--under); margin: 0; }
+.tf-code { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: auto; background: var(--under); margin: 0; }
 .tf-code .tf-l { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
 .tf-code .tf-l > span:first-child { color: var(--ink-2); text-align: right; padding-right: 12px; user-select: none; }
 .tf-code .tf-l:hover { background: var(--sheet-2); }
@@ -152,7 +152,7 @@
    over it for selection (transparent, positioned by pdf.js's TextLayer through the CSSOM), and its links. */
 .tf-fpdf { background: var(--sheet); --under: var(--sheet); }
 .tf-pdf-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 6px 18px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); }
-.tf-pdf-zoom { min-width: 44px; text-align: center; font: var(--t-sm) var(--mono); font-variant-ligatures: none; font-variant-numeric: tabular-nums; }
+.tf-pdf-zoom { min-width: 44px; text-align: center; font: var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures); font-variant-numeric: tabular-nums; }
 .tf-pdf-pages { padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 14px; overflow-x: auto; background: var(--sheet); }
 .tf-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--rule), 0 2px 6px rgb(0 0 0 / 0.12); --scale-round-x: 1px; --scale-round-y: 1px; }
 .tf-pdf-page canvas { position: absolute; inset: 0; display: block; }
@@ -210,7 +210,7 @@
 .tf-dtool-prog ~ .tf-dtop { margin-left: 0; }
 .tf-dtool.tf-stuck .tf-dtop { display: inline-flex; }
 .tf-dband ~ .tf-dgrid .tf-diff .tf-fh { top: var(--tf-dband, 0px); }
-.tf-diff { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: clip; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
+.tf-diff { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: clip; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-diff + .tf-diff { margin-top: 12px; }
 /* The file's head stays in view through a long diff. */
 .tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; position: sticky; top: 0; z-index: 2; }
@@ -289,7 +289,7 @@
 .tf-dstick .tf-flist { position: static; max-height: none; min-height: 0; }
 .tf-flist button {
   display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
-  font: var(--t-sm) var(--mono); font-variant-ligatures: none; align-items: center; text-align: left; cursor: pointer;
+  font: var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures); align-items: center; text-align: left; cursor: pointer;
 }
 .tf-flist button:first-of-type { border-top: 0; }
 .tf-flist button:hover { background: var(--sheet-2); }
@@ -312,7 +312,7 @@
 .tf-ftree .tf-state, .tf-flist .tf-state { font-family: var(--sans); }
 .tf-diff .tf-fh-open { margin-left: auto; font: 400 var(--t-sm) var(--sans); }
 .tf-diff .tf-fh-viewed + .tf-fh-open { margin-left: 0; }
-.tf-flist .tf-fdir { padding: 6px 10px 2px; border-top: 1px solid var(--rule-2); color: var(--ink-2); font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-flist .tf-fdir { padding: 6px 10px 2px; border-top: 1px solid var(--rule-2); color: var(--ink-2); font: 600 var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-flist .tf-fdir:first-child { border-top: 0; }
 .tf-flist .tf-fdir + button { border-top: 0; }
 .tf-flist button.tf-d1 { padding-left: 24px; }
@@ -404,7 +404,7 @@
 /* An outdated thread at the commit it was written on (#2318): the sha, then the hunk as it read there. */
 .tf-was { margin: 2px 0 6px; }
 .tf-was-at { color: var(--ink-2); font-size: var(--t-xs); }
-.tf-was-hunk, .tf-pdfd-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; background: var(--under); font: var(--t-xs)/1.6 var(--mono); font-variant-ligatures: none; }
+.tf-was-hunk, .tf-pdfd-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; background: var(--under); font: var(--t-xs)/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: 40px 40px 1fr; white-space: pre; overflow: visible; }
 .tf-was-hunk .tf-no, .tf-pdfd-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
 .tf-was-hunk .tf-add, .tf-pdfd-hunk .tf-add { background: var(--ok-bg); }
@@ -432,7 +432,7 @@
 /* A command renderer's run (#2262): the sandboxed frame, and a failure above the source (mockups/code-area .stepfail). */
 .tf-rframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--paper); }
 .tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
-.tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }
+.tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }
 
 /*
  * The code area's pick menus, one rule for all three (review of spec #2234, Standards 9): the renderer switcher
@@ -488,11 +488,11 @@
 .tf-psteps { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-plab { font-weight: 600; margin-right: 4px; }
 .tf-parrow { color: var(--ink-2); }
-.tf-psrc { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
+.tf-psrc { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
 .tf-pstep { display: inline-flex; align-items: center; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet-2); overflow: hidden; }
 .tf-pgrip { display: inline-grid; place-items: center; width: 18px; height: 100%; padding: 0; border: 0; border-right: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: grab; }
 .tf-pname { padding: 0 8px; font-weight: 600; white-space: nowrap; }
-.tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--field); font: var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 0 8px; color: var(--ink); }
+.tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--field); font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 0 8px; color: var(--ink); }
 .tf-pfilter { min-width: 260px; }
 .tf-parg:focus-visible, .tf-pgrip:focus-visible, .tf-px:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
@@ -500,7 +500,7 @@
 .tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
 .tf-pmenu { display: inline-flex; }
 .tf-menu.tf-pmenu-m { width: 320px; font-size: var(--t-sm); }
-.tf-pmono { font-family: var(--mono); font-variant-ligatures: none; }
+.tf-pmono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* #2265: the person's own command step (mockup `.step.user`), the save form, the suggestion chip (`.suggest`). */
 .tf-pstep.tf-puser .tf-pname::after { content: " cmd"; font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); }
 .tf-psave { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; }

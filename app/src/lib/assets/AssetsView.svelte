@@ -3737,7 +3737,7 @@
     max-width: 100%;
     overflow-wrap: anywhere;
     font-size: var(--t-xs);
-    font-variant-ligatures: none;
+    font-variant-ligatures: var(--mono-ligatures);
   }
 
   .breaks .lst li .path {
@@ -3895,13 +3895,13 @@
 
   .prop.wide dd .val code {
     font: var(--t-xs) var(--mono);
-    font-variant-ligatures: none;
+    font-variant-ligatures: var(--mono-ligatures);
   }
 
   .prop dd .val.code {
     font-family: var(--mono);
     font-size: var(--t-xs);
-    font-variant-ligatures: none;
+    font-variant-ligatures: var(--mono-ligatures);
     letter-spacing: normal;
     word-spacing: normal;
   }
@@ -3991,7 +3991,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--t-xs);
-    font-variant-ligatures: none;
+    font-variant-ligatures: var(--mono-ligatures);
     color: var(--ink-2);
     text-align: left;
   }
@@ -4009,7 +4009,7 @@
 
   .routes .rprop code {
     font: var(--t-xs) var(--mono);
-    font-variant-ligatures: none;
+    font-variant-ligatures: var(--mono-ligatures);
   }
 
   .routes .rto {

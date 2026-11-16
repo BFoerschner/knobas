@@ -97,7 +97,7 @@
 .tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
 .tf-doc li { margin: 4px 0; }
 .tf-doc li > p:last-child, .tf-doc li.tf-task > div > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
-.tf-doc code { font: .82em var(--mono); font-size: round(.82em, 1px); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
+.tf-doc code { font: .82em var(--mono); font-size: round(.82em, 1px); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
 /* A code block: its language and Copy in a strip above the code, so neither covers a long line (#2083). */
 .tf-pre { margin: 0 0 18px; }
 .tf-doc li > p:has(+ .tf-pre) { margin-bottom: 8px; }
@@ -108,7 +108,7 @@
 }
 .tf-pre-bar .tf-btn { margin-left: auto; }
 .tf-doc pre {
-  font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule);
+  font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); border: 1px solid var(--rule);
   border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
 }
 /* A table scrolls sideways inside its frame, so a wide one never widens the page (#2436). */
@@ -149,7 +149,7 @@
   display: inline-flex; gap: 5px; align-items: baseline; font-family: var(--sans); font-size: var(--t-md); padding: 0 6px;
   border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); text-decoration: none; white-space: nowrap; line-height: 1.5;
 }
-.tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
 .tf-ment { font-family: var(--sans); font-size: var(--t-sm); font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--mark); color: var(--ink); }

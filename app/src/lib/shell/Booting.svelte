@@ -106,6 +106,7 @@
   .boot-mono {
     font-family: var(--mono);
     font-size: var(--t-xs);
+    font-variant-ligatures: var(--mono-ligatures);
   }
 
   .boot-fail {

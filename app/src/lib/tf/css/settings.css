@@ -95,7 +95,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-run progress { width: 100%; height: 4px; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
 .tf-stg-run progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
 .tf-stg-run progress::-webkit-progress-value { background: var(--info); border-radius: 2px; }
-.tf-stg-run p { font: 400 var(--t-sm)/1.5 var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
+.tf-stg-run p { font: 400 var(--t-sm)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
 /* Why a number typed here was not what got stored (F-613), on its own line under the field. */
 .tf-stg-why { flex-basis: 100%; font-size: var(--t-xs); color: var(--err); }
 .tf-stg-c [aria-invalid="true"], .tf-formgrid #tf-add-id[aria-invalid="true"] { border-color: var(--err); }
@@ -112,14 +112,14 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-runs td:not(.tf-stg-res) { white-space: nowrap; }
 .tf-stg-det { margin-top: 4px; color: var(--ink-2); }
 .tf-stg-det summary { cursor: pointer; font-size: var(--t-xs); }
-.tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); font-variant-ligatures: none; }
+.tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
 .tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
 /* A label shares its field's first line, however much help runs under the field; named at this weight because `.tf-formgrid` centres. */
 .tf-formgrid.tf-sf-grid { align-items: start; }
 .tf-sf-grid > label { padding-top: 7px; }
 .tf-sf-area { resize: vertical; min-height: 54px; line-height: 1.45; font: inherit; }
-.tf .tf-sf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); }
+.tf .tf-sf-mono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-sm); }
 .tf-sf-help { font-size: var(--t-xs); color: var(--ink-2); line-height: 1.4; }
 /* the other sections (#831): prototype-6's inline widths, .stg-checks and .stg-keys */
 .tf-stg-in.tf-stg-n70 { width: 70px; }
@@ -185,3 +185,17 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 /* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
 .tf-stg-l small.tf-req { display: inline; margin-left: 4px; }
+/* Appearance › Code font (2026-11-16): the field is a font's name, so it is drawn in code's face; the list's names are
+   the interface's, since drawing each in its own would load every font on the machine. The specimen spans the row
+   under the label and the field, framed as the Source view frames a file, so what it shows is what a file will be. */
+.tf-cf-combo { width: min(420px, 100%); }
+.tf .tf-combo.tf-cf-combo .tf-opts { max-height: 280px; }
+.tf .tf-combo.tf-cf-combo .tf-opts [role="option"] { font: var(--t-sm) var(--sans); padding: 5px 10px; }
+.tf .tf-combo.tf-cf-combo .tf-opts [aria-selected="true"] { font-weight: 600; }
+.tf-cf-mh { padding: 8px 10px 3px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+.tf-cf-spec {
+  grid-column: 1 / -1; margin: 0; background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule);
+  border-radius: 6px; overflow: hidden;
+}
+.tf-cf-spec > pre { padding: 8px 0; }
+.tf-cf-spec figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); }

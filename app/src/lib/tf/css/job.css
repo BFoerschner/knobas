@@ -188,7 +188,7 @@
 .tf-tkatt .tf-rsub { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-tkkind {
   width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2);
-  display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
+  display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2);
 }
 /* An image's preview (#2405): the file's bytes, fetched when the panel opens and drawn as a data image, cropped to the
    frame. One that cannot be fetched is the same frame dashed and empty, as `.tf-md-noimg` draws a missing image. The
@@ -242,7 +242,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
 /* The last value: *Download* stands in its place on hover, so it is at least as wide. */
 .tf-r .tf-rend .tf-rowval { min-width: 72px; text-align: right; }
-.tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
+.tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
 .tf-minif {
   display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--field); border-radius: 4px;
   padding: 2px 7px; flex: 1; min-width: 120px; max-width: 220px; color: var(--ink-2);
@@ -278,7 +278,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step:first-of-type { border-top: 0; }
 .tf-step .tf-num {
   display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--rule);
-  font: 700 var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
+  font: 700 var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2);
 }
 .tf-step.tf-st-done .tf-num { background: var(--ok); border-color: var(--ok); color: var(--sheet); }
 .tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
@@ -286,7 +286,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step.tf-st-skipped :is(input, select) { color: var(--ink-2); }
 .tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tf-step input, .tf-step select {
-  font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--field); color: var(--ink);
+  font: var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures); border: 1px solid var(--rule); background: var(--field); color: var(--ink);
   padding: 4px 8px; border-radius: 4px; width: 100%; max-width: 400px;
 }
 /* A step's select shows its choice whole, and a value you cannot edit reads as words. */

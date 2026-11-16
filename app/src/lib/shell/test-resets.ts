@@ -38,6 +38,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "detail/view/pending-comments.svelte.ts#pendingComments": async () => (await import("../detail/view/pending-comments.svelte")).pendingComments.forget(),
   // Split or unified (#2266), stored in `localStorage`: each test starts unified.
   "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
+  // Code's face and its ligatures (2026-11-16), stored in `localStorage` and written on <html>: each test starts on
+  // the bundled face with no ligatures, and reads the installed fonts afresh.
+  "tf/code-face.svelte.ts#codeFace": async () => (await import("../tf/code-face.svelte")).codeFace.reset(),
+  "tf/settings/TfCodeFont.svelte#asked": async () => (await import("../tf/settings/TfCodeFont.svelte")).forgetInstalledFonts(),
   // Titles or Everything (#2430), stored in `localStorage`: each test starts on Titles.
   "launcher/scope.svelte.ts#launcherScope": async () => (await import("../launcher/scope.svelte")).launcherScope.reset(),
   // The keys bound (#2429), read from the backend: each test starts with none.

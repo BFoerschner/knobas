@@ -71,12 +71,12 @@
 /* ---------- Builds, the Run… dialog (#852): prototype-6's .combo, .prm and .runsum ---------- */
 .tf-dialog.tf-run-dialog { width: min(680px, calc(100vw - 32px)); }
 .tf-combo { position: relative; }
-.tf-combo input { width: 100%; font-family: var(--mono); font-variant-ligatures: none; }
+.tf-combo input { width: 100%; font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-combo .tf-opts {
   position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--sheet);
   border: 1px solid var(--rule); border-radius: 4px; box-shadow: var(--shadow); max-height: 220px; overflow: auto; z-index: 5;
 }
-.tf-combo .tf-opts [role="option"] { display: flex; gap: 8px; padding: 6px 10px; cursor: pointer; font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-combo .tf-opts [role="option"] { display: flex; gap: 8px; padding: 6px 10px; cursor: pointer; font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-combo .tf-opts [role="option"]:hover, .tf-combo .tf-opts .tf-act { background: var(--sheet-2); }
 .tf-combo .tf-opts .tf-dim { margin-left: auto; font-family: var(--sans); font-size: var(--t-2xs); }
 /* A parameter's name is long, so the Run dialog's label column is wider, and its other fields share it. */
@@ -102,7 +102,7 @@
 .tf-sbseg.tf-wait { fill: var(--rule); }
 .tf-stepsbar text { fill: var(--ink); font-size: var(--t-xs); pointer-events: none; }
 /* A command is code, a size down so its wider face holds the bar's line. `nameWidth` in `TfRun.svelte` measures both. */
-.tf-stepsbar text.tf-sbcmd { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-2xs); }
+.tf-stepsbar text.tf-sbcmd { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-2xs); }
 .tf-sbseg:is(.tf-err, .tf-run) ~ text { fill: var(--sheet); }
 .tf-sbseg.tf-wait ~ text { fill: var(--ink-2); }
 .tf-stepsbar a { cursor: pointer; }
@@ -116,7 +116,7 @@
   display: flex; flex-direction: column; gap: 6px;
 }
 .tf-problem h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--err); overflow-wrap: anywhere; }
-.tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-problem .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-problem .tf-dim { font-size: var(--t-sm); }
 /* The box is the list's own: the heading stands above it, so its padding is the same on all four sides. */
@@ -305,11 +305,11 @@
 .tf-rbrail .tf-pl-top .tf-fsearch { max-width: none; }
 .tf-rb-count { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; margin-left: auto; }
 /* A branch name is code; its namespace (`feature/`, `renovate/`) is drawn in the second ink, as a shared prefix is. */
-.tf-rbr .tf-pi-nm { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-rbr .tf-pi-nm { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* The branch's page, capped so a run stays near its pipeline's name on a wide window. */
 .tf-rbp { max-width: 1040px; min-width: 0; }
 .tf-rbp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tf-rbp-h h2 { font: 600 var(--t-xl) var(--mono); font-variant-ligatures: none; min-width: 0; overflow-wrap: anywhere; }
+.tf-rbp-h h2 { font: 600 var(--t-xl) var(--mono); font-variant-ligatures: var(--mono-ligatures); min-width: 0; overflow-wrap: anywhere; }
 .tf-rbp-sub { color: var(--ink-2); font-size: var(--t-sm); margin: 4px 0 14px; }
 .tf-rbp .tf-problem { margin-bottom: 10px; }
 .tf-rbp-ok { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }

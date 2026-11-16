@@ -2,13 +2,20 @@
   Settings › Appearance (#831, R-13a.8): prototype-6's `STGV.appearance`. The
   same setting as the top bar's toggle (`theme.svelte.ts`). Below it, *State
   colours* (#2466), which reads the database and so waits for it: Theme
-  draws before the database is up.
+  draws before the database is up. Between them, *Code font* and *Ligatures in code* (`TfCodeFont.svelte`), which
+  need no database either.
 -->
 <script lang="ts">
+  import type { InstalledFont } from "../../ipc/app";
   import type { Theme, ThemeChoice } from "../theme.svelte";
+  import TfCodeFont from "./TfCodeFont.svelte";
   import TfStateColours, { type StateColourPorts } from "./TfStateColours.svelte";
 
-  let { theme, ready = true, ports }: { theme: Theme; ready?: boolean; ports: StateColourPorts } = $props();
+  let {
+    theme,
+    ready = true,
+    ports,
+  }: { theme: Theme; ready?: boolean; ports: StateColourPorts & { installedFonts?: () => Promise<InstalledFont[]> } } = $props();
 
   const CHOICES: readonly (readonly [ThemeChoice, string])[] = [
     ["system", "Like the system"],
@@ -28,6 +35,7 @@
     </div>
   </div>
 </div>
+<TfCodeFont {...ports.installedFonts ? { installedFonts: ports.installedFonts } : {}} />
 {#if ready}
   <TfStateColours {ports} />
 {/if}

@@ -15,7 +15,7 @@
 .tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
 .tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--mark); }
 /* Yellow is the ticket you are on, on its page, its card and its row, and nothing else: a chip that names the job is neutral. A mention is a highlight, which is `--mark`. */
-.tf-chip.tf-chip-job { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); font-family: var(--mono); font-variant-ligatures: none; }
+.tf-chip.tf-chip-job { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-chip.tf-chip-mention { background: var(--mark); color: var(--ink); }
 .tf-at { font-weight: 600; color: var(--info); }
 .tf-fold {
@@ -97,7 +97,7 @@ a.tf-lk-go:hover .tf-lk-name { text-decoration: underline; }
 .tf-pane-h:has(+ .tf-picklist) { margin-bottom: -6px; }
 
 /* ---------- the *This job* choice's key in a segmented control ---------- */
-.tf-seg .tf-jobk { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); }
+.tf-seg .tf-jobk { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-xs); }
 
 /* ---------- the large decision row: the Controls specimen's (`TfControls.svelte`) ---------- */
 .tf-decide { display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; }

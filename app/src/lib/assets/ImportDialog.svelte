@@ -760,6 +760,7 @@
   .lst .id {
     margin-left: auto;
     font: 400 var(--t-2xs) var(--mono);
+    font-variant-ligatures: var(--mono-ligatures);
     color: var(--faint);
   }
 

@@ -8,7 +8,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { appStatus, pagesKeptOpen, setPagesKeptOpen, setSmoothScrolling, smoothScrolling, type AppStatus } from "../../ipc/app";
+import { appStatus, pagesKeptOpen, setPagesKeptOpen, setSmoothScrolling, smoothScrolling, type AppStatus, type InstalledFont } from "../../ipc/app";
 import { monitoringSettings, setMonitoringSettings, type MonitoringSettings } from "../../ipc/assets";
 import {
   backupNow,
@@ -197,6 +197,8 @@ export interface SectionPorts {
   /** *Pages kept open* (#2247), Settings › Performance. */
   pagesKeptOpen: () => Promise<number>;
   setPagesKeptOpen: (count: number) => Promise<number>;
+  /** The installed font families, Settings › Appearance › *Code font*; the IPC read when omitted. */
+  installedFonts?: () => Promise<InstalledFont[]>;
   /** *Smooth scrolling on 120 Hz displays*, Settings › Performance: `null` where the platform has no switch. */
   smoothScrolling: () => Promise<boolean | null>;
   setSmoothScrolling: (on: boolean) => Promise<boolean | null>;

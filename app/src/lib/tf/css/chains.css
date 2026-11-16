@@ -27,7 +27,7 @@
 .tf-logbar .tf-lqn { font-size: var(--t-xs); white-space: nowrap; }
 .tf-nav2 { display: flex; gap: 2px; }
 .tf-nav2 button { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); border-radius: 3px; cursor: pointer; width: 26px; height: 26px; }
-.tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font: var(--t-xs)/1.55 var(--mono); font-variant-ligatures: none; overflow: auto; }
+.tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font: var(--t-xs)/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: auto; }
 .tf-logv details { border-top: 1px solid var(--rule-2); }
 /* The log's rows are flat (#2211): a loose run's rule and padding are rows of their own, and the first row is marked, since a windowed list's first child is any row. */
 .tf-logv > .tf-l0 { border-top: 0; }
@@ -52,7 +52,7 @@
 /* The size is the last value: *Download folder* stands in its place on hover, so the column is as wide as that. */
 .tf-arow { display: grid; grid-template-columns: minmax(0, 1fr) 122px auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-arow:first-child { border-top: 0; }
-.tf-arow .tf-nm { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-arow .tf-nm { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-arow .tf-sz { text-align: right; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-arow.tf-dir { font-weight: 600; background: var(--sheet-2); }
 .tf-arow.tf-dir > button.tf-fold { all: unset; cursor: pointer; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -67,7 +67,7 @@
 .tf-aall .tf-dim { font-size: var(--t-sm); }
 /* A file's name opens it in the file viewer (#2415): the name drawn as it was, a link's underline under the pointer. */
 .tf-arow > button.tf-aopen {
-  all: unset; cursor: pointer; font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm);
+  all: unset; cursor: pointer; font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-sm);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-arow > button.tf-aopen:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -77,12 +77,12 @@
 .tf-trow > :nth-child(n + 3) { text-align: right; font-variant-numeric: tabular-nums; }
 .tf-trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) 76px 104px; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-trow:first-child { border-top: 0; }
-.tf-trow .tf-nm { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); overflow-wrap: anywhere; }
+.tf-trow .tf-nm { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-sm); overflow-wrap: anywhere; }
 .tf-trow .tf-nm button { all: unset; cursor: pointer; }
 .tf-trow .tf-nm button:focus-visible { outline: 2px solid var(--focus); }
 .tf-trow .tf-dim { font-size: var(--t-xs); }
 .tf-tdetail { padding: 4px 12px 10px 34px; }
-.tf-tdetail pre { margin: 0; font: var(--t-xs)/1.55 var(--mono); font-variant-ligatures: none; white-space: pre-wrap; background: var(--sheet-2); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; }
+.tf-tdetail pre { margin: 0; font: var(--t-xs)/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre-wrap; background: var(--sheet-2); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; }
 .tf-tdetail .tf-tacts { display: flex; gap: var(--control-gap); margin-top: 6px; align-items: center; }
 .tf-tdetail .tf-tacts .tf-dim { font-size: var(--t-sm); }
 /* prototype-6 draws the Tests bar flat inside the run page: static, no frame. */

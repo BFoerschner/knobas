@@ -159,7 +159,7 @@
 .tf-ln-mg[data-tone="info"] { color: var(--info); background: var(--info-bg); border-color: transparent; }
 .tf-ln-mg[data-tone="muted"] { color: var(--muted); background: var(--muted-bg); border-color: transparent; }
 .tf-ln-k { font-size: var(--t-sm); color: var(--ink-2); }
-.tf-ln-k.tf-ln-mono { font-family: var(--mono); font-variant-ligatures: none; font-weight: 600; color: var(--ink); }
+.tf-ln-k.tf-ln-mono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-weight: 600; color: var(--ink); }
 
 /* An author or under: search a source cannot answer (#141): a fact about the corpus, not a fault. */
 .tf-ln-gap {

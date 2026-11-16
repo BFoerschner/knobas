@@ -78,7 +78,7 @@
 
 /* The worklog draft's duration: the start and the minutes, then the reading in the job key's width. */
 .tf-dur { display: flex; gap: 10px; align-items: center; }
-.tf-dialog .tf-formgrid .tf-dur input { width: 112px; font-family: var(--mono); font-variant-ligatures: none; }
+.tf-dialog .tf-formgrid .tf-dur input { width: 112px; font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; line-height: 1; }
 .tf-cands { display: flex; flex-direction: column; gap: 6px; }
 .tf-cands legend { padding: 0 0 6px; }
@@ -124,7 +124,7 @@
 .tf-formgrid fieldset { border: 0; padding: 0; margin: 0; }
 /* A field's label: one size and tone in every dialog. A code value as a label (a build parameter's name) is mono. */
 .tf-formgrid > :is(label, span):not(.tf-ck) { font-size: var(--t-sm); color: var(--ink-2); }
-.tf-formgrid > :is(label, input).tf-k { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-formgrid > :is(label, input).tf-k { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* A note on the field above it: under the field, in the field's column, only when it says something. */
 .tf-formgrid > .tf-chg { grid-column: 2; margin-top: -4px; font-size: var(--t-2xs); color: var(--info); font-weight: 600; }
 .tf-formgrid > .tf-chg:empty { display: none; }

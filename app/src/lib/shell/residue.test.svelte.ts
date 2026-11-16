@@ -282,6 +282,7 @@ vi.mock("../ipc/app", () => ({
   setPagesKeptOpen: (count: number) => deferred(count),
   smoothScrolling: () => deferred(true),
   setSmoothScrolling: (on: boolean) => deferred(on),
+  installedFonts: () => deferred([{ family: "Menlo", monospace: true }]),
   diffPipelines: () => deferred(true),
   setDiffPipelines: (on: boolean) => deferred(on),
   userRenderers: () => deferred([]),
@@ -2297,6 +2298,8 @@ const CASES: Case[] = [
   sectionCase("TfRenderersSection", "renderers"),
   // Appearance's State colours (#2466): its read lands late.
   sectionCase("TfStateColours", "appearance"),
+  // Appearance's Code font (2026-11-16): the installed fonts' read lands late.
+  sectionCase("TfCodeFont", "appearance"),
   {
     /**
      * The write queue panel (#1425): a layer on the stack, and a title read

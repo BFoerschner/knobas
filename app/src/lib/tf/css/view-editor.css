@@ -55,7 +55,7 @@
 .tf-vw-btns { display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: var(--t-sm); }
 .tf-vw-words { margin-top: 12px; }
 .tf-vw-sec .tf-vw-q { margin: 10px 0 0; font-size: var(--t-sm); color: var(--ink-2); }
-.tf-vw-q code { font-size: var(--t-xs); color: var(--ink); font-variant-ligatures: none; }
+.tf-vw-q code { font-size: var(--t-xs); color: var(--ink); font-variant-ligatures: var(--mono-ligatures); }
 .tf-vw-newq { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .tf-vw-cols { display: flex; flex-direction: column; gap: 6px; }
 .tf-vw-col {
