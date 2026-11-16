@@ -448,10 +448,10 @@ impl Connector {
     /// The app pool's settings, with no connection opened yet: the two
     /// callers above differ only in how long they wait for the first one.
     fn app_pool_unconnected(&self) -> PgPool {
-        let options = self.options.clone().options([(
-            "statement_timeout",
-            format!("{}ms", UI_STATEMENT_TIMEOUT.as_millis()),
-        )]);
+        let options = self
+            .options
+            .clone()
+            .options(app_session_settings(cfg!(windows)));
         PgPoolOptions::new()
             .max_connections(MAX_CONNECTIONS)
             // sqlx's default, spelled out: the statement limit above is
@@ -462,6 +462,36 @@ impl Connector {
             .idle_timeout(None)
             .connect_lazy_with(options)
     }
+}
+
+/// What every connection of the app's pool is opened with, on Windows where
+/// `windows` says so: the statement limit, and there no parallel worker.
+///
+/// **A parallel worker is a process PostgreSQL starts for one query and ends
+/// with it** (seen on 18.6: three workers during a query, none after it,
+/// three new ones for the next). None can be kept. On Windows a process
+/// start is 31 to 37 ms (the Windows pass, 2026-11-14), on macOS and Linux
+/// about 2. So a read a person waits on that plans two workers pays 62 to 74
+/// ms on Windows before it reads a row. The Tickets views' counts did, on
+/// every opening of Tickets: 33 ms with their two workers on the Mac and 44
+/// with none, so about 115 against 70 to 90 on Björn's PC (the long-words
+/// pass, 2026-11-16). On Windows the pool's connections therefore plan no
+/// worker unless a statement asks for some itself
+/// (`knobas_search::sql`'s one-letter read does). Elsewhere the server's own
+/// rule stands: there the workers are worth their start.
+///
+/// The sync and bring-up's migrations open connections of their own and
+/// keep the server's rule on every platform.
+#[must_use]
+pub fn app_session_settings(windows: bool) -> Vec<(&'static str, String)> {
+    let mut settings = vec![(
+        "statement_timeout",
+        format!("{}ms", UI_STATEMENT_TIMEOUT.as_millis()),
+    )];
+    if windows {
+        settings.push(("max_parallel_workers_per_gather", "0".to_owned()));
+    }
+    settings
 }
 
 /// The password a connection URL carries, percent-decoded.

@@ -2201,6 +2201,80 @@ async fn the_app_pool_keeps_its_connections_for_its_life() {
     other.close().await;
 }
 
+/// On Windows the app's connections plan no parallel worker (the long-words
+/// pass, 2026-11-16): a worker is a process started for one query, 31 to 37
+/// ms there, and the Tickets views' counts started two on every opening.
+/// Elsewhere the server's own rule stands. Both are the settings a
+/// connection of the pool is opened with, and a connection opened with
+/// Windows' plans no worker however cheap one is made to look.
+#[tokio::test]
+async fn on_windows_the_apps_connections_plan_no_parallel_worker() {
+    use knobas_db::embedded::app_session_settings;
+    let named = |windows: bool| -> Vec<(&'static str, String)> { app_session_settings(windows) };
+    assert_eq!(
+        named(true),
+        [
+            ("statement_timeout", "30000ms".to_owned()),
+            ("max_parallel_workers_per_gather", "0".to_owned())
+        ]
+    );
+    assert_eq!(named(false), [("statement_timeout", "30000ms".to_owned())]);
+
+    let connector = knobas_db::test_util::scratch_database("app_pool_workers").await;
+    let seeded = connector.pool(1).await.unwrap();
+    sqlx::query("create table public.wide as select g as n, repeat('x', 200) as pad from generate_series(1, 20000) g")
+        .execute(&seeded)
+        .await
+        .unwrap();
+    sqlx::query("analyze public.wide")
+        .execute(&seeded)
+        .await
+        .unwrap();
+    seeded.close().await;
+    // A scan made to look worth every worker there is.
+    let plan = async |windows: bool| -> String {
+        let options = (*connector.pool(1).await.unwrap().connect_options())
+            .clone()
+            .options(app_session_settings(windows));
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(
+            "select set_config('parallel_setup_cost', '0', true), \
+                    set_config('parallel_tuple_cost', '0', true), \
+                    set_config('min_parallel_table_scan_size', '0', true)",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        let lines: Vec<String> = sqlx::query_scalar(
+            "explain (costs off) select count(*) from public.wide where pad <> ''",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+        drop(tx);
+        pool.close().await;
+        lines.join("\n")
+    };
+    let elsewhere = plan(false).await;
+    assert!(
+        elsewhere.contains("Gather"),
+        "the server's rule:\n{elsewhere}"
+    );
+    let windows = plan(true).await;
+    assert!(!windows.contains("Gather"), "on Windows:\n{windows}");
+    let cleanup = connector.pool(1).await.unwrap();
+    sqlx::query("drop table public.wide")
+        .execute(&cleanup)
+        .await
+        .unwrap();
+    cleanup.close().await;
+}
+
 /// The app's pool cancels a statement that runs past thirty seconds (#745).
 ///
 /// Every connection of [`knobas_db::embedded::Connector::app_pool`] carries
