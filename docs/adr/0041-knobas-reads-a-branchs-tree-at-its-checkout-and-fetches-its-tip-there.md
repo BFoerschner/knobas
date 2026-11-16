@@ -4,6 +4,8 @@ status: accepted
 
 # knobas reads a branch's tree at its checkout, and fetches its tip there
 
+*Amended 2026-11-16 (the git-starts pass of PR #2479, [ADR-0043](0043-knobas-reads-a-clone-in-its-own-process-and-git-behind-it.md), `docs/decisions/2026-11-16-a-clone-is-read-in-process.md`): every read named under *Reads* below, and the compare's lists, names, commits and files of the amendments after this one, is answered in knobas's own process first, with the bytes the command prints, and the command is started only where that reader cannot answer exactly. A folder, a file, a branch switch and a compare at a clone start no process. The fetch is git's, as it was.*
+
 *Amended 2026-11-09 (the second smoothness pass, ADR-0042): *New pull request* fetches a branch tip its checkout lacks too, behind the source's compare, as *Files* does, so a branch pushed elsewhere reads at the clone from its next open. Found in the app's own window on the live Gitea.*
 
 *Amended 2026-11-10 (the third smoothness pass of PR #2479): a branch the mirror has not synced yet has no tip there, so Compare's diff of it is the source's compare, and **the head commit that compare settled** is fetched into a checkout that lacks it, behind the answer, by the same command (`checkout::fetch_answered_tip`). The sha is the source's answer, checked as every fetched one (40 or 64 hex digits). A compare the source answers 404 is `not_found` (a branch it does not hold), which is the only answer Compare says a branch is missing on. Witnessed against the testenv Gitea and Forgejo (`read_cache_live.rs`, `a_branch_made_on_the_forge_since_the_sync_is_read_by_name_and_its_tip_fetched`).*

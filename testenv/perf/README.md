@@ -94,6 +94,7 @@ trace on every state write, which made the measured app's filter keys several ti
 | `syncing.mjs`, `lane-probe.mjs` | one source kept syncing for a run's length, and the felt waits a sync can hold timed at the backend per adapter (*With a sync running*, below) |
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
 | `soak.mjs`, `soak.sh`, `soak-repo.sh` | a repository's Code page browsed for a long while, then every other page, with what grows counted; what `just soak` runs and the repository it browses (*The soak*, below) |
+| `git-starts.mjs`, `git-shim/git`, `git-starts.sh` | how many `git` processes a press at a cloned repository starts, the counting `git` the backend runs under, and what `just git-starts` runs (*Starts of git*, below) |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
 
@@ -490,6 +491,63 @@ rows, `invoic` is `invoice`'s own lexeme), so the fifth letters and the last one
 The backend makes each statement's plan once on each of its five connections, 10 to 30 ms, and keeps it for the
 app's life, so `keys.mjs` asks a letter and three words twelve times each before its first case: the lines hold the
 keys after that.
+
+## Starts of git: `just git-starts`
+
+How many `git` processes a press at a cloned repository starts, from the git-starts pass of PR #2479 (2026-11-16,
+`docs/decisions/2026-11-16-a-clone-is-read-in-process.md`, ADR-0043). A start is a few ms on a Mac and tens of ms on
+Windows, so a press that starts git several times in a row misses its line there while every number here looks fine.
+`git-starts.mjs` presses each action with real input, as `open.mjs` does, at a repository that is cloned, and reads
+what a counting `git` on the backend's `PATH` wrote (`git-shim/git`: one line a start, an optional sleep, then the real
+git):
+
+| Action | What is pressed |
+|---|---|
+| `code`, `repo-landing`, `folder`, `file-small`, `file-large`, `file-deep`, `go-to-file` | Code, a repository, a folder of its tree, three files, *Go to file* |
+| `branch-switch`, `files-refresh` | another branch picked on *Files*; every source's run ending while a file is open |
+| `commits`, `commit` | the Commits tab, one commit's diff |
+| `compare`, `new-pull-request` | a branch's compare by address, *New pull request* |
+| `pr-files`, `pr-files-large` | two pull requests' *Files changed* |
+| `local-changes`, `launcher` | the *Local changes* tab, the launcher with four letters typed |
+
+Each is pressed twice (`first`: the first press in the backend's life; `again`: left and pressed again), one item set
+a throttle (`inner-items.json`), and printed with its starts (the subcommand and when it began after the press), how
+many were at once, and the press's useful, drawn and settled times. With `--check`, which `just git-starts` passes, a
+press that started git at all fails, but for `fetch`, `clone` and `worktree`, which are writes behind an answer.
+`local-changes` is the one action that may: the working tree is git's to read (ADR-0043), three commands at once the
+first time and after a change there, none while nothing changed. `--count` only counts, for a before.
+
+```sh
+python3 -I testenv/perf/standin-repos.py --out <dir> scale-commerce/cart-service scale-commerce/payments-gateway scale-commerce/mobile-android
+for r in cart-service payments-gateway mobile-android; do git clone -q <dir>/scale-commerce-$r.git <clones>/$r; done
+cp -cR <saved home> "$TMPDIR/starts"           # its dev-secrets.json moved out for the first start
+# once, with no secret in reach: the Gitea source at the stand-in, the other sources off, each repository's clone named
+HOME="$TMPDIR/starts" <headless_ipc> --data-dir "$TMPDIR/starts/Library/Application Support/dev.knobas.desktop" --port 5811 &
+curl -X POST http://127.0.0.1:5811/invoke -d '{"cmd":"update_source","args":{"id":"live-gitea","patch":{"base_url":"http://127.0.0.1:3981"}}}'
+curl -X POST http://127.0.0.1:5811/invoke -d '{"cmd":"set_checkout_override","args":{"entityId":"live-gitea:scale-commerce/cart-service","path":"<clones>/cart-service"}}'
+curl -X POST http://127.0.0.1:5811/quit        # then only `source:live-gitea` back in dev-secrets.json
+node testenv/perf/standin-forge.mjs --listen 3981 --delay 30 --repos <dir> --pulls pulls.json --real-compare &
+log="$TMPDIR/git-starts.log"
+HOME="$TMPDIR/starts" PATH="$PWD/testenv/perf/git-shim:$PATH" KNOBAS_GIT_SHIM_REAL="$(command -v git)" \
+  KNOBAS_GIT_SHIM_LOG="$log" KNOBAS_GIT_SHIM_DELAY=0.1 \
+  <headless_ipc built with debug assertions> --data-dir "$TMPDIR/starts/Library/Application Support/dev.knobas.desktop" --port 5811 &
+just git-starts --real 5811 --shim-log "$log" --delay 100
+```
+
+- **`KNOBAS_GIT_SHIM_DELAY=0.1`** holds each start 100 ms, a slow Windows laptop's process start, so the Mac shows what
+  the starts cost there; `--delay 100` tells the probe, which then says which starts were at once and which in a row.
+  Leave both out to count alone.
+- **The pull requests' records** (`pulls.json`) come from a backend on the saved database, as for the inner pages
+  (`standin-repos.py --port <port> --pulls pulls.json --pr scale-commerce/cart-service#124 ...`).
+- **The source is pointed at the stand-in before its credential is back**, so nothing the saved home has queued
+  reaches the live Gitea.
+
+Two more instruments sit with the reader itself (`crates/knobas-git/examples`), and run on any machine with a clone:
+
+| Example | Does |
+|---|---|
+| `parity -- <repository> [--commits 2000] [--pairs 300]` | every read of the reader against the `git` on `PATH` over the repository's history: each commit's diff in every form, trees, files, and merge bases, logs and range diffs of commit pairs. Prints each difference; any is exit 1 |
+| `timing -- <repository> <old> <new>` | what each read costs in-process and as a start of `git`, medians of nine: the number a Windows machine owes this pass |
 
 ### With a sync running: `just open-budget --inner --syncing <source>`
 

@@ -1,5 +1,5 @@
 ---
-status: accepted, amended by ADR-0036
+status: accepted, amended by ADR-0036 and ADR-0043
 ---
 
 # knobas reads a checkout's uncommitted diff
