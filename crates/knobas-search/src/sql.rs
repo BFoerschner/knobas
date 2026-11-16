@@ -2468,10 +2468,25 @@ pub async fn explain_kept(
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query(WORKERS_LOOK_FREE).execute(&mut *tx).await?;
     let plan = explain_on(&mut tx, built).await?;
     tx.commit().await?;
     Ok(plan)
 }
+
+/// A parallel worker made to look worth starting for any scan at all, of a
+/// table of any size: what [`explain_kept`] and
+/// [`explain_named_at_any_size`] plan under, after the settings the
+/// statement runs under. A statement that asks for no worker
+/// ([`KEPT_PLANNING`], [`NAMED_PLANNING`]) still plans none, and one that
+/// forgot to ask shows a `Gather` on a test's small mirror: a worker is a
+/// process started for the one query, 31 to 37 ms each on Windows, and the
+/// launcher's keys are held to lines its statements meet without any.
+#[cfg(any(test, feature = "test-util"))]
+const WORKERS_LOOK_FREE: &str = "select set_config('parallel_setup_cost', '0', true), \
+     set_config('parallel_tuple_cost', '0', true), \
+     set_config('min_parallel_table_scan_size', '0', true), \
+     set_config('min_parallel_index_scan_size', '0', true)";
 
 /// The plan [`fetch_named`] runs a statement under.
 ///
@@ -2509,6 +2524,7 @@ pub async fn explain_named_at_any_size(
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query(WORKERS_LOOK_FREE).execute(&mut *tx).await?;
     let plan = explain_on(&mut tx, built).await?;
     tx.commit().await?;
     Ok(plan)

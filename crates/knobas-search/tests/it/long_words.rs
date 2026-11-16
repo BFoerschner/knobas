@@ -867,6 +867,65 @@ async fn a_kinds_rows_are_walked_in_the_index_order() {
     assert!(late.contains("never executed"), "{plan}");
 }
 
+/// **No statement the launcher's keys are held to plans a parallel worker.**
+/// A worker is a process PostgreSQL starts for one query and ends with it:
+/// about 2 ms on a Mac and 31 to 37 on Windows, for each. The count, the
+/// ranking of few matches, the bounded answer either way its names are read,
+/// and a word's first characters are each planned here with a worker made to
+/// look free for any scan of any table, and none holds a `Gather`. The
+/// one-letter read of the whole table, which asks for three, shows the
+/// instrument sees one.
+#[tokio::test]
+async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
+    use knobas_search::sql::{
+        explain_by_a_letter_at_any_size, explain_named_at_any_size, kept_search_sql, letter_sql,
+        search_sql,
+    };
+    let pool = pool().await;
+    let s = seed_scale_words(&pool, 300).await;
+    let corpora = [&LIVE_ITEM_FILLED];
+    for titles in [false, true] {
+        let asked = EffectiveFilters {
+            titles,
+            ..filters(&s)
+        };
+        let mut kept = vec![
+            ("the count", probe_sql("payout", true, &asked, 5).unwrap()),
+            (
+                "few matches ranked",
+                kept_search_sql(&corpora, "payout", true, &asked, 10, 40).unwrap(),
+            ),
+        ];
+        for names in [Names::Ranked, Names::Newest] {
+            kept.push((
+                "the bounded answer",
+                broad_sql(&corpora, "payout", true, &asked, 10, 40, names, 500).unwrap(),
+            ));
+        }
+        for (what, built) in kept {
+            for at_any_size in [false, true] {
+                let plan = explain_kept(&pool, built.clone(), at_any_size)
+                    .await
+                    .unwrap();
+                assert!(
+                    !plan.contains("Gather") && !plan.contains("Workers"),
+                    "{what}, titles {titles}:\n{plan}"
+                );
+            }
+        }
+        let letters = letter_sql(&corpora, "pa", &asked, 10, 40).unwrap();
+        let plan = explain_named_at_any_size(&pool, letters).await.unwrap();
+        assert!(
+            !plan.contains("Gather") && !plan.contains("Workers"),
+            "a word's first characters, titles {titles}:\n{plan}"
+        );
+    }
+    // The instrument: the one-letter read of the whole table asks for three.
+    let whole = search_sql(&corpora, Some("p"), true, &filters(&s), 10, 40);
+    let plan = explain_by_a_letter_at_any_size(&pool, whole).await.unwrap();
+    assert!(plan.contains("Workers Planned: 3"), "{plan}");
+}
+
 /// **Until every item has its stored rows, the launcher answers as it did
 /// before them.** A mirror whose `sync.item_initial` is not marked whole
 /// (one that held items before the migrations, until bring-up's fill has
