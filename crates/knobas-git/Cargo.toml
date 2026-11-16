@@ -1,0 +1,24 @@
+[package]
+name = "knobas-git"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# A clone read in knobas's own process, where the app used to start `git` for
+# every read (the git-starts pass of PR #2479, 2026-11-16,
+# `docs/decisions/2026-11-16-a-clone-is-read-in-process.md`). Each read here
+# answers the bytes one `git` command line prints, or says git must be asked.
+
+[dependencies]
+# gitoxide, pure Rust: the object database, revision parsing, merge bases and
+# attributes. No default features: no network client, no worktree mutation,
+# no status. `parallel` makes an opened repository shareable between the
+# threads the app reads on. MIT OR Apache-2.0.
+gix = { version = "0.90.0", default-features = false, features = ["revision", "attributes", "sha1", "parallel"] }
+# The line differ gix itself uses (Myers with git's heuristics and its indent
+# heuristic), named here because the patch writer drives it directly. The
+# copy gix resolves. Apache-2.0.
+gix-imara-diff = "0.3.3"
+
+[dev-dependencies]
+tempfile = "3"

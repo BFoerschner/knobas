@@ -40,6 +40,10 @@ knobas-db = { path = "../knobas-db" }
 # mapping -- rather than a `reqwest::Client` of this crate's own, which is the
 # hole `knobas-http` exists to close (`Request` has no `send`). An importer is
 # not a source (ADR-0015), but it is HTTP, and there is one HTTP stack.
+# A clone read in knobas's own process, where the checkout module started
+# `git` for every read (the git-starts pass, 2026-11-16,
+# `docs/decisions/2026-11-16-a-clone-is-read-in-process.md`).
+knobas-git = { path = "../knobas-git" }
 knobas-http = { path = "../knobas-http" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
