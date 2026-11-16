@@ -1683,7 +1683,7 @@
           data-path={full}
           class="tf-d{Math.min(row.depth, 8)}"
           class:tf-changed={changed.has(full)}
-          aria-current={full === shown ? "true" : undefined}
+          aria-current={full === shown && folderRender === null ? "true" : undefined}
           onpointerenter={() => restOn(full, row.section, "file")}
           onpointerleave={unrest}
           title={changed.has(full) ? "Changed in your checkout" : undefined}

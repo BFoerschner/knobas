@@ -364,7 +364,7 @@
       </div>
       <div class="tf-stg-row">
         <label class="tf-stg-l" for="tf-frp-time">Timeout<small>1 to 600 seconds; the command is stopped after it. Copying the folder is not counted.</small></label>
-        <div class="tf-stg-c"><div class="tf-rnd-secs"><input id="tf-frp-time" class="tf-rnd-secn" type="number" min="1" max="600" bind:value={draft.timeout} /><span>seconds</span></div></div>
+        <div class="tf-stg-c tf-stg-inl"><input id="tf-frp-time" class="tf-stg-in tf-stg-n90" type="number" min="1" max="600" bind:value={draft.timeout} /><span>seconds</span></div>
       </div>
     </div>
 

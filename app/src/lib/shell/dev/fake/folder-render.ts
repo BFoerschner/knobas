@@ -5,7 +5,7 @@
  *
  * None is saved until one is, so every other page draws as it did; `?fake-folder-render` starts with one,
  * *Folder listing*, which takes every folder. The fake runs no program: a run is queued, copies, runs for
- * 300 ms and draws the folder's name and the renderer's command as text, each step told on
+ * 1.5 s and draws the folder's name and the renderer's command as text, each step told on
  * `folder-render:moved` as the backend tells it. A command holding `fail` fails with stderr, and one holding
  * `png` draws a 1 × 1 PNG.
  */
@@ -107,12 +107,12 @@ export function handlers(): Handlers {
               size: made.length,
               commit: at.commit,
               from: "clone",
-              took_ms: 300,
+              took_ms: 1500,
               drawn_at: new Date().toISOString(),
             });
           }
           tell(at, null);
-        }, 300),
+        }, 1500),
       );
       return { ...view, running: { state: "queued" } };
     },

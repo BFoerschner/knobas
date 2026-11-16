@@ -60,7 +60,7 @@ const CASES = [
 
 // A first drawing, so the kept-drawing case has one.
 await c.js(`(${go(`${REPO}/render/folder-listing/src`)})()`);
-await sleep(1500);
+await sleep(2500);
 
 let over = 0;
 for (const t of throttles) {
@@ -71,7 +71,7 @@ for (const t of throttles) {
       await c.js(`(${k.before})()`);
       await settle();
       // A press waits for the run before it to end, so each press starts one.
-      if (k.kind === "press") await sleep(800);
+      if (k.kind === "press") await sleep(2000);
       times.push(await timed(k.act, k.sel, k.text ?? null));
     }
     times.sort((a, b) => a - b);

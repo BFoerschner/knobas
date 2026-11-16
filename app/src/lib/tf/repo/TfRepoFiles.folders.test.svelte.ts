@@ -147,6 +147,8 @@ test("the address draws the folder in the file's place, opens it in the tree and
   expect(target.querySelector(".tf-frender header .tf-p")?.textContent).toBe("flows/orders");
   expect(asked[0]).toMatchObject({ entityId: REPO, renderer: "lc", folder: "flows/orders", ask: "open", paths: "paths" });
   expect(target.querySelector('.tf-fdir[data-path="flows/orders"]')?.getAttribute("aria-current")).toBe("true");
+  // No file is marked open while a folder is drawn in its place, not even the landing's README.
+  expect(target.querySelector('.tf-ftree a[aria-current="true"]')).toBeNull();
   expect(target.querySelector(".tf-lastc")).toBeNull();
 });
 

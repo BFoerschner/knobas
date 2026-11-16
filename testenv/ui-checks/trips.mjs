@@ -295,8 +295,8 @@ const PAGES = [
   ] },
   // Folder renderers (ADR-0044, ux17): every press they brought, twice by key and twice with the pointer still.
   { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, trips: [
-    { id: "folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 1200 }], press: { sel: ".tf-frender-run", text: "Run again" } },
-    { id: "folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 1200 }], press: { sel: ".tf-frender-run", text: "Run again" } },
+    { id: "folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" } },
+    { id: "folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" }, rows: ".tf-frender-run" },
   ] },
   { page: "A folder's row on the tree", route: REPO, trips: [
     { id: "folder-glyph-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 900 }], press: { sel: ".tf-frmark a" }, leaves: true },
