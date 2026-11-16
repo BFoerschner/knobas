@@ -23,6 +23,28 @@ their items living on the live products. Windows runs
 the same pages in about twice the Mac's time (the Windows pass, 2026-11-14), so a line met with little room on the Mac
 is a line missed on a slow Windows laptop; `docs/decisions/2026-11-14-what-a-page-costs-to-build.md` has the numbers.
 
+### At every window size (the sizes pass, 2026-11-15)
+
+The targets hold at every size a person runs the app at, full screen and at high DPI as much as at the 1440 x 868 the
+probes always drew. Every probe that starts its own browser takes `--size WxH@scale`: the page's CSS pixels and the
+display's scale (`cdp.mjs`), 1440x868@1 by default. A scale of 1.25 or 1.5 is Windows at 125 % or 150 %, a scale of 2 a
+4K screen at 200 % or a Mac's Retina panel, so `1920x1080@2` is a maximised window on a 3840 x 2160 screen at 200 %.
+
+| Budget | Sizes it runs | Throttles |
+|---|---|---|
+| `just frame-budget`, `just open-budget --real`, `just keys-budget --real` | 1440x868@1 | 1x, 4x, 6x |
+| the same, by default after it | `1920x1080@2` (4K at 200 %, the most device pixels) and `2560x1440@1.25` (1440p at 125 %, the most CSS pixels at a fractional scale) | 4x, 6x |
+
+One cell is red until issue #2508: *Monitors*' scroll at 6x on `2560x1440@1.25` (52 to 54.5 frames a second, ruled to
+stay red rather than move the line, `docs/decisions/2026-11-15-every-window-size.md`); any other red cell is new.
+`--sizes "WxH@s ..."` names others and `--sizes none` runs the default size alone; the inner pages and the extremes run
+at 1440x868@1 unless `--sizes` names sizes for them. The lines are the same at every size. `run.mjs`'s scroll records, a
+scenario, what grows with the device pixels a window paints: each presented frame's main-thread paint (`Paint`,
+`PrePaint`, `Layerize`), raster, compositor thread, GPU main thread and display compositor (`pixels`, `frames.mjs`'s
+`pixelWork`), and the page's composited layers and their area in device megapixels (`layers`, from the `LayerTree`
+domain). A headless Chrome draws at 60 Hz whatever the size; what a 240 Hz display asks of a frame (4.2 ms) only the
+person's own window can show (`docs/decisions/2026-11-15-every-window-size.md`, *Owed on Windows*).
+
 ## `just frame-budget`
 
 Builds the app as the probes measure it, serves it on loopback, drives it in a headless Chrome at 1x, 4x and 6x, and
@@ -84,6 +106,12 @@ trace on every state write, which made the measured app's filter keys several ti
 - **keys to paint**: from each synthetic input event to the frame that draws it.
 - **switch ms**: a page switch's first frame or its longest frame after, whichever is longer.
 - **throttle Nx**: `Emulation.setCPUThrottlingRate`, the page's main thread only; not the compositor, raster or GPU.
+- **size WxH@s** (`--size`): the page's CSS pixels and device scale; a probe's results name it (`size`).
+- **a frame's paint, raster, compositor, gpu, viz** (scroll, `pixels`): those threads' task time over the scroll
+  divided by the frames presented, ms. Headless Chrome on the Mac rasters on the GPU process, so raster's cost shows
+  under `gpu` more than under `raster`.
+- **layers, Mpx** (scroll, `layers`): composited layers that draw, and their bounds' area in device megapixels; a
+  scroller's contents layer is its whole height, of which the compositor rasters only the tiles near the view.
 
 ## Opening a page: `just open-budget`
 
