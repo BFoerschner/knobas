@@ -117,6 +117,8 @@
   import TfToasts from "./TfToasts.svelte";
   import TfContextMenu from "./context/TfContextMenu.svelte";
   import TfTopBar from "./TfTopBar.svelte";
+  import TfZoomLevel from "./TfZoomLevel.svelte";
+  import { installZoomInput, zoom as sharedZoom, zoomKey, type Zoom } from "./zoom.svelte";
   import "./tf.css";
 
   let {
@@ -153,6 +155,7 @@
     kept = sharedKeptPages,
     keys = launcherKeys,
     secretPorts,
+    zoom = sharedZoom,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /**
@@ -198,6 +201,8 @@
     keys?: KeyStore;
     /** What the credential prompt over a page reads and writes; the bridge's when omitted. */
     secretPorts?: Pick<SettingsPorts, "listSources" | "listAdapters" | "appStatus" | "setSourceSecret" | "syncNow">;
+    /** The window's zoom (`zoom.svelte.ts`): its keys, its wheel, its plate and the status bar's level. */
+    zoom?: Zoom;
   } = $props();
 
   let hash = $state(location.hash);
@@ -688,6 +693,14 @@
     // ⌘R presses the page's *Refresh* or *Sync now* (#2156), and the webview
     // never reloads; an overlay owns the keyboard, as it does history's keys.
     if (onRefreshKey(event, dialogOpen())) return;
+    // ⌘+ / ⌘− / ⌘0 zoom the window from anywhere, a field and a dialog too, as a browser's do: the window's, not a page's.
+    const zooming = zoomKey(event);
+    if (zooming !== null) {
+      event.preventDefault();
+      if (zooming === 0) zoom.reset();
+      else zoom.step(zooming);
+      return;
+    }
     const travel = historyStep(event);
     if (travel !== null) {
       event.preventDefault();
@@ -812,6 +825,7 @@
   onMount(() => installExternalLinks());
   onMount(() => installFocusKeep());
   onMount(() => installKeysHere());
+  onMount(() => installZoomInput(zoom));
   // So no page's first draw waits on a face and lays itself out again when it lands (the render-cost pass, 2026-11-14).
   onMount(() => loadEveryFace());
   // So a pull request's first *Files changed* runs warm code (the forge-rounds pass, 2026-11-15).
@@ -872,7 +886,7 @@
       }}
     />
   </main>
-  <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} />
+  <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} {zoom} />
   {@render dialogs?.(sync)}
   {#if writeQueuePanel.open}
     <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
@@ -881,6 +895,7 @@
     <TfSecretPromptHost sourceId={secretPrompt.source} {layers} ports={secretPorts} />
   {/if}
   <TfToasts />
+  <TfZoomLevel {zoom} />
   <div class="tf-floats"></div>
   <!-- The right-click menu (2026-11-16): one for the window, in the float host. -->
   <TfContextMenu

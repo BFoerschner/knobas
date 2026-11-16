@@ -363,6 +363,10 @@ const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
 const TfContextMenu = (await import("../tf/context/TfContextMenu.svelte")).default;
 const { realMenuPorts } = await import("../tf/context/ports");
+const TfZoomLevel = (await import("../tf/TfZoomLevel.svelte")).default;
+const { createZoom } = await import("../tf/zoom.svelte");
+/** A zoom of its own whose frames run at once: what is counted is the plate's, not the webview's frame. */
+const plateZoom = createZoom({ storage: () => null, apply: () => {}, frame: (draw) => draw() });
 const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const TfSideEdgeFixture = (await import("../tf/TfSideEdge.fixture.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
@@ -2421,6 +2425,16 @@ const CASES: Case[] = [
   sectionCase("TfStateColours", "appearance"),
   // Appearance's Code font (2026-11-16): the installed fonts' read lands late.
   sectionCase("TfCodeFont", "appearance"),
+  {
+    /** The zoom's level as it changes (2026-11-16): a step shows it, and its timer to hide it goes with the plate. */
+    name: "TfZoomLevel",
+    source: "lib/tf/TfZoomLevel.svelte",
+    open: (target) => ({ app: mount(TfZoomLevel, { target, props: { zoom: plateZoom } }) }),
+    exercise: () => {
+      plateZoom.step(1);
+      flushSync();
+    },
+  },
   {
     /**
      * The write queue panel (#1425): a layer on the stack, and a title read

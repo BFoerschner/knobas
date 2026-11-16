@@ -1,6 +1,8 @@
 import { flushSync } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
+import { checkScale } from "./device-scale.svelte";
+import { gridLength } from "./windowed";
 import { growWindowsNow, laidOut, placeWindowsNow, Windowed } from "./windowed.svelte";
 
 /**
@@ -521,5 +523,70 @@ test("a row's height is its box's on the device's grid, not the observer's cut t
   // A row a transform scales: its box is no measure of its layout, and the observer's height stands, on the grid.
   box = 81.6;
   expect(laidOut(entry) * 1.25).toBeCloseTo(51, 12);
+  vi.unstubAllGlobals();
+});
+
+test("a zoom step (a new device scale) observes each drawn row afresh and writes the room again on the new grid, once (the zoom, 2026-11-16)", () => {
+  vi.stubGlobal("devicePixelRatio", 1.25);
+  const observed: Element[] = [];
+  const unobserved: Element[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(el: Element) {
+        observed.push(el);
+      }
+      unobserve(el: Element) {
+        unobserved.push(el);
+      }
+      disconnect() {}
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  document.body.innerHTML = '<ol style="overflow-y: auto"><li class="before"></li><li class="row"></li><li class="after"></li></ol>';
+  const list = document.querySelector("ol")!;
+  let scrolled = 0;
+  Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(list, "clientHeight", { value: 300 });
+  // Rows of 18.85 px (13 px text at a line height of 1.45): off every grid but the device's own.
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 18.85, overscan: 200, scrolls: true });
+  const row = list.querySelector<HTMLElement>(".row")!;
+  const detached: (() => void)[] = [];
+  const stop = $effect.root(() => {
+    detached.push(win.list(list));
+    win.room("before")(list.querySelector<HTMLElement>(".before")!);
+    win.room("after")(list.querySelector<HTMLElement>(".after")!);
+    win.row(0)(row);
+  });
+  placed();
+  scrolled = 10_000;
+  list.dispatchEvent(new Event("scroll"));
+  flushSync();
+  const before = list.querySelector<HTMLElement>(".before")!;
+  expect(before.style.height).toBe(gridLength(win.before, 1.25));
+  const seen = observed.filter((el) => el === row).length;
+
+  // 110 % on that screen: 1.375.
+  vi.stubGlobal("devicePixelRatio", 1.25 * 1.1);
+  checkScale();
+  flushSync();
+  expect(unobserved.filter((el) => el === row).length).toBe(1);
+  expect(observed.filter((el) => el === row).length).toBe(seen + 1);
+  expect(before.style.height).toBe(gridLength(win.before, 1.25 * 1.1));
+  expect(before.style.height).not.toBe(gridLength(win.before, 1.25));
+  // The same scale told again (a resize with no zoom): nothing is read again.
+  checkScale();
+  flushSync();
+  expect(unobserved.filter((el) => el === row).length).toBe(1);
+
+  // Gone, the list hears no more steps.
+  for (const detach of detached) detach();
+  stop();
+  const gone = observed.length;
+  vi.stubGlobal("devicePixelRatio", 2);
+  checkScale();
+  expect(observed.length).toBe(gone);
   vi.unstubAllGlobals();
 });

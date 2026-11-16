@@ -17,13 +17,16 @@
   Drawn from what the shell hands it; the readings are `status.ts`'s.
 -->
 <script lang="ts">
+  import { keyHint } from "../shell/platform";
   import { healthyRollup, queueLabel, type SourceReading } from "./status";
+  import { percent, zoom as windowZoom, type Zoom } from "./zoom.svelte";
 
   let {
     readings,
     pending,
     decisions,
     onqueue,
+    zoom = windowZoom,
   }: {
     readings: SourceReading[];
     /** Writes still waiting to be sent. */
@@ -31,6 +34,8 @@
     /** Held and refused writes, which wait on the reader (`decisionsIn`). */
     decisions: number;
     onqueue: () => void;
+    /** The window's zoom (`zoom.svelte.ts`): while it is not 100 % the bar ends in it, and a press puts it back. */
+    zoom?: Pick<Zoom, "level" | "reset">;
   } = $props();
 
   const label = $derived(queueLabel(pending, decisions));
@@ -63,4 +68,7 @@
       {label.queued}
     {/if}
   </span>
+  {#if zoom.level !== 1}
+    <button class="tf-zoomed" title={keyHint("Back to 100 % (⌘0)")} onclick={() => zoom.reset()}>Zoom {percent(zoom.level)}</button>
+  {/if}
 </footer>
