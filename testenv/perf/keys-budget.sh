@@ -43,5 +43,13 @@ size_throttle=$(echo "$throttle" | tr ',' '\n' | grep -xE '4|6' | paste -sd, -)
     --app "http://127.0.0.1:$port/?fake-ipc&fake-real=$real#/tickets" --out "$out/keys-$size.json" \
     --throttle "$size_throttle" --repeat "$repeat" ${only:+--only "$only"} --check "$here/budget-keys.json" --lines real || status=1
 done
+# A 5120 x 1440 window at 100 % (Björn's display full screen, the ux14 pass, 2026-11-16): the board's letter, whose
+# tall columns draw the most cards, at 4x and 6x against the same lines. A whole run only: --only names its own cases.
+[ "$sizes" != none ] && [ -n "$size_throttle" ] && [ -z "$only" ] && {
+  echo "keys-budget: 5120x1440@1 at ${size_throttle//,/x, }x, tickets-letter"
+  "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/keys.mjs" --size 5120x1440@1 \
+    --app "http://127.0.0.1:$port/?fake-ipc&fake-real=$real#/tickets" --out "$out/keys-5120x1440@1.json" \
+    --throttle "$size_throttle" --repeat "$repeat" --only tickets-letter --check "$here/budget-keys.json" --lines real || status=1
+}
 echo "keys-budget: results in $out"
 exit $status

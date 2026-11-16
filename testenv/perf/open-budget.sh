@@ -140,5 +140,12 @@ size_throttle=$(echo "$throttle" | tr ',' '\n' | grep -xE '4|6' | paste -sd, -)
   "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/open.mjs" --app "$url" --out "$out/open-$size.json" --size "$size" \
     --throttle "$size_throttle" ${only:+--only "$only"} "${size_args[@]}" --check "$here/budget-open.json" --lines "$lines" || status=1
 done
+# A 5120 x 1440 window at 100 % (Björn's display full screen, the ux14 pass, 2026-11-16): a repository's landing at 4x
+# and 6x against the same lines. The nav pages' whole run only: --only names its own places.
+[ "$sizes" != none ] && [ -n "$size_throttle" ] && [ -z "$only$inner$extremes$forge" ] && {
+  echo "open-budget: 5120x1440@1 at ${size_throttle//,/x, }x, repo"
+  "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/open.mjs" --app "$url" --out "$out/open-5120x1440@1.json" \
+    --size 5120x1440@1 --throttle "$size_throttle" --only repo --check "$here/budget-open.json" --lines "$lines" || status=1
+}
 echo "open-budget: results in $out"
 exit $status

@@ -34,6 +34,7 @@ display's scale (`cdp.mjs`), 1440x868@1 by default. A scale of 1.25 or 1.5 is Wi
 |---|---|---|
 | `just frame-budget`, `just open-budget --real`, `just keys-budget --real` | 1440x868@1 | 1x, 4x, 6x |
 | the same, by default after it | `1920x1080@2` (4K at 200 %, the most device pixels) and `2560x1440@1.25` (1440p at 125 %, the most CSS pixels at a fractional scale) | 4x, 6x |
+| `just open-budget --real` and `just keys-budget --real`, a whole run, after those | `5120x1440@1` (a 32:9 screen at 100 %, Björn's display full screen): a repository's landing (`repo`) and the board's letter (`tickets-letter`), the pages that grow most with a wide and tall window (the ux14 pass, 2026-11-16) | 4x, 6x |
 
 *Monitors*' scroll at 6x on `2560x1440@1.25`, the one red cell of the sizes pass, holds 60 since issue #2508
 (`docs/decisions/2026-11-16-a-row-swap-paints-its-own-rows.md`): a row swap moved every row that stayed by a fraction of
