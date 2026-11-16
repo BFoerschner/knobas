@@ -133,7 +133,9 @@ const rows = () => [...list().querySelectorAll('[role="option"]')].map((row) => 
 const text = () => list().textContent ?? "";
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  // The clock too: whether a key is asked at once or waits for the keys to pause is read off `Date.now()`, and a
+  // test that types two keys "at once" on a loaded machine would otherwise find them 90 ms apart.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   target = document.createElement("div");
   document.body.append(target);
 });
