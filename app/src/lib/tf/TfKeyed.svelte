@@ -10,10 +10,16 @@
   }
 </script>
 
+<!--
+  A key is drawn here as `TfKey` draws one with no link, title or chip: the same span and classes, without a component
+  of its own; a line with no key is its text (the ux14 pass, 2026-11-16: a board's letter draws seventy cards, each
+  with its epic line, and the epic's `TfKey` was a quarter of a card's script).
+-->
 <script lang="ts">
-  import TfKey from "./TfKey.svelte";
-
   let { text, lead = false }: { text: string; lead?: boolean } = $props();
+
+  const parts = $derived(keyParts(text));
+  const keyClass = $derived(lead ? "tf-mono tf-key tf-key-lead" : "tf-mono tf-key");
 </script>
 
-{#each keyParts(text) as part, at (at)}{#if at % 2 === 1}<TfKey value={part} {lead} />{:else}{part}{/if}{/each}
+{#if parts.length === 1}{text}{:else}{#each parts as part, at (at)}{#if at % 2 === 1}<span class={keyClass}>{part}</span>{:else}{part}{/if}{/each}{/if}

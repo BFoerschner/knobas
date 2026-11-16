@@ -21,7 +21,7 @@
 </script>
 
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import type { MiniBoardCard } from "../../ipc/entity";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -31,6 +31,7 @@
     cut,
     card,
     onwin,
+    floor = null,
   }: {
     /** Every card the column draws, in order. */
     cards: MiniBoardCard[];
@@ -40,10 +41,32 @@
     card: Snippet<[MiniBoardCard, Attachment<HTMLElement>]>;
     /** Hands the page this column's window, so `j`/`k` can draw a card before it focuses it; `null` once it goes. */
     onwin: (win: Windowed | null) => void;
+    /**
+     * The least a card stands before it is drawn (`cardFloor`): given, a key's first frame draws the cards on screen
+     * and one more, not a quarter of a screen more (the ux14 pass, 2026-11-16).
+     */
+    floor?: ((card: MiniBoardCard) => number) | null;
   } = $props();
 
+  const byKey = $derived(floor === null ? null : new Map(cards.map((one) => [one.entity_id, one])));
+  const floorOf = (key: string) => {
+    const one = byKey?.get(key);
+    return one && floor ? floor(one) : 130;
+  };
+
   /** A card is 86 to 211 px on the scale estate (a line of summary or four, an epic line or not), most about 130, 6 apart. */
-  const win = new Windowed({ count: () => cards.length, key: (i) => cards[i]!.entity_id, estimate: 130, gap: 6, from: STACK_WINDOW_FROM });
+  const win = new Windowed({
+    count: () => cards.length,
+    key: (i) => cards[i]!.entity_id,
+    estimate: 130,
+    estimateOf: untrack(() => floor) === null ? null : floorOf,
+    onScreen: untrack(() => floor) !== null,
+    // Reckoned at its floor, a card stands at about two thirds of the 136 px it stood at, so 400 px below the view
+    // holds as many cards as 600 did: the key's later grow builds no more than the overscan always held.
+    overscan: untrack(() => floor) === null ? 600 : 400,
+    gap: 6,
+    from: STACK_WINDOW_FROM,
+  });
 
   /** The page holds this window while the column's box is drawn. */
   const held = () => {

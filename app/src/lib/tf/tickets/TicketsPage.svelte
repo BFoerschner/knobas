@@ -149,7 +149,7 @@
   import TicketStack from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { assigneeName, assigneeOptions, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, cardFloor, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -612,6 +612,8 @@
     if (!firstFrame || cards.length <= FIRST_FRAME_CARDS || (drewWhole.get(place) ?? 0) >= FIRST_FRAME_CARDS) return cards;
     return cards.slice(0, FIRST_FRAME_CARDS);
   }
+  /** What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. */
+  const cardFloorOf = (card: MiniBoardCard) => cardFloor(card, view?.card_fields ?? null);
   const listHold = new HeldOrder<{ card: MiniBoardCard }>(({ card }) => card.entity_id);
   const heldList = $derived(
     showing.layout === "list" && reader.board !== null ? listHold.place(rows, heldBasis) : { rows: [] as { card: MiniBoardCard }[], waiting: 0, stale: false },
@@ -1088,7 +1090,7 @@
                   >
                 </h3>
                 <div class="tf-stack">
-                  <TicketStack cards={heldCards.get(place) ?? []} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)}>
+                  <TicketStack cards={heldCards.get(place) ?? []} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
                     {#snippet card(card, row)}
                       <TicketCard
                         {card}

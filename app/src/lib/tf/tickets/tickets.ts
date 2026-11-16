@@ -183,6 +183,21 @@ export function epicLine(card: Pick<MiniBoardCard, "path" | "parent_title">): st
 }
 
 /**
+ * The least a board card can stand, in pixels, before it is drawn (the ux14 pass, 2026-11-16): what a column's window
+ * reckons an undrawn card at, so a key's first frame draws the cards that fill the screen and not a quarter of a screen
+ * more. A card is its padding, its key line and its avatar's line, 66 px, and 18.2 px a line of summary (`tickets.css`,
+ * measured on the scale estate at both column widths: 84.2 px for one line, 102.4 for two, 193.3 for seven). The
+ * summary's lines are counted at 40 characters a line, more than the widest column holds (32 measured), and the epic,
+ * the source and the labels add nothing here, so a card is never reckoned taller than it draws: a short reckoning
+ * draws a card more, a tall one would leave the column's foot empty for a frame.
+ */
+export function cardFloor(card: Pick<MiniBoardCard, "title">, fields: readonly string[] | null): number {
+  const avatarLine = fields === null || fields.includes("assignee");
+  const lines = Math.max(1, Math.ceil(card.title.length / 40));
+  return (avatarLine ? 66 : 40) + 18 * lines;
+}
+
+/**
  * The comment count a card draws (#894): "N comments" above zero only, so a
  * count of none and a count that never answered both draw nothing.
  */

@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
+  cardFloor,
   columnHead,
   sentenceCase,
   shortKey,
@@ -390,4 +391,18 @@ test("a ticket is not its own sub-task, in any source that holds it (the live ru
   expect(withoutTicket(alone, "PAY-236").columns).toEqual([]);
   // A key that only starts the same is another ticket.
   expect(withoutTicket(alone, "PAY-23").columns[0]!.total).toBe(2);
+});
+
+// The ux14 pass (2026-11-16): measured on the scale estate, 84.2 px for a line of summary, 102.4 for two, 193.3 for
+// seven, at either column width. The floor never stands above those, so a column's first frame never falls short.
+test("a card's floor is never above what it draws", () => {
+  const titled = (n: number) => ({ title: "x".repeat(n) });
+  expect(cardFloor(titled(20), null)).toBe(84);
+  expect(cardFloor(titled(20), null)).toBeLessThanOrEqual(84.2);
+  // 41 characters draw on two lines at least (32 fit the widest column): 102.4 px.
+  expect(cardFloor(titled(41), null)).toBe(102);
+  // A summary of seven lines at the widest column holds at least 7 x 32 characters.
+  expect(cardFloor(titled(7 * 32), null)).toBeLessThanOrEqual(193.3);
+  // With no avatar line, the meta row can be empty.
+  expect(cardFloor(titled(10), ["type", "signals"])).toBe(58);
 });

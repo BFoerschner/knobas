@@ -60,6 +60,7 @@
  * A folding list windows its flattened visible rows (headers of open folds
  * and their rows) with one key per row.
  */
+import { untrack } from "svelte";
 import { Heights, gridLength, onGrid, STEPS, type Span } from "./windowed";
 
 export interface WindowedOptions<K> {
@@ -95,6 +96,16 @@ export interface WindowedOptions<K> {
    * run log's `overflow: auto`) computes `auto` too, yet grows with its rows.
    */
   scrolls?: boolean;
+  /**
+   * Each new set of rows draws the rows on screen and one past them first, and the overscan below two frames later,
+   * as a list's first read does, but without its quarter of a view more or the rows drawn before it (the ux14 pass,
+   * 2026-11-16). A set is new when the list starts to window or a row it drew is no longer where it was (more rows
+   * after them, as *Show more* brings, are the same set): a board column's letter, whose
+   * first frame drew the whole overscan below the view, 32 cards at 5120 x 1440 where 26 were on screen. Only for a
+   * list whose `estimateOf` never reckons a row taller than it draws, and whose rows below the view are clipped from
+   * sight: a tall reckoning would leave the view's foot empty for a frame.
+   */
+  onScreen?: boolean;
 }
 
 const ALL: Span = { start: 0, end: 0, before: 0, after: 0 };
@@ -157,8 +168,19 @@ export class Windowed<K = string> {
   #held: { keys: readonly K[]; start: number; end: number } | null = null;
   /** Whether `list` has read where the list sits: rows drawn before that are the overscan's, and none are held. */
   #placed = false;
-  /** Whether the overscan below the view is drawn too: from two frames after the last list read where it sits. */
-  #grown = $state(false);
+  /**
+   * Whether the overscan below the view is drawn too: from two frames after the last list read where it sits, for the
+   * set of rows (`#set`) it was drawn for.
+   */
+  #grownFor = $state(-1);
+  /** The set of rows drawn: moved on, for an `onScreen` list, when it starts to window or its first row changes. */
+  #set = 0;
+  /** The set a grow was asked for. */
+  #growAsked = -1;
+  /** Whether the list windowed, and the rows it drew where, when the span was last worked out (`onScreen`). */
+  #lastOn = false;
+  #lastKeys: readonly K[] | null = null;
+  #lastDrawn: { start: number; keys: readonly K[] } = { start: 0, keys: [] };
   /** The last row drawn before the read: the read keeps those under the view that the overscan below would hold. */
   #early: { key: K } | null = null;
 
@@ -166,11 +188,18 @@ export class Windowed<K = string> {
     const keys = this.#keys;
     if (keys.length < this.#options.from) {
       this.#held = null;
+      this.#lastOn = false;
       return { ...ALL, end: keys.length, on: false };
     }
     void this.#remeasured;
+    if (this.#options.onScreen && this.#placed && keys !== this.#lastKeys) {
+      const { start, keys: drew } = this.#lastDrawn;
+      if (!this.#lastOn || drew.some((key, at) => keys[start + at] !== key)) this.#set += 1;
+    }
+    this.#lastOn = true;
+    this.#lastKeys = keys;
     // Read before the held rows may answer, so the overscan below is drawn when it may be.
-    const grown = this.#grown;
+    const grown = this.#grownFor === this.#set;
     this.#sync(keys);
     const { overscan, margin } = this.#options;
     const held = this.#held;
@@ -182,11 +211,12 @@ export class Windowed<K = string> {
     // alone fell short of the screen's bottom for a frame; and the last drawn row stays off screen, where a list's
     // `:last-child` rule (the Inbox's border) changes no row in view. The read takes away none of the rows drawn before
     // it that the overscan would hold: a row under a clipping footer stays where it drew.
-    const below = this.#placed && !grown ? Math.min(overscan, this.#viewHeight / 4) : overscan;
+    const fits = this.#options.onScreen;
+    const below = this.#placed && !grown ? (fits ? 0 : Math.min(overscan, this.#viewHeight / 4)) : overscan;
     let span = this.#heights.span(this.#viewTop, this.#viewHeight, overscan, below);
     if (this.#placed && !grown) {
       const full = this.#heights.span(this.#viewTop, this.#viewHeight, overscan);
-      const early = this.#early === null ? -1 : keys.indexOf(this.#early.key);
+      const early = this.#early === null || fits ? -1 : keys.indexOf(this.#early.key);
       const end = Math.min(full.end, Math.max(span.end + 1, early + 1));
       if (end > span.end) span = this.#heights.around(span.start, end);
     }
@@ -194,6 +224,7 @@ export class Windowed<K = string> {
     // Held once the overscan below is in: rows held before would cover the view with the margin to spare, and the grow
     // would draw nothing.
     this.#held = this.#placed && grown ? { keys, start: span.start, end: span.end } : null;
+    if (this.#options.onScreen) this.#lastDrawn = { start: span.start, keys: keys.slice(span.start, span.end) };
     return { ...span, on: true };
   });
 
@@ -211,6 +242,7 @@ export class Windowed<K = string> {
       from: 300,
       scrolls: false,
       estimateOf: null,
+      onScreen: false,
       margin: overscan / 2,
       ...options,
       overscan,
@@ -220,6 +252,13 @@ export class Windowed<K = string> {
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver((entries) => this.#measure(entries));
+  }
+
+  /** Draws the overscan below the view for `set` once its frame and the one after it have drawn (`growSoon`). */
+  #growFor(set: number) {
+    if (untrack(() => this.#grownFor) === set || this.#growAsked === set) return;
+    this.#growAsked = set;
+    growSoon(() => (this.#grownFor = set));
   }
 
   /** The rows to draw out of `items` (the list's rows, in the same order). */
@@ -356,10 +395,15 @@ export class Windowed<K = string> {
         pad(node, "padding-bottom", this.after && base.bottom + this.after);
       }
       read();
-      if (!this.#grown) growSoon(() => (this.#grown = true));
+      this.#growFor(this.#set);
       resized?.observe(node);
       for (const clip of clips) resized?.observe(clip);
     };
+    // A new set of rows (`onScreen`) grows its overscan below once its frame has drawn.
+    $effect(() => {
+      void this.#span;
+      if (placed && this.#options.onScreen) this.#growFor(this.#set);
+    });
     // A list too short to window draws every row wherever it sits, so it reads nothing until it windows: a first
     // open of a short list lays nothing out for it.
     $effect(() => {

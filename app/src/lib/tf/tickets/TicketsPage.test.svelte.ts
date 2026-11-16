@@ -433,6 +433,34 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
   expect(input.value).toBe("s epa");
 });
 
+// The ux14 pass (2026-11-16): a column that windowed once drew the whole overscan below the view in the first frame of
+// every key after, 88 cards at 5120 x 1440 where 66 were on screen. Each new set of cards draws the screen's first.
+test("each key's new cards draw the screen's first and the overscan below them a frame later", async () => {
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
+  await open(h);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  const onScreen = stacks()[0]!.cards;
+  growWindowsNow();
+  await settle();
+  const grown = stacks()[0]!.cards;
+  expect(grown).toBeGreaterThan(onScreen);
+  // Cleared, each column is back to its eight cards; typed again, its cards are a new set.
+  const input = field();
+  input.value = "";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(stacks()[0]!.cards).toBe(8);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(stacks()[0]!.cards).toBe(onScreen);
+  const first = [...target.querySelectorAll(".tf-tcard")];
+  growWindowsNow();
+  await settle();
+  expect(stacks()[0]!.cards).toBe(grown);
+  expect(first.every((card) => card.isConnected)).toBe(true);
+});
+
 const bulk = (status: string, n: number, word: string) =>
   Array.from({ length: n }, (_, i) => ({ status, card: card(`BLK-${status[0]}${i + 1}`, `${word} ${i + 1}`) }));
 /** A column's cards box: the drawn cards' count, and the room it holds for the rest below them. */
@@ -458,10 +486,11 @@ test("a typed filter reads fifty a column under its total, a long column draws t
   expect(drawn).toBeGreaterThan(onScreen);
   expect(drawn).toBeGreaterThan(5);
   expect(drawn).toBeLessThan(24);
-  // Every undrawn card's room, at its 130 px estimate and the 6 px between cards, under the drawn ones.
+  // Every undrawn card's room, at its floor (`cardFloor`: 84 px for a line of summary) and the 6 px between cards,
+  // under the drawn ones.
   expect(stacks()).toEqual([
-    { cards: drawn, room: `${(50 - drawn) * 136}px` },
-    { cards: drawn, room: `${(50 - drawn) * 136}px` },
+    { cards: drawn, room: `${(50 - drawn) * 90}px` },
+    { cards: drawn, room: `${(50 - drawn) * 90}px` },
   ]);
   expect(columns()).toEqual([
     { head: "To do 60", cards: drawn, more: "Show 10 more" },
@@ -481,7 +510,7 @@ test("a typed filter reads fifty a column under its total, a long column draws t
     { head: "To do 60", cards: drawn, more: null },
     { head: "Done 55", cards: drawn, more: "Show 5 more done" },
   ]);
-  expect(stacks()[0]!.room).toBe(`${(60 - drawn) * 136}px`);
+  expect(stacks()[0]!.room).toBe(`${(60 - drawn) * 90}px`);
 });
 
 test("a column a filter grows under 24 cards draws its first sixteen in the frame the answer lands, the rest the frame after (the broad-filters pass, 2026-11-13)", async () => {
