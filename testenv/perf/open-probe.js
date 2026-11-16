@@ -5,7 +5,12 @@
 (() => {
   if (window.__open) return;
   const now = () => performance.now();
-  const shown = () => document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector("main") ?? document.body;
+  // The shown page: a kept page that is not hidden and in no hidden kept page. A repository's tabs are kept pages too, so
+  // the Code page left hidden for a run still holds its own unhidden Builds tab, first in the document (2026-11-16).
+  const shown = () =>
+    [...document.querySelectorAll(".tf-kept:not([hidden])")].find((k) => k.parentElement?.closest(".tf-kept[hidden]") == null) ??
+    document.querySelector("main") ??
+    document.body;
   const visible = (e) => {
     if (!e.isConnected) return false;
     const r = e.getBoundingClientRect();

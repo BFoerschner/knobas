@@ -212,6 +212,21 @@
     "moved": 0
    }
   },
+  "repo-builds-run": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
   "monitors": {
    "1": {
     "usefulMs": 100,

@@ -100,6 +100,9 @@ const PLACES = [
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
+  // A run pressed on a repository's Builds tab (Björn, 2026-11-16: "click on the run … and open the build itself immediately"):
+  // its cell is a link to the run on Builds, and `Esc` is back on the tab. A repository three pipelines built.
+  { name: "repo-builds-run", parent: "code", start: "#/repo/live-gitea%3Ascale-data%2Fbi-dashboards/builds", press: `${shown} .tf-rbt a.tf-rbt-cell`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   { name: "monitors", start: "#/time", press: nav("monitors"), hash: "#/monitors", useful: ".tf-mon-state", min: 5, away: "time" },
   { name: "standup", parent: "time", start: "#/time", press: `${shown} a[href="#/time/standup"]`, hash: "#/time/standup", useful: ".tf-su-h, .tf-su-body", min: 2, back: `${shown} a[href="#/time"]` },
   { name: "time", start: "#/docs", press: nav("time"), hash: "#/time", useful: ".tf-tm-wrap", min: 1, away: "docs" },
