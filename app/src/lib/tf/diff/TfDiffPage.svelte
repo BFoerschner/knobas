@@ -33,6 +33,7 @@
     entityFilePiped,
     entityRangeDiff,
     entityRangeFile,
+    entityRangeFilePages,
     entityRangeFiles,
     cancelRead,
     entityView,
@@ -61,6 +62,8 @@
      */
     rangeFiles?: RangeFilesRead;
     rangeFile?: RangeFileRead;
+    /** The first page of many files in one read (the big-compare pass, 2026-11-16). */
+    rangeFilePages?: RangeFilePagesRead;
     /** Calls a named read off at the backend. */
     cancelRead?: (read: string) => Promise<boolean>;
   }
@@ -74,6 +77,7 @@
     piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
     rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
     rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+    rangeFilePages: (entityId, base, head, files, ignoreWhitespace, read) => entityRangeFilePages(entityId, base, head, files, ignoreWhitespace, read),
     cancelRead: (read) => cancelRead(read),
   };
 </script>
@@ -81,7 +85,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { caretOf, isSha, shortEnd } from "./sha";
-  import { fillEnds, rangeFill, type RangeFileRead, type RangeFilesRead } from "./fill";
+  import { fillEnds, keptList, rangeFill, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "./fill";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
   import type { DiffFill } from "./diff";
   import type { EscTarget } from "../escape";
@@ -196,14 +200,30 @@
    * a file at a time, its list, each file's lines read as it nears the view.
    */
   function read(id: string, from: string, to: string, ws: boolean, alive: () => boolean, again = false, name = newRead()): Promise<unknown> {
-    reading = true;
     const listing = ports.rangeFiles;
+    // *Open as diff* of a compare drawn this session (the big-compare pass, 2026-11-16): the list it drew between these two
+    // commits, and its files' lines kept, drawn in this page's first frame, read no second time. Two whole shas name a
+    // diff that never changes, so there is nothing to read again behind it, on a return either.
+    const drew = listing !== undefined && ports.rangeFile !== undefined && !ws ? keptList(id, from, to) : undefined;
+    if (drew !== undefined) {
+      reading = false;
+      fill = rangeFill(ports.rangeFile!, id, fillEnds(drew, from, to), ws, stopRead, ports.rangeFilePages, drew.read_at === "checkout");
+      files = drew.files;
+      cut = drew.truncated;
+      range = drew.range;
+      readAt = drew.read_at;
+      return Promise.resolve();
+    }
+    reading = true;
     const answer: Promise<RangeDiff> = listing !== undefined && ports.rangeFile !== undefined ? listing(id, from, to, ws, name) : ports.rangeDiff(id, from, to, ws);
     return answer.then(
       (diff) => {
         if (!alive()) return;
         reading = false;
-        fill = listing !== undefined && ports.rangeFile !== undefined ? rangeFill(ports.rangeFile, id, fillEnds(diff, from, to), ws, stopRead) : null;
+        fill =
+          listing !== undefined && ports.rangeFile !== undefined
+            ? rangeFill(ports.rangeFile, id, fillEnds(diff, from, to), ws, stopRead, ports.rangeFilePages, diff.read_at === "checkout")
+            : null;
         files = diff.files;
         cut = diff.truncated;
         range = diff.range;

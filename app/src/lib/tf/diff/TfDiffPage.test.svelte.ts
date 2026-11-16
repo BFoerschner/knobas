@@ -348,3 +348,31 @@ test("a diff that names its range runs a file's default pipeline on both sides a
     installPipelines(noPipelines);
   }
 });
+
+test("Open as diff of a compare drawn this session draws its list and its lines kept, and reads neither again", async () => {
+  // The big-compare pass (2026-11-16): Compare kept the counted list it drew, and its files' lines, between two commits.
+  const { keepList, rangeFill, forgetKeptPages } = await import("./fill");
+  forgetKeptPages();
+  const listed = ["src/sepa/retry.rs", "tests/sepa_retry.rs"].map((path) => ({ ...file(path), hunks: [] }));
+  const range = { repository: REPO, base: BASE, head: HEAD, commits: [] };
+  keepList(REPO, { files: listed, truncated: false, range, read_at: "checkout" });
+  const lined = file("src/sepa/retry.rs");
+  const drew = rangeFill(async () => ({ file: lined, from: 0, continues: false, next: null }), REPO, { base: BASE, head: HEAD }, false);
+  await drew.page(listed[0]!, 0, "compare-1");
+  const ports: DiffPagePorts = {
+    entityView: vi.fn(answer),
+    getEntity: async () => detail,
+    rangeDiff: vi.fn(),
+    rangeFiles: vi.fn(),
+    rangeFile: vi.fn(async (_e: string, _b: string, _h: string, path: string) => ({ file: file(path), from: 0, continues: false, next: null })),
+  } as unknown as DiffPagePorts;
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: BASE, head: HEAD, ports } });
+  flushSync();
+  expect(headers(target), "in the page's first frame").toEqual(["src/sepa/retry.rs", "tests/sepa_retry.rs"]);
+  expect(target.querySelector(".tf-diff[data-file='src/sepa/retry.rs'] .tf-ln"), "its lines kept").not.toBeNull();
+  await settle();
+  expect(ports.rangeFiles).not.toHaveBeenCalled();
+  expect(ports.rangeDiff).not.toHaveBeenCalled();
+  expect((ports.rangeFile as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[3]), "only the file not read before").toEqual(["tests/sepa_retry.rs"]);
+  forgetKeptPages();
+});

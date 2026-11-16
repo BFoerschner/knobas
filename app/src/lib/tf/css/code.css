@@ -198,6 +198,18 @@
 .tf-dview { container: dview / inline-size; min-width: 0; }
 .tf-dtool { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; margin-bottom: 12px; font-size: var(--t-sm); }
 .tf-dtool-prog { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
+/*
+  The band (the big-compare pass, 2026-11-16): a diff's toolbar sticks to the top of the page's scroller through a long
+  diff, on the paper it sits on, its 6 px of padding taken out of its margins so nothing moves where the diff starts. Once
+  it has stuck it draws a hairline under it and ends in *Back to top*; the file heads and the file list stick under it.
+*/
+.tf-dmark { height: 0; }
+.tf-dtool.tf-dband { position: sticky; top: 0; z-index: 3; background: var(--paper); margin-top: -6px; padding: 6px 0; margin-bottom: 6px; }
+.tf-dtool.tf-dband.tf-stuck { box-shadow: 0 1px 0 var(--rule); }
+.tf-dtool .tf-dtop { display: none; margin-left: auto; }
+.tf-dtool-prog ~ .tf-dtop { margin-left: 0; }
+.tf-dtool.tf-stuck .tf-dtop { display: inline-flex; }
+.tf-dband ~ .tf-dgrid .tf-diff .tf-fh { top: var(--tf-dband, 0px); }
 .tf-diff { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: clip; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-diff + .tf-diff { margin-top: 12px; }
 /* The file's head stays in view through a long diff. */
@@ -258,7 +270,7 @@
   .tf-dgrid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .tf-dgrid > .tf-railbar { display: flex; }
   .tf-dgrid.tf-rail-shut > .tf-rail { display: none; }
-  .tf-flist { position: static; }
+  .tf-flist, .tf-dgrid .tf-dstick { position: static; }
 }
 /* As tall as the diffs beside it, so the file list has room to stick in (#2091). */
 .tf-dnav { align-self: stretch; }
@@ -268,6 +280,13 @@
   display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
   font-size: var(--t-sm); position: sticky; top: 12px; max-height: calc(100vh - 140px); overflow: auto;
 }
+/* The rail's filter and its list stick together under the band (the big-compare pass); the list leaves the filter its room. */
+.tf-dstick {
+  position: sticky; top: calc(var(--tf-dband, 0px) + 12px); max-height: calc(100vh - 140px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.tf-dstick .tf-minif { flex: none; }
+.tf-dstick .tf-flist { position: static; max-height: none; min-height: 0; }
 .tf-flist button {
   display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
   font: var(--t-sm) var(--mono); font-variant-ligatures: none; align-items: center; text-align: left; cursor: pointer;
@@ -445,7 +464,8 @@
 .tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
 /* On the toolbar's row, not above it (F-246). With no toolbar drawn, while a pick reads or where nothing changes, it stands on its own. */
 .tf-prfiles { position: relative; }
-.tf-prfiles.tf-with-tool > .tf-pickbar { position: absolute; top: 0; left: 0; padding: 0; }
+/* Of no height, so the toolbar's row is where it was; sticky with the band, level with its controls (`.tf-dband`'s 6 px). */
+.tf-prfiles.tf-with-tool > .tf-pickbar { position: sticky; top: 6px; z-index: 4; width: max-content; height: 0; padding: 0; align-items: flex-start; }
 .tf-prfiles > .tf-dview > .tf-dtool { padding-left: calc(var(--tf-pick-w, 0px) + var(--control-gap)); }
 .tf-pick { display: inline-flex; }
 .tf-pick-lab, .tf-pick-ends { color: var(--ink-2); }

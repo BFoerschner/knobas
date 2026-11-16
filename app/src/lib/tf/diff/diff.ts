@@ -57,6 +57,15 @@ export interface DiffFill {
   page(file: DiffFile, from: number, read: string): Promise<FilePage>;
   /** Calls off the read named `read` at the backend (`cancel_read`): the view went before it answered. */
   stop?(read: string): void;
+  /**
+   * The first page of each of `files` in one read (the big-compare pass, 2026-11-16): `null` for a file it could not
+   * answer, which `page` then reads alone. Absent: one read a file.
+   */
+  pages?(files: readonly DiffFile[], read: string): Promise<(FilePage | null)[]>;
+  /** Page `from` of `file`, where it was read before and kept: drawn at once, read no second time. */
+  cached?(file: DiffFile, from: number): FilePage | undefined;
+  /** The view may read ahead the files it has not drawn (`pages`, kept by `cached`): a local read, cheap to make. */
+  ahead?: boolean;
 }
 
 /** One page of one file's lines (`RangeFilePage`): `continues` puts its first hunk's lines at the end of the last page's last hunk. */

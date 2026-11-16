@@ -69,6 +69,7 @@
   import { matchesPath, sameTarget, targetOf } from "../pr/files";
   import {
     DIFF_CEILING,
+    FILL_PAGE,
     EXPAND_STEP,
     hiddenBefore,
     keyOf,
@@ -78,6 +79,7 @@
     type DiffContext,
     type DiffFill,
     type DiffReview,
+    type FilePage,
     type DiffViewed,
     type DrawnFile,
     type DrawnLine,
@@ -488,15 +490,82 @@
   const wantsLines = (file: DrawnFile) =>
     !isClosed(file) && modeOf(file) === "lines" && file.change !== "binary" && (loads[keyOf(file)] === true || !needsLoad(file));
 
-  function ask(key: string, from: number) {
-    if (fill === null || filling.has(key) || queued.some((q) => q.key === key)) return;
-    queued.push({ key, from });
-    pump();
+  /** Lays page `from` of file `key` into what the view drew of it. */
+  function apply(key: string, file: DrawnFile, from: number, page: FilePage) {
+    const had = lined[key];
+    const hunks = from === 0 || had === undefined ? page.hunks : [...had.file.hunks];
+    if (from > 0 && had !== undefined) {
+      const more = [...page.hunks];
+      if (page.continues && more.length > 0 && hunks.length > 0) {
+        const last = hunks.at(-1)!;
+        hunks[hunks.length - 1] = { ...last, lines: [...last.lines, ...more.shift()!.lines] };
+      }
+      hunks.push(...more);
+    }
+    lined = { ...lined, [key]: { file: { ...file, hunks, truncated: page.truncated }, next: page.next, failed: null } };
   }
+
+  /** Asks page `from` of file `key`; `now` false queues it for a `pump` the caller makes once it has queued the rest. */
+  function ask(key: string, from: number, now = true) {
+    if (fill === null || filling.has(key) || queued.some((q) => q.key === key)) return;
+    // A page read before (this view's own, or another's of the same two commits: *Open as diff*, a jump back) is drawn at
+    // once, with no read (the big-compare pass, 2026-11-16).
+    const file = byKey.get(key);
+    const kept = file === undefined ? undefined : fill.cached?.(file, from);
+    if (file !== undefined && kept !== undefined) {
+      apply(key, file, from, kept);
+      return;
+    }
+    queued.push({ key, from });
+    if (now) pump();
+  }
+
+  /** At most this many files' first pages in one read, where the fill reads many at once. */
+  const NEAR_AT_ONCE = 40;
 
   function pump() {
     const port = fill;
     while (port !== null && filling.size < AT_ONCE && queued.length > 0) {
+      // The first pages of the files near the view in one read (one start of git for all of them): a Windows laptop
+      // spends most of a file's wait starting git (the big-compare pass, 2026-11-16).
+      if (port.pages !== undefined && queued[0]!.from === 0) {
+        const batch: { key: string; file: DrawnFile }[] = [];
+        for (let i = 0; i < queued.length && batch.length < NEAR_AT_ONCE; ) {
+          const { key, from } = queued[i]!;
+          const file = byKey.get(key);
+          if (from !== 0 || file === undefined) {
+            i++;
+            continue;
+          }
+          queued.splice(i, 1);
+          batch.push({ key, file });
+        }
+        if (batch.length > 1) {
+          const name = readName();
+          for (const { key } of batch) filling.set(key, name);
+          void port.pages(batch.map((one) => one.file), name).then(
+            (pages) => {
+              batch.forEach(({ key, file }, n) => {
+                if (filling.get(key) !== name) return;
+                filling.delete(key);
+                const page = pages[n];
+                // A file the read could not answer whole is read alone.
+                if (page === null || page === undefined) queued.push({ key, from: 0 });
+                else apply(key, file, 0, page);
+              });
+            },
+            () => {
+              // The read as a whole failed: each file is read alone, and says so if it fails too.
+              for (const { key } of batch) if (filling.get(key) === name) {
+                filling.delete(key);
+                queued.push({ key, from: 0 });
+              }
+            },
+          ).finally(pump);
+          continue;
+        }
+        if (batch.length === 1) queued.unshift({ key: batch[0]!.key, from: 0 });
+      }
       const { key, from } = queued.shift()!;
       const file = byKey.get(key);
       if (file === undefined) continue;
@@ -505,17 +574,7 @@
       void port.page(file, from, name).then(
         (page) => {
           if (filling.get(key) !== name) return;
-          const had = lined[key];
-          const hunks = from === 0 || had === undefined ? page.hunks : [...had.file.hunks];
-          if (from > 0 && had !== undefined) {
-            const more = [...page.hunks];
-            if (page.continues && more.length > 0 && hunks.length > 0) {
-              const last = hunks.at(-1)!;
-              hunks[hunks.length - 1] = { ...last, lines: [...last.lines, ...more.shift()!.lines] };
-            }
-            hunks.push(...more);
-          }
-          lined = { ...lined, [key]: { file: { ...file, hunks, truncated: page.truncated }, next: page.next, failed: null } };
+          apply(key, file, from, page);
         },
         (cause) => {
           if (filling.get(key) !== name) return;
@@ -534,17 +593,89 @@
   $effect(() => {
     if (fill === null) return;
     const near = fileWin.slice(drawn).filter((file) => waits(file) && wantsLines(file)).map(keyOf);
+    // The file the reader is on first, then outward from it: a pick's own file is read before the overscan's.
+    const on = current;
+    if (on !== null && near.includes(on)) {
+      const place = new Map(near.map((key, n) => [key, n] as const));
+      const at = place.get(on)!;
+      near.sort((a, b) => Math.abs(place.get(a)! - at) - Math.abs(place.get(b)! - at));
+    }
     untrack(() => {
       const want = new Set(near);
       for (let i = queued.length - 1; i >= 0; i--) if (!want.has(queued[i]!.key) && queued[i]!.from === 0) queued.splice(i, 1);
-      for (const key of near) ask(key, 0);
+      // All of them queued before any read goes, so they go in one read where the fill reads many.
+      for (const key of near) ask(key, 0, false);
+      pump();
     });
   });
+  /**
+   * **Reading ahead** (the big-compare pass, 2026-11-16): where the fill reads many files at once at a checkout
+   * (`fill.ahead`), the first pages of the files not drawn yet are read while the page is idle, a batch at a time, out
+   * from the file the reader is on, up to {@link AHEAD_LINES} changed lines. They are kept (`fill.cached`), so a pick in the
+   * file list, a `j` far down or *Open as diff* draws the file's lines in the frame it lands in, with no read.
+   */
+  const AHEAD_LINES = 100_000;
+  const AHEAD_AT_ONCE = 100;
+  $effect(() => {
+    const port = fill;
+    const all = drawn;
+    if (port === null || port.ahead !== true || port.pages === undefined || port.cached === undefined || !counted || all.length === 0) return;
+    let live = true;
+    let reading: string | null = null;
+    let wait: (() => void) | null = null;
+    let budget = AHEAD_LINES;
+    const later = (then: () => void) => {
+      if (typeof requestIdleCallback === "function") {
+        const id = requestIdleCallback(then, { timeout: 1000 });
+        wait = () => cancelIdleCallback(id);
+      } else {
+        const id = setTimeout(then, 50);
+        wait = () => clearTimeout(id);
+      }
+    };
+    const next = () => {
+      wait = null;
+      if (!live || budget <= 0) return;
+      const keys = all.map(keyOf);
+      const here = Math.max(0, current === null ? 0 : keys.indexOf(current));
+      const batch: DrawnFile[] = [];
+      // Out from the reader's file: below it first, then above.
+      for (let d = 0; batch.length < AHEAD_AT_ONCE && budget > 0 && (here + d < all.length || here - d > 0); d++) {
+        for (const i of d === 0 ? [here] : [here + d, here - d]) {
+          const file = all[i];
+          if (file === undefined || batch.length >= AHEAD_AT_ONCE || budget <= 0) continue;
+          const key = keyOf(file);
+          if (!waits(file) || filling.has(key) || port.cached!(file, 0) !== undefined) continue;
+          batch.push(file);
+          budget -= Math.min(file.additions + file.deletions, FILL_PAGE);
+        }
+      }
+      if (batch.length === 0) return;
+      const name = readName();
+      reading = name;
+      void port.pages!(batch, name).then(
+        () => {
+          if (reading === name) reading = null;
+          if (live) later(next);
+        },
+        () => {
+          if (reading === name) reading = null;
+        },
+      );
+    };
+    later(next);
+    return () => {
+      live = false;
+      wait?.();
+      if (reading !== null) port.stop?.(reading);
+    };
+  });
+
   // A diff that goes (another branch picked, the page left) calls off the reads it started.
   $effect(() => () => {
     queued.length = 0;
     const port = untrack(() => fill);
-    for (const name of filling.values()) port?.stop?.(name);
+    for (const name of new Set(filling.values())) port?.stop?.(name);
     filling.clear();
   });
 
@@ -858,6 +989,47 @@
     return () => window.removeEventListener("keydown", keys);
   });
 
+  /**
+   * **The band** (the big-compare pass, 2026-11-16): the toolbar sticks to the top of the page's scroller through a long
+   * diff, the file list sticking under it, and once it has stuck it ends in *Back to top*, which takes the page back to
+   * its start: Compare's branches and *Create pull request*, a pull request's tabs. Whether it has stuck is read off a
+   * mark of no height just above it, which the scroller's top has passed.
+   */
+  let stuck = $state(false);
+  let band = $state<HTMLElement | null>(null);
+  function stickMark(mark: HTMLElement) {
+    const root = mark.closest(".tf-main, .tf-bmain");
+    if (root === null || typeof IntersectionObserver === "undefined") return;
+    const watch = new IntersectionObserver(
+      ([entry]) => {
+        if (entry !== undefined) stuck = !entry.isIntersecting && entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0);
+      },
+      { root },
+    );
+    watch.observe(mark);
+    return () => watch.disconnect();
+  }
+  /** The band's height, for the file heads and the file list that stick under it. */
+  function bandRoom(node: HTMLElement) {
+    band = node;
+    if (typeof ResizeObserver === "undefined") return;
+    const host = node.parentElement;
+    const watch = new ResizeObserver(([entry]) => {
+      const px = entry?.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight;
+      host?.style.setProperty("--tf-dband", `${px}px`);
+    });
+    watch.observe(node);
+    return () => watch.disconnect();
+  }
+  /** *Back to top*: the page's start, focus on the page so its keys go on. */
+  function toTop() {
+    const root = band?.closest<HTMLElement>(".tf-main, .tf-bmain");
+    if (!root) return;
+    root.scrollTop = 0;
+    heldAt = null;
+    root.focus({ preventScroll: true });
+  }
+
   let filesHost = $state<HTMLElement | null>(null);
   /** A windowed file is holding rows back: it pads for them (`Windowed`), and the find bar finds only what is drawn. */
   const heldBack = () =>
@@ -907,7 +1079,8 @@
 
 <div class="tf-dview">
 <TfFindBar root={() => filesHost} within="in open files" more={heldBack} />
-<div class="tf-dtool">
+{#if list}<div class="tf-dmark" aria-hidden="true" {@attach stickMark}></div>{/if}
+<div class="tf-dtool" class:tf-dband={list} class:tf-stuck={list && stuck} {@attach bandRoom}>
   <div class="tf-seg" role="group" aria-label="Layout">
     <button type="button" aria-pressed={!split} onclick={() => layout.set("unified")}>Unified</button>
     <button
@@ -939,6 +1112,10 @@
     {@const count = files.filter((file) => isViewed(file.path)).length}
     <span class="tf-dtool-prog">{count} of {files.length} viewed</span>
   {/if}
+  {#if list}
+    <!-- Drawn once the band has stuck: at the diff's start there is nothing above it to go back to. -->
+    <button type="button" class="tf-btn tf-sm tf-ghost tf-dtop" tabindex={stuck ? undefined : -1} onclick={toTop}>Back to top</button>
+  {/if}
 </div>
 {#if cut}
   <p class="tf-dcut">
@@ -949,6 +1126,8 @@
   {#if list}
     <TfRailBar label="File" value={current === null ? "None" : nameOf(current)} open={railOpen} controls="{uid}-files" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
     <div class="tf-dnav tf-rail" id="{uid}-files">
+      <!-- The filter sticks with the list under the band, so a file is found by name from anywhere in the diff. -->
+      <div class="tf-dstick">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
         <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys({ aside: true })} />
@@ -986,6 +1165,7 @@
         {#if railWin.after > 0}<div class="tf-wgap" aria-hidden="true" {@attach railWin.room("after")}></div>{/if}
       </nav>
       {/if}
+      </div>
       <p class="tf-dkeys tf-dim">
         <span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span>{#if viewed}<span><kbd>v</kbd> viewed</span>{/if}{#if review}<span
             ><kbd>c</kbd> comment</span

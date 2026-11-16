@@ -405,7 +405,7 @@ test("no page's scroller reserves room for its bar: the page is as wide as the w
   expect(block(code, ".tf-sbody")).toMatch(/width:\s*100cqw/);
 });
 
-const STICKY_BARS = [":is(.tf-mon, .tf-mon-gaps) thead th", ".tf-fbar", ".tf-findbar", ".tf-findhold", ".tf-rd-crumbrow", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap.tf-lanes .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(.tf-lanes) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap.tf-lanes > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)", ".tf-laned > h2", ".tf-lanes-more", ".tf-newruns"];
+const STICKY_BARS = [":is(.tf-mon, .tf-mon-gaps) thead th", ".tf-fbar", ".tf-findbar", ".tf-findhold", ".tf-rd-crumbrow", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap.tf-lanes .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(.tf-lanes) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap.tf-lanes > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)", ".tf-laned > h2", ".tf-lanes-more", ".tf-newruns", ".tf-dtool.tf-dband", ".tf-prfiles.tf-with-tool > .tf-pickbar"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
@@ -417,7 +417,7 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
     expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline"]),
   );
   // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
-  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree", ".tf-rbv > .tf-rbrail": ".tf-pl-list" };
+  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree", ".tf-rbv > .tf-rbrail": ".tf-pl-list", ".tf-dstick": ".tf-flist" };
   const scrolls = (selector: string, body: string) =>
     INNER[selector] === undefined
       ? /overflow(-y)?:\s*auto/.test(body)

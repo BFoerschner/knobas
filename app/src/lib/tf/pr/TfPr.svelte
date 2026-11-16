@@ -48,7 +48,7 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { SourceFacts } from "../job/job";
   import type { DetailRefreshPorts } from "../refresh.svelte";
-  import type { RangeFileRead, RangeFilesRead } from "../diff/fill";
+  import type { RangeFilePagesRead, RangeFileRead, RangeFilesRead } from "../diff/fill";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface PrPorts {
@@ -72,6 +72,7 @@
     /** *Files changed*'s clone diff and commit picks a file at a time (the compare pass, 2026-11-13); whole when left out. */
     rangeFiles?: RangeFilesRead;
     rangeFile?: RangeFileRead;
+    rangeFilePages?: RangeFilePagesRead;
     cancelRead?: (read: string) => Promise<boolean>;
   }
 </script>
@@ -86,6 +87,7 @@
     codeFacts,
     cancelRead,
     entityRangeFile,
+    entityRangeFilePages,
     entityRangeFiles,
     entityView,
     getEntity,
@@ -181,6 +183,7 @@
       setPrFileViewed: (id, path, viewed, blobs) => setPrFileViewed(id, path, viewed, blobs),
       rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
       rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+      rangeFilePages: (entityId, base, head, files, ignoreWhitespace, read) => entityRangeFilePages(entityId, base, head, files, ignoreWhitespace, read),
       cancelRead: (read) => cancelRead(read),
     },
     pending = sharedPending,
@@ -940,6 +943,7 @@
             {me}
             rangeFiles={ports.rangeFiles ?? null}
             rangeFile={ports.rangeFile ?? null}
+            rangeFilePages={ports.rangeFilePages ?? null}
             cancelRead={ports.cancelRead ?? null}
           />
         </TfRepoTab>

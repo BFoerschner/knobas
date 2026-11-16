@@ -69,7 +69,7 @@
   import { rangeContext } from "../diff/context";
   import { pickedEnds, type PrPick } from "../diff/pick";
   import { diffOf } from "./files";
-  import { fillEnds, rangeFill, type RangeFileRead, type RangeFilesRead } from "../diff/fill";
+  import { fillEnds, rangeFill, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "../diff/fill";
   import type { DiffFill } from "../diff/diff";
   import TfPrPicker from "./TfPrPicker.svelte";
 
@@ -93,6 +93,7 @@
     piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
     rangeFiles = null,
     rangeFile = null,
+    rangeFilePages = null,
     cancelRead = null,
   }: {
     prId: string;
@@ -134,6 +135,8 @@
      */
     rangeFiles?: RangeFilesRead | null;
     rangeFile?: RangeFileRead | null;
+    /** The first page of many files in one read (the big-compare pass, 2026-11-16). */
+    rangeFilePages?: RangeFilePagesRead | null;
     /** Calls a named read off at the backend. */
     cancelRead?: ((read: string) => Promise<boolean>) | null;
   } = $props();
@@ -147,7 +150,7 @@
   function readRange(repo: string, base: string, head: string, name: string): Promise<{ diff: RangeDiff; fill: DiffFill | null }> {
     if (rangeFiles === null || rangeFile === null) return rangeDiff(repo, base, head, false).then((diff) => ({ diff, fill: null }));
     const lines = rangeFile;
-    return rangeFiles(repo, base, head, false, name).then((diff) => ({ diff, fill: rangeFill(lines, repo, fillEnds(diff, base, head), false, stopRead) }));
+    return rangeFiles(repo, base, head, false, name).then((diff) => ({ diff, fill: rangeFill(lines, repo, fillEnds(diff, base, head), false, stopRead, rangeFilePages ?? undefined, diff.read_at === "checkout") }));
   }
   /** The fills of the clone's diff and of a pick's, while each is drawn. */
   let predictedFill = $state.raw<DiffFill | null>(null);

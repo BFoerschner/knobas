@@ -56,6 +56,7 @@
 -->
 <script lang="ts" module>
   import type { EchoListen } from "../queued.svelte";
+  import type { RangeFilePagesRead } from "../diff/fill";
   import type {
     CheckoutView,
     ChoiceOption,
@@ -139,6 +140,8 @@
     rangeFiles?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string) => Promise<RangeFiles>;
     /** One page of one file's lines (the compare pass). */
     rangeFile?: (entityId: string, base: string, head: string, path: string, oldPath: string | null, ignoreWhitespace: boolean, from: number, read: string) => Promise<RangeFilePage>;
+    /** The first page of many files in one read (the big-compare pass, 2026-11-16): one start of git for the files near the view. */
+    rangeFilePages?: RangeFilePagesRead;
     /** The source's compare now as a list of files (the compare pass): what Compare checks a predicted list against. */
     sourceRangeFiles?: (entityId: string, base: string, head: string, read: string) => Promise<RangeFiles>;
     /** Calls off a named read at the backend (the compare pass). */
@@ -217,6 +220,7 @@
     entityFilePiped,
     entityRangeDiff,
     entityRangeFile,
+    entityRangeFilePages,
     entityRangeFiles,
     entitySourceRangeFiles,
     entityRangeNames,
@@ -332,6 +336,7 @@
       sourceRangeDiff: (entityId, base, head) => entitySourceRangeDiff(entityId, base, head),
       rangeFiles: (entityId, base, head, ignoreWhitespace, read) => entityRangeFiles(entityId, base, head, ignoreWhitespace, read),
       rangeFile: (entityId, base, head, path, oldPath, ignoreWhitespace, from, read) => entityRangeFile(entityId, base, head, path, oldPath, ignoreWhitespace, from, read),
+      rangeFilePages: (entityId, base, head, files, ignoreWhitespace, read) => entityRangeFilePages(entityId, base, head, files, ignoreWhitespace, read),
       sourceRangeFiles: (entityId, base, head, read) => entitySourceRangeFiles(entityId, base, head, read),
       cancelRead: (read) => cancelRead(read),
       rangeNames: (entityId, base, head) => entityRangeNames(entityId, base, head),
