@@ -417,6 +417,17 @@ impl Connector {
     /// is waited for under the pool's acquire timeout, as [`pool`](Self::pool)'s
     /// is: the callers reach a server that has just answered them.
     ///
+    /// **A connection is kept for the life of the pool** (the long-words
+    /// pass, 2026-11-16). sqlx closes one after 30 minutes, and after 10
+    /// idle, by default: the rule for a server across a network, which may
+    /// have gone away. This one is the app's own on the loopback, and each
+    /// connection holds what the launcher prepared on it: the plans its
+    /// statements are run under (`knobas_search::sql::fetch_kept`), made
+    /// once a connection, 10 to 30 ms each. A connection replaced every
+    /// half hour made them again at the next key. One that has broken is
+    /// still found and replaced when it is next asked for (sqlx tests each
+    /// before it hands it out).
+    ///
     /// # Errors
     /// [`sqlx::Error`] if the first connection fails.
     pub async fn app_pool(&self) -> Result<PgPool, sqlx::Error> {
@@ -446,6 +457,9 @@ impl Connector {
             // sqlx's default, spelled out: the statement limit above is
             // argued from it.
             .acquire_timeout(Duration::from_secs(30))
+            // Kept, with what was prepared on them: `app_pool` says why.
+            .max_lifetime(None)
+            .idle_timeout(None)
             .connect_lazy_with(options)
     }
 }

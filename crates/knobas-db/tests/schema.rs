@@ -2170,6 +2170,37 @@ async fn the_fill_steps_past_an_item_a_sync_holds() {
         .unwrap();
 }
 
+/// The app's pool keeps a connection for as long as the pool lives (the
+/// long-words pass, 2026-11-16): no age and no idle time closes one, where
+/// sqlx's defaults close it after 30 minutes and after 10 idle. The
+/// launcher's statements are planned once a connection
+/// (`knobas_search::sql::fetch_kept`), and a connection replaced took its
+/// plans with it. A pool a test or a tool opens keeps sqlx's defaults.
+#[tokio::test]
+async fn the_app_pool_keeps_its_connections_for_its_life() {
+    let connector = knobas_db::test_util::scratch_database("app_pool_kept").await;
+    let app = connector.app_pool().await.unwrap();
+    assert_eq!(app.options().get_max_lifetime(), None);
+    assert_eq!(app.options().get_idle_timeout(), None);
+    // A statement prepared on a connection is there the next time the
+    // connection is handed out: one connection, asked for twice.
+    let prepared = async || -> i64 {
+        sqlx::query_scalar("select count(*) from pg_prepared_statements")
+            .fetch_one(&app)
+            .await
+            .unwrap()
+    };
+    let first = prepared().await;
+    assert!(first >= 1, "the count's own statement is prepared");
+    assert_eq!(prepared().await, first, "and kept");
+    app.close().await;
+
+    let other = connector.pool(1).await.unwrap();
+    assert!(other.options().get_max_lifetime().is_some());
+    assert!(other.options().get_idle_timeout().is_some());
+    other.close().await;
+}
+
 /// The app's pool cancels a statement that runs past thirty seconds (#745).
 ///
 /// Every connection of [`knobas_db::embedded::Connector::app_pool`] carries
