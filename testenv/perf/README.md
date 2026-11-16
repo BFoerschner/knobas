@@ -406,7 +406,8 @@ node testenv/perf/open.mjs --app "<app>?fake-ipc&fake-hooks&fake-real=5411#/time
 How long one key takes to show the rows it asks for, from the broad-filters pass of PR #2479 (2026-11-13, rulings in
 `docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md`). The keys are the dear ones, those that keep most
 of a page: the first letter typed into Tickets' filter, a `-project:` and a `-priority:` that leave one value out, and a
-single letter under Everything in the launcher, with the second and the third letter of a word after it. `keys.mjs`
+single letter under Everything in the launcher, with the second, the third, the fourth, the fifth and the last
+letter of a word after it. `keys.mjs`
 presses each as real input over the DevTools protocol, each
 press a key the session never asked before so the answer cache cannot answer it, and records in the page, from the
 key's own event time:
@@ -448,6 +449,15 @@ once. They hold one letter's lines, 70, 100 and 130 ms, and measured 34, 61 and 
 and 73 for the third, where the ranking of words took 96, 126 and 145 and 89, 103 and 118. A press must change what
 the list draws: `keys.mjs` reads an answer off the change it makes, so a key that asks for the rows already drawn
 (`d` after `le`, which name the same rows) counts as one that drew nothing.
+
+`everything-four-letters`, `everything-five-letters` and `everything-word` (the long-words pass, 2026-11-16,
+`docs/decisions/2026-11-16-a-word-many-rows-hold.md`) press the fourth letter, the fifth and the last of words the
+scale seed's bodies are built from, each in 13,000 to 22,000 of the 39,770 rows, into a box that holds the letters
+before with their answer drawn. Ranked over every match they took 48 to 59 ms of backend. Counted first and answered
+by their names and each kind's newest text they take 11 to 15, under one plan a connection. Their lines are the
+letters', 70, 100 and 130 ms. A later letter often asks for the rows already drawn (`payo` and `payou` hold the same
+rows, `invoic` is `invoice`'s own lexeme), so the fifth letters and the last ones are those that change the list.
+The first press on each of the backend's five connections also makes that connection's plan, about 10 ms once.
 
 ### With a sync running: `just open-budget --inner --syncing <source>`
 

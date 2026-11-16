@@ -3,7 +3,9 @@
 // ones: the first letter typed into Tickets' filter, a `-project:` that leaves one project out, a `-priority:` that
 // leaves one out, and the first letter under Everything in the launcher, with the second and the third after it
 // (the two-letters pass, 2026-11-16: `everything-two-letters` presses the second letter of a word into a box that
-// holds its first, `everything-three-letters` the third into one that holds two). The `tickets-expanded-*` cases
+// holds its first, `everything-three-letters` the third into one that holds two) and the fourth, the fifth and a
+// word's last (the long-words pass, 2026-11-16: `everything-four-letters`, `everything-five-letters` and
+// `everything-word`, each of a word half the scale mirror holds). The `tickets-expanded-*` cases
 // press the same on a board whose every column had its *Show more* pressed four times (`EXPAND_PAGES`): 1,243 cards
 // on the scale database, the board the Windows pass measured (2026-11-14).
 //
@@ -217,6 +219,15 @@ const CASES = [
   // and the probe, which reads an answer off the change it makes, would count it as no rows.
   { name: "everything-two-letters", presses: [["p", "a"], ["r", "e"], ["c", "o"], ["d", "e"], ["s", "t"], ["l", "e"], ["b", "a"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-three-letters", presses: [["pa", "y"], ["re", "t"], ["co", "n"], ["de", "p"], ["st", "a"], ["ca", "c"], ["ba", "t"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  // The long-words pass (2026-11-16): the fourth letter, the fifth and the last of words the scale seed's bodies are
+  // built from, each in 13,000 to 22,000 of the 39,770 rows. Ranked whole, each took 48 to 59 ms of backend; counted
+  // and read bounded they take 11 to 15. The fourth letter leaves the names' answer for the words'. A later letter
+  // often asks for the rows already drawn (`payo` and `payou` hold the same rows, and `invoic` is `invoice`'s own
+  // lexeme), which the probe would count as no rows, so the fifth letters and the last ones here are those that
+  // change the list: `retr` to `retry` drops `retro`, `refun` to `refund` is ranked by the whole word.
+  { name: "everything-four-letters", presses: [["pay", "o"], ["ret", "r"], ["con", "f"], ["dep", "l"], ["led", "g"], ["bat", "c"], ["sta", "g"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-five-letters", presses: [["retr", "y"], ["conf", "i"], ["batc", "h"], ["sche", "d"], ["chec", "k"], ["part", "n"], ["time", "o"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));
 
