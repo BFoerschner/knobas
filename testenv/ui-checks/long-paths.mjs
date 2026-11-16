@@ -10,6 +10,7 @@
 // window's smallest, 1100x600. It fails when:
 //   - a run of a path's text reaches past the window, or past any box that holds it, cut or spilling, unless it is the start of a
 //     path drawn by `TfPath` (`.tf-path-head`), which gives up its middle for the folder at its end, whole path on hover;
+//   - an ellipsis cuts a path, other than that start;
 //   - a box scrolls sideways with the long paths and did not with the fixture's short ones.
 // A visually hidden run (the sign's description, which the witness and a screen reader read) is left out.
 //
@@ -37,8 +38,8 @@ const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 // `press`: the control to press first, by its words or a selector; `focus`: the control to focus (the sign's bubble opens on it).
 const SCREENS = [
   { id: "repo-files", route: REPO },
-  { id: "repo-sign-focus", route: REPO, focus: ".tf-clonesign-face" },
-  { id: "repo-sign-hover", route: REPO, hover: ".tf-clonesign-face" },
+  { id: "repo-sign-focus", route: REPO, focus: ".tf-signbtn" },
+  { id: "repo-sign-hover", route: REPO, hover: ".tf-signbtn" },
   { id: "repo-open-in", route: REPO, press: "Open in…" },
   { id: "repo-local", route: `${REPO}/local` },
   { id: "repo-branches", route: `${REPO}/branches` },
@@ -49,6 +50,7 @@ const SCREENS = [
   { id: "pr", route: "pr/mock%3Apayout-service%23142" },
   { id: "pr-open-in", route: "pr/mock%3Apayout-service%23142", press: "Open in…" },
   { id: "settings-checkouts", route: "settings/checkouts" },
+  { id: "settings-remove-worktree", route: "settings/checkouts", press: "Remove…" },
   { id: "job", route: "job/PAY-231" },
 ];
 
@@ -75,22 +77,42 @@ const CHECK = String.raw`(() => {
       }
       if (hidden) continue;
       const left = Math.min(...rects.map((r) => r.left)), right = Math.max(...rects.map((r) => r.right));
+      // What shows: the run as laid out, inside every box that clips it. A run clipped out of sight is not drawn.
+      let shownLeft = left, shownRight = right;
+      for (let e = node.parentElement; e; e = e.parentElement) {
+        if (getComputedStyle(e).overflowX === "visible") continue;
+        const b = e.getBoundingClientRect();
+        shownLeft = Math.max(shownLeft, b.left);
+        shownRight = Math.min(shownRight, b.right);
+      }
+      if (shownRight <= shownLeft) continue;
       const text = node.textContent.trim().slice(-48);
-      if (right > innerWidth + 0.5 || left < -0.5) { misses.push({ kind: "window", at: where(node.parentElement), text, over: Math.round(right - innerWidth) }); continue; }
+      if (shownRight > innerWidth + 0.5 || shownLeft < -0.5) { misses.push({ kind: "window", at: where(node.parentElement), text, over: Math.round(Math.max(shownRight - innerWidth, -shownLeft)) }); continue; }
       if (cutOnPurpose) continue;
       for (let e = node.parentElement; e && e !== document.body; e = e.parentElement) {
-        if (getComputedStyle(e).display === "inline") continue;
+        const s = getComputedStyle(e);
+        if (s.display === "inline") continue;
         const b = e.getBoundingClientRect();
         if (b.width === 0) continue;
         if (right > b.right + 1 || left < b.left - 1) { misses.push({ kind: "box", at: where(e), text, over: Math.round(Math.max(right - b.right, b.left - left)) }); break; }
+        // A float (the sign's bubble, a menu) stands out of the boxes around it on purpose: past it, only the window holds it.
+        if (s.position === "absolute" || s.position === "fixed") break;
       }
     }
+  }
+  // A path an ellipsis cuts: Chrome reports such a run as only what shows, so the boxes above can't see it.
+  for (const root of roots) for (const e of root.querySelectorAll("*")) {
+    if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth + 1 || !MARK.test(e.textContent)) continue;
+    const s = getComputedStyle(e);
+    if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.closest(".tf-sr")) continue;
+    misses.push({ kind: "cut", at: where(e), text: e.textContent.trim().slice(-48), over: e.scrollWidth - e.clientWidth });
   }
   const scrolls = [];
   for (const root of roots) for (const e of [root, ...root.querySelectorAll("*")]) {
     if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth + 1) continue;
     const s = getComputedStyle(e);
-    if (s.overflowX === "visible" || s.textOverflow === "ellipsis") continue;
+    // A clip is no scroll: the kept page clips what passes under the scroller's 8 px bar on purpose (chrome.css).
+    if (s.overflowX === "visible" || s.overflowX === "clip" || s.textOverflow === "ellipsis") continue;
     scrolls.push(where(e));
   }
   return JSON.stringify({ misses, scrolls, page: document.documentElement.scrollWidth > innerWidth + 1 });
@@ -109,6 +131,8 @@ const chrome = await launch("knobas-long-paths");
 const { send, evaluate } = chrome;
 const opener = screenOpener(chrome, port);
 await opener.install();
+// Headless, the page has no focus of its own, so a focus() would fire no focus event and the sign's bubble would stay shut.
+await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
 const results = [];
 let failed = 0;

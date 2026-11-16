@@ -345,7 +345,7 @@
   background: var(--sheet); box-shadow: var(--shadow); color: var(--ink); font-size: var(--t-sm); white-space: normal;
 }
 .tf-signbubble-what { color: var(--ink-2); font-size: var(--t-xs); }
-.tf-signbubble-drawn { overflow-wrap: anywhere; line-height: 1.45; }
+.tf-signbubble-drawn { line-height: 1.45; }
 .tf-signbubble-drawn b { font-weight: 600; }
 .tf-signbubble-state { color: var(--ink-2); font-size: var(--t-xs); }
 .tf-signbubble-acts { display: flex; flex-wrap: wrap; gap: var(--control-gap); margin-top: 2px; }
@@ -354,8 +354,10 @@
 .tf-path { display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; white-space: nowrap; }
 .tf-path-head { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-path-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* A sentence that holds a whole path wraps inside it rather than run past its box. */
-.tf-wrapall { overflow-wrap: anywhere; }
+/* A path that wraps whole, alone or inside a sentence, anywhere rather than run past its box; over the code face's
+   one-line rule (`tokens.css`). */
+.tf-wrapall, .tf-wrapall .tf-mono { overflow-wrap: anywhere; }
+.tf-wrapall.tf-mono, .tf-wrapall .tf-mono { white-space: normal; }
 .tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
 .tf .tf-small { font-size: var(--t-sm); }
 .tf-linkish {

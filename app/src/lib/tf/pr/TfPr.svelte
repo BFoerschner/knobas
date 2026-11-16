@@ -156,7 +156,6 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
-  import TfPath from "../TfPath.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { diffOf, rangeOf } from "./files";
   import { BY_POINTER_MS } from "../press-guard";
@@ -1187,7 +1186,7 @@
             <div class="tf-panel tf-headed">
               <header><h3>Local checkout</h3></header>
               <div class="tf-prlocal">
-                <TfPath path={local.path} />
+                <span class="tf-mono tf-wrapall">{local.path}</span>
                 <span>{local.line}</span>
                 <div class="tf-prlocal-acts">
                   <TfOpenIn entityId={repo.entity_id} title={repo.title} checkout={checkout ?? undefined} />

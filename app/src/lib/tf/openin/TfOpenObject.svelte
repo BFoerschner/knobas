@@ -204,7 +204,7 @@
         {#if tool !== null}
           {@const at = tool.ends}
           {#if entries.length > 0}<hr />{/if}
-          <button role="menuitem" onclick={() => diff(at)}><b>Diff tool</b><TfPath path={argvText(tool.argv)} /></button>
+          <button role="menuitem" onclick={() => diff(at)}><b>Diff tool</b><span class="tf-mono tf-appmenu-argv">{argvText(tool.argv)}</span></button>
         {/if}
         {#if page !== null}
           {#if entries.length > 0 || tool !== null}<hr />{/if}

@@ -214,7 +214,7 @@
         <span class="tf-sr" id="{uid}-path">{path}</span>
         {#if open}
           <!-- The path drawn, its folder in ink; the hidden run above is what is read, as one run. -->
-          <span class="tf-signbubble-drawn tf-mono" aria-hidden="true"
+          <span class="tf-signbubble-drawn tf-mono tf-wrapall" aria-hidden="true"
             >{#if parts.head !== ""}<span class="tf-dim">{parts.head}</span>{/if}<b>{parts.tail}</b></span
           >
           {#if sentence?.state}<span class="tf-signbubble-state" aria-hidden="true">{sentence.state}</span>{/if}
