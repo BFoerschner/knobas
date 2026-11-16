@@ -31,15 +31,17 @@
 // - the tree: rows in the DOM, its height, folders opened;
 // - every `--trace-every` laps, the sweep under a trace: the elements each style pass computed.
 //
-// `--check` holds the run to the `soak` lines of the budget: growth from the third lap to the last, the hovers at each
-// throttle, the hover and the reads after a run's end. Exit 1 when one is crossed.
+// `--check` holds the run to the `soak` lines of the budget: what the page keeps after a collection late in the run
+// against early in it, the hovers at each throttle, the hover and the reads after a run's end. Exit 1 when one is
+// crossed.
 //
 // `--tour` is the same question asked of every other page: each lap visits each page in turn (the sections, a
 // pipeline, a run, a space, a doc, the repository's other tabs, a pull request and its files), opens what it offers
 // more of (a board column's *Show 50 more*, *Older runs*, a diff's *Expand all*), and keeps the pointer moving over its
 // rows through a run's end. Per page it holds the reads and the main thread's time that end costs on the last lap
-// against the second (`tourCallsGrowth`, `tourMainMsGrowth`) and the hover through it (`tourFeltP95`), and over all
-// of them the nodes, listeners and heap kept (`soak-tour` lines).
+// against the second and third (`tourCallsGrowth`, `tourMainMsGrowth`) and the hover through it (`tourFeltP95`):
+// the `soak-tour` lines. The nodes and the heap kept are printed and not held: what the tour presses is kept by
+// design (a hundred more cards a lap, a diff's context), so they grow until there is no more to press.
 import { readFileSync, writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 import { stylePasses } from "./frames.mjs";
@@ -148,6 +150,8 @@ for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav'
 await js(PAGE);
 
 const metrics = async () => Object.fromEntries((await c.send("Performance.getMetrics")).metrics.map((m) => [m.name, m.value]));
+/** The metrics after a collection, asked three times: a page dropped goes in the first, and what only it held in the next. */
+const collected = async () => { for (let i = 0; i < 3; i++) { await c.send("HeapProfiler.collectGarbage"); await sleep(120); } return metrics(); };
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s.length === 0 ? null : s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
 const r1 = (n) => (n === null ? null : Math.round(n * 10) / 10);
@@ -328,16 +332,19 @@ if (touring) {
       row.pages[hash] = { pressed, rows: rows.length, elements, ...got };
     }
     await park();
-    await c.send("HeapProfiler.collectGarbage");
-    const kept = await metrics();
+    const kept = await collected();
     Object.assign(row, { atMin: r1((Date.now() - tourStart) / 60000), heapMB: r1(kept.JSHeapUsedSize / 1e6), nodesKept: kept.Nodes, listenersKept: kept.JSEventListeners, documents: kept.Documents, tauriListeners: await js("window.__soak.listens - window.__soak.unlistens") });
     laps.push(row);
     const worst = Object.entries(row.pages).sort((a, b) => b[1].feltMax - a[1].feltMax)[0];
     console.log(`tour lap ${lap} (${row.atMin} min): ${row.nodesKept} nodes, ${row.listenersKept} listeners, ${row.tauriListeners} tauri, heap ${row.heapMB} MB; a run's end at ${slowest}x: ${Object.values(row.pages).reduce((a, p) => a + p.calls, 0)} calls and ${Object.values(row.pages).reduce((a, p) => a + p.mainMs, 0)} ms over ${pages.length} pages; slowest hover ${worst[1].feltMax} ms on ${worst[0]}`);
     writeFileSync(out, JSON.stringify({ app, repo, size: size.name, throttle: slowest, pages, laps }, null, 1));
   }
+  // A page's second and third visits are its steady state (the first reads what the session never read; Branches reads
+  // its branches' standings over two): the larger of the two is what the last is held against.
   const second = laps[Math.min(1, laps.length - 1)], final = laps.at(-1);
-  const perPage = pages.map((hash) => ({ hash, callsFirst: second.pages[hash].calls, callsLast: final.pages[hash].calls, mainMsFirst: second.pages[hash].mainMs, mainMsLast: final.pages[hash].mainMs, feltP95Last: final.pages[hash].feltP95, feltMaxLast: final.pages[hash].feltMax, elementsFirst: second.pages[hash].elements, elementsLast: final.pages[hash].elements }));
+  const early = laps.slice(1, 3).length > 0 ? laps.slice(1, 3) : [second];
+  const steady = (hash, key) => Math.max(...early.map((lap) => lap.pages[hash][key]));
+  const perPage = pages.map((hash) => ({ hash, callsFirst: steady(hash, "calls"), callsLast: final.pages[hash].calls, mainMsFirst: steady(hash, "mainMs"), mainMsLast: final.pages[hash].mainMs, feltP95Last: final.pages[hash].feltP95, feltMaxLast: final.pages[hash].feltMax, elementsFirst: second.pages[hash].elements, elementsLast: final.pages[hash].elements }));
   const result = {
     laps: laps.length,
     minutes: final.atMin,
@@ -351,7 +358,7 @@ if (touring) {
     tourFeltP95: Math.max(...perPage.map((p) => p.feltP95Last ?? 0)),
     tourFeltMax: Math.max(...perPage.map((p) => p.feltMaxLast ?? 0)),
   };
-  console.log(["| page | calls, lap 2 | last | main ms, lap 2 | last | hover p95, last | max |", "|---|---|---|---|---|---|---|", ...perPage.map((p) => `| ${p.hash} | ${p.callsFirst} | ${p.callsLast} | ${p.mainMsFirst} | ${p.mainMsLast} | ${p.feltP95Last} | ${p.feltMaxLast} |`)].join("\n"));
+  console.log(["| page | calls, laps 2 and 3 | last | main ms, laps 2 and 3 | last | hover p95, last | max |", "|---|---|---|---|---|---|---|", ...perPage.map((p) => `| ${p.hash} | ${p.callsFirst} | ${p.callsLast} | ${p.mainMsFirst} | ${p.mainMsLast} | ${p.feltP95Last} | ${p.feltMaxLast} |`)].join("\n"));
   let over = 0;
   const table = ["| measure | got | line | |", "|---|---|---|---|"];
   const lines = checkFile ? (JSON.parse(readFileSync(checkFile, "utf8"))[linesName]?.["soak-tour"] ?? {}) : {};
@@ -450,8 +457,7 @@ for (let lap = 1; lap <= laps && (minutes === null || Date.now() - started < min
       kept: document.querySelectorAll(".tf-kept").length, elements: document.getElementsByTagName("*").length, shownElements: document.querySelector("${shown}")?.getElementsByTagName("*").length ?? 0 }; })()`));
   row.foldersOpened = opened.size;
   if (lap % 5 === 1) {
-    await c.send("HeapProfiler.collectGarbage");
-    const kept = await metrics();
+    const kept = await collected();
     row.heapMB = r1(kept.JSHeapUsedSize / 1e6);
     row.nodesKept = kept.Nodes;
     row.listenersKept = kept.JSEventListeners;
@@ -481,15 +487,18 @@ const heaps = samples.filter((s) => s.heapMB !== undefined);
 const synced = samples.filter((s) => s.afterSync);
 const returns = samples.filter((s) => s.afterReturn);
 const half = (xs) => xs.slice(Math.floor(xs.length / 2));
+const third = Math.max(1, Math.floor(heaps.length / 3));
+const grown = (key) => (heaps.length < 2 ? 0 : pct(heaps.slice(-third).map((s) => s[key]), 0.5) - pct(heaps.slice(0, third).map((s) => s[key]), 0.5));
 const result = {
   laps: samples.length,
   minutes: last.atMin,
   foldersOpened: last.foldersOpened,
-  // After a collection, from the second collected lap (the first holds the app's own start) to the last.
-  nodesGrowth: heaps.length > 1 ? heaps.at(-1).nodesKept - heaps[1].nodesKept : 0,
-  listenersGrowth: heaps.length > 1 ? heaps.at(-1).listenersKept - heaps[1].listenersKept : 0,
+  // After a collection: the median of the last third of the collected laps less that of the first third. One lap
+  // against another reads which page keep-alive happened to hold, a pull request's diff or a list of a few rows.
+  nodesGrowth: grown("nodesKept"),
+  listenersGrowth: grown("listenersKept"),
   tauriListenersGrowth: last.tauriListeners - from.tauriListeners,
-  heapGrowthMB: heaps.length > 1 ? r1(heaps.at(-1).heapMB - heaps[1].heapMB) : 0,
+  heapGrowthMB: r1(grown("heapMB")),
   idleMsPerMin: pct(half(samples).map((s) => s.idleMsPerMin), 0.5),
   // The second half of the run: the page after a while, which is where it was slow.
   syncCalls: synced.length ? Math.max(...half(synced).map((s) => s.afterSync.calls)) : null,

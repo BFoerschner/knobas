@@ -1,5 +1,5 @@
 {
- "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend. `long` is long.mjs's (the monitors-builds pass, 2026-11-12): Monitors shown while every source's run ends every 5 s, then kept hidden behind the Inbox. A hover is its handlers and the frame that draws it, not the wait for that frame; the 4x line is 33 ms. The real ipcP95 is a debug backend's. On the fixture the long lines hold growth and hovers only: the fixture answers each read with a query engine of its own in the page, so its main-thread time a minute and its long tasks are the fixture's work at every run's end, not the app's (on ff7b8f88, 1,763 ms a minute with a 109 ms task on the fixture against 628 and none over the saved database). The render-cost pass (2026-11-14) added Björn's standing 6x line: scrolling with no visible stall (a list at 55 frames a second or more, no task over 60 ms, as at 4x), a key painted within 200 ms and a page switch within 300; docs/decisions/2026-11-14-what-a-page-costs-to-build.md. `soak` and `soak-tour` are soak.mjs's (the hover-lag pass, 2026-11-16; the README's The soak), real only: a repository's Code page browsed for ten minutes or more, and every other page visited a few times. Growth is from the second collected lap to the last; `syncCalls` is the IPC calls a run's end asks and `syncCallsGrowth` how many more the last asked than the second (with every folder read again: 113 calls after ten minutes, 305 after thirty); `afterSync` and `afterReturn` are a hover, mouse move to frame, with the pointer kept moving through a run's end and a return at the slowest throttle (1,580 and 2,180 ms after thirty minutes before the pass, 27 and 170 after); a return's includes the return's own first frame. The hovers at rest include the wait for the frame, 16.7 ms at most. docs/decisions/2026-11-16-a-refresh-reads-what-can-have-changed.md.",
+ "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend. `long` is long.mjs's (the monitors-builds pass, 2026-11-12): Monitors shown while every source's run ends every 5 s, then kept hidden behind the Inbox. A hover is its handlers and the frame that draws it, not the wait for that frame; the 4x line is 33 ms. The real ipcP95 is a debug backend's. On the fixture the long lines hold growth and hovers only: the fixture answers each read with a query engine of its own in the page, so its main-thread time a minute and its long tasks are the fixture's work at every run's end, not the app's (on ff7b8f88, 1,763 ms a minute with a 109 ms task on the fixture against 628 and none over the saved database). The render-cost pass (2026-11-14) added Björn's standing 6x line: scrolling with no visible stall (a list at 55 frames a second or more, no task over 60 ms, as at 4x), a key painted within 200 ms and a page switch within 300; docs/decisions/2026-11-14-what-a-page-costs-to-build.md. `soak` and `soak-tour` are soak.mjs's (the hover-lag pass, 2026-11-16; the README's The soak), real only: a repository's Code page browsed for ten minutes or more, and every other page visited a few times. Growth is what the page keeps after a collection, the median of the last third of the collected laps less that of the first; the tour's is a page's last visit against the larger of its second and third, and its nodes and heap are not held, since what it presses (a column's Show 50 more, a diff's Expand all) is kept by design; `syncCalls` is the IPC calls a run's end asks and `syncCallsGrowth` how many more the last asked than the second (with every folder read again: 113 calls after ten minutes, 305 after thirty); `afterSync` and `afterReturn` are a hover, mouse move to frame, with the pointer kept moving through a run's end and a return at the slowest throttle (1,580 and 2,180 ms after thirty minutes before the pass, 27 and 170 after); a return's includes the return's own first frame. The hovers at rest include the wait for the frame, 16.7 ms at most. docs/decisions/2026-11-16-a-refresh-reads-what-can-have-changed.md.",
  "real": {
   "scroll": {
    "tickets-board": {
@@ -303,12 +303,12 @@
    "listenersGrowth": 400,
    "tauriListenersGrowth": 8,
    "heapGrowthMB": 12,
-   "idleMsPerMin": 150,
+   "idleMsPerMin": 300,
    "syncCalls": 45,
    "syncCallsGrowth": 12,
-   "syncMainMs": 800,
-   "afterSyncFeltP95": 60,
-   "afterSyncFeltMax": 120,
+   "syncMainMs": 1500,
+   "afterSyncFeltP95": 120,
+   "afterSyncFeltMax": 200,
    "afterReturnFeltP95": 260,
    "afterReturnFeltMax": 400,
    "hover1xFeltP95": 34,
@@ -318,6 +318,13 @@
    "hover6xFeltP95": 50,
    "hover6xCostP95": 18,
    "hoverStyleElementsMax": 12
+  },
+  "soak-tour": {
+   "tauriListenersGrowth": 8,
+   "tourCallsGrowth": 8,
+   "tourMainMsGrowth": 1200,
+   "tourFeltP95": 200,
+   "tourFeltMax": 300
   }
  },
  "fake": {

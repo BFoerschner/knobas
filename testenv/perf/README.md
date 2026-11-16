@@ -536,13 +536,17 @@ and its files, at another section, and comes back. After each lap, at rest on Fi
 | `idleMsPerMin` | the main thread's time while nothing is pressed |
 | `hoverStyle` | every `--trace-every` laps, the sweep under a trace: the elements each style pass computed (two to four: the row left and the row entered) |
 
-`--check budget.json --lines real` holds the `soak` lines: the growth from the second collected lap to the last, the
-hovers at rest, and over the run's second half the hover through a run's end and a return, the calls a run's end asks
-and how much they grew. `--tour` asks the same of every other page: each lap visits the sections, a pipeline, a run, a
-space, a doc, the repository's other tabs, a pull request, its files and its conversation, presses what a page offers
-more of (a board column's *Show 50 more*, *Older runs*, a diff's *Expand all*), and keeps the pointer moving over its
-rows through a run's end; the `soak-tour` lines hold the page whose run's end grew most between the second lap and
-the last, and the slowest hover through one.
+`--check budget.json --lines real` holds the `soak` lines: what the page keeps late in the run against early in it
+(the median of the last third of the collected laps less that of the first: one lap against another reads which page
+keep-alive happened to hold), the hovers at rest, and over the run's second half the hover through a run's end and a
+return, the calls a run's end asks and how much they grew. `--tour` asks the same of every other page: each lap visits
+the sections, a pipeline, a run, a space, a doc, the repository's other tabs, a pull request, its files and its
+conversation, presses what a page offers more of (a board column's *Show 50 more*, *Older runs*, a diff's *Expand
+all*), and keeps the pointer moving over its rows through a run's end; the `soak-tour` lines hold the page whose run's
+end grew most between its second and third visits and its last, and the slowest hover through one. The tour's nodes
+and heap are printed and not held: what it presses is kept by design, a hundred more cards a lap on the board and a
+diff's context, so they grow until there is no more to press (a pull request's page levelled at 31,000 nodes after
+eight laps; Tickets, 1,200 more cards on, still asked 17 calls a run's end and drew a hover in 22 to 59 ms).
 
 ```sh
 testenv/perf/soak-repo.sh <dir>               # the stand-in's cart-service with 9,700 files on main, and a clone
@@ -608,6 +612,9 @@ scratch folder, and only while they are away:
 5. `node.exe run.mjs --attach 9444 --match http://127.0.0.1:5412 --throttle 1,4,6 --guard "powershell.exe -NoProfile
    -File guard.ps1" --out <file>`: the guard runs before every scenario and stops the run when the last input in the
    session is under five minutes old.
+6. The soak, in the same window (`--attach` loads the page afresh with `?fake-hooks`, at the size the window has):
+   `node.exe soak.mjs --attach 9444 --match http://127.0.0.1:5412 --app "http://127.0.0.1:5412/?fake-ipc&fake-hooks&fake-real=5411#/code"
+   --repo <entity id> --minutes 15 --out <file>`, the backend's repository built and pinned on the Mac as *The soak* says.
 
 `win/` has the three PowerShell helpers, for a `scripts` folder one below the scratch folder: `guard.ps1` (go on only
 if the last input is five minutes old or the run's own), `wake.ps1 -Do wake|hold|release` (a pointer move of zero
