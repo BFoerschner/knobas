@@ -16,11 +16,9 @@ impl GiteaClient {
         owner: &str,
         repo: &str,
     ) -> Result<T, SourceError> {
-        self.get_json(
-            &format!("/repos/{}/{}", segment(owner)?, segment(repo)?),
-            &[],
-        )
-        .await
+        // Shared by the reads asking it at once: each section's (#2479).
+        self.get_json_shared(&format!("/repos/{}/{}", segment(owner)?, segment(repo)?))
+            .await
     }
 
     /// One page of fifty of `GET /repos/{o}/{r}/labels`, the repository's
@@ -67,8 +65,24 @@ impl GiteaClient {
         escaped_path(path).map(drop)
     }
 
-    /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
-    pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
+    /// `GET /repos/{o}/{r}`, read now and for this caller alone: what a write
+    /// checks before it acts must not be an answer read before it was asked
+    /// ([`Self::repo_as`] shares a read under way).
+    pub(crate) async fn repo_fresh_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!("/repos/{}/{}", segment(owner)?, segment(repo)?),
+            &[],
+        )
+        .await
+    }
+
+    /// A branch's record, read now and for this caller alone, for a write
+    /// ([`Self::branch_as`] shares a read under way).
+    pub(crate) async fn branch_fresh_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
         repo: &str,
@@ -83,6 +97,24 @@ impl GiteaClient {
             ),
             &[],
         )
+        .await
+    }
+
+    /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
+    pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<T, SourceError> {
+        // Shared by the reads asking it at once: a landing's tree, README and
+        // commits each learn the tip (#2479).
+        self.get_json_shared(&format!(
+            "/repos/{}/{}/branches/{}",
+            segment(owner)?,
+            segment(repo)?,
+            escaped(branch)?
+        ))
         .await
     }
 

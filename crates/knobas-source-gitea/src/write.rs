@@ -116,7 +116,7 @@ async fn holds_branch_from(
     name: &str,
     from_ref: &str,
 ) -> bool {
-    let Ok(made) = client.branch_as::<BranchTip>(owner, repo, name).await else {
+    let Ok(made) = client.branch_fresh_as::<BranchTip>(owner, repo, name).await else {
         return false;
     };
     let tip = made.commit.id.to_ascii_lowercase();
@@ -128,7 +128,7 @@ async fn holds_branch_from(
         return true;
     }
     client
-        .branch_as::<BranchTip>(owner, repo, from_ref)
+        .branch_fresh_as::<BranchTip>(owner, repo, from_ref)
         .await
         .is_ok_and(|base| base.commit.id.eq_ignore_ascii_case(&tip))
 }
@@ -698,8 +698,8 @@ pub(crate) async fn delete_branch(
     name: &str,
 ) -> Result<(), SourceError> {
     let (head, guard) = tokio::try_join!(
-        client.repo_as::<RepoHead>(owner, repo),
-        client.branch_as::<BranchGuard>(owner, repo, name),
+        client.repo_fresh_as::<RepoHead>(owner, repo),
+        client.branch_fresh_as::<BranchGuard>(owner, repo, name),
     )?;
     // No guess where Gitea names none: the views' `main` fallback is a fine
     // label and a wrong guard, since on a `master` repository it would let the
@@ -978,7 +978,7 @@ pub(crate) async fn commit_file(
     }
     if commit.new_branch.is_none() {
         let guard = client
-            .branch_as::<PushGuard>(owner, repo, commit.branch)
+            .branch_fresh_as::<PushGuard>(owner, repo, commit.branch)
             .await?;
         if let Some(refusal) = guard.refusal(commit.branch) {
             return Err(SourceError::protocol(format!(
