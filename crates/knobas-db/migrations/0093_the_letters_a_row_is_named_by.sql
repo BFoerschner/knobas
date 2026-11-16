@@ -54,7 +54,10 @@
 --   characters again. A stamp of `synced_at` or an edit of the body changes
 --   none of the five and writes nothing here.
 -- * **A row deleted**: the foreign key cascades.
--- * **Every row mirrored before this migration**: below, one pass.
+-- * **Every row mirrored before this migration**: by bring-up's fill, a
+--   batch at a time behind the app (`0095`'s `sync.fill_item_initial_beside`,
+--   `knobas_core::item_initial`). Until it has passed over every row the
+--   launcher ranks a typed character as it did before this migration.
 --
 -- The stored rows depend on `sync.item` and on nothing else (ADR-0019).
 -- **A backup rebuilds it, never carries it**: the `sync` schema is not in an
@@ -67,12 +70,18 @@
 -- ## What it costs
 --
 -- 253,585 rows on the 39,770-row mirror, 6.4 a row: a table of 23 MB and
--- 33 MB of indexes, of a database of 839 MB. The pass below is one read of
--- the mirror and two index builds: 2.6 s on that mirror with the machine
--- busy (the rows 1.8 s, the key 0.2 s, the index 0.5 s), once, at the first
--- start after the upgrade. Each write of a mirror row whose name or date
--- changed lexes its key and its key cell once more and writes about six
--- narrow rows.
+-- 33 MB of indexes, of a database of 839 MB. Each write of a mirror row
+-- whose name or date changed lexes its key and its key cell once more and
+-- writes about six narrow rows.
+--
+-- **Nothing at the first start.** Until 2026-11-16 this migration wrote
+-- every mirrored row's characters in one pass, 2.6 s on that mirror with the
+-- machine busy, before the window opened. The long-words pass took the pass
+-- out: the table is made empty, with its key and its index, and bring-up
+-- fills it behind the app (`0095`). A database that ran the migration as it
+-- was holds the rows that pass wrote, and the fill finds each of them done
+-- once it has written the row `0095` adds
+-- (`docs/decisions/2026-11-16-a-word-many-rows-hold.md`).
 
 -- The characters a row is named by, from its weight-A vector, and whether a
 -- name of it begins with each. The first lexeme of a text is the one at its
@@ -112,22 +121,13 @@ create table sync.item_initial (
   item_updated_at timestamptz
 );
 
--- Every row mirrored before this migration, then the key and the index over
--- the filled table (`0077`'s order: each is one build). The vector's
--- weight-A half is read from the narrow copy, which holds it for every row
--- since `0077`.
-insert into sync.item_initial (entity_id, initial, leads, kind, source_id, item_updated_at)
-select i.entity_id, n.initial, n.leads, i.kind, i.source_id, i.item_updated_at
-  from sync.item i
-  join sync.item_search s on s.entity_id = i.entity_id
- cross join lateral sync.name_initials(s.fts_a, i.title, i.kind, i.entity_id, i.key_cell) n;
-
+-- The key and the index, over a table that holds nothing yet: the rows
+-- mirrored before this migration are written by bring-up's fill (`0095`).
 alter table sync.item_initial
   add primary key (entity_id, initial),
   add foreign key (entity_id) references sync.item (entity_id) on delete cascade;
 create index item_initial_newest_idx on sync.item_initial
   (initial, kind, leads desc, item_updated_at desc nulls last, entity_id);
-analyze sync.item_initial;
 
 create function sync.item_initial_inserted() returns trigger
 language plpgsql as $fn$

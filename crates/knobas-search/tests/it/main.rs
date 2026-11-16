@@ -23,6 +23,7 @@ mod item_search;
 mod key_cell;
 mod launcher_kinds;
 mod lists;
+mod long_words;
 mod name_glob;
 mod one_letter;
 mod parent_key_pin;

@@ -1976,42 +1976,41 @@ async fn zero_twenty_seven_reaches_a_row_mirrored_before_it() {
     assert_eq!(synced_after, synced_before, "and nothing wrote it again");
 }
 
-/// An existing install (the two-letters pass, 2026-11-16): a row mirrored
-/// before `0094` holds the first two and three characters of its names once
-/// the migration runs, without a sync writing it again, and its single
-/// characters are the rows `0093` wrote, where they were. The table has its
-/// key, its foreign key and its index again, which the migration takes off
-/// for its pass, and `0093`'s function is gone. Its own database, because
-/// the wind-back drops a function.
+/// An existing install (the long-words pass, 2026-11-16): `0093` and `0094`
+/// write no row of `sync.item_initial` themselves any more, and bring-up's
+/// fill (`0095`, `sync.fill_item_initial_beside`) gives an item mirrored
+/// before them every start of its names, the empty one among them, without a
+/// sync writing it again. Three installs it meets: one that predates `0093`
+/// (no row), one that ran `0093` as it was (the single characters), one that
+/// ran `0094` as it was (three lengths and no empty start). An item that has
+/// its row under the empty start is left as it is. The table is marked
+/// whole once no item is without that row, and not before.
 #[tokio::test]
-async fn zero_ninety_four_gives_a_row_mirrored_before_it_its_first_two_and_three_characters() {
-    let pool = knobas_db::test_util::scratch_database("initial94-existing")
+async fn the_fill_gives_an_item_mirrored_before_it_every_start_of_its_names() {
+    let pool = knobas_db::test_util::scratch_database("initial95-fill")
         .await
         .pool(2)
         .await
         .expect("a pool on the scratch database");
-    let id = "gitea:acme/ledger";
-    mirror_row(&pool, id, "The payout service", "ledger").await;
-
-    // Wind back to an install that predates 0094: only the single
-    // characters stored, `0093`'s function in the place of this one's, and
-    // the runner's record of 0094 gone.
+    // `payout` and `servic`: `The` is no lexeme.
+    mirror_row(&pool, "gitea:acme/a-none", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/b-single", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/c-three", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/d-whole", "The payout service", "ledger").await;
     for statement in [
-        "delete from sync.item_initial where length(initial) > 1",
-        "drop function sync.name_prefixes(tsvector, text, text, text, text)",
-        "create function sync.name_initials(fts_a tsvector, title text, kind text,
-                                            entity_id text, key_cell text)
-         returns table (initial text, leads boolean) language sql immutable
-         as 'select null::text, null::boolean where false'",
-        "delete from public._sqlx_migrations where version = 94",
+        "delete from sync.item_initial_whole",
+        "delete from sync.item_initial where entity_id = 'gitea:acme/a-none'",
+        "delete from sync.item_initial where entity_id = 'gitea:acme/b-single' and length(initial) <> 1",
+        "delete from sync.item_initial where entity_id = 'gitea:acme/c-three' and initial = ''",
     ] {
         sqlx::query(statement).execute(&pool).await.unwrap();
     }
-    let stored = async |pool: &sqlx::PgPool| -> Vec<(String, bool, String)> {
+    let stored = async |pool: &sqlx::PgPool, id: &str| -> Vec<(String, bool, String)> {
         sqlx::query_as(
             "select initial, leads, ctid::text from sync.item_initial
-              where entity_id = 'gitea:acme/ledger' order by initial",
+              where entity_id = $1 order by initial",
         )
+        .bind(id)
         .fetch_all(pool)
         .await
         .unwrap()
@@ -2021,61 +2020,154 @@ async fn zero_ninety_four_gives_a_row_mirrored_before_it_its_first_two_and_three
             .map(|(initial, leads, _)| (initial.clone(), *leads))
             .collect()
     };
-    let own = |rows: &[(&str, bool)]| -> Vec<(String, bool)> {
-        rows.iter()
-            .map(|(initial, leads)| ((*initial).to_owned(), *leads))
-            .collect()
+    let every: Vec<(String, bool)> = [
+        ("", true),
+        ("p", true),
+        ("pa", true),
+        ("pay", true),
+        ("s", false),
+        ("se", false),
+        ("ser", false),
+    ]
+    .iter()
+    .map(|(initial, leads)| ((*initial).to_owned(), *leads))
+    .collect();
+    let whole_before = stored(&pool, "gitea:acme/d-whole").await;
+    assert_eq!(named(&whole_before), every, "a new item's own trigger");
+    let marked = async |pool: &sqlx::PgPool| -> bool {
+        sqlx::query_scalar("select exists (select from sync.item_initial_whole)")
+            .fetch_one(pool)
+            .await
+            .unwrap()
     };
-    // `payout` and `servic`: `The` is no lexeme.
-    let before = stored(&pool).await;
-    assert_eq!(named(&before), own(&[("p", true), ("s", false)]));
 
-    migrate::run(&pool).await.unwrap();
-
-    let after = stored(&pool).await;
-    assert_eq!(
-        named(&after),
-        own(&[
-            ("p", true),
-            ("pa", true),
-            ("pay", true),
-            ("s", false),
-            ("se", false),
-            ("ser", false),
-        ]),
+    // Not whole while an item is without its row: the mark refuses.
+    let whole: bool = sqlx::query_scalar("select sync.mark_item_initial_whole()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        !whole && !marked(&pool).await,
+        "three items have no row yet"
     );
-    for row in &before {
-        assert!(
-            after.contains(row),
-            "a single character's row was written again: {row:?} of {after:?}"
-        );
+
+    // Two items a batch: the first batch reaches `a` and `b` and no further.
+    let (last, skipped): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/")
+            .bind(2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((last.as_deref(), skipped), (Some("gitea:acme/b-single"), 0));
+    assert_eq!(named(&stored(&pool, "gitea:acme/a-none").await), every);
+    assert_eq!(named(&stored(&pool, "gitea:acme/b-single").await), every);
+    assert_eq!(
+        named(&stored(&pool, "gitea:acme/c-three").await),
+        every[1..],
+        "the batch stopped before it"
+    );
+
+    let (last, _): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/b-single")
+            .bind(2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(last.as_deref(), Some("gitea:acme/d-whole"));
+    assert_eq!(named(&stored(&pool, "gitea:acme/c-three").await), every);
+    assert_eq!(
+        stored(&pool, "gitea:acme/d-whole").await,
+        whole_before,
+        "an item that has its row under the empty start is not written again"
+    );
+    // Past the last item: nothing looked at.
+    let (last, skipped): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/d-whole")
+            .bind(2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((last, skipped), (None, 0));
+
+    // Every other item of the scratch database, then the mark.
+    let mut after = String::new();
+    loop {
+        let (last, _): (Option<String>, i32) =
+            sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+                .bind(&after)
+                .bind(500)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let Some(last) = last else { break };
+        after = last;
     }
+    let whole: bool = sqlx::query_scalar("select sync.mark_item_initial_whole()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(whole && marked(&pool).await, "every item has its row");
 
-    let (key, foreign, index, old_function): (bool, bool, bool, bool) = sqlx::query_as(
-        "select exists (select from pg_constraint
-                         where conrelid = 'sync.item_initial'::regclass and contype = 'p'),
-                exists (select from pg_constraint
-                         where conrelid = 'sync.item_initial'::regclass and contype = 'f'),
-                exists (select from pg_indexes
-                         where schemaname = 'sync' and indexname = 'item_initial_newest_idx'),
-                exists (select from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                         where n.nspname = 'sync' and p.proname = 'name_initials')",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(key, "the primary key is back");
-    assert!(foreign, "the foreign key is back");
-    assert!(index, "the index of the answer's order is back");
-    assert!(!old_function, "0093's function is dropped");
-
-    // The foreign key still takes a row's characters with the row.
-    sqlx::query("delete from sync.item where entity_id = $1")
-        .bind(id)
+    // The foreign key still takes an item's rows with the item.
+    sqlx::query("delete from sync.item where entity_id like 'gitea:acme/_-%'")
         .execute(&pool)
         .await
         .unwrap();
-    assert!(stored(&pool).await.is_empty());
+    assert!(stored(&pool, "gitea:acme/a-none").await.is_empty());
+}
+
+/// The fill steps past an item a running sync holds and says so, and the
+/// item's own write then stands (`0091`'s shape): the batch never waits on
+/// the run, and never writes under it.
+#[tokio::test]
+async fn the_fill_steps_past_an_item_a_sync_holds() {
+    let pool = knobas_db::test_util::scratch_database("initial95-beside")
+        .await
+        .pool(3)
+        .await
+        .expect("a pool on the scratch database");
+    mirror_row(&pool, "gitea:acme/held", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/free", "The payout service", "ledger").await;
+    sqlx::query("delete from sync.item_initial where entity_id like 'gitea:acme/%'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut run = pool.begin().await.unwrap();
+    sqlx::query("update sync.item set synced_at = now() where entity_id = 'gitea:acme/held'")
+        .execute(&mut *run)
+        .await
+        .unwrap();
+    let (last, skipped): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/")
+            .bind(10)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((last.as_deref(), skipped), (Some("gitea:acme/held"), 1));
+    run.commit().await.unwrap();
+
+    let rows = async |id: &str| -> i64 {
+        sqlx::query_scalar("select count(*) from sync.item_initial where entity_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(rows("gitea:acme/free").await, 7);
+    assert_eq!(
+        rows("gitea:acme/held").await,
+        0,
+        "stepped past, not written"
+    );
+    sqlx::query("delete from sync.item where entity_id like 'gitea:acme/%'")
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 /// The app's pool cancels a statement that runs past thirty seconds (#745).
@@ -3275,6 +3367,63 @@ mod line_endings {
         // Back, so the scratch database is handed on as it came.
         migrate::run(&pool).await.unwrap();
         assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        pool.close().await;
+    }
+
+    fn unhex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// A profile PR #2479's draft was run on recorded `0093` and `0094` as
+    /// they were before the long-words pass (2026-11-16) took their one pass
+    /// over the mirror out. It opens under this build, its two rows now
+    /// naming the files as they are; the same checksum under another
+    /// version is refused as any edited migration is.
+    #[tokio::test]
+    async fn a_database_that_ran_0093_and_0094_as_they_were_opens_under_this_build() {
+        const FIRST_0093: &str = "98f277a00a18f76889eaac08383995e0a45b862e80d63cadc502aa4ce8b0e3e807259738b0e9f2ad248f7e08e5a7e455";
+        const FIRST_0094: &str = "3aea0a6a5ad23c1c09d03acef89f7b89f4707eb5f2096e206901f261717e89d4969202f024f68cfa95fa24f016eea737";
+        let connector = knobas_db::test_util::scratch_database("superseded").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        for (version, first) in [(93_i64, FIRST_0093), (94, FIRST_0094)] {
+            sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+                .bind(unhex(first))
+                .bind(version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert_ne!(recorded(&pool).await, checksums_of(&this_build));
+
+        migrate::run(&pool)
+            .await
+            .expect("a profile of the draft opens under this build");
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+
+        // `0093`'s first checksum recorded for `0092` names no file `0092` ever was.
+        let ninety_two = this_build.iter().find(|m| m.version == 92).unwrap();
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = 92")
+            .bind(unhex(FIRST_0093))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let refused = migrate::run(&pool).await.unwrap_err();
+        assert!(
+            matches!(
+                &refused,
+                knobas_db::DbError::Migrate(MigrateError::VersionMismatch(92))
+            ),
+            "{refused}"
+        );
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = 92")
+            .bind(ninety_two.checksum.as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
         pool.close().await;
     }
 

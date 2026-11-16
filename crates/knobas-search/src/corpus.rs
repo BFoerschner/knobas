@@ -1276,6 +1276,17 @@ pub const LIVE_ITEM_INITIAL: Corpus = Corpus {
     ..LIVE_ITEM_MATCH
 };
 
+/// A mirror row **a walk of its kind's newest rows tests** (the long-words
+/// pass, 2026-11-16; `crate::sql::broad_sql`): the search copy read by its
+/// key for each row the empty start's index gives (`sync.item_initial`,
+/// migration `0095`). The walk stops at a kind's tenth match, so its
+/// liveness is two probes a row that matched (`knobas_core::live_by_key!`)
+/// and no set built for the statement, as [`LIVE_ITEM_INITIAL`]'s is.
+pub const LIVE_ITEM_WALKED: Corpus = Corpus {
+    scope: Some(knobas_core::live_by_key!("sx")),
+    ..LIVE_ITEM_MATCH
+};
+
 /// [`LIVE_ITEM`] on a mirror whose every search copy holds its six columns
 /// (migration `0084`): the same rows, its match stage read off the copy alone
 /// ([`LIVE_ITEM_MATCH`]). What [`mirror`] hands out once the fill is done.
@@ -1300,14 +1311,54 @@ pub const LIVE_ITEM_FILLED: Corpus = Corpus {
 ///
 /// [`sqlx::Error`] if the probe fails.
 pub async fn mirror(pool: &sqlx::PgPool) -> Result<&'static Corpus, sqlx::Error> {
-    let unfilled: bool =
-        sqlx::query_scalar("select exists (select from sync.item_search where kind is null)")
-            .fetch_one(pool)
-            .await?;
-    Ok(if unfilled {
-        &LIVE_ITEM
-    } else {
-        &LIVE_ITEM_FILLED
+    Ok(stored(pool).await?.mirror)
+}
+
+/// What the database holds of the mirror's stored reads, as a search finds
+/// it now: one round trip, two probes.
+#[derive(Clone, Copy)]
+pub struct Stored {
+    /// The mirror as the match stage reads it: [`mirror`]'s answer.
+    pub mirror: &'static Corpus,
+    /// Whether every item has its rows of `sync.item_initial`, the first
+    /// characters of its names and its row under none (migrations `0093` to
+    /// `0095`): the table is marked whole. Bring-up fills it in the
+    /// background (`knobas_core::item_initial::fill`), and until it has, a
+    /// word's first characters and a word many rows hold are ranked as they
+    /// were before `0093`. **No item goes back**: the triggers write a new
+    /// item's rows with it, so a table found whole stays whole.
+    pub names: bool,
+}
+
+impl Stored {
+    /// Whether the launcher's bounded reads may run: every search copy
+    /// filled, which they match through, and every item's first characters
+    /// stored, which they are ordered by.
+    #[must_use]
+    pub fn whole(&self) -> bool {
+        self.names && self.mirror.relation_is_narrowed()
+    }
+}
+
+/// [`Stored`] of this database now.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the probe fails.
+pub async fn stored(pool: &sqlx::PgPool) -> Result<Stored, sqlx::Error> {
+    let (unfilled, names): (bool, bool) = sqlx::query_as(
+        "select exists (select from sync.item_search where kind is null), \
+                exists (select from sync.item_initial_whole)",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(Stored {
+        mirror: if unfilled {
+            &LIVE_ITEM
+        } else {
+            &LIVE_ITEM_FILLED
+        },
+        names,
     })
 }
 

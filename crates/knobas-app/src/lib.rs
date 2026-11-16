@@ -1079,6 +1079,22 @@ async fn bring_up_app<R: tauri::Runtime>(
                     tracing::warn!(%error, "the search copies could not all be filled");
                 }
             }
+            // Then the first characters each item is named by and its row
+            // under none (migrations `0093` to `0095`), for the items
+            // mirrored before them: after the search copies, whose
+            // weight-A vectors it reads. The launcher ranks every match as
+            // it did before `0093` until the table is marked whole.
+            let started = std::time::Instant::now();
+            match knobas_core::item_initial::fill(&fill_pool).await {
+                Ok(batches) => tracing::info!(
+                    batches,
+                    ms = started.elapsed().as_millis(),
+                    "the names' first characters are filled"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "the names' first characters could not all be filled");
+                }
+            }
         });
         // Before `Ready`, and before `AppState` is installed: the sync
         // engine is part of "the database is up" as far as the frontend is

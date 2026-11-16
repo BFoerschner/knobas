@@ -45,7 +45,8 @@
 -- A stamp or an edit of the body writes nothing. `sync.name_prefixes`
 -- replaces `sync.name_initials`, which is dropped: one function says what a
 -- row's characters are, and its one-character rows are the ones `0093`
--- wrote, so those stay as they are.
+-- wrote. The rows mirrored before this migration are written by bring-up's
+-- fill (`0095`).
 --
 -- **A migration that changes what weight A holds** must write this table
 -- again, as `0093` says.
@@ -55,14 +56,20 @@
 -- 539,457 rows more on the 39,770-row mirror (267,306 of two characters,
 -- 272,151 of three), 13.6 a row beside the 6.4 there were: the table goes
 -- from 57 MB with its indexes to 181 MB (73 MB of rows, 46 MB of key, 62 MB
--- of index), in a database of about 900 MB. The pass below is one read of
--- the mirror and three builds: 3.3 to 3.8 s on that mirror with the Mac at a
--- load of 8 to 10 (the rows 1.5 s, the keys 0.6 s, the index 1.3 s), once,
--- at the first start after the upgrade. The key, the foreign key and the
--- index are dropped for the pass and built over the whole table after it:
--- written into them a row at a time, the same rows took 7.3 s and left the
--- indexes a third larger. A write of a mirror row whose name or date changed
--- now writes about twenty narrow rows where it wrote six.
+-- of index), in a database of about 900 MB. A write of a mirror row whose
+-- name or date changed now writes about twenty narrow rows where it wrote
+-- six.
+--
+-- **Nothing at the first start.** Until 2026-11-16 this migration wrote the
+-- two- and three-character rows of every mirrored row in one pass, with the
+-- key, the foreign key and the index taken off for it and built again
+-- after: 3.4 s on that mirror with the Mac at a load of 9, 5 to 6 s on
+-- Björn's PC, before the window opened. The long-words pass took the pass
+-- out: bring-up's fill writes every length behind the app (`0095`), and
+-- until it has passed over every row the launcher ranks what was typed as
+-- it did before `0093`. A database that ran the migration as it was holds
+-- the rows that pass wrote
+-- (`docs/decisions/2026-11-16-a-word-many-rows-hold.md`).
 
 -- The first characters a row is named by, from its weight-A vector, and
 -- whether a name of it begins with each. The first lexeme of a text is the
@@ -98,29 +105,6 @@ language sql immutable parallel safe as $fn$
               where length(x) >= n
                 and (n = 1 or left(x, 1) not in ('-', '+', '/'))) w
 $fn$;
-
--- Every row mirrored before this migration: its rows of two and of three
--- characters, beside the one-character rows `0093` wrote. The key, the
--- foreign key and the index come off for the pass and are built once over
--- the whole table after it.
-alter table sync.item_initial
-  drop constraint item_initial_entity_id_fkey,
-  drop constraint item_initial_pkey;
-drop index sync.item_initial_newest_idx;
-
-insert into sync.item_initial (entity_id, initial, leads, kind, source_id, item_updated_at)
-select i.entity_id, n.initial, n.leads, i.kind, i.source_id, i.item_updated_at
-  from sync.item i
-  join sync.item_search s on s.entity_id = i.entity_id
- cross join lateral sync.name_prefixes(s.fts_a, i.title, i.kind, i.entity_id, i.key_cell) n
- where length(n.initial) > 1;
-
-alter table sync.item_initial
-  add primary key (entity_id, initial),
-  add foreign key (entity_id) references sync.item (entity_id) on delete cascade;
-create index item_initial_newest_idx on sync.item_initial
-  (initial, kind, leads desc, item_updated_at desc nulls last, entity_id);
-analyze sync.item_initial;
 
 -- `0093`'s two trigger functions, writing the three lengths.
 create or replace function sync.item_initial_inserted() returns trigger

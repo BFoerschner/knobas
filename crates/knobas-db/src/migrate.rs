@@ -21,6 +21,17 @@
 //! accepts a recorded checksum of the same migration with the other line
 //! endings, rewriting it to the embedded one first
 //! ([`adopt_other_line_endings`]).
+//!
+//! # A file changed before its release
+//!
+//! Two migrations of PR #2479 changed while the PR was a draft
+//! ([`SUPERSEDED`]): `0093` and `0094` each wrote `sync.item_initial` in one
+//! pass before the window opened, and the long-words pass (2026-11-16) took
+//! the pass out of both for a fill behind the app (`0095`). No release
+//! carried the first files, but the profiles the draft was run on recorded
+//! their checksums. [`run`] accepts those two and rewrites them, as it does
+//! the other line endings: what the first files left is a table `0095`'s
+//! fill reads as it reads an empty one.
 
 /// Bring `pool`'s database up to the current schema.
 ///
@@ -76,14 +87,50 @@ pub async fn run_with(
 /// in, as sqlx itself names it.
 const APPLIED: &str = "_sqlx_migrations";
 
+/// The migrations whose file changed before any release carried it, each
+/// with the SHA-384 of the file it was first run as, in hex: a database that
+/// recorded one ran the same migration, and [`adopt_other_line_endings`]
+/// rewrites its row to the embedded checksum.
+///
+/// **Only for a file no release shipped, and only where the schema the first
+/// file left is one every later migration and the app read as they read the
+/// new file's.** `0093` and `0094` as they were left `sync.item_initial`
+/// filled; as they are they leave it empty, and `0095`'s fill writes an item
+/// that has no row under the empty start, which is every item either way.
+const SUPERSEDED: &[(i64, &str)] = &[
+    (
+        93,
+        "98f277a00a18f76889eaac08383995e0a45b862e80d63cadc502aa4ce8b0e3e807259738b0e9f2ad248f7e08e5a7e455",
+    ),
+    (
+        94,
+        "3aea0a6a5ad23c1c09d03acef89f7b89f4707eb5f2096e206901f261717e89d4969202f024f68cfa95fa24f016eea737",
+    ),
+];
+
+/// Whether `checksum` is the one `version` was first run under
+/// ([`SUPERSEDED`]).
+fn superseded(version: i64, checksum: &[u8]) -> bool {
+    let recorded = checksum.iter().fold(String::new(), |mut hex, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    });
+    SUPERSEDED
+        .iter()
+        .any(|(of, first)| *of == version && *first == recorded)
+}
+
 /// Rewrite every recorded checksum that is an embedded migration's with the
 /// other line endings to the embedded one, in one transaction. Returns how
 /// many rows changed; 0 on a database that has none, or no migrations table.
 ///
 /// A recorded checksum counts as the same migration when it is the SHA-384 of
-/// the embedded SQL with every line ending LF, or with every one CRLF, and
-/// nothing else: a migration whose text changed in any other way is still the
-/// "previously applied but has been modified" the runner reports. Under
+/// the embedded SQL with every line ending LF, or with every one CRLF, or the
+/// one the migration was first run under where its file changed before a
+/// release ([`SUPERSEDED`]), and nothing else: a migration whose text changed
+/// in any other way is still the "previously applied but has been modified"
+/// the runner reports. Under
 /// `select ... for update`, so two launches that meet here rewrite each row
 /// once; sqlx's own advisory lock comes after, in [`sqlx::migrate::Migrator::run`].
 async fn adopt_other_line_endings(
@@ -115,7 +162,7 @@ async fn adopt_other_line_endings(
             continue;
         }
         let (lf, crlf) = line_ending_checksums(migration.sql.as_str());
-        if checksum != lf && checksum != crlf {
+        if checksum != lf && checksum != crlf && !superseded(version, &checksum) {
             continue;
         }
         sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -131,7 +178,8 @@ async fn adopt_other_line_endings(
     if rewritten > 0 {
         tracing::info!(
             rewritten,
-            "migration checksums recorded with the other line endings now name the same files"
+            "migration checksums recorded with the other line endings, or under a file that \
+             changed before its release, now name the same files"
         );
     }
     Ok(rewritten)

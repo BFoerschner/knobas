@@ -184,6 +184,233 @@ pub fn search_sql(
     )
 }
 
+/// Whether a query asks only what the mirror's narrow relations hold
+/// (`sync.item_search`, `sync.item_initial`): the words, the scope, and the
+/// sources, kinds and dates. An author, a parent, a reach, a name glob or a
+/// ticket key reads the mirror's own row, and such a query is built by
+/// [`search_sql`] alone.
+fn asks_narrowly(filters: &EffectiveFilters) -> bool {
+    !(filters.filters_by_author()
+        || filters.filters_by_under()
+        || filters.filters_by_reach()
+        || !filters.names.is_empty()
+        || !filters.fields.is_empty())
+}
+
+/// [`search_sql`] for a query the launcher has counted and found few rows
+/// hold ([`probe_sql`]; the long-words pass, 2026-11-16,
+/// `docs/decisions/2026-11-16-a-word-many-rows-hold.md`): the same stages
+/// and the same answer, built to run under **one plan a connection**
+/// ([`fetch_kept`]).
+///
+/// [`search_sql`] is planned for each key, because its match stage is as
+/// large as the word is common and only the typed word says how common: 8 ms
+/// of planning and 2 of parsing a key on Björn's scale. A statement the
+/// probe let through ranks 2,000 rows at most whatever was typed, so one
+/// plan serves every word. What differs in the text is `q`: **materialized**,
+/// so the typed words are parsed once a statement. Inlined under a plan
+/// that does not know them they were parsed again for every row and every
+/// use, 6 µs a row where a rank takes 2.
+///
+/// `None` for a query that asks what the narrow relations do not hold
+/// ([`asks_narrowly`]): [`search_sql`] answers it, planned for the key.
+#[must_use]
+pub fn kept_search_sql(
+    corpora: &[&Corpus],
+    text: &str,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+) -> Option<SearchSql> {
+    asks_narrowly(filters).then(|| {
+        build_search_sql(
+            corpora,
+            Some(text),
+            prefix_last,
+            filters,
+            per_group,
+            limit,
+            KindCut::Limit,
+            Matching::Kept,
+        )
+    })
+}
+
+/// How [`broad_sql`] reads the names of a word many rows hold.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Names {
+    /// Every row the word names, ranked as *Titles* ranks them: they are
+    /// few ([`probe_sql`] counted them).
+    Ranked,
+    /// Each kind's newest rows the word names: it names many rows too, and
+    /// none is ranked.
+    Newest,
+}
+
+/// How many of a kind's newest rows [`broad_sql`] looks through for the
+/// rows whose text holds a word, before it asks the index for that kind
+/// instead: 1.3 µs a row on Björn's scale, so 0.7 ms a kind at most. A kind
+/// that holds the word in one row of fifty fills its ten within it.
+pub const WALK: u32 = 500;
+
+/// How many rows may hold a query for it to be ranked whole, as
+/// [`search_sql`] ranks: past this, [`broad_sql`] answers. Ranking a match
+/// takes 1.8 µs on Björn's scale and 3 on his PC, so 2,000 are 4 to 6 ms,
+/// which is what the bounded answer takes.
+pub const RANKED_WHOLE: u32 = 2_000;
+
+/// How many live mirror rows hold a query, **counted no further than one
+/// past `cap`**: one row, `(matched, named)`.
+///
+/// * `matched`: the rows the query's scope matches, the names under
+///   *Titles* and the text under *Everything*.
+/// * `named`: the rows it names, counted only where `matched` is past the
+///   cap (under *Everything* the names are a part of the matches, so few
+///   matches are few names), and 0 otherwise.
+///
+/// The index gives every match's place whatever the cap (2.6 ms for the
+/// 19,146 places of `payout` on Björn's scale); the cap bounds the rows
+/// then fetched to be counted, 0.4 µs each. The mirror alone: knobas' own
+/// corpora hold tens of rows and are ranked whatever the count says.
+///
+/// `None` for a query that asks what the narrow relation does not hold
+/// ([`asks_narrowly`]).
+#[must_use]
+pub fn probe_sql(
+    text: &str,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    cap: u32,
+) -> Option<SearchSql> {
+    if !asks_narrowly(filters) {
+        return None;
+    }
+    let mut builder = Builder::default();
+    let tsquery = builder.param(Bind::Text(text.to_owned()));
+    // A count reads no kind as another, so the kinds answered as pipelines
+    // are bound as the kinds a `pipeline` filter admits and nothing else: a
+    // bind no fragment reads is one the server cannot type.
+    let counted_under = EffectiveFilters {
+        kinds: filters.kind_scope(),
+        pipeline_kinds: Vec::new(),
+        ..filters.clone()
+    };
+    let mut bound = bind_filters(&mut builder, &counted_under);
+    let cap = builder.param(Bind::I64(i64::from(cap)));
+    let mirror = &crate::corpus::LIVE_ITEM_MATCH;
+    let counted = |predicates: Vec<String>| {
+        format!(
+            "(select count(*) from (select 1 from {} cross join q\n          where {}\n          limit {cap} + 1) c)",
+            mirror.relation,
+            predicates.join("\n            and "),
+        )
+    };
+    let matched = counted(corpus_predicates(mirror, Some("q.tsq"), &bound));
+    let named = if filters.titles {
+        // Under *Titles* the names are the matches.
+        "c.matched".to_owned()
+    } else {
+        // By the names' own index alone: the whole vector's agreement
+        // (`corpus_predicates`) reads each row's vector, 0.6 µs a row, to
+        // drop a name whose body holds a word the query leaves out. Such a
+        // name is counted here and never answered; the count only chooses
+        // how the names are read.
+        bound.titles = true;
+        let agreement = format!("coalesce({} @@ q.tsq, false)", mirror.fts);
+        counted(
+            corpus_predicates(mirror, Some("q.tsq"), &bound)
+                .into_iter()
+                .filter(|predicate| *predicate != agreement)
+                .collect(),
+        )
+    };
+    let mut sql = String::from("with\n");
+    sql.push_str(&typed_words(&tsquery, prefix_last, true));
+    // One row; the names are counted only where the matches are many.
+    // Materialized: read twice below, and inlined it was counted twice.
+    let _ = write!(
+        sql,
+        "counted as materialized (select {matched} as matched)\nselect c.matched as matched,\n       case when c.matched > {cap} then {named} else 0 end as named\n  from counted c"
+    );
+    Some(SearchSql {
+        sql,
+        binds: builder.binds,
+        narrowly: true,
+    })
+}
+
+/// The launcher's statement for **a word many rows hold** (the long-words
+/// pass, 2026-11-16;
+/// `docs/decisions/2026-11-16-a-word-many-rows-hold.md`): the rows it
+/// names, and under *Everything*, where they leave a kind room, that
+/// kind's newest rows whose text holds it.
+///
+/// # Why it is its own statement
+///
+/// [`search_sql`] ranks every match to keep ten a kind: 1.8 µs a match, 34
+/// ms of `payout`'s 54 on Björn's scale, where it holds 18,553 of 39,770
+/// rows, and it ranks them by how often they say the word. Past
+/// [`RANKED_WHOLE`] matches nothing is read that grows with the match:
+///
+/// * **The names** are the rows *Titles* matches the word by, off the index
+///   of the names (`fts_a`). [`Names::Ranked`] where they are few: each
+///   one ranked as [`search_sql`] ranks. [`Names::Newest`] where the word
+///   names more than [`RANKED_WHOLE`] rows too (a project's key): each
+///   kind's newest ten of them, none ranked.
+/// * **The text** (not under *Titles*): for each kind the names do not
+///   fill, its rows newest first off the empty start's index
+///   (`sync.item_initial`, migration `0095`), each tested for the word,
+///   until ten are found. The match is spelled so that no index answers
+///   it: the walk is the read. A kind the word is rare in is not walked to
+///   its end: after `walk` rows the kind is asked of the index instead,
+///   which lists the word's every row once and keeps that kind's newest
+///   (`late`). So the text's rows are each kind's newest, whichever way
+///   they were found.
+///
+/// # What differs from [`search_sql`]
+///
+/// * **The rank** of a row the text found is 0: it was not ranked. A name's
+///   is its rank ([`Names::Ranked`]) or 1 ([`Names::Newest`]). So the
+///   stages after `m` order a kind names first, as ranked or newest, then
+///   the text's rows by date.
+/// * **A kind's total** is the rows the answer holds of it, `per_group` at
+///   most: the matches are not counted, which is the read this statement
+///   exists to leave out.
+/// * **`q` is materialized** and the statement runs under one plan a
+///   connection ([`fetch_kept`], [`kept_search_sql`]).
+///
+/// Knobas' own corpora are matched and ranked as [`search_sql`] does: tens
+/// of rows each. A pipeline found by its run log is a row the text found.
+///
+/// `None` for a query that asks what the narrow relations do not hold
+/// ([`asks_narrowly`]).
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn broad_sql(
+    corpora: &[&Corpus],
+    text: &str,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+    names: Names,
+    walk: u32,
+) -> Option<SearchSql> {
+    asks_narrowly(filters).then(|| {
+        build_search_sql(
+            corpora,
+            Some(text),
+            prefix_last,
+            filters,
+            per_group,
+            limit,
+            KindCut::Limit,
+            Matching::Broad { names, walk },
+        )
+    })
+}
+
 /// The launcher's statement for **one, two or three typed characters**
 /// (the one-letter pass, 2026-11-15, and the two-letters pass, 2026-11-16;
 /// `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`,
@@ -334,6 +561,13 @@ enum Matching {
     /// As typed: every word, the last as a prefix while it is being typed,
     /// ranked by cover density ([`search_sql`]).
     Words,
+    /// [`Matching::Words`] under one plan a connection: `q` materialized
+    /// ([`kept_search_sql`]).
+    Kept,
+    /// A word many rows hold: its names, and each kind's newest rows whose
+    /// text holds it, `walk` rows of a kind looked through at most
+    /// ([`broad_sql`]).
+    Broad { names: Names, walk: u32 },
     /// A word's first characters, one to three, by the names that hold a
     /// word beginning with them, the mirror's read off `sync.item_initial`
     /// ([`letter_sql`]).
@@ -363,6 +597,69 @@ enum KindCut {
     Window,
 }
 
+/// The typed words as the statement reads them, the CTE `q` ending in `,\n`:
+/// the query (`tsq`), with `whole` and `words` beside it for the rank and
+/// the names. `raw` is the placeholder of what was typed.
+///
+/// Computed ONCE, as a FROM item, and never bound as a tsquery (roadmap §4
+/// gotcha 2): the match, the rank and the headline all read this one value.
+///
+/// `kept` says the statement runs under a plan made without the typed words
+/// ([`fetch_kept`]): `q` is then **materialized**, one row read by every
+/// stage. Not materialized, the planner inlines it, which under a plan made
+/// for the words folds it to a constant ([`search_sql`]'s way, and what its
+/// estimates are read from) and under a kept plan parses the words again
+/// for every row.
+fn typed_words(raw: &str, prefix_last: bool, kept: bool) -> String {
+    let mut sql = String::from(if kept {
+        "q as materialized (\n  select "
+    } else {
+        "q as not materialized (\n  select "
+    });
+    if prefix_last {
+        // What makes the box answer while the word is still being typed.
+        // `websearch_to_tsquery` output is already a well-formed, quoted
+        // tsquery, so appending ':*' to its *text* and casting back turns
+        // only the last lexeme into a prefix. Two guards. A query of
+        // nothing but stopwords yields the empty tsquery, and ':*' on its
+        // own is a syntax error. And ':*' binds only to a quoted lexeme:
+        // a negated phrase followed by a word Postgres drops (a stopword,
+        // `or`, a lone `-`) ends its text in `)` whatever the parser saw
+        // typed last (#1971), so such text is matched whole. That makes
+        // `tsq` and `whole` the same tsquery, which `RANK_WHOLE` ranks by.
+        sql.push_str(concat!(
+            "case when t.tsq::text = '' then null::tsquery\n",
+            "              when right(t.tsq::text, 1) <> '''' then t.tsq\n",
+            "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
+            // The same words with none of them a prefix: what a row is
+            // ranked by when it holds the last word whole (`RANK_WHOLE`).
+            "         t.tsq as whole,\n"
+        ));
+    } else {
+        sql.push_str("t.tsq as tsq,\n");
+    }
+    if kept {
+        // Whether the query leaves no word out: its text holds no `!`, the
+        // one way a tsquery writes a word left out. A row its names match
+        // is then matched by its whole vector too, which holds every name's
+        // lexemes and places, so a read of the names need not ask
+        // (`broad_sql`'s newest names).
+        sql.push_str("         position('!' in t.tsq::text) = 0 as plain,\n");
+    }
+    // The typed words as `to_tsvector` lexes a name, sorted and distinct,
+    // for `NAMED`: one array per search, compared against each match. It
+    // must lex exactly as `NAMED` does, or no row is ever named.
+    let _ = writeln!(
+        sql,
+        "         tsvector_to_array(to_tsvector('english', {raw})) as words"
+    );
+    let _ = writeln!(
+        sql,
+        "    from (select websearch_to_tsquery('english', {raw}) as tsq) t\n),"
+    );
+    sql
+}
+
 /// [`search_sql`], cutting each kind as `cut` says and matching as
 /// `matching` does: the one builder behind the launcher's statements.
 #[allow(clippy::too_many_arguments)]
@@ -377,13 +674,23 @@ fn build_search_sql(
     matching: Matching,
 ) -> SearchSql {
     let mut builder = Builder::default();
-    let by_letter = matching != Matching::Words;
+    let by_letter = matches!(matching, Matching::Letter | Matching::LetterUnstored);
+    let broad = match matching {
+        Matching::Broad { names, walk } => Some((names, walk)),
+        _ => None,
+    };
 
     // Binds are allocated in the order their placeholders first appear in the
     // statement below. That is not cosmetic: it is what keeps `$1..$n` dense
     // and in order, which `placeholders_are_numbered_in_bind_order` pins.
     let tsquery = text.map(|raw| builder.param(Bind::Text(raw.to_owned())));
-    let bound = bind_filters(&mut builder, filters);
+    let mut bound = bind_filters(&mut builder, filters);
+    // How many of a kind's newest rows a word many rows hold is looked for
+    // in (`broad_sql`), read by its walk alone, which is the first stage to
+    // read a limit.
+    let walk = broad
+        .filter(|_| !filters.titles)
+        .map(|(_, walk)| builder.param(Bind::I64(i64::from(walk.max(1)))));
     let per_group = builder.param(Bind::I64(i64::from(per_group)));
     let limit = builder.param(Bind::I64(i64::from(limit)));
     let headline_opts = (text.is_some() && filters.headline)
@@ -396,8 +703,9 @@ fn build_search_sql(
         None => builder.param(Bind::Json(filters.declarations.as_param())),
     };
 
-    // `letter_kinds` walks the stored characters' index a kind at a time.
-    let mut sql = String::from(if matching == Matching::Letter {
+    // `letter_kinds` walks the stored characters' index a kind at a time,
+    // and so does a broad word's `kinds`.
+    let mut sql = String::from(if matching == Matching::Letter || walk.is_some() {
         "with recursive\n"
     } else {
         "with\n"
@@ -421,43 +729,11 @@ fn build_search_sql(
             "q as not materialized (\n  select t.c as c, (quote_literal(t.c) || ':*')::tsquery as tsq, array[t.c] as words\n    from (select {letter} as c) t\n   where t.c is not null\n),"
         );
     } else if let Some(tsquery) = &tsquery {
-        // Computed ONCE, as a FROM item, and never bound as a tsquery
-        // (roadmap §4 gotcha 2): the match, the rank and the headline all read
-        // this one value.
-        sql.push_str("q as not materialized (\n  select ");
-        if prefix_last {
-            // What makes the box answer while the word is still being typed.
-            // `websearch_to_tsquery` output is already a well-formed, quoted
-            // tsquery, so appending ':*' to its *text* and casting back turns
-            // only the last lexeme into a prefix. Two guards. A query of
-            // nothing but stopwords yields the empty tsquery, and ':*' on its
-            // own is a syntax error. And ':*' binds only to a quoted lexeme:
-            // a negated phrase followed by a word Postgres drops (a stopword,
-            // `or`, a lone `-`) ends its text in `)` whatever the parser saw
-            // typed last (#1971), so such text is matched whole. That makes
-            // `tsq` and `whole` the same tsquery, which `RANK_WHOLE` ranks by.
-            sql.push_str(concat!(
-                "case when t.tsq::text = '' then null::tsquery\n",
-                "              when right(t.tsq::text, 1) <> '''' then t.tsq\n",
-                "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
-                // The same words with none of them a prefix: what a row is
-                // ranked by when it holds the last word whole (`RANK_WHOLE`).
-                "         t.tsq as whole,\n"
-            ));
-        } else {
-            sql.push_str("t.tsq as tsq,\n");
-        }
-        // The typed words as `to_tsvector` lexes a name, sorted and distinct,
-        // for `NAMED`: one array per search, compared against each match. It
-        // must lex exactly as `NAMED` does, or no row is ever named.
-        let _ = writeln!(
-            sql,
-            "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
-        );
-        let _ = writeln!(
-            sql,
-            "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
-        );
+        sql.push_str(&typed_words(
+            tsquery,
+            prefix_last,
+            matches!(matching, Matching::Kept | Matching::Broad { .. }),
+        ));
     }
 
     // A ticket key's declared paths, resolved once for the statement (#811),
@@ -488,11 +764,149 @@ fn build_search_sql(
         );
     }
 
+    // A word many rows hold (`broad_sql`): the mirror's rows are read before
+    // `m`, the names off the names' index and the text's off each kind's
+    // newest rows.
+    if let (Some((names, _)), Some(_)) = (broad, mirror) {
+        let matched = &crate::corpus::LIVE_ITEM_MATCH;
+        let rank = if prefix_last {
+            RANK_WHOLE.replace("{fts}", matched.fts)
+        } else {
+            format!("ts_rank_cd({}, q.tsq)", matched.fts)
+        };
+        let named = matched.named.unwrap_or("false");
+        let answered = answered_kind(matched, &bound);
+        // What *Titles* matches, whatever the scope: the names.
+        let scope = bound.titles;
+        bound.titles = true;
+        let named_by = corpus_predicates(matched, Some("q.tsq"), &bound).join("\n     and ");
+        bound.titles = scope;
+        match names {
+            // Every row the word names, ranked.
+            Names::Ranked => {
+                let _ = writeln!(
+                    sql,
+                    "names as materialized (\n  select {} as entity_id, {answered} as kind, {} as raw, {rank} as rank, {named} as named,\n         {} as item_updated_at\n    from {} cross join q\n   where {named_by}\n),",
+                    matched.entity_id, matched.kind, matched.updated_at, matched.relation,
+                );
+            }
+            // Every row the word names with its kind and date and no rank:
+            // `top` keeps each kind's newest. Reading them is a third of
+            // ranking them (0.7 µs a row against 1.8 on Björn's scale), and
+            // less where the query leaves no word out (`q.plain`): the
+            // whole vector, 0.3 µs a row to test, is then not read at all.
+            Names::Newest => {
+                let agreement = format!("coalesce({} @@ q.tsq, false)", matched.fts);
+                let named_by = named_by.replace(&agreement, &format!("(q.plain or {agreement})"));
+                let _ = writeln!(
+                    sql,
+                    "names as materialized (\n  select {} as entity_id, {answered} as kind, {} as raw, 1::real as rank, false as named,\n         {} as item_updated_at\n    from {} cross join q\n   where {named_by}\n),",
+                    matched.entity_id, matched.kind, matched.updated_at, matched.relation,
+                );
+            }
+        }
+        if let Some(walk) = &walk {
+            // The kinds the mirror holds, off the empty start's index: its
+            // first entry, then the first past each kind found (a loose
+            // scan, as `letter_kinds` is).
+            sql.push_str(concat!(
+                "kinds as (\n",
+                "  (select ii.kind from sync.item_initial ii\n",
+                "    where ii.initial = ''\n",
+                "    order by ii.kind limit 1)\n",
+                "  union all\n",
+                "  select (select ii.kind from sync.item_initial ii\n",
+                "           where ii.initial = '' and ii.kind > k.kind\n",
+                "           order by ii.kind limit 1)\n",
+                "    from kinds k\n",
+                "   where k.kind is not null\n",
+                "),\n",
+            ));
+            // A row the walk tests: live, within the query's sources and
+            // dates, its text holding the word and no name of it doing so
+            // (a name is in `names`). Each half of the match is wrapped, so
+            // no index answers it: the walk is the read.
+            let walked = &crate::corpus::LIVE_ITEM_WALKED;
+            let mut tested = vec![
+                format!("{} = x.entity_id", walked.entity_id),
+                format!("coalesce({} @@ q.tsq, false)", walked.fts),
+                format!(
+                    "not coalesce({} @@ q.tsq, false)",
+                    walked.title_fts.unwrap_or(walked.fts)
+                ),
+            ];
+            tested.extend(corpus_predicates(walked, None, &bound));
+            let mut kinds = vec!["k.kind is not null".to_owned()];
+            if let Some(hidden) = &bound.hidden {
+                kinds.push(format!("k.kind <> all({hidden})"));
+            }
+            if let Some(asked) = &bound.kinds {
+                kinds.push(format!("k.kind = any({asked})"));
+            }
+            // No walk of a kind the names fill.
+            sql.push_str(
+                "named_kinds as materialized (select n.raw, count(*) as held from names n group by n.raw),\n",
+            );
+            kinds.push(format!(
+                "coalesce((select nk.held from named_kinds nk where nk.raw = k.kind), 0) < {per_group}"
+            ));
+            let _ = writeln!(
+                sql,
+                "walk as materialized (\n  select k.kind as raw, w.entity_id, w.item_updated_at, w.hit, w.nth\n    from kinds k\n   cross join q\n   cross join lateral (\n     select x.entity_id, x.item_updated_at, x.nth, hit.entity_id is not null as hit\n       from (select ii.entity_id, ii.item_updated_at,\n                    row_number() over (order by ii.item_updated_at desc nulls last, ii.entity_id) as nth\n               from sync.item_initial ii\n              where ii.initial = '' and ii.kind = k.kind and ii.leads\n              order by ii.item_updated_at desc nulls last, ii.entity_id\n              limit {walk}) x\n       left join lateral (select {} as entity_id\n                            from {}\n                           where {}) hit on true\n      where hit.entity_id is not null or x.nth = {walk}\n      order by x.item_updated_at desc nulls last, x.entity_id\n      limit {per_group} + 1) w\n   where {}\n),",
+                walked.entity_id,
+                walked.relation,
+                tested.join("\n                             and "),
+                kinds.join("\n     and "),
+            );
+            // The kinds the walk ran out of rows to look through before it
+            // found their ten: asked of the index instead, which lists the
+            // word's every row once, whatever its kind. No such kind, no
+            // read.
+            let mut late = corpus_predicates(matched, Some("q.tsq"), &bound);
+            late.push(format!(
+                "not coalesce({} @@ q.tsq, false)",
+                matched.title_fts.unwrap_or(matched.fts)
+            ));
+            late.push(format!("{} = any(s.kinds)", matched.kind));
+            let _ = writeln!(
+                sql,
+                "sparse as (\n  select w.raw as kind from walk w\n   group by w.raw\n  having count(*) filter (where w.hit) < {per_group} and bool_or(w.nth = {walk})\n),\nlate as materialized (\n  select f.entity_id, f.raw, f.item_updated_at\n    from (select array_agg(sp.kind) as kinds from sparse sp having count(*) > 0) s\n   cross join q\n   cross join lateral (\n     select {} as entity_id, {} as raw, {} as item_updated_at,\n            row_number() over (partition by {} order by {} desc nulls last, {}) as nth\n       from {}\n      where {}) f\n   where f.nth <= {per_group}\n),",
+                matched.entity_id,
+                matched.kind,
+                matched.updated_at,
+                matched.kind,
+                matched.updated_at,
+                matched.entity_id,
+                matched.relation,
+                late.join("\n        and "),
+            );
+        }
+    }
+
     let mut narrowly = false;
     sql.push_str("m as materialized (\n");
     for (index, corpus) in corpora.iter().enumerate() {
         if index > 0 {
             sql.push_str("  union all\n");
+        }
+        if broad.is_some() && Some(index) == mirror {
+            narrowly = true;
+            let _ = writeln!(
+                sql,
+                "  select n.entity_id as entity_id, n.kind as kind, n.rank as rank, n.named as named,\n         n.item_updated_at as item_updated_at, {} as corpus\n    from names n",
+                drawn_by(index, corpus),
+            );
+            if walk.is_some() {
+                // The text's rows, not ranked: the walk's for a kind it
+                // filled or read to its end, the index's for the others.
+                let _ = writeln!(
+                    sql,
+                    "  union all\n  select t.entity_id as entity_id, {} as kind, 0::real as rank, false as named,\n         t.item_updated_at as item_updated_at, {} as corpus\n    from (select w.entity_id, w.raw, w.item_updated_at from walk w\n           where w.hit and w.raw not in (select sp.kind from sparse sp)\n          union all\n          select l.entity_id, l.raw, l.item_updated_at from late l) t",
+                    answered_as("t.raw", &bound),
+                    drawn_by(index, corpus),
+                );
+            }
+            continue;
         }
         if matching == Matching::Letter && Some(index) == mirror {
             // Each kind's first rows in the index's order, and no more: the
@@ -539,6 +953,9 @@ fn build_search_sql(
             // lexeme.
             _ if by_letter && Some(index) == mirror => LEADS_UNSTORED.to_owned(),
             _ if by_letter => LEADS.replace("{fts}", corpus.fts),
+            // A pipeline a broad word's run log found is a row the text
+            // found: not ranked, after the names.
+            _ if broad.is_some() && corpus.drawn_as_mirror => "0::real".to_owned(),
             (true, true) => RANK_WHOLE.replace("{fts}", corpus.fts),
             (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
             (false, _) => "0::real".to_owned(),
@@ -574,8 +991,17 @@ fn build_search_sql(
     }
     sql.push_str("),\n");
 
-    // The true per-kind count, over every match rather than over the page.
-    sql.push_str("totals as (select kind, count(*) as kind_total from m group by kind),\n");
+    // The true per-kind count, over every match rather than over the page;
+    // for a word many rows hold, the rows the answer holds of the kind,
+    // since its matches are not read to be counted.
+    if broad.is_some() {
+        let _ = writeln!(
+            sql,
+            "totals as (select kind, least(count(*), {per_group}) as kind_total from m group by kind),"
+        );
+    } else {
+        sql.push_str("totals as (select kind, count(*) as kind_total from m group by kind),\n");
+    }
 
     // One ordering, spelled three times with different qualifiers: within the
     // kind (window), across the page, and across the joined result. They must
@@ -592,21 +1018,19 @@ fn build_search_sql(
                 sql,
                 "top as (\n  select t.* from totals k\n   cross join lateral (select m.* from m where m.kind = k.kind\n                        order by {within}\n                        limit {per_group}) t\n),"
             );
-            if by_letter {
-                // A word's first characters say nothing of which kind is
-                // meant, so the page is dealt a row a kind at a time: every
-                // kind that holds them shows its first rows, where the
-                // newest of all would be the kinds that change most.
-                let _ = writeln!(
-                    sql,
-                    "picked as (\n  select * from (select top.*, row_number() over (partition by top.kind order by {ordering}) as nth\n                   from top) dealt\n   order by dealt.nth, {ordering}\n   limit {limit}\n),"
-                );
-            } else {
-                let _ = writeln!(
-                    sql,
-                    "picked as (\n  select * from top\n   order by {ordering}\n   limit {limit}\n),"
-                );
-            }
+            // The page is dealt a row a kind at a time: every kind's first
+            // row, then every kind's second, up to `limit`. What was typed
+            // says nothing of which kind is meant, and a rank says nothing
+            // across kinds: a page's body is long and a repository's
+            // description short, so the best forty of all were tickets and
+            // pages, and a repository named what was typed was not drawn
+            // (`payout`, `ledger`; the long-words pass, 2026-11-16). For a
+            // word's first characters since the one-letter pass, where the
+            // newest of all were the kinds that change most.
+            let _ = writeln!(
+                sql,
+                "picked as (\n  select * from (select top.*, row_number() over (partition by top.kind order by {ordering}) as nth\n                   from top) dealt\n   order by dealt.nth, {ordering}\n   limit {limit}\n),"
+            );
         }
         KindCut::Window => {
             let _ = writeln!(
@@ -614,9 +1038,11 @@ fn build_search_sql(
                 "top as (\n  select m.*, row_number() over (partition by m.kind order by {}) as rn\n    from m\n),",
                 order_by("m.", ranked, false)
             );
+            // Dealt as `KindCut::Limit` deals: `rn` is the row's place in
+            // its kind.
             let _ = writeln!(
                 sql,
-                "picked as (\n  select * from top where rn <= {per_group}\n   order by {ordering}\n   limit {limit}\n),"
+                "picked as (\n  select * from top where rn <= {per_group}\n   order by rn, {ordering}\n   limit {limit}\n),"
             );
         }
     }
@@ -1735,6 +2161,15 @@ pub fn query_as_with<O>(built: SearchSql) -> QueryAs<'static, Postgres, O, PgArg
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
+    bound(built, false)
+}
+
+/// [`query_as_with`], the statement prepared by name where `kept` says so
+/// ([`fetch_kept`]) and sent unnamed where not.
+fn bound<O>(built: SearchSql, kept: bool) -> QueryAs<'static, Postgres, O, PgArguments>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
     let SearchSql { sql, binds, .. } = built;
     let mut query = sqlx::query_as::<Postgres, O>(sqlx::AssertSqlSafe(sql))
         // **Not a cached prepared statement, and this is a measured decision.**
@@ -1758,7 +2193,12 @@ where
         // against a 5x regression that only appears after the sixth keystroke
         // of a session and would therefore never be seen in a test that ran a
         // query five times.
-        .persistent(false);
+        //
+        // **A statement whose work its own limits bound is kept**
+        // ([`fetch_kept`], the long-words pass, 2026-11-16): its plan does
+        // not depend on the typed words, and it runs with `plan_cache_mode`
+        // `force_generic_plan`, so there is no sixth execution to switch at.
+        .persistent(kept);
     for bind in binds {
         query = match bind {
             Bind::Text(value) => query.bind(value),
@@ -1837,7 +2277,78 @@ pub async fn fetch_named<O>(pool: &sqlx::PgPool, built: SearchSql) -> Result<Vec
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
-    fetch_planned(pool, built, NAMED_PLANNING).await
+    // Prepared by name, so the plan `NAMED_PLANNING` asks for is kept: sent
+    // unnamed, as it was until the long-words pass (2026-11-16), the
+    // statement was parsed and planned again for every key, 6 to 9 ms of a
+    // read that runs in 2.
+    let mut tx = pool.begin().await?;
+    sqlx::query(NAMED_PLANNING).execute(&mut *tx).await?;
+    let rows = bound::<O>(built, true).fetch_all(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(rows)
+}
+
+/// Run a statement [`kept_search_sql`], [`probe_sql`] or [`broad_sql`]
+/// built and collect its rows, under **one plan a connection**
+/// ([`KEPT_PLANNING`]): the statement is prepared by name, where
+/// [`query_as_with`] sends it unnamed, so the server parses it and plans it
+/// once on each of the pool's connections and binds the typed words after.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_kept<O>(pool: &sqlx::PgPool, built: SearchSql) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    let mut kept = Kept::begin(pool).await?;
+    let rows = kept.fetch(built).await?;
+    kept.end().await?;
+    Ok(rows)
+}
+
+/// A transaction that runs its statements as [`fetch_kept`] runs one: what
+/// the launcher counts a query in and then answers it in
+/// (`Searcher::rows_by_words`), on one connection and one snapshot's
+/// settings, so the count and the answer are four round trips fewer than
+/// two transactions.
+pub struct Kept {
+    tx: sqlx::Transaction<'static, Postgres>,
+}
+
+impl Kept {
+    /// A transaction on one of `pool`'s connections, planning as
+    /// [`KEPT_PLANNING`] says until it ends.
+    ///
+    /// # Errors
+    ///
+    /// [`sqlx::Error`] if the transaction cannot begin.
+    pub async fn begin(pool: &sqlx::PgPool) -> Result<Self, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        sqlx::query(KEPT_PLANNING).execute(&mut *tx).await?;
+        Ok(Self { tx })
+    }
+
+    /// `built`'s rows, the statement prepared by name on this connection.
+    ///
+    /// # Errors
+    ///
+    /// [`sqlx::Error`] if the statement fails.
+    pub async fn fetch<O>(&mut self, built: SearchSql) -> Result<Vec<O>, sqlx::Error>
+    where
+        O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+    {
+        bound::<O>(built, true).fetch_all(&mut *self.tx).await
+    }
+
+    /// End the transaction: nothing was written in it.
+    ///
+    /// # Errors
+    ///
+    /// [`sqlx::Error`] if the commit fails.
+    pub async fn end(self) -> Result<(), sqlx::Error> {
+        self.tx.commit().await
+    }
 }
 
 /// `built`'s rows, planned under `planning` in a transaction of its own.
@@ -1901,6 +2412,23 @@ const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', tru
      set_config('parallel_setup_cost', '0', true), \
      set_config('max_parallel_workers_per_gather', '3', true)";
 
+/// [`fetch_kept`]'s: **one plan whatever was typed**, made once a
+/// connection and kept.
+///
+/// * **`plan_cache_mode` `force_generic_plan`**: the plan is made without
+///   the typed words, and each statement run under it spells its reads so
+///   that no estimate of them chooses: an index's own predicate where the
+///   index is the read, a wrapped one where a walk is.
+/// * **`enable_seqscan` off**, as [`MATCHED_PLANNING`]: a match is read
+///   through its index.
+/// * **No worker**, as [`NAMED_PLANNING`], and **no JIT**: the work is a few
+///   thousand rows at most, and compiling a statement of this size takes
+///   longer than running it.
+const KEPT_PLANNING: &str = "select set_config('plan_cache_mode', 'force_generic_plan', true), \
+     set_config('enable_seqscan', 'off', true), \
+     set_config('max_parallel_workers_per_gather', '0', true), \
+     set_config('jit', 'off', true)";
+
 /// [`fetch_named`]'s: **one plan for every character, and for two and
 /// three**, made once a connection and kept (`plan_cache_mode`
 /// `force_generic_plan`).
@@ -1916,6 +2444,34 @@ const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', tru
 /// one costs 31 to 37 ms to start (the Windows pass, 2026-11-14).
 const NAMED_PLANNING: &str = "select set_config('plan_cache_mode', 'force_generic_plan', true), \
      set_config('max_parallel_workers_per_gather', '0', true)";
+
+/// The plan [`fetch_kept`] runs a statement under, with every other way to
+/// read a table switched off where `at_any_size` says so, so a test's small
+/// mirror is planned as a large one is ([`explain_named_at_any_size`]).
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain_kept(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    at_any_size: bool,
+) -> Result<String, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(KEPT_PLANNING).execute(&mut *tx).await?;
+    if at_any_size {
+        sqlx::query(
+            "select set_config('enable_bitmapscan', 'off', true), \
+                    set_config('enable_sort', 'off', true)",
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    let plan = explain_on(&mut tx, built).await?;
+    tx.commit().await?;
+    Ok(plan)
+}
 
 /// The plan [`fetch_named`] runs a statement under.
 ///
@@ -2699,6 +3255,210 @@ mod tests {
         assert!(letter_sql(&[&LIVE_ITEM], "p", &plain, 10, 40).is_some());
     }
 
+    /// The statements of the long-words pass ([`probe_sql`],
+    /// [`kept_search_sql`], [`broad_sql`]) are held to the same two rules:
+    /// what was typed is a bind, the literals are the closed list, and the
+    /// placeholders are dense and in order. Each is one text whatever was
+    /// typed, which is what lets its plan be kept, and reads the typed words
+    /// off a materialized `q`. And what the narrow relations do not hold is
+    /// not asked of them.
+    #[test]
+    fn a_word_many_rows_hold_never_enters_the_sql_string() {
+        let evil = "'; drop table sync.item; --";
+        let hostile = |titles: bool| EffectiveFilters {
+            titles,
+            pipeline_kinds: vec![evil.to_owned()],
+            hidden_kinds: vec![evil.to_owned()],
+            ..filters(&[evil], &[evil], Some(7), &[])
+        };
+        let corpora = [&crate::corpus::LIVE_ITEM_FILLED];
+        let every = |word: &str| -> Vec<(&'static str, SearchSql)> {
+            let mut built = Vec::new();
+            for titles in [false, true] {
+                let asked = hostile(titles);
+                built.push((
+                    "probe",
+                    probe_sql(word, true, &asked, 2_000).expect("narrow"),
+                ));
+                built.push((
+                    "kept",
+                    kept_search_sql(&corpora, word, true, &asked, 10, 40).expect("narrow"),
+                ));
+                for names in [Names::Ranked, Names::Newest] {
+                    built.push((
+                        "broad",
+                        broad_sql(&corpora, word, true, &asked, 10, 40, names, 500)
+                            .expect("narrow"),
+                    ));
+                }
+            }
+            built
+        };
+        let other = every("payout");
+        // The closed list, and the one mark a kept `q` looks for: a word
+        // left out.
+        let allowed: Vec<&str> = ALLOWED_LITERALS.iter().copied().chain(["!"]).collect();
+        for ((what, built), (_, same)) in every(evil).into_iter().zip(other) {
+            for literal in literals(&built.sql) {
+                assert!(
+                    allowed.contains(&literal.as_str()),
+                    "{what}: unexpected literal {literal:?} in\n{}",
+                    built.sql
+                );
+            }
+            assert_eq!(
+                placeholders(&built.sql),
+                (1..=built.bind_count()).collect::<Vec<_>>(),
+                "{what}:\n{}",
+                built.sql
+            );
+            assert!(
+                built
+                    .binds
+                    .iter()
+                    .any(|bind| matches!(bind, Bind::Text(text) if text == evil)),
+                "{what}"
+            );
+            // One text whatever was typed, the words read once.
+            assert_eq!(built.sql, same.sql, "{what}");
+            assert!(
+                built.sql.contains("q as materialized ("),
+                "{what}:\n{}",
+                built.sql
+            );
+            assert!(built.matches_narrowly(), "{what}");
+        }
+
+        // The broad statement's reads, each spelled for the way it is made.
+        let everything = hostile(false);
+        let ranked = broad_sql(
+            &corpora,
+            "payout",
+            true,
+            &everything,
+            10,
+            40,
+            Names::Ranked,
+            500,
+        )
+        .expect("narrow");
+        // The names off their own index, ranked; the walk off the empty
+        // start's, its match wrapped so that no index answers it.
+        let names = &ranked.sql[ranked.sql.find("names as materialized").unwrap()
+            ..ranked.sql.find("kinds as (").unwrap()];
+        assert!(names.contains("where sx.fts_a @@ q.tsq"), "{names}");
+        assert!(names.contains("ts_rank_cd(sx.fts, q.whole)"), "{names}");
+        let walk = &ranked.sql[ranked.sql.find("walk as materialized").unwrap()
+            ..ranked.sql.find("sparse as (").unwrap()];
+        assert!(
+            walk.contains("where ii.initial = '' and ii.kind = k.kind and ii.leads"),
+            "{walk}"
+        );
+        assert!(walk.contains("coalesce(sx.fts @@ q.tsq, false)"), "{walk}");
+        assert!(
+            walk.contains("not coalesce(sx.fts_a @@ q.tsq, false)"),
+            "{walk}"
+        );
+        assert!(!walk.contains("and sx.fts @@ q.tsq"), "{walk}");
+        assert!(!walk.contains("ts_rank"), "{walk}");
+        // A kind the query hides or does not ask for is not walked, and
+        // nor is one the names fill: its rows would be read to be cut.
+        assert!(
+            walk.contains(
+                "where k.kind is not null\n     and k.kind <> all($3)\n     and k.kind = any($5)\n     \
+                 and coalesce((select nk.held from named_kinds nk where nk.raw = k.kind), 0) < $8"
+            ),
+            "{walk}"
+        );
+        // Newest names: no rank read.
+        let newest = broad_sql(
+            &corpora,
+            "payout",
+            true,
+            &everything,
+            10,
+            40,
+            Names::Newest,
+            500,
+        )
+        .expect("narrow");
+        let names = &newest.sql[newest.sql.find("names as materialized").unwrap()
+            ..newest.sql.find("kinds as (").unwrap()];
+        assert!(!names.contains("ts_rank"), "{names}");
+        assert!(names.contains("1::real as rank"), "{names}");
+        // Nor the whole vector, where the query leaves no word out.
+        assert!(
+            names.contains("and (q.plain or coalesce(sx.fts @@ q.tsq, false))"),
+            "{names}"
+        );
+        // Under *Titles* the names are the question: no walk at all.
+        let titled = broad_sql(
+            &corpora,
+            "payout",
+            true,
+            &hostile(true),
+            10,
+            40,
+            Names::Ranked,
+            500,
+        )
+        .expect("narrow");
+        assert!(!titled.sql.contains("sync.item_initial"), "{}", titled.sql);
+        assert!(titled.sql.starts_with("with\n"), "{}", titled.sql);
+        assert!(ranked.sql.starts_with("with recursive\n"), "{}", ranked.sql);
+        // A kind's total is the rows the answer holds of it.
+        assert!(
+            ranked
+                .sql
+                .contains("select kind, least(count(*), $8) as kind_total from m group by kind"),
+            "{}",
+            ranked.sql
+        );
+
+        // An author, a parent, a reach, a name glob or a ticket key reads the
+        // mirror's own row.
+        use crate::query::{FieldFilter, FieldKey};
+        let plain = EffectiveFilters::default();
+        for asked in [
+            filters(&[], &[], None, &["me"]),
+            EffectiveFilters {
+                under: vec!["payout".to_owned()],
+                ..plain.clone()
+            },
+            EffectiveFilters {
+                reach: vec!["jira:PAY-1".to_owned()],
+                ..plain.clone()
+            },
+            EffectiveFilters {
+                names: vec!["pay*".to_owned()],
+                ..plain.clone()
+            },
+            EffectiveFilters {
+                fields: vec![FieldFilter {
+                    key: FieldKey::Status,
+                    negated: false,
+                    values: vec!["Done".to_owned()],
+                    within_days: None,
+                    me: Vec::new(),
+                }],
+                ..plain.clone()
+            },
+        ] {
+            assert!(
+                probe_sql("payout", true, &asked, 2_000).is_none(),
+                "{asked:?}"
+            );
+            assert!(
+                kept_search_sql(&corpora, "payout", true, &asked, 10, 40).is_none(),
+                "{asked:?}"
+            );
+            assert!(
+                broad_sql(&corpora, "payout", true, &asked, 10, 40, Names::Ranked, 500).is_none(),
+                "{asked:?}"
+            );
+        }
+    }
+
     /// The saved-list summary is held to the same two rules the search is.
     ///
     /// Same closed literal list, same dense placeholder numbering — and the
@@ -3115,9 +3875,19 @@ mod tests {
             "the per-kind total is back on a window partition:\n{}",
             built.sql
         );
-        // No window function at all: the per-kind cap is an ordered limit
-        // a kind (`KindCut::Limit`), not a `row_number` over every match.
-        assert_eq!(built.sql.matches(" over (").count(), 0, "{}", built.sql);
+        // No window function over the matches: the per-kind cap is an
+        // ordered limit a kind (`KindCut::Limit`), not a `row_number` over
+        // every match. The one window there is deals the page, over the
+        // rows that cap kept, ten a kind at most.
+        assert_eq!(built.sql.matches(" over (").count(), 1, "{}", built.sql);
+        assert!(
+            built.sql.contains(
+                "row_number() over (partition by top.kind order by rank desc, named desc, \
+                 item_updated_at desc nulls last, entity_id) as nth\n                   from top"
+            ),
+            "{}",
+            built.sql
+        );
         assert!(
             built.sql.contains("from m where m.kind = k.kind"),
             "{}",

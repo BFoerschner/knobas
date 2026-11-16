@@ -13,6 +13,7 @@ pub(crate) mod fill;
 pub mod inbox;
 pub mod item_card;
 mod item_field;
+pub mod item_initial;
 pub mod item_row;
 pub mod item_run;
 pub mod item_search;

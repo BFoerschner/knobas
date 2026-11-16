@@ -146,6 +146,11 @@ pub struct Searcher {
     /// `note:` finds nothing, and `kind:` stops offering `note`. The notes
     /// themselves stay (D10).
     notes_shown: bool,
+    /// How many rows may hold a query for it to be ranked whole, and how many
+    /// of a kind's newest rows a broader one is looked for in:
+    /// [`sql::RANKED_WHOLE`] and [`sql::WALK`], but for a test, whose mirror
+    /// holds tens of rows ([`Self::bounded_at`]).
+    bounds: (u32, u32),
 }
 
 impl Searcher {
@@ -161,6 +166,7 @@ impl Searcher {
             kinds: KindCatalog::default(),
             payload_paths: Vec::new(),
             notes_shown: true,
+            bounds: (sql::RANKED_WHOLE, sql::WALK),
         }
     }
 
@@ -169,6 +175,17 @@ impl Searcher {
     #[must_use]
     pub fn with_notes_shown(mut self, shown: bool) -> Self {
         self.notes_shown = shown;
+        self
+    }
+
+    /// The same searcher, ranking a query whole while no more than
+    /// `ranked_whole` rows hold it and looking for a broader one's text in
+    /// `walk` of a kind's newest rows: the two bounds of
+    /// [`Self::rows_by_words`], at a size a test's mirror reaches.
+    #[cfg(any(test, feature = "test-util"))]
+    #[must_use]
+    pub fn bounded_at(mut self, ranked_whole: u32, walk: u32) -> Self {
+        self.bounds = (ranked_whole, walk);
         self
     }
 
@@ -190,6 +207,7 @@ impl Searcher {
             kinds,
             payload_paths: Vec::new(),
             notes_shown: true,
+            bounds: (sql::RANKED_WHOLE, sql::WALK),
         }
     }
 
@@ -385,11 +403,12 @@ impl Searcher {
         let started = Instant::now();
         let query = validate(query)?;
 
-        // The vocabulary, and beside it which mirror the match stage reads
-        // (migration `0084`, [`corpus::mirror`]): one probe, asked while the
-        // vocabulary's two reads are out, so it adds no wait of its own.
-        let (vocab, mirror) = tokio::try_join!(self.vocabulary(), async {
-            Ok(corpus::mirror(&self.pool).await?)
+        // The vocabulary, and beside it what the database holds of the
+        // mirror's stored reads (migrations `0084` and `0093` to `0095`,
+        // [`corpus::stored`]): one round trip, asked while the vocabulary's
+        // two reads are out, so it adds no wait of its own.
+        let (vocab, stored) = tokio::try_join!(self.vocabulary(), async {
+            Ok(corpus::stored(&self.pool).await?)
         })?;
         let mut parsed = query::parse(&query.raw, &vocab);
         // Pipelines under the shell's word, and no runs or commits (#2422).
@@ -433,9 +452,12 @@ impl Searcher {
         let rows: Vec<RawHit> = if known_under.admits_nothing {
             Vec::new()
         } else {
+            // A word's first characters are read off the stored ones only
+            // once every item has its own (`Stored::names`): until bring-up's
+            // fill has passed, they are ranked as every query was before.
             let named = self
                 .rows_by_name(
-                    text.filter(|_| by_name),
+                    text.filter(|_| by_name && stored.names),
                     parsed.prefix_last_term,
                     &filters,
                     query.limit,
@@ -449,32 +471,24 @@ impl Searcher {
                     // `0084`).
                     let corpora = corpus::with_mirror(
                         corpus::searched(self.corpora(), filters.titles),
-                        mirror,
+                        stored.mirror,
                     );
-                    let built = sql::search_sql(
-                        &corpora,
-                        text,
-                        parsed.prefix_last_term,
-                        &filters,
-                        PER_GROUP,
-                        query.limit,
-                    );
-                    match words {
-                        // A character no name holds is rare in the bodies
-                        // too: through the index, on the processes the
-                        // planner gives a word, where a letter read whole
-                        // starts three workers whatever it matches (31 to 37
-                        // ms each on Windows, `sql::LETTER_PLANNING`).
-                        Named::NoName => sql::fetch_matched(&self.pool, built).await?,
-                        // Few names: the text's rows in the room they
-                        // leave, read the same way.
-                        Named::Few(names) => group::filled(
-                            names,
-                            sql::fetch_matched(&self.pool, built).await?,
-                            PER_GROUP,
+                    let rows = self
+                        .rows_by_words(
+                            &corpora,
+                            text,
+                            parsed.prefix_last_term,
+                            &filters,
                             query.limit,
-                        ),
-                        _ => self.rows_of(built, text).await?,
+                            by_name && stored.whole(),
+                        )
+                        .await?;
+                    match words {
+                        // Few names: the text's rows in the room they leave.
+                        Named::Few(names) => group::filled(names, rows, PER_GROUP, query.limit),
+                        // No name holds the characters, or they are no
+                        // word's first: the words' answer whole.
+                        _ => rows,
                     }
                 }
             }
@@ -557,6 +571,85 @@ impl Searcher {
         } else {
             Named::Rows(rows)
         })
+    }
+
+    /// The rows **words** are answered with (the long-words pass, 2026-11-16;
+    /// `docs/decisions/2026-11-16-a-word-many-rows-hold.md`): four typed
+    /// characters and more, a finished word, and what a word's first
+    /// characters leave to the text ([`Self::rows_by_name`]).
+    ///
+    /// The matches are counted first, no further than one past
+    /// [`sql::RANKED_WHOLE`] ([`sql::probe_sql`]):
+    ///
+    /// * **Few rows hold the query**: every match is ranked, as
+    ///   [`sql::search_sql`] always ranked, the same answer
+    ///   ([`sql::kept_search_sql`]).
+    /// * **Many do**: the rows the query names, ranked where they are few
+    ///   and the newest where they are many too, and under *Everything*,
+    ///   where they leave a kind room, that kind's newest rows whose text
+    ///   holds it ([`sql::broad_sql`]). Ranking 18,553 matches to keep ten a
+    ///   kind was 54 ms of `payout` on Björn's scale; this is 10.
+    ///
+    /// Both run under one plan a connection ([`sql::fetch_kept`]).
+    ///
+    /// `bounded` says the stored reads those statements take are whole
+    /// (`corpus::Stored::whole`) and a word's first characters are answered
+    /// by names: where it is false, and for a browse or a query that asks
+    /// what the narrow relations do not hold (an author, a parent, a reach,
+    /// a name glob, a ticket key), [`sql::search_sql`] answers, planned for
+    /// the query, as before.
+    async fn rows_by_words(
+        &self,
+        corpora: &[&'static corpus::Corpus],
+        text: Option<&str>,
+        prefix_last: bool,
+        filters: &EffectiveFilters,
+        limit: u32,
+        bounded: bool,
+    ) -> Result<Vec<RawHit>, sqlx::Error> {
+        let whole = || sql::search_sql(corpora, text, prefix_last, filters, PER_GROUP, limit);
+        let Some(typed) = text.filter(|_| bounded) else {
+            return self.rows_of(whole(), text).await;
+        };
+        let (ranked_whole, walk) = self.bounds;
+        let Some(probe) = sql::probe_sql(typed, prefix_last, filters, ranked_whole) else {
+            return self.rows_of(whole(), text).await;
+        };
+        // The count and the answer in one transaction, on one connection.
+        let mut kept = sql::Kept::begin(&self.pool).await?;
+        let (matched, named) = kept
+            .fetch::<(i64, i64)>(probe)
+            .await?
+            .first()
+            .copied()
+            .unwrap_or_default();
+        let cap = i64::from(ranked_whole);
+        let built = if matched <= cap {
+            sql::kept_search_sql(corpora, typed, prefix_last, filters, PER_GROUP, limit)
+        } else {
+            let names = if named <= cap {
+                sql::Names::Ranked
+            } else {
+                sql::Names::Newest
+            };
+            sql::broad_sql(
+                corpora,
+                typed,
+                prefix_last,
+                filters,
+                PER_GROUP,
+                limit,
+                names,
+                walk,
+            )
+        };
+        let Some(built) = built else {
+            kept.end().await?;
+            return self.rows_of(whole(), text).await;
+        };
+        let rows = kept.fetch(built).await?;
+        kept.end().await?;
+        Ok(rows)
     }
 
     /// The rows of a statement [`sql::search_sql`] built: through the indexes

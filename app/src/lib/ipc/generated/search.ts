@@ -398,8 +398,9 @@ left_out: Array<LeftOut>, };
 export type ResultGroup = { kind: string, label: string, plural: string, monogram: string, 
 /**
  * Matches of this kind, before `limit` was applied. For one, two or
- * three typed characters that names answer, at most the rows a kind may
- * contribute: see [`SearchResponse::total`].
+ * three typed characters that names answer, and for a query more than
+ * 2,000 rows hold, at most the rows a kind may contribute: see
+ * [`SearchResponse::total`].
  */
 total: number, hits: Array<SearchHit>, };
 
@@ -619,9 +620,10 @@ titles: boolean, };
 export type SearchResponse = { interpreted: ParsedQuery, groups: Array<ResultGroup>, 
 /**
  * Matches across every kind, before `limit` was applied. For one, two
- * or three typed characters that names answer, the rows the answer
- * holds: such an answer reads each kind's first rows and counts no
- * match (the one-letter pass, 2026-11-15, and the two-letters pass,
+ * or three typed characters that names answer, and for a query more
+ * than 2,000 rows hold, the rows the answer holds: such an answer reads
+ * each kind's first rows and counts no match (the one-letter pass,
+ * 2026-11-15, the two-letters pass and the long-words pass,
  * 2026-11-16).
  */
 total: number, took_ms: number, 
