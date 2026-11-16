@@ -280,38 +280,41 @@ in both builds.
 
 ## Gates
 
-On a clean clone. The code and its tests are commits `c6398298` to `df79627f` on `ux-polish`; the correctness gates
-ran on `2f2d713c` (the same commits before a rebase over two commits of the Compare pass and one of notes) and
-`just check-front` again on `df79627f`.
+Björn's trimmed gates of 2026-11-16 (the full timing matrix runs once a pre-release, not in every pass), on the
+pushed head `b0f86759` in a clean clone. Timing and UI runs held the machine's timing lock, one run at a time.
 
-- `just check-front` on `df79627f`: doc-lists and conflict-markers ok, `svelte-check` 0 errors over 1,475 files, vitest
-  5,209 passed, 1 skipped, in 340 files. On `2f2d713c`, beside this pass's own Rust tests and budgets and the other
-  sessions' (a load of 40 to 60), two runs of the whole suite each passed 5,208 and failed one, a different test each
-  time, neither in this pass's files: `TfRepoCompare.swap`'s read while the page is idle, and `TicketsPage`'s
-  *Show N more* case. Both pass alone.
-- `svelte-check --threshold error`: 0 errors. `bash testenv/desktop-witness-test.sh`: ok, 307 checks.
+- `just check-front`: ok. `svelte-check` 0 errors over 1,479 files, vitest 5,236 passed, 1 skipped, in 342 files.
   `just check-scripts`: ok.
-- Press trips with `--strict` against a built app: 272 of 272, the 16 `rows-still` trips among them.
-- Rust (`2f2d713c`; nothing under `crates/` changed after it): `cargo fmt --all --check`, `just clippy` and
-  `just clippy-libs` clean; `just wasm-fixture` then `env -u RUSTUP_TOOLCHAIN just test`: 61 binaries, 4,974 passed, 2
-  failed, 263 ignored, at a load over 50. The two are timeouts in code this pass does not touch
-  (`knobas-wasm-host`'s `a_healthy_source_beside_a_spinning_one_is_not_held_up`, 2.2 s where it allows less, and
-  `knobas-app`'s `a_value_nested_deep_at_run_time_fails_the_step_not_the_app`, jq's 10 s), and both pass alone.
-  `app/src/lib/ipc/generated/` unchanged after it.
+- Press trips with `--strict`, under the Mac's lock: 272 of 272, the 16 `rows-still` trips among them.
+  `bash testenv/desktop-witness-test.sh`, under the lock: ok, 307 checks. (Started first from a shell job, it
+  failed 15: a job started with `&` hands its children SIGINT ignored, and the test stops its stand-in postmaster
+  with SIGINT. Started with the signal at its default, it passes.)
+- `pixel-same.py`: not run, nothing drawn changed.
+- Rust: `just clippy` and `cargo fmt --all --check` clean; `cargo test -p knobas-app`, the one crate changed: 1,625
+  passed, 0 failed, 83 ignored, in 16 targets. (Before the trim, on `2f2d713c`: `just clippy-libs` clean, and the
+  whole `just test` 4,974 passed with 2 timeouts outside this change that pass alone, at a load over 50.)
+- **Timing, for what this pass touched.**
+  - The soak (`soak.mjs --check budget.json --lines real`, ten minutes, 1x, 4x and 6x) on Björn's PC, idle and under
+    its lock, in a headless Edge, the backend the Mac's through a tunnel: every line held at both sizes.
 
-**The timing gates.** Six sessions were building and timing on the Mac at once, at a load of 30 to 98, until the
-orchestrator's rule of 14:30 (one timing or UI run at a time a machine, under a lock).
+    | The PC, final head | 1440x868@1 | 2560x1440@1.25 |
+    |---|---|---|
+    | folders opened | 112 | 91 |
+    | IPC calls a run's end, and their growth | 25, -6 | 25, +4 |
+    | hover through a run's end at 6x, p95 / max | 22 / 25 ms | 35 / 41 ms |
+    | hover through a return at 6x, p95 | 197 ms | 231 ms |
+    | hover at rest, move to frame, 1x / 4x / 6x | 7.1 / 10.4 / 12.6 ms | 7.2 / 10.5 / 12.9 ms |
+    | its main-thread share, 1x / 4x / 6x | 1.0 / 4.6 / 6.9 ms | 1.1 / 4.6 / 7.8 ms |
+    | nodes, listeners, heap kept, growth | +3,021, +87, +2.6 MB | +3,739, +219, +2.3 MB |
 
-- `just soak --real` on `df79627f`: passes. 25 calls a run's end and no growth, nodes +3,097, listeners +87, heap
-  +3.4 MB over ten minutes and 110 folders; a hover through a run's end 67 ms at the 95th percentile at 6x and 86 at
-  most, through a return 121 and 124, at rest 18, 25 and 28 ms at 1x, 4x and 6x; the tour's calls grew by 0 and its
-  slowest hover was 142 ms. (The run before it, at a load of 32 to 44, held every count and crossed three hover lines
-  then taken from a quiet run; those lines are the targets now, with both machines' numbers in `budget.json`'s note.)
-- `just frame-budget`, `just frame-budget --real`, `just open-budget --real` and `just keys-budget --real` each ran
-  once before the rule, at a load of 45 to 98, and read that load: the fixture's frames 42 within and 3 over at
-  1440x868 (26 and 10, 30 and 6 at the two large sizes), the real frames 42 and 22, the keys 13 over of 33, the opens 6
-  over. Side by side at the same load the base commit (`c2fe626c`, without this pass) went over on the same cells:
-  Monitors' scroll at 6x 41.9 frames a second on base and 42.6 on head, Tickets' 48.8 and 48.3 (fixture); Tickets'
-  54.5 and 48.8 on base, 51.8 and 50.3 on head, the launcher's letter at 4x 109 and 100 ms on base (the saved
-  database). None of the four touches what this pass changed: no saved-database repository has a clone, and none of
-  their presses refreshes Files. Their reruns under the lock are recorded below.
+  - The Files tab's opens (`open.mjs --set inner`: the landing, a deep file, *Go to file*, a small, a large and a
+    README file; first, return and after a sync; 1x, 4x and 6x) on the Mac under its lock, against the stand-in
+    forge, a fresh backend a size: 54 of 54 within their lines at 2560x1440@1.25, 53 of 54 at 1440x868@1. The one
+    over was *Go to file*'s first use at 4x, 2,882 ms with a 1.2 s task in it while the machine's load went from 9
+    to 30 (98 ms at 1x and 142 at 6x in the same run); alone under the lock on two fresh backends, at a load of 5,
+    it drew in 70 and 80 ms, line 200. The landing's first open, the forge's stand-in holding each request 30 ms:
+    465, 166 and 524 ms at 1x, 4x and 6x at the first size; a return 0 to 12 ms.
+- Before the lock existed (six sessions on the Mac at once, a load of 45 to 98), `just frame-budget`, its `--real`
+  run, `just open-budget --real` and `just keys-budget --real` each ran once and read that load, the base commit going
+  over on the same cells side by side (Monitors' scroll at 6x 41.9 frames a second on base and 42.6 on head, Tickets'
+  48.8 and 48.3). Those runs are not this pass's gates any more; the pre-release's run of the whole matrix is.
