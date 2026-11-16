@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Heights, textHeight } from "./windowed";
+import { gridLength, Heights, onGrid, stepOf, STEPS, textHeight } from "./windowed";
 
 /** Ten rows keyed `r0` … `r9`, 50 px estimated, no gap. */
 const ten = () => new Heights(50, 0);
@@ -120,3 +120,49 @@ describe("textHeight", () => {
   });
 });
 
+
+/** The step `length` lands on at `dpr`: Chromium's single-precision cut, and below 2^16 device pixels the same in double. */
+const unit = (length: string, dpr: number) => {
+  const single = stepOf(parseFloat(length), dpr);
+  if (single < 2 ** 16 * STEPS) expect(Math.floor(parseFloat(length) * dpr * STEPS), `${length} at ${dpr} in double precision`).toBe(single);
+  return single;
+};
+
+describe("the device's layout grid (#2508)", () => {
+  it("keeps a height an observer cut to a 64th of a CSS pixel on the device's grid", () => {
+    // A 51-device-pixel row at 1.25 is 40.8 px; a ResizeObserver tells it as 40.796875.
+    expect(onGrid(40.796875, 1.25) * 1.25).toBeCloseTo(51, 12);
+    expect(onGrid(40.8, 1.25) * 1.25).toBeCloseTo(51, 12);
+    // 61.1875 device pixels at 1.5, a 64th-step height that is no whole pixel.
+    expect(onGrid(61.1875 / 1.5, 1.5) * 1.5).toBe(61.1875);
+  });
+
+  it("writes room that lands on its own step at every common scale, up to 2^17 device pixels", () => {
+    for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 3])
+      for (let rows = 1; rows < 2400; rows += 7)
+        for (const device of [51, 61.1875, 41.015625]) {
+          const want = rows * device * STEPS;
+          // The room as a windowed list sums it: CSS heights on the grid, added in a double.
+          let css = 0;
+          for (let i = 0; i < rows; i++) css += onGrid(device / dpr, dpr);
+          const length = gridLength(css, dpr);
+          expect(unit(length, dpr), `${rows} rows of ${device} at ${dpr}: ${length}`).toBe(want);
+        }
+  });
+
+  it("moves the rows that stay by nothing when a swap takes rows from above into the room", () => {
+    // 40 rows of 51 device pixels above at 1.25, then 8 more swapped out: the room grows by exactly their 8 x 51.
+    const dpr = 1.25;
+    const h = new Heights(42, 0);
+    const keys = Array.from({ length: 200 }, (_, i) => i);
+    h.keys(keys);
+    for (const k of keys) h.set(k, onGrid(40.796875, dpr));
+    const room = (start: number) => unit(gridLength(h.around(start, start + 50).before, dpr), dpr);
+    for (let start = 8; start < 150; start += 8) expect(room(start) - room(start - 8)).toBe(8 * 51 * STEPS);
+  });
+
+  it("writes whole and power-of-two scales' room as the plain length", () => {
+    expect(gridLength(1234, 1)).toBe("1234px");
+    expect(gridLength(100.5, 2)).toBe("100.5px");
+  });
+});

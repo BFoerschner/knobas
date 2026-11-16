@@ -1,7 +1,7 @@
 import { flushSync } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { growWindowsNow, placeWindowsNow, Windowed } from "./windowed.svelte";
+import { growWindowsNow, laidOut, placeWindowsNow, Windowed } from "./windowed.svelte";
 
 /**
  * Draws, then reads where each windowed list sits, as the end of the flush that attached it does, and draws again;
@@ -508,4 +508,18 @@ test("rows drawn before a list reads where it sits stay until the overscan below
   // overscan below would hold them.
   expect([win.start, win.end]).toEqual([0, 10]);
   stop();
+});
+
+test("a row's height is its box's on the device's grid, not the observer's cut to a 64th of a CSS pixel (#2508)", () => {
+  vi.stubGlobal("devicePixelRatio", 1.25);
+  const row = document.createElement("div");
+  let box = 40.79999923706055;
+  vi.spyOn(row, "getBoundingClientRect").mockImplementation(() => ({ height: box }) as DOMRect);
+  // A 51-device-pixel row at 1.25, which the observer tells as 40.796875.
+  const entry = { target: row, borderBoxSize: [{ blockSize: 40.796875, inlineSize: 100 }], contentRect: { height: 40.796875 } } as unknown as ResizeObserverEntry;
+  expect(laidOut(entry) * 1.25).toBeCloseTo(51, 12);
+  // A row a transform scales: its box is no measure of its layout, and the observer's height stands, on the grid.
+  box = 81.6;
+  expect(laidOut(entry) * 1.25).toBeCloseTo(51, 12);
+  vi.unstubAllGlobals();
 });

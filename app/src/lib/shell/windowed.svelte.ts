@@ -32,6 +32,10 @@
  *   (`tr.tf-wgap`, `gap` 0) only while their room is above 0, so
  *   `:last-child` rules hold, and `room(side)` sizes each one's cell. Both
  *   go through the CSSOM: CSP refuses inline styles in markup.
+ * - Heights and room are kept on the device's layout grid (`onGrid`,
+ *   `gridLength` in `windowed.ts`), so a row swap moves none of the rows that
+ *   stay, at any display scale: a row moved by a fraction of a pixel is
+ *   painted again, and at 125 % every swap repainted the whole table (#2508).
  * - `slice(items)` is what to draw; `start` is its first index.
  * - `topOf(index)` is where row `index` sits on screen, drawn or not.
  * - A list that scrolls itself (`scrolls: true`) reads the
@@ -56,7 +60,7 @@
  * A folding list windows its flattened visible rows (headers of open folds
  * and their rows) with one key per row.
  */
-import { Heights, type Span } from "./windowed";
+import { Heights, gridLength, onGrid, STEPS, type Span } from "./windowed";
 
 export interface WindowedOptions<K> {
   /** How many rows the list holds. */
@@ -530,8 +534,7 @@ export class Windowed<K = string> {
     let moved = false;
     for (const entry of entries ?? []) {
       const key = this.#keyOf.get(entry.target);
-      const px =
-        entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+      const px = laidOut(entry);
       if (key !== undefined && px !== 0 && this.#heights.set(key, px))
         moved = true;
     }
@@ -650,9 +653,16 @@ export function growWindowsNow() {
   for (const each of all) each();
 }
 
+/** A drawn row's border-box height as laid out: its box's, on the grid; the observer's where a transform scales the box. */
+export function laidOut(entry: ResizeObserverEntry): number {
+  const told = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+  const box = entry.target.getBoundingClientRect().height;
+  return onGrid(Math.abs(box - told) < 2 / STEPS ? box : told);
+}
+
 /** Sets `px` of room through the CSSOM (CSP refuses inline styles in markup), none when 0. */
 function pad(node: HTMLElement, property: string, px: number) {
-  if (px > 0) node.style.setProperty(property, `${px}px`);
+  if (px > 0) node.style.setProperty(property, gridLength(px));
   else node.style.removeProperty(property);
 }
 

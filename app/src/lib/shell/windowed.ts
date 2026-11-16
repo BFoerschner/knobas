@@ -8,6 +8,50 @@
  * so a filter that narrows or reorders the list keeps them.
  */
 
+/**
+ * Chromium lays out in device pixels, in steps of a 64th (a layout unit). A row's height is a whole number of
+ * those steps; in CSS pixels at a scale of 1.25 or 1.5 it is not, and a ResizeObserver reports it cut down to a 64th of
+ * a CSS pixel (a 51-device-pixel row at 1.25 is 40.8 px, told as 40.796875). Room summed from such heights came out
+ * short by a step or two for every few rows, so each row swap moved every row that stayed by a fraction of a pixel,
+ * and a row that moves is painted again: the whole visible table, every swap (#2508). So a height is kept on the
+ * device's grid, read from the row's box, which carries it whole, and the room is written so it lands on that grid.
+ */
+export const STEPS = 64;
+
+/** The display's scale; 1 where there is none (jsdom). */
+const scale = () => (typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1);
+
+/** `px` (CSS) on the device's layout grid, in CSS pixels. */
+export function onGrid(px: number, dpr = scale()): number {
+  return Math.round(px * dpr * STEPS) / STEPS / dpr;
+}
+
+/** The layout step a CSS length `px` lands on at scale `dpr`, as Chromium cuts it: in single precision, then down. */
+export function stepOf(px: number, dpr: number): number {
+  return Math.floor(Math.fround(Math.fround(px) * Math.fround(dpr)) * STEPS);
+}
+
+/**
+ * `px` as a CSS length that lays out at exactly `px` on the device's grid. At a scale that is not a power of two the
+ * length times the scale is not the step; Chromium takes it in single precision and cuts it down to a step (measured,
+ * 2026-11-16), so the length aims at the middle of the step and, where single precision carries it off, moves by
+ * the least amount single precision can. Past about 2^17 device pixels single precision cannot hit every step, and a
+ * swap there may move the rows by one (then they are painted again, as before).
+ */
+export function gridLength(px: number, dpr = scale()): string {
+  const device = Math.round(px * dpr * STEPS) / STEPS;
+  if (Number.isInteger(Math.log2(dpr))) return `${device / dpr}px`;
+  const want = device * STEPS;
+  const aim = (device + 1 / (2 * STEPS)) / dpr;
+  if (stepOf(aim, dpr) === want) return `${aim}px`;
+  const near = Math.fround(aim);
+  // Single precision's step at `near`: 23 bits below its leading one.
+  const ulp = 2 ** (Math.floor(Math.log2(near)) - 23);
+  for (let k = 1; k <= 4; k++)
+    for (const at of [near + k * ulp, near - k * ulp]) if (stepOf(at, dpr) === want) return `${at}px`;
+  return `${aim}px`;
+}
+
 /** The rows to draw, `start` to `end` (exclusive), and the room the undrawn rows take above and below them. */
 export interface Span {
   start: number;
