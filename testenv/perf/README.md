@@ -375,6 +375,35 @@ node testenv/perf/compare.mjs --app "http://127.0.0.1:<app>/?fake-ipc&fake-hooks
   the page's forge reads and the clone's answer queues behind them, which Tauri's IPC does not do. The steps' times move
   by about 30 ms run to run on a loaded Mac: take the median of three.
 
+### Moving through a big compare: `just open-budget --real <port> --moves`
+
+From the big-compare pass (2026-11-16, `docs/decisions/2026-11-16-a-big-compare-moves-at-once.md`): `big-compare.mjs`'s
+long-lived branch, `many-commits` (300 commits over 4,200 files of `main`, about 67,000 changed lines, titles of every
+length) and its 4x twin, with a pull request open from each in the cloned repository. `compare-moves.mjs` presses, at
+each throttle and size, from the press to the frame that shows the answer:
+
+- **jump-mid**, **jump-last**: a file half way down the file list and the last, picked in the list after the page and
+  the list were scrolled to it; `lines` is the frame its lines are drawn with its head at the view's top (in view, for
+  the last), `drift` how far it moved after.
+- **top**: *Back to top* from the last file, until *From* is on screen.
+- **swap-from**, **swap-into**, **swap-from-2**: three pairs never drawn (the page reads the next picks' names ahead
+  while idle); **swap-back**: *Into* back to the pair the moves started on.
+- **open-diff**: *Open as diff*, until the diff page lists the branch's file and draws a card's lines; `reads` counts
+  its range reads.
+- **pr-jump**: in the pull request's *Files changed*, the middle file (the last is past the whole diff's 50,000-line
+  ceiling).
+
+```sh
+just open-budget --real <port> --moves                     # make, press at three sizes, remove
+node testenv/perf/compare-moves.mjs --app "<app>?fake-ipc&fake-hooks&fake-real=<port>#/time" \
+  --repo live-gitea:knobas-perf-big-compare/cloned --pr 'live-gitea:knobas-perf-big-compare/cloned#1' \
+  --pr-b 'live-gitea:knobas-perf-big-compare/cloned#2' --throttle 1,4,6 [--size 2560x1440@1.25] [--trace <dir>] [--profile]
+```
+
+- `--trace <dir>` saves a Chrome trace of each move; `--profile` prints its script time by function.
+- **A Windows laptop's git**: put a `git` that sleeps 100 ms and then runs the real one first on the windowless
+  backend's `PATH`. Every start of git then costs what one costs there, which is most of a per-file read's wait.
+
 ### The extremes: `just open-budget --real <port> --extremes`
 
 The worst shapes a real team's data has (the extremes pass, 2026-11-13,
