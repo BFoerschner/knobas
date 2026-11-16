@@ -5,7 +5,7 @@
  */
 import { needles } from "./needles";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 
 import type {
   ContextRow,
@@ -438,6 +438,10 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
 test("each key's new cards draw the screen's first and the overscan below them a frame later", async () => {
   const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
   await open(h);
+  // No frame comes on its own, so the overscan below grows only when `growWindowsNow` says: on a loaded machine two of
+  // jsdom's frames can pass inside `settle`.
+  const frames = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+  onTestFinished(() => frames.mockRestore());
   for (const char of "bulk") type(field(), char);
   await settle();
   const onScreen = stacks()[0]!.cards;
