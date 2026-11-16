@@ -303,7 +303,7 @@ impl Repo {
             return Ok(Vec::new());
         };
         // The empty tree is known without being held.
-        if tree.to_string() == EMPTY_TREE {
+        if tree == ObjectId::empty_tree(gix::hash::Kind::Sha1) {
             return Ok(Vec::new());
         }
         let object = self.object(tree)?;

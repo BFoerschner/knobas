@@ -21,6 +21,9 @@ use std::process::Command;
 
 use knobas_git::{Answer, DiffAsk, DiffForm, Repo};
 
+#[path = "../tests/it/oracle.rs"]
+mod oracle;
+
 fn git(repo: &Path, now: i64, args: &[&str]) -> (bool, Vec<u8>) {
     let out = Command::new("git")
         .arg("-C")

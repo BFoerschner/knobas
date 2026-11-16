@@ -93,18 +93,17 @@ fn copied(src: &[(u32, u32)], dst: &[(u32, u32)]) -> u64 {
     total
 }
 
-/// One file's pieces, counted once.
+/// One file's pieces: the bytes of each, by its hash, in hash order.
+type Pieces = std::rc::Rc<Vec<(u32, u32)>>;
+
+/// Each file's pieces, counted once; `None` for a file that cannot be read.
 #[derive(Default)]
 struct Counted {
-    pieces: HashMap<ObjectId, Option<std::rc::Rc<Vec<(u32, u32)>>>>,
+    pieces: HashMap<ObjectId, Option<Pieces>>,
 }
 
 impl Counted {
-    fn of(
-        &mut self,
-        file: &File<'_>,
-        contents: &mut dyn Contents,
-    ) -> Option<std::rc::Rc<Vec<(u32, u32)>>> {
+    fn of(&mut self, file: &File<'_>, contents: &mut dyn Contents) -> Option<Pieces> {
         if let Some(known) = self.pieces.get(&file.oid) {
             return known.clone();
         }
