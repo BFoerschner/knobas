@@ -152,7 +152,11 @@ const key = (name: string) => {
 
 test("the list holds the machine's families, monospace first under their headings, and is read once a session", async () => {
   const read = await draw();
+  // Focus alone opens nothing: Settings puts the focus in a section's first field as it opens.
   field().dispatchEvent(new FocusEvent("focus"));
+  flushSync();
+  expect(target.querySelector('[role="listbox"]')).toBeNull();
+  field().click();
   flushSync();
   expect(target.querySelector('[role="listbox"]')?.getAttribute("aria-label")).toBe("Installed fonts");
   expect([...target.querySelectorAll(".tf-cf-mh")].map((el) => el.textContent)).toEqual(["Monospace", "Other fonts"]);
@@ -166,8 +170,7 @@ test("the list holds the machine's families, monospace first under their heading
 
 test("the option under the keys draws in the specimen before it is chosen; Enter chooses it for the whole app", async () => {
   await draw();
-  expect(caption()).toBe("JetBrains Mono, which comes with knobas");
-  field().dispatchEvent(new FocusEvent("focus"));
+  expect(caption()).toBe("JetBrains Mono");
   key("ArrowDown");
   key("ArrowDown");
   expect(specimen().style.getPropertyValue("font-family")).toBe('"Menlo", var(--mono)');
@@ -227,7 +230,7 @@ test("Use JetBrains Mono goes back to the bundled face", async () => {
 
 test("the list failing to read leaves a field that still takes a name", async () => {
   await draw(() => Promise.reject(new Error("no fonts")));
-  field().dispatchEvent(new FocusEvent("focus"));
+  field().click();
   flushSync();
   expect(target.querySelector('[role="listbox"]')).toBeNull();
   field().value = "Menlo";

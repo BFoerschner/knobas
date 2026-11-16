@@ -5,7 +5,8 @@
 
   The field is a combobox over the families installed on this machine (`installed_fonts`, read once a run by the
   backend), monospace ones first, under a heading each; a name typed that is not listed is taken as it is, since a
-  font can be installed where the read does not look. The option the keys or the pointer are on draws in the specimen
+  font can be installed where the read does not look. A click, a key typed or `↓` opens the list, focus alone does
+  not: Settings puts the focus in a section's first field as it opens. The option the keys or the pointer are on draws in the specimen
   under the field before it is chosen; `Enter` or a click chooses it, and the whole app redraws in it at once. `Esc`
   puts the chosen one back. The specimen is a few lines as the Source view draws a file: numbered, highlighted, at the
   Source view's size, so what it shows is what a file will look like. The option names are in the interface's face:
@@ -187,7 +188,6 @@
         aria-autocomplete="list"
         aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
         bind:value={text}
-        onfocus={() => (open = true)}
         onclick={() => (open = true)}
         oninput={() => ((open = true), (typed = true), (active = -1))}
         onblur={onLeave}
@@ -232,7 +232,7 @@
       {#if missing}
         {previewed} is not installed on this machine, so code draws as {BUNDLED}.
       {:else}
-        {previewed ?? BUNDLED}{previewed === null ? ", which comes with knobas" : ""}
+        {previewed ?? BUNDLED}
       {/if}
     </figcaption>
   </figure>
