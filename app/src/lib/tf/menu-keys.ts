@@ -7,7 +7,7 @@ export const MENU_ITEMS = '[role^="menuitem"]:not([disabled]):not([aria-disabled
  * menu's own close, which is told to keep focus where it went. Focus going to `opener` is no leaving: the press that
  * moved it there is about to answer, and closing here would have that press open the menu again.
  */
-export function menuKeys(close: () => void, opener: () => HTMLElement | null = () => null) {
+export function menuKeys(close: () => void, opener: () => HTMLElement | null = () => null, keep: () => Element | null = () => null) {
   return (menu: HTMLElement) => {
     const items = () => [...menu.querySelectorAll<HTMLElement>(MENU_ITEMS)];
     function onkey(event: KeyboardEvent) {
@@ -27,7 +27,8 @@ export function menuKeys(close: () => void, opener: () => HTMLElement | null = (
     function onleave(event: FocusEvent) {
       const next = event.relatedTarget;
       // Focus going nowhere is a click on nothing, which the menu's own outside-click answers.
-      if (next instanceof Node && !menu.contains(next) && !opener()?.contains(next)) close();
+      // Nor is focus going into the menu it `keep`s: a submenu and its parent.
+      if (next instanceof Node && !menu.contains(next) && !opener()?.contains(next) && !keep()?.contains(next)) close();
     }
     menu.addEventListener("keydown", onkey);
     menu.addEventListener("focusout", onleave);

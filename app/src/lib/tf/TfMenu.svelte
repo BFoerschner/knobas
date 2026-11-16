@@ -8,11 +8,17 @@
   else closes it and leaves focus where the click put it, as does a move to another address.
 
   The opener is the caller's button, which sets `open` and carries `aria-haspopup` and `aria-expanded`.
+
+  A right-click's menu (`context/TfContextMenu.svelte`, 2026-11-16) stands at a point (`at`) instead: the pointer, or
+  under the focused thing for a key. It goes where it fits beside the point, and a scroll, a press anywhere else or the
+  window losing focus closes it, since what it was opened on may have moved. Its opener is what had focus, which focus
+  goes back to. Its *Open in…* is a second `TfMenu` `beside` its item, and each `keep`s the other: a press or focus in
+  one is not leaving the other.
 -->
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
 
-  import { inFloatHost, placeFloat } from "./floats";
+  import { inFloatHost, placeAt, placeBeside, placeFloat } from "./floats";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { menuKeys, MENU_ITEMS } from "./menu-keys";
 
@@ -24,6 +30,10 @@
     align = "end",
     ready = true,
     focusOn = "",
+    at = null,
+    beside = false,
+    keep = () => null,
+    focusItem = true,
     layers = sharedLayers,
     children,
   }: {
@@ -39,6 +49,14 @@
     ready?: boolean;
     /** The item that takes focus on opening, when one matches; else the first. */
     focusOn?: string;
+    /** A point to stand at instead of under the opener: a right-click's menu. */
+    at?: { x: number; y: number } | null;
+    /** Beside the opener, its top at the opener's, as a submenu stands by its item. */
+    beside?: boolean;
+    /** Another float that counts as inside this one: a submenu, or its parent menu. */
+    keep?: () => Element | null;
+    /** `false`: the menu itself takes focus, not an item, as a pointer opening it asks; ↓ then goes to the first. */
+    focusItem?: boolean;
     layers?: Layers | undefined;
     children: Snippet;
   } = $props();
@@ -65,22 +83,26 @@
     return untrack(() => {
       menu = node;
       inFloatHost(node);
+      const point = at;
       const spot = () => {
-        if (opener === null) return;
         const edges = node.offsetHeight - node.clientHeight;
-        const at = placeFloat(
-          opener.getBoundingClientRect(),
-          { width: node.offsetWidth, height: node.scrollHeight + edges },
-          { width: window.innerWidth, height: window.innerHeight },
-          align,
-        );
-        node.style.left = `${at.left}px`;
-        node.style.top = `${at.top}px`;
-        node.style.maxHeight = `${at.maxHeight}px`;
+        const size = { width: node.offsetWidth, height: node.scrollHeight + edges };
+        const view = { width: window.innerWidth, height: window.innerHeight };
+        let spotted;
+        if (point !== null) spotted = placeAt(point, size, view);
+        else if (opener === null) return;
+        else if (beside) spotted = placeBeside(opener.getBoundingClientRect(), size, view);
+        else spotted = placeFloat(opener.getBoundingClientRect(), size, view, align);
+        node.style.left = `${spotted.left}px`;
+        node.style.top = `${spotted.top}px`;
+        node.style.maxHeight = `${spotted.maxHeight}px`;
       };
       spot();
       const scrolled = (event: Event) => {
-        if (!(event.target instanceof Node && node.contains(event.target))) spot();
+        if (event.target instanceof Node && (node.contains(event.target) || keep()?.contains(event.target))) return;
+        // What a point was taken from has moved: the menu goes with it (a right-click's, and its submenu).
+        if (point !== null || beside) open = false;
+        else spot();
       };
       window.addEventListener("resize", spot);
       window.addEventListener("scroll", scrolled, true);
@@ -90,8 +112,16 @@
       const keys = menuKeys(
         () => (open = false),
         () => opener,
+        keep,
       )(node);
       const onkey = (event: KeyboardEvent) => {
+        // ← closes a submenu back to its item, as Esc does.
+        if (beside && event.key === "ArrowLeft") {
+          event.preventDefault();
+          event.stopPropagation();
+          dismiss();
+          return;
+        }
         if (event.key !== "Escape" && event.key !== "Tab") return;
         event.preventDefault();
         event.stopPropagation();
@@ -112,30 +142,35 @@
   $effect(() => {
     if (!open) return;
     const off = untrack(() => layers.add({ kind: "dialog", close: dismiss }));
+    // A right-click's opener is what had focus, not something pressed: a press on it is a press elsewhere.
+    const pointed = untrack(() => at !== null);
     const away = (event: MouseEvent) => {
-      if (event.target instanceof Node && (menu?.contains(event.target) || opener?.contains(event.target))) return;
+      const target = event.target;
+      if (target instanceof Node && (menu?.contains(target) || keep()?.contains(target) || (!pointed && opener?.contains(target)))) return;
       open = false;
     };
     const moved = () => (open = false);
     window.addEventListener("mousedown", away, true);
     window.addEventListener("click", away, true);
     window.addEventListener("hashchange", moved);
+    if (pointed) window.addEventListener("blur", moved);
     return () => {
       untrack(off);
       window.removeEventListener("mousedown", away, true);
       window.removeEventListener("click", away, true);
       window.removeEventListener("hashchange", moved);
+      window.removeEventListener("blur", moved);
     };
   });
 
   $effect(() => {
     if (!open) return;
-    const items = ready;
+    const items = ready && focusItem;
     const asked = focusOn;
     queueMicrotask(() => {
       if (menu === null) return;
       const first = items ? ((asked === "" ? null : menu.querySelector<HTMLElement>(asked)) ?? menu.querySelector<HTMLElement>(MENU_ITEMS)) : null;
-      (first ?? menu).focus();
+      (first ?? menu).focus({ preventScroll: true });
     });
   });
 </script>

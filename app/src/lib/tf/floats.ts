@@ -51,3 +51,32 @@ export function placeFloat(opener: Box, size: Size, view: Size, align: "start" |
   const wanted = align === "start" ? opener.left : opener.right - size.width;
   return { left: Math.max(EDGE, Math.min(wanted, view.width - EDGE - size.width)), top, maxHeight: room };
 }
+
+/**
+ * Where a float standing at a point goes (a right-click's menu, 2026-11-16): its top left corner at the point, or its
+ * right edge there where the window has no room on the right, and over the point where there is more room above. Kept
+ * inside the window by `EDGE`; taller than the room, it scrolls. In CSS pixels, so a scale or a zoom changes nothing.
+ */
+export function placeAt(point: { x: number; y: number }, size: Size, view: Size): FloatSpot {
+  const below = view.height - point.y - EDGE;
+  const above = point.y - EDGE;
+  const under = size.height <= below || below >= above;
+  const room = Math.max(0, under ? below : above);
+  const top = under ? point.y : point.y - Math.min(size.height, room);
+  const wanted = point.x + size.width <= view.width - EDGE ? point.x : point.x - size.width;
+  const placed = Math.max(EDGE, top);
+  return { left: Math.max(EDGE, Math.min(wanted, view.width - EDGE - size.width)), top: placed, maxHeight: under ? Math.min(room, view.height - EDGE - placed) : room };
+}
+
+/**
+ * Where a submenu goes: beside its item, overlapping its menu by the menu's padding, on the right or on the left where
+ * the right has no room, its top level with the item's and pushed up to stay inside the window.
+ */
+export function placeBeside(item: Box, size: Size, view: Size): FloatSpot {
+  const PAD = 4;
+  const right = item.right - PAD;
+  const left = right + size.width <= view.width - EDGE ? right : item.left + PAD - size.width;
+  const room = Math.max(0, view.height - 2 * EDGE);
+  const top = Math.max(EDGE, Math.min(item.top - PAD, view.height - EDGE - Math.min(size.height, room)));
+  return { left: Math.max(EDGE, Math.min(left, view.width - EDGE - size.width)), top, maxHeight: room };
+}
