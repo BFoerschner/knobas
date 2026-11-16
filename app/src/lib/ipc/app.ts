@@ -223,9 +223,12 @@ export function folderRenderLeave(entityId: string, renderer: string, folder: st
   return invoke<void>("folder_render_leave", { entityId, renderer, folder });
 }
 
+/** What `folder_render_output` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
+type RawBytes = ArrayBuffer | ArrayLike<number>;
+
 /** The bytes a folder render drew, by its token: raw from the bridge, as `entity_file_bytes` answers. */
 export async function folderRenderOutput(token: string): Promise<Uint8Array> {
-  const answer = await invoke<ArrayBuffer | ArrayLike<number>>("folder_render_output", { token });
+  const answer = await invoke<RawBytes>("folder_render_output", { token });
   return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
 }
 

@@ -271,6 +271,13 @@
     if (next !== undefined) zoom = next;
   }
   let img = $state<HTMLImageElement | null>(null);
+  /** The zoomed image's width, set through the CSSOM (the app's CSP refuses a style attribute); fitted, the stylesheet's. */
+  const sized = (at: number | null) => (node: HTMLImageElement) => {
+    const apply = () => (node.style.width = at === null || node.naturalWidth === 0 ? "" : `${Math.round(node.naturalWidth * at)}px`);
+    apply();
+    node.addEventListener("load", apply);
+    return () => node.removeEventListener("load", apply);
+  };
   /** The fitted image's scale, which a first zoom steps from. */
   const fitted = () => (img === null || img.naturalWidth === 0 ? 1 : img.clientWidth / img.naturalWidth);
 </script>
@@ -291,7 +298,7 @@
       {#if switchTo !== null && others.length > 0}
         <label class="tf-frender-as">
           <span class="tf-dim tf-small">Render with</span>
-          <select class="tf-select" value={renderer.id} onchange={(event) => (location.hash = switchTo(event.currentTarget.value))}>
+          <select class="tf-select" aria-label="Render with" value={renderer.id} onchange={(event) => (location.hash = switchTo(event.currentTarget.value))}>
             {#each renderers as one (one.id)}<option value={one.id}>{one.name}</option>{/each}
           </select>
         </label>
@@ -341,7 +348,7 @@
               bind:this={img}
               src={shown.image}
               alt="{renderer.name}'s drawing of {folder || title || 'the top folder'}"
-              style:width={zoom === null || img === null ? null : `${Math.round(img.naturalWidth * zoom)}px`}
+              {@attach sized(zoom)}
             />
           </div>
         {:else if drawn.kind.kind === "html" && shown.frame !== undefined}

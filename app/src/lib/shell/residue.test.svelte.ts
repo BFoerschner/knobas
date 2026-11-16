@@ -292,6 +292,14 @@ vi.mock("../ipc/app", () => ({
   setNamedPipelines: (list: unknown[]) => deferred(list),
   commandSteps: () => deferred([]),
   setCommandSteps: (list: unknown[]) => deferred(list),
+  folderRenderers: () => deferred([]),
+  setFolderRenderers: (list: unknown[]) => deferred(list),
+  folderRender: () => new Promise(() => {}),
+  folderRenderStop: () => deferred(undefined),
+  folderRenderLeave: () => deferred(undefined),
+  folderRenderOutput: () => deferred(new Uint8Array()),
+  folderRenderFrame: () => deferred(""),
+  folderRenderMarks: () => deferred([]),
 }));
 
 /**
@@ -379,6 +387,10 @@ const TfAppPage = (await import("../tf/openin/TfAppPage.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
+const TfFolderRender = (await import("../tf/render/TfFolderRender.svelte")).default;
+const TfFolderRendererPage = (await import("../tf/settings/TfFolderRendererPage.svelte")).default;
+const TfFolderRenderersTable = (await import("../tf/settings/TfFolderRenderersTable.svelte")).default;
+const { createFolderRenderers } = await import("../render/folders.svelte");
 const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
@@ -1389,6 +1401,63 @@ const CASES: Case[] = [
           commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
         },
       }),
+    }),
+  },
+  {
+    /** A folder drawn by a folder renderer (ADR-0044): its ask, its event listener, the run's clock and the drawing's read, answering late. */
+    name: "TfFolderRender",
+    source: "lib/tf/render/TfFolderRender.svelte",
+    open: (target) => ({
+      app: mount(TfFolderRender, {
+        target,
+        props: {
+          entityId: "mock:tidewater/payout-service",
+          renderer: { id: "lister", name: "Lister", command: "tree {path}", holds: [], folders: [], output: "text", timeout_secs: 30 },
+          folder: "src",
+          ports: {
+            render: () =>
+              deferred({
+                renderer: "lister",
+                folder: "src",
+                drawn: { token: "t", kind: { kind: "text" }, size: 1, commit: null, from: "clone", took_ms: 1, drawn_at: "2026-11-16T12:00:00Z" },
+                current: true,
+                running: { state: "running", elapsed_ms: 0 },
+                failure: null,
+                from: "clone",
+                commit: null,
+              }),
+            stop: () => deferred(undefined),
+            leave: () => deferred(undefined),
+            output: () => deferred(new TextEncoder().encode("x")),
+            frame: () => deferred("t"),
+            listen: () => deferred(() => {}),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /** A folder renderer's page (ADR-0044): it reads the list, the repositories and their checkouts, and its leaving takes a try back. */
+    name: "TfFolderRendererPage",
+    source: "lib/tf/settings/TfFolderRendererPage.svelte",
+    open: (target) => ({
+      app: mount(TfFolderRendererPage, {
+        target,
+        props: {
+          at: { renderer: null, repo: "mock:tidewater/payout-service", folder: "src" },
+          folders: createFolderRenderers({ read: () => deferred([]), save: (list) => deferred(list as never) }),
+          reads: { repos: () => deferred([]), checkouts: () => deferred([]), files: () => deferred(null) },
+          leave: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** Settings › Renderers' folder renderers (ADR-0044): its read of the list. */
+    name: "TfFolderRenderersTable",
+    source: "lib/tf/settings/TfFolderRenderersTable.svelte",
+    open: (target) => ({
+      app: mount(TfFolderRenderersTable, { target, props: { folders: createFolderRenderers({ read: () => deferred([]), save: (list) => deferred(list as never) }) } }),
     }),
   },
   {

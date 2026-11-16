@@ -30,7 +30,7 @@
     file’s place. It runs on a copy of the folder at the commit shown, never in your checkout.
   </p>
   {#if failed !== null}
-    <p class="tf-stg-errt" role="alert">Could not read the folder renderers: {failed}</p>
+    <p class="tf-stg-errt" role="status">Could not read the folder renderers: {failed}</p>
   {:else if read && folders.list.length === 0}
     <p class="tf-dim">No folder renderers yet.</p>
   {:else if folders.list.length > 0}

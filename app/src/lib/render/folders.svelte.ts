@@ -55,3 +55,8 @@ export function noteMarks(repoId: string, marks: ReadonlyMap<string, ReadonlySet
 export function marksOf(repoId: string): ReadonlyMap<string, ReadonlySet<string>> {
   return marksSeen.get(repoId) ?? new Map();
 }
+
+/** Forget every repository's marks: a test's reset. */
+export function resetMarks(): void {
+  marksSeen.clear();
+}

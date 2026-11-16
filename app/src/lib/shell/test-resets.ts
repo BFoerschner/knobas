@@ -110,6 +110,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "render/defaults.svelte.ts#rendererDefaults": async () => (await import("../render/defaults.svelte")).rendererDefaults.reset(),
   "render/pipelines.svelte.ts#namedPipelines": async () => (await import("../render/pipelines.svelte")).namedPipelines.reset(),
   "render/pipelines.svelte.ts#commandSteps": async () => (await import("../render/pipelines.svelte")).commandSteps.reset(),
+  "render/folders.svelte.ts#folderRenderers": async () => (await import("../render/folders.svelte")).folderRenderers.reset(),
+  "render/folders.svelte.ts#marksSeen": async () => (await import("../render/folders.svelte")).resetMarks(),
   "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
   // Each view's filter and fold, and the set hints *Not now* put away (#1983).
   "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),

@@ -89,6 +89,14 @@ vi.mock("./lib/ipc/app", () => ({
   setNamedPipelines: (list: unknown[]) => Promise.resolve(list),
   commandSteps: () => Promise.resolve([]),
   setCommandSteps: (list: unknown[]) => Promise.resolve(list),
+  folderRenderers: () => Promise.resolve([]),
+  setFolderRenderers: (list: unknown[]) => Promise.resolve(list),
+  folderRender: () => new Promise(() => {}),
+  folderRenderStop: () => Promise.resolve(undefined),
+  folderRenderLeave: () => Promise.resolve(undefined),
+  folderRenderOutput: () => Promise.resolve(new Uint8Array()),
+  folderRenderFrame: () => Promise.resolve(""),
+  folderRenderMarks: () => Promise.resolve([]),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({

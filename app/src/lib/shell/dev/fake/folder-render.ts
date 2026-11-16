@@ -11,6 +11,7 @@
  */
 import type { FolderAsk, FolderDrawn, FolderRenderer, FolderRendererDraft, FolderRenderView } from "../../../ipc/app";
 import type { FakeBridge, Handlers } from "../fake-tauri";
+import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 
 let bridge: FakeBridge | null = null;
 let saved: FolderRenderer[] = [];
@@ -49,10 +50,20 @@ function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {
   });
 }
 
+/** The list the page's query started with. */
+let seeded: FolderRenderer[] = [];
+
+keepSeed(drawn, bytes, failed, running);
+const atLoad = seedOf({ bridge, saved, seeded, tokens });
+onFakeReset(() => {
+  ({ bridge, saved, seeded, tokens } = atLoad());
+});
+
 export function seed(params: URLSearchParams): void {
-  saved = params.has("fake-folder-render")
+  seeded = params.has("fake-folder-render")
     ? [{ id: "folder-listing", name: "Folder listing", command: "tree {path}", holds: [], folders: [], output: "text", timeout_secs: 30 }]
     : [];
+  saved = seeded.map((r) => ({ ...r }));
 }
 
 export function attach(installed: FakeBridge): void {
