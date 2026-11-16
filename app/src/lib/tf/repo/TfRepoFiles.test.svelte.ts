@@ -940,6 +940,118 @@ test("a refresh reads the top again and not a file drawn at a commit; a branch t
   expect(source.reads).toContain("file@2:main.rs");
 });
 
+/**
+ * A source whose listings name a commit, as Gitea's do (`files@<sha>:<dir>`): each folder holds `count` files, and
+ * `push` moves the branch.
+ */
+function commitTree(folders: number) {
+  let tip = 1;
+  const reads: string[] = [];
+  const names = Array.from({ length: folders }, (_, i) => `pkg${String(i).padStart(2, "0")}`);
+  const entityView = async (_at: string, section: string | null): Promise<SourceView> => {
+    const id = section ?? "";
+    reads.push(id);
+    const one = (blocks: unknown[]) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks }], actions: [] }) as unknown as SourceView;
+    const tree = (entries: TreeEntry[]) => one([{ type: "tree", trail: [], entries, truncated: false, url: null }]);
+    if (id === "files") return tree(names.map((name) => ({ name, kind: "dir", size: null, section: `files@${tip}:${name}` })));
+    const dir = /^files@(\d+):(.*)$/.exec(id);
+    if (dir !== null) return tree([{ name: `at${dir[1]}.rs`, kind: "file", size: 5, section: `file@${dir[1]}:${dir[2]}/at${dir[1]}.rs` }]);
+    throw { code: "not_found", message: `no section ${id}` };
+  };
+  return { reads, entityView, push: () => (tip += 1) };
+}
+
+// The hover-lag pass (2026-11-16): a refresh read every folder opened so far again, one read each, and each answer drew
+// the whole tree again; on a forge that was a request a folder on every run's end, and on any tree a redraw a folder.
+test("a refresh reads the top again and no folder read at a commit; a branch that moved reads the open folders at the new one", async () => {
+  const source = commitTree(30);
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: null as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: { dir: "files:", file: "file:" },
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await settle();
+  for (const folder of target.querySelectorAll<HTMLButtonElement>(".tf-ftree button.tf-fdir")) folder.click();
+  await settle();
+  expect(tree()).toHaveLength(60);
+  const folderReads = () => source.reads.filter((id) => id.startsWith("files@"));
+  expect(folderReads()).toHaveLength(30);
+
+  // The branch stands where it did: the top says so, and the thirty folders at its commit are not asked for again.
+  props.refreshed += 1;
+  await settle();
+  props.refreshed += 1;
+  await settle();
+  expect(folderReads(), "no folder at its commit is read again").toHaveLength(30);
+  expect(tree()).toHaveLength(60);
+
+  // The branch moved: the top names every folder at the new commit, and the open ones are read there.
+  source.push();
+  props.refreshed += 1;
+  await settle();
+  expect(folderReads().filter((id) => id.startsWith("files@2:"))).toHaveLength(30);
+  expect(tree()).toContain("at2.rs");
+  expect(tree()).not.toContain("at1.rs");
+});
+
+test("a folder read by its path alone is still read again on a refresh, and the answers are drawn together", async () => {
+  const files: Files = { "README.md": "# payout-service", "docs/guide.md": "# guide", "src/lib.rs": "pub fn pay() {}" };
+  const source = heldSource(files);
+  const releaseAll = async () => {
+    for (let round = 0; round < 6; round += 1) {
+      for (const read of source.asked.splice(0)) read.release();
+      await settle();
+    }
+  };
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "README.md" as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: GITEA_TREE,
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await releaseAll();
+  for (const folder of target.querySelectorAll<HTMLButtonElement>(".tf-ftree button.tf-fdir")) folder.click();
+  await releaseAll();
+  expect(tree()).toEqual(["docs", "guide.md", "src", "lib.rs", "README.md"]);
+
+  // Each folder gained a file on the source; the refresh asks for both again, since their sections name no commit.
+  files["docs/intro.md"] = "# intro";
+  files["src/retry.rs"] = "pub fn retry() {}";
+  source.answered.length = 0;
+  props.refreshed += 1;
+  await settle();
+  // (And the README, read by its path too.)
+  expect(source.asked.map((read) => read.section).sort()).toEqual(["file:README.md", "files", "files:docs", "files:src"]);
+  // One folder's answer alone draws nothing yet: the tree is drawn once, when every folder has answered.
+  source.asked.find((read) => read.section === "files:docs")!.release();
+  await settle();
+  expect(tree()).toEqual(["docs", "guide.md", "src", "lib.rs", "README.md"]);
+  source.asked.find((read) => read.section === "files:src")!.release();
+  await settle();
+  expect(tree()).toEqual(["docs", "guide.md", "intro.md", "src", "lib.rs", "retry.rs", "README.md"]);
+});
+
 test("a deep link's guess that drew the file stands for the section its listing names, so the file is not read twice", async () => {
   const source = commitSource();
   draw(source.entityView, "main.rs");

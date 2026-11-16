@@ -392,7 +392,23 @@
    * The checkout's top `top`, at the mirror's tip, drawn as the tree: at once where nothing is drawn yet, or taking over
    * from the source's tree drawn first. `true` where it was taken.
    */
-  async function land(top: LocalDir, where: string, mine: number, synced = false): Promise<boolean> {
+  function land(top: LocalDir, where: string, mine: number, synced = false): Promise<boolean> {
+    // The clone's own read and the source's top both say a branch moved, a moment apart: the second joins the first's
+    // takeover at that commit (the hover-lag pass, 2026-11-16: each read every folder at the new commit, twice over).
+    const under = landing;
+    if (under !== null && under.commit === top.commit && under.where === where && under.mine === mine && (under.synced || !synced)) return under.done;
+    const done = landNow(top, where, mine, synced);
+    const mineNow = { commit: top.commit, where, mine, synced, done };
+    landing = mineNow;
+    void done.finally(() => {
+      if (landing === mineNow) landing = null;
+    });
+    return done;
+  }
+  /** The takeover under way (`land`), for a second ask at the same commit to join. */
+  let landing: { commit: string; where: string; mine: number; synced: boolean; done: Promise<boolean> } | null = null;
+
+  async function landNow(top: LocalDir, where: string, mine: number, synced: boolean): Promise<boolean> {
     const read = ports.localDir;
     if (read === undefined || !top.complete || mine !== generation || where !== at) return false;
     // The source's top answered first (the app keeps it, so on a later open it beats `git ls-tree`): where it stands
@@ -1245,18 +1261,22 @@
 
   // The refresh after the commit, or a run of its source's end, reads the
   // file again (#2105); what the reader typed stays.
-  $effect(() => untrack(() => watchEchoes(REPO_FILES, rereadFile, { listen: ports.listen })));
+  $effect(() => untrack(() => watchEchoes(REPO_FILES, () => void rereadFile(), { listen: ports.listen })));
 
-  function rereadFile(): Promise<unknown> {
+  /** `top`: read the top too; `false` where the tree's own read of it is on its way (a refresh reads it once, not twice). */
+  function rereadFile(top = true): Promise<unknown> {
     const section = fileSection;
     const where = at;
     if (section === null || section === MISSING) return Promise.resolve();
     // The file a commit made is at the branch's new tip: the top says which.
-    void rereadTop();
+    if (top) void rereadTop();
     // A file kept under the section that names its commit (`keepFile`) cannot have changed: a branch that moved names
     // another section in the top read again, and the file is read there. Reading it again here asked the source on every
     // run's end, and a page opened meanwhile waited on it (the WSL block, 2026-11-14: 0.2 to 2.2 s on Gitea).
     if (hasDrawnFile(where, section)) return Promise.resolve();
+    // Nor can the clone's file at its commit (the hover-lag pass, 2026-11-16): read again on every run's end and every
+    // return, it was drawn again whole, its lines coloured again and a README's every image read again.
+    if (section.startsWith(LOCAL)) return Promise.resolve();
     forgetDrawnFiles(where);
     return readSection(section, where).then(
       (read) => {
@@ -1276,7 +1296,7 @@
   // over what the tab drew; what the reader typed stays.
   onRefreshed(
     () => refreshed,
-    () => Promise.all([rereadTree(), rereadFile()]),
+    () => Promise.all([rereadTree(), rereadFile(false)]),
   );
 
   /**
@@ -1340,23 +1360,55 @@
     };
   });
 
+  /**
+   * Whether `section` names where the folder `dir` stands: the clone's at a commit, or a listing's of the source at
+   * one. A folder read through it cannot have changed, as a file kept by such a section cannot (`keepFile`); one read
+   * by its path alone may have.
+   */
+  function standsAt(section: string, dir: string): boolean {
+    if (section.startsWith(LOCAL)) return true;
+    return treeSections != null && section !== `${treeSections.dir}${dir}`;
+  }
+
+  const sameEntries = (a: readonly TreeEntry[], b: readonly TreeEntry[]) =>
+    a.length === b.length && a.every((entry, i) => entry.name === b[i]!.name && entry.kind === b[i]!.kind && entry.section === b[i]!.section && entry.size === b[i]!.size);
+
+  /**
+   * A refresh's read of the tree: its top, which is where a branch that moved shows (`rereadLocal`, `rereadTop`), and
+   * nothing under it that stands at a commit (the hover-lag pass, 2026-11-16). Every folder read so far was read
+   * again, one read each, and each answer drew the whole tree again, on every run's end of the repository's source
+   * and every return to the page: with 300 folders opened over an hour that was 301 reads and 301 walks of 4,000
+   * rows, 2.3 s of a sixth-speed main thread, and a pointer on the tree waited 1.5 s for its hover (9.8 s at 600
+   * folders). A folder read by its path alone (a source that names no commit) is still read again, and the answers
+   * are drawn once, together, and only where one differs from what is drawn.
+   */
   function rereadTree(): Promise<unknown> {
     const mine = generation;
     const reads: Promise<unknown>[] = [rereadLocal(), rereadTop()];
+    const byPath: Promise<readonly [string, TreeEntry[]] | null>[] = [];
     for (const dir of Object.keys(listings)) {
       if (dir === "") continue;
       const section = entryOf(dir)?.section;
-      if (section == null) continue;
-      const read = readSection(section).then(
-        (read) => {
-          const block = read?.blocks[0];
-          if (mine === generation && block?.type === "tree") listings = { ...listings, [dir]: block.entries };
-        },
-        // The directory keeps what it drew.
-        () => {},
+      if (section == null || standsAt(section, dir)) continue;
+      byPath.push(
+        readSection(section).then(
+          (read) => {
+            const block = read?.blocks[0];
+            return block?.type === "tree" ? ([dir, block.entries] as const) : null;
+          },
+          // The directory keeps what it drew.
+          () => null,
+        ),
       );
-      reads.push(read);
     }
+    if (byPath.length > 0)
+      reads.push(
+        Promise.all(byPath).then((answers) => {
+          if (mine !== generation) return;
+          const moved = answers.filter((answer) => answer !== null && !sameEntries(listings[answer[0]] ?? [], answer[1]));
+          if (moved.length > 0) listings = { ...listings, ...Object.fromEntries(moved as (readonly [string, TreeEntry[]])[]) };
+        }),
+      );
     return Promise.all(reads);
   }
 

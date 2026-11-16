@@ -736,3 +736,75 @@ describe("a file reopened after a sync moved the branch", () => {
     expect(target.querySelector(".tf-fileview .tf-banner.tf-info")).toBeNull();
   });
 });
+
+/**
+ * The hover-lag pass (2026-11-16): a refresh (each run's end of the repository's source, each return to the page) read
+ * every folder opened so far again, one read each, and drew the whole tree again on each answer. After an hour's
+ * browsing that was hundreds of reads and redraws, and a pointer on the tree waited seconds for its hover. A clone's
+ * folder and file stand at a commit, so a refresh reads the top, where a branch that moved shows, and nothing under it.
+ */
+describe("a refresh of a clone's tree after many folders were opened", () => {
+  const MANY: Files = { "README.md": "# payout-service\n" };
+  for (let i = 0; i < 40; i += 1) MANY[`pkg${String(i).padStart(2, "0")}/mod.rs`] = `// ${i}\n`;
+
+  function mountMany() {
+    const state = { clone: localTree(MANY) as LocalTree };
+    const checkout = checkoutPorts(() => state.clone);
+    const ports = {
+      entityView: async (_at: string, section: string | null) => {
+        asked.push({ section: section ?? "", release: () => {} });
+        return sourceAnswer(MANY, section ?? "", state.clone.commit, "b10b");
+      },
+      ...checkout,
+      localFile: async (_at: string, commit: string, path: string) => {
+        localReads.push(`${commit.slice(0, 7)}:${path}`);
+        const text = MANY[path];
+        return text === undefined ? null : fileBlock(path, text, "b10b-local", commit);
+      },
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    };
+    const props = $state({ ports, repoId: REPO, at: REPO, branch: "main", path: "README.md", changed: new Set<string>(), treeSections: { dir: "files:", file: "file:" }, refreshed: 0 });
+    view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+    return { state, checkout, props };
+  }
+
+  test("reads the top again, and no folder and no file that stands at the commit", async () => {
+    const { checkout, props } = mountMany();
+    await settle();
+    for (const folder of target.querySelectorAll<HTMLButtonElement>(".tf-ftree button.tf-fdir")) folder.click();
+    await settle();
+    expect(tree()).toHaveLength(81);
+    expect(checkout.dirReads.filter((read) => read.startsWith(TIP)), "each folder was read once, as it opened").toHaveLength(40);
+
+    const [dirs, files, source] = [checkout.dirReads.length, localReads.length, sourceReads().length];
+    props.refreshed += 1;
+    await settle();
+    props.refreshed += 1;
+    await settle();
+    // Each refresh asks the clone for its top at the mirror's tip and the source for its top: two reads, however many
+    // folders are open. Before, each read the forty folders and the README again too.
+    expect(checkout.dirReads.slice(dirs)).toEqual(["tip:", "tip:"]);
+    expect(localReads.slice(files), "the README at its commit is not read again").toEqual([]);
+    expect(sourceReads().slice(source)).toEqual(["files", "files"]);
+    expect(tree()).toHaveLength(81);
+  });
+
+  test("a sync that moved the branch still draws every open folder at the new commit, in one read each", async () => {
+    const { state, checkout, props } = mountMany();
+    await settle();
+    for (const folder of [...target.querySelectorAll<HTMLButtonElement>(".tf-ftree button.tf-fdir")].slice(0, 5)) folder.click();
+    await settle();
+    expect(tree()).toHaveLength(46);
+
+    const dirs = checkout.dirReads.length;
+    state.clone = { ...localTree({ ...MANY, "pkg00/new.rs": "// new\n" }, MOVED), as_of: "2026-11-09T11:00:00Z" };
+    props.refreshed += 1;
+    await settle();
+    expect(note()).toContain("From your clone at d00d000");
+    expect(tree()).toContain("new.rs");
+    // The top at the tip, then the five folders read so far at the new commit.
+    expect(checkout.dirReads.slice(dirs).filter((read) => read.startsWith(MOVED))).toHaveLength(5);
+  });
+});
