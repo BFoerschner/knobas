@@ -67,6 +67,8 @@
   so instead, and its diff comes when a read lists it.
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
@@ -836,7 +838,8 @@
     {/if}
   </div>
 {:else}
-<div class="tf-compare">
+<div class="tf-compare" {@attach sideWidth("compare")}>
+  <TfSideEdge side="compare" />
   <div>
     <h2 class="tf-cgroup-h">{standing?.pr || sentFrom !== undefined ? "Compare" : "New pull request"}</h2>
     {#if guessed !== null && guessed.branch === head && !standing?.pr && sentFrom === undefined}

@@ -78,6 +78,8 @@
   read at; *More* (⋯) holds *Edit*, *History* and its page on the source.
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
   import { flushSync, tick, untrack } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -1628,7 +1630,8 @@
   </div>
 {/snippet}
 
-<div class="tf-repo">
+<div class="tf-repo" {@attach sideWidth("repo-tree")}>
+  <TfSideEdge side="repo-tree" />
   <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
   <aside class="tf-ftreebox">
     <header>
