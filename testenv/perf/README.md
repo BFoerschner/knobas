@@ -457,7 +457,9 @@ before with their answer drawn. Ranked over every match they took 48 to 59 ms of
 by their names and each kind's newest text they take 11 to 15, under one plan a connection. Their lines are the
 letters', 70, 100 and 130 ms. A later letter often asks for the rows already drawn (`payo` and `payou` hold the same
 rows, `invoic` is `invoice`'s own lexeme), so the fifth letters and the last ones are those that change the list.
-The first press on each of the backend's five connections also makes that connection's plan, about 10 ms once.
+The backend makes each statement's plan once on each of its five connections, 10 to 30 ms, and keeps it for the
+app's life, so `keys.mjs` asks a letter and three words twelve times each before its first case: the lines hold the
+keys after that.
 
 ### With a sync running: `just open-budget --inner --syncing <source>`
 

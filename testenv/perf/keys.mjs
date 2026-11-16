@@ -256,6 +256,17 @@ async function press(key) {
   await c.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk });
 }
 
+// The backend plans each of the launcher's statements once on each of its five connections and keeps the plan (the
+// long-words pass, 2026-11-16): a first use is 10 to 30 ms of planning, once for the app's life. The lines are held to
+// the keys after it, so each statement is asked here until every connection has its plan: a letter, a word few rows
+// hold, and words many rows hold whose names are few and many. A word the database does not hold warms what it can.
+const real = new URL(app).searchParams.get("fake-real");
+if (real) {
+  const ask = (raw) => fetch(`http://127.0.0.1:${real}/invoke`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cmd: "search", args: { query: { raw, titles: false, limit: 40, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] } } } }) }).then((r) => r.text()).catch(() => null);
+  for (const raw of ["q", "iban", "payout", "retry"]) for (let i = 0; i < 12; i++) await ask(raw);
+}
+
 const med = (xs) => { const s = xs.filter((x) => x !== null).sort((a, b) => a - b); return s.length ? s[Math.floor((s.length - 1) / 2)] : null; };
 const results = { app, at: new Date().toISOString(), size: size.name, cases: [] };
 for (const rate of throttles) {
