@@ -9,7 +9,6 @@ import {
   entityCheckout,
   entityHead,
   objectPage,
-  openFolder,
   resolveUrl,
   submitWrite,
   type CheckoutView,
@@ -45,7 +44,6 @@ export interface MenuPorts {
   createLink: (fromId: string, toId: string, relation: string) => Promise<unknown>;
   inboxAck: (key: string) => Promise<void>;
   inboxDone: (key: string) => Promise<void>;
-  openFolder: (entityId: string, application: string, folder: string) => Promise<string[]>;
   clone: (repo: { entityId: string; title: string }) => Promise<void>;
   go: (hash: string) => void;
 }
@@ -73,7 +71,6 @@ export const realMenuPorts: MenuPorts = {
   createLink: (fromId, toId, relation) => createLink(fromId, toId, relation),
   inboxAck: (key) => inbox.ack(key),
   inboxDone: (key) => inbox.complete(key),
-  openFolder: (entityId, application, folder) => openFolder(entityId, application, folder),
   clone: (repo) => realSheetPorts.clone(repo),
   go: (hash) => {
     location.hash = hash;

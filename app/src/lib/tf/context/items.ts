@@ -113,11 +113,6 @@ export function sourceOf(entityId: string): string {
   return at < 0 ? "" : entityId.slice(0, at);
 }
 
-/** The folder a path is in, `""` for the repository's top. */
-export function folderOf(path: string): string {
-  const at = path.lastIndexOf("/");
-  return at < 0 ? "" : path.slice(0, at);
-}
 
 /** The words of a selection worth searching for: one line, 80 characters or fewer. */
 export function searchable(text: string): boolean {

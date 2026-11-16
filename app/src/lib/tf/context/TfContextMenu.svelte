@@ -25,9 +25,9 @@
   import { drawn } from "../../detail/relations";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
-  import { argvText, joinInside } from "../openin/openin";
+  import { joinInside } from "../openin/openin";
   import TfMenu from "../TfMenu.svelte";
-  import { folderOf, menuFor, type Act, type CodeAt, type Entry, type Item, type MenuFacts, type Text } from "./items";
+  import { menuFor, type Act, type CodeAt, type Entry, type Item, type MenuFacts, type Text } from "./items";
   import { realMenuPorts, type MenuPorts } from "./ports";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
 
@@ -379,14 +379,6 @@
     return (cause: unknown) => push({ text: `${what}: ${ipcErrorMessage(cause)}`, tone: "err" });
   }
 
-  /** Start an application and say what started, as `apps.run` does. */
-  function started(name: string, start: () => Promise<string[]>) {
-    start().then(
-      (argv) => push({ text: `Started ${name}: ${argvText(argv)}` }),
-      (cause: unknown) => push({ text: `Could not start ${name}: ${ipcErrorMessage(cause)}`, tone: "err" }),
-    );
-  }
-
   /** The one place an item is carried out. */
   function carry(act: Act, was: Shown) {
     const from = reads ?? { head: Promise.resolve(null), checkout: Promise.resolve(null), forge: Promise.resolve(null) };
@@ -457,8 +449,8 @@
   }
 
   /**
-   * An application on what the menu was opened on. A file opens with the application's file command; one with none
-   * opens the file's folder as it opens a folder (Fable's ruling 5), the repository's top for a file at the top.
+   * An application on what the menu was opened on, through the store every *Open in…* runs through: a file opens with
+   * the application's file command, and one with none opens the file's folder as it opens a folder (`runFile`).
    */
   function runApp(entityId: string, appId: string, name: string, at: CodeAt) {
     const app = apps.settings?.applications.find((one) => one.id === appId) ?? null;
@@ -466,15 +458,12 @@
       case "repository":
         return void apps.run(entityId, name, { application: appId });
       case "folder":
-        return started(name, () => ports.openFolder(entityId, appId, at.path));
+        return void apps.runFolder(entityId, name, appId, at.path);
       case "commit":
         return void apps.runObject(entityId, name, appId, { kind: "commit", sha: at.sha });
-      case "file": {
-        if (app?.file_command) return void apps.run(entityId, name, { application: appId, file: at.path, line: at.line });
-        const folder = folderOf(at.path);
-        if (folder === "") return void apps.run(entityId, name, { application: appId });
-        return started(name, () => ports.openFolder(entityId, appId, folder));
-      }
+      case "file":
+        if (app === null) return void apps.run(entityId, name, { application: appId, file: at.path, line: at.line });
+        return void apps.runFile(entityId, app, at.path, at.line);
     }
   }
 

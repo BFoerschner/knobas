@@ -20,12 +20,12 @@
   - Nothing while the checkout has not been read.
 -->
 <script lang="ts">
-  import { objectPage, setClonesRoot, type CheckoutView } from "../../ipc/entity";
+  import { objectPage, setClonesRoot, type CheckoutApplication, type CheckoutView } from "../../ipc/entity";
   import { openInBrowser } from "../../shell/external-links";
   import { openExternal } from "../../shell/open-external";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
-  import { apps as sharedApps, type Apps } from "./apps.svelte";
+  import { apps as sharedApps, fileFolder, type Apps } from "./apps.svelte";
   import { clones as sharedClones, type Clones } from "./clones.svelte";
   import { appPageHash } from "./app-page";
   import { cloneTip, commandFor, fill, joinInside, menuOrder, repoName } from "./openin";
@@ -114,7 +114,17 @@
 
   function run(id: string, appName: string) {
     open = false;
-    void apps.run(entityId, appName, { application: id, file, line });
+    const app = apps.settings?.applications.find((one) => one.id === id);
+    if (file !== null && app) void apps.runFile(entityId, app, file, line);
+    else void apps.run(entityId, appName, { application: id, file, line });
+  }
+
+  /** What an application's line says it runs: at a file, the file command, or the file's folder for one with none. */
+  function willRun(app: CheckoutApplication, at: string): string {
+    const folder = file === null ? null : fileFolder(app, file);
+    if (folder === null) return fill(commandFor(app, file), { path: at, file: fileAt, line });
+    const inside = folder === "" ? at : joinInside(at, folder);
+    return fill(app.command, { path: inside, file: null, line });
   }
 
   function clone() {
@@ -152,7 +162,7 @@
           {#each entries as entry (entry.app.id)}
             <button role="menuitem" onclick={() => run(entry.app.id, entry.app.name)}
               ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><span
-                class="tf-mono" title={fill(commandFor(entry.app, file), { path, file: fileAt, line })}>{fill(commandFor(entry.app, file), { path, file: fileAt, line })}</span
+                class="tf-mono" title={willRun(entry.app, path)}>{willRun(entry.app, path)}</span
               ></button
             >
           {/each}

@@ -77,7 +77,6 @@ beforeEach(() => {
     createLink: record("createLink") as MenuPorts["createLink"],
     inboxAck: record("inboxAck") as MenuPorts["inboxAck"],
     inboxDone: record("inboxDone") as MenuPorts["inboxDone"],
-    openFolder: record("openFolder", () => ["open", "-a", "Terminal", "/x"]) as MenuPorts["openFolder"],
     clone: record("clone") as MenuPorts["clone"],
     go: (hash) => void (calls["go"] ??= []).push([hash]),
   };
@@ -85,6 +84,7 @@ beforeEach(() => {
     checkoutSettings: () => Promise.resolve(SETTINGS),
     setCheckoutApplications: () => Promise.resolve(SETTINGS),
     openCheckout: (entityId, at) => ((calls["openCheckout"] ??= []).push([entityId, at]), Promise.resolve(["code", "/x"])),
+    openFolder: (entityId, application, folder) => ((calls["openFolder"] ??= []).push([entityId, application, folder]), Promise.resolve(["open", "-a", "Terminal", "/x"])),
   });
   location.hash = "#/inbox";
 });

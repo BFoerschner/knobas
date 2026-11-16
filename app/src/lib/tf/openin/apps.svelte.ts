@@ -7,6 +7,7 @@ import { ipcErrorMessage } from "../../ipc";
 import {
   checkoutSettings,
   openCheckout,
+  openFolder,
   openObject,
   setCheckoutApplications,
   type CheckoutApplication,
@@ -24,6 +25,8 @@ export interface AppsPorts {
   openCheckout: (entityId: string, at: OpenAt) => Promise<string[]>;
   /** `open_object` (#2274); tests that open no code object leave it out. */
   openObject?: (entityId: string, application: string | null, object: OpenObject) => Promise<string[]>;
+  /** `open_folder` (2026-11-16); tests that open no folder leave it out. */
+  openFolder?: (entityId: string, application: string, folder: string) => Promise<string[]>;
 }
 
 export const realAppsPorts: AppsPorts = {
@@ -31,6 +34,7 @@ export const realAppsPorts: AppsPorts = {
   setCheckoutApplications: (drafts, defaultApplication) => setCheckoutApplications(drafts, defaultApplication),
   openCheckout: (entityId, at) => openCheckout(entityId, at),
   openObject: (entityId, application, object) => openObject(entityId, application, object),
+  openFolder: (entityId, application, folder) => openFolder(entityId, application, folder),
 };
 
 export interface Apps {
@@ -46,6 +50,13 @@ export interface Apps {
   run(entityId: string, name: string, at: OpenAt): Promise<void>;
   /** Run a saved application on a code object (#2274) and say so in a toast. */
   runObject(entityId: string, name: string, application: string, object: OpenObject): Promise<void>;
+  /** Run a saved application on a folder of the checkout as on the checkout (2026-11-16) and say so in a toast. */
+  runFolder(entityId: string, name: string, application: string, folder: string): Promise<void>;
+  /**
+   * Run a saved application on a file (Fable's ruling of 2026-11-16): its file command; one with none opens the file's
+   * folder as it opens a folder, and the checkout for a file at its top.
+   */
+  runFile(entityId: string, app: CheckoutApplication, file: string, line: number | null): Promise<void>;
   /** Tests only: forget the settings read (#1743). */
   reset(): void;
 }
@@ -111,6 +122,16 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
       const open = ports.openObject ?? realAppsPorts.openObject!;
       await said(name, () => open(entityId, application, object));
     },
+    async runFolder(entityId, name, application, folder) {
+      const open = ports.openFolder ?? realAppsPorts.openFolder!;
+      await said(name, () => open(entityId, application, folder));
+    },
+    async runFile(entityId, app, file, line) {
+      const folder = fileFolder(app, file);
+      if (folder === null) return this.run(entityId, app.name, { application: app.id, file, line });
+      if (folder === "") return this.run(entityId, app.name, { application: app.id });
+      return this.runFolder(entityId, app.name, app.id, folder);
+    },
   };
 }
 
@@ -121,4 +142,14 @@ export const apps = createApps();
 export function runDefault(store: Apps, entityId: string): void {
   const app = defaultApp(store.settings);
   if (app !== null) void store.run(entityId, app.name, { application: app.id });
+}
+
+/**
+ * Where an application opens a file: `null` for the file itself (it has a file command), else the folder the file is
+ * in, `""` for the checkout's top. An application that knows only folders opens the file's (Fable, 2026-11-16).
+ */
+export function fileFolder(app: Pick<CheckoutApplication, "file_command">, file: string): string | null {
+  if (app.file_command) return null;
+  const at = file.lastIndexOf("/");
+  return at < 0 ? "" : file.slice(0, at);
 }

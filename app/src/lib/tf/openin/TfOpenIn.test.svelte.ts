@@ -52,6 +52,7 @@ let app: ReturnType<typeof mount> | null = null;
 let stored: CheckoutSettings;
 const calls = {
   open: [] as [string, OpenAt][],
+  folder: [] as [string, string, string][],
   saved: [] as [CheckoutApplicationDraft[], string | null][],
   clone: [] as [string, boolean | undefined][],
   roots: [] as string[],
@@ -91,6 +92,10 @@ beforeEach(() => {
     openCheckout: (entityId, at) => {
       calls.open.push([entityId, at]);
       return Promise.resolve(["code", "/Users/mara/code/payout-service"]);
+    },
+    openFolder: (entityId, application, folder) => {
+      calls.folder.push([entityId, application, folder]);
+      return Promise.resolve(["open", "-a", "Terminal", `/Users/mara/code/payout-service/${folder}`]);
     },
   });
   clones = createClones(
@@ -216,6 +221,29 @@ test("at a file, the menu shows and runs the file command", async () => {
   items()[0]!.click();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode", file: "src/sepa/retry.rs", line: null }]]);
+});
+
+test("at a file, an application with no file command opens the file's folder, and says so on its line (2026-11-16)", async () => {
+  await draw(view("/Users/mara/code/payout-service"), "src/sepa/retry.rs");
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  expect(text(items()[1])).toBe("Terminalopen -a Terminal /Users/mara/code/payout-service/src/sepa");
+  items()[1]!.click();
+  await settle();
+  expect(calls.folder).toEqual([[REPO, "terminal", "src/sepa"]]);
+  expect(calls.open).toEqual([]);
+  expect(toasts.items.map((toast) => toast.text)).toContain("Started Terminal: open -a Terminal /Users/mara/code/payout-service/src/sepa");
+});
+
+test("at a file at the checkout's top, an application with no file command opens the checkout", async () => {
+  await draw(view("/Users/mara/code/payout-service"), "README.md");
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  expect(text(items()[1])).toBe("Terminalopen -a Terminal /Users/mara/code/payout-service");
+  items()[1]!.click();
+  await settle();
+  expect(calls.open).toEqual([[REPO, { application: "terminal" }]]);
+  expect(calls.folder).toEqual([]);
 });
 
 test("nothing is drawn before the checkout is read", async () => {
