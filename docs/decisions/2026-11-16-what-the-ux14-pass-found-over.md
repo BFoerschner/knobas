@@ -10,7 +10,8 @@ requests spent on every branch's tree. A repository's first open: 275, 203 and 3
 **How it was measured.** Headless Chrome on the Mac (M2 Pro, on AC power) at `1440x868@1`, `2560x1440@1.25` and
 `5120x1440@1`, the windowless backend (release build) on fresh APFS clones of the saved scale database with their
 secrets moved out, the front end built as the probes build it, the base (69a5180d) and the head alternated. The Mac
-was shared with other agents' builds and browsers the whole pass: a load average of 25 to 55. Each change is also
+was shared with other agents' builds and browsers the whole pass: a load average of 25 to 115. The before and after
+tables were run again at the end under the Mac's timing lock (one timing run at a time). Each change is also
 counted in what no load moves (cards drawn, requests sent, the order reads go out). The first hour's board numbers were
 thrown away: the backend this pass started could not bind its port, which another agent's backend held, and the probes
 had measured that backend's database. Ports are checked before a backend starts since.
@@ -44,20 +45,21 @@ Cards drawn in the frame the answer lands, after a letter (`e`), and in all once
 | 1440x868@1 | 59 (34 on screen), 59 | 38 (34 on screen), 51 |
 
 The draw after the answer (main thread from the board's answer to the end of the frame that paints its cards), medians
-of 12 keys, base and head alternated, at a load of 40 to 55:
+of 12 keys (`a`, `e`, `i`, `o`, `r`, `s`, twice), the commit before this pass (31d17461) and the head alternated, under
+the Mac's timing lock at a load of 21 to 35 (the last two rows 53 and 88, another agent's build):
 
 | Size | CPU | before | after |
 |---|---|---|---|
-| 5120x1440@1 | 4x | 66.8 ms | 48.2 ms |
-| 5120x1440@1 | 6x | 103.8 ms | 93.4 ms |
-| 2560x1440@1.25 | 4x | 93.0 ms | 82.9 ms |
-| 2560x1440@1.25 | 6x | 163.3 ms | 84.7 ms |
-| 1440x868@1 | 4x | 37.5 ms | 29.0 ms |
+| 5120x1440@1 | 4x | 59.2 ms | 36.2 ms |
+| 5120x1440@1 | 6x | 88.2 ms | 56.5 ms |
+| 2560x1440@1.25 | 4x | 51.7 ms | 40.9 ms |
+| 2560x1440@1.25 | 6x | 91.3 ms | 63.4 ms |
+| 1440x868@1 | 4x | 40.2 ms | 34.8 ms |
 
-These are before the `TfKeyed` change, which takes a quarter of each new card's script off. The main thread's work in
-the 300 ms after the answer is about the same as before (79 and 81 ms at 4x on 5120 x 1440): the cards below the view
+At both full-screen sizes the draw is within half of Björn's key lines (100 at 4x, 200 at 6x). The main thread's work
+in the 300 ms after the answer is about the same as before (63 and 60 ms at 4x on 5120 x 1440): the cards below the view
 are built two frames later, not in the frame that shows the answer. On the PC the board's answer came at 65 ms and its
-draw took 51, so the same share off is about 37: about 100 ms at 4x at full screen, at the line; the 6x key was within.
+draw took 51; the same share off is about 31, so expect about 96 ms at 4x at full screen, just inside the line.
 
 **Not taken.** Fewer cards a column on screen, or narrower ones: the look is the board's. Holding the cards' marks
 until the answer lands (the key's own task is 20 to 30 ms at 4x): the marks appear as the key is typed, and that is
@@ -125,23 +127,26 @@ trees and READMEs (item 3) nothing is read from the forge; the README is a read 
 - **The header's read is the observer's first call** (`TfRepo.svelte`, `watchStack`), after the page's layout and
   before its first paint.
 
-`open.mjs`, the first press after the app started, drawn, medians alternated with the base:
+`open.mjs`, the first press after the app started, drawn, medians of three alternated with the commit before this
+pass, under the Mac's timing lock at a load of 25 to 50:
 
 | Size | CPU | before | after |
 |---|---|---|---|
-| 1440x868@1 | 1x | 54.9 ms | 57.5 ms |
-| 1440x868@1 | 4x | 130.6 ms | 120.3 ms |
-| 1440x868@1 | 6x | 216.8 ms | 198.2 ms |
-| 5120x1440@1 | 1x | 54.7 ms | 48.4 ms |
-| 5120x1440@1 | 4x | 171.4 ms | 150.1 ms |
-| 5120x1440@1 | 6x | 278.9 ms | 246.9 ms |
+| 1440x868@1 | 1x | 60.5 ms | 49.5 ms |
+| 1440x868@1 | 4x | 123.7 ms | 128.1 ms |
+| 1440x868@1 | 6x | 237.0 ms | 198.3 ms |
+| 5120x1440@1 | 1x | 52.4 ms | 52.0 ms |
+| 5120x1440@1 | 4x | 109.6 ms | 84.9 ms |
+| 5120x1440@1 | 6x | 191.4 ms | 152.4 ms |
+
+At 4x at 1440 x 868 the build task ends after the answers in both, so the reads going out sooner change nothing there.
 
 **What is left** is the page's own build, 100 to 190 ms of one task at 4x and 6x: the repository page and its Files tab
 (about 45 ms of script at 6x), the leaving page's scroll noted (`keepScroll`, a forced style and layout of about 20 ms at
 6x, since the new page is in the DOM when it reads), and the bridge's own calls. On the PC the README of a landing came
 from the forge, then from a second round of IPC (69a5180d), and its first open at 6x was 372 ms; with the README stored
 by the first sync and the reads out at the press, expect about 300 at 6x at window size and 330 at full screen, still
-the build's. **Not taken:** `keepScroll` from the scroll events' own positions, with no read at the hide: its tests and
+the build's (the Mac's draws above are about half the PC's). **Not taken:** `keepScroll` from the scroll events' own positions, with no read at the hide: its tests and
 `return-place.ts` read the boxes' scroll as it stands, and a box scrolled with no event yet would come back wrong.
 
 ## Owed on Windows
