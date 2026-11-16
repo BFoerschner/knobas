@@ -19,9 +19,11 @@
 //! [`Source::read_tree`], which fetches only the levels the store does not
 //! hold.
 //!
-//! **In order of use, a batch a run.** Default branches first, then branches
-//! an open pull request is opened from and the person's own (their last
-//! commit is the source's configured username), then the rest, newest first.
+//! **In order of use, a batch a run.** Default branches first, each with its
+//! README read right after its tree (what a landing opens: the ux14 pass,
+//! 2026-11-16), then branches an open pull request is opened from and the
+//! person's own (their last commit is the source's configured username),
+//! then the rest, newest first.
 //! At most [`REQUESTS_PER_RUN`] requests inside [`BUDGET`] a run, so a
 //! repository with thousands of branches fills over the runs after it.
 //!
@@ -87,6 +89,8 @@ struct Owed {
     branch: String,
     commit: String,
     stored_root: Option<Vec<u8>>,
+    /// The repository's default branch: its README is read right after it.
+    is_default: bool,
 }
 
 /// The tree levels of one source the store holds, by sha, with each tree's
@@ -174,7 +178,7 @@ pub async fn refresh_within(
     // The READMEs of default branches stored in a run before this one go
     // first: one request a repository, before the branches' trees take the
     // run's budget; those of default branches stored now, after them.
-    store_readmes(pool, source_id, source, &shape, requests, &mut filled).await?;
+    store_readmes(pool, source_id, source, &shape, requests, &mut filled, None).await?;
     let owed = owed(pool, source_id, &shape).await?;
     if !owed.is_empty() {
         let mut totals = held(pool, source_id).await?;
@@ -239,9 +243,9 @@ pub async fn refresh_within(
                 TreeRead::Read {
                     root,
                     levels,
-                    requests,
+                    requests: sent,
                 } => {
-                    filled.requests += requests;
+                    filled.requests += sent;
                     let Some((new_totals, entries)) = totals_of(&root, &levels, &totals) else {
                         tracing::debug!(
                             source_id,
@@ -291,11 +295,31 @@ pub async fn refresh_within(
                         .or_insert((0, None));
                     repository.0 += added;
                     repository.1 = Some(repository.1.unwrap_or(0).max(entries));
+                    // A landing opens the default branch's top and its README:
+                    // the README is read now, one request, before the next
+                    // repository's tree or any other branch takes the budget.
+                    // The first sync after the upgrade to 0090 stored 3 of 63
+                    // READMEs when they waited for every branch (the ux14 pass).
+                    if branch.is_default
+                        && store_readmes(
+                            pool,
+                            source_id,
+                            source,
+                            &shape,
+                            requests,
+                            &mut filled,
+                            Some(&branch.repository_id),
+                        )
+                        .await?
+                    {
+                        filled.left = owed.len();
+                        break;
+                    }
                 }
             }
         }
     }
-    store_readmes(pool, source_id, source, &shape, requests, &mut filled).await?;
+    store_readmes(pool, source_id, source, &shape, requests, &mut filled, None).await?;
     if sweep {
         filled.removed = remove_unreached(pool, source_id).await?;
     }
@@ -345,7 +369,8 @@ pub fn landing_readme(names: &[String], modes: &[i32]) -> Option<usize> {
 
 /// Store each default branch's README the store does not hold yet, by its
 /// blob sha (migration `0090`): one request each, inside what is left of the
-/// run's `requests`. A forge that does not answer ends it; a README past
+/// run's `requests`; `only` names one repository. A forge that does not
+/// answer ends it, and the answer is then `true`; a README past
 /// [`BLOB_CAP`], or one the adapter reads no bytes of, is left to the forge.
 async fn store_readmes(
     pool: &PgPool,
@@ -354,7 +379,8 @@ async fn store_readmes(
     shape: &knobas_source::tree::TreeShape,
     requests: u32,
     filled: &mut Filled,
-) -> Result<(), sqlx::Error> {
+    only: Option<&str>,
+) -> Result<bool, sqlx::Error> {
     let path: Vec<String> = shape
         .default_branch
         .iter()
@@ -373,10 +399,12 @@ async fn store_readmes(
            from sync.branch_tree bt
            join sync.item r on r.entity_id = bt.repository_id
            join sync.git_tree t on t.source_id = bt.source_id and t.sha = bt.root
-          where bt.source_id = $1 and bt.branch = r.payload #>> $2::text[]",
+          where bt.source_id = $1 and bt.branch = r.payload #>> $2::text[]
+            and ($3::text is null or bt.repository_id = $3)",
     )
     .bind(source_id)
     .bind(&path)
+    .bind(only)
     .fetch_all(pool)
     .await?;
     for (repository, commit, names, modes, sizes, shas) in tops {
@@ -425,14 +453,14 @@ async fn store_readmes(
             Ok(None) => {}
             Err(error) if forge_failed(&error) => {
                 tracing::debug!(source_id, repository, %error, "the forge did not answer a README; the pass stops");
-                break;
+                return Ok(true);
             }
             Err(error) => {
                 tracing::debug!(source_id, repository, %error, "a README was not read");
             }
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Whether a failed tree read says the forge is not answering at all (down,
@@ -523,7 +551,8 @@ async fn owed(
 
 /// The plan: every live branch of the source under a live repository, with
 /// the commit the mirror holds for it, where the stored row is missing or at
-/// another commit; default branches first, then those an open pull request
+/// another commit; default branches first (each README read right after its
+/// tree, in `refresh_within`), then those an open pull request
 /// is opened from or whose last commit is the source's configured username,
 /// then the rest, newest first.
 const OWED: &str = r"
@@ -555,7 +584,7 @@ heads as materialized (
    where i.source_id = $1 and i.kind = $7 and i.payload #>> $9::text[] = $10
 )
 select b.entity_id, r.entity_id as repository_id, b.name as branch, b.commit,
-       bt.root as stored_root
+       bt.root as stored_root, coalesce(b.name = r.default_branch, false) as is_default
   from branches b
   join repos r on r.name = b.parent
   left join sync.branch_tree bt on bt.entity_id = b.entity_id

@@ -113,6 +113,8 @@ struct Asked {
     at_tip: Vec<(String, Option<String>, String)>,
     /// Each file read for the store: the repository, the commit, the path.
     blobs: Vec<(String, String, String)>,
+    /// Every tree and file read for the store, in the order sent.
+    sent: Vec<String>,
 }
 
 /// What the fake answers for a file read for the store.
@@ -174,7 +176,11 @@ impl Source for Forge {
         held: &dyn HeldTrees,
         cap: u64,
     ) -> Result<Option<TreeRead>, SourceError> {
-        self.asked.lock().unwrap().trees.push(commit.to_owned());
+        {
+            let mut asked = self.asked.lock().unwrap();
+            asked.trees.push(commit.to_owned());
+            asked.sent.push(format!("tree {commit}"));
+        }
         if commit == sha(0xee) {
             return Err(SourceError::Unreachable("503 after its retries".to_owned()));
         }
@@ -243,11 +249,12 @@ impl Source for Forge {
         path: &str,
         _cap: u64,
     ) -> Result<Option<Vec<u8>>, SourceError> {
-        self.asked.lock().unwrap().blobs.push((
-            repository.to_owned(),
-            commit.to_owned(),
-            path.to_owned(),
-        ));
+        let mut asked = self.asked.lock().unwrap();
+        asked
+            .blobs
+            .push((repository.to_owned(), commit.to_owned(), path.to_owned()));
+        asked.sent.push(format!("blob {commit}:{path}"));
+        drop(asked);
         Ok(Some(blob_bytes(commit, path)))
     }
     async fn view_at_tip(
@@ -977,4 +984,46 @@ async fn a_default_branchs_readme_is_stored_once_and_drawn_from_the_store() {
             .unwrap();
     stored.sort();
     assert_eq!(stored, [sha(0xf1), sha(0xf5)]);
+}
+
+/// **A default branch's README goes right after its tree** (the ux14 pass,
+/// 2026-11-16): what a landing opens is stored before the run's budget goes
+/// to other branches. The first sync after the upgrade to `0090` stored 3 of
+/// 63 READMEs on Björn's PC, each waiting for every branch's tree. With a
+/// budget of three requests, `main`'s two levels and its README are read and
+/// `feat`'s four levels are left for the next run, which reads them first.
+#[tokio::test]
+async fn a_default_branchs_readme_is_read_right_after_its_tree() {
+    let f = fixture().await;
+    let filled = knobas_sync::stored_trees::refresh_within(
+        &f.pool,
+        &f.id,
+        &f.forge(),
+        3,
+        std::time::Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::mem::take(&mut f.asked.lock().unwrap().sent),
+        [
+            format!("tree {}", sha(0xc1)),
+            format!("blob {}:README.md", sha(0xc1))
+        ],
+        "main's tree, then its README, then the budget is spent"
+    );
+    assert_eq!((filled.branches, filled.blobs, filled.requests), (1, 1, 3));
+    assert_eq!(filled.left, 3, "feat, old and stale left for the next run");
+
+    let filled = f.refresh().await;
+    assert_eq!(
+        std::mem::take(&mut f.asked.lock().unwrap().sent),
+        [
+            format!("tree {}", sha(0xc2)),
+            format!("tree {}", sha(0xc1)),
+            format!("tree {}", sha(0xc2))
+        ],
+        "the rest in order of use, the README held"
+    );
+    assert_eq!((filled.branches, filled.blobs, filled.left), (3, 0, 0));
 }
