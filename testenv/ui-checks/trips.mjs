@@ -124,6 +124,14 @@
 //   scroller-tab  Round 17. `scroller` at `at`, a real press in its words, then Tab. Fails if the scroller moves, or if focus lands on nothing.
 //   pane-esc      Round 17. A real press in the pane's words, then Esc. Fails unless the address moved, focus left the pane, and the next ↓ walks.
 //
+//   right-click   2026-11-16 (Björn: "did, somewhere, we check if rightclick-options make sense?"). A real right press on `on` (or, with
+//                 `key`, Shift+F10 on it focused). Fails if the web view's menu wasn't stopped (or was, with `platform`: a field keeps it),
+//                 if knobas's menu isn't up by the next frame (or is, with `none`), if its rows aren't `items` (their ids), if opening
+//                 it moved the address or sent a write, if a second right press there doesn't draw it again in place, or if Esc
+//                 doesn't close it with focus back where it was. `select` selects `on`'s words first. `pick` (and `sub`, a row of
+//                 *Open in… ▸*) is chosen by pointer, and then `toast` must start a toast, `hash` start the address, or `launcher`
+//                 be the launcher's box. The clipboard is the page's own stub: nothing reaches the machine's.
+//
 //   app-page      The application page (PR #2479, 2026-11-13). From `route` (a repository), *Open in… › Add an application*, the page
 //                 must be at its address; name and command typed, the second repository picked, *It will run* must name that repository's
 //                 checkout; *Try it* must start it there, *Add application* must save and go back to `route`, whose *Open in…* then lists it.
@@ -166,7 +174,38 @@ const GROW_FORGE = `window.__fake.corpus.push(
 const GROW_TICKET = `window.__fake.corpus.push({ entity_id: "mock:PAY-9001", kind: "ticket", title: "A ticket the sync brought", updated_at: "2026-12-01T00:00:00Z", body_text: "", author: "mara", web_url: null, deleted_at: null, payload: { key: "PAY-9001", fields: { project: { key: "PAY", name: "Payments Platform" } }, status: "To do", priority: "High", assignee: "mara", type: "Story", labels: [] } }), 1`;
 
 // By page. `press` finds the first visible control with those words; `prep` runs first: { click, text | starts }, { fill, text }, { eval } or { wait }.
+// The right-click menu's cases (2026-11-16): one per kind of thing a person right-clicks daily, a field, and nothing.
+const RIGHT_CLICK = [
+  { page: "Right-click, Tickets", route: "tickets", trips: [
+    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
+    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "web", "copy-key", "copy-key-title", "copy-link"] },
+    { id: "rc-field", kind: "right-click", finding: "right-click", platform: true, on: { sel: ".tf-main input" } },
+  ] },
+  { page: "Right-click, Code", route: "code", trips: [
+    { id: "rc-repo-row", kind: "right-click", finding: "right-click", on: { sel: "tbody tr.tf-row td:last-child" }, items: ["open", "prs", "branches", "commits", "open-default", "open-in", "web", "copy-name", "copy-full", "copy-link"], pick: "prs", hash: "#/repo/" },
+  ] },
+  { page: "Right-click, a repository's files", route: `${REPO}/files`, trips: [
+    { id: "rc-folder", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows .tf-fdir" }, items: ["open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "open-in", sub: "app-terminal", toast: "Started " },
+    { id: "rc-file", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows a" }, items: ["open", "history", "open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "copy-path", toast: "Copied " },
+  ] },
+  { page: "Right-click, a repository's commits", route: `${REPO}/commits`, trips: [
+    { id: "rc-commit", kind: "right-click", finding: "right-click", on: { sel: "a[href*='/commits/']" }, items: ["open", "open-default", "open-in", "web", "copy-sha", "copy-short", "copy-link"], pick: "copy-short", toast: "Copied " },
+  ] },
+  { page: "Right-click, Inbox", route: "inbox", trips: [
+    { id: "rc-inbox-line", kind: "right-click", finding: "right-click", on: { sel: ".tf-ib a" }, starts: ["open"] },
+    { id: "rc-words", kind: "right-click", finding: "right-click", select: true, on: { sel: ".tf-ib time" }, starts: ["copy-sel", "search-sel", "open"], pick: "search-sel", launcher: true },
+    { id: "rc-nothing", kind: "right-click", finding: "right-click", none: true, on: { sel: ".tf-main h1" } },
+  ] },
+  { page: "Right-click, Monitors", route: "monitors", trips: [
+    { id: "rc-monitor", kind: "right-click", finding: "right-click", on: { sel: ".tf-mon tbody tr:not(.tf-mon-foldrow) td:first-child" }, starts: ["open"] },
+  ] },
+  { page: "Right-click, a run", route: RUN, trips: [
+    { id: "rc-run-heading", kind: "right-click", finding: "right-click", on: { sel: ".tf-main h1" }, starts: ["log", "tests", "rerun"] },
+  ] },
+];
+
 const PAGES = [
+  ...RIGHT_CLICK,
   // The still-rows pass (PR #2479, 2026-11-11): each late read lands after the first draw, and nothing drawn may move.
   { page: "Code, Repositories", route: "code", trips: [
     // *Show N new* itself: a sync brings a repository above the drawn rows, then the press, twice by key and twice by a still pointer.
@@ -2998,7 +3037,102 @@ async function worker(queue, results) {
     return { reasons, note: `${from} → ${at}, tried on ${picked}, saved, back at ${back}, menu ${items.length} items` };
   }
 
-  const KINDS = { "app-page": appPage, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  async function rightClick(t) {
+    await open(t);
+    const reasons = [];
+    const ids = () => evaluate(`JSON.stringify([...document.querySelectorAll('.tf-ctx-m')].slice(0, 1).flatMap((m) => [...m.querySelectorAll('[role=menuitem]')].map((i) => i.dataset.item)))`).then(JSON.parse);
+    const menus = () => evaluate(`document.querySelectorAll('.tf-ctx-m').length`);
+    // The page's own clipboard stub, and a listener after the app's that reads what it did with the event.
+    await evaluate(`(() => {
+      window.__copied = [];
+      try { Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (t) => (window.__copied.push(t), Promise.resolve()), write: () => Promise.resolve() } }); } catch {}
+      window.__ctx = null;
+      window.addEventListener("contextmenu", (e) => {
+        const at = performance.now();
+        window.__ctx = { prevented: e.defaultPrevented, frame: null };
+        requestAnimationFrame(() => { window.__ctx.frame = document.querySelectorAll(".tf-ctx-m").length; window.__ctx.ms = performance.now() - at; });
+      });
+      return 1;
+    })()`);
+    const raw = await evaluate(`window.__trip.point(${JSON.stringify(t.on)})`);
+    if (!raw) throw new Error(`can't find ${t.on.sel}`);
+    const at = JSON.parse(raw);
+    if (t.select) await evaluate(`(() => { const r = document.createRange(); r.selectNodeContents(window.__pressed); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return s.toString(); })()`);
+    const before = await snap();
+    const right = async () => {
+      await mouseTo(at.x, at.y);
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "right", buttons: 2, clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "right", buttons: 0, clickCount: 1 });
+    };
+    if (t.key) {
+      if (!(await evaluate(`(window.__pressed.focus(), document.activeElement === window.__pressed)`))) throw new Error(`${t.on.sel} takes no focus`);
+      await keyOf("F10", 121, 8);
+    } else await right();
+    await sleep(80);
+    const ctx = JSON.parse(await evaluate(`JSON.stringify(window.__ctx)`));
+    if (t.platform) {
+      if (ctx?.prevented) reasons.push("a field's web view menu was stopped");
+      if ((await menus()) > 0) reasons.push("knobas drew a menu on a field");
+      return { reasons, note: "the field keeps the web view's own menu" };
+    }
+    if (!t.key && !ctx) throw new Error("no contextmenu reached the page");
+    if (!t.key && !ctx.prevented) reasons.push("the web view's own menu was not stopped");
+    if (t.none) {
+      if ((await menus()) > 0) reasons.push(`a menu opened on nothing: ${JSON.stringify(await ids())}`);
+      return { reasons, note: "nothing drawn, the web view's menu stopped" };
+    }
+    if (!t.key && ctx.frame !== 1) reasons.push(`the menu wasn't up by the next frame (${ctx.frame} menus)`);
+    const got = await ids();
+    if (t.items && JSON.stringify(got) !== JSON.stringify(t.items)) reasons.push(`its rows are ${JSON.stringify(got)}, not ${JSON.stringify(t.items)}`);
+    if (t.starts && JSON.stringify(got.slice(0, t.starts.length)) !== JSON.stringify(t.starts)) reasons.push(`its rows start ${JSON.stringify(got.slice(0, t.starts.length))}, not ${JSON.stringify(t.starts)}`);
+    const opened = await snap();
+    if (opened.hash !== before.hash) reasons.push(`opening it moved the address to ${opened.hash}`);
+    if (added(opened, before).length) reasons.push(`opening it wrote ${added(opened, before).join(", ")}`);
+    if (t.key) {
+      const first = await evaluate(`document.activeElement?.dataset?.item ?? null`);
+      if (first !== got[0]) reasons.push(`by key, focus is on ${first}, not the first row`);
+    } else {
+      await right();
+      await sleep(80);
+      if ((await menus()) !== 1 || JSON.stringify(await ids()) !== JSON.stringify(got)) reasons.push("a second right press there didn't draw it again in place");
+    }
+    await key("Escape");
+    await sleep(150);
+    if ((await menus()) > 0) reasons.push("Esc left it open");
+    if (t.key && !(await evaluate(`document.activeElement === window.__pressed`))) reasons.push("Esc didn't give focus back to what had it");
+    if (!t.pick) return { reasons, note: `${got.length} rows, up by the next frame, Esc closes` };
+    if (t.select) await evaluate(`(() => { const r = document.createRange(); r.selectNodeContents(window.__pressed); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return 1; })()`);
+    if (t.key) await keyOf("F10", 121, 8); else await right();
+    await sleep(120);
+    const row = async (id, sub) => {
+      const p = await evaluate(`(() => { const m = [...document.querySelectorAll('.tf-ctx-m')][${sub ? 1 : 0}]; const e = m?.querySelector('[data-item="${id}"]'); if (!e) return null; const r = e.getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()`);
+      if (!p) throw new Error(`no row ${id}${sub ? " in Open in…" : ""}`);
+      return JSON.parse(p);
+    };
+    const pick = await row(t.pick, false);
+    await mouseTo(pick.x, pick.y);
+    await sleep(100);
+    if (t.sub) {
+      const sub = await row(t.sub, true);
+      // Along the row first, then down into the submenu, as a hand goes.
+      await mouseTo(sub.x, pick.y);
+      await mouseTo(sub.x, sub.y);
+      await sleep(80);
+      await pressAt(sub.x, sub.y);
+    } else await pressAt(pick.x, pick.y);
+    await sleep(400);
+    const after = await snap();
+    if ((await menus()) > 0) reasons.push("the pick left the menu open");
+    if (t.toast && !after.toasts.some((x) => x.startsWith(t.toast))) reasons.push(`no toast starting "${t.toast}": ${tidy(after.toasts)}`);
+    if (t.hash && !after.hash.startsWith(t.hash)) reasons.push(`the pick went to ${after.hash}, not ${t.hash}…`);
+    if (t.launcher) {
+      const box = await evaluate(`document.querySelector('[role=dialog] input')?.value ?? null`);
+      if (!box) reasons.push("the launcher didn't open with the words");
+    }
+    return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
+  }
+
+  const KINDS = { "right-click": rightClick, "app-page": appPage, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };
