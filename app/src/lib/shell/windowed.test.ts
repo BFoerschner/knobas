@@ -153,7 +153,7 @@ describe("the device's layout grid (#2508)", () => {
   it("moves the rows that stay by nothing when a swap takes rows from above into the room", () => {
     // 40 rows of 51 device pixels above at 1.25, then 8 more swapped out: the room grows by exactly their 8 x 51.
     const dpr = 1.25;
-    const h = new Heights(42, 0);
+    const h = new Heights<number>(42, 0);
     const keys = Array.from({ length: 200 }, (_, i) => i);
     h.keys(keys);
     for (const k of keys) h.set(k, onGrid(40.796875, dpr));
