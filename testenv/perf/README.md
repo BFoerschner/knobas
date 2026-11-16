@@ -93,6 +93,7 @@ trace on every state write, which made the measured app's filter keys several ti
 | `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
 | `syncing.mjs`, `lane-probe.mjs` | one source kept syncing for a run's length, and the felt waits a sync can hold timed at the backend per adapter (*With a sync running*, below) |
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
+| `soak.mjs`, `soak.sh`, `soak-repo.sh` | a repository's Code page browsed for a long while, then every other page, with what grows counted; what `just soak` runs and the repository it browses (*The soak*, below) |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
 
@@ -511,6 +512,63 @@ them, while `--source` is kept syncing. A view answered from what knobas held is
 ```sh
 node testenv/perf/lane-probe.mjs --port 5411 --probes jira.json --source live-jira --out jira-after.json
 ```
+
+## The soak: `just soak`
+
+What a page costs after it has been used for a while, from the hover-lag pass of PR #2479 (2026-11-16,
+`docs/decisions/2026-11-16-a-refresh-reads-what-can-have-changed.md`). Every other probe here measures a page fresh:
+its first open, its return, a scroll. Björn's report was of a page that got slow with use: "Hovering over the filelist
+on the left side is incredibly slow ... it just happens when you browse the code-page for a longer time." A hover at
+rest never showed it, at any throttle, after any amount of browsing. What grew was the work each run's end and each
+return to the page started: every folder opened so far read again and the tree drawn again once a folder.
+
+`soak.mjs` browses a repository's Code page as a person does. A lap opens two or three folders and two files, scrolls,
+folds a folder now and then, and every few laps looks at Commits and a commit, at *New pull request*, at a pull request
+and its files, at another section, and comes back. After each lap, at rest on Files, it records:
+
+| Measure | What it is |
+|---|---|
+| `hover` | a sweep over the tree's rows on screen at each throttle: `felt`, from the mouse move's own time to the end of the frame that draws it, and `cost`, the main thread's share (the move's handlers and that frame's rendering) |
+| `afterSync` | the pointer kept moving over the tree, a row every 80 ms, through the end of a run of every source that changed something (`sync:state`, told through `?fake-hooks`; every `--sync-every` seconds), at the slowest throttle: each move's `felt`, the main thread's time in the two seconds after it (`mainMs`), and the IPC calls it asked (`calls`) |
+| `afterReturn` | the same through a return from another section (every second lap) |
+| `nodesKept`, `listenersKept`, `heapMB` | every fifth lap, after a collection: DOM nodes, DOM listeners and the JS heap the page holds |
+| `tauriListeners` | Tauri event listeners registered and not dropped |
+| `idleMsPerMin` | the main thread's time while nothing is pressed |
+| `hoverStyle` | every `--trace-every` laps, the sweep under a trace: the elements each style pass computed (two to four: the row left and the row entered) |
+
+`--check budget.json --lines real` holds the `soak` lines: the growth from the second collected lap to the last, the
+hovers at rest, and over the run's second half the hover through a run's end and a return, the calls a run's end asks
+and how much they grew. `--tour` asks the same of every other page: each lap visits the sections, a pipeline, a run, a
+space, a doc, the repository's other tabs, a pull request, its files and its conversation, presses what a page offers
+more of (a board column's *Show 50 more*, *Older runs*, a diff's *Expand all*), and keeps the pointer moving over its
+rows through a run's end; the `soak-tour` lines hold the page whose run's end grew most between the second lap and
+the last, and the slowest hover through one.
+
+```sh
+testenv/perf/soak-repo.sh <dir>               # the stand-in's cart-service with 9,700 files on main, and a clone
+cp -cR <saved home> "$TMPDIR/soak"            # keep only `source:live-gitea` in its dev-secrets.json
+node testenv/perf/standin-forge.mjs --listen 3973 --delay 30 --repos <dir>/repos --pulls pulls.json --real-compare &
+HOME="$TMPDIR/soak" <headless_ipc built with debug assertions> --data-dir "$TMPDIR/soak/Library/Application Support/dev.knobas.desktop" --port 5733 &
+curl -X POST http://127.0.0.1:5733/invoke -d '{"cmd":"update_source","args":{"id":"live-gitea","patch":{"base_url":"http://127.0.0.1:3973"}}}'
+psql <the copy's database url> -c "<the update soak-repo.sh printed>"       # the mirror's main at the big commit
+curl -X POST http://127.0.0.1:5733/invoke -d '{"cmd":"set_checkout_override","args":{"entityId":"live-gitea:scale-commerce/cart-service","path":"<dir>/clone"}}'
+just soak --real 5733 --repo live-gitea:scale-commerce/cart-service                  # ten minutes, then the tour
+just soak --real 5733 --repo live-gitea:scale-commerce/cart-service --minutes 40 --size 2560x1440@1.25
+```
+
+- **The pull requests' records** (`pulls.json`) come from the backend itself, as for the inner pages:
+  `standin-repos.py --out <dir>/repos --port 5733 --pulls pulls.json --pr scale-commerce/cart-service#124 …`.
+- **A fresh copy a run.** The browsing writes visits, and a backend that has answered a tree keeps it.
+- **Six requests at once.** Headless Chrome sends at most six requests to the backend at a time, so a burst of reads
+  the app's own window would send together (300 folders read again) reaches the backend six at a time here. The
+  page's side of such a burst, its main thread's time and the hover through it, shows in full; the backend's side does
+  not. `crates/knobas-app`'s own tests hold that (`folders_asked_at_once_read_the_tree_once`).
+- **The fixture's bridge kept every listener's callback** until this pass, and with it the page that listened: a soak
+  over it grew by 2,500 nodes and 1.2 MB a minute that the app's own window never held. Tauri drops the callback with
+  the listener, and so does `fake-tauri.ts` now; a soak's node and heap growth is the app's.
+- **Read `afterSync` and `afterReturn`, not `hover`,** for a page that reads again too much: a hover at rest is two
+  restyled elements whatever the page holds. A return's hover includes the return's own first frame, which
+  `open-budget`'s `return` rounds hold.
 
 ## On a real database
 

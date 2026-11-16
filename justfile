@@ -1358,6 +1358,15 @@ open-budget *args:
 keys-budget *args:
     testenv/perf/keys-budget.sh {{args}}
 
+# The soak (the hover-lag pass of PR #2479, 2026-11-16, `testenv/perf/README.md`): browses a repository's Code page in a
+# headless Chrome as a person does for ten minutes, opening folders and files, looking at its other tabs and at other
+# sections, while runs end, then visits every other page a few times, and fails when what a run's end or a return costs
+# a hover grows with the browsing, or the nodes, listeners or heap kept do (`testenv/perf/budget.json`'s `soak` and
+# `soak-tour` lines). On the windowless backend over a copy of the saved scale database with a cloned repository of
+# thousands of files: `just soak --real <port> --repo <entity id>`.
+soak *args:
+    testenv/perf/soak.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
