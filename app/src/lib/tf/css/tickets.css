@@ -179,7 +179,8 @@
 .tf-go small { color: var(--ink-2); text-align: center; }
 @media (max-width: 1240px) {
   .tf-tickets { grid-template-columns: var(--side-tickets-views, 200px) minmax(0, 1fr); }
-  .tf-tickets .tf-preview, .tf-tickets > .tf-sedge[data-at="end"] { display: none; }
+  .tf-tickets .tf-preview { display: none; }
+  .tf-tickets > .tf-sedge[data-at="end"] { display: none; }
 }
 @media (max-width: 900px) {
   .tf-tickets { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
