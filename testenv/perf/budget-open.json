@@ -1510,5 +1510,110 @@
     "moved": 0
    }
   }
+ },
+ "_moves": "Lines for testenv/perf/compare-moves.mjs --budget (just moves-budget <port>, the big-compare pass of PR #2479, 2026-11-16, docs/decisions/2026-11-16-a-big-compare-moves-at-once.md): per move and CPU throttle, the most ms from the press to the frame that shows its answer, on big-compare.mjs's long-lived branch (4,200 changed files, about 67,000 changed lines, 300 commits) and its pull request, with a clone. A click is Björn's key-or-click line (100, 100 and 200 ms at 1x, 4x and 6x): a file picked in the list until its lines are drawn at the view's top, Back to top, a swap back to a pair drawn before, a file picked in Files changed. A view is his page line (100, 200 and 300 ms): a swap to a pair never drawn, which the page read ahead, and Open as diff.",
+ "moves": {
+  "jump-mid": {
+   "1": {
+    "linesMs": 100
+   },
+   "4": {
+    "linesMs": 100
+   },
+   "6": {
+    "linesMs": 200
+   }
+  },
+  "jump-last": {
+   "1": {
+    "linesMs": 100
+   },
+   "4": {
+    "linesMs": 100
+   },
+   "6": {
+    "linesMs": 200
+   }
+  },
+  "top": {
+   "1": {
+    "landedMs": 100
+   },
+   "4": {
+    "landedMs": 100
+   },
+   "6": {
+    "landedMs": 200
+   }
+  },
+  "swap-from": {
+   "1": {
+    "landedMs": 100
+   },
+   "4": {
+    "landedMs": 200
+   },
+   "6": {
+    "landedMs": 300
+   }
+  },
+  "swap-into": {
+   "1": {
+    "landedMs": 100
+   },
+   "4": {
+    "landedMs": 200
+   },
+   "6": {
+    "landedMs": 300
+   }
+  },
+  "swap-from-2": {
+   "1": {
+    "landedMs": 100
+   },
+   "4": {
+    "landedMs": 200
+   },
+   "6": {
+    "landedMs": 300
+   }
+  },
+  "swap-back": {
+   "1": {
+    "landedMs": 100
+   },
+   "4": {
+    "landedMs": 100
+   },
+   "6": {
+    "landedMs": 200
+   }
+  },
+  "open-diff": {
+   "1": {
+    "landedMs": 100,
+    "linesMs": 100
+   },
+   "4": {
+    "landedMs": 200,
+    "linesMs": 200
+   },
+   "6": {
+    "landedMs": 300,
+    "linesMs": 300
+   }
+  },
+  "pr-jump": {
+   "1": {
+    "linesMs": 100
+   },
+   "4": {
+    "linesMs": 100
+   },
+   "6": {
+    "linesMs": 200
+   }
+  }
  }
 }

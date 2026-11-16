@@ -31,6 +31,25 @@ export const BRANCHES = [
 ];
 /** Another base for *Into*: `main` and one commit beside it. */
 export const OTHER_BASE = "base-b";
+/**
+ * A long-lived branch (the big-compare pass, 2026-11-16): `MANY_COMMITS` commits, each changing `MANY_PER` files of
+ * `main` by six lines replaced and four added (16 changed lines a file, about 67,000 in all), with titles of every
+ * length, and a pull request open from it into `main` in the cloned repository. The `-b` twin is the 4x run's.
+ */
+export const MANY = ["many-commits", "many-commits-b"];
+export const MANY_COMMITS = 300;
+export const MANY_PER = 14;
+/** Commit titles of every length, as a team writes them: what the commits list draws one to a line. */
+const TITLES = [
+  "Fix typo",
+  "Round tax per line, not per order",
+  "PAY-412: Rework the cart totals so tax and discounts round per item rather than once per order, matching the invoice service",
+  "wip",
+  "Move the fixture builders next to the tests that use them",
+  "Merge the duplicated currency formatting helpers into one module and delete the two copies in checkout and invoices",
+  "Bump the client library",
+  "Make the retry budget a setting",
+];
 
 const here = new URL(".", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -55,6 +74,15 @@ const original = (i) =>
 const changed = (i, branch, step) =>
   original(i).replace(`export const value${i} = ${i};`, `export const value${i} = "${branch}";`) + `export const step${i} = ${step}; // ${branch}\n`;
 
+/** File `i` as a commit of the long-lived branch leaves it: six lines replaced, four added. */
+const many = (i, branch, c) =>
+  original(i)
+    .split("\n")
+    .map((line, l) => (l >= 2 && l < 8 ? `// ${branch} commit ${c + 1}: line ${l + 1} of ${pathOf(i)} rewritten` : line))
+    .join("\n") +
+  Array.from({ length: 4 }, (_, k) => `export const extra${i}_${k} = ${c * 10 + k}; // ${branch}`).join("\n") +
+  "\n";
+
 /** The repository as a fast-import stream: `main`, each branch off it in three commits, and the other base. */
 function stream() {
   const out = [];
@@ -76,6 +104,15 @@ function stream() {
       // A file of the branch's own, first in the file list (root files first): what tells one branch's list from another's.
       if (step === 0) file(`A-${name}.md`, `# ${name}\n\nChanges the first ${n} files of main.\n`);
       for (let i = step * third; i < Math.min(n, (step + 1) * third); i++) file(pathOf(i), changed(i, name, step + 1));
+      out.push("\n");
+    }
+  });
+  MANY.forEach((name, b) => {
+    for (let c = 0; c < MANY_COMMITS; c++) {
+      const title = `${TITLES[c % TITLES.length]} (${c + 1})`;
+      commit(`refs/heads/${name}`, T + 7200 * (b + 1) + c * 60, `${title}\n`, c === 0 ? "refs/tags/knobas-main" : null);
+      if (c === 0) file(`A-${name}.md`, `# ${name}\n\n${MANY_COMMITS} commits over ${MANY_COMMITS * MANY_PER} files of main.\n`);
+      for (let i = c * MANY_PER; i < (c + 1) * MANY_PER; i++) file(pathOf(i), many(i, name, c));
       out.push("\n");
     }
   });
@@ -111,13 +148,20 @@ export async function up({ port, dir, clone = true }) {
   execFileSync("git", ["-C", src, "fast-import", "--quiet"], { input: stream(), maxBuffer: 1 << 30 });
   const org = await api(g, "POST", "/orgs", { username: ORG, visibility: "public" });
   if (!org.ok && org.status !== 422) throw new Error(`big-compare: Gitea refused the org (${org.status})`);
-  const refs = ["main", OTHER_BASE, ...BRANCHES.map(([name]) => name)];
+  const refs = ["main", OTHER_BASE, ...BRANCHES.map(([name]) => name), ...MANY];
   for (const repo of ["cloned", "forge"]) {
     const r = await api(g, "POST", `/orgs/${ORG}/repos`, { name: repo, default_branch: "main" });
     if (!r.ok && r.status !== 409) throw new Error(`big-compare: Gitea refused ${repo} (${r.status})`);
     const at = new URL(g.url);
     const remote = `${at.protocol}//${g.user}:${g.token}@${at.host}/${ORG}/${repo}.git`;
     execFileSync("git", ["-C", src, "-c", "credential.helper=", "push", "-q", "--force", remote, ...refs.map((ref) => `${ref}:${ref}`)], { stdio: "ignore" });
+  }
+  // The pull requests from the long-lived branches, in the cloned repository: *Files changed* of thousands of files.
+  for (const name of MANY) {
+    const open = await (await api(g, "GET", `/repos/${ORG}/cloned/pulls?state=open&limit=50`)).json();
+    if (Array.isArray(open) && open.some((pr) => pr.head?.ref === name)) continue;
+    const pr = await api(g, "POST", `/repos/${ORG}/cloned/pulls`, { head: name, base: "main", title: `${name}: ${MANY_COMMITS} commits over ${MANY_COMMITS * MANY_PER} files` });
+    if (!pr.ok) throw new Error(`big-compare: Gitea refused the pull request from ${name} (${pr.status})`);
   }
   const sources = await call(port, "list_sources");
   const id = process.env.KNOBAS_PERF_GITEA_SOURCE ?? "live-gitea";

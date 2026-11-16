@@ -6,6 +6,7 @@
 #
 #   testenv/perf/open-budget.sh --real <port> [--inner [--no-big]] [--forge <ms>] [--syncing <source>] [--throttle 1,4,6]
 #                               [--only a,b] [--sizes "WxH@s ..." | none] [--out <dir>]
+#   testenv/perf/open-budget.sh --real <port> --moves [--keep-compares]
 #
 # --real <port>  the windowless backend on the saved scale database (examples/headless_ipc.rs); the places are its
 #                pages (the SCLENG space, a TeamCity pipeline), so there is no fixture run
@@ -22,6 +23,11 @@
 # --extremes     the extreme pages instead (`open.mjs --set extremes`, the extremes pass, 2026-11-13; README, *The
 #                extremes*): seeded on the live products for the run (`testenv/seed-extremes.sh`), synced through the
 #                profile's sources and removed after it, checked against `extremes` lines; `--keep-extremes` leaves them
+# --moves        moving through a big compare instead (`compare-moves.mjs`, the big-compare pass, 2026-11-16): a jump to
+#                a file, Back to top, branch swaps, Open as diff and a jump in Files changed, on big-compare.mjs's
+#                repositories made on the live Gitea for the run (a branch of 4,200 changed files and 300 commits, and its
+#                pull request) and removed after it, at 1440x868@1 and the two full-screen sizes, against `moves` lines;
+#                `--keep-compares` leaves them for the next run
 # --sizes        the nav pages pressed again at these sizes, at 4x and 6x, against the same lines (the sizes pass,
 #                2026-11-15): by default a 4K screen at 200 % (1920x1080@2, the most device pixels) and a 1440p screen
 #                at 125 % (2560x1440@1.25, the most CSS pixels at a fractional scale); `none` runs 1440x868@1 alone.
@@ -29,11 +35,11 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="" only="" out="" inner="" forge="" syncing="" extremes="" keep="" nobig="" sizes=""
+real="" throttle="" asked="" only="" out="" inner="" forge="" syncing="" extremes="" keep="" nobig="" sizes="" moves="" keepcmp=""
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
-    --throttle) throttle=$2; shift 2 ;;
+    --throttle) throttle=$2; asked=1; shift 2 ;;
     --only) only=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --sizes) sizes=$2; shift 2 ;;
@@ -43,13 +49,15 @@ while [ $# -gt 0 ]; do
     --syncing) syncing=$2; shift 2 ;;
     --extremes) extremes=1; shift ;;
     --keep-extremes) keep=1; shift ;;
-    *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    --moves) moves=1; shift ;;
+    --keep-compares) keepcmp=1; shift ;;
+    *) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
 # The nav pages and the inner pages at 1x, 4x and 6x (Björn's three lines, 2026-11-14; the inner pages' 6x items since
 # the inner-6x pass, 2026-11-15); the extremes at 1x and 4x, the throttles their items name.
 [ -n "$throttle" ] || { if [ -n "$extremes" ]; then throttle="1,4"; else throttle="1,4,6"; fi; }
-[ -n "$real" ] || { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$real" ] || { sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ -z "$extremes" ] || [ -z "$inner" ] || { echo "open-budget: --extremes and --inner are two runs" >&2; exit 2; }
 [ -z "$forge" ] || [ -n "$inner" ] || { echo "open-budget: --forge measures the inner pages: add --inner" >&2; exit 2; }
 [ -z "$nobig" ] || [ -n "$inner" ] || { echo "open-budget: --no-big leaves out the inner pages' big folders: add --inner" >&2; exit 2; }
@@ -60,6 +68,25 @@ mkdir -p "$out"
 port=${KNOBAS_PERF_PORT:-5362}
 KNOBAS_PERF=1 "$root/testenv/ui-checks/build-app.sh" "$root" "$out/app" || exit 1
 url="http://127.0.0.1:$port/?fake-ipc&fake-hooks&fake-real=$real#/time"
+if [ -n "$moves" ]; then
+  # The big compare's moves (the big-compare pass): made on the live Gitea, measured at three sizes, removed.
+  dir="$out/big-compare"
+  node "$here/big-compare.mjs" up --port "$real" --dir "$dir" || exit 1
+  [ -n "$keepcmp" ] || trap 'node "$here/big-compare.mjs" down --dir "$dir"' EXIT
+  repo="live-gitea:knobas-perf-big-compare/cloned"
+  # Its two pull requests, made in this order on a repository made for the run: `many-commits`, then the 4x twin's.
+  pr_a="$repo#1" pr_b="$repo#2"
+  status=0
+  for size in 1440x868@1 1920x1080@2 2560x1440@1.25; do
+    rates=1,4,6
+    [ "$size" = 1440x868@1 ] || rates=4,6
+    echo "open-budget: the big compare's moves at $size, ${rates//,/x, }x"
+    "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/compare-moves.mjs" --app "$url" --repo "$repo" \
+      --pr "$pr_a" --pr-b "$pr_b" --throttle "$([ -n "$asked" ] && echo "$throttle" || echo "$rates")" --size "$size" --out "$out/moves-$size.json" --budget || status=1
+  done
+  echo "open-budget: results in $out"
+  exit $status
+fi
 set_args=() lines=real
 # open.mjs gives up after 45 minutes unless told otherwise; the nav pages at 1x, 4x and 6x outran that (2026-11-14), so they
 # get 45 a throttle.
