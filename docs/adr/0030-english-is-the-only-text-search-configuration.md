@@ -15,14 +15,18 @@ Every `fts` column in the mirror and every `websearch_to_tsquery` call in `crate
 
 ## One typed character is read under `simple` (2026-11-15)
 
-The launcher answers one typed character from `sync.item_initial` (migration `0093`, `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`), which holds the first character of each `english` lexeme a row is named by. The typed character is lexed under `simple`, which lower-cases it as `english` does and drops no stop word, and is compared with those characters. So `s` and `a` name rows where `english` read them as stop words and matched nothing, and a row still matches a character exactly where `fts_a @@ 'c':*` would. The index side is `english` as before. A query of two characters or more is unchanged, stop words included.
+The launcher answers one typed character from `sync.item_initial` (migration `0093`, `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`), which holds the first character of each `english` lexeme a row is named by. The typed character is lexed under `simple`, which lower-cases it as `english` does and drops no stop word, and is compared with those characters. So `s` and `a` name rows where `english` read them as stop words and matched nothing, and a row still matches a character exactly where `fts_a @@ 'c':*` would. The index side is `english` as before. ~~A query of two characters or more is unchanged, stop words included.~~ Amended below.
+
+## Two and three typed characters are read as `english` reads them, a stop word kept (2026-11-16)
+
+Since migration `0094` the table holds the first two and three characters of each lexeme too, and the launcher answers two and three typed letters or digits from it (`docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`). What was typed is lexed under `english`, as the ranking of words lexes it, and that lexeme is what the stored characters are asked for. So `ops` asks for `op`, as it always did, and a row matches exactly where `fts_a @@ 'op':*` would: the names are the ones *Titles* matched. Where `english` gives no lexeme, because the characters are a stop word (`in`, `the`, `and`, `or`), they are lexed under `simple`, lower-cased and kept, so those name rows where they matched nothing. One character is read the same way, and for one character the two configurations give the same letter, so its answers did not change. Two or three characters that are not all letters and digits (`c#`, `a-b`) are ranked as words, as before, and so is everything of four characters and more, stop words included. The index side is `english` as before.
 
 ## The migration shape a later change would take
 
 One migration and one amendment here:
 
 1. A new text-search configuration, created in the migration, with `create extension if not exists unaccent` if used, which the embedded server must ship.
-2. Every generated `fts` column altered by `alter column … set expression` to it, the shape migrations `0019` and `0048` used, and `sync.item`'s three stored name columns (`title_words`, `title_tail_words`, `key_words`, migration `0056`, #1650) altered the same way, or no mirror row is named what was typed. `sync.item_initial` (migration `0093`) written again from the new vectors, since a rewrite of `sync.item` fires no trigger.
+2. Every generated `fts` column altered by `alter column … set expression` to it, the shape migrations `0019` and `0048` used, and `sync.item`'s three stored name columns (`title_words`, `title_tail_words`, `key_words`, migration `0056`, #1650) altered the same way, or no mirror row is named what was typed. `sync.item_initial` (migrations `0093` and `0094`) written again from the new vectors, since a rewrite of `sync.item` fires no trigger.
 3. The query side in `crates/knobas-search/src/sql.rs` switched in the same PR.
 4. The ranking witness in `crates/knobas-search/tests/it/ranking.rs` re-run and `just search-perf` re-measured.
 
