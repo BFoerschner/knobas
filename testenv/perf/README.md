@@ -372,7 +372,8 @@ node testenv/perf/open.mjs --app "<app>?fake-ipc&fake-hooks&fake-real=5411#/time
 How long one key takes to show the rows it asks for, from the broad-filters pass of PR #2479 (2026-11-13, rulings in
 `docs/decisions/2026-11-13-a-broad-key-answers-in-a-frame-or-two.md`). The keys are the dear ones, those that keep most
 of a page: the first letter typed into Tickets' filter, a `-project:` and a `-priority:` that leave one value out, and a
-single letter under Everything in the launcher. `keys.mjs` presses each as real input over the DevTools protocol, each
+single letter under Everything in the launcher, with the second and the third letter of a word after it. `keys.mjs`
+presses each as real input over the DevTools protocol, each
 press a key the session never asked before so the answer cache cannot answer it, and records in the page, from the
 key's own event time:
 
@@ -405,6 +406,14 @@ and the list draws an answer's first 24 rows in the frame it lands. Björn's key
 PC, whose read is about 1.5 times the Mac's, so the Mac's lines sit under his. With other agents' builds on the cores
 it read 74 at 1x. `knobas-search`'s own tests hold the statement to the index, so a miss here is the page or the
 machine: read the backend's `--timings` for `search`, which is about 10 ms.
+
+`everything-two-letters` and `everything-three-letters` (the two-letters pass, 2026-11-16,
+`docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`) press the next letter of a word
+into a box that holds the letters before, with their answer drawn and the keys long paused, so the key is asked at
+once. They hold one letter's lines, 70, 100 and 130 ms, and measured 34, 61 and 73 for the second letter and 31, 59
+and 73 for the third, where the ranking of words took 96, 126 and 145 and 89, 103 and 118. A press must change what
+the list draws: `keys.mjs` reads an answer off the change it makes, so a key that asks for the rows already drawn
+(`d` after `le`, which name the same rows) counts as one that drew nothing.
 
 ### With a sync running: `just open-budget --inner --syncing <source>`
 

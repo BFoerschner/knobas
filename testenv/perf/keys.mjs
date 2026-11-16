@@ -1,9 +1,11 @@
 // The keystroke probe (the broad-filters pass of PR #2479, 2026-11-13): how long one key takes, with real input, to
 // show the rows it asks for, at each throttle. For the keys that keep most of what a page holds, which are the dear
 // ones: the first letter typed into Tickets' filter, a `-project:` that leaves one project out, a `-priority:` that
-// leaves one out, and the first letter under Everything in the launcher. The `tickets-expanded-*` cases press the same
-// on a board whose every column had its *Show more* pressed four times (`EXPAND_PAGES`): 1,243 cards on the scale
-// database, the board the Windows pass measured (2026-11-14).
+// leaves one out, and the first letter under Everything in the launcher, with the second and the third after it
+// (the two-letters pass, 2026-11-16: `everything-two-letters` presses the second letter of a word into a box that
+// holds its first, `everything-three-letters` the third into one that holds two). The `tickets-expanded-*` cases
+// press the same on a board whose every column had its *Show more* pressed four times (`EXPAND_PAGES`): 1,243 cards
+// on the scale database, the board the Windows pass measured (2026-11-14).
 //
 //   node testenv/perf/keys.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--repeat 5]
 //                              [--check budget.json --lines real]
@@ -175,6 +177,25 @@ const launcher = `
   box.focus();
   return true;`;
 
+/**
+ * {@link launcher}, its box holding `before` with that text's answer drawn and the keys long paused, so the key
+ * pressed next is asked at once: the second or third letter of a word typed at a person's pace.
+ */
+const launcherHolding = (before) => `
+  if (location.hash !== "#/tickets") location.hash = "#/tickets";
+  ${sleepIn(300)}
+  if (!document.querySelector("[role=dialog] input")) document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+  ${until(vis("[role=dialog] input"))}
+  const box = document.querySelector("[role=dialog] input");
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  if (box.value !== "") { set.call(box, ""); box.dispatchEvent(new InputEvent("input", { bubbles: true })); ${sleepIn(400)} }
+  set.call(box, ${JSON.stringify(before)});
+  box.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  ${sleepIn(1200)}
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  return true;`;
+
 // Each press is a key never asked before in the session, so the answer cache (`ipc/answer-cache.ts`) never answers it:
 // a person types something new. `before` is what the box holds when the key is pressed. The launcher's letters are none
 // of the English stopwords (a, d, i, m, o, s, t, y), which the search answered with nothing in a millisecond until the
@@ -188,6 +209,12 @@ const CASES = [
   { name: "tickets-expanded-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: expandedBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-expanded-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: expandedBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "everything-letter", presses: [["", "p"], ["", "r"], ["", "c"], ["", "b"], ["", "l"], ["", "g"], ["", "w"]], setup: () => launcher, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  // The words the scale seed's names begin with, a letter further each: `pa`, `re`, `co`, `de`, `st`, `le`, `ba`, then
+  // `pay`, `ret`, `con`, `dep`, `sta`, `cac`, `bat`. Each matched 18,000 to 29,000 of the 39,770 rows as a ranked word.
+  // Every press changes what the list draws: `le` and `led` name the same rows, so `d` after `le` draws nothing new
+  // and the probe, which reads an answer off the change it makes, would count it as no rows.
+  { name: "everything-two-letters", presses: [["p", "a"], ["r", "e"], ["c", "o"], ["d", "e"], ["s", "t"], ["l", "e"], ["b", "a"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-three-letters", presses: [["pa", "y"], ["re", "t"], ["co", "n"], ["de", "p"], ["st", "a"], ["ca", "c"], ["ba", "t"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));
 
