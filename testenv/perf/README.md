@@ -676,7 +676,11 @@ scratch folder, and only while they are away:
 5. `node.exe run.mjs --attach 9444 --match http://127.0.0.1:5412 --throttle 1,4,6 --guard "powershell.exe -NoProfile
    -File guard.ps1" --out <file>`: the guard runs before every scenario and stops the run when the last input in the
    session is under five minutes old.
-6. The soak, in the same window (`--attach` loads the page afresh with `?fake-hooks`, at the size the window has):
+6. The soak. With no window at all (the hover-lag pass ran it so, 2026-11-16, under the PC's timing lock): the probe
+   starts a headless Edge of its own from the portable Node where `KNOBAS_CHROME` names `msedge.exe` (through WSL
+   interop, `WSLENV=KNOBAS_CHROME`). `launch()` cannot stop it on Windows, so stop the processes whose command line
+   holds the run's profile folder afterwards. Or in the app window of step 4 (`--attach` loads the page afresh with
+   `?fake-hooks`, at the size the window has):
    `node.exe soak.mjs --attach 9444 --match http://127.0.0.1:5412 --app "http://127.0.0.1:5412/?fake-ipc&fake-hooks&fake-real=5411#/code"
    --repo <entity id> --minutes 15 --out <file>`, the backend's repository built and pinned on the Mac as *The soak* says.
 
