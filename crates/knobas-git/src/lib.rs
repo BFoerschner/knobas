@@ -215,12 +215,30 @@ impl Repo {
                 opened
             }
         };
-        let mut repo = shared.to_thread_local();
-        // Commits and trees read again within one answer (a walk, a diff)
-        // are kept decoded.
-        repo.object_cache_size_if_unset(16 * 1024 * 1024);
-        Ok(Self { repo, shallow })
+        Ok(Self {
+            repo: cached(&shared),
+            shallow,
+        })
     }
+}
+
+/// The most memory one answer keeps of delta bases it decoded, as git's
+/// `core.deltaBaseCacheLimit` (96 MiB there). Let go with the answer.
+const DELTA_BASES: usize = 64 * 1024 * 1024;
+
+/// One answer's handle on `shared`, with the two caches git reads with:
+/// decoded objects (commits and trees read again within a walk or a diff),
+/// and the bases of deltas, without which an object 50 deltas deep is
+/// decoded from the bottom each time.
+fn cached(shared: &gix::ThreadSafeRepository) -> gix::Repository {
+    let mut repo = shared.to_thread_local();
+    repo.object_cache_size_if_unset(16 * 1024 * 1024);
+    repo.objects.set_pack_cache(|| {
+        Box::new(gix::odb::pack::cache::lru::MemoryCappedHashmap::new(
+            DELTA_BASES,
+        ))
+    });
+    repo
 }
 
 impl Repo {
@@ -234,9 +252,10 @@ impl Repo {
     /// As [`Repo::open`].
     pub fn open_isolated(path: &Path) -> Result<Self, AskGit> {
         let (shared, shallow) = open_fresh(path, true)?;
-        let mut repo = shared.to_thread_local();
-        repo.object_cache_size_if_unset(16 * 1024 * 1024);
-        Ok(Self { repo, shallow })
+        Ok(Self {
+            repo: cached(&shared),
+            shallow,
+        })
     }
 }
 

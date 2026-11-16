@@ -13,8 +13,11 @@ license.workspace = true
 # gitoxide, pure Rust: the object database, revision parsing, merge bases and
 # attributes. No default features: no network client, no worktree mutation,
 # no status. `parallel` makes an opened repository shareable between the
-# threads the app reads on. MIT OR Apache-2.0.
-gix = { version = "0.90.0", default-features = false, features = ["revision", "attributes", "sha1", "parallel"] }
+# threads the app reads on. `pack-cache-lru-dynamic` is the cache of delta
+# bases git has by default: without it every object is decoded from the
+# bottom of its delta chain, 18 µs an object where the chains are 50 deep and
+# 1.6 µs with it (10,100 files' counts: 935 ms without). MIT OR Apache-2.0.
+gix = { version = "0.90.0", default-features = false, features = ["revision", "attributes", "sha1", "parallel", "pack-cache-lru-dynamic"] }
 # The line differ gix itself uses (Myers with git's heuristics and its indent
 # heuristic), named here because the patch writer drives it directly. The
 # copy gix resolves. Apache-2.0.

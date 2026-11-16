@@ -323,15 +323,11 @@ fn a_tree_is_listed_as_git_lists_it() {
         &["ls-tree", "-r", "-t", "-z", "--long", "--full-tree", &sha],
     );
     let listing = String::from_utf8_lossy(&theirs.1).into_owned();
-    for kind in [
-        "040000 tree",
-        "100644 blob",
-        "100755 blob",
-        "120000 blob",
-        "160000 commit",
-    ] {
+    for kind in ["040000 tree", "100644 blob", "100755 blob", "160000 commit"] {
         assert!(listing.contains(kind), "the fixture holds a {kind}");
     }
+    // A link is made where the test can make one.
+    assert!(cfg!(not(unix)) || listing.contains("120000 blob"));
     same("ls-tree", repo.ls_tree(&sha), theirs);
     same(
         "ls-tree of a commit not here",
@@ -687,23 +683,23 @@ fn a_last_line_without_a_newline_and_an_empty_file_say_so() {
 fn a_name_is_quoted_where_git_quotes_it() {
     let dir = new_repo();
     let p = dir.path();
-    for name in [
-        "with space.txt",
-        "ünï/cödé.txt",
-        "tab\there.txt",
-        "quote\"d.txt",
-        "plain.txt",
-    ] {
+    // A tab and a double quote are no file names on Windows.
+    let names: &[&str] = if cfg!(unix) {
+        &[
+            "with space.txt",
+            "ünï/cödé.txt",
+            "tab\there.txt",
+            "quote\"d.txt",
+            "plain.txt",
+        ]
+    } else {
+        &["with space.txt", "ünï/cödé.txt", "plain.txt"]
+    };
+    for name in names {
         write(p, name, format!("{name} one\n"));
     }
     let first = commit(p, 0, "first");
-    for name in [
-        "with space.txt",
-        "ünï/cödé.txt",
-        "tab\there.txt",
-        "quote\"d.txt",
-        "plain.txt",
-    ] {
+    for name in names {
         write(p, name, format!("{name} two\n"));
     }
     mv(p, "plain.txt", "now with space.txt");
@@ -1200,7 +1196,11 @@ fn a_shallow_clones_history_is_left_to_git() {
     write(p, "a.txt", "two\n");
     let second = commit(p, 60, "second");
     let shallow = tempfile::tempdir().expect("a folder");
-    let url = format!("file://{}", p.display());
+    let url = if cfg!(windows) {
+        format!("file:///{}", p.display().to_string().replace('\\', "/"))
+    } else {
+        format!("file://{}", p.display())
+    };
     git(shallow.path(), &["clone", "-q", "--depth", "1", &url, "."]);
     let repo = open(shallow.path());
     same(
