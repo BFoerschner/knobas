@@ -7,7 +7,9 @@
 //! bytes, the merge base, the log between them, and their diff as the names,
 //! the names with counts, the whole patch and one file's patch. Each is
 //! timed `--runs` times both ways and the medians printed, with the answer's
-//! size and whether the two were the same bytes. On Windows the `git`
+//! size and whether the two were the same bytes. Then the working tree's
+//! stamp, read by file and by folder, beside the `git status` it stands in
+//! for (the last column there is the status's size). On Windows the `git`
 //! column is mostly the process start, which is what this pass removed; the
 //! first line printed is that start alone (`git --version`).
 //!
@@ -250,6 +252,49 @@ fn main() {
                 Some(first) if *first == theirs => "yes",
                 Some(_) => "NO",
                 None => "left to git",
+            }
+        );
+    }
+    // The working tree: the stamp that says nothing changed, read each of
+    // its two ways, against the `git status` it stands in for.
+    let status = [
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "--untracked-files=normal",
+    ];
+    let mut outside = Vec::new();
+    let mut said = Vec::new();
+    for _ in 0..runs {
+        let at = Instant::now();
+        said = git(path, &status);
+        outside.push(at.elapsed());
+    }
+    let outside = median(outside);
+    for (name, by_listing) in [
+        ("the stamp, by file", false),
+        ("the stamp, by folder", true),
+    ] {
+        let cold = Instant::now();
+        let stamped = knobas_git::stamp::of_read(path, by_listing);
+        let cold = cold.elapsed();
+        let inside: Vec<Duration> = (0..runs)
+            .map(|_| {
+                let at = Instant::now();
+                let _ = knobas_git::stamp::of_read(path, by_listing);
+                at.elapsed()
+            })
+            .collect();
+        println!(
+            "{name:22} {:>10.2?} {:>12.2?} {:>12.2?} {:>10}  {}",
+            median(inside),
+            cold,
+            outside,
+            said.len(),
+            if stamped.is_some() {
+                "stamped"
+            } else {
+                "not stamped"
             }
         );
     }

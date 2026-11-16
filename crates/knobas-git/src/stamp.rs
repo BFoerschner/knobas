@@ -40,6 +40,19 @@
 //! the size and the attributes; NTFS moves a directory's last write time
 //! when an entry in it is made, removed or renamed, as Unix does.
 //!
+//! # How the files are read
+//!
+//! On Unix one `lstat` a tracked file, which is a microsecond. On Windows a
+//! file's metadata by its path opens the file, which is tens of microseconds
+//! and more behind a virus scanner, so a checkout of 30,000 files took
+//! seconds where `git status` takes a fraction of one: Git for Windows reads
+//! each directory's listing instead, which carries every entry's times, size
+//! and attributes (`core.fscache`). The stamp does the same there: each
+//! directory that holds a tracked file is listed once, and a tracked file's
+//! metadata is its entry's. A tracked file the listing does not name as the
+//! index spells it (another case, or deleted) is read by its path as before.
+//! The directory itself is always read by its path.
+//!
 //! # Where it gives up
 //!
 //! No stamp at all, so the caller runs git as before, for anything it does
@@ -48,7 +61,8 @@
 //! a split or sparse index (`link`, `sdir`), no index yet, and on Windows a
 //! tracked path that is not UTF-8.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
@@ -57,6 +71,16 @@ use std::path::{Path, PathBuf};
 /// none of what the module covers changed in between.
 #[must_use]
 pub fn of(tree: &Path) -> Option<u64> {
+    of_read(tree, cfg!(windows))
+}
+
+/// [`of`], with the way the tracked files are read said: `by_listing` reads
+/// each directory's listing (Windows's way), else each file by its path
+/// (Unix's). Both are compiled and tested everywhere; `examples/timing.rs`
+/// times the two. A stamp of one way is not comparable with the other's.
+#[doc(hidden)]
+#[must_use]
+pub fn of_read(tree: &Path, by_listing: bool) -> Option<u64> {
     let git = tree.join(".git");
     if !std::fs::symlink_metadata(&git).ok()?.is_dir() {
         return None;
@@ -79,37 +103,88 @@ pub fn of(tree: &Path) -> Option<u64> {
     for own in user_files() {
         stat(&own, &mut hash);
     }
-    let mut dirs: BTreeSet<&[u8]> = BTreeSet::new();
-    dirs.insert(b"");
+    // Each directory with the tracked files it holds, and every directory
+    // above one: the top always.
+    let mut dirs: BTreeMap<&[u8], Vec<&[u8]>> = BTreeMap::new();
+    dirs.insert(b"", Vec::new());
     for path in &paths {
-        let mut end = path.len();
-        while let Some(slash) = path[..end].iter().rposition(|&b| b == b'/') {
-            if !dirs.insert(&path[..slash]) {
-                break;
-            }
-            end = slash;
+        let (dir, name) = match path.iter().rposition(|&b| b == b'/') {
+            Some(slash) => (&path[..slash], &path[slash + 1..]),
+            None => (&b""[..], &path[..]),
+        };
+        // A directory already there has every directory above it there.
+        let mut end = dir.len();
+        while !dirs.contains_key(&dir[..end]) {
+            dirs.insert(&dir[..end], Vec::new());
+            end = dir[..end].iter().rposition(|&b| b == b'/').unwrap_or(0);
         }
-        stat(&under(tree, path)?, &mut hash);
+        dirs.get_mut(dir)?.push(name);
     }
-    for dir in dirs {
-        stat(&under(tree, dir)?, &mut hash);
+    for (dir, names) in &dirs {
+        let at = tree.join(spelled(dir)?);
+        stat(&at, &mut hash);
+        let listed = (by_listing && !names.is_empty())
+            .then(|| listing(&at))
+            .flatten();
+        files(&at, names, listed.as_ref(), &mut hash)?;
     }
     Some(hash.finish())
 }
 
-/// A path the index spells in bytes, under `tree`, as this platform's path.
-#[cfg(unix)]
-#[allow(clippy::unnecessary_wraps)]
-fn under(tree: &Path, bytes: &[u8]) -> Option<PathBuf> {
-    use std::os::unix::ffi::OsStrExt;
-    Some(tree.join(std::ffi::OsStr::from_bytes(bytes)))
+/// A directory's listing: each entry's name with its metadata.
+type Listing = HashMap<OsString, std::fs::Metadata>;
+
+/// The tracked files `names` of the directory `at` into `hash`: each by its
+/// entry in `listed` where that names it as the index does, else by its
+/// path. `None` for a name that is no path on this platform.
+fn files(
+    at: &Path,
+    names: &[&[u8]],
+    listed: Option<&Listing>,
+    hash: &mut impl Hasher,
+) -> Option<()> {
+    for name in names {
+        let name = spelled(name)?;
+        let path = at.join(&name);
+        match listed.and_then(|listed| listed.get(&name)) {
+            Some(meta) => {
+                path.hash(hash);
+                changed_by(meta, hash);
+            }
+            None => stat(&path, hash),
+        }
+    }
+    Some(())
 }
 
-/// A path the index spells in bytes, under `tree`: git on Windows stores
-/// names as UTF-8, and one that is not is no path here.
+/// What `dir` lists, each entry's name with its metadata as the listing
+/// gave it, a symlink not followed; `None` for a directory that cannot be
+/// listed. On Windows the metadata comes with the listing and no file is
+/// opened; on Unix each entry is one `lstat`.
+fn listing(dir: &Path) -> Option<Listing> {
+    let mut listed = HashMap::new();
+    for entry in std::fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        if let Ok(meta) = entry.metadata() {
+            listed.insert(entry.file_name(), meta);
+        }
+    }
+    Some(listed)
+}
+
+/// A name or path the index spells in bytes, as this platform's.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)]
+fn spelled(bytes: &[u8]) -> Option<OsString> {
+    use std::os::unix::ffi::OsStrExt;
+    Some(std::ffi::OsStr::from_bytes(bytes).to_owned())
+}
+
+/// A name or path the index spells in bytes: git on Windows stores names
+/// as UTF-8, and one that is not is no path here.
 #[cfg(not(unix))]
-fn under(tree: &Path, bytes: &[u8]) -> Option<PathBuf> {
-    Some(tree.join(std::str::from_utf8(bytes).ok()?))
+fn spelled(bytes: &[u8]) -> Option<OsString> {
+    Some(std::str::from_utf8(bytes).ok()?.into())
 }
 
 /// What of a file's metadata says it changed, as git compares it.
@@ -357,6 +432,13 @@ mod tests {
     /// file, a stage, a commit made in a terminal, a fetch, a checkout.
     #[test]
     fn every_change_status_would_see_moves_the_stamp() {
+        for by_listing in [false, true] {
+            every_change_moves(by_listing);
+        }
+    }
+
+    fn every_change_moves(by_listing: bool) {
+        let of = |tree: &Path| of_read(tree, by_listing);
         let dir = repo();
         let p = dir.path();
         let mut before = of(p).expect("a plain clone is stamped");
@@ -400,9 +482,48 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
             step();
             let after = of(p).expect("still stamped");
-            assert_ne!(after, before, "{what} did not move the stamp");
+            assert_ne!(
+                after, before,
+                "{what} did not move the stamp (by listing: {by_listing})"
+            );
             before = after;
         }
+    }
+
+    /// A tracked file the listing does not name as the index spells it
+    /// (another case on Windows, a listing that failed half way) is read by
+    /// its path, so its edit still moves the stamp; and one the listing
+    /// names is read from the listing, with no file opened.
+    #[test]
+    fn a_file_the_listing_does_not_name_is_read_by_its_path() {
+        let dir = repo();
+        let p = dir.path();
+        let names: [&[u8]; 1] = [b"README.md"];
+        let stamped = |listed: Option<&Listing>| {
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            files(p, &names, listed, &mut hash).expect("a path here");
+            hash.finish()
+        };
+        let nothing = Listing::new();
+        let before = stamped(Some(&nothing));
+        let listed = listing(p).expect("the top lists");
+        assert!(listed.contains_key(std::ffi::OsStr::new("README.md")));
+        let before_listed = stamped(Some(&listed));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(p.join("README.md"), "hello again\n").unwrap();
+        assert_ne!(
+            stamped(Some(&nothing)),
+            before,
+            "a file the listing does not name is read by its path"
+        );
+        // The listing taken before the edit still says what it said: the
+        // file is not opened behind it.
+        assert_eq!(stamped(Some(&listed)), before_listed);
+        assert_ne!(
+            stamped(Some(&listing(p).expect("the top lists"))),
+            before_listed,
+            "a new listing has the edit"
+        );
     }
 
     /// A linked worktree's `.git` is a file, and is never stamped.
