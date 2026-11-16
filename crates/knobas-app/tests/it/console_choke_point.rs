@@ -32,7 +32,13 @@ fn production(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
     let end = lines
         .windows(2)
-        .position(|pair| pair[0].trim() == "#[cfg(test)]" && pair[1].starts_with("mod tests"))
+        .position(|pair| {
+            // `#[cfg(test)]`, or a test module kept to some platforms,
+            // `#[cfg(all(test, unix))]`: test code either way.
+            let gate = pair[0].trim();
+            (gate == "#[cfg(test)]" || gate.starts_with("#[cfg(all(test,"))
+                && pair[1].starts_with("mod tests")
+        })
         .unwrap_or(lines.len());
     lines[..end]
         .iter()
@@ -91,6 +97,19 @@ fn the_rule_rejects_a_bare_start_and_spares_tests() {
     assert!(!offends(
         "knobas-app/src/checkout/working_tree.rs",
         in_tests
+    ));
+
+    // A test module kept to some platforms is test code too.
+    let in_unix_tests = in_tests.replace("#[cfg(test)]", "#[cfg(all(test, unix))]");
+    assert!(!offends(
+        "knobas-app/src/checkout/working_tree.rs",
+        &in_unix_tests
+    ));
+    // And a module only built when not testing is not.
+    let not_tests = in_tests.replace("#[cfg(test)]", "#[cfg(not(test))]");
+    assert!(offends(
+        "knobas-app/src/checkout/working_tree.rs",
+        &not_tests
     ));
 
     let commented = "// std::process::Command::new(\"git\") would open a window\nfn read() {}";
