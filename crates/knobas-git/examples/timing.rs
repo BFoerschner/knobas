@@ -8,7 +8,12 @@
 //! the names with counts, the whole patch and one file's patch. Each is
 //! timed `--runs` times both ways and the medians printed, with the answer's
 //! size and whether the two were the same bytes. On Windows the `git`
-//! column is mostly the process start, which is what this pass removed.
+//! column is mostly the process start, which is what this pass removed; the
+//! first line printed is that start alone (`git --version`).
+//!
+//! The Windows workflow builds this and `parity` for release and keeps them
+//! as the artifact `knobas-git-tools-windows`, for a machine nobody builds
+//! on.
 
 use std::path::Path;
 use std::process::Command;
@@ -59,6 +64,21 @@ fn main() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("a clock")
         .as_secs() as i64;
+    // A start of git with nothing to read: the floor under every figure of
+    // the `git` column, and what each start a press made cost on this
+    // machine.
+    let alone: Vec<Duration> = (0..runs.max(9))
+        .map(|_| {
+            let at = Instant::now();
+            let _ = Command::new("git").arg("--version").output();
+            at.elapsed()
+        })
+        .collect();
+    println!(
+        "a start of git alone: {:.2?} (the median of {})",
+        median(alone),
+        runs.max(9)
+    );
     // The first changed file, and the blob it is after the change.
     let raw = git(
         path,

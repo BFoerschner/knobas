@@ -75,6 +75,24 @@ jobs:
       - name: every read of a clone is this git's answer, and the stamp moves with a change
         run: cargo test -p knobas-git -- --nocapture
 
+      # The two tools of `crates/knobas-git/examples`, built as the app is
+      # (MSVC, release) for a Windows machine nobody builds on: `timing`
+      # prints each read's time in-process and as a start of `git.exe`,
+      # `parity` compares every read with that machine's git over a real
+      # history (docs/decisions/2026-11-16-a-clone-is-read-in-process.md,
+      # *Owed on Windows*).
+      - name: the timing and parity tools, built for release
+        run: cargo build --release -p knobas-git --examples
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: knobas-git-tools-windows
+          path: |
+            target/release/examples/timing.exe
+            target/release/examples/parity.exe
+          if-no-files-found: error
+          retention-days: 30
+
   console:
     runs-on: windows-latest
     # A cold build of knobas-db and its dependencies is minutes, and the
