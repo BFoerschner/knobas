@@ -113,7 +113,7 @@ materialized.
 - `walk`: for each kind the names do not fill, its rows newest first off `sync.item_initial`'s index at the empty
   start (below), each one's search copy fetched by its key and tested for the word, until ten are found. The match is
   spelled so that no index answers it (`coalesce(sx.fts @@ q.tsq, false)`): the walk is the read. For `payout` that
-  is 7 repositories found in 60 rows.
+  is the repositories alone: 65 rows walked for the seven only whose text holds it.
 - `late`: a kind the walk did not fill within 500 rows is asked of the word's index instead, which lists every row
   of the word once and keeps that kind's newest ten. So a kind the word is rare in is answered whole, and the walk
   of it costs 0.7 ms at most. No such kind, no read. The budget changes no answer, which a test holds at 1, 3 and
@@ -128,9 +128,18 @@ it must be made, an index's own predicate where the index is the read and a wrap
 estimate chooses. A plan made without the words would parse them again for every row and every use if `q` were
 inlined (6 µs a row, measured), which is why it is materialized.
 
+**A connection is kept for the life of the app** (`knobas_db::embedded`, the app's pool). A plan is made once on
+each of the pool's five connections, 10 to 30 ms a statement, and lives as long as the connection does. sqlx closes a
+connection after 30 minutes, and after 10 idle, by default, which is the rule for a server across a network. So the
+plans would have been made again at the next key five times every half hour: a letter 13 to 15 ms where the kept
+read is 3, a broad word 30 to 50 where it is 12. The app's pool now sets no age and no idle time. A connection that
+broke is still found and replaced when it is next asked for. What is left is the first use after the app starts:
+the first five letters and the first five long words typed are that much slower, once (the words no slower than
+they were before this pass).
+
 **The same for one to three letters, where it was only meant.** `fetch_named` set `force_generic_plan` since the
 one-letter pass and sent its statement unnamed, so the server parsed and planned it again for every key: 1.5 ms and
-5 to 7 ms of a read that runs in 2. It is prepared by name now. One letter: 9 ms to 3.
+5 to 7 ms of a read that runs in 2. It is prepared by name now. One letter: 8 ms to 3.
 
 **Migration `0095`: the empty start.** `sync.item_initial` takes one row more an item, under no characters at all
 (`initial = ''`): every name begins with the empty string. So the index the names are read off
@@ -142,17 +151,23 @@ ranked search scanned all 40,061 to find them: 1.6 ms to 0.02, on a read that is
 
 ## What it costs
 
-- **Disk.** 39,770 rows more on his scale, one an item beside the 20 there were: about 9 MB with their index
-  entries, in a table of 181.
+- **Disk.** 39,770 rows more on his scale, one an item beside the 20 there were, about 9 MB with their index
+  entries. And the table filled a batch at a time is 214 MB where the one pass left 181 (part two).
 - **The sync.** A write of a mirror row whose name or date changed writes 21 narrow rows where it wrote 20.
   It was not dearer where it was measured. A date moved on 1,000 tickets, median of six on scale clones, the two
   builds alternated: 325 ms of the statement's 1,517 in the trigger before, 199 of 1,379 after. The fill writes into
   the index a batch at a time and leaves its pages room; the one pass packed them, so every rewritten row split one.
 - **A query on the line.** One that 2,001 rows hold is answered names first where one that 2,000 hold is ranked
   whole. The line is in rows, not a share of the mirror, because the cost it bounds is in rows.
-- **A word that names thousands** reads every one of its names for kind and date, 0.7 µs each: `scale` 24 ms under *Everything* and 16 under *Titles*
-  where it took 27 and 26. It is the one read here that still grows with the word.
+- **A word that names thousands** reads every one of its names for kind and date, 0.7 µs each: `scale` takes 24 ms
+  under *Everything* and 16 under *Titles* where it took 27 and 26. It is the one read here that still grows with
+  the word.
 - **A count before every answer.** 1 ms for a word few rows hold, 3 to 5 for one many do.
+- **The first use after a start.** Each statement's plan is made once on each connection: the first five letters
+  typed after the app starts take 13 to 15 ms of backend where the head before took 8 and the kept read takes 3, and
+  the first five long words 30 to 50, as before this pass.
+- **Connections that stay.** The app's five are no longer closed at 30 minutes or after 10 idle. Each holds the
+  launcher's prepared statements, a few megabytes of the server's memory in all.
 - **The contract.** `SearchResponse.total` and `ResultGroup.total` are the rows the answer holds for a query more
   than 2,000 rows hold. The generated mirror's two doc comments say so. And a page of forty holds other rows than it
   did where more than forty were ranked across more than four kinds.
@@ -189,6 +204,63 @@ ranked search scanned all 40,061 to find them: 1.6 ms to 0.02, on a read that is
   what the next writes use.
 - **Write only the missing row for an item `0094` had filled.** Half the fill's work for a profile of the draft, and
   a second path through the function to hold to the first. The draft's profiles are few.
+
+# Part three: parallel workers
+
+**Asked (Björn, during the pass):** on his PC a statement that runs on several processes pays for each one's start.
+Can three workers be kept open? And if workers make a search faster, keep them.
+
+## What a worker is
+
+A process PostgreSQL starts for one query and ends with it. Seen on this server (18.6): three workers alive during
+a parallel query, none after it, three new process ids for the same query run again. `max_parallel_workers` caps how
+many run at once; nothing keeps one. On the Mac a start is about 2 ms. On his PC the Windows pass (2026-11-14)
+measured 31 to 37 ms.
+
+What can be kept is a connection, and the app's five now are (part one, *How*). Work could be spread over them by
+the app itself, three statements at once on three connections, their rows merged in Rust, with no process started on
+any platform. Not built: after this pass no read the key targets are held to needs it.
+
+## Which statements start workers, on the scale mirror
+
+Found by the server's own count (`pg_stat_database.parallel_workers_launched`: 0 on the saved home, 687 after the
+open budget's tour of every page) and by sampling which statement the workers belonged to while each recorded
+command was asked once.
+
+| Statement | Workers | On the Mac, with / without | On his PC |
+|---|---|---|---|
+| The Tickets views' counts (`ticket_views`), on every opening of Tickets | 2, by the server's own rule | 33 / 44 ms, measured | about 115 / 70 to 90, **estimated** |
+| One letter read whole: a single character in the Docs search, and the launcher while the names' table fills | 3, always (`LETTER_PLANNING`) | 73 to 90 / 133 to 139 ms at a load of 25, measured | `r` 94 / 157, `x` 46 / 7, measured by the Windows pass on the launcher's read as it was |
+| A word ranked whole: a launcher query with an author, a parent, a reach, a name glob or a ticket key, and the Docs search's words | up to 3, seldom started (`MATCHED_PLANNING`) | 52 / 60, 60 / 57 and 10 / 10 ms for `payout`, `retry` and `iban`, measured: no difference | 31 to 37 ms more for each worker it does start, **estimated** |
+| The launcher's letters, its count, a word few rows hold, a word many rows hold | none, on every platform | 3 to 17 ms | 5 to 30, **estimated** |
+
+Of the 687 workers of the tour, 678 were the Tickets counts' (339 openings, two each). No other page's read started
+one.
+
+The estimates are the Mac's time at 1.5 to 2 times, plus 31 to 37 ms for each worker started. **Nothing in this pass
+ran on Windows.**
+
+## Decided
+
+1. **On Windows the app's connections plan no worker unless a statement asks for some**
+   (`knobas_db::embedded::app_session_settings`). The Tickets counts gain 11 ms from their two workers on the Mac
+   and would pay 62 to 74 ms for them on his PC. **Not measured there.** It is one commit, and dropping it is one
+   line.
+2. **On macOS and Linux the server's rule stands.** Workers are worth their start there, and the Mac's numbers say
+   so.
+3. **The one-letter read of the whole table keeps its three**, on every platform: the Windows pass measured it
+   faster with them for a broad letter and slower for a rare one, and ruled then. What would end it is answering
+   the Docs search's single character the way the launcher answers one, off the names.
+4. **A word ranked whole is left as it is.** Workers made no difference to it on the Mac, so asking for none would
+   cost nothing here and could only save a start on Windows. Not changed without a number from the PC.
+5. **The statements the key targets are held to plan none**, and a test reads each one's plan with a worker made to
+   look free for any scan of any size (`long_words.rs`,
+   `no_statement_a_key_is_held_to_plans_a_parallel_worker`).
+
+## What would settle it
+
+Three timings on his PC, against the scale data: `ticket_views` with the server's rule and with no worker; `search`
+for `payout`, `retry` and one letter; a single character in the Docs search.
 
 # Before and after
 
@@ -310,7 +382,8 @@ the letters' lines, 70, 100 and 130 ms.
   indexes, about 1 MB each) and one more read in each statement; the stored order of one to three letters would take
   the same read.
 - **A pipeline found by its run log** is a row the text found, after the names and by date, where it was ranked.
-- **The Docs search** ranks every page that holds the word, as before. It reads 5,032 pages.
+- **The Docs search** ranks every page that holds the word, as before. It reads 5,032 pages, and a single
+  character typed into it is the one launcher-side read that still asks for three workers (part three).
 - **A query with an author, a parent, a reach, a name glob or a ticket key** is planned for each key and ranked
   whole, as before.
 
