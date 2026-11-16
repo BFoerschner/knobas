@@ -15,6 +15,7 @@ Every read of a checkout started `git`: a folder two processes, a file one, a co
 - **The working tree stays git's.** The working tree state (`status`, ADR-0021) and the uncommitted diff (ADR-0026) depend on the person's clean and smudge filters, line-ending settings, sparse rules, ignore files and submodules, which only their git applies as they see it in a terminal. What changed is when git runs: the stamp that says nothing changed (ADR-0021 as amended 2026-11-10) reads Windows's file metadata too, where it gave up and every view started `git status`; the uncommitted diff is kept by the same stamp; its three commands run at once.
 - **The writes stay git's**: `clone`, the fetch of a tip (ADR-0041), `worktree add` (ADR-0035). None is a wait a press makes.
 - **A repository is held open twenty seconds** after its last read, eight at most. An open repository holds its pack files mapped, and on Windows a mapped file cannot be deleted, so a `git gc` in a terminal would leave old packs behind while knobas held them.
+- **The way back is a switch.** `KNOBAS_CLONE_READER=git` in the app's environment has every read here start `git` as before this ADR (`checkout::reader::READER_SWITCH`). It is how the two are compared in the app itself with one build, on a machine nobody builds on, and what to set should a clone ever read wrong in-process.
 
 ## Rejected
 

@@ -27,6 +27,13 @@
 //! settings, sparse rules and submodules, which only their git applies. The
 //! writes: `clone`, `fetch`, `worktree add`. And any read here the in-process
 //! reader hands back.
+//!
+//! # The way back
+//!
+//! `KNOBAS_CLONE_READER=git` in the app's environment ([`READER_SWITCH`])
+//! has every read here start `git` as before ADR-0043. It is how the two are
+//! compared in the app itself with one build, on a machine nobody builds on,
+//! and what to set should a clone ever read wrong in-process.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -52,6 +59,29 @@ static ASKED_GIT: AtomicU64 = AtomicU64::new(0);
 #[must_use]
 pub fn asked_git() -> u64 {
     ASKED_GIT.load(Ordering::Relaxed)
+}
+
+/// The environment variable that says who reads a clone. `git`: every read
+/// starts `git`, as before ADR-0043. Unset or anything else: knobas's own
+/// process answers first.
+pub const READER_SWITCH: &str = "KNOBAS_CLONE_READER";
+
+/// Whether knobas's own process answers a read first, as [`READER_SWITCH`]
+/// said when the first clone was read.
+fn in_process() -> bool {
+    static IN_PROCESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IN_PROCESS.get_or_init(|| {
+        let inside = by_switch(std::env::var_os(READER_SWITCH).as_deref());
+        if !inside {
+            tracing::warn!("{READER_SWITCH}=git: every read of a clone starts git");
+        }
+        inside
+    })
+}
+
+/// What a value of [`READER_SWITCH`] says: in-process unless it is `git`.
+fn by_switch(value: Option<&OsStr>) -> bool {
+    value != Some(OsStr::new("git"))
 }
 
 /// Which of `git diff`'s outputs a read asks for.
@@ -83,7 +113,7 @@ impl Reader {
         Self {
             path: path.to_path_buf(),
             search: std::env::var_os("PATH").unwrap_or_default(),
-            inside: true,
+            inside: in_process(),
             git: tokio::sync::OnceCell::new(),
         }
     }
@@ -547,6 +577,20 @@ mod tests {
                 )
                 .await),
         ]
+    }
+
+    /// The way back: `git` and nothing else turns the in-process reader
+    /// off, so a mistyped value never starts a process a read.
+    #[test]
+    fn the_switch_turns_the_reader_off_for_git_and_nothing_else() {
+        assert!(by_switch(None), "unset: in-process");
+        assert!(
+            !by_switch(Some(OsStr::new("git"))),
+            "git: every read is git's"
+        );
+        for other in ["", "GIT", "gix", "1", "off"] {
+            assert!(by_switch(Some(OsStr::new(other))), "{other:?}: in-process");
+        }
     }
 
     /// **No process on a read a person waits on**: every read answered
