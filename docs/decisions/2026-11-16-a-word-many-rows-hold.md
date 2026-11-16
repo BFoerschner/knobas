@@ -387,6 +387,36 @@ the letters' lines, 70, 100 and 130 ms.
 - **A query with an author, a parent, a reach, a name glob or a ticket key** is planned for each key and ranked
   whole, as before.
 
+# Gates
+
+In a clean clone, on the pushed head `1354ba57` unless said otherwise.
+
+- `cargo fmt --all --check`, `just clippy` and `just clippy-libs`: clean.
+- `just wasm-fixture`, then `env -u RUSTUP_TOOLCHAIN just test`: 61 binaries and 19 doc-test crates, 4,973 passed, 0
+  failed, 263 ignored, and `app/src/lib/ipc/generated/` unchanged after it. Run on `68561d1c`, the same Rust tree:
+  the rebase onto the row-swap pass's four commits changed no file under `crates/`. Two earlier runs of the day each
+  failed one plan test of knobas-search under the gate's load and nothing else:
+  `item_search::a_search_with_words_reads_through_the_narrow_tables_indexes` once (it plans against whatever its
+  module's database holds at that moment, and passed alone, with its module and in every later run), and
+  `coverage_plans::a_probe_never_reads_a_table_to_prove_a_source_has_nothing` once, which the brief lists as flaky.
+- `just check-front`: ok. vitest whole: 338 files, 5,190 passed, 1 skipped. `svelte-check --threshold error`: 1,473
+  files, 0 errors, 0 warnings. The press trips with `--strict`: 272 of 272.
+- `just check-scripts`: ok.
+- `just open-budget --real`, on `e55d18b1`: every open within its line at 1440x868 and at 1920x1080@2 (three
+  throttles, four visits a place). At 2560x1440@1.25 one cell of the tour's 525 was over, *Builds* after a sync at 6x,
+  drawn in 331 ms with a longest task of 162, while another agent's build held the load at 13; the same cell drew in
+  113 and 127 ms at the other two sizes. The cell was not run again: the machine stayed loaded (below).
+- `just keys-budget --real`: **not held on the pushed head.** From the afternoon on, other agents' test runs, builds
+  and browsers kept the machine at a load of 14 to 44, and a throttled press is the measure most open to that. The
+  launcher's six cases were pressed all the same, at a load of 37 to 44: all 126 presses drew their rows and none
+  moved, and every cell read two to three times its quiet figure, the three letter cases no slower read touched
+  among them (one letter 50, 111 and 189 ms where it holds 37, 55 and 74). The measure that stands is the one in
+  *Before and after*: both builds alternated at a load of 2 to 6, every new case under its line. To hold the lines
+  on a quiet machine: `KNOBAS_PERF_PORT=5373 just keys-budget --real <port>` (another run may hold the default
+  port). An earlier whole run, on a backend just started and before the probe asked each statement first, read the
+  fourth letter at 70.5 ms against 70 at 1x, its first presses 136, 148 and 98 ms: each of the five connections
+  making its plans. That is why the probe now asks them first and why the connections are kept.
+
 # Reversing it
 
 Part one: `Searcher::rows_by_words` answering through `sql::search_sql` whatever the count is the ranking of every
