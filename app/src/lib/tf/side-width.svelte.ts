@@ -92,9 +92,10 @@ export function maxWidth(id: SideId, grid: number): number {
   return Math.max(spec.min, Math.min(spec.max ?? Number.POSITIVE_INFINITY, share));
 }
 
-/** `px` in whole pixels, within `id`'s bounds in a grid `grid` pixels wide. */
+/** `px` in whole pixels, within `id`'s bounds in a grid `grid` pixels wide; with no bound to hold an endless width, the default. */
 export function clampWidth(id: SideId, px: number, grid = 0): number {
-  return Math.round(Math.min(maxWidth(id, grid), Math.max(specOf(id).min, px)));
+  const width = Math.min(maxWidth(id, grid), Math.max(specOf(id).min, px));
+  return Number.isFinite(width) ? Math.round(width) : specOf(id).base;
 }
 
 /** What the grid's custom property holds for a width: clamped in CSS as well, to the floor and the share. */

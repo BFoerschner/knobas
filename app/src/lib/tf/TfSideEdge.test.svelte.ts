@@ -51,6 +51,8 @@ describe("the widths", () => {
     // No grid laid out: no share to hold, so a wide width stands.
     expect(clampWidth("builds", 4000)).toBe(4000);
     expect(clampWidth("builds", 4000, 1440)).toBe(648);
+    // End on a grid not laid out: no bound, so the default rather than an endless width.
+    expect(clampWidth("builds", Number.POSITIVE_INFINITY)).toBe(300);
     // At 5120 px the share still decides, not a fixed cap.
     expect(clampWidth("builds", 4000, 5120)).toBe(2304);
     // The ticket card keeps its cap (#2402) as well as its share.
