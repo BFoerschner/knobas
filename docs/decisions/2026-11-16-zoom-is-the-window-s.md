@@ -133,3 +133,18 @@ every level.
   on Windows whether WebView2 sends a pinch as a wheel with Ctrl while its own pinch zoom is off. Each needs a person's
   fingers.
 - **WKWebView's step.** A zoom there is `pageZoom`; its cost was not measured (WKWebView has no DevTools protocol).
+
+## Gates
+
+On the code head rebased on 29ed5d0d (the docs after it change no code), in this pass's own worktree: svelte-check
+1,515 files, 0 errors, 0 warnings; vitest whole, 356 files, 5,431 passed, 1 skipped; `doc-lists` and
+`conflict-markers` ok; `just check-scripts` ok. Thirty-five mutants, one for each key, step, bound, kept level, wheel
+path, listener's coming and going, the plate, Settings, the status bar, the shell's wiring, the lists' re-read, the
+scale's watcher and the PDF: each failed a test. Press trips with `--strict` (the Mac's lock was held; WSL's headless
+Chrome on the base b45492c5 head and this one, alternated): 284 trips, 279 passing, and the same three right-click
+trips failing and two that cannot run (row-room) on the base build too: the right-click trips there predate the menu's
+*Link to the job* row, and Linux Chrome cannot run the row-room trip. `testenv/desktop-witness-test.sh` on the WSL box
+from this head's archive: 284 checks ok, its macOS helper checks skipped there. `pixel-same.py` not run: at 100 % the
+only thing drawn differently is the new row in Settings › Appearance; the plate and the status bar's level draw only
+while zoomed. Rust: `capabilities/default.json` only, which knobas-app's build script read and accepted (the release
+build got past the crate itself before the disk filled); no Rust code changed.
