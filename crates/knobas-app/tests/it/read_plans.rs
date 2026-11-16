@@ -997,6 +997,12 @@ fn searches_per_id(node: &serde_json::Value) -> Vec<String> {
 
 /// Every index read of `knobas.entity` (#1149): liveness as a probe per row,
 /// `sync.live_item`'s join, where the tombstones read once is a hashed set.
+///
+/// But for `entity_withdrawn_idx` (migration `0095`): it holds the withdrawn
+/// entities and no other, so a read of it is the tombstones read, the set
+/// itself, off 291 index entries where the set was a scan of every entity.
+/// A set probed a row at a time would be an unhashed subplan, which
+/// [`item_scans_filtered_per_row`] reports.
 fn entity_probes(node: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     let probes = matches!(
@@ -1006,7 +1012,7 @@ fn entity_probes(node: &serde_json::Value) -> Vec<String> {
     if probes
         && node["Index Name"]
             .as_str()
-            .is_some_and(|index| index.starts_with("entity_"))
+            .is_some_and(|index| index.starts_with("entity_") && index != "entity_withdrawn_idx")
     {
         found.push(format!(
             "probes knobas.entity by {}",
