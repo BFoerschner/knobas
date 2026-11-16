@@ -128,8 +128,14 @@
   function press() {
     if (hold.held()) return;
     hold.hold();
-    if (view?.running) void ports.stop(entityId, renderer.id, folder);
-    else answer("again");
+    // The press answers in its own frame; the backend's answer (and its events) replace this.
+    if (view?.running) {
+      view = { ...view, running: null };
+      void ports.stop(entityId, renderer.id, folder);
+    } else {
+      if (view !== null) view = { ...view, running: { state: "queued" }, failure: null };
+      answer("again");
+    }
   }
 
   const ask = (kind: FolderAsk["ask"]) =>

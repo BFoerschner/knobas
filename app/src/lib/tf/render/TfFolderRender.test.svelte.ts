@@ -176,6 +176,10 @@ test("a failure says what the command said, and Run again runs it", async () => 
   const run = target.querySelector<HTMLButtonElement>(".tf-frender-run")!;
   expect(run.textContent).toBe("Run again");
   run.click();
+  flushSync();
+  // The press answers in its own frame: the failure goes and the run is said, before the backend answers.
+  expect(run.textContent).toBe("Stop");
+  expect(target.querySelector('[role="alert"]')).toBeNull();
   await settle();
   expect(f.asked.map((a) => a.ask)).toEqual(["open", "again"]);
   // The same button, now Stop, keeps focus; a second press inside the hold stops nothing.
@@ -192,6 +196,9 @@ test("Stop stops the run; an event moves the state and an ending asks again", as
   const run = target.querySelector<HTMLButtonElement>(".tf-frender-run")!;
   expect(run.textContent).toBe("Stop");
   run.click();
+  flushSync();
+  // The press answers at once, before the backend does.
+  expect(target.querySelector(".tf-banner.tf-info")).toBeNull();
   // A double press is one press (the press rule).
   run.click();
   expect(f.stopped).toEqual(["lister:flows/app"]);

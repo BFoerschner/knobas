@@ -294,18 +294,18 @@ const PAGES = [
     { id: "app-page-flow", kind: "app-page", strict: true, finding: "apps-page" },
   ] },
   // Folder renderers (ADR-0044, ux17): every press they brought, twice by key and twice with the pointer still.
-  { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, query: "&fake-folder-render", trips: [
-    { id: "folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render", prep: [{ wait: 1200 }], press: { sel: ".tf-frender-run", text: "Run again" } },
-    { id: "folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", prep: [{ wait: 1200 }], press: { sel: ".tf-frender-run", text: "Run again" } },
+  { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, trips: [
+    { id: "folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 1200 }], press: { sel: ".tf-frender-run", text: "Run again" } },
+    { id: "folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 1200 }], press: { sel: ".tf-frender-run", text: "Run again" } },
   ] },
-  { page: "A folder's row on the tree", route: REPO, query: "&fake-folder-render", trips: [
-    { id: "folder-glyph-key", kind: "enter-twice", strict: true, finding: "folder-render", prep: [{ wait: 900 }], press: { sel: ".tf-frmark a" }, leaves: true },
+  { page: "A folder's row on the tree", route: REPO, trips: [
+    { id: "folder-glyph-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 900 }], press: { sel: ".tf-frmark a" }, leaves: true },
   ] },
-  { page: "Settings, adding a folder renderer", route: "settings/renderers/folder/add", query: "&fake-folder-render", trips: [
-    { id: "folder-try-key", kind: "enter-twice", strict: true, finding: "folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
-    { id: "folder-try-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
-    { id: "folder-add-key", kind: "enter-twice", strict: true, finding: "folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Add folder renderer" }, leaves: true },
-    { id: "folder-add-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Add folder renderer" } },
+  { page: "Settings, adding a folder renderer", route: "settings/renderers/folder/add", trips: [
+    { id: "folder-try-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
+    { id: "folder-try-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
+    { id: "folder-add-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Add folder renderer" }, leaves: true },
+    { id: "folder-add-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Add folder renderer" } },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },
