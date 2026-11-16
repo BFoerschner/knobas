@@ -629,6 +629,11 @@ just soak --real 5733 --repo live-gitea:scale-commerce/cart-service --minutes 40
 - **The fixture's bridge kept every listener's callback** until this pass, and with it the page that listened: a soak
   over it grew by 2,500 nodes and 1.2 MB a minute that the app's own window never held. Tauri drops the callback with
   the listener, and so does `fake-tauri.ts` now; a soak's node and heap growth is the app's.
+- **The lines.** The calls a run's end asks and their growth hold the fault itself whatever else the machine is
+  doing (25 calls against 113 after ten minutes of the old re-read). A hover's `felt` lines are Björn's targets, 100, 100
+  and 200 ms, and 300 through a return: a quiet Mac measures 18, 21 and 23 ms at rest, 27 through a run's end and 170
+  through a return, and one at a load of 40 from other sessions 66, 24 and 33, 128 and 284. The `cost` lines hold the
+  main thread's share of a hover at rest.
 - **Read `afterSync` and `afterReturn`, not `hover`,** for a page that reads again too much: a hover at rest is two
   restyled elements whatever the page holds. A return's hover includes the return's own first frame, which
   `open-budget`'s `return` rounds hold.
