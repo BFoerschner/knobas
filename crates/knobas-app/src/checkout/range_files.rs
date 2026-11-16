@@ -934,7 +934,8 @@ pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
         .peekable();
     let mut raws: Vec<Raw> = Vec::new();
     // Each count with its file's path, in the order read.
-    let mut counted: Vec<(&str, (Option<u32>, Option<u32>))> = Vec::new();
+    type Counted<'a> = (&'a str, (Option<u32>, Option<u32>));
+    let mut counted: Vec<Counted> = Vec::new();
     while let Some(token) = tokens.next() {
         if token.is_empty() {
             continue;
