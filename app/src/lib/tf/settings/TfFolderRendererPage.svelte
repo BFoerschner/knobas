@@ -28,6 +28,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { backStep } from "../page-name.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
+  import { PressHold } from "../press-hold.svelte";
   import { insertAt } from "../openin/openin";
   import { lastTried, noteTried } from "../openin/app-page";
   import { CHECKOUT_BATCH, realTryReads, type TryReads, type TryRepo } from "../openin/try-reads";
@@ -194,9 +195,13 @@
     return folders.save(list);
   }
 
+  /** A *Try it* pressed twice runs once (the press rule): the press holds while it saves and a while after. */
+  const tryHold = new PressHold();
+
   async function tryIt() {
     const picked = repo;
-    if (!ready || picked === null) return;
+    if (!ready || picked === null || tryHold.held()) return;
+    tryHold.hold();
     busy = true;
     error = null;
     const own = tried?.id ?? at.renderer;
@@ -206,6 +211,8 @@
     } catch (cause) {
       error = ipcErrorMessage(cause);
       busy = false;
+      // A refused save isn't held, so the corrected command can go at once.
+      tryHold.release();
       return;
     }
     busy = false;

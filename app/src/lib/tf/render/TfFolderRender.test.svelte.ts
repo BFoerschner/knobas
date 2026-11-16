@@ -173,16 +173,27 @@ test("a failure says what the command said, and Run again runs it", async () => 
   expect(alert.textContent).toContain("Lister could not draw this folder.");
   expect(alert.textContent).toContain("The command exited with status 3.");
   expect(alert.querySelector("pre")!.textContent).toBe("no project file\n");
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run again")!.click();
+  const run = target.querySelector<HTMLButtonElement>(".tf-frender-run")!;
+  expect(run.textContent).toBe("Run again");
+  run.click();
   await settle();
   expect(f.asked.map((a) => a.ask)).toEqual(["open", "again"]);
+  // The same button, now Stop, keeps focus; a second press inside the hold stops nothing.
+  expect(target.querySelector(".tf-frender-run")).toBe(run);
+  expect(run.textContent).toBe("Stop");
+  run.click();
+  expect(f.stopped).toEqual([]);
   expect(target.querySelector(".tf-banner.tf-info")!.textContent).toContain("Copying 1 of 4 files from your clone…");
 });
 
 test("Stop stops the run; an event moves the state and an ending asks again", async () => {
   const f = fake([view({ running: { state: "running", elapsed_ms: 0 } }), view({ drawn: drawnAs({ kind: "text" }), current: true })]);
   await draw(f.ports);
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Stop")!.click();
+  const run = target.querySelector<HTMLButtonElement>(".tf-frender-run")!;
+  expect(run.textContent).toBe("Stop");
+  run.click();
+  // A double press is one press (the press rule).
+  run.click();
   expect(f.stopped).toEqual(["lister:flows/app"]);
 
   // Another folder's event is not this one's.

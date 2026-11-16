@@ -39,6 +39,10 @@ function listing(dir: string): TreeEntry[] {
 async function entityView(_at: string, section: string | null): Promise<SourceView> {
   const id = section ?? "";
   const one = (blocks: unknown[]) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks }], actions: [] }) as unknown as SourceView;
+  if (id === "commits") {
+    const rows = [{ entity_id: null, title: "Orders flow takes a refund step", meta: "", tone: null, chip: "c90d11a", url: null }];
+    return { sections: [{ id, title: "Commits", count: null, deferred: false, blocks: [{ type: "entities", title: null, rows }] }], actions: [] } as unknown as SourceView;
+  }
   if (id === "paths") return one([{ type: "tree", trail: [], entries: Object.keys(FILES).map((name) => ({ name, kind: "file", size: 1, section: `file:${name}` })), truncated: false, url: null }]);
   if (id === "files" || id.startsWith("files:")) {
     const dir = id === "files" ? "" : id.slice("files:".length);
@@ -129,6 +133,8 @@ test("a folder a renderer takes gets its link on its row: by name at once, by a 
   expect(docs?.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/render/docs/docs");
   expect(docs?.getAttribute("title")).toBe("Render with Docs site");
   expect(rowLink("flows")).toBeNull();
+  // The landing keeps its last commit over the README.
+  expect(target.querySelector(".tf-lastc .tf-lastc-msg")?.textContent).toBe("Orders flow takes a refund step");
   // Open flows: its folder orders holds the project file.
   target.querySelector<HTMLButtonElement>('.tf-fdir[data-path="flows"]')!.click();
   await settle();

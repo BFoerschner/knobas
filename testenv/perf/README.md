@@ -107,6 +107,7 @@ an SSH tunnel.
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
 | `soak.mjs`, `soak.sh`, `soak-repo.sh` | a repository's Code page browsed for a long while, then every other page, with what grows counted; what `just soak` runs and the repository it browses (*The soak*, below) |
 | `git-starts.mjs`, `git-shim/git`, `git-starts.sh` | how many `git` processes a press at a cloned repository starts, the counting `git` the backend runs under, and what `just git-starts` runs (*Starts of git*, below) |
+| `folder-render.mjs` | folder renderers' pages and presses (ADR-0044): a repository's landing with its folders' glyphs, a folder's render opened from its row and on return with its drawing kept, *Run again*, Settings › Renderers and a folder renderer's page, over the built app under `?fake-ipc&fake-folder-render`, five times a case at each throttle, against the page and press lines (`--machine pc` for the PC's whole lines) |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
 

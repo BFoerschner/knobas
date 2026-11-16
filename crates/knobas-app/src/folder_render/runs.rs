@@ -1240,10 +1240,19 @@ mod tests {
         let second = settled(&runs, &r, &v2).await;
         assert!(second.current);
         assert_eq!(text_of(&runs, &second), "two");
-        // A look at the earlier state is still kept.
+        // A look at the earlier state is still kept, and is now the last one
+        // looked at: a third state shows it while it waits.
         assert!(
             runs.view(&slot(), &r, Ok(resolved(&r, &v1)), Ask::Look)
                 .current
+        );
+        let v3 = [("a.txt", "three")];
+        let third = runs.view(&slot(), &r, Ok(resolved(&r, &v3)), Ask::Look);
+        assert!(!third.current);
+        assert_eq!(
+            third.drawn.map(|d| d.token),
+            first.drawn.map(|d| d.token),
+            "the drawing last looked at"
         );
     }
 

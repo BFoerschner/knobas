@@ -65,6 +65,7 @@
   import { renderPort } from "../../render/port";
   import { ago } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
+  import { PressHold } from "../press-hold.svelte";
 
   let {
     entityId,
@@ -121,6 +122,15 @@
   /** Moves every second while a tool runs, so its time counts up. */
   let tick = $state(0);
   let askedAt = 0;
+
+  /** *Run again* and *Stop* are one button (focus stays on it), held after a press so a double press acts once. */
+  const hold = new PressHold();
+  function press() {
+    if (hold.held()) return;
+    hold.hold();
+    if (view?.running) void ports.stop(entityId, renderer.id, folder);
+    else answer("again");
+  }
 
   const ask = (kind: FolderAsk["ask"]) =>
     ports.render({ entityId, renderer: renderer.id, folder, commit, paths, ask: kind });
@@ -286,11 +296,7 @@
           </select>
         </label>
       {/if}
-      {#if running !== null}
-        <button type="button" class="tf-btn tf-sm" onclick={() => void ports.stop(entityId, renderer.id, folder)}>Stop</button>
-      {:else}
-        <button type="button" class="tf-btn tf-sm" disabled={view === null} onclick={() => answer("again")}>Run again</button>
-      {/if}
+      <button type="button" class="tf-btn tf-sm tf-frender-run" disabled={view === null && refused === null} onclick={press}>{running !== null ? "Stop" : "Run again"}</button>
     </span>
   </header>
   {#if refused !== null}
@@ -354,7 +360,7 @@
     {:else if running === null && failed === null}
       <div class="tf-empty">
         <p>{stopped ? `${renderer.name} was stopped.` : `${renderer.name} has not drawn this folder yet.`}</p>
-        <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => answer("again")}>Run {renderer.name}</button>
+        <button type="button" class="tf-btn tf-sm tf-primary" onclick={press}>Run {renderer.name}</button>
       </div>
     {/if}
   {/if}
