@@ -405,6 +405,26 @@ async fn find_off_runtime(search: &OsStr, name: &str) -> Result<Option<PathBuf>,
         })
 }
 
+/// Where the system-wide git configuration of the `git` on `search` is,
+/// told from where that git is and without running it (the git-starts pass,
+/// 2026-11-16): `etc/gitconfig` beside the folder git sits in, or up to two
+/// folders above it. Git for Windows keeps it at `<install>\etc\gitconfig`
+/// with `git.exe` in `<install>\cmd` and `<install>\mingw64\bin`; a git
+/// built under a prefix (Homebrew's `/opt/homebrew/bin/git`) reads
+/// `<prefix>/etc/gitconfig`. `None` where no such file is, which on Unix
+/// leaves the default `/etc/gitconfig`.
+///
+/// What knobas's own reader ([`super::reader`]) reads `diff.*` and
+/// `core.quotePath` from, beside the user's and the repository's files.
+pub(super) fn system_config_beside(search: &OsStr) -> Option<PathBuf> {
+    let git = find_on(search, "git")?;
+    git.parent()?
+        .ancestors()
+        .take(3)
+        .map(|above| above.join("etc").join("gitconfig"))
+        .find(|candidate| candidate.is_file())
+}
+
 /// The first executable called `name` in a `PATH`-style list.
 fn find_on(search: &OsStr, name: &str) -> Option<PathBuf> {
     let file: OsString = if cfg!(windows) {
@@ -466,6 +486,36 @@ mod tests {
     const IMPATIENT: Duration = Duration::from_millis(100);
 
     /// A header git may add later, and an ignored entry, change nothing.
+    /// The system configuration is found beside the git on the path: in
+    /// its prefix (Homebrew, a git built under `/usr/local`) or two folders
+    /// up (Git for Windows's `mingw64/bin`), and nowhere for a git with none.
+    #[test]
+    fn the_system_configuration_is_found_beside_git() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = if cfg!(windows) { "git.exe" } else { "git" };
+        let place = |bin: &str| {
+            let dir = root.path().join(bin);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(exe), "").unwrap();
+            dir
+        };
+        let (prefixed, nested, bare) = (place("a/bin"), place("b/mingw64/bin"), place("c/bin"));
+        for etc in ["a/etc", "b/etc"] {
+            std::fs::create_dir_all(root.path().join(etc)).unwrap();
+            std::fs::write(root.path().join(etc).join("gitconfig"), "").unwrap();
+        }
+        assert_eq!(
+            system_config_beside(prefixed.as_os_str()),
+            Some(root.path().join("a/etc/gitconfig"))
+        );
+        assert_eq!(
+            system_config_beside(nested.as_os_str()),
+            Some(root.path().join("b/etc/gitconfig"))
+        );
+        assert_eq!(system_config_beside(bare.as_os_str()), None);
+        assert_eq!(system_config_beside(OsStr::new("")), None);
+    }
+
     #[test]
     fn what_the_reader_does_not_know_is_skipped() {
         let state = parse("# branch.oid abc\n# branch.head main\n# stash 3\n! ignored.log\n");

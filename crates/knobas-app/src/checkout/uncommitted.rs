@@ -7,6 +7,12 @@
 //!
 //! # What runs (ADR-0026, on ADR-0021's terms)
 //!
+//! git itself, and not knobas's own reader ([`super::reader`]): what is
+//! changed in a working tree depends on the person's filters, line-ending
+//! settings, sparse rules and submodules, which only their git applies. The
+//! three commands run at once, and an answer is kept until something in the
+//! checkout changes ([`read_known`]), so the tab opened again starts none.
+//!
 //! Three read-only git commands at the checkout path, under
 //! [`working_tree`](super::working_tree)'s environment and guards:
 //!
@@ -141,6 +147,57 @@ pub async fn read(path: &Path) -> DiffRead {
     read_with(&search, path).await
 }
 
+/// [`read`], unless nothing in the checkout changed since the last answer
+/// there: then that answer, and no git (the git-starts pass, 2026-11-16, as
+/// [`read_known`](super::working_tree::read_known) keeps the working tree's
+/// state). Each diff git gave is kept with the checkout's
+/// [stamp](super::stamp), taken before git ran, so a change made while it ran
+/// is read next time. Only a [`DiffRead::Read`] is kept, and of the last
+/// [`KNOWN`] checkouts: a diff can be megabytes.
+pub async fn read_known(path: &Path) -> DiffRead {
+    read_known_with(path, read).await
+}
+
+/// [`read_known`], with the read it makes when the stamp moved passed in, so
+/// a test can count them.
+async fn read_known_with(path: &Path, read: impl AsyncFnOnce(&Path) -> DiffRead) -> DiffRead {
+    let at = path.to_path_buf();
+    let stamp = tokio::task::spawn_blocking(move || super::stamp::of(&at))
+        .await
+        .ok()
+        .flatten();
+    if let Some(stamp) = stamp
+        && let Some(diff) = known()
+            .iter()
+            .find(|(kept, at, _)| kept == path && *at == stamp)
+            .map(|(_, _, diff)| diff.clone())
+    {
+        return diff;
+    }
+    let diff = read(path).await;
+    let mut known = known();
+    known.retain(|(kept, _, _)| kept != path);
+    if let (Some(stamp), DiffRead::Read(_)) = (stamp, &diff) {
+        known.push_front((path.to_path_buf(), stamp, diff.clone()));
+        known.truncate(KNOWN);
+    }
+    diff
+}
+
+/// How many checkouts' uncommitted diffs [`read_known`] keeps.
+const KNOWN: usize = 4;
+
+type Known = std::collections::VecDeque<(std::path::PathBuf, u64, DiffRead)>;
+
+/// [`read_known`]'s answers, the newest first.
+fn known() -> std::sync::MutexGuard<'static, Known> {
+    static KNOWN_ONES: std::sync::OnceLock<std::sync::Mutex<Known>> = std::sync::OnceLock::new();
+    KNOWN_ONES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// [`read`], with the `PATH` to look for `git` on passed in, so "git is not
 /// installed" is reachable from a test on a machine that has git.
 pub async fn read_with(search: &OsStr, path: &Path) -> DiffRead {
@@ -163,10 +220,16 @@ async fn read_guarded(search: &OsStr, path: &Path, timeout: Duration, caps: Read
     if !is_dir_off_runtime(path).await {
         return DiffRead::NotARepo;
     }
+    // The three at once: in a row each waited for the start of the one
+    // before, and a start is the dear part on Windows (the git-starts pass,
+    // 2026-11-16). All three only read.
     let all = async {
-        let unstaged = half(&git, path, false, caps).await?;
-        let staged = half(&git, path, true, caps).await?;
-        let (untracked, untracked_truncated) = untracked(&git, path, caps.untracked).await?;
+        let (unstaged, staged, untracked) = tokio::join!(
+            half(&git, path, false, caps),
+            half(&git, path, true, caps),
+            untracked(&git, path, caps.untracked)
+        );
+        let (unstaged, staged, (untracked, untracked_truncated)) = (unstaged?, staged?, untracked?);
         Ok(UncommittedDiff {
             unstaged,
             staged,
