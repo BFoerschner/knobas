@@ -78,7 +78,7 @@ function draw(
     pipeline?: string | null;
     pulls?: { branch: string; entity_id: string; cell: string | null }[];
     branches?: BranchOption[];
-    runs?: () => Promise<RunRow[]>;
+    runs?: (pipelineId: string) => Promise<RunRow[]>;
   } = {},
 ) {
   page = mount(TfRepoBuilds, {
@@ -303,4 +303,23 @@ test("a run with no number yet still has its link, called queued", async () => {
   const link = target.querySelector<HTMLAnchorElement>(".tf-rbruns tbody tr.tf-row a")!;
   expect(link.textContent).toBe("queued");
   expect(link.getAttribute("href")).toBe("#/build/tc%3AbuildType%3APayout_IntegrationTests/tc%3Abuild%3A1190");
+});
+
+test("the tab reads its pipelines' runs ahead, and a run the pointer reaches at once, so the run's page opens from memory", async () => {
+  const asked: string[] = [];
+  const rows = [...ROWS, pipeline("Payout_Smoke", [run("12", "feat/PAY-231-retry", "ok", "2026-08-22T08:00:00Z")])];
+  draw({ rows, runs: (id) => (asked.push(id), Promise.resolve([])) });
+  await settle();
+  // Nothing before the window is idle: the tab's own draw comes first.
+  expect(asked).toEqual([]);
+  // Hovered, the run's pipeline is read at once.
+  const smoke = [...target.querySelectorAll<HTMLAnchorElement>(".tf-rbt a.tf-rbt-cell")].find((a) => a.getAttribute("href")!.includes("Payout_Smoke"))!;
+  smoke.dispatchEvent(new PointerEvent("pointerenter"));
+  expect(asked).toEqual(["tc:buildType:Payout_Smoke"]);
+  // Then the table's pipelines, in its order, one in each idle moment, each once.
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  expect(asked).toEqual(["tc:buildType:Payout_Smoke", "tc:buildType:Payout_IntegrationTests", "tc:buildType:Payout_Build"]);
+  smoke.dispatchEvent(new PointerEvent("pointerenter"));
+  smoke.focus();
+  expect(asked.length).toBe(3);
 });

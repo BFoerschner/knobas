@@ -188,6 +188,45 @@
   }
 
   /**
+   * The run page reads its pipeline's runs before it draws (`pipeline_runs`), and from here nothing has read them yet: the
+   * Builds page holds them, this tab only each pipeline's newest runs. So the tab reads them ahead, through the answer
+   * cache, so a press on a run opens its page from memory (2026-11-16): the table's first pipelines, one in each of the
+   * window's idle moments, and any run the pointer or focus reaches at once. A new answer or a *Refresh* reads them again.
+   */
+  const AHEAD = 12;
+  let readAhead = new Set<string>();
+  function ahead(pipelineId: string) {
+    if (readAhead.has(pipelineId)) return;
+    const asked = readAhead;
+    asked.add(pipelineId);
+    void untrack(() => runs(pipelineId)).catch(() => asked.delete(pipelineId));
+  }
+  $effect(() => {
+    void builds;
+    void refreshed;
+    readAhead = new Set();
+  });
+  $effect(() => {
+    const ids = (page?.ran ?? []).slice(0, AHEAD).map((x) => x.row.entity_id);
+    void refreshed;
+    if (ids.length === 0) return;
+    let left = true;
+    const idle = (then: () => void): void => {
+      if (typeof requestIdleCallback === "function") requestIdleCallback(then, { timeout: 2000 });
+      else setTimeout(then, 200);
+    };
+    const next = (at: number) => {
+      if (!left || at >= ids.length) return;
+      ahead(ids[at]!);
+      idle(() => next(at + 1));
+    };
+    idle(() => next(0));
+    return () => {
+      left = false;
+    };
+  });
+
+  /**
    * A press anywhere on a run's row is a press on its link, the run's number (TfPipeline's run rows, R-9.6): the
    * same event, so a modified press or another button does what it does on the link. A link or button in the row does
    * its own, and a selection of the row's words is not a press.
@@ -261,6 +300,8 @@
       class:tf-err={tone === "err"}
       class:tf-info={tone === "run"}
       href={runHash(row.entity_id, run.entity_id)}
+      onpointerenter={() => ahead(row.entity_id)}
+      onfocus={() => ahead(row.entity_id)}
       title="Open {row.name} {run.number !== null ? `#${run.number}` : "run"} on {name}: {runGlyph(run).word}, {when(run)}"
       ><TfRunGlyph {...runGlyph(run)} /><b class="tf-rbt-num">{run.number !== null ? `#${run.number}` : "queued"}</b><span class="tf-rbt-at">{when(run)}</span></a
     >
