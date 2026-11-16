@@ -104,6 +104,7 @@
   import TfWrittenAt from "./TfWrittenAt.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { SvelteMap } from "svelte/reactivity";
+  import { menuThing } from "../context/thing";
 
   let {
     files,
@@ -1170,6 +1171,7 @@
               title={keyOf(file)}
               onclick={() => pick(file)}
               {@attach railWin.row(treeKey(row))}
+              {@attach menuThing(() => (openAt !== null && file.change !== "deleted" ? { kind: "file", repoId: openAt.entityId, path: file.path } : null))}
               ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
                 >{#if file.change !== "binary" && counted}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button

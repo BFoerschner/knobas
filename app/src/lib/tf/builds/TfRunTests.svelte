@@ -24,6 +24,7 @@
   import { stateWord } from "../state-word";
   import { jumpAcross } from "../opener";
   import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
+  import { menuThing } from "../context/thing";
 
   let {
     runId,
@@ -153,7 +154,7 @@
       {#if !entry.detail}
         {@const open = isOpen(test)}
         {@const time = testTime(test.duration_ms)}
-        <div class="tf-trow" {@attach win.row(entryKey(entry))}>
+        <div class="tf-trow" {@attach win.row(entryKey(entry))} {@attach menuThing(() => ({ kind: "test", name: test.name }))}>
           <span class={`tf-dot ${test.status === "failed" ? "tf-err" : test.status === "passed" ? "tf-ok" : ""}`}></span>
           <span class="tf-nm"
             >{#if test.status === "failed"}<button type="button" aria-label={test.name} aria-expanded={open} onclick={() => (opened[test.name] = !open)}

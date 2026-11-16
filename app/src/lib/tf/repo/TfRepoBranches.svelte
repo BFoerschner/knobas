@@ -82,6 +82,7 @@
   import type { RepoBuilds } from "../../ipc/entity";
   import { waitPhase } from "../waiting";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { menuThing } from "../context/thing";
 
   let {
     ports,
@@ -370,7 +371,7 @@
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
         {@const built = buildsByBranch?.get(row.name)}
-        <tr data-place {@attach win.row(row.name)}>
+        <tr data-place {@attach win.row(row.name)} {@attach menuThing(() => ({ kind: "branch-name", repoId, name: row.name }))}>
           <td title={row.name}
             ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >

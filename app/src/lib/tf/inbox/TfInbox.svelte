@@ -81,6 +81,7 @@
   import { ticketHash } from "../route";
   import { reenterWords, secretNoun } from "../settings/settings";
   import TfKey from "../TfKey.svelte";
+  import { menuThing } from "../context/thing";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import { backLabel, detailOf, expiryOf, failed, fixOf, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
 
@@ -631,7 +632,16 @@
         <div class="tf-ib tf-ib-held" data-row={item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(item.key)} {@attach heldHeight(hold.height)} {@attach heldActs(hold.acts)}>{@render heldWords(item, null)}</div>
       {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-      <div class="tf-ib" data-row={item.key} onclick={followRow} {@attach win.row(item.key)}>
+      <div
+        class="tf-ib"
+        data-row={item.key}
+        onclick={followRow}
+        {@attach win.row(item.key)}
+        {@attach menuThing(
+          () => ({ kind: "inbox", key: item.key, title: item.title, open: opener(item)?.href ?? null, ops: rowActions(entry), entityId: item.entity_id, sourceId: item.source_id }),
+          { claims: true },
+        )}
+      >
         <time datetime={item.occurred_at}>{when(item.occurred_at)}</time>
         {@render said(item)}
         <!-- Before the actions: Tab goes down the row's words, then right to what it can do (F-143). -->

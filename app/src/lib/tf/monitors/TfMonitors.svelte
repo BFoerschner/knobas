@@ -113,7 +113,7 @@
   import { badges } from "../badges.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
-  import { MONITOR_AT } from "../route";
+  import { MONITOR_AT, monitorHash } from "../route";
   import TfNothingHere from "../TfNothingHere.svelte";
   import type { RoleFrameProps } from "../page-entry";
 
@@ -169,6 +169,7 @@
   } from "./monitors";
   import TfCreateMonitor from "./TfCreateMonitor.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import { menuThing } from "../context/thing";
   import { createDetailRefresh, type DetailRefresh, type RefreshSubject } from "../refresh.svelte";
 
   let {
@@ -916,7 +917,13 @@
               {@const down = tone === "err" && !row.tombstoned}
               {@const toggled = echoOn(row.entity_id, TOGGLE)}
               {@const refresher = refreshers.get(row.entity_id)}
-              <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
+              <tr
+                class:tf-mon-hid={row.hidden}
+                class:tf-mon-at={row.entity_id === markedId}
+                aria-current={row.entity_id === markedId ? "true" : undefined}
+                {@attach win.row(entryKey(entry))}
+                {@attach menuThing(() => ({ kind: "monitor", id: row.entity_id, hash: monitorHash(row.entity_id), alerting: down && !(row.entity_id in acked), ack: () => void ack(row) }))}
+              >
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
                 <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
                 <!-- Before the bars and figures, not after them: the row's actions stand in the last column's place on hover, and this column's links have to stay in reach. -->
