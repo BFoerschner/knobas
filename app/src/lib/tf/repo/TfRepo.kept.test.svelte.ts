@@ -572,11 +572,36 @@ test("with no clone, New pull request's compare is asked once the landing drew, 
   await new Promise((resolve) => setTimeout(resolve, 50));
   await settle();
   expect(asked.map((a) => [a.base, a.head])).toEqual([["main", "feature/PAY-231-sepa-retry"]]);
-  expect(asked[0]!.read).toMatch(/^compare-early-/);
+  expect(asked[0]!.read).toMatch(/^ahead:compare-early-/);
 
   await go(COMPARE("feature/PAY-231-sepa-retry"));
   expect(asked, "Compare took the answer").toHaveLength(1);
   expect(text(target.querySelector(".tf-cdiff"))).toContain("feature/PAY-231-sepa-retry.txt");
+});
+
+// The landing-rounds pass (2026-11-16): the early compare went to the forge beside the landing's README, in its first round.
+test("the landing's early compare waits for the page to be idle after the landing drew, and is asked ahead", async () => {
+  forgetEarlyCompares();
+  const idle: (() => void)[] = [];
+  const real = globalThis.requestIdleCallback;
+  globalThis.requestIdleCallback = ((callback: IdleRequestCallback) => {
+    idle.push(() => callback({ didTimeout: false, timeRemaining: () => 50 }));
+    return idle.length;
+  }) as typeof requestIdleCallback;
+  try {
+    const { asked, rangeFiles } = listing();
+    await drawLive([REPO], ports({ rangeFiles }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settle();
+    expect(asked, "nothing asked while the landing's round may be out").toEqual([]);
+    expect(idle.length).toBeGreaterThan(0);
+    for (const fire of idle.splice(0)) fire();
+    await settle();
+    expect(asked.map((a) => [a.base, a.head])).toEqual([["main", "feature/PAY-231-sepa-retry"]]);
+    expect(asked[0]!.read).toMatch(/^ahead:/);
+  } finally {
+    globalThis.requestIdleCallback = real;
+  }
 });
 
 test("a press quicker than the pointer's rest opens Compare, which reads the list once: the rest asks nothing after it", async () => {

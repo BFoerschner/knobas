@@ -23,13 +23,18 @@ let reads = 0;
 
 const keyOf = (repoId: string, base: string, head: string) => `${repoId}\u0000${base}\u0000${head}`;
 
-/** Ask `base`...`head`'s list now, for Compare to take; once a session per compare. */
-export function askCompareEarly(list: ListRange | undefined, repoId: string, base: string, head: string): void {
+/**
+ * Ask `base`...`head`'s list now, for Compare to take; once a session per compare. `ahead` is a guess nobody reached
+ * for (the landing's *New pull request*): its read is named `ahead:…`, which the backend sends in the sync's lane, so it
+ * goes to the forge only once a person's reads there are answered (the landing-rounds pass, 2026-11-16: it went out
+ * beside the landing's README). A pointer resting on a link is a reach for the press, and goes as a person's read.
+ */
+export function askCompareEarly(list: ListRange | undefined, repoId: string, base: string, head: string, ahead = false): void {
   if (list === undefined || base === "" || head === "" || base === head) return;
   const key = keyOf(repoId, base, head);
   if (askedOnce.has(key)) return;
   askedOnce.add(key);
-  const answer = list(repoId, base, head, false, `compare-early-${++reads}`);
+  const answer = list(repoId, base, head, false, `${ahead ? "ahead:" : ""}compare-early-${++reads}`);
   // A failed early read is not taken: the page asks for itself.
   answer.catch(() => {
     if (early.get(key)?.answer === answer) early.delete(key);
@@ -53,6 +58,14 @@ export function takeCompareEarly(repoId: string, base: string, head: string): Pr
   if (asked === undefined) return null;
   early.delete(key);
   return Date.now() - asked.at > FRESH_MS ? null : asked.answer;
+}
+
+/** Once the page is idle: what the landing's early compare waits for after the landing drew, so it never goes out in its round. */
+export function whenIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 2000 });
+    else setTimeout(resolve, 50);
+  });
 }
 
 /** Forget every early read, for a test. */

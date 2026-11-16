@@ -297,7 +297,7 @@
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { landInPlace } from "../land-in-place";
   import { HELD_AFTER_MS } from "./view-fresh.svelte";
-  import { askCompareEarly } from "./compare-early";
+  import { askCompareEarly, whenIdle } from "./compare-early";
   import type { SourceSyncStatus } from "../../ipc/sources";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
@@ -1082,9 +1082,11 @@
   // ---- A compare asked early (the forge-waits pass, 2026-11-13, `compare-early.ts`) ----
 
   /**
-   * *New pull request*'s compare, asked once the landing has drawn (or a moment after the page opened on another tab),
-   * where the repository has no clone: Gitea's compare took 0.65 to 2.7 s, which a clone answers in a tenth of that. Once
-   * a session; Compare takes the answer.
+   * *New pull request*'s compare, asked once the landing has drawn (or a moment after the page opened on another tab) and
+   * the page is idle, where the repository has no clone: Gitea's compare took 0.65 to 2.7 s, which a clone answers in a
+   * tenth of that. Once a session; Compare takes the answer. Asked ahead (`askCompareEarly`'s `ahead`): the backend sends
+   * it behind the landing's own reads of the forge, which it went out beside before (the landing-rounds pass,
+   * 2026-11-16).
    */
   const COMPARE_EARLY_AFTER_MS = 1500;
   $effect(() => {
@@ -1095,9 +1097,11 @@
     if (!ready || !visible || id === null || head === null || base === null || head === base || !noClone || oneBranch || tab === "compare") return;
     let live = true;
     const drew = treeDrew;
-    void Promise.race([drew.promise, new Promise((resolve) => setTimeout(resolve, COMPARE_EARLY_AFTER_MS))]).then(() => {
-      if (live) askCompareEarly(untrack(() => ports.rangeFiles), id, base, head);
-    });
+    void Promise.race([drew.promise, new Promise((resolve) => setTimeout(resolve, COMPARE_EARLY_AFTER_MS))])
+      .then(() => (live ? whenIdle() : undefined))
+      .then(() => {
+        if (live) askCompareEarly(untrack(() => ports.rangeFiles), id, base, head, true);
+      });
     return () => {
       live = false;
     };

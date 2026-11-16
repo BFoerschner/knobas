@@ -11,12 +11,23 @@
 //! superseded stops costing the machine and the forge.
 //!
 //! A read with no name runs in place, as every command did before.
+//!
+//! **A read asked ahead** (`ahead:…`, the landing-rounds pass, 2026-11-16) is
+//! a guess at what a person may open next that nobody reached for: the
+//! landing's *New pull request* compare. It runs in the background lane
+//! (`knobas_http::Lane::Background`), so its requests reach the forge only
+//! once a person's there are answered (and the lane's linger past them): it
+//! went out beside the landing's README read before. A pointer resting on a
+//! link is a reach for the press and is not named so.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 
 use crate::IpcError;
+
+/// The prefix of a read asked ahead, which runs in the background lane.
+pub const AHEAD: &str = "ahead:";
 
 fn running() -> &'static Mutex<HashMap<String, tokio::task::AbortHandle>> {
     static RUNNING: OnceLock<Mutex<HashMap<String, tokio::task::AbortHandle>>> = OnceLock::new();
@@ -38,7 +49,11 @@ where
     let Some(name) = read else {
         return work.await;
     };
-    let task = tokio::spawn(work);
+    let task = if name.starts_with(AHEAD) {
+        tokio::spawn(knobas_http::on_lane(knobas_http::Lane::Background, work))
+    } else {
+        tokio::spawn(work)
+    };
     running()
         .lock()
         .expect("the running reads")
@@ -69,6 +84,29 @@ pub fn cancel(read: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A read asked ahead runs in the background lane, behind a person's
+    /// requests to its server; any other read, named or not, as a person's.
+    #[tokio::test]
+    async fn a_read_asked_ahead_runs_in_the_background_lane() {
+        let lane = || async { Ok::<_, IpcError>(knobas_http::current_lane()) };
+        assert_eq!(
+            run(Some("ahead:compare-early-1".to_owned()), lane())
+                .await
+                .unwrap(),
+            knobas_http::Lane::Background
+        );
+        assert_eq!(
+            run(Some("compare-early-2".to_owned()), lane())
+                .await
+                .unwrap(),
+            knobas_http::Lane::Interactive
+        );
+        assert_eq!(
+            run(None, lane()).await.unwrap(),
+            knobas_http::Lane::Interactive
+        );
+    }
 
     #[tokio::test]
     async fn a_called_off_read_stops_and_says_so() {

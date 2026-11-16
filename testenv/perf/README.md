@@ -207,7 +207,9 @@ node testenv/perf/page-requests.mjs --app "http://127.0.0.1:5980/?fake-ipc&fake-
   --control 3988 --seconds 120 --every 40 --news alternate [--hide 10]
 ```
 
-`page-requests.mjs` opens a page, lets it settle, then counts what the stand-in answers while the page is told a run of
+`landing-requests.mjs` prints what a repository's landing asks the stand-in on its first open, in order (`--log`'s
+lines from `--log-file`): the landing-rounds pass (2026-11-16) found the default branch's tip read three times and the
+early compare in the landing's own round with it. `page-requests.mjs` opens a page, lets it settle, then counts what the stand-in answers while the page is told a run of
 its source ended every `--every` seconds (`--news` says which ended with something), hidden from `--hide` on. Build the
 before and after backends into **separate target directories**: cargo's dep-info names sources relative to the
 workspace, so a second checkout built into the first's target directory takes the first's crates as fresh.
