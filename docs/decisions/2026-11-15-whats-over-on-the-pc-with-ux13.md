@@ -138,4 +138,14 @@ the early compare for *New pull request* starts once the tree draws, beside the 
 
 ## Gates
 
-On this pass's head, in a clean clone: see the PR comment for this pass.
+On this pass's head (`ea5c9855`, rebased on the branch), in a clean clone, on AC power, each `--real` gate on a fresh
+copy of the saved home with its secrets moved out, through a release build of this head's windowless backend with debug
+assertions: `just check-front` ok (vitest 337 files, 5,164 passed, 1 skipped); the full vitest the same;
+`svelte-check --threshold error` 1,472 files, 0 errors, 0 warnings; `testenv/desktop-witness-test.sh` 307 checks; the
+press trips with `--strict` 272 of 272, the 16 `rows-still` among them; `just frame-budget` on the fixture 45 within, 0
+over, and `--real` 65 within, 0 over; `just open-budget --real` every open within its line, 225 opens, no row moved, the
+slowest at 6x 175 ms drawn (a repository's first open); `just keys-budget --real` 18 of 18 within, no row moved, the
+slowest at 6x 80 ms (a Tickets letter); `pixel-same.py` over ten screens shot on the base and this head (Settings ›
+Performance named, its words changed): five the same, three by 25 to 72 pixels, and the Inbox by 649, its clock (two
+shots of this head minutes apart differ by the same 649, the base and this head shot together by 40); `just
+check-scripts` ok. No Rust changed, so no cargo gate ran.
