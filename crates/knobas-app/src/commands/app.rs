@@ -509,6 +509,18 @@ pub async fn set_smooth_scrolling<R: tauri::Runtime>(
     Ok(Some(stored))
 }
 
+/// The font families installed on this machine, monospace ones first, for
+/// Settings › Appearance › *Code font* (`crate::code_font`). Read once a run,
+/// needing no database.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn installed_fonts() -> Result<Vec<crate::code_font::InstalledFont>, IpcError> {
+    crate::code_font::installed().await
+}
+
 /// The command renderers saved in Settings › Renderers (#2262), in order.
 ///
 /// # Errors
@@ -738,7 +750,7 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 16);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 17);
     }
 
     /// The mirror sends each argument by its Rust name (#2262).

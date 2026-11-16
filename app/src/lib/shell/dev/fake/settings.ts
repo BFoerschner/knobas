@@ -200,6 +200,13 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return keptOpen;
     },
     smooth_scrolling: () => smooth,
+    // A machine's families: two monospace ones first, as the backend sorts them.
+    installed_fonts: () => [
+      { family: "Fira Code", monospace: true },
+      { family: "Menlo", monospace: true },
+      { family: "Arial", monospace: false },
+      { family: "Georgia", monospace: false },
+    ],
     set_smooth_scrolling: (args) => {
       smooth = args["on"] === true;
       return smooth;

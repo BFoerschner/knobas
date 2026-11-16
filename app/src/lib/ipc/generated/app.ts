@@ -81,6 +81,21 @@ detail: string | null, } | { "state": "migrating" } | { "state": "ready" } | { "
 message: string, };
 
 /**
+ * One installed font family.
+ */
+export type InstalledFont = { 
+/**
+ * The family name, as `font-family` takes it.
+ */
+family: string, 
+/**
+ * A face of the family says it is fixed pitch (its `post` table's
+ * `isFixedPitch`), or draws `i`, `M`, `0`, `.` and a space at one
+ * advance: the picker lists these first.
+ */
+monospace: boolean, };
+
+/**
  * One named pipeline: steps a default per file pattern names by id.
  */
 export type NamedPipeline = { 

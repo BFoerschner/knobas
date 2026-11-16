@@ -41,6 +41,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::app::AppStatus::export_all(cfg)?;
     crate::commands::app::DbState::export_all(cfg)?;
     crate::renderers::UserRenderer::export_all(cfg)?;
+    crate::code_font::InstalledFont::export_all(cfg)?;
     crate::renderers::UserRendererDraft::export_all(cfg)?;
     crate::renderers::RenderContent::export_all(cfg)?;
     crate::renderers::RenderRun::export_all(cfg)?;

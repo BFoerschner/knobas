@@ -11,6 +11,7 @@ import type {
   AppStatus,
   CommandStep,
   CommandStepDraft,
+  InstalledFont,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,
@@ -26,6 +27,7 @@ export type {
   CommandStep,
   CommandStepDraft,
   DbState,
+  InstalledFont,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,
@@ -118,6 +120,14 @@ export function smoothScrolling(): Promise<boolean | null> {
 /** Store *Smooth scrolling on 120 Hz displays*, applied to the window at once; answers what is now stored. */
 export function setSmoothScrolling(on: boolean): Promise<boolean | null> {
   return invoke<boolean | null>("set_smooth_scrolling", { on });
+}
+
+/**
+ * The font families installed on this machine, monospace ones first, for
+ * Settings › Appearance › *Code font*. Read once a run; needs no database.
+ */
+export function installedFonts(): Promise<InstalledFont[]> {
+  return invoke<InstalledFont[]>("installed_fonts");
 }
 
 /** *Run pipelines on diffs* (#2270): on until set in Settings › Renderers. */

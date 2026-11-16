@@ -33,6 +33,7 @@ pub mod backup;
 pub mod bundle;
 pub mod capture;
 pub mod checkout;
+pub mod code_font;
 pub mod commands;
 pub mod conversation;
 pub mod docs;
@@ -815,6 +816,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // *By repository* on the Builds list: the repositories of the commits
         // its runs built, appended at the foot (§10.8).
         commands::entity::commit_repositories,
+        // Settings › Appearance › *Code font* (PR #2479, 2026-11-16): the
+        // installed font families, appended at the foot (§10.8).
+        commands::app::installed_fonts,
     ]
 }
 
