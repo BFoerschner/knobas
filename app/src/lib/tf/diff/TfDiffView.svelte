@@ -633,24 +633,30 @@
         wait = () => clearTimeout(id);
       }
     };
+    // The order is made once, out from the reader's file (below it first, then above), and walked with a cursor: each
+    // file is looked at once, not every file on every turn (a turn that scanned 4,200 read files was 50 ms at 6x).
+    const here = untrack(() => Math.max(0, current === null ? 0 : all.findIndex((file) => keyOf(file) === current)));
+    const order: number[] = [here];
+    for (let d = 1; here + d < all.length || here - d >= 0; d++) {
+      if (here + d < all.length) order.push(here + d);
+      if (here - d >= 0) order.push(here - d);
+    }
+    let cursor = 0;
     const next = () => {
       wait = null;
       if (!live || budget <= 0) return;
-      const keys = all.map(keyOf);
-      const here = Math.max(0, current === null ? 0 : keys.indexOf(current));
       const batch: DrawnFile[] = [];
-      // Out from the reader's file: below it first, then above.
-      for (let d = 0; batch.length < AHEAD_AT_ONCE && budget > 0 && (here + d < all.length || here - d > 0); d++) {
-        for (const i of d === 0 ? [here] : [here + d, here - d]) {
-          const file = all[i];
-          if (file === undefined || batch.length >= AHEAD_AT_ONCE || budget <= 0) continue;
-          const key = keyOf(file);
-          if (!waits(file) || filling.has(key) || port.cached!(file, 0) !== undefined) continue;
-          batch.push(file);
-          budget -= Math.min(file.additions + file.deletions, FILL_PAGE);
-        }
+      // At most a thousand files looked at a turn, so a list read already is walked in short turns.
+      for (let seen = 0; cursor < order.length && batch.length < AHEAD_AT_ONCE && budget > 0 && seen < 1000; seen++) {
+        const file = all[order[cursor++]!]!;
+        if (!waits(file) || filling.has(keyOf(file)) || port.cached!(file, 0) !== undefined) continue;
+        batch.push(file);
+        budget -= Math.min(file.additions + file.deletions, FILL_PAGE);
       }
-      if (batch.length === 0) return;
+      if (batch.length === 0) {
+        if (cursor < order.length) later(next);
+        return;
+      }
       const name = readName();
       reading = name;
       void port.pages!(batch, name).then(

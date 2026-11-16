@@ -87,13 +87,18 @@ test("the files near the view have their first pages read in one read", async ()
   const { fill, one, many } = manyFill();
   const files = ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"].map((path) => listed(path));
   draw({ files, fill });
-  await settle();
+  // Past the two frames the overscan below waits for, and its own read.
+  for (let i = 0; i < 4; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settle();
+  }
   const near = [...target.querySelectorAll(".tf-diff")].map((card) => card.getAttribute("data-file"));
   expect(near.length).toBeGreaterThan(1);
   // The cards on screen first and the rest of the overscan after them (drawn in pieces), each piece in one read.
-  expect(many.flat().sort(), "every card drawn, each once").toEqual([...near].sort());
-  expect(many.length).toBeLessThan(near.length);
-  expect(one).toEqual([]);
+  // A piece of one card is read alone.
+  expect([...many.flat(), ...one].sort(), "every card drawn, each once").toEqual([...near].sort());
+  expect(many[0]!.length, "the first piece in one read").toBeGreaterThan(1);
+  expect(many.length + one.length).toBeLessThan(near.length);
   for (const path of near) expect(lines(path!)).toBe(3);
 });
 

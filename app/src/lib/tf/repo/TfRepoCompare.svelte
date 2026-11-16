@@ -446,6 +446,9 @@
         (names) => {
           // Not over a counted list this pick drew already (the pair drawn before, below).
           if (!alive() || landed || names === null || (filesFor === asked && counted)) return;
+          // The names of the two commits the drawn list stands at are that list: nothing to lay down again (a pair drawn
+          // before, or read ahead, drew them in the pick's frame; laying 4,200 files down again was a task of its own).
+          if (filesFor === asked && sameRange(range, names.range)) return;
           const list = namesList(names);
           keepDrawnCompare(repoId, from, to, list, false);
           reading = false;
@@ -480,7 +483,8 @@
       reading = false;
       failed = null;
       missing = false;
-      files = diff.files;
+      // The counted list of the two commits the drawn counted list stands at is that list: the rows stay as they are.
+      if (!(counted && filesFor === asked && sameRange(range, diff.range) && files?.length === diff.files.length)) files = diff.files;
       counted = true;
       if (listing !== undefined) {
         keepDrawnCompare(repoId, from, to, diff as RangeFiles, true);
@@ -514,6 +518,9 @@
       files = null;
     });
   }
+
+  /** Whether two ranges are the same two commits (whole shas name content that never changes). */
+  const sameRange = (a: DiffRange | null, b: DiffRange | null) => a !== null && b !== null && a.base === b.base && a.head === b.head;
 
   /** Whether two answers for one range are the same diff: the same two commits where both name them, else the same files and counts. */
   function sameDiff(a: RangeDiff, b: RangeDiff): boolean {

@@ -99,7 +99,10 @@ const PAGE = `(() => {
       obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
       r.obs = obs;
       let prevT = null;
-      const tick = (t) => {
+      // The time in the frame's callback, not its timestamp: a frame held back by a long task is stamped before the task
+      // ended, which would count a move as drawn before its work was done.
+      const tick = () => {
+        const t = performance.now();
         if (r.t0 !== null && prevT !== null && t - prevT > 50) r.frames.push(Math.round(t - prevT));
         prevT = t;
         if (r.t0 !== null) {
