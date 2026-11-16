@@ -107,6 +107,14 @@ const idle = async () => {
   }
 };
 
+/** Waits for `ready`, a loaded machine's idle turns and timers coming late: up to 10 s. */
+async function until(ready: () => boolean) {
+  for (let i = 0; i < 100 && !ready(); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await settle(1);
+  }
+}
+
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"));
 
@@ -143,12 +151,12 @@ test("the names of the next picks are read at the clone while the page is idle, 
   lists.find((l) => l.head === "feature/a")!.answer(counted("feature/a", [listed("pay.py")]));
   await settle();
   const asked = named.length;
-  await idle();
+  await until(() => named.length > asked);
   const ahead = named.slice(asked).map((n) => `${n.base}...${n.head}`);
   // *From* the other branch (not the default one, which moves *Into*), then *Into* the other branches.
   expect(ahead[0]).toBe("main...feature/b");
   named.slice(asked)[0]!.answer(names("feature/b", ["ledger.py", "rails.py"]));
-  await idle();
+  await until(() => named.length > asked + 1);
   expect(named.slice(asked).map((n) => `${n.base}...${n.head}`)).toContain("feature/b...feature/a");
 
   props.head = "feature/b";
