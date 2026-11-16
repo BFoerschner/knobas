@@ -30,6 +30,9 @@
 .tf-board-wrap:not(.tf-lanes) .tf-sbody > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 0 0; }
 .tf-board-wrap:not(.tf-lanes) .tf-sbody > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; background: var(--paper); padding: 0 22px 14px; }
 .tf-board-wrap:not(.tf-lanes) .tf-col h3 { position: sticky; top: 0; z-index: 1; background: var(--paper); margin-bottom: 0; padding-bottom: 8px; }
+/* Each column a paint layer of its own, with no stacking context, as a scroller's content is (`chrome.css`, #2508): the
+   columns are the scroller's content, and a scroll that moves its scrollbar walked every drawn card again each frame. */
+.tf-col { position: relative; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
 .tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 6px 0 8px; }
