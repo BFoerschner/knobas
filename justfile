@@ -1367,6 +1367,15 @@ keys-budget *args:
 soak *args:
     testenv/perf/soak.sh {{args}}
 
+# The starts of git (the git-starts pass of PR #2479, 2026-11-16, `testenv/perf/README.md`): presses each action at a
+# cloned repository (its landing, a folder, a file, a branch switch, a commit, Compare, a pull request's *Files
+# changed*, *Local changes*, the launcher) as real input in a headless Chrome at 1x, 4x and 6x, counts the `git`
+# processes the backend started for each from a counting `git` first on its `PATH`, and fails when a press a person
+# waits on started one. On the saved scale database with its repositories cloned:
+# `just git-starts --real <port> --shim-log <file>`.
+git-starts *args:
+    testenv/perf/git-starts.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh

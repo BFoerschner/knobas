@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# A counting `git` for the process-start probe (testenv/perf/README.md, *Starts of git*): put this folder first on the
+# backend's PATH and every `git` the backend starts appends one line here, then runs the real one.
+#
+#   KNOBAS_GIT_SHIM_REAL   the real git (`command -v git`, read before this folder went on PATH)
+#   KNOBAS_GIT_SHIM_LOG    the file a start is appended to: `<seconds since the epoch> <the arguments>`
+#   KNOBAS_GIT_SHIM_DELAY  seconds to sleep before the real git, to stand in for a slower process start (0.1 is a
+#                          Windows laptop's start, the README's table)
+printf '%s %s\n' "${EPOCHREALTIME:-$(date +%s)}" "$*" >> "${KNOBAS_GIT_SHIM_LOG:-/dev/null}"
+[ -z "${KNOBAS_GIT_SHIM_DELAY:-}" ] || sleep "$KNOBAS_GIT_SHIM_DELAY"
+exec "${KNOBAS_GIT_SHIM_REAL:?KNOBAS_GIT_SHIM_REAL names the real git}" "$@"
