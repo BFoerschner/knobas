@@ -35,8 +35,9 @@ display's scale (`cdp.mjs`), 1440x868@1 by default. A scale of 1.25 or 1.5 is Wi
 | `just frame-budget`, `just open-budget --real`, `just keys-budget --real` | 1440x868@1 | 1x, 4x, 6x |
 | the same, by default after it | `1920x1080@2` (4K at 200 %, the most device pixels) and `2560x1440@1.25` (1440p at 125 %, the most CSS pixels at a fractional scale) | 4x, 6x |
 
-One cell is red until issue #2508: *Monitors*' scroll at 6x on `2560x1440@1.25` (52 to 54.5 frames a second, ruled to
-stay red rather than move the line, `docs/decisions/2026-11-15-every-window-size.md`); any other red cell is new.
+One cell sits at its line until issue #2508: *Monitors*' scroll at 6x on `2560x1440@1.25` (52 to 54.5 frames a second at
+a load of 6 to 10, 59.3 at 4; ruled to stay red when it misses rather than move the line,
+`docs/decisions/2026-11-15-every-window-size.md`); any other red cell is new.
 `--sizes "WxH@s ..."` names others and `--sizes none` runs the default size alone; the inner pages and the extremes run
 at 1440x868@1 unless `--sizes` names sizes for them. The lines are the same at every size. `run.mjs`'s scroll records, a
 scenario, what grows with the device pixels a window paints: each presented frame's main-thread paint (`Paint`,

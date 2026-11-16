@@ -159,11 +159,13 @@ fps) and *Monitors*' filter key (121 ms at 4x) all within; Builds' first open (3
 25) 245 ms, and the launcher's first open (264 ms at 4x) 65 ms. One cell stays over: *Monitors*' scroll at 6x on
 2560x1440@1.25, below.
 
-## Monitors at 6x on a 1440p window at 125 %: over, ruled to stay red
+## Monitors at 6x on a 1440p window at 125 %: at its line, ruled to stay a red cell when it misses
 
 52 to 54.5 frames a second against the line of 55, longest task 30 to 44 ms (line 60), on the fixture and on the scale
 database, and the same on the head before this pass (140103aa), on fc6b7939 and on this head, alternated at a load of
-6 to 10; once 58.5 on the quieter night of the before matrix. At 1440x868 and on 4K at 200 % it holds 60.
+6 to 10; 58.5 on the quieter night of the before matrix, and 59.3 on the final head (rebased on aa781e07, which windows
+the roster from 40 rows) at a load of 4. At 1440x868 and on 4K at 200 % it holds 60. A line met at a load of 4 and
+missed at 6 is a line missed on a slow Windows laptop.
 
 ```sh
 node testenv/perf/run.mjs --app "http://127.0.0.1:<app>/?fake-ipc&fake-real=<backend>#/inbox" --out m.json \
@@ -183,7 +185,8 @@ list as they are. Dropping the size drops what Björn called necessary; a lower 
 does; a fix now holds every other cell behind work of unknown size that may change pixels and needs the design review.
 The follow-up is the next pass, not backlog, since a budget that stays red teaches everyone to ignore it, and its fix
 must stop a swap's cost growing with the list's height rather than retune the overscan to scrape 55: issue #2508.
-`just frame-budget` exits non-zero on exactly this cell until then; any other red cell is new.
+`just frame-budget` may exit non-zero on exactly this cell until then, as the machine's load goes; any other red cell
+is new.
 
 ## Owed on Windows
 
@@ -211,3 +214,15 @@ and 27 within, *Monitors* on 2560x1440@1.25 over; no box that scrolls without an
 of 25 and within run again; `just keys-budget --real` 42 of 42, the slowest at 6x 104 ms; `pixel-same.py` over Inbox,
 Monitors, Builds, Code's pull requests, Tickets and Docs at 1440x900@1, 1920x1080@2 and 2560x1440@1 against the base,
 18 of 18 the same; `just check-scripts` ok. No Rust changed.
+
+**On this pass rebased on aa781e07** (the main sections built hidden while the app is idle, and the roster, the
+Tickets list and Code's pull requests windowed from 40 rows), the same code as pushed on 4c66a02d, where vitest whole
+ran again (338 files, 5,185 passed, 1 skipped) with svelte-check 0 errors and `just check-scripts` ok: `just check-front` ok (svelte-check 1,472
+files, 0 errors); vitest whole, 337 files, 5,166 passed, 1 skipped; `testenv/desktop-witness-test.sh` 307 checks; the
+press trips with `--strict` 272 of 272, the 16 `rows-still` among them; `just check-scripts` ok; at a load of 4,
+`just open-budget --real --only inbox,tickets-board,code,builds,monitors,launcher,pipeline,run` every open within at
+all three sizes (224 opens, the slowest drawn at 6x 129, 161 and 163 ms: with the sections built ahead a nav press
+shows a page already built) and `just frame-budget --real --only monitors,builds-main,inbox,tickets-list` 36, 28 and
+28 within, *Monitors* at 2560x1440@1.25 at 59.3 frames a second. The whole budgets ran on 6123fcb0, above. With the
+sections built ahead, the overscan's wait now splits the idle build's task and serves the pages not built ahead (a
+ticket, a pull request, a pipeline at its own address); a nav press no longer builds a page.
