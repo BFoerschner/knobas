@@ -12,7 +12,10 @@
 //!
 //! # What runs (ADR-0041, on ADR-0036's terms)
 //!
-//! Under [`range`](super::range)'s environment (`git_read`: no optional
+//! Each read is answered in knobas's own process first
+//! ([`Reader`](super::reader), the git-starts pass, 2026-11-16): a folder, a
+//! file and a branch switch start no process. Where it cannot answer, the
+//! command runs, under [`range`](super::range)'s environment (`git_read`: no optional
 //! locks, no fsmonitor, no prompt, closed stdin, no lazy fetch, no transport,
 //! no replace refs, the ceiling at the checkout's parent), and nothing else:
 //!
@@ -38,9 +41,7 @@ use knobas_source::file_text::{BYTE_CAP, capped, is_binary, language_of};
 use knobas_source::view::{Block, EntryKind};
 use serde::Serialize;
 
-use super::range::{commit, git_read};
-use super::uncommitted::run_capped;
-use super::working_tree::{APPLE_SHIM, command_line_tools_installed, is_dir_off_runtime, locate};
+use super::reader::Reader;
 
 /// How long one local read may take before the source is asked instead.
 pub const TIMEOUT: std::time::Duration = super::range::TIMEOUT;
@@ -291,18 +292,24 @@ static READING: LazyLock<Mutex<HashMap<(PathBuf, String), Reading>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The tree at `sha` in the checkout at `path`, or `None` when it cannot be
-/// read here: no git, no repository, a sha the checkout does not hold, git
-/// refusing or slow. `as_of` is left `None` for the caller to fill.
+/// read here: no repository, a sha the checkout does not hold, and with git
+/// asked: no git, git refusing or slow. `as_of` is left `None` for the
+/// caller to fill. Read in knobas's own process, and by git where that
+/// cannot answer ([`Reader`]).
 pub async fn tree(path: &Path, sha: &str) -> Option<Arc<LocalTree>> {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    tree_with(&search, path, sha).await
+    tree_via(&Reader::at(path), sha).await
 }
 
-/// [`tree`] with the `PATH` to find `git` on.
+/// [`tree`] by the `git` on `search` alone.
 pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<LocalTree>> {
+    tree_via(&Reader::git_alone(search, path), sha).await
+}
+
+async fn tree_via(reader: &Reader, sha: &str) -> Option<Arc<LocalTree>> {
     if !is_sha(sha) {
         return None;
     }
+    let path = reader.path();
     if let Some(tree) = kept(path, sha) {
         return Some(tree);
     }
@@ -315,14 +322,11 @@ pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<Loc
         .clone();
     // Each asker waits `TIMEOUT` at most, whoever runs the read: one whose
     // wait ends leaves the read to the next still waiting.
-    let tree = tokio::time::timeout(
-        TIMEOUT,
-        reading.get_or_init(|| read_tree(search, path, sha)),
-    )
-    .await
-    .ok()
-    .cloned()
-    .flatten();
+    let tree = tokio::time::timeout(TIMEOUT, reading.get_or_init(|| read_tree(reader, sha)))
+        .await
+        .ok()
+        .cloned()
+        .flatten();
     let mut under_way = READING.lock().unwrap_or_else(PoisonError::into_inner);
     if under_way
         .get(&key)
@@ -333,25 +337,11 @@ pub async fn tree_with(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<Loc
     tree
 }
 
-/// [`tree_with`]'s read itself: git over the whole tree, kept when it
-/// answers.
-async fn read_tree(search: &OsStr, path: &Path, sha: &str) -> Option<Arc<LocalTree>> {
-    let git = locate(
-        search,
-        Path::new(APPLE_SHIM),
-        command_line_tools_installed,
-        TIMEOUT,
-    )
-    .await
-    .ok()?;
-    if !is_dir_off_runtime(path).await {
-        return None;
-    }
-    let whole = commit(&git, path, sha).await?;
-    let mut command = git_read(&git, path);
-    command.args(["ls-tree", "-r", "-t", "-z", "--long", "--full-tree"]);
-    command.arg(&whole);
-    let (out, cut) = run_capped(command, usize::MAX, LISTING_BYTES).await.ok()?;
+/// [`tree_via`]'s read itself: the whole tree, kept when it answers.
+async fn read_tree(reader: &Reader, sha: &str) -> Option<Arc<LocalTree>> {
+    let path = reader.path();
+    let whole = reader.commit(sha).await?;
+    let (out, cut) = reader.ls_tree(&whole, LISTING_BYTES).await?;
     let (entries, short) = parse_listing(&out);
     let tree = Arc::new(LocalTree::new(whole, entries, cut || short));
     keep(path, tree.clone());
@@ -468,22 +458,10 @@ pub async fn file_bytes(
 /// `git cat-file blob <blob>`, read up to `max` bytes; the flag says the read
 /// stopped at `max`.
 async fn blob_bytes(path: &Path, blob: &str, max: usize) -> Option<(Vec<u8>, bool)> {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    let git = locate(
-        &search,
-        Path::new(APPLE_SHIM),
-        command_line_tools_installed,
-        TIMEOUT,
-    )
-    .await
-    .ok()?;
-    let mut command = git_read(&git, path);
-    command.args(["cat-file", "blob"]);
-    command.arg(blob);
-    tokio::time::timeout(TIMEOUT, run_capped(command, usize::MAX, max))
+    let reader = Reader::at(path);
+    tokio::time::timeout(TIMEOUT, reader.blob(blob, max))
         .await
         .ok()?
-        .ok()
 }
 
 #[cfg(test)]

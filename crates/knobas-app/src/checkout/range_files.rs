@@ -37,9 +37,8 @@ use knobas_source::diff::{DiffChange, DiffFile, Hunk, parse_view};
 use serde::Serialize;
 use sqlx::PgPool;
 
-use super::range::{commit, empty_tree_if_whole, git_read};
-use super::uncommitted::{READ_BYTES, READ_LINES, run_capped};
-use super::working_tree::{APPLE_SHIM, command_line_tools_installed, is_dir_off_runtime, locate};
+use super::reader::{Form, Reader};
+use super::uncommitted::{READ_BYTES, READ_LINES};
 use super::{DiffReadAt, RangeDiff, branch_tip, repo_of, resolve};
 use crate::IpcError;
 
@@ -521,13 +520,10 @@ pub async fn range_names(
     if kept_lists().has(&listed_key(path, &format!("{a}..."), &b, false)) {
         return None;
     }
+    let reader = Reader::at(path);
     let all = async {
-        let git = git_at_checkout(path).await?;
         let range = format!("{a}^{{commit}}...{b}^{{commit}}");
-        let (from, named) = tokio::join!(
-            super::range::merge_base(path, &a, &b),
-            names(&git, path, &range)
-        );
+        let (from, named) = tokio::join!(reader.merge_base(&a, &b), names(&reader, &range));
         Some((from?, named?))
     };
     let (from, (files, truncated)) = tokio::time::timeout(super::range::TIMEOUT, all)
@@ -554,22 +550,10 @@ pub async fn range_names(
 
 /// `git diff --raw -z -M <range>`, parsed: the files [`listing`] reads, in
 /// its order, with no counts.
-async fn names(git: &Path, path: &Path, range: &str) -> Option<(Vec<DiffFile>, bool)> {
-    let mut command = git_read(git, path);
-    command.args([
-        "-c",
-        "diff.autoRefreshIndex=false",
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        "--no-textconv",
-        "-M",
-        "--raw",
-        "-z",
-        range,
-        "--",
-    ]);
-    let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
+async fn names(reader: &Reader, range: &str) -> Option<(Vec<DiffFile>, bool)> {
+    let (out, cut) = reader
+        .diff(Form::Raw, range, None, false, &[], usize::MAX, READ_BYTES)
+        .await?;
     Some(parse_raw(&out, cut))
 }
 
@@ -666,8 +650,8 @@ impl LocalStat {
 
 /// The two ends at the checkout, resolved as [`range::read`](super::range::read)
 /// resolves them: each a checked sha it holds, the base possibly `<sha>^`
-/// (the empty tree for a root commit). The git to run, the old side as git
-/// is to name it, the old side's sha (`None`: the empty tree) and the head's.
+/// (the empty tree for a root commit). The old side as git is to name it,
+/// the old side's sha (`None`: the empty tree) and the head's.
 ///
 /// Two whole shas need no `rev-parse` each: they are handed to git as
 /// `<sha>^{commit}`, so a checkout that lacks one fails the read itself and
@@ -675,7 +659,6 @@ impl LocalStat {
 /// waits on (the compare pass: four starts of git in a row were most of a
 /// list's time on a busy machine).
 struct Ends {
-    git: std::path::PathBuf,
     /// The old side as git is to name it, and the new.
     old: String,
     new: String,
@@ -688,20 +671,7 @@ fn whole(sha: &str) -> bool {
     is_sha(sha) && matches!(sha.len(), 40 | 64)
 }
 
-async fn git_at_checkout(path: &Path) -> Option<std::path::PathBuf> {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    let git = locate(
-        &search,
-        Path::new(APPLE_SHIM),
-        command_line_tools_installed,
-        super::range::TIMEOUT,
-    )
-    .await
-    .ok()?;
-    is_dir_off_runtime(path).await.then_some(git)
-}
-
-async fn ends(path: &Path, base: &str, head: &str) -> Option<Ends> {
+async fn ends(reader: &Reader, base: &str, head: &str) -> Option<Ends> {
     let (stem, caret) = match base.strip_suffix('^') {
         Some(stem) => (stem, true),
         None => (base, false),
@@ -709,29 +679,26 @@ async fn ends(path: &Path, base: &str, head: &str) -> Option<Ends> {
     if !is_sha(stem) || !is_sha(head) {
         return None;
     }
-    let git = git_at_checkout(path).await?;
     if !caret && whole(stem) && whole(head) {
         let (base, head) = (stem.to_ascii_lowercase(), head.to_ascii_lowercase());
         return Some(Ends {
             old: format!("{base}^{{commit}}"),
             new: format!("{head}^{{commit}}"),
-            git,
             base: Some(base),
             head,
         });
     }
-    let head = commit(&git, path, head).await?;
-    let stem = commit(&git, path, stem).await?;
+    let head = reader.commit(head).await?;
+    let stem = reader.commit(stem).await?;
     let (old, base) = if caret {
-        match commit(&git, path, &format!("{stem}^")).await {
+        match reader.commit(&format!("{stem}^")).await {
             Some(parent) => (parent.clone(), Some(parent)),
-            None => (empty_tree_if_whole(&git, path).await?, None),
+            None => (reader.empty_tree_if_whole().await?, None),
         }
     } else {
         (stem.clone(), Some(stem))
     };
     Some(Ends {
-        git,
         old,
         new: head.clone(),
         base,
@@ -742,43 +709,30 @@ async fn ends(path: &Path, base: &str, head: &str) -> Option<Ends> {
 /// `git diff --raw --numstat -z -M <old> <new>` (`<old>` may be `A...B`),
 /// parsed: the files and whether the listing was cut.
 async fn listing(
-    git: &Path,
-    path: &Path,
+    reader: &Reader,
     old: &str,
     new: Option<&str>,
     ignore_whitespace: bool,
 ) -> Option<(Vec<DiffFile>, bool)> {
-    let mut command = git_read(git, path);
-    command.args([
-        "-c",
-        "diff.autoRefreshIndex=false",
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        "--no-textconv",
-        "-M",
-        "--raw",
-        "--numstat",
-        "-z",
-    ]);
-    if ignore_whitespace {
-        command.arg("-w");
-    }
-    command.arg(old);
-    if let Some(new) = new {
-        command.arg(new);
-    }
-    command.arg("--");
-    let (out, cut) = run_capped(command, usize::MAX, READ_BYTES).await.ok()?;
+    let (out, cut) = reader
+        .diff(
+            Form::RawNumstat,
+            old,
+            new,
+            ignore_whitespace,
+            &[],
+            usize::MAX,
+            READ_BYTES,
+        )
+        .await?;
     let (files, cut_inside) = parse_stat(&out, cut);
     Some((files, cut || cut_inside))
 }
 
 /// The list a source's three-dot compare of two tips is, at the checkout
 /// `path` (ADR-0041): `git diff A...B`, which diffs from their merge base,
-/// with the merge base and `git log A..B` read beside it, three starts of
-/// git at once. `None` where it cannot be read here, or the two share no
-/// history.
+/// with the merge base and `git log A..B` read beside it, three reads at
+/// once. `None` where it cannot be read here, or the two share no history.
 pub async fn stat_between(
     path: &Path,
     base_tip: &str,
@@ -792,14 +746,14 @@ pub async fn stat_between(
     if let Some(kept) = kept_lists().get(&key) {
         return Some(kept);
     }
+    let reader = Reader::at(path);
     let all = async {
-        let git = git_at_checkout(path).await?;
         let (a, b) = (base_tip.to_ascii_lowercase(), head_tip.to_ascii_lowercase());
         let range = format!("{a}^{{commit}}...{b}^{{commit}}");
         let (from, listed, commits) = tokio::join!(
-            super::range::merge_base(path, &a, &b),
-            listing(&git, path, &range, None, ignore_whitespace),
-            log(&git, path, Some(&a), &b)
+            reader.merge_base(&a, &b),
+            listing(&reader, &range, None, ignore_whitespace),
+            log(&reader, Some(&a), &b)
         );
         let (files, truncated) = listed?;
         Some(LocalStat {
@@ -879,17 +833,17 @@ pub async fn stat(
     if let Some(kept) = key.as_deref().and_then(|key| kept_lists().get(key)) {
         return Some(kept);
     }
+    let reader = Reader::at(path);
     let all = async {
         let Ends {
-            git,
             old,
             new,
             base,
             head,
-        } = ends(path, base, head).await?;
+        } = ends(&reader, base, head).await?;
         let (listed, commits) = tokio::join!(
-            listing(&git, path, &old, Some(&new), ignore_whitespace),
-            log(&git, path, base.as_deref(), &head)
+            listing(&reader, &old, Some(&new), ignore_whitespace),
+            log(&reader, base.as_deref(), &head)
         );
         let (files, truncated) = listed?;
         Some(LocalStat {
@@ -918,24 +872,14 @@ pub const COMMITS: usize = 500;
 /// as a commit row reads. None where it cannot be read, or from the empty
 /// tree.
 async fn log(
-    git: &Path,
-    path: &Path,
+    reader: &Reader,
     base: Option<&str>,
     head: &str,
 ) -> Vec<knobas_source::view::RangeCommit> {
     let Some(base) = base else {
         return Vec::new();
     };
-    let mut command = git_read(git, path);
-    command.args([
-        "log",
-        "--no-color",
-        &format!("--max-count={COMMITS}"),
-        "--format=%H%x1f%an%x1f%ar%x1f%s%x1e",
-        &format!("{base}..{head}"),
-        "--",
-    ]);
-    let Ok((out, _)) = run_capped(command, usize::MAX, 4 * 1024 * 1024).await else {
+    let Some(out) = reader.log(base, head, COMMITS).await else {
         return Vec::new();
     };
     String::from_utf8_lossy(&out)
@@ -1326,30 +1270,25 @@ pub async fn file(
     old_path: Option<&str>,
     ignore_whitespace: bool,
 ) -> Option<Option<DiffFile>> {
+    let reader = Reader::at(repo);
     let all = async {
-        let Ends { git, old, new, .. } = ends(repo, base, head).await?;
-        let mut command = git_read(&git, repo);
-        command.args([
-            "-c",
-            "diff.autoRefreshIndex=false",
-            "diff",
-            "--no-ext-diff",
-            "--no-color",
-            "--no-textconv",
-            "-M",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-        ]);
-        if ignore_whitespace {
-            command.arg("-w");
+        let Ends { old, new, .. } = ends(&reader, base, head).await?;
+        let mut paths = vec![path];
+        if let Some(old_path) = old_path.filter(|o| *o != path) {
+            paths.push(old_path);
         }
         // Literal paths: a name is the file's, never a pattern.
-        command.env("GIT_LITERAL_PATHSPECS", "1");
-        command.args([old.as_str(), new.as_str(), "--", path]);
-        if let Some(old_path) = old_path.filter(|o| *o != path) {
-            command.arg(old_path);
-        }
-        let (text, cut) = run_capped(command, READ_LINES, READ_BYTES).await.ok()?;
+        let (text, cut) = reader
+            .diff(
+                Form::Patch,
+                &old,
+                Some(&new),
+                ignore_whitespace,
+                &paths,
+                READ_LINES,
+                READ_BYTES,
+            )
+            .await?;
         let (mut files, _) = parse_view(&String::from_utf8_lossy(&text));
         if cut && let Some(last) = files.last_mut() {
             last.truncated = true;
@@ -1761,11 +1700,11 @@ mod tests {
     async fn the_names_are_the_counted_list_less_its_counts_in_its_order() {
         let (dir, base, head) = repo();
         let p = dir.path();
-        let git = git_at_checkout(p).await.expect("git");
+        let reader = Reader::at(p);
         let range = format!("{base}...{head}");
-        let (named, cut) = names(&git, p, &range).await.expect("the clone answers");
+        let (named, cut) = names(&reader, &range).await.expect("the clone answers");
         assert!(!cut);
-        let (counted, _) = listing(&git, p, &range, None, false)
+        let (counted, _) = listing(&reader, &range, None, false)
             .await
             .expect("the clone answers");
         let less = |f: &DiffFile| DiffFile {

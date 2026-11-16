@@ -56,6 +56,7 @@ pub mod local;
 pub mod open;
 pub mod range;
 pub mod range_files;
+pub mod reader;
 pub mod stamp;
 pub mod uncommitted;
 pub mod working_tree;
@@ -385,7 +386,7 @@ pub async fn local_changes(
             "{entity_id} has no checkout on this machine, so there are no local changes to read"
         ))
     })?;
-    Ok(uncommitted::read(Path::new(&path)).await)
+    Ok(uncommitted::read_known(Path::new(&path)).await)
 }
 
 /// Where a [`RangeDiff`] was read.
