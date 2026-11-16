@@ -922,9 +922,9 @@ struct Raw {
 /// By path, not by place (the git-starts pass, 2026-11-16): with blanks
 /// ignored the two halves need not hold the same files. A git before 2.52
 /// lists a file whose lines differ in blanks alone among the raw records and
-/// gives it no count, so every file after it took the next file's count; a
-/// git since 2.52 leaves such a file out of both, and a file only renamed
-/// out of the raw records alone. A file is listed where both name it: it
+/// gives it no count, so every file after it took the next file's count and
+/// the list said it was cut. A git since 2.52, and knobas's own reader,
+/// leave such a file out of both. A file is listed where both name it: it
 /// has something left to show.
 pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
     let text = String::from_utf8_lossy(out);
@@ -1836,9 +1836,9 @@ mod tests {
             [("a.txt", 1, 2), ("z.txt", 3, 4)],
             "z.txt keeps its own count"
         );
-        // A git since 2.52: a file only renamed has a count and no raw record.
-        let newer = b":100644 100644 aaaaaaa bbbbbbb M\0a.txt\0:100644 100644 ccccccc ddddddd M\0z.txt\x001\t2\ta.txt\x000\t0\t\0old.txt\0new.txt\x003\t4\tz.txt\0";
-        let (files, dropped) = parse_stat(newer, false);
+        // A count no raw record names is no file of the list.
+        let stray = b":100644 100644 aaaaaaa bbbbbbb M\0a.txt\0:100644 100644 ccccccc ddddddd M\0z.txt\x001\t2\ta.txt\x007\t7\tother.txt\x003\t4\tz.txt\0";
+        let (files, dropped) = parse_stat(stray, false);
         assert!(!dropped);
         assert_eq!(
             files

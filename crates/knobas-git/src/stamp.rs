@@ -364,9 +364,14 @@ mod tests {
         // Something git does not see: a file in an ignored folder.
         std::fs::write(p.join("target/out.o"), "x").unwrap();
         assert_eq!(of(p), Some(before), "an ignored folder's contents");
-        let steps: [(&str, &dyn Fn()); 8] = [
+        let steps: [(&str, &dyn Fn()); 9] = [
             ("an unstaged edit", &|| {
                 std::fs::write(p.join("src/deep/lib.rs"), "fn b() {}\n").unwrap()
+            }),
+            // The index alone moves: the file and the paths it lists are as
+            // they were.
+            ("that edit staged", &|| {
+                git(p, &["add", "src/deep/lib.rs"]);
             }),
             ("a new file", &|| {
                 std::fs::write(p.join("src/deep/new.rs"), "").unwrap()

@@ -628,14 +628,14 @@ impl<'a> Work<'a> {
             .collect())
     }
 
-    /// `--raw -z`. With blanks ignored (`counts` given), only the files in
-    /// which something is left to show, as git lists them since 2.52: an
-    /// added or deleted file, a changed mode or kind, a binary file whose
-    /// content changed, a text with a line added or removed. A file whose
-    /// lines differ in blanks alone is not listed, and neither is one only
-    /// renamed. (An older git lists every changed path here whatever is
-    /// ignored, and leaves the same files out of `--numstat`, so its two
-    /// halves disagree; the app pairs them by path.)
+    /// `--raw -z`. With blanks ignored (`counts` given), a changed file in
+    /// which nothing is left to show is not listed, as git lists since 2.52:
+    /// one whose lines differ in blanks alone. An added, deleted or renamed
+    /// file, and a changed mode or kind, are listed whatever is ignored.
+    /// These are the files `--numstat` gives no count, so the two halves
+    /// hold the same files. (An older git lists every changed path here and
+    /// leaves the same files out of `--numstat` alone; the app pairs the two
+    /// by path.)
     fn raw(
         &mut self,
         out: &mut Vec<u8>,
@@ -645,12 +645,9 @@ impl<'a> Work<'a> {
         for (at, pair) in pairs.iter().enumerate() {
             if self.ignore_space
                 && let Some(counts) = counts
-                && !matches!(pair.status(), b'A' | b'D' | b'T')
+                && pair.status() == b'M'
                 && pair.old.mode == pair.new.mode
-                && match counts[at] {
-                    None => pair.old.oid == pair.new.oid,
-                    Some((added, removed)) => added + removed == 0,
-                }
+                && counts[at] == Some((0, 0))
             {
                 continue;
             }

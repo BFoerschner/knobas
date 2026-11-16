@@ -430,6 +430,7 @@ fn changed_files_come_in_the_trees_order() {
     let p = dir.path();
     for name in [
         "a-b",
+        "a,gone",
         "a/inner.txt",
         "a/z/deep.txt",
         "a.txt",
@@ -439,12 +440,18 @@ fn changed_files_come_in_the_trees_order() {
         write(p, name, format!("{name} one\n"));
     }
     let first = commit(p, 0, "first");
+    // `a,gone` is in one tree only, beside the folder `a` both hold: the two
+    // are told apart by the folder's slash, not by the bytes of their names.
+    std::fs::remove_file(p.join("a,gone")).expect("removed");
     for name in ["a-b", "a/inner.txt", "a/z/deep.txt", "a.txt", "a0"] {
         write(p, name, format!("{name} two\n"));
     }
     std::fs::remove_dir_all(p.join("b")).expect("removed");
     write(p, "a/added.txt", "added\n");
     write(p, "a!", "before everything\n");
+    // In one tree only, and the last file before the folder `a`: a walk that
+    // took the folder for a file of that name would pass the folder first.
+    write(p, "a.zzz", "after a.txt, before a/\n");
     let second = commit(p, 60, "second");
     let Ok(Answer::Out(raw)) = open(p).diff(&DiffAsk {
         old: &first,
@@ -466,8 +473,10 @@ fn changed_files_come_in_the_trees_order() {
         order,
         [
             "a!",
+            "a,gone",
             "a-b",
             "a.txt",
+            "a.zzz",
             "a/added.txt",
             "a/inner.txt",
             "a/z/deep.txt",
@@ -650,6 +659,146 @@ fn a_rename_is_paired_and_scored_as_git_pairs_it() {
     same_diffs(p, &first, Some(&second), &["docs/manual.md"]);
     same_diffs(p, &first, Some(&second), &["lib/util.rs", "src/util.rs"]);
     same_diffs(p, &first, Some(&second), &["new"]);
+}
+
+/// By name a rename takes three quarters alike: a deleted file of the same
+/// name that is two thirds alike loses to another that is more alike. And
+/// how alike two files of long lines are is counted in pieces of 64 bytes.
+#[test]
+fn a_rename_by_name_needs_three_quarters_and_long_lines_count_in_pieces() {
+    let dir = new_repo();
+    let p = dir.path();
+    let shared: String = (0..60)
+        .map(|i| format!("shared line number {i}\n"))
+        .collect();
+    let namesake: String = (0..30)
+        .map(|i| format!("only in the namesake {i}\n"))
+        .collect();
+    let other: String = (0..4).map(|i| format!("only in the other {i}\n")).collect();
+    write(p, "namesake/target.txt", format!("{shared}{namesake}"));
+    write(p, "other/source.txt", format!("{shared}{other}more\n"));
+    let long = |mark: &str| -> String {
+        (0..40)
+            .map(|i| format!("{}{mark}{}\n", "x".repeat(70 + i), "y".repeat(90)))
+            .collect()
+    };
+    write(p, "long/lines.min.js", long("-"));
+    let first = commit(p, 0, "first");
+    git(p, &["rm", "-q", "namesake/target.txt", "other/source.txt"]);
+    write(p, "pick/target.txt", format!("{shared}{other}"));
+    mv(p, "long/lines.min.js", "long/moved.min.js");
+    write(p, "long/moved.min.js", long("-").replacen("x-y", "x+y", 9));
+    let second = commit(p, 60, "second");
+    let raw = String::from_utf8_lossy(&oracle(p, &["diff", "--raw", "-M", &first, &second]).1)
+        .into_owned();
+    assert!(
+        raw.contains("other/source.txt\tpick/target.txt"),
+        "the more alike, not the namesake: {raw}"
+    );
+    assert!(
+        raw.contains("long/lines.min.js\tlong/moved.min.js"),
+        "{raw}"
+    );
+    same_diffs(p, &first, Some(&second), &[]);
+    same_diffs(p, &second, Some(&first), &[]);
+}
+
+/// A block that can sit in two places sits where git's indent heuristic
+/// puts it: a function added before another like it starts at its own
+/// comment, not in the middle of the one below. With blanks ignored too,
+/// where the lines were compared without their indentation.
+#[test]
+fn a_block_that_can_slide_sits_where_gits_heuristic_puts_it() {
+    let dir = new_repo();
+    let p = dir.path();
+    let function = |name: &str, indent: &str| {
+        format!(
+            "{indent}/**\n{indent} * Does {name}.\n{indent} */\n{indent}fn {name}() {{\n{indent}    run();\n{indent}}}\n\n"
+        )
+    };
+    // A function with no comment comes first, so `run();` and `}` are met
+    // before any `/**`: a block placed by the order its lines were first
+    // seen in, and not by their indentation, would start at `run();`.
+    let module = |names: &[(&str, &str)]| -> String {
+        let body: String = names
+            .iter()
+            .map(|(name, indent)| function(name, indent))
+            .collect();
+        format!("mod m {{\n    fn early() {{\n        run();\n    }}\n\n{body}}}\n")
+    };
+    // Lines that are one line without their blanks and many with them, so
+    // a line's place among the compared lines is not its place among the
+    // exact ones.
+    let shifted: String = (0..40)
+        .map(|i| format!("{}let same = 1;\n", " ".repeat(i)))
+        .collect();
+    write(
+        p,
+        "plain.rs",
+        module(&[("first", "    "), ("last", "    ")]),
+    );
+    write(
+        p,
+        "tabbed.rs",
+        format!(
+            "{shifted}{}",
+            module(&[("first", "    "), ("last", "    ")])
+        ),
+    );
+    write(
+        p,
+        "deep.rs",
+        format!(
+            "{shifted}{}",
+            module(&[("first", "        "), ("mid", "    "), ("last", "        ")])
+        ),
+    );
+    let first = commit(p, 0, "first");
+    write(
+        p,
+        "plain.rs",
+        module(&[
+            ("first", "    "),
+            ("added", "    "),
+            ("more", "    "),
+            ("last", "    "),
+        ]),
+    );
+    write(
+        p,
+        "tabbed.rs",
+        format!(
+            "{shifted}{}",
+            module(&[("first", "    "), ("added", "\t"), ("last", "    ")])
+        ),
+    );
+    write(
+        p,
+        "deep.rs",
+        format!(
+            "{shifted}{}",
+            module(&[
+                ("first", "        "),
+                ("added", "\t\t"),
+                ("mid", "    "),
+                ("more", "  "),
+                ("last", "        ")
+            ])
+        ),
+    );
+    let second = commit(p, 60, "second");
+    let plain = String::from_utf8_lossy(&oracle(p, &["diff", &first, &second, "--", "plain.rs"]).1)
+        .into_owned();
+    assert!(
+        plain.contains("+    /**\n+     * Does added."),
+        "the block starts at its comment, not inside the next one: {plain}"
+    );
+    let tabbed =
+        String::from_utf8_lossy(&oracle(p, &["diff", "-w", &first, &second, "--", "tabbed.rs"]).1)
+            .into_owned();
+    assert!(tabbed.contains("+\t/**\n+\t * Does added."), "{tabbed}");
+    same_diffs(p, &first, Some(&second), &[]);
+    same_diffs(p, &second, Some(&first), &[]);
 }
 
 #[test]
@@ -900,10 +1049,10 @@ fn blanks_ignored_leave_what_else_changed() {
     same_diffs(p, &third, Some(&fourth), &[]);
 }
 
-/// With blanks ignored, the list holds what is left to show and nothing
-/// else, as git lists it since 2.52: not a file whose lines differ in blanks
-/// alone, not a file only renamed, and still a mode change, an added file and
-/// a binary file that changed.
+/// With blanks ignored, a changed file with nothing left to show is not
+/// listed, as git lists since 2.52: not one whose lines differ in blanks
+/// alone. A renamed file is, whatever its lines, and a mode change, an added
+/// file and a binary file that changed.
 #[test]
 fn blanks_ignored_a_file_with_nothing_left_is_not_listed() {
     let dir = new_repo();
@@ -967,8 +1116,19 @@ fn blanks_ignored_a_file_with_nothing_left_is_not_listed() {
     );
     assert_eq!(
         listed(true),
-        ["added.txt", "logo.bin", "mode.sh", "real.txt"],
-        "what is left to show"
+        [
+            "added.txt",
+            "logo.bin",
+            "mode.sh",
+            "moved.txt",
+            "moved_blanks.txt",
+            "real.txt",
+            "same.bin",
+            "to/moved.txt",
+            "to/moved_blanks.txt",
+            "to/same.bin"
+        ],
+        "all but blanks.txt and ends.txt"
     );
     same_diffs(p, &first, Some(&second), &[]);
 }
