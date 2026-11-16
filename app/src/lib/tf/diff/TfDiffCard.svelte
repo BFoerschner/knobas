@@ -261,7 +261,9 @@
     return out;
   });
 
-  const win = new Windowed<string>({ count: () => items.length, key: (i) => items[i]!.key, estimate: 21 });
+  // A card's lines window from 80 (the big-compare pass, 2026-11-16): a card of a few hundred lines below the fold drew them
+  // all as the tab opened.
+  const win = new Windowed<string>({ count: () => items.length, key: (i) => items[i]!.key, estimate: 21, from: 80 });
   const nodes = new Map<string, HTMLElement>();
   const keep = (key: string) => (node: HTMLElement) => {
     nodes.set(key, node);

@@ -685,7 +685,9 @@
    * opened). A file's room before it is drawn is its lines', or its header's while it is collapsed or waits for *Load
    * diff*; each card's own lines are windowed as before.
    */
-  const fileWin = new Windowed({ count: () => drawn.length, key: (i) => keyOf(drawn[i]!), estimate: 120, gap: 12, estimateOf: (key) => fileRoom.get(key) ?? 120 });
+  // From three files (the big-compare pass, 2026-11-16): a pull request of seven drew every card and every line of each
+  // in its first frame, 530 ms of a sixth-speed main thread on Windows; now the cards on screen, the rest in pieces after.
+  const fileWin = new Windowed({ count: () => drawn.length, key: (i) => keyOf(drawn[i]!), estimate: 120, gap: 12, estimateOf: (key) => fileRoom.get(key) ?? 120, from: 3 });
   const fileRoom = $derived.by(() => {
     // What each file's room reads, read once for all of them: a list of 10,000 files asked each of every file (the
     // stored-compare pass, 2026-11-14).
