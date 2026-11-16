@@ -94,6 +94,12 @@ export class Heights<K = string> {
     return true;
   }
 
+  /** Every measured height through `to` (onto another scale's grid); the estimates stand as they are. */
+  regrid(to: (px: number) => number) {
+    for (const [key, px] of this.#measured) this.#measured.set(key, to(px));
+    this.#stale = true;
+  }
+
   /** A row's measured height, else its estimate. */
   heightOf(key: K): number {
     return this.#measured.get(key) ?? this.#estimateOf?.(key) ?? this.#estimate;

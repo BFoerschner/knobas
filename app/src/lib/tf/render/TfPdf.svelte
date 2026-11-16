@@ -13,6 +13,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { fitWidth, zoomStep } from "../../render/pdf-view";
+  import { deviceScale } from "../../shell/device-scale.svelte";
   import { renderPort, type PdfDocument, type PdfLink, type RenderPort } from "../../render/port";
   import { BYTES_CAP } from "../../render/registry";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
@@ -86,10 +87,14 @@
 
   const widest = $derived(shown.kind === "open" ? Math.max(...shown.sizes.map((s) => s.width)) : 0);
 
-  /** Draws page `n` into its box, when the box comes near the view; again whenever the zoom changes. */
+  /**
+   * Draws page `n` into its box, when the box comes near the view; again whenever the zoom changes, and the window's
+   * device scale (a window zoom step, `tf/zoom.svelte.ts`), so the canvas stays sharp.
+   */
   function pageAt(pdf: PdfDocument, n: number, width: number, height: number) {
     return (node: HTMLElement) => {
       const at = scale;
+      void deviceScale.ratio;
       // Through the CSSOM: the app's CSP refuses `style=""` in markup, not this.
       node.style.width = `${Math.round(width * at)}px`;
       node.style.height = `${Math.round(height * at)}px`;
@@ -152,6 +157,16 @@
     return a;
   }
 
+  /** ⌘ or Ctrl with the wheel over the PDF steps its zoom, not the window's (`installZoomInput`'s `data-own-zoom`). */
+  function ownZoom(node: HTMLElement) {
+    const step = (event: Event) => {
+      const steps = (event as CustomEvent<number>).detail;
+      for (let i = 0; i < Math.abs(steps); i++) scale = zoomStep(scale, steps > 0 ? 1 : -1);
+    };
+    node.addEventListener("knobas-zoom", step);
+    return () => node.removeEventListener("knobas-zoom", step);
+  }
+
   const refused = (error: unknown) => push({ text: error instanceof Error ? error.message : String(error) });
 
   function follow(node: HTMLElement) {
@@ -189,7 +204,7 @@
   <div class="tf-fpdf"><div class="tf-stepfail" role="alert"><b>{shown.title}</b><pre>{shown.why}</pre></div></div>
 {:else}
   {@const pdf = shown.pdf}
-  <div class="tf-fpdf" bind:this={pane}>
+  <div class="tf-fpdf" data-own-zoom bind:this={pane} {@attach ownZoom}>
     <div class="tf-pdf-bar">
       <span class="tf-dim tf-small">{shown.sizes.length} {shown.sizes.length === 1 ? "page" : "pages"}</span>
       <span class="tf-trail">

@@ -33,6 +33,7 @@ import { defaultPipelines } from "./diff/piped";
 import { createTheme, type Theme } from "./theme.svelte";
 import { createRoleSyncs, type RoleSyncPorts, type RoleSyncs } from "./role-sync.svelte";
 import { sourceFacts } from "./job/source-facts.fixture";
+import { zoom as windowZoom } from "./zoom.svelte";
 
 /** Every block the Day tab's *Add to* wrote, as its target (#1525). */
 const created = vi.hoisted(() => [] as unknown[]);
@@ -1347,6 +1348,50 @@ test("⌘K opens search with an empty box and ⌘, opens Settings", async () => 
   press(",", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/settings");
+});
+
+test("⌘+, ⌘= and ⌘− step the window's zoom from any page, in a field too, ⌘0 goes back, and the plate and the status bar say the level", async () => {
+  start();
+  await at("#/builds");
+  expect(press("=", { metaKey: true }).defaultPrevented).toBe(true);
+  expect(windowZoom.level).toBe(1.1);
+  press("+", { ctrlKey: true });
+  expect(windowZoom.level).toBe(1.25);
+  flushSync();
+  expect(target.querySelector(".tf-zoomlevel b")?.textContent).toBe("125 %");
+  expect(target.querySelector(".tf-status .tf-zoomed")?.textContent).toBe("Zoom 125 %");
+  const field = target.appendChild(document.createElement("input"));
+  field.focus();
+  press("-", { ctrlKey: true });
+  expect(windowZoom.level).toBe(1.1);
+  press("0", { metaKey: true });
+  expect(windowZoom.level).toBe(1);
+  flushSync();
+  expect(target.querySelector(".tf-status .tf-zoomed")).toBeNull();
+  // With ⌥ it is typing (AltGr off the Mac), not zoom.
+  press("+", { ctrlKey: true, altKey: true });
+  expect(windowZoom.level).toBe(1);
+  field.remove();
+});
+
+test("Ctrl and the wheel zoom the window, wheel up in, and nothing scrolls; the shell's going takes its listeners", async () => {
+  start();
+  await at("#/builds");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", ctrlKey: true }));
+  const up = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+  target.dispatchEvent(up);
+  expect(up.defaultPrevented).toBe(true);
+  expect(windowZoom.level).toBe(1.1);
+  target.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
+  expect(windowZoom.level).toBe(1);
+  window.dispatchEvent(new KeyboardEvent("keyup", { key: "Control" }));
+  unmount(shell!);
+  shell = null;
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", ctrlKey: true }));
+  const after = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+  target.dispatchEvent(after);
+  expect(after.defaultPrevented).toBe(false);
+  expect(windowZoom.level).toBe(1);
 });
 
 /** The keys a backend holds (#2429): one saved list on ⌘1, and a list someone bound to ⌘T before the shell kept it. */

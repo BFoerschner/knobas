@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { gridLength, Heights, onGrid, stepOf, STEPS, textHeight } from "./windowed";
+import { LEVELS } from "../tf/zoom.svelte";
 
 /** Ten rows keyed `r0` … `r9`, 50 px estimated, no gap. */
 const ten = () => new Heights(50, 0);
@@ -159,6 +160,35 @@ describe("the device's layout grid (#2508)", () => {
     for (const k of keys) h.set(k, onGrid(40.796875, dpr));
     const room = (start: number) => unit(gridLength(h.around(start, start + 50).before, dpr), dpr);
     for (let start = 8; start < 150; start += 8) expect(room(start) - room(start - 8)).toBe(8 * 51 * STEPS);
+  });
+
+  it("lands the room on its step at every display scale times every zoom level, 125 % x 110 % among them (the zoom, 2026-11-16)", () => {
+    for (const display of [1, 1.25, 1.5, 2])
+      for (const level of LEVELS) {
+        // As Chromium tells it: the display's scale times the zoom, in a double.
+        const dpr = display * level;
+        for (let rows = 1; rows < 1600; rows += 13)
+          for (const device of [51, 61.1875, 23.75]) {
+            let css = 0;
+            for (let i = 0; i < rows; i++) css += onGrid(device / dpr, dpr);
+            expect(unit(gridLength(css, dpr), dpr), `${rows} rows of ${device} at ${display} x ${level}`).toBe(rows * device * STEPS);
+          }
+      }
+  });
+
+  it("puts heights measured at one scale on the next one's grid, so a swap after a zoom step moves nothing", () => {
+    const h = new Heights<number>(42, 0);
+    const keys = Array.from({ length: 300 }, (_, i) => i);
+    h.keys(keys);
+    // Measured at 125 %: 51 device pixels a row.
+    for (const k of keys) h.set(k, onGrid(51 / 1.25, 1.25));
+    // A step to 110 % on that screen: 1.375, where the row lays out at 56.125 device pixels (40.8 x 1.375 on the grid).
+    const dpr = 1.25 * 1.1;
+    h.regrid((px) => onGrid(px, dpr));
+    for (const k of keys) expect(h.heightOf(k) * dpr * STEPS).toBeCloseTo(Math.round(40.8 * dpr * STEPS), 6);
+    const room = (start: number) => unit(gridLength(h.around(start, start + 50).before, dpr), dpr);
+    const row = Math.round(40.8 * dpr * STEPS);
+    for (let start = 8; start < 200; start += 8) expect(room(start) - room(start - 8)).toBe(8 * row);
   });
 
   it("writes whole and power-of-two scales' room as the plain length", () => {

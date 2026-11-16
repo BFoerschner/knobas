@@ -42,6 +42,14 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // the bundled face with no ligatures, and reads the installed fonts afresh.
   "tf/code-face.svelte.ts#codeFace": async () => (await import("../tf/code-face.svelte")).codeFace.reset(),
   "tf/settings/TfCodeFont.svelte#asked": async () => (await import("../tf/settings/TfCodeFont.svelte")).forgetInstalledFonts(),
+  // The window's zoom (2026-11-16), stored in `localStorage`: each test starts at 100 %, nothing kept.
+  "tf/zoom.svelte.ts#zoom": async () => (await import("../tf/zoom.svelte")).zoom.forget(),
+  // The device scale and who hears it change (the zoom, 2026-11-16): each test reads the ratio afresh, with nobody listening.
+  "shell/device-scale.svelte.ts#listeners": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#ratio": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#query": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#armed": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#subscribe": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
   // Titles or Everything (#2430), stored in `localStorage`: each test starts on Titles.
   "launcher/scope.svelte.ts#launcherScope": async () => (await import("../launcher/scope.svelte")).launcherScope.reset(),
   // The keys bound (#2429), read from the backend: each test starts with none.

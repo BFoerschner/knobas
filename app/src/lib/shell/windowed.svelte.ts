@@ -36,6 +36,9 @@
  *   `gridLength` in `windowed.ts`), so a row swap moves none of the rows that
  *   stay, at any display scale: a row moved by a fraction of a pixel is
  *   painted again, and at 125 % every swap repainted the whole table (#2508).
+ *   A change of that scale (a zoom step, `tf/zoom.svelte.ts`, or a screen of
+ *   another scale) re-reads the drawn rows once, puts the heights held for
+ *   undrawn rows on the new grid and writes the room again (`device-scale`).
  * - `slice(items)` is what to draw; `start` is its first index.
  * - `topOf(index)` is where row `index` sits on screen, drawn or not.
  * - A list that scrolls itself (`scrolls: true`) reads the
@@ -61,6 +64,7 @@
  * and their rows) with one key per row.
  */
 import { untrack } from "svelte";
+import { onScaleChange } from "./device-scale.svelte";
 import { Heights, gridLength, onGrid, STEPS, type Span } from "./windowed";
 
 export interface WindowedOptions<K> {
@@ -141,6 +145,8 @@ export class Windowed<K = string> {
   #viewHeight = $state(0);
   /** Bumped when a measurement moves a row, so the span is worked out again. */
   #remeasured = $state(0);
+  /** Bumped when the device's scale changes, so the room is written again on the new grid. */
+  #grid = $state(0);
   /** The list's ancestors that clip it, nearest first. */
   #clips: HTMLElement[] = [];
   #synced: readonly K[] | null = null;
@@ -284,6 +290,7 @@ export class Windowed<K = string> {
       $effect(() => {
         // Not before the list's own padding is read, which would then be read with the room in it.
         if (!base.read) return;
+        void this.#grid;
         pad(node, "padding-top", this.before && base.top + this.before);
         pad(node, "padding-bottom", this.after && base.bottom + this.after);
       });
@@ -440,7 +447,9 @@ export class Windowed<K = string> {
     // Scroll events do not bubble; a capturing listener hears every box's.
     document.addEventListener("scroll", read, { capture: true, passive: true });
     window.addEventListener("resize", read, { passive: true });
+    const unscale = onScaleChange(() => this.#rescale());
     return () => {
+      unscale();
       if (queued) unplaced.delete(place);
       node.removeEventListener("focusin", focusIn);
       node.removeEventListener("focusout", focusOut);
@@ -459,9 +468,10 @@ export class Windowed<K = string> {
    * gap the list puts beside the spacer itself.
    */
   room = (side: "before" | "after") => (node: HTMLElement) => {
-    $effect(() =>
-      pad(node, "height", this[side] && this[side] - this.#options.gap),
-    );
+    $effect(() => {
+      void this.#grid;
+      pad(node, "height", this[side] && this[side] - this.#options.gap);
+    });
   };
 
   /** On each drawn row, with its key. */
@@ -571,6 +581,21 @@ export class Windowed<K = string> {
     if (keys === this.#synced) return;
     this.#synced = keys;
     this.#heights.keys(keys);
+  }
+
+  /**
+   * The device's scale changed (a zoom step): every height held was on the old grid. The undrawn rows' go onto the new
+   * one, each drawn row is observed afresh, so the observer reports it as laid out now (and `#measure` holds the row on
+   * screen through it, as for any redraw), and the room is written again.
+   */
+  #rescale() {
+    this.#heights.regrid((px) => onGrid(px));
+    for (const row of this.#drawn) {
+      this.#sizes?.unobserve(row);
+      this.#sizes?.observe(row);
+    }
+    this.#grid++;
+    this.#remeasured++;
   }
 
   /** `entries` may be missing: a test's stand-in observer calls back with none. */
