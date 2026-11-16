@@ -83,6 +83,128 @@ pub struct RawHit {
     excerpt_line: Option<i64>,
 }
 
+/// Whether a names answer is **few**: it fills no kind (`per_group` rows of
+/// one) and not the page (`limit` rows in all). Where two or three typed
+/// characters name so little under *Everything*, the text is asked as well
+/// ([`filled`]); names that fill a kind are the answer by themselves.
+#[must_use]
+pub(crate) fn few(names: &[RawHit], per_group: u32, limit: u32) -> bool {
+    let mut of_kind: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    let mut all = 0_u32;
+    for row in names.iter().filter(|row| row.is_hit()) {
+        let held = of_kind.entry(row.group_kind.as_str()).or_default();
+        *held += 1;
+        all += 1;
+        if *held >= per_group {
+            return false;
+        }
+    }
+    all < limit
+}
+
+/// The page two or three typed characters are answered with where the names
+/// are few (the two-letters pass, 2026-11-16;
+/// `docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`):
+/// `names`, every row of them where it stood, and in the room they leave the
+/// rows `text` found, the answer the words' ranking gives the same
+/// characters.
+///
+/// * **A name is never displaced.** `names` holds fewer rows than `limit`,
+///   so every one is on the page, first in its kind and in its own order.
+/// * **A row is on the page once.** One `text` found that `names` holds is
+///   the name.
+/// * **A kind holds `per_group` rows at most**, its names and what follows
+///   them.
+/// * **The room is dealt a row a kind at a time**, as the names' page is: a
+///   kind's rows of `text` count on from its names, so a kind that has no
+///   row yet takes its first before another takes its fourth. Within a
+///   round the higher rank first, then the newer, then the id.
+/// * **A kind's total is the rows the page holds of it**, as a names answer
+///   counts: no kind is a header alone.
+///
+/// The rows come back names first, then `text`'s in the order they arrived,
+/// which is by kind and then as ranked, so [`group`] draws a kind's names
+/// above what the text added.
+#[must_use]
+pub(crate) fn filled(
+    names: Vec<RawHit>,
+    text: Vec<RawHit>,
+    per_group: u32,
+    limit: u32,
+) -> Vec<RawHit> {
+    use std::cmp::Ordering;
+    use std::collections::{HashMap, HashSet};
+
+    let per_group = usize::try_from(per_group).unwrap_or(usize::MAX);
+    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+    let mut page: Vec<RawHit> = names.into_iter().filter(RawHit::is_hit).collect();
+    let mut held: HashSet<(String, String)> = HashSet::new();
+    let mut of_kind: HashMap<String, usize> = HashMap::new();
+    for row in &page {
+        held.insert((
+            row.group_kind.clone(),
+            row.entity_id.clone().unwrap_or_default(),
+        ));
+        *of_kind.entry(row.group_kind.clone()).or_default() += 1;
+    }
+
+    // Each row of the text that could join, with the place it would take in
+    // its kind.
+    let mut offered: Vec<(usize, usize)> = Vec::new();
+    let mut next = of_kind.clone();
+    for (index, row) in text.iter().enumerate() {
+        let Some(id) = row.entity_id.as_ref().filter(|_| row.is_hit()) else {
+            continue;
+        };
+        if held.contains(&(row.group_kind.clone(), id.clone())) {
+            continue;
+        }
+        let place = next.entry(row.group_kind.clone()).or_default();
+        if *place >= per_group {
+            continue;
+        }
+        *place += 1;
+        offered.push((*place, index));
+    }
+    // A row a kind at a time, the best of a round first.
+    let best_first = |a: &RawHit, b: &RawHit| {
+        b.rank
+            .partial_cmp(&a.rank)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| match (a.updated_at, b.updated_at) {
+                (Some(a), Some(b)) => b.cmp(&a),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            })
+            .then_with(|| a.entity_id.cmp(&b.entity_id))
+    };
+    offered.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| best_first(&text[a.1], &text[b.1]))
+    });
+    offered.truncate(limit.saturating_sub(page.len()));
+    let taken: HashSet<usize> = offered.into_iter().map(|(_, index)| index).collect();
+    for (index, row) in text.into_iter().enumerate() {
+        if taken.contains(&index) {
+            *of_kind.entry(row.group_kind.clone()).or_default() += 1;
+            page.push(row);
+        }
+    }
+    for row in &mut page {
+        row.kind_total = i64::try_from(of_kind[&row.group_kind]).unwrap_or(i64::MAX);
+    }
+    page
+}
+
+impl RawHit {
+    /// Whether the row is a hit and not the header of a kind the page cut:
+    /// the two columns [`hit`] asks for.
+    fn is_hit(&self) -> bool {
+        self.entity_id.is_some() && self.synced_at.is_some()
+    }
+}
+
 /// Fold the flat rows into groups, ordered by [`GROUP_ORDER`].
 ///
 /// The rows arrive ordered by kind and then by rank, so a group's hits keep
@@ -332,6 +454,219 @@ mod tests {
                 .iter()
                 .all(|s| !s.text.contains([snippet::HIT_START, snippet::HIT_STOP]))
         );
+    }
+
+    /// What a page holds, as `(kind, total, ids)` in the rows' own order.
+    fn page(rows: &[RawHit]) -> Vec<(String, i64, String)> {
+        rows.iter()
+            .map(|row| {
+                (
+                    row.group_kind.clone(),
+                    row.kind_total,
+                    row.entity_id.clone().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    fn of(rows: &[(&str, i64, &str)]) -> Vec<(String, i64, String)> {
+        rows.iter()
+            .map(|(kind, total, id)| ((*kind).to_owned(), *total, (*id).to_owned()))
+            .collect()
+    }
+
+    /// **The text fills the room the names leave** (`filled`): every name
+    /// stays where it stood, a row both found is the name, a kind holds its
+    /// cap and no more, and each kind's total is the rows the page holds.
+    #[test]
+    fn the_text_fills_the_room_the_names_leave() {
+        let names = || {
+            vec![
+                detail("ticket", 2, "ji:1", 1.0),
+                detail("ticket", 2, "ji:2", 0.0),
+                detail("repo", 1, "gt:r", 1.0),
+            ]
+        };
+        // As the words' statement gives them: by kind, then as ranked, with
+        // the header of a kind its page cut.
+        let text = || {
+            vec![
+                detail("page", 9, "cf:1", 0.6),
+                detail("page", 9, "cf:2", 0.2),
+                header("pr", 4),
+                detail("ticket", 30, "ji:9", 0.9),
+                detail("ticket", 30, "ji:2", 0.8),
+                detail("ticket", 30, "ji:8", 0.7),
+                detail("ticket", 30, "ji:7", 0.1),
+            ]
+        };
+        // Room for all of it: names first, each kind's text after its names,
+        // `ji:2` once, and no header.
+        assert_eq!(
+            page(&filled(names(), text(), 10, 40)),
+            of(&[
+                ("ticket", 5, "ji:1"),
+                ("ticket", 5, "ji:2"),
+                ("repo", 1, "gt:r"),
+                ("page", 2, "cf:1"),
+                ("page", 2, "cf:2"),
+                ("ticket", 5, "ji:9"),
+                ("ticket", 5, "ji:8"),
+                ("ticket", 5, "ji:7"),
+            ]),
+        );
+        // Three rows a kind: the tickets take one more after their two
+        // names, the best of the text's.
+        assert_eq!(
+            page(&filled(names(), text(), 3, 40)),
+            of(&[
+                ("ticket", 3, "ji:1"),
+                ("ticket", 3, "ji:2"),
+                ("repo", 1, "gt:r"),
+                ("page", 2, "cf:1"),
+                ("page", 2, "cf:2"),
+                ("ticket", 3, "ji:9"),
+            ]),
+        );
+        // No text: the names as they were.
+        assert_eq!(
+            page(&filled(names(), Vec::new(), 10, 40)),
+            of(&[
+                ("ticket", 2, "ji:1"),
+                ("ticket", 2, "ji:2"),
+                ("repo", 1, "gt:r"),
+            ]),
+        );
+    }
+
+    /// **The room is dealt a row a kind at a time.** A kind's text counts on
+    /// from its names, so the kind with no row yet takes its first before a
+    /// kind with two takes its third, whatever the ranks; within a round the
+    /// higher rank is first, then the newer row, then the id. No name gives
+    /// way, however many rows the text ranks above it.
+    #[test]
+    fn the_room_is_dealt_a_row_a_kind_at_a_time() {
+        let names = || {
+            vec![
+                detail("ticket", 2, "ji:1", 1.0),
+                detail("ticket", 2, "ji:2", 0.0),
+            ]
+        };
+        let at = |mut row: RawHit, minutes: i64| {
+            row.updated_at = Some(Utc::now() + chrono::Duration::minutes(minutes));
+            row
+        };
+        // The first rows of the pages and of the pull requests tie on rank,
+        // and the pull request is the newer.
+        let text = || {
+            vec![
+                at(detail("page", 3, "cf:1", 0.5), 1),
+                detail("page", 3, "cf:2", 0.1),
+                at(detail("pr", 2, "gt:a", 0.5), 9),
+                detail("pr", 2, "gt:b", 0.4),
+                detail("ticket", 9, "ji:9", 9.0),
+                detail("ticket", 9, "ji:8", 8.0),
+            ]
+        };
+        // Room for one: the first row of a kind that has none, the newer of
+        // the two that tie, and never the ticket that outranks both.
+        assert_eq!(
+            page(&filled(names(), text(), 10, 3)),
+            of(&[
+                ("ticket", 2, "ji:1"),
+                ("ticket", 2, "ji:2"),
+                ("pr", 1, "gt:a"),
+            ]),
+        );
+        // Room for three: both first rows, then the second round's best.
+        assert_eq!(
+            page(&filled(names(), text(), 10, 5)),
+            of(&[
+                ("ticket", 2, "ji:1"),
+                ("ticket", 2, "ji:2"),
+                ("page", 1, "cf:1"),
+                ("pr", 2, "gt:a"),
+                ("pr", 2, "gt:b"),
+            ]),
+        );
+        // Room for five: the tickets' third row waits for the third round.
+        assert_eq!(
+            page(&filled(names(), text(), 10, 7)),
+            of(&[
+                ("ticket", 3, "ji:1"),
+                ("ticket", 3, "ji:2"),
+                ("page", 2, "cf:1"),
+                ("page", 2, "cf:2"),
+                ("pr", 2, "gt:a"),
+                ("pr", 2, "gt:b"),
+                ("ticket", 3, "ji:9"),
+            ]),
+        );
+        // A full page of names takes nothing.
+        assert_eq!(
+            page(&filled(names(), text(), 10, 2)),
+            of(&[("ticket", 2, "ji:1"), ("ticket", 2, "ji:2")]),
+        );
+
+        // Within a round the higher rank, whatever the dates; and where rank
+        // and date tie, the id.
+        let ranked = vec![
+            at(detail("page", 1, "cf:1", 0.2), 9),
+            at(detail("pr", 1, "gt:a", 0.5), 1),
+        ];
+        assert_eq!(
+            page(&filled(names(), ranked, 10, 3)),
+            of(&[
+                ("ticket", 2, "ji:1"),
+                ("ticket", 2, "ji:2"),
+                ("pr", 1, "gt:a"),
+            ]),
+        );
+        let tied = vec![detail("pr", 1, "gt:a", 0.5), detail("page", 1, "cf:1", 0.5)];
+        assert_eq!(
+            page(&filled(names(), tied, 10, 3)),
+            of(&[
+                ("ticket", 2, "ji:1"),
+                ("ticket", 2, "ji:2"),
+                ("page", 1, "cf:1"),
+            ]),
+        );
+        // A row with a date is ahead of one with none.
+        let dated = vec![
+            detail("page", 1, "cf:1", 0.5),
+            at(detail("pr", 1, "gt:a", 0.5), 0),
+        ];
+        assert_eq!(
+            page(&filled(names(), dated, 10, 3)),
+            of(&[
+                ("ticket", 2, "ji:1"),
+                ("ticket", 2, "ji:2"),
+                ("pr", 1, "gt:a"),
+            ]),
+        );
+    }
+
+    /// **Names are few where they fill no kind and not the page** (`few`):
+    /// then the text is asked as well. A kind at its cap, or a full page, is
+    /// an answer by itself; a header is no row.
+    #[test]
+    fn names_are_few_where_they_fill_no_kind_and_not_the_page() {
+        let names = vec![
+            detail("ticket", 2, "ji:1", 1.0),
+            detail("ticket", 2, "ji:2", 0.0),
+            detail("repo", 1, "gt:r", 1.0),
+            header("pr", 4),
+        ];
+        assert!(few(&names, 10, 40));
+        // Three rows a kind: two tickets are under it, and at two they fill
+        // their kind.
+        assert!(few(&names, 3, 40));
+        assert!(!few(&names, 2, 40));
+        // Three rows in all fill a page of three, and leave room in four.
+        assert!(few(&names, 10, 4));
+        assert!(!few(&names, 10, 3));
+        assert!(few(&[], 10, 40));
+        assert!(few(&[header("pr", 4)], 1, 1));
     }
 
     /// A null snippet is browse mode (no text, so no headline), not an error.

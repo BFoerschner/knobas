@@ -361,11 +361,11 @@ impl Searcher {
         self.search_as(query, true).await
     }
 
-    /// [`Self::search`] with one typed character ranked as longer words are
-    /// ([`sql::search_sql`]), as every query was answered before the
-    /// one-letter pass (2026-11-15): the reference
-    /// `tests/it/one_letter.rs` holds the queries of two characters and
-    /// more to, and shows a single one against.
+    /// [`Self::search`] with a word's first characters ranked as longer words
+    /// are ([`sql::search_sql`]), as every query was answered before the
+    /// one-letter pass (2026-11-15): the reference `tests/it/one_letter.rs`
+    /// and `tests/it/short_words.rs` hold the queries the names do not
+    /// answer to, and show one to three characters against.
     ///
     /// # Errors
     ///
@@ -375,7 +375,7 @@ impl Searcher {
         self.search_as(query, false).await
     }
 
-    /// [`Self::search`], one typed character answered by names where
+    /// [`Self::search`], a word's first characters answered by names where
     /// `by_name` says so.
     async fn search_as(
         &self,
@@ -466,6 +466,14 @@ impl Searcher {
                         // starts three workers whatever it matches (31 to 37
                         // ms each on Windows, `sql::LETTER_PLANNING`).
                         Named::NoName => sql::fetch_matched(&self.pool, built).await?,
+                        // Few names: the text's rows in the room they
+                        // leave, read the same way.
+                        Named::Few(names) => group::filled(
+                            names,
+                            sql::fetch_matched(&self.pool, built).await?,
+                            PER_GROUP,
+                            query.limit,
+                        ),
                         _ => self.rows_of(built, text).await?,
                     }
                 }
@@ -497,19 +505,33 @@ impl Searcher {
         })
     }
 
-    /// The rows **one typed character** is answered with (the one-letter
-    /// pass, 2026-11-15; `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`):
-    /// the names that hold a word beginning with it, those that begin with
-    /// it first, then the newest ([`sql::letter_sql`]), under *Titles* and
-    /// under *Everything* alike.
+    /// The rows **a word's first characters** are answered with: one typed
+    /// character (the one-letter pass, 2026-11-15;
+    /// `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`), and
+    /// two or three (the two-letters pass, 2026-11-16;
+    /// `docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`).
+    /// The names that hold a word beginning with them, those that begin
+    /// with them first, then the newest ([`sql::letter_sql`]), under
+    /// *Titles* and under *Everything* alike.
     ///
-    /// Where [`sql::search_sql`] is to answer instead, it says which way:
-    /// [`Named::NotAsked`] for words of more than one character, a finished
-    /// word (`p` and a space) or a query that asks what the stored
-    /// characters do not hold, and [`Named::NoName`] where, under
-    /// *Everything*, no name holds the character, so the bodies are asked
-    /// as before and *nothing matches* stays true of them too. Under
-    /// *Titles* the names were the whole question, and none is the answer.
+    /// Where [`sql::search_sql`] is to answer instead, or beside, it says
+    /// which way:
+    ///
+    /// * [`Named::NotAsked`] for a longer word, a finished one (`p` and a
+    ///   space), two or three characters that are not all letters and
+    ///   digits, or a query that asks what the stored characters do not
+    ///   hold.
+    /// * [`Named::NoName`] where, under *Everything*, no name holds the
+    ///   characters, so the bodies are asked as before and *nothing matches*
+    ///   stays true of them too.
+    /// * [`Named::Few`] where, under *Everything*, the names of two or three
+    ///   characters are few, filling no kind and not the page
+    ///   ([`group::few`]): the text is asked too, and its rows take the room
+    ///   the names leave ([`group::filled`]). Names that fill a kind are the
+    ///   answer, and so are one character's, as they were decided.
+    ///
+    /// Under *Titles* the names were the whole question, and none is the
+    /// answer.
     async fn rows_by_name(
         &self,
         words: Option<&str>,
@@ -517,17 +539,21 @@ impl Searcher {
         filters: &EffectiveFilters,
         limit: u32,
     ) -> Result<Named, sqlx::Error> {
-        let Some(letter) = words.filter(|text| prefix_last && text.chars().count() == 1) else {
+        let Some(typed) = words.filter(|text| prefix_last && named_by_its_start(text)) else {
             return Ok(Named::NotAsked);
         };
         // Names, so no run log: a log is never one (`corpus::searched`).
         let corpora = corpus::searched(self.corpora(), true);
-        let Some(built) = sql::letter_sql(&corpora, letter, filters, PER_GROUP, limit) else {
+        let Some(built) = sql::letter_sql(&corpora, typed, filters, PER_GROUP, limit) else {
             return Ok(Named::NotAsked);
         };
         let rows: Vec<RawHit> = sql::fetch_named(&self.pool, built).await?;
-        Ok(if rows.is_empty() && !filters.titles {
+        Ok(if filters.titles {
+            Named::Rows(rows)
+        } else if rows.is_empty() {
             Named::NoName
+        } else if typed.chars().count() > 1 && group::few(&rows, PER_GROUP, limit) {
+            Named::Few(rows)
         } else {
             Named::Rows(rows)
         })
@@ -987,16 +1013,33 @@ impl Searcher {
     }
 }
 
-/// What the names say of one typed character ([`Searcher::rows_by_name`]).
+/// What the names say of a word's first characters
+/// ([`Searcher::rows_by_name`]).
 enum Named {
     /// The answer: the rows the names give, which under *Titles* may be none.
     Rows(Vec<RawHit>),
-    /// No name holds the character, and under *Everything* the bodies are
+    /// The names of two or three characters, and few of them: under
+    /// *Everything* the text is still to ask, for the room they leave.
+    Few(Vec<RawHit>),
+    /// No name holds the characters, and under *Everything* the bodies are
     /// still to ask.
     NoName,
-    /// Not one typed character, or one asked with what the stored
+    /// Not a word's first characters, or asked with what the stored
     /// characters do not hold: the words' ranking answers, as before.
     NotAsked,
+}
+
+/// Whether `text` is a word's first characters as the stored ones hold them
+/// (`sync.item_initial`): one character, or two or three that are all
+/// letters and digits. A longer word is ranked, and so are two or three
+/// characters the parser would read as more than one word (`c#`, `a-b`,
+/// `-pa`): their lexemes are not what was typed.
+fn named_by_its_start(text: &str) -> bool {
+    match text.chars().count() {
+        1 => true,
+        2 | 3 => text.chars().all(char::is_alphanumeric),
+        _ => false,
+    }
 }
 
 /// What a query admits of one kind ([`Searcher::admits_in`]).

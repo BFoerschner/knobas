@@ -8,8 +8,9 @@
 //! it. The bounded read to the full ranking it stands for
 //! ([`letter_sql_unstored`]), over the scale seed's words and after every
 //! kind of write. The stored characters to the mirror's rows. And every
-//! query of two characters and more to the answer it had before
-//! ([`Searcher::search_by_words`]).
+//! query the names do not answer to the answer it had before
+//! ([`Searcher::search_by_words`]). Two and three characters, which names
+//! answer since 2026-11-16, are held in `short_words.rs`.
 //!
 //! This module has a database of its own (`knobas_db::test_util` keys it by
 //! file), shared by its tests, so each test reads the rows of a source it
@@ -28,18 +29,18 @@ use knobas_search::{
 
 use super::item_search::{seed_scale_words, source};
 
-async fn pool() -> sqlx::PgPool {
+pub(super) async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
     pool
 }
 
-fn at(minutes: i64) -> DateTime<Utc> {
+pub(super) fn at(minutes: i64) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap() + Duration::minutes(minutes)
 }
 
 /// One mirror row of `source`, its id `<source>:<key>`.
-async fn item(
+pub(super) async fn item(
     pool: &sqlx::PgPool,
     source: &str,
     kind: &str,
@@ -73,14 +74,19 @@ async fn item(
 }
 
 /// The launcher's answer to `raw` over `source`'s rows.
-async fn ask(pool: &sqlx::PgPool, source: &str, raw: &str, titles: bool) -> SearchResponse {
+pub(super) async fn ask(
+    pool: &sqlx::PgPool,
+    source: &str,
+    raw: &str,
+    titles: bool,
+) -> SearchResponse {
     Searcher::new(pool.clone())
         .search(query(source, raw, titles))
         .await
         .unwrap()
 }
 
-fn query(source: &str, raw: &str, titles: bool) -> SearchQuery {
+pub(super) fn query(source: &str, raw: &str, titles: bool) -> SearchQuery {
     SearchQuery {
         titles,
         raw: raw.to_owned(),
@@ -93,9 +99,9 @@ fn query(source: &str, raw: &str, titles: bool) -> SearchQuery {
 }
 
 /// Each group as `(kind, total, its hits' ids and ranks in order)`.
-type Answer = Vec<(String, u32, Vec<(String, f32)>)>;
+pub(super) type Answer = Vec<(String, u32, Vec<(String, f32)>)>;
 
-fn read(response: &SearchResponse) -> Answer {
+pub(super) fn read(response: &SearchResponse) -> Answer {
     response
         .groups
         .iter()
@@ -110,7 +116,7 @@ fn read(response: &SearchResponse) -> Answer {
         .collect()
 }
 
-fn answer(rows: Vec<RawHit>) -> Answer {
+pub(super) fn answer(rows: Vec<RawHit>) -> Answer {
     group::group(rows, &KindCatalog::default())
         .into_iter()
         .map(|g| {
@@ -125,7 +131,7 @@ fn answer(rows: Vec<RawHit>) -> Answer {
 }
 
 /// [`Answer`] without its totals: a bounded read counts the rows it holds.
-fn hits(answer: &Answer) -> Vec<(String, Vec<(String, f32)>)> {
+pub(super) fn hits(answer: &Answer) -> Vec<(String, Vec<(String, f32)>)> {
     answer
         .iter()
         .map(|(kind, _, hits)| (kind.clone(), hits.clone()))
@@ -355,7 +361,7 @@ async fn a_character_no_name_holds_is_asked_of_the_bodies_under_everything() {
 }
 
 /// How the scale corpus of `source` is asked for a character.
-fn filters(source: &str) -> EffectiveFilters {
+pub(super) fn filters(source: &str) -> EffectiveFilters {
     EffectiveFilters {
         sources: vec![source.to_owned()],
         ..EffectiveFilters::default()
@@ -364,7 +370,7 @@ fn filters(source: &str) -> EffectiveFilters {
 
 /// `letter` asked of the stored characters and of the mirror's own rows,
 /// under `filters`, `per_group` rows a kind and `limit` in all.
-async fn both(
+pub(super) async fn both(
     pool: &sqlx::PgPool,
     letter: &str,
     filters: &EffectiveFilters,
@@ -521,13 +527,13 @@ async fn the_bounded_read_is_the_full_rankings_first_rows() {
 
 /// How many of `source`'s stored characters are not the mirror row's: a
 /// row the function gives that is not stored, or a stored row it does not
-/// give, by id, character, lead, kind, source and date.
-async fn out_of_step(pool: &sqlx::PgPool, source: &str) -> i64 {
+/// give, by id, characters (one, two or three), lead, kind, source and date.
+pub(super) async fn out_of_step(pool: &sqlx::PgPool, source: &str) -> i64 {
     sqlx::query_scalar(
         "with now as (
            select i.entity_id, n.initial, n.leads, i.kind, i.source_id, i.item_updated_at
              from sync.item i
-            cross join lateral sync.name_initials(ts_filter(i.fts, '{a}'), i.title, i.kind,
+            cross join lateral sync.name_prefixes(ts_filter(i.fts, '{a}'), i.title, i.kind,
                                                   i.entity_id, i.key_cell) n
             where i.entity_id like $1 || ':%'),
          stored as (
@@ -543,10 +549,12 @@ async fn out_of_step(pool: &sqlx::PgPool, source: &str) -> i64 {
     .unwrap()
 }
 
-/// `id`'s stored characters as `(character, leads)`, in order.
+/// `id`'s stored first characters as `(character, leads)`, in order: its
+/// rows of one character (`short_words.rs` reads the longer ones).
 async fn initials(pool: &sqlx::PgPool, id: &str) -> Vec<(String, bool)> {
     sqlx::query_as(
-        "select initial, leads from sync.item_initial where entity_id = $1 order by initial",
+        "select initial, leads from sync.item_initial
+          where entity_id = $1 and length(initial) = 1 order by initial",
     )
     .bind(id)
     .fetch_all(pool)
@@ -748,7 +756,7 @@ async fn a_withdrawn_row_and_a_source_switched_off_are_not_answered() {
 
 /// What a response says beside its timing: each group's kind, total, and
 /// each hit's id, rank and excerpts.
-fn said(response: &SearchResponse) -> String {
+pub(super) fn said(response: &SearchResponse) -> String {
     let groups: Vec<_> = response
         .groups
         .iter()
@@ -764,22 +772,24 @@ fn said(response: &SearchResponse) -> String {
     format!("{:?} {groups:?}", response.total)
 }
 
-/// **Two characters and more answer as they did.** Every probe is asked of
-/// the launcher and of the ranking of words alone
-/// ([`Searcher::search_by_words`], every query's answer before this pass),
-/// under both scopes: the prefixes a reader types past the first letter,
-/// whole words, two words, a phrase, a key, and one character that is a
-/// finished word (`p` and a space), which is a word and not a character
-/// being typed. One character typed is the answer that differs.
+/// **What the names do not answer is answered as it was.** Every probe is
+/// asked of the launcher and of the ranking of words alone
+/// ([`Searcher::search_by_words`], every query's answer before the
+/// one-letter pass), under both scopes: words of four characters and more,
+/// whole words, two words, a phrase, a key, a word left out, a finished word
+/// of one, two and three characters (`p` and a space), which is a word and
+/// not the start of one, and two or three characters that are not all
+/// letters and digits. One, two and three characters typed are the answers
+/// that differ.
 #[tokio::test]
-async fn two_characters_and_more_answer_as_they_did() {
+async fn what_the_names_do_not_answer_is_answered_as_it_was() {
     let pool = pool().await;
     let s = seed_scale_words(&pool, 300).await;
     let searcher = Searcher::new(pool.clone());
     let probes = [
-        "pa",
-        "pay",
-        "re",
+        "payo",
+        "retr",
+        "sche",
         "retry",
         "payout",
         "fx quotes",
@@ -789,8 +799,20 @@ async fn two_characters_and_more_answer_as_they_did() {
         "PAY-12",
         "p ",
         "r ",
+        "pa ",
+        "re ",
+        "pay ",
         "p r",
-        "#t pa",
+        "pa re",
+        "#t payo",
+        "#t pay ",
+        "p-",
+        "a-b",
+        "c#",
+        "-pa",
+        "\"pa",
+        "p.",
+        "pa:",
     ];
     let mut matched = 0;
     for raw in probes {
@@ -804,18 +826,24 @@ async fn two_characters_and_more_answer_as_they_did() {
             matched += usize::from(now.total > 0);
         }
     }
-    assert!(matched >= 14, "the probes that matched: {matched}");
+    assert!(matched >= 24, "the probes that matched: {matched}");
 
-    // One character typed is the answer this pass changed, under both
-    // scopes, so the comparison above can tell the two apart.
-    for titles in [false, true] {
-        let now = searcher.search(query(&s, "p", titles)).await.unwrap();
-        let before = searcher
-            .search_by_words(query(&s, "p", titles))
-            .await
-            .unwrap();
-        assert!(now.total > 0 && before.total > now.total, "titles {titles}");
-        assert_ne!(said(&now), said(&before), "titles {titles}");
+    // One, two and three characters typed are the answers the two passes
+    // changed, under both scopes, so the comparison above can tell the two
+    // apart.
+    for raw in ["p", "pa", "pay", "#t pa"] {
+        for titles in [false, true] {
+            let now = searcher.search(query(&s, raw, titles)).await.unwrap();
+            let before = searcher
+                .search_by_words(query(&s, raw, titles))
+                .await
+                .unwrap();
+            assert!(
+                now.total > 0 && before.total > now.total,
+                "{raw:?}, titles {titles}"
+            );
+            assert_ne!(said(&now), said(&before), "{raw:?}, titles {titles}");
+        }
     }
 }
 
@@ -851,7 +879,7 @@ async fn a_kinds_rows_are_read_in_the_index_order() {
 
 /// The lines of `plan` under the node that begins `stage`: those indented
 /// past it, up to the next that is not.
-fn stage_of(plan: &str, stage: &str) -> String {
+pub(super) fn stage_of(plan: &str, stage: &str) -> String {
     let indent = |line: &str| line.len() - line.trim_start().len();
     let mut lines = plan.lines().skip_while(|line| line.trim_start() != stage);
     let head = lines

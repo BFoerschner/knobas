@@ -1258,11 +1258,13 @@ pub const LIVE_ITEM_MATCH: Corpus = Corpus {
     matched: None,
 };
 
-/// The mirror for **one typed character** (the one-letter pass, 2026-11-15):
-/// `sync.item_initial` (migration `0093`), one row for each first character
-/// of the words a mirror row is named by, in the order such an answer is
-/// given in. `crate::sql::letter_sql` reads each kind's first rows off its
-/// index and stops, so its liveness is two probes a row read
+/// The mirror for **a word's first characters** (one, the one-letter pass,
+/// 2026-11-15; two and three, the two-letters pass, 2026-11-16):
+/// `sync.item_initial` (migrations `0093` and `0094`), one row for each
+/// first character, first two and first three of the words a mirror row is
+/// named by, in the order such an answer is given in.
+/// `crate::sql::letter_sql` reads each kind's first rows off its index and
+/// stops, so its liveness is two probes a row read
 /// (`knobas_core::live_by_key!`) and no set built for the statement.
 ///
 /// **What it cannot answer.** It holds a row's kind, source and date and no

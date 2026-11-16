@@ -184,46 +184,57 @@ pub fn search_sql(
     )
 }
 
-/// The launcher's statement for **one typed character** (the one-letter
-/// pass, 2026-11-15;
-/// `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`): the rows
-/// a word of whose name begins with it, those whose name begins with it
-/// first, then the newest.
+/// The launcher's statement for **one, two or three typed characters**
+/// (the one-letter pass, 2026-11-15, and the two-letters pass, 2026-11-16;
+/// `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`,
+/// `docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`):
+/// the rows a word of whose name begins with them, those whose name begins
+/// with them first, then the newest.
 ///
 /// # Why it is its own statement
 ///
 /// One character matches every row holding a word that begins with it,
 /// 35,232 of 39,770 on Björn's scale, and [`search_sql`] ranks each match by
 /// how many such words it holds: 52 ms on four processes on the Mac, 121 ms
-/// on his PC, for a number that says nothing a person meant by one key. A
-/// character is answered by **names** instead: what *Titles* matches (a
-/// word of the title or the key begins with it), whatever the scope, in an
-/// order that depends on nothing typed. So the order is an index
-/// (`sync.item_initial`, migration `0093`), and the mirror's branch of `m`
-/// holds each kind's first `per_group` rows of it and no more: a hundred
-/// index entries read where there were 35,000 vectors ranked.
+/// on his PC, for a number that says nothing a person meant by one key. Two
+/// characters are the same read (`pa` 25,886 rows and 75 ms, `re` 28,778
+/// and 106), and three nearly (`con` 25,498 and 71). The first characters
+/// of a word are answered by **names** instead: what *Titles* matches (a
+/// word of the title or the key begins with them), whatever the scope, in
+/// an order that depends on nothing typed. So the order is an index
+/// (`sync.item_initial`, migrations `0093` and `0094`), and the mirror's
+/// branch of `m` holds each kind's first `per_group` rows of it and no
+/// more: a hundred index entries read where there were 35,000 vectors
+/// ranked.
 ///
 /// # What differs from [`search_sql`]
 ///
-/// * **`q`**: the word the character lexes to under the `simple`
-///   configuration (`q.c`: lower-cased, and no stop words, so `s` and `a`
-///   answer as `p` does), and that word as a prefix (`q.tsq`), which the
-///   corpora with no stored characters match their weight-A lexemes by. A
-///   character the parser reads as no word (`-`, `"`) gives no row, and the
-///   statement answers nothing.
-/// * **The mirror's branch of `m`**: for each kind that holds the character
+/// * **`q`**: the word the characters lex to (`q.c`), and that word as a
+///   prefix (`q.tsq`), which the corpora with no stored characters match
+///   their weight-A lexemes by. The word is the `english` lexeme, the one
+///   [`search_sql`] matches by, so `ops` asks for `op` as it always did
+///   and the names matched are the ones *Titles* matched; where `english`
+///   reads a stop word (`s`, `a`, `in`, `the`), the word as `simple` lexes
+///   it, lower-cased and kept, so those answer as `p` and `pa` do. A
+///   character the parser reads as no word (`-`, `"`) gives no row, and
+///   the statement answers nothing.
+/// * **The mirror's branch of `m`**: for each kind that holds the word
 ///   (`letter_kinds`, one probe of the index a kind), the first `per_group`
 ///   live rows in the index's order, [`crate::corpus::LIVE_ITEM_INITIAL`].
-/// * **The rank** is whether a name of the row begins with the character,
-///   1 or 0, so the stages after `m` order a kind as the index does: those
+/// * **The rank** is whether a name of the row begins with the word, 1 or
+///   0, so the stages after `m` order a kind as the index does: those
 ///   first, then the newest, then the id.
 /// * **The page is dealt a row a kind at a time** (`picked`): every kind's
-///   first row, then every kind's second, up to `limit`. One character
-///   says nothing of which kind is meant, and the rows that lead and are
-///   newest of all would be the kinds that change most.
+///   first row, then every kind's second, up to `limit`. A word's first
+///   characters say nothing of which kind is meant, and the rows that lead
+///   and are newest of all would be the kinds that change most.
 /// * **A kind's total** is the rows `m` holds of it, `per_group` at most:
 ///   the matches are not counted, which is the read this statement exists
 ///   to leave out, and nothing draws the count.
+///
+/// `letter` is what was typed, of any length: the caller asks only what the
+/// stored characters hold, one character or two or three letters and digits
+/// (`Searcher::rows_by_name`). A longer word would find no stored row.
 ///
 /// `None` for a query that asks what the stored characters do not hold (an
 /// author, a parent, a reach, a name glob, a ticket key): [`search_sql`]
@@ -263,9 +274,9 @@ pub fn letter_sql(
 
 /// [`letter_sql`]'s answer read with no stored character: every name match
 /// of the mirror, each one's lead worked out from its row
-/// (`sync.name_initials`, the function the stored rows are written by), cut
+/// (`sync.name_prefixes`, the function the stored rows are written by), cut
 /// by the stages [`search_sql`] cuts with. What `tests/it/one_letter.rs`
-/// holds [`letter_sql`]'s rows and order to.
+/// and `tests/it/short_words.rs` hold [`letter_sql`]'s rows and order to.
 #[cfg(any(test, feature = "test-util"))]
 #[must_use]
 pub fn letter_sql_unstored(
@@ -323,8 +334,9 @@ enum Matching {
     /// As typed: every word, the last as a prefix while it is being typed,
     /// ranked by cover density ([`search_sql`]).
     Words,
-    /// One character, by the names that hold a word beginning with it, the
-    /// mirror's read off `sync.item_initial` ([`letter_sql`]).
+    /// A word's first characters, one to three, by the names that hold a
+    /// word beginning with them, the mirror's read off `sync.item_initial`
+    /// ([`letter_sql`]).
     Letter,
     /// [`Matching::Letter`] with the mirror's names matched and their leads
     /// worked out row by row ([`letter_sql_unstored`]).
@@ -391,13 +403,15 @@ fn build_search_sql(
         "with\n"
     });
 
-    // The word a typed character lexes to (`letter_sql`): one expression of
-    // the bind, which the planner folds, so the index reads below compare
-    // against a value and join nothing.
+    // The word the typed characters lex to (`letter_sql`): the `english`
+    // lexeme, as the words' statement reads them, and the `simple` one where
+    // `english` drops a stop word. One expression of the bind, so the index
+    // reads below compare against a value and join nothing.
     let letter = match &tsquery {
-        Some(raw) if by_letter => {
-            format!("(tsvector_to_array(to_tsvector('simple', {raw})))[1]")
-        }
+        Some(raw) if by_letter => format!(
+            "coalesce((tsvector_to_array(to_tsvector('english', {raw})))[1], \
+             (tsvector_to_array(to_tsvector('simple', {raw})))[1])"
+        ),
         _ => String::new(),
     };
 
@@ -464,7 +478,7 @@ fn build_search_sql(
         _ => index,
     };
 
-    // The kinds that hold the typed character, in the stored characters'
+    // The kinds that hold the typed characters, in the stored characters'
     // index: its first entry, then the first past each kind found (a loose
     // scan: one probe a kind, where a `distinct` reads every entry).
     if matching == Matching::Letter && mirror.is_some() {
@@ -519,9 +533,10 @@ fn build_search_sql(
             _ => corpus,
         };
         let rank = match (text.is_some(), prefix_last) {
-            // One character: whether a name of the row begins with it. The
-            // mirror's rows as the stored characters are written
-            // (`sync.name_initials`), another corpus's by its first lexeme.
+            // A word's first characters: whether a name of the row begins
+            // with them. The mirror's rows as the stored characters are
+            // written (`sync.name_prefixes`), another corpus's by its first
+            // lexeme.
             _ if by_letter && Some(index) == mirror => LEADS_UNSTORED.to_owned(),
             _ if by_letter => LEADS.replace("{fts}", corpus.fts),
             (true, true) => RANK_WHOLE.replace("{fts}", corpus.fts),
@@ -530,7 +545,8 @@ fn build_search_sql(
         };
         // What a corpus stores (#1650) it is not lexed for, per match.
         let named = match (text, corpus.named) {
-            // One character orders by its leads and the date alone.
+            // A word's first characters order by their leads and the date
+            // alone.
             _ if by_letter => "false".to_owned(),
             (None, _) => "false".to_owned(),
             (Some(_), Some(stored)) => stored.to_owned(),
@@ -577,9 +593,9 @@ fn build_search_sql(
                 "top as (\n  select t.* from totals k\n   cross join lateral (select m.* from m where m.kind = k.kind\n                        order by {within}\n                        limit {per_group}) t\n),"
             );
             if by_letter {
-                // One character says nothing of which kind is meant, so the
-                // page is dealt a row a kind at a time: every kind that
-                // holds the character shows its first rows, where the
+                // A word's first characters say nothing of which kind is
+                // meant, so the page is dealt a row a kind at a time: every
+                // kind that holds them shows its first rows, where the
                 // newest of all would be the kinds that change most.
                 let _ = writeln!(
                     sql,
@@ -1885,8 +1901,9 @@ const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', tru
      set_config('parallel_setup_cost', '0', true), \
      set_config('max_parallel_workers_per_gather', '3', true)";
 
-/// [`fetch_named`]'s: **one plan for every character**, made once a
-/// connection and kept (`plan_cache_mode` `force_generic_plan`).
+/// [`fetch_named`]'s: **one plan for every character, and for two and
+/// three**, made once a connection and kept (`plan_cache_mode`
+/// `force_generic_plan`).
 ///
 /// The statement's work is bounded by its limits whatever was typed: a
 /// probe of the index a kind, and each kind's first rows in the index's
@@ -2238,19 +2255,19 @@ fn clamp_days(days: u32) -> i32 {
 /// this only decides their order.
 const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.whole)\n              else ts_rank_cd({fts}, q.tsq) end";
 
-/// Whether a name of a match begins with the typed character (`q.c`), as a
+/// Whether a name of a match begins with the typed characters (`q.c`), as a
 /// rank of 1 or 0, for a corpus whose index is `{fts}` and that stores no
 /// characters of its own ([`letter_sql`]): the first lexeme of its weight-A
 /// half, the one at the lowest position, which is its title's first word.
 /// The notes, the assets, the routes, the views, the sets and the saved
 /// lists: tens of rows each, lexed when they were written.
-const LEADS: &str = "coalesce((select left(u.lexeme, 1) from unnest(ts_filter({fts}, '{a}')) u\n                          order by u.positions[1], u.lexeme limit 1) = q.c, false)::int::real";
+const LEADS: &str = "coalesce((select left(u.lexeme, length(q.c)) from unnest(ts_filter({fts}, '{a}')) u\n                          order by u.positions[1], u.lexeme limit 1) = q.c, false)::int::real";
 
 /// [`LEADS`] for the mirror read with no stored character
-/// ([`letter_sql_unstored`]): the lead `sync.name_initials` gives the row,
-/// the function `sync.item_initial`'s rows are written by (migration `0093`).
+/// ([`letter_sql_unstored`]): the lead `sync.name_prefixes` gives the row,
+/// the function `sync.item_initial`'s rows are written by (migration `0094`).
 #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
-const LEADS_UNSTORED: &str = "coalesce((select n.leads from sync.name_initials(sx.fts_a, i.title, i.kind, i.entity_id, i.key_cell) n\n                          where n.initial = q.c), false)::int::real";
+const LEADS_UNSTORED: &str = "coalesce((select n.leads from sync.name_prefixes(sx.fts_a, i.title, i.kind, i.entity_id, i.key_cell) n\n                          where n.initial = q.c), false)::int::real";
 
 /// Whether a match is *named* exactly what was typed, for a corpus whose
 /// title is `{title}`: the title, lexed as the index lexes it, is the typed
@@ -2592,11 +2609,11 @@ mod tests {
         );
     }
 
-    /// One typed character's statement ([`letter_sql`]) is held to the same
-    /// two rules: the character is a bind, the literals are the closed list
-    /// and the two its own fragments add, and the placeholders are dense and
-    /// in order. And what the stored characters do not hold is not asked of
-    /// them.
+    /// The statement of a word's first characters ([`letter_sql`]) is held
+    /// to the same two rules: what was typed is a bind, the literals are the
+    /// closed list and the one its own fragment adds, and the placeholders
+    /// are dense and in order. And what the stored characters do not hold is
+    /// not asked of them.
     #[test]
     fn a_typed_character_never_enters_the_sql_string() {
         // One character, and the one that would end a literal.
