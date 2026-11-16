@@ -1131,7 +1131,7 @@
   {/if}
   {#if list}
     <!-- Drawn once the band has stuck: at the diff's start there is nothing above it to go back to. -->
-    <button type="button" class="tf-btn tf-sm tf-ghost tf-dtop" tabindex={stuck ? undefined : -1} onclick={toTop}>Back to top</button>
+    <button type="button" class="tf-btn tf-sm tf-ghost tf-dtop" title="The page's start: Home" tabindex={stuck ? undefined : -1} onclick={toTop}>Back to top</button>
   {/if}
 </div>
 {#if cut}
