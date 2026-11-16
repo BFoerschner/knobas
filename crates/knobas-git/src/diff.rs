@@ -190,10 +190,22 @@ impl Repo {
         let pairs = work.renamed(pairs)?;
         let mut out = Vec::new();
         match ask.form {
-            DiffForm::Raw => work.raw(&mut out, &pairs)?,
-            DiffForm::RawNumstat => {
-                work.raw(&mut out, &pairs)?;
-                work.numstat(&mut out, &pairs, ask.max_bytes)?;
+            DiffForm::Raw | DiffForm::RawNumstat => {
+                let numstat = ask.form == DiffForm::RawNumstat;
+                // The counts, where they are printed or decide what is.
+                let counts = if numstat || ask.ignore_space {
+                    let mut counts = Vec::with_capacity(pairs.len());
+                    for pair in &pairs {
+                        counts.push(work.counted(pair)?);
+                    }
+                    Some(counts)
+                } else {
+                    None
+                };
+                work.raw(&mut out, &pairs, counts.as_deref())?;
+                if numstat {
+                    work.numstat(&mut out, &pairs, counts.as_deref().unwrap_or_default());
+                }
             }
             DiffForm::Patch => work.patch(&mut out, &pairs, ask.max_lines, ask.max_bytes)?,
         }
@@ -616,9 +628,32 @@ impl<'a> Work<'a> {
             .collect())
     }
 
-    /// `--raw -z`.
-    fn raw(&mut self, out: &mut Vec<u8>, pairs: &[Pair]) -> Result<(), AskGit> {
-        for pair in pairs {
+    /// `--raw -z`. With blanks ignored (`counts` given), only the files in
+    /// which something is left to show, as git lists them since 2.52: an
+    /// added or deleted file, a changed mode or kind, a binary file whose
+    /// content changed, a text with a line added or removed. A file whose
+    /// lines differ in blanks alone is not listed, and neither is one only
+    /// renamed. (An older git lists every changed path here whatever is
+    /// ignored, and leaves the same files out of `--numstat`, so its two
+    /// halves disagree; the app pairs them by path.)
+    fn raw(
+        &mut self,
+        out: &mut Vec<u8>,
+        pairs: &[Pair],
+        counts: Option<&[Option<(u32, u32)>]>,
+    ) -> Result<(), AskGit> {
+        for (at, pair) in pairs.iter().enumerate() {
+            if self.ignore_space
+                && let Some(counts) = counts
+                && !matches!(pair.status(), b'A' | b'D' | b'T')
+                && pair.old.mode == pair.new.mode
+                && match counts[at] {
+                    None => pair.old.oid == pair.new.oid,
+                    Some((added, removed)) => added + removed == 0,
+                }
+            {
+                continue;
+            }
             let (a, b) = (self.short(&pair.old.oid)?, self.short(&pair.new.oid)?);
             let _ = write!(
                 out,
@@ -665,25 +700,17 @@ impl<'a> Work<'a> {
         ))))
     }
 
-    /// `--numstat -z`, after the raw records.
-    fn numstat(
-        &mut self,
-        out: &mut Vec<u8>,
-        pairs: &[Pair],
-        max_bytes: usize,
-    ) -> Result<(), AskGit> {
-        for pair in pairs {
-            if out.len() >= max_bytes {
-                break;
-            }
-            match self.counted(pair)? {
+    /// `--numstat -z`, after the raw records: each pair's `counts`.
+    fn numstat(&mut self, out: &mut Vec<u8>, pairs: &[Pair], counts: &[Option<(u32, u32)>]) {
+        for (pair, counted) in pairs.iter().zip(counts) {
+            match counted {
                 None => out.extend_from_slice(b"-\t-\t"),
                 Some((added, removed)) => {
                     // A changed file in which nothing counts (blanks alone,
                     // ignored) has no line, unless its mode changed.
                     if pair.status() == b'M'
-                        && added == 0
-                        && removed == 0
+                        && *added == 0
+                        && *removed == 0
                         && pair.old.mode == pair.new.mode
                         && pair.old.oid != pair.new.oid
                     {
@@ -700,7 +727,6 @@ impl<'a> Work<'a> {
             out.extend_from_slice(&pair.path);
             out.push(0);
         }
-        Ok(())
     }
 
     /// The patch.

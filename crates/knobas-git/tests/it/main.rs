@@ -17,6 +17,8 @@ use std::process::Command;
 
 use knobas_git::{Answer, AskGit, DiffAsk, DiffForm, Read, Repo};
 
+mod oracle;
+
 /// The moment "now" is, for git and for the reader: relative dates read the
 /// same on both sides.
 const NOW: i64 = 1_790_000_000;
@@ -128,9 +130,12 @@ fn same_diffs(dir: &Path, old: &str, new: Option<&str>, paths: &[&str]) {
                 "--no-textconv",
                 "-M",
             ];
+            // An older git's `--raw -w` lists files the newer leaves out:
+            // its answer is made into the newer one (`oracle.rs`).
+            let older = ignore_space && form != DiffForm::Patch && !oracle::raw_is_content_aware();
             match form {
-                DiffForm::Raw => args.extend(["--raw", "-z"]),
-                DiffForm::RawNumstat => args.extend(["--raw", "--numstat", "-z"]),
+                DiffForm::Raw if !older => args.extend(["--raw", "-z"]),
+                DiffForm::Raw | DiffForm::RawNumstat => args.extend(["--raw", "--numstat", "-z"]),
                 DiffForm::Patch => args.extend(["--src-prefix=a/", "--dst-prefix=b/"]),
             }
             if ignore_space {
@@ -155,7 +160,12 @@ fn same_diffs(dir: &Path, old: &str, new: Option<&str>, paths: &[&str]) {
                     .env("GIT_LITERAL_PATHSPECS", "1")
                     .output()
                     .expect("git runs");
-                (out.status.success(), out.stdout)
+                let printed = if older && out.status.success() {
+                    oracle::since_2_52(&out.stdout, form == DiffForm::RawNumstat)
+                } else {
+                    out.stdout
+                };
+                (out.status.success(), printed)
             };
             let ours = repo.diff(&DiffAsk {
                 old,
@@ -410,6 +420,139 @@ fn an_edit_is_shown_with_its_function_line_and_context() {
         &[],
     );
     same_diffs(p, EMPTY_TREE, Some(&first), &[]);
+}
+
+/// A name that sorts one way as a file and another as a folder: the changed
+/// files come in the trees' order, `a-b`, then `a/`'s, then `a.txt`, `a0`.
+#[test]
+fn changed_files_come_in_the_trees_order() {
+    let dir = new_repo();
+    let p = dir.path();
+    for name in [
+        "a-b",
+        "a/inner.txt",
+        "a/z/deep.txt",
+        "a.txt",
+        "a0",
+        "b/only.txt",
+    ] {
+        write(p, name, format!("{name} one\n"));
+    }
+    let first = commit(p, 0, "first");
+    for name in ["a-b", "a/inner.txt", "a/z/deep.txt", "a.txt", "a0"] {
+        write(p, name, format!("{name} two\n"));
+    }
+    std::fs::remove_dir_all(p.join("b")).expect("removed");
+    write(p, "a/added.txt", "added\n");
+    write(p, "a!", "before everything\n");
+    let second = commit(p, 60, "second");
+    let Ok(Answer::Out(raw)) = open(p).diff(&DiffAsk {
+        old: &first,
+        new: Some(&second),
+        form: DiffForm::Raw,
+        ignore_space: false,
+        paths: &[],
+        max_lines: usize::MAX,
+        max_bytes: usize::MAX,
+    }) else {
+        panic!("no answer")
+    };
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let order: Vec<&str> = text
+        .split('\0')
+        .filter(|token| !token.is_empty() && !token.starts_with(':'))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "a!",
+            "a-b",
+            "a.txt",
+            "a/added.txt",
+            "a/inner.txt",
+            "a/z/deep.txt",
+            "a0",
+            "b/only.txt"
+        ]
+    );
+    same_diffs(p, &first, Some(&second), &[]);
+    same_diffs(p, &first, Some(&second), &["a"]);
+}
+
+/// Two blobs whose names share seven digits are each written with eight,
+/// loose and packed: as many digits as tell an object from every other.
+#[test]
+fn a_name_is_abbreviated_until_no_other_object_shares_it() {
+    let dir = new_repo();
+    let p = dir.path();
+    // b2664c85... and b2664c81...
+    write(p, "one.txt", "collide 826\n");
+    write(p, "two.txt", "collide 4561\n");
+    let first = commit(p, 0, "first");
+    write(p, "one.txt", "changed\n");
+    write(p, "two.txt", "changed too\n");
+    let second = commit(p, 60, "second");
+    let patch = String::from_utf8_lossy(&oracle(p, &["diff", &first, &second]).1).into_owned();
+    assert!(patch.contains("index b2664c85.."), "{patch}");
+    assert!(patch.contains("index b2664c81.."), "{patch}");
+    same_diffs(p, &first, Some(&second), &[]);
+    same_diffs(p, &second, Some(&first), &[]);
+    git(p, &["gc", "-q"]);
+    same_diffs(p, &first, Some(&second), &[]);
+}
+
+/// A replace ref is the clone's own rewrite of history, which the source
+/// never sees: a sha means the commit it names (ADR-0036).
+#[test]
+fn a_replace_ref_is_not_followed() {
+    let dir = new_repo();
+    let p = dir.path();
+    write(p, "a.txt", "one\n");
+    let first = commit(p, 0, "first");
+    write(p, "a.txt", "two\n");
+    write(p, "b.txt", "added\n");
+    let second = commit(p, 60, "second");
+    git(p, &["replace", &second, &first]);
+    let repo = open(p);
+    same(
+        "ls-tree of a replaced commit",
+        repo.ls_tree(&second),
+        oracle(
+            p,
+            &[
+                "ls-tree",
+                "-r",
+                "-t",
+                "-z",
+                "--long",
+                "--full-tree",
+                &second,
+            ],
+        ),
+    );
+    let Ok(Answer::Out(listing)) = repo.ls_tree(&second) else {
+        panic!("no tree")
+    };
+    assert!(
+        String::from_utf8_lossy(&listing).contains("b.txt"),
+        "the commit itself, not its replacement"
+    );
+    same_diffs(p, &first, Some(&second), &[]);
+    same(
+        "log over a replaced commit",
+        repo.log(&first, &second, 500, NOW),
+        oracle(
+            p,
+            &[
+                "log",
+                "--no-color",
+                "--max-count=500",
+                "--format=%H%x1f%an%x1f%ar%x1f%s%x1e",
+                &format!("{first}..{second}"),
+                "--",
+            ],
+        ),
+    );
 }
 
 #[test]
@@ -757,6 +900,79 @@ fn blanks_ignored_leave_what_else_changed() {
     same_diffs(p, &third, Some(&fourth), &[]);
 }
 
+/// With blanks ignored, the list holds what is left to show and nothing
+/// else, as git lists it since 2.52: not a file whose lines differ in blanks
+/// alone, not a file only renamed, and still a mode change, an added file and
+/// a binary file that changed.
+#[test]
+fn blanks_ignored_a_file_with_nothing_left_is_not_listed() {
+    let dir = new_repo();
+    let p = dir.path();
+    write(p, "blanks.txt", "a b\nc\n");
+    write(p, "ends.txt", "one\ntwo\n");
+    write(p, "real.txt", "one\n");
+    write(p, "moved.txt", "moved, the same\nline two\nline three\n");
+    write(
+        p,
+        "moved_blanks.txt",
+        "moved,  with blanks\nline two\nline three\nline four\n",
+    );
+    write(p, "mode.sh", "echo  mode\n");
+    write(p, "logo.bin", [0u8, 1, 2]);
+    write(p, "same.bin", [0u8, 7, 7]);
+    let first = commit(p, 0, "first");
+    write(p, "blanks.txt", "a  b\n\tc\n");
+    write(p, "ends.txt", "one\r\ntwo\r\n");
+    write(p, "real.txt", "two\n");
+    mv(p, "moved.txt", "to/moved.txt");
+    mv(p, "moved_blanks.txt", "to/moved_blanks.txt");
+    write(
+        p,
+        "to/moved_blanks.txt",
+        "moved, with blanks\nline two\nline three\nline four\n",
+    );
+    write(p, "mode.sh", "echo mode\n");
+    write(p, "logo.bin", [0u8, 9, 9]);
+    mv(p, "same.bin", "to/same.bin");
+    write(p, "added.txt", "");
+    git(p, &["add", "-A"]);
+    git(p, &["update-index", "--chmod=+x", "mode.sh"]);
+    git_at(p, 60, &["commit", "-q", "-m", "second"]);
+    let second = git(p, &["rev-parse", "HEAD"]);
+    let listed = |ignore_space| {
+        let Ok(Answer::Out(raw)) = open(p).diff(&DiffAsk {
+            old: &first,
+            new: Some(&second),
+            form: DiffForm::Raw,
+            ignore_space,
+            paths: &[],
+            max_lines: usize::MAX,
+            max_bytes: usize::MAX,
+        }) else {
+            panic!("no answer")
+        };
+        let text = String::from_utf8_lossy(&raw).into_owned();
+        let mut paths: Vec<String> = text
+            .split('\0')
+            .filter(|token| !token.is_empty() && !token.starts_with(':'))
+            .map(str::to_owned)
+            .collect();
+        paths.sort();
+        paths
+    };
+    assert_eq!(
+        listed(false).len(),
+        12,
+        "every changed path, a rename's two"
+    );
+    assert_eq!(
+        listed(true),
+        ["added.txt", "logo.bin", "mode.sh", "real.txt"],
+        "what is left to show"
+    );
+    same_diffs(p, &first, Some(&second), &[]);
+}
+
 #[test]
 fn a_file_no_diff_is_wanted_of_is_binary_and_one_forced_is_text() {
     let dir = new_repo();
@@ -1095,6 +1311,24 @@ fn a_log_lists_what_git_lists_in_its_order() {
                 );
             }
         }
+    }
+    // A merge's parent is its first, a root has none.
+    for sha in &shas {
+        let parent = format!("{sha}^");
+        same(
+            &format!("rev-parse {parent}"),
+            repo.rev_parse_commit(&parent),
+            oracle(
+                p,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    "--end-of-options",
+                    &format!("{parent}^{{commit}}"),
+                ],
+            ),
+        );
     }
     let Ok(Answer::Out(out)) = repo.log(&shas[0], &shas[10], 500, NOW) else {
         panic!("no log")

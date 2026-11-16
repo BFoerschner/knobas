@@ -106,9 +106,12 @@ fn diffs(
     for ignore_space in [false, true] {
         for form in [DiffForm::Raw, DiffForm::RawNumstat, DiffForm::Patch] {
             let mut args: Vec<&str> = DIFF[..7].to_vec();
+            // An older git's `--raw -w` lists files the newer leaves out:
+            // its answer is made into the newer one (`oracle.rs`).
+            let older = ignore_space && form != DiffForm::Patch && !oracle::raw_is_content_aware();
             match form {
-                DiffForm::Raw => args.extend(["--raw", "-z"]),
-                DiffForm::RawNumstat => args.extend(["--raw", "--numstat", "-z"]),
+                DiffForm::Raw if !older => args.extend(["--raw", "-z"]),
+                DiffForm::Raw | DiffForm::RawNumstat => args.extend(["--raw", "--numstat", "-z"]),
                 DiffForm::Patch => args.extend(["--src-prefix=a/", "--dst-prefix=b/"]),
             }
             if ignore_space {
@@ -128,10 +131,14 @@ fn diffs(
                 max_lines: usize::MAX,
                 max_bytes: usize::MAX,
             };
+            let mut theirs = git(path, now, &args);
+            if older && theirs.0 {
+                theirs.1 = oracle::since_2_52(&theirs.1, form == DiffForm::RawNumstat);
+            }
             tally.check(
                 &format!("{what} {form:?}{}", if ignore_space { " -w" } else { "" }),
                 repo.diff(&ask),
-                git(path, now, &args),
+                theirs,
             );
         }
     }
