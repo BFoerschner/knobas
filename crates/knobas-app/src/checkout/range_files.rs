@@ -1120,8 +1120,9 @@ async fn kept_diff(
     Ok(diff)
 }
 
-/// The most files one [`range_file_pages`] reads in one start of git: a
-/// command line of paths well inside Windows' 32,767 characters.
+/// The most files one [`range_file_pages`] reads at once: where the read
+/// falls to git ([`Reader`]), a command line of paths well inside Windows'
+/// 32,767 characters.
 pub const PAGES_AT_ONCE: usize = 200;
 
 /// One file [`range_file_pages`] is asked for: as the list named it.
@@ -1135,9 +1136,9 @@ pub struct RangeFileAsk {
 
 /// The first page of each of `files` in `base`..`head` of the repository
 /// `entity_id`, in one read (the big-compare pass of PR #2479, 2026-11-16):
-/// at the checkout one `git diff -M -- <paths>` for all of them, where
-/// [`range_file`] starts git once a file, which on a Windows laptop is most
-/// of a file's wait; else out of the kept compare. Each answer is the page
+/// at the checkout one `git diff -M -- <paths>` for all of them (in-process
+/// since the git-starts pass of the same day, [`Reader`]), where
+/// [`range_file`] reads one file a call; else out of the kept compare. Each answer is the page
 /// [`range_file`] answers for that file from line 0, in the order asked;
 /// `None` for a file this read could not answer whole (past the read's
 /// ceiling, or not in the diff), which the page then reads alone. At most
@@ -1199,32 +1200,28 @@ async fn files_at(
     files: &[RangeFileAsk],
     ignore_whitespace: bool,
 ) -> Option<Vec<Option<DiffFile>>> {
+    let reader = Reader::at(repo);
     let all = async {
-        let Ends { git, old, new, .. } = ends(repo, base, head).await?;
-        let mut command = git_read(&git, repo);
-        command.args([
-            "-c",
-            "diff.autoRefreshIndex=false",
-            "diff",
-            "--no-ext-diff",
-            "--no-color",
-            "--no-textconv",
-            "-M",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-        ]);
-        if ignore_whitespace {
-            command.arg("-w");
-        }
-        command.env("GIT_LITERAL_PATHSPECS", "1");
-        command.args([old.as_str(), new.as_str(), "--"]);
+        let Ends { old, new, .. } = ends(&reader, base, head).await?;
+        // Literal paths: a name is the file's, never a pattern.
+        let mut paths: Vec<&str> = Vec::with_capacity(files.len());
         for ask in files {
-            command.arg(&ask.path);
+            paths.push(&ask.path);
             if let Some(old_path) = ask.old_path.as_deref().filter(|o| *o != ask.path) {
-                command.arg(old_path);
+                paths.push(old_path);
             }
         }
-        let (text, cut) = run_capped(command, READ_LINES, READ_BYTES).await.ok()?;
+        let (text, cut) = reader
+            .diff(
+                Form::Patch,
+                &old,
+                Some(&new),
+                ignore_whitespace,
+                &paths,
+                READ_LINES,
+                READ_BYTES,
+            )
+            .await?;
         let (mut parsed, _) = parse_view(&String::from_utf8_lossy(&text));
         // The last file of a cut read stopped part way: read alone, it has its own pages.
         if cut {
