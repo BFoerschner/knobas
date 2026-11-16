@@ -224,9 +224,18 @@ fn changed_by(meta: &std::fs::Metadata, hash: &mut impl Hasher) {
     (meta.modified().ok(), meta.len(), meta.is_dir()).hash(hash);
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many paths this thread read by path, which is what the listing
+    /// is there to spare: a test counts them.
+    static READ_BY_PATH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `path`'s metadata into `hash`, not following a symlink, as git compares
 /// it; a path that is not there hashes as absent.
 fn stat(path: &Path, hash: &mut impl Hasher) {
+    #[cfg(test)]
+    READ_BY_PATH.with(|read| read.set(read.get() + 1));
     path.hash(hash);
     match std::fs::symlink_metadata(path) {
         Ok(meta) => changed_by(&meta, hash),
@@ -524,6 +533,23 @@ mod tests {
             before_listed,
             "a new listing has the edit"
         );
+    }
+
+    /// By listing, no tracked file is read by its path: git's own files,
+    /// the user's and the folders are, and that is all. This is the whole
+    /// point on Windows, where a read by path opens the file.
+    #[test]
+    fn by_listing_no_tracked_file_is_read_by_its_path() {
+        let dir = repo();
+        let p = dir.path();
+        let read_by_path = |by_listing: bool| {
+            READ_BY_PATH.with(|read| read.set(0));
+            of_read(p, by_listing).expect("a plain clone is stamped");
+            READ_BY_PATH.with(std::cell::Cell::get)
+        };
+        let tracked = git(p, &["ls-files"]).lines().count();
+        assert_eq!(tracked, 4, "the fixture's tracked files");
+        assert_eq!(read_by_path(false) - read_by_path(true), tracked);
     }
 
     /// A linked worktree's `.git` is a file, and is never stamped.
