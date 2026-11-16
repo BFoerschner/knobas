@@ -324,6 +324,38 @@
 /* A button that is part of a chip's text, drawn as that text (design system, Controls: chip buttons). */
 .tf-chipbtn { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 .tf-chipbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 2px; }
+/* The clone's sign (design system, Controls: the clone's sign): where a repository page reads from, *Local* and how the clone
+   stands or *Remote*, outlined as a label is, one line of the subline tall, so it neither moves the tabs nor holds a path.
+   What is cut is the standing, at its end; *Local* stays whole. */
+.tf-clonesign { position: relative; display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; }
+.tf-signbtn {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 18px; padding: 0 6px;
+  border: 1px solid var(--rule); border-radius: 3px; background: none; color: var(--ink-2); font-size: var(--t-xs);
+  line-height: 16px; white-space: nowrap; cursor: pointer;
+}
+.tf-signbtn:hover, .tf-signbtn[aria-expanded="true"] { border-color: var(--ink-2); }
+.tf-signbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tf-signbtn svg { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.tf-sign-word { flex: none; color: var(--ink); font-weight: 600; }
+.tf-sign-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Its bubble: a popover (8 px, the shadow of what floats), under the sign and inside the window, the path wrapped whole. */
+.tf-signbubble:not(.tf-sr) {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 35; display: grid; gap: 6px; width: max-content;
+  max-width: min(36rem, calc(100vw - 16px)); padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--sheet); box-shadow: var(--shadow); color: var(--ink); font-size: var(--t-sm); white-space: normal;
+}
+.tf-signbubble-what { color: var(--ink-2); font-size: var(--t-xs); }
+.tf-signbubble-drawn { overflow-wrap: anywhere; line-height: 1.45; }
+.tf-signbubble-drawn b { font-weight: 600; }
+.tf-signbubble-state { color: var(--ink-2); font-size: var(--t-xs); }
+.tf-signbubble-acts { display: flex; flex-wrap: wrap; gap: var(--control-gap); margin-top: 2px; }
+/* A path on one line (`TfPath`, design system, Paths): its start gives way first, then its end, so the folder it names
+   stays in view; the whole path is its title. */
+.tf-path { display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; white-space: nowrap; }
+.tf-path-head { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-path-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A sentence that holds a whole path wraps inside it rather than run past its box. */
+.tf-wrapall { overflow-wrap: anywhere; }
 .tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
 .tf .tf-small { font-size: var(--t-sm); }
 .tf-linkish {

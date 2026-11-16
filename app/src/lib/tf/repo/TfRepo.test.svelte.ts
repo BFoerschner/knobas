@@ -26,6 +26,7 @@ import type {
 } from "../../ipc/entity";
 import TfRepo, { forgetHeaderLooks, forgetHeaderSearches, type RepoPorts } from "./TfRepo.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
+import { drawsReading } from "../../shell/test-witness";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -287,9 +288,12 @@ test("the header names the repository, its last push and its checkout; the tabs 
   await draw([REPO]);
 
   expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
-  expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe(
-    "Payments, Rust, last push today 12:30. Cloned at /Users/mara/src/payout-service, main, 1 ahead, 1 changed.",
-  );
+  expect(text(target.querySelector(".tf-fhead .tf-reposub"))).toBe("Payments, Rust, last push today 12:30.");
+  // The checkout is a sign beside it, its path the sign's description and a run of its own (the clone-path pass).
+  const sign = target.querySelector(".tf-fhead .tf-sub .tf-signbtn")!;
+  expect(text(sign)).toBe("Local, main, 1 ahead, 1 changed");
+  expect(text(document.getElementById(sign.getAttribute("aria-describedby")!))).toBe("/Users/mara/src/payout-service");
+  expect(drawsReading(target, "/Users/mara/src/payout-service")).toBe(true);
   expect([...target.querySelectorAll(".tf-crumbs > a:not(.tf-esc), .tf-crumbs strong")].map(text)).toEqual([
     "Code",
     "tidewater/payout-service",
@@ -628,7 +632,8 @@ test("a line link opens Files on the file with that line marked (#2251)", async 
 test("an uncloned repository reads its files through the source and says it is not on this machine", async () => {
   // With nothing declared the header starts at the push (#973).
   await draw([REPO, "files", "src", "lib.rs"], ports({ codeFacts: async () => [] }, false));
-  expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe("Last push today 12:30. Not on this machine yet.");
+  expect(text(target.querySelector(".tf-fhead .tf-reposub"))).toBe("Last push today 12:30.");
+  expect(text(target.querySelector(".tf-fhead .tf-sub .tf-signbtn"))).toBe("Remote, not cloned");
   expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// src/lib.rs", "2fn main() {}"]);
   expect(target.querySelector(".tf-changed")).toBeNull();
   expect([...target.querySelectorAll(".tf-tabs a")].map(text)).toContain("Local changes");

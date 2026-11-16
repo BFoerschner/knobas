@@ -25,8 +25,8 @@
 #   1. a clones root and an application whose command is a stub, typed into
 #      the real Settings and stored by the real backend -- the root and the
 #      command read back off the section once its dialogs have closed;
-#   2. the repository payout-service, opened from ⌘K, with its *Cloned at*
-#      line naming the clone **on screen after the launcher's Return and not
+#   2. the repository payout-service, opened from ⌘K, with its clone's sign
+#      naming the clone **on screen after the launcher's Return and not
 #      before it** (#547);
 #   3. that picking the application from *Open in…* starts the stub with the
 #      checkout path as its **only** argument.
@@ -219,7 +219,8 @@ lands_named cmd-k "$QUERY_BOX"
 "$ax" type "$REPO_NAME"
 wait_until "the launcher never answered '$REPO_NAME'" launcher_answered
 
-# The page's *Cloned at* line carries the clone's path as a value of its own.
+# The page's clone's sign carries the clone's path as a value of its own: its
+# description, a run of text that is visually hidden until its bubble opens.
 # Read before Return and after (#547): Settings, behind the launcher, reads the
 # *root* and not the clone, so the before-read is `no` on a correct app, and
 # one already there witnesses nothing.
@@ -244,7 +245,7 @@ too-early)
         "nothing about the page. Whatever drew it over the launcher is where to look."
     ;;
 never-appeared)
-    die "no *Cloned at* line naming the clone on the page for '$REPO_NAME'." \
+    die "no clone's sign naming the clone on the page for '$REPO_NAME'." \
         "demo.rs's the_demo_corpus_answers_the_checkout_the_desktop_driver_opens" \
         "covers the read under the window, so check that ⌘K's first hit is the" \
         "repository and that its page found the clone."

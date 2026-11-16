@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
+  import TfPath from "../TfPath.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import {
     pullRequestWorktrees,
@@ -144,7 +145,7 @@
   <div class="tf-stg-row">
     <div class="tf-stg-l">Clones root<small>knobas finds clones here and clones new ones into it.</small></div>
     <div class="tf-stg-c tf-stg-inl">
-      {#if settings.clones_root !== null}<span class="tf-mono">{settings.clones_root}</span>{:else}<span class="tf-dim">Not set</span>{/if}
+      {#if settings.clones_root !== null}<TfPath path={settings.clones_root} />{:else}<span class="tf-dim">Not set</span>{/if}
       <button class="tf-btn tf-sm" onclick={changeRoot}>Change…</button>
       <TfCloneAll small {layers} />
     </div>
@@ -159,7 +160,7 @@
     </div>
     <div class="tf-stg-c">
       {#if settings.git.status === "found"}
-        <span class="tf-stg-ok"><span class="tf-dot tf-ok"></span> git at <span class="tf-mono">{settings.git.path}</span></span>
+        <span class="tf-stg-ok"><span class="tf-dot tf-ok"></span> git at <TfPath path={settings.git.path} /></span>
       {:else if settings.git.status === "no_git"}
         <span><span class="tf-dot tf-warn"></span> git was not found on this machine</span>
       {:else}
@@ -209,7 +210,7 @@
           {#each worktrees as tree (tree.path)}
             <tr>
               <td>#{tree.number}{#if tree.closed}{" "}<TfStateChip text="closed" />{/if}</td>
-              <td class="tf-small"><span class="tf-mono">{tree.path}</span></td>
+              <td class="tf-small"><TfPath path={tree.path} /></td>
               <td class="tf-right"
                 ><button class="tf-btn tf-sm tf-ghost tf-danger" title="Remove {tree.path}" onclick={() => (removing = tree)}
                   >Remove…</button
@@ -253,7 +254,7 @@
   {@const tree = removing}
   <TfDialog title="Remove the worktree of #{tree.number}?" {layers} onclose={() => (removing = null)}>
     {#snippet body()}
-      <p class="tf-dlg-note">Deletes <span class="tf-mono">{tree.path}</span> from this machine, with any changes in it. The pull request itself is not touched.</p>
+      <p class="tf-dlg-note tf-wrapall">Deletes <span class="tf-mono">{tree.path}</span> from this machine, with any changes in it. The pull request itself is not touched.</p>
     {/snippet}
     {#snippet footer()}
       <button type="button" class="tf-btn tf-ghost" onclick={() => (removing = null)}>Cancel</button>

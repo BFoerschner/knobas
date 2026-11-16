@@ -58,6 +58,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
+  import TfPath from "../TfPath.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
   import { appPageHash } from "./app-page";
   import { argvText, fillObject, objectCommand, objectMenu, worktreeOf } from "./openin";
@@ -197,15 +198,13 @@
         {#each entries as entry (entry.app.id)}
           {@const line = fillObject(objectCommand(entry.app, object.kind) ?? "", { path: worktree ?? path ?? "", object, url: page })}
           <button role="menuitem" onclick={() => run(entry.app.id, entry.app.name)}
-            ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><span
-              class="tf-mono" title={line}>{line}</span
-            ></button
+            ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><TfPath path={line} /></button
           >
         {/each}
         {#if tool !== null}
           {@const at = tool.ends}
           {#if entries.length > 0}<hr />{/if}
-          <button role="menuitem" onclick={() => diff(at)}><b>Diff tool</b><span class="tf-mono" title={argvText(tool.argv)}>{argvText(tool.argv)}</span></button>
+          <button role="menuitem" onclick={() => diff(at)}><b>Diff tool</b><TfPath path={argvText(tool.argv)} /></button>
         {/if}
         {#if page !== null}
           {#if entries.length > 0 || tool !== null}<hr />{/if}

@@ -70,8 +70,9 @@ type Entry = { list: string; line: number; rule: string; file: string; key: stri
  * Classes that name a control (rule a). `tf-refresh` is the shared Refresh button
  * (`TfDetailRefresh`), always a `.tf-btn`; views resized it under its own name.
  * `tf-chipbtn` is a chip's own button, drawn as the chip's text (spec #2463).
+ * `tf-signbtn` is the clone's sign on a repository page (the clone-path pass, 2026-11-16).
  */
-const CONTROL = /\.(?:tf-btn|tf-sm|tf-lg|tf-iconbtn|tf-chipbtn|tf-refresh)(?![\w-])/;
+const CONTROL = /\.(?:tf-btn|tf-sm|tf-lg|tf-iconbtn|tf-chipbtn|tf-signbtn|tf-refresh)(?![\w-])/;
 /** The segmented control and the pill toggles: their `button`s are controls. */
 const BUTTON_GROUP = /\.(?:tf-seg|tf-fchips)(?![\w-])/;
 const SIZING = /^(?:height|min-height|padding(?:-[a-z-]+)?|font-size|font|border(?:-[a-z]+)*-radius)$/;

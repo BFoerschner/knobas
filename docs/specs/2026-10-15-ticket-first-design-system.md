@@ -153,6 +153,7 @@ Three sizes is the complete set. A rule outside `chrome.css` doesn't set a butto
 - **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height from its token, with horizontal padding only. The filter bar is a page body's toolbar, so its search (`.tf-fsearch`) and its selects (`.tf-fsel select`) are `--control-h-sm`, as the segmented control and the pill toggles beside them are.
 - **Pill toggles** (`.tf-fchips`, and Standup's people are one): off is outlined; on is ringed in `--ink` on `--sheet-2`, not filled. Several can be on at once, and a row of filled pills outweighed the one action the page exists for (reviewers, Rounds 7 and 8, on Standup's *Publish*). Only a primary, a pressed segment and a rail's selected row are filled, and a segmented control has exactly one on. Amended 2026-11-05. A pill's class is `.tf-fchips` alone, and the gate refuses another.
 - **Chip buttons** (`.tf-chipbtn`): a button that is part of a chip's text, drawn as that text. The State colours chip's word, which is its grip, and its *Reset* are the two (spec #2463). No border, background or padding, and the chip's own font; `chrome.css` draws it, and a view adds no size to it. Text-only styling (an underline, a weight) is the view's. *Reset* stands 6 px off the word, in `--muted` (F-655).
+- **The clone's sign** (`.tf-signbtn`, `TfCloneSign`): where a repository page reads from, at the end of the line under its title. *Local* with a folder glyph and how the clone stands (*Local, main, 1 ahead, 1 changed*), or *Remote* with a cloud and *not cloned*, where the forge answers. Outlined as a label is, 18 px tall so the line keeps its height, `--t-xs`, the word in `--ink` at 600 and the standing in `--ink-2`, cut at its end with *Local* whole. It never holds the path. Its bubble does: on hover after 150 ms, at once on focus, and pinned by a press, it says *Cloned at*, the whole path wrapped with its folder in ink, how the clone stands, then *Copy path* (*Copied* for 2 s) and *Open in* the default application where one is set, the *Open in…* menu's first item. A remote bubble names the source and has nothing to press. Closed, the bubble is visually hidden, not removed: the path is the sign's `aria-describedby` and one run of text, which a screen reader and the desktop witness read. It is a popover (8 px, `--shadow`), but it stands in the page under the sign and is moved back inside the window, not in the float host, because its actions follow the sign in the `Tab` order. `Esc` closes it and leaves focus on the sign (a `panel` layer), and a press elsewhere or another address closes it. Björn asked for it (2026-11-16): "cloned at C:\x\y\z\foo\bar can get long in certain places and go out of bounds".
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
 
 ### Labels
@@ -235,9 +236,15 @@ The title block on the left and `.tf-acts` on the right, top-aligned, while both
 3. "Open in <source>", always a ghost button;
 4. *Sync now* / *Refresh*, always last.
 
+A repository page's subline is its facts and then the clone's sign (Controls), and the facts give way first, so the line stays one line and the path is never in it (the clone-path pass, 2026-11-16).
+
 *Submit review… (N pending)* isn't in this row. It stands at the right end of the tab row beside the write chips, because it comes and goes in the middle of a review, and in the header it took the title's room and moved the tabs and the code under the reader (F-254, amended 2026-11-06).
 
 A section heading that carries an action puts it on the right of the heading line at the small size. A dialog that shows a thing and decides nothing (the file viewer, `TfFileViewer`, #2415) is a viewer: its action is on its title line at the default size, in `TfDialog`'s `actions`, and it has no footer. The action, a 1 px rule and the Close are one cluster (`.tf-dctl`), each control the default height, centred on the title block; *Download* carries its tray glyph at the Close's stroke. The ticket page has no header: its key, status and actions are on its card ([below](#the-ticket-pages-card)), and its title heads the reading column.
+
+### Paths
+
+A filesystem path never runs past its box. On one line it is `TfPath`: its start gives way first, then its end, so it reads *C:\Users\someone\sou…\payout-service* and the folder or file it names stays, with the whole path in its title. That is the clones root, git and a pull request's worktree in Settings › Checkouts, the Local changes tab's line, a pull request's *Local checkout*, Code's *Local checkout* column, and each command in an *Open in…* menu, which ends in the path it opens. A path inside a sentence wraps anywhere (`.tf-wrapall`), as in *Remove the worktree of #142?*. `testenv/ui-checks/long-paths.mjs` holds every one of them to its box with long Windows paths, spaces in them, at 5120 x 1440, 2560 x 1440 at 125 %, 1920 x 1080 at 200 % and the window's smallest, 1100 x 600 (`?fake-long-paths`).
 
 ### The ticket page's card
 
@@ -294,6 +301,8 @@ There is no third way to draw danger.
 | A row's fading group | `.tf-rowend .tf-rowacts` |
 | A row's value, which hides only where the group covers it | `.tf-rowval`, `.tf-covered` |
 | A menu's opener (`TfMenu`) | `.tf-r button[aria-haspopup="menu"]` |
+| The clone's sign | `.tf-clonesign .tf-signbtn` |
+| A path on one line | `.tf-path .tf-path-tail` |
 
 A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
 

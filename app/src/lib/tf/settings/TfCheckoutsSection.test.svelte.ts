@@ -173,7 +173,9 @@ const mark = (root: ParentNode, needle: string) =>
 
 test("a set root and real commands draw in mono; Not set and opens the checkout are sans labels (#1444)", async () => {
   await draw();
-  expect(inMono(mark(target, "/Users/mara/code"))).toBe(true);
+  // The root is a path drawn to keep its end (`TfPath`), whole in its title.
+  expect(inMono(target.querySelector('.tf-path[title="/Users/mara/code"]'))).toBe(true);
+  expect(text(target.querySelector('.tf-path[title="/Users/mara/code"]'))).toBe("/Users/mara/code");
   expect(inMono(mark(target, "code {path}"))).toBe(true);
   expect(inMono(mark(target, "open -a Fork {path}"))).toBe(true);
   expect(inMono(mark(target, "opens the checkout"))).toBe(false);

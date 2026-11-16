@@ -285,6 +285,7 @@
   import { latestOn, yoursOf } from "./repo-builds";
   import { runTone } from "../builds/builds";
   import TfRepoLocal from "./TfRepoLocal.svelte";
+  import TfCloneSign from "./TfCloneSign.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
@@ -845,15 +846,8 @@
   const filesAtOnce = (one: string) => one === "files" && picked === null;
   const changed = $derived(changedPaths(local));
   const sentence = $derived(checkoutSentence(checkout));
-  /** The line under the title in words, for its tooltip: one line on the page, a long clone path cut. */
-  const subTitle = $derived(
-    [
-      repo === null ? "" : headLine(facts, repo.updated_at, now),
-      sentence === null ? "" : sentence.path !== null ? `Cloned at ${sentence.path}${sentence.state ? `, ${sentence.state}` : ""}.` : "Not on this machine yet.",
-    ]
-      .filter((part) => part !== "")
-      .join(" "),
-  );
+  /** The line under the title, for its tooltip where it is cut; the clone's sign beside it holds its path in its bubble. */
+  const subTitle = $derived(repo === null ? "" : headLine(facts, repo.updated_at, now));
   const tab = $derived<RepoTabId>(litTab(route.tab));
   /** The address names a tab the page has; one it does not have is said under the tabs, not drawn as Files. */
   const tabKnown = $derived(knowsRepoTab(rest));
@@ -1199,13 +1193,9 @@
     <header class="tf-fhead tf-repohead" {@attach watchStack}>
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
-        <div class="tf-sub" title={subTitle || undefined}>
-          {#if repo !== null}{headLine(facts, repo.updated_at, now)}{/if}
-          {#if sentence !== null && sentence.path !== null}
-            Cloned at <span class="tf-mono">{sentence.path}</span>{#if sentence.state}, {sentence.state}{/if}.
-          {:else if sentence !== null}
-            Not on this machine yet.
-          {/if}
+        <div class="tf-sub">
+          <span class="tf-reposub" title={subTitle || undefined}>{subTitle}</span>
+          <TfCloneSign entityId={repoId} {checkout} source={sourceName(source)} />
         </div>
       </div>
       <!-- #2238's order, as the mockup (#2252) draws it: the primary, the others, Open in, Refresh last. -->

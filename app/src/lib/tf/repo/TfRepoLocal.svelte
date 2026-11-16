@@ -21,6 +21,7 @@
   import { treeStanding } from "../code/code";
   import { repoName } from "../openin/openin";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfPath from "../TfPath.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { localFiles } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
@@ -92,7 +93,7 @@
   <!-- Not read yet. -->
 {:else if path !== null}
   <div class="tf-checkout tf-local-line">
-    <span class="tf-mono">{path}</span>
+    <TfPath {path} />
     {#if tree !== null}<span>on <span class="tf-mono">{tree.branch ?? "a detached head"}</span></span>{/if}
     {#if where !== null}<span>{where}</span>{/if}
     <span class="tf-trail"><TfOpenIn entityId={repoId} {title} {checkout} /></span>
@@ -112,7 +113,7 @@
   {:else if read.status === "no_git"}
     <div class="tf-empty"><p>git was not found on this machine, so knobas cannot read the checkout.</p></div>
   {:else if read.status === "not_a_repo"}
-    <div class="tf-empty"><p>{path} is not a git working tree any more.</p></div>
+    <div class="tf-empty"><p class="tf-wrapall">{path} is not a git working tree any more.</p></div>
   {:else if read.status === "failed"}
     <p class="tf-cfail">git could not read the checkout: {read.reason}</p>
   {:else if files.length === 0 && untracked.length === 0}

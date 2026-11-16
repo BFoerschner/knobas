@@ -383,6 +383,7 @@ const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfCloneSign = (await import("../tf/repo/TfCloneSign.svelte")).default;
 const TfAppPage = (await import("../tf/openin/TfAppPage.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
@@ -1343,6 +1344,32 @@ const CASES: Case[] = [
     }),
     exercise: (target) => {
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /**
+     * The clone's sign (the clone-path pass, 2026-11-16): hover arms a timer, the open bubble registers a layer and a
+     * window mousedown and hashchange listener, and *Copy path* arms the *Copied* timer.
+     */
+    name: "TfCloneSign",
+    source: "lib/tf/repo/TfCloneSign.svelte",
+    open: (target) => ({
+      app: mount(TfCloneSign, {
+        target,
+        props: {
+          entityId: "mock:tidewater/payout-service",
+          checkout: CLONED,
+          source: "Tidewater Gitea",
+          apps: residueApps(),
+          layers: createLayers(),
+          copy: () => Promise.resolve(),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector(".tf-clonesign")?.dispatchEvent(new PointerEvent("pointerenter"));
+      target.querySelector<HTMLButtonElement>(".tf-signbtn")?.click();
+      [...target.querySelectorAll<HTMLButtonElement>(".tf-signbubble button")].find((b) => b.textContent === "Copy path")?.click();
     },
   },
   {

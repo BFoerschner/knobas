@@ -79,6 +79,7 @@
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfPath from "../TfPath.svelte";
   import { itemHash, keyOf } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
@@ -679,7 +680,7 @@
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
-              <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
+              <td class:tf-dim={local?.dim}>{#if local !== null && local.text === checkouts[row.entity_id]?.path}<TfPath path={local.text} />{:else}{local?.text ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</span></td>
               <td class="tf-nowrap tf-right"><span class="tf-rowend"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></span></td>
             </tr>

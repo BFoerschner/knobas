@@ -41,7 +41,7 @@
 .tf-dnote { font-size: var(--t-sm); }
 .tf-clonefail { font-size: var(--t-sm); color: var(--err); max-width: 60ch; }
 .tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
-.tf-stg-ok { display: inline-flex; align-items: center; gap: 6px; }
+.tf-stg-ok { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .tf .tf-right { text-align: right; }
 .tf-local-line { margin: 0 0 12px; }
 .tf-local-note { margin: 0 0 10px; font-size: var(--t-sm); }

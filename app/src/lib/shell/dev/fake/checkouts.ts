@@ -1,11 +1,11 @@
 /**
  * `?fake-ipc`: Checkouts (#499): the clones root, a repository's checkout and diff, the
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
- * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
+ * `?fake-long-paths`, `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
 import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
-import { fillObject, isDiffEnd, objectCommand, worktreeOf } from "../../../tf/openin/openin";
+import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { CORPUS } from "./corpus";
@@ -34,18 +34,46 @@ let fakeClonesRoot: string | null = DEFAULT_CLONES_ROOT;
  * root is a label rather than a walk, and the walk is `knobas-core`'s to prove.
  */
 function seedClonesRoot(params: URLSearchParams): void {
+  const long = params.get("fake-long-paths");
+  if (long !== null) {
+    fakeScanRoot = long.trim() === "" ? LONG_ROOT : long.trim();
+    fakeClonesRoot = fakeScanRoot;
+    fakeFolderTail = LONG_TAIL;
+    fakeGitPath = LONG_GIT;
+  }
   const given = params.get("fake-clones-root");
   if (given === null) return;
   fakeClonesRoot = given.trim() === "" ? null : given.trim();
 }
 
-/** What the scan would find, per repo entity. */
+/**
+ * `?fake-long-paths` (the clone-path pass, 2026-11-16): every path the fixture draws as a long Windows one, with spaces,
+ * so a layout check can hold each place a path is drawn to its box. `?fake-long-paths=<root>` names the root instead.
+ * The scan finds its clones under it, each folder ending in a long name, and git is deep under *Program Files*.
+ */
+const LONG_ROOT = String.raw`C:\Users\someone with a long name\source\repos\very\deep\nested\folders with spaces in them\and still more folders`;
+const LONG_TAIL = "-the-repository-name-that-is-long";
+const LONG_GIT = String.raw`C:\Program Files\Git for Windows, installed in a folder with a long name\mingw64\libexec\git-core\git.exe`;
+
+/** The root the scan found its clones under: the default clones root, or `?fake-long-paths`' own. */
+let fakeScanRoot = DEFAULT_CLONES_ROOT;
+/** What ends each scanned folder's name after the repository's: nothing, or `?fake-long-paths`' long tail. */
+let fakeFolderTail = "";
+let fakeGitPath = "/usr/bin/git";
+
+/** The folder the scan would find, per repo entity, under the scan's root. */
 const FAKE_SCANNED: Record<string, string> = {
-  "mock:tidewater/payout-service": "/Users/mara/src/payout-service",
+  "mock:tidewater/payout-service": "payout-service",
   // Code's *Local checkout* column (#837): two more clones, as prototype-6 has several.
-  "mock:tidewater/psp-client": "/Users/mara/src/psp-client",
-  "mock:tidewater/rust-common": "/Users/mara/src/rust-common",
+  "mock:tidewater/psp-client": "psp-client",
+  "mock:tidewater/rust-common": "rust-common",
 };
+
+/** Where the scan found `repo`'s clone, if it did: under the root the scan walked, and only while that is the clones root. */
+function scannedPath(repo: string): string | undefined {
+  const folder = FAKE_SCANNED[repo];
+  return folder === undefined || fakeClonesRoot !== fakeScanRoot ? undefined : joinInside(fakeScanRoot, `${folder}${fakeFolderTail}`);
+}
 
 const fakeOverrides: Record<string, string> = {};
 
@@ -129,8 +157,7 @@ function fakeCheckout(entityId: string): CheckoutView {
   // Keyed on the *root* as well as the repo, so a run pointed at a temporary
   // directory of its own sees the honest *no checkout* rather than a path
   // under a root nobody set.
-  const scanned =
-    repo === null || fakeClonesRoot !== DEFAULT_CLONES_ROOT ? undefined : FAKE_SCANNED[repo];
+  const scanned = repo === null ? undefined : scannedPath(repo);
   const path = override ?? scanned ?? (repo === null ? undefined : fakeCloned[repo]) ?? null;
   return {
     repo_entity_id: repo,
@@ -289,7 +316,7 @@ function slug(name: string): string {
 function fakeSettings(): CheckoutSettings {
   return {
     clones_root: fakeClonesRoot,
-    git: fakeNoGit ? { status: "no_git" } : { status: "found", path: "/usr/bin/git" },
+    git: fakeNoGit ? { status: "no_git" } : { status: "found", path: fakeGitPath },
     default_application: fakeApps.some((app) => app.id === fakeDefault) ? fakeDefault : (fakeApps[0]?.id ?? null),
     applications: fakeApps.map((app) => ({ ...app })),
   };
@@ -445,7 +472,7 @@ function fakeDiffTool(args: Record<string, unknown>): string[] | null {
   const base = String(args["base"] ?? "");
   const head = String(args["head"] ?? "");
   if (checkout.path === null || !isDiffEnd(base, true) || !isDiffEnd(head, false)) return null;
-  return ["/usr/bin/git", "-C", checkout.path, "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
+  return [fakeGitPath, "-C", checkout.path, "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
 }
 
 /**
@@ -482,7 +509,7 @@ function fakeClone(args: Record<string, unknown>): CloneAnswer {
   if (fakeClonesRoot === null) {
     throw { code: "invalid", message: "no clones root is set: choose where clones go in Settings › Checkouts", source_id: null };
   }
-  const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
+  const path = joinInside(fakeClonesRoot, entry.title.split("/").pop() ?? entry.title);
   if (args["stop"] === true) {
     const timer = fakeCloning.get(id);
     if (timer === undefined) return { status: "not_cloning" };
@@ -549,7 +576,7 @@ function fakeStartCloneAll(): CloneAllState {
     run.current = [entry.title];
     tell();
     // Quicker than one *Clone*'s eight steps, so a whole run fits under a trip's wait.
-    const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
+    const path = joinInside(fakeClonesRoot ?? "", entry.title.split("/").pop() ?? entry.title);
     emit(entry.entity_id, path, { state: "progress", phase: "Receiving objects", percent: 50 });
     setTimeout(() => {
       fakeCloned[entry.entity_id] = path;
@@ -681,6 +708,9 @@ export function handlers(): Handlers {
 /** What `?fake-ipc`'s query seeds before the bridge is installed. */
 export function seed(params: URLSearchParams): void {
   seedClonesRoot(params);
+  // Settings' worktree list, which is empty until a pull request opens in one, holds one under the long root.
+  const tree = params.has("fake-long-paths") ? worktreeOf(fakeClonesRoot, "mock:tidewater/payout-service", 142) : null;
+  if (tree !== null) fakeWorktrees = [{ repo_entity_id: "mock:tidewater/payout-service", number: 142, path: tree, closed: false }];
   seedOpenState(params);
   seedClones(params);
 }
@@ -690,11 +720,11 @@ export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
 
-const atLoad = seedOf({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
+const atLoad = seedOf({ fakeClonesRoot, fakeScanRoot, fakeFolderTail, fakeGitPath, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
   fakeWorktrees = [];
   fakeCloneAll = null;
-  ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
+  ({ fakeClonesRoot, fakeScanRoot, fakeFolderTail, fakeGitPath, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
 keepSeed(fakeOverrides, fakeCloning, fakeCloned, listedDiffs);

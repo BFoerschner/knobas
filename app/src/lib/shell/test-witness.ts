@@ -85,7 +85,8 @@ export function landing(driver: string, landingName: string): DriverLanding {
  * Whether a run of text under `root` reads exactly `reading`, trimmed, as
  * `has_reading` compares a line. A run is one text node: WebKit draws each as
  * an AXStaticText of its own, so `Cloned at <span>path</span>` reads
- * `Cloned at` and the path, never the two joined.
+ * `Cloned at` and the path, never the two joined. The clone's sign keeps its
+ * path one run for this (`TfCloneSign`).
  */
 export function drawsReading(root: Element, reading: string): boolean {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);

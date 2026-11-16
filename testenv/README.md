@@ -2375,8 +2375,8 @@ spawn: it writes a stub executable and a fake clone into a scratch directory,
 and in Settings › *Checkouts and Open in* sets the **Clones root** to that
 directory (*Change…*, *Save*) and adds an application whose command is
 `<stub> {path}` (*Add an application*, the application page). It opens the
-repository payout-service through the launcher, waits for its *Cloned at* line
-to name the clone, picks the new application from *Open in…* (the menu's last
+repository payout-service through the launcher, waits for its clone's sign
+to name the clone (the path is the sign's description, a run of text of its own), picks the new application from *Open in…* (the menu's last
 application, walked up to from the focused default), and asserts that the stub ran with
 **exactly one** argument and that it is the checkout path. Exactly one is the
 assertion ADR-0016 asks for: what the program received is what the disk
@@ -2946,8 +2946,8 @@ One script outside this folder belongs to the same family, since it measures the
 
 ## UI checks
 
-`testenv/ui-checks/` holds three checks the UX polish loop (#2479) ran on every round. They caught regressions that the
-suite and the screenshots missed, so they are kept, but none is a gate and none starts a product: all three use the mock
+`testenv/ui-checks/` holds the checks the UX polish loop (#2479) ran on every round. They caught regressions that the
+suite and the screenshots missed, so they are kept, but none is a gate and none starts a product: all of them use the mock
 corpus under `?fake-ipc`.
 
 **The press trips** (`trips.mjs`, with `chrome.mjs` beside it): about 210 trips a person makes, written by hand in the
@@ -2994,6 +2994,18 @@ fixture at scale by default, or `--real <port>` on the windowless backend over a
 Edge or WebView2 on Windows over the DevTools protocol (`--attach`), which is where a scroll on the compositor shows,
 and `testenv/perf/wk/` holds the WKWebView instruments (a bare WKWebView host, real HID wheel input, a recording of what
 the window showed). `testenv/perf/README.md` has each tool, what its numbers mean, and how to run it on each machine.
+
+**Long paths** (`long-paths.mjs`, PR #2479, 2026-11-16): every place the app draws a filesystem path, with
+`?fake-long-paths` making each one a long Windows path with spaces in it (the clones, the clones root, git, a pull
+request's worktree; `?fake-long-paths=<root>` names the root). It opens the repository page and its tabs, its sign's
+bubble by focus and by hover, the *Open in…* menus, Code, a pull request, Settings › Checkouts and the job, at 5120 x 1440,
+2560 x 1440 at 125 %, 1920 x 1080 at 200 % and the window's smallest, 1100 x 600. It fails when a path's text runs past
+the window or past any box that holds it (the start `TfPath` gives up on purpose excepted), or when a box scrolls
+sideways with the long paths and not with the short ones. Run it as the trips run, under the machine's lock:
+
+```sh
+testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5341 node testenv/ui-checks/long-paths.mjs "$TMPDIR/long-paths" --port 5341
+```
 
 **The screenshot comparison** (`pixel-same.py`): given two folders of screenshots taken of the same screens on two
 heads, and the manifest that named them, it lists the screens whose pixels changed that nobody meant to change, most
