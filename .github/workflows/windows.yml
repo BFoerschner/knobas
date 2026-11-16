@@ -16,6 +16,12 @@
 # installer carries: unpacked, `initdb`, started and queried with no download
 # to fall back on, on the one platform whose programs a Mac cannot run.
 #
+# And since 2026-11-16, the reader of a clone (`knobas-git`, ADR-0043): Björn
+# runs knobas on Windows, where a start of `git` is the wait the reader
+# removed, and no Mac shows what Git for Windows prints or what NTFS says of a
+# changed file. The job compares every read with the runner's own git, and
+# moves the working tree's stamp by Windows's file metadata.
+#
 # Narrow on purpose, unlike `check.yml`: one crate's tests filtered to these,
 # on a pull request that changes what they cover or this file, or by hand.
 name: windows
@@ -29,6 +35,7 @@ on:
       - crates/knobas-db/src/migrate.rs
       - crates/knobas-db/migrations/**
       - crates/knobas-db/migrations.sha384
+      - crates/knobas-git/**
       - .gitattributes
       - .github/workflows/windows.yml
   workflow_dispatch:
@@ -37,6 +44,37 @@ permissions:
   contents: read
 
 jobs:
+  # `knobas-git` has no native dependency, so its build is minutes. Its tests
+  # make their repositories with the runner's git and compare each answer
+  # with it byte for byte.
+  clone-reader:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: toolchain
+        name: Read the pinned toolchain
+        shell: bash
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (same commit as master)
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: clone-reader
+
+      - name: the runner's git
+        run: git --version
+
+      - name: every read of a clone is this git's answer, and the stamp moves with a change
+        run: cargo test -p knobas-git -- --nocapture
+
   console:
     runs-on: windows-latest
     # A cold build of knobas-db and its dependencies is minutes, and the
