@@ -68,8 +68,32 @@ export function whenIdle(): Promise<void> {
   });
 }
 
+/**
+ * **The lists Compare drew, by pair** (the big-compare pass, 2026-11-16): a pick of a pair drawn before this session
+ * draws its list in the frame the pick lands in, under the clone's line, while the reads go out as for any pick and fill
+ * it in place; nothing moves where it is the same. The last {@link DRAWN_KEPT} pairs, the ones Compare read ahead among them.
+ */
+const drawn = new Map<string, { list: RangeFiles; counted: boolean }>();
+export const DRAWN_KEPT = 16;
+
+/** Keeps the list Compare drew for `base`...`head`; a counted one over the names. */
+export function keepDrawnCompare(repoId: string, base: string, head: string, list: RangeFiles, counted: boolean): void {
+  const key = keyOf(repoId, base, head);
+  const had = drawn.get(key);
+  if (had?.counted && !counted) return;
+  drawn.delete(key);
+  drawn.set(key, { list, counted });
+  while (drawn.size > DRAWN_KEPT) drawn.delete(drawn.keys().next().value!);
+}
+
+/** The list Compare last drew for `base`...`head` this session, if any. */
+export function drawnCompare(repoId: string, base: string, head: string): { list: RangeFiles; counted: boolean } | undefined {
+  return drawn.get(keyOf(repoId, base, head));
+}
+
 /** Forget every early read, for a test. */
 export function forgetEarlyCompares(): void {
   early.clear();
   askedOnce.clear();
+  drawn.clear();
 }

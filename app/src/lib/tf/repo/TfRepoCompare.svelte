@@ -71,9 +71,9 @@
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
-  import type { DiffFile, DiffRange, RangeCommit, RangeDiff } from "../../ipc/entity";
+  import type { DiffFile, DiffRange, RangeCommit, RangeDiff, RangeFiles } from "../../ipc/entity";
   import type { DiffFill } from "../diff/diff";
-  import { fillEnds, namesList, rangeFill } from "../diff/fill";
+  import { fillEnds, keepList, namesList, rangeFill } from "../diff/fill";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
@@ -91,8 +91,9 @@
   import { onViewFresh } from "./view-fresh.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import TfHeldNote from "../TfHeldNote.svelte";
-  import { compareReads, takeCompareEarly } from "./compare-early";
+  import { compareReads, drawnCompare, keepDrawnCompare, takeCompareEarly } from "./compare-early";
   import { waitPhase } from "../waiting";
+  import { Windowed } from "../../shell/windowed.svelte";
   import { shortEnd } from "../diff/sha";
   import {
     branchStanding,
@@ -123,7 +124,7 @@
     guessed = null,
     onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "rangeFilePages" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -186,9 +187,14 @@
    * view measures it against nothing. A diff predicted at the checkout lists none, so the check behind it brings them.
    */
   let compareCommits = $state<{ section: string; commits: RangeCommit[] } | null>(null);
-  /** Keeps what the source's compare `diff` listed for `asked`, where it listed any. */
-  function keepCommits(asked: string, diff: RangeDiff): void {
+  /**
+   * Keeps what the source's compare `diff` listed for `asked`, where it listed any. `longer`: a check of the same diff,
+   * whose list stands only where it is longer (Gitea's compare lists at most 250 commits, the clone's 500: the check
+   * replaced a branch's 300 with 250, the big-compare pass, 2026-11-16).
+   */
+  function keepCommits(asked: string, diff: RangeDiff, longer = false): void {
     const listed = diff.range?.commits ?? [];
+    if (longer && compareCommits?.section === asked && compareCommits.commits.length >= listed.length) return;
     if (listed.length > 0 || compareCommits?.section !== asked) compareCommits = listed.length > 0 ? { section: asked, commits: listed } : null;
   }
   /**
@@ -377,11 +383,15 @@
    * The two ends the drawn list's files are read between, a page of lines at a time as each comes near the view: the
    * commits it settled, else the names it was read by. `null` while the diff drawn carries its lines (no `rangeFiles`).
    */
-  let fillAt = $state<{ base: string; head: string } | null>(null);
+  let fillAt = $state<{ base: string; head: string; local: boolean } | null>(null);
+  /** The same two ends, read at the same place: the fill stays, and the lines read under it. */
+  const sameEnds = (a: { base: string; head: string; local: boolean } | null, b: { base: string; head: string; local: boolean }) =>
+    a !== null && a.base === b.base && a.head === b.head && a.local === b.local;
   const fill = $derived.by((): DiffFill | null => {
     const read = ports.rangeFile;
     const at = fillAt;
-    return read === undefined || at === null ? null : rangeFill(read, repoId, at, false, stopRead);
+    // Many files' first pages in one read, and read ahead where the list was read at the clone (the big-compare pass).
+    return read === undefined || at === null ? null : rangeFill(read, repoId, at, false, stopRead, ports.rangeFilePages, at.local);
   });
 
   /**
@@ -408,18 +418,43 @@
     // The clone's names, drawn while the list with counts is read beside them, where they land first (the stored-compare
     // pass): one `git diff --raw` that reads no file's lines, where the counts cost git a read of every file.
     let landed = false;
+    // A pair drawn before this session (a swap back, the other end picked again): drawn now, in the pick's own frame, under
+    // the clone's line, while the reads below go out as for any pick and fill it in place (the big-compare pass).
+    // Only the clone's: a forge's list knobas holds is the backend's held read, drawn under its own line.
+    const before = again || listing === undefined ? undefined : drawnCompare(repoId, from, to);
+    // Untracked: this runs in the read's effect, which must not read again when what it draws changes.
+    if (before !== undefined && before.list.read_at === "checkout") untrack(() => {
+      const list = before.list;
+      reading = false;
+      failed = null;
+      missing = false;
+      files = list.files;
+      counted = before.counted;
+      const at = { ...fillEnds(list, from, to), local: true };
+      if (!sameEnds(fillAt, at)) fillAt = at;
+      cut = list.truncated;
+      range = list.range;
+      filesFor = asked;
+      keepCommits(asked, list);
+      moved = null;
+      predicted = { section: asked, checked: false };
+      held = null;
+      checking = null;
+    });
     if (!again && listing !== undefined) {
       void ports.rangeNames?.(repoId, from, to).then(
         (names) => {
-          if (!alive() || landed || names === null) return;
+          // Not over a counted list this pick drew already (the pair drawn before, below).
+          if (!alive() || landed || names === null || (filesFor === asked && counted)) return;
           const list = namesList(names);
+          keepDrawnCompare(repoId, from, to, list, false);
           reading = false;
           failed = null;
           missing = false;
           files = list.files;
           counted = false;
-          const at = fillEnds(list, from, to);
-          if (fillAt === null || fillAt.base !== at.base || fillAt.head !== at.head) fillAt = at;
+          const at = { ...fillEnds(list, from, to), local: true };
+          if (!sameEnds(fillAt, at)) fillAt = at;
           cut = false;
           range = list.range;
           filesFor = asked;
@@ -447,9 +482,14 @@
       missing = false;
       files = diff.files;
       counted = true;
+      if (listing !== undefined) {
+        keepDrawnCompare(repoId, from, to, diff as RangeFiles, true);
+        // *Open as diff* of this compare draws it from here (the big-compare pass).
+        keepList(repoId, diff as RangeFiles);
+      }
       // The same two ends keep the fill, so the lines read under the names stay.
-      const at = listing === undefined ? null : fillEnds(diff, from, to);
-      if (at === null || fillAt === null || fillAt.base !== at.base || fillAt.head !== at.head) fillAt = at;
+      const at = listing === undefined ? null : { ...fillEnds(diff, from, to), local: diff.read_at === "checkout" };
+      if (at === null || !sameEnds(fillAt, at)) fillAt = at;
       cut = diff.truncated;
       range = diff.range;
       filesFor = asked;
@@ -497,15 +537,16 @@
       (fresh) => {
         const same = sameDiff(shown, fresh);
         if (alive() && filesFor === asked) {
-          keepCommits(asked, fresh);
+          keepCommits(asked, fresh, same);
           if (heldAt !== undefined) held = { section: asked, at: heldAt, done: true, failed: null };
           if (same) {
             if (heldAt === undefined) predicted = { section: asked, checked: true };
           } else {
             files = fresh.files;
             if (fillAt !== null) {
-              const at = fillEnds(fresh, from, to);
-              if (fillAt.base !== at.base || fillAt.head !== at.head) fillAt = at;
+              const at = { ...fillEnds(fresh, from, to), local: false };
+              if (!sameEnds(fillAt, at)) fillAt = at;
+              keepDrawnCompare(repoId, from, to, fresh as RangeFiles, true);
             }
             cut = fresh.truncated;
             range = fresh.range;
@@ -524,6 +565,71 @@
     );
     checking = { section: asked, differs };
   }
+
+  /**
+   * **The next picks, read ahead** (the big-compare pass, 2026-11-16): once the pair shown is drawn and the page is idle,
+   * the names of the pairs a reader picks next are read at the clone, one after another (the six newest other branches as
+   * *From*, three other bases as *Into*), and kept as a pair drawn is, so such a pick draws its list in its own frame; the
+   * pick's reads go out as for any pick and fill it in place. A clone only: names of a pair the clone cannot answer are
+   * none, and nothing is asked of the forge.
+   */
+  const AHEAD_FROM = 6;
+  const AHEAD_INTO = 3;
+  $effect(() => {
+    const read = ports.rangeNames;
+    const [into, from] = [base, head];
+    const ready = shown && filesFor === section && files !== null && !reading && predicted !== null;
+    if (read === undefined || ports.rangeFiles === undefined || from === null || into === "" || into === from || !ready) return;
+    const pairs: [string, string][] = [];
+    const other = (name: string) => name !== from && name !== into;
+    for (const option of branches) {
+      if (pairs.length >= AHEAD_FROM) break;
+      // The default branch as *From* moves *Into*: not a pick read ahead.
+      if (other(option.name) && !option.isDefault && option.made === undefined) pairs.push([into, option.name]);
+    }
+    let bases = 0;
+    for (const option of branches) {
+      if (bases >= AHEAD_INTO) break;
+      if (other(option.name) && option.made === undefined) {
+        pairs.push([option.name, from]);
+        bases++;
+      }
+    }
+    const todo = pairs.filter(([a, b]) => drawnCompare(repoId, a, b) === undefined);
+    if (todo.length === 0) return;
+    let live = true;
+    let stop: (() => void) | null = null;
+    const later = (then: () => void) => {
+      if (typeof requestIdleCallback === "function") {
+        const id = requestIdleCallback(then, { timeout: 2000 });
+        stop = () => cancelIdleCallback(id);
+      } else {
+        const id = setTimeout(then, 100);
+        stop = () => clearTimeout(id);
+      }
+    };
+    const step = (at: number) => {
+      stop = null;
+      const pair = todo[at];
+      if (!live || pair === undefined) return;
+      const [a, b] = pair;
+      void read(repoId, a, b)
+        .then(
+          (names) => {
+            if (names !== null && drawnCompare(repoId, a, b) === undefined) keepDrawnCompare(repoId, a, b, namesList(names), false);
+          },
+          () => {},
+        )
+        .finally(() => {
+          if (live) later(() => step(at + 1));
+        });
+    };
+    later(() => step(0));
+    return () => {
+      live = false;
+      stop?.();
+    };
+  });
 
   // The form, proposed for each branch: from its ticket where it names one.
   // Only a new branch proposes anew; nothing else may wipe what was typed,
@@ -626,6 +732,9 @@
         ? []
         : (standing?.commits ?? []),
   );
+
+  /** *Commits* a few hundred long draws the rows its box shows. By place: the list is the compare's, in its order. */
+  const commitWin = new Windowed({ count: () => commits.length, key: (i) => i, estimate: 35, scrolls: true, from: 40, overscan: 350 });
 
   // One commit says what the change is better than its branch's name does (F-241). Only over the name proposed: typed words stay.
   $effect(() => {
@@ -790,13 +899,17 @@
   </div>
   {#if !same}
   <aside class="tf-side">
-    <div class="tf-panel tf-headed">
-      <header><h3>Commits</h3></header>
+    <div class="tf-panel tf-headed tf-ccommits">
+      <header><h3>Commits</h3>{#if commits.length > 0}<span class="tf-ccount">{commits.length.toLocaleString("en-US")}</span>{/if}</header>
       {#if commits.length > 0}
-        <div class="tf-rows">
-          {#each commits as commit, n (n)}
-            <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}><TfKeyed text={commit.title} /></span></div>
+        <!-- One line a commit in a box of about ten that scrolls (the big-compare pass, 2026-11-16): hundreds of commits
+             stood here two lines each and pushed the diff thousands of pixels down. -->
+        <div class="tf-rows tf-crows" aria-label="Commits" {@attach commitWin.list}>
+          {#if commitWin.before > 0}<div class="tf-wgap" aria-hidden="true" {@attach commitWin.room("before")}></div>{/if}
+          {#each commitWin.slice(commits) as commit, n (commitWin.start + n)}
+            <div class="tf-r" title={commit.title} {@attach commitWin.row(commitWin.start + n)}><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t"><TfKeyed text={commit.title} /></span></div>
           {/each}
+          {#if commitWin.after > 0}<div class="tf-wgap" aria-hidden="true" {@attach commitWin.room("after")}></div>{/if}
         </div>
       {:else if fromDefault ? filesFor === section && files !== null && files.length === 0 : standing !== null}
         <p class="tf-prnote tf-cnone">Nothing that {fromDefault ? base : (defaultBranch ?? "the default branch")} lacks.</p>
