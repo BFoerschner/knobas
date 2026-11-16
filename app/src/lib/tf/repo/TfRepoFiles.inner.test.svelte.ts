@@ -7,7 +7,8 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { SourceView, TreeEntry } from "../../ipc/entity";
+import type { LocalTree, SourceView, TreeEntry, ViewBlock } from "../../ipc/entity";
+import { checkoutPorts } from "./checkout-ports.test-support";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import { forgetAllDrawnFiles } from "./drawn-files";
 
@@ -179,14 +180,35 @@ test("a landing with no checkout asks its README beside the top listing, and dra
   expect(reads.filter((id) => id.endsWith(":README.md")), "the listing's section was not asked again").toEqual(["file:README.md"]);
 });
 
-test("a landing whose checkout holds a copy guesses nothing at the source", async () => {
+// The ux14 Windows pass (2026-11-16): asked only once the checkout had said it holds no copy, the README waited a
+// second round of IPC behind the checkout's read, about 90 ms of a landing's 372 at 6x on the PC (Fable's ruling that
+// day). It is asked at once, beside the checkout's read and the top listing; where the checkout holds a copy, the copy
+// draws it, the guess goes unread, and nothing reads the README again.
+test("a landing asks its README beside the checkout's read, and a clone's copy draws it", async () => {
+  let answer: (tree: LocalTree) => void = () => {};
+  const clone = new Promise<LocalTree>((resolve) => (answer = resolve));
+  const cloned: string[] = [];
+  /** The source's reads as they are asked, before any answers. */
+  const asked: string[] = [];
+  // The source answers only once the clone has drawn: a forge slower than `git ls-tree`.
+  let open: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (open = resolve));
   place.path = null;
   view = mount(TfRepoFiles, {
     target,
     props: {
       ports: {
-        entityView,
-        localDir: () => new Promise<never>(() => {}),
+        entityView: async (at: string, section: string | null) => {
+          asked.push(section ?? "");
+          await gate;
+          return entityView(at, section);
+        },
+        ...checkoutPorts(() => clone),
+        localFile: async (_at: string, commit: string, path: string) => {
+          cloned.push(path);
+          const text = path === "README.md" ? "# payout, the clone's\n" : (FILES[path] ?? "");
+          return { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: "b10b-local", commit } as ViewBlock;
+        },
         submitWrite: async () => {
           throw { code: "invalid", message: "no write here" };
         },
@@ -204,5 +226,24 @@ test("a landing whose checkout holds a copy guesses nothing at the source", asyn
   });
   flushSync();
   await settle();
-  expect(reads).not.toContain("file:README.md");
+  // The checkout has not answered, and the README is asked already.
+  expect(asked).toContain("file:README.md");
+  answer({
+    commit: SHA,
+    as_of: "2026-11-16T09:00:00Z",
+    truncated: false,
+    entries: [
+      { path: "README.md", kind: "file", size: 20 },
+      { path: "src", kind: "dir", size: null },
+      { path: "src/a.rs", kind: "file", size: 10 },
+      { path: "src/b.rs", kind: "file", size: 10 },
+    ],
+  });
+  await settle();
+  expect(target.querySelector(".tf-fileview .tf-md")?.textContent).toContain("the clone's");
+  expect(cloned).toContain("README.md");
+  open();
+  await settle();
+  expect(target.querySelector(".tf-fileview .tf-md")?.textContent).toContain("the clone's");
+  expect(asked.filter((id) => id.endsWith(":README.md")), "no read of the README at a commit follows").toEqual(["file:README.md"]);
 });

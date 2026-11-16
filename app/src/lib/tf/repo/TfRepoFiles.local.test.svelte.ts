@@ -123,8 +123,9 @@ const shownFile = () => text(target.querySelector(".tf-fileview"));
 const note = () => text(target.querySelector(".tf-gonote"));
 /** The source reads Files made; the last commit above the README (`commits`) is the source's own read. */
 const sourceReads = () => asked.map((read) => read.section).filter((section) => section !== "commits");
+/** The newest read of `section` answers: the landing's README guess, asked at once, is an older one (the ux14 pass). */
 const release = (section: string, files: Files, commit: string, sha = "b10b-local") =>
-  asked.find((read) => read.section === section)!.release(files, commit, sha);
+  asked.filter((read) => read.section === section).at(-1)!.release(files, commit, sha);
 
 test("the checkout's copy draws the tree and the README while the source has not answered at all", async () => {
   draw(localTree(FILES));
@@ -134,8 +135,9 @@ test("the checkout's copy draws the tree and the README while the source has not
   expect(shownFile()).toContain("at c0ffee0 Render as Markdown payout-service");
   expect(localReads).toEqual(["c0ffee0:README.md"]);
   expect(note()).toBe("From your clone at c0ffee0, as of the last sync.");
-  // The source's top is asked behind it, and nothing else is: the README came from the checkout.
-  expect(sourceReads()).toEqual(["files"]);
+  // The source's top is asked behind it, and the README's guess beside the checkout's read (the ux14 Windows pass,
+  // 2026-11-16), which goes unread: the README came from the checkout.
+  expect(sourceReads()).toEqual(["files", "file:README.md"]);
 });
 
 test("a directory opened from the copy is the checkout's too, with no read of the source", async () => {
@@ -144,7 +146,7 @@ test("a directory opened from the copy is the checkout's too, with no read of th
   target.querySelector<HTMLButtonElement>(".tf-ftree button.tf-fdir")!.click();
   await settle();
   expect(tree()).toEqual(["src", "lib.rs", "README.md"]);
-  expect(sourceReads()).toEqual(["files"]);
+  expect(sourceReads()).toEqual(["files", "file:README.md"]);
 });
 
 test("the source's top at the same commit checks the copy, and nothing is read again", async () => {
@@ -155,7 +157,7 @@ test("the source's top at the same commit checks the copy, and nothing is read a
 
   expect(note()).toBe("From your clone at c0ffee0, the same as on the code host.");
   expect(tree()).toEqual(["src", "README.md"]);
-  expect(sourceReads()).toEqual(["files"]);
+  expect(sourceReads()).toEqual(["files", "file:README.md"]);
   expect(localReads).toEqual(["c0ffee0:README.md"]);
 });
 

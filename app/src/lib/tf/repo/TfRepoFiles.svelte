@@ -380,21 +380,13 @@
    */
   function readLocal(where: string, mine: number) {
     const read = ports.localDir;
-    localNone = false;
     if (read === undefined) return;
-    const none = () => {
-      if (mine === generation && where === at) localNone = true;
-      return false;
-    };
     read(where, null, "").then(
-      (top) => (top === null ? none() : land(top, where, mine)),
+      (top) => (top === null ? false : land(top, where, mine)),
       // No checkout's copy: the source's reads draw the tree, as before.
-      none,
+      () => false,
     );
   }
-
-  /** The checkout said it holds no copy here: the source draws the tree and its files, and the landing's README is guessed. */
-  let localNone = $state(false);
 
   /**
    * The checkout's top `top`, at the mirror's tip, drawn as the tree: at once where nothing is drawn yet, or taking over
@@ -435,6 +427,8 @@
     local = { commit: top.commit, checked: first && sourceTop === top.commit, asOf: top.as_of };
     listings = drawn;
     pathsSection = localId(top.commit, "paths", "");
+    // The checkout's copy draws the landing's README: the source's guess at it goes unread, and goes.
+    early.delete(fileKey(LANDING_GUESS));
     return true;
   }
 
@@ -697,14 +691,17 @@
     });
   });
 
-  // The landing names no file: its README is asked of the source beside the top listing, as a deep link's file is, once
-  // the checkout has said it holds no copy (the inner-6x pass, 2026-11-15: asked once the listing had named it, it was a
-  // second round of the forge, 130 ms of a landing's 330 at 6x). A Markdown README is the default `pickDefaultFile` takes
-  // first; where the listing names another file, or none, the guess goes unread and the listing's own section is read.
+  // The landing names no file: its README is asked of the source beside the top listing and the checkout's read, as a
+  // deep link's file is (the inner-6x pass, 2026-11-15: asked once the listing had named it, it was a second round of the
+  // forge, 130 ms of a landing's 330 at 6x; the ux14 Windows pass, 2026-11-16: asked once the checkout had said it holds
+  // no copy, a second round of IPC, about 90 ms of a landing's 372 at 6x on the PC). Where the checkout holds a copy, the
+  // copy draws the README and the guess goes unread: one read of the store, and the read behind it, spent for the round.
+  // A Markdown README is the default `pickDefaultFile` takes first; where the listing names another file, or none, the
+  // guess goes unread and the listing's own section is read.
   const LANDING_GUESS = "README.md";
   $effect(() => {
     const declared = treeSections;
-    if (path !== null || !localNone) return;
+    if (path !== null) return;
     if (listings[""] !== undefined) {
       // The listing names its own default: a guess it did not take goes, so no later open of that file takes a read from now.
       untrack(() => {
