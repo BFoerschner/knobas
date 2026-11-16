@@ -11,6 +11,11 @@ import type {
   AppStatus,
   CommandStep,
   CommandStepDraft,
+  FolderMarks,
+  FolderRenderer,
+  FolderRendererDraft,
+  FolderRenderView,
+  Ask,
   InstalledFont,
   NamedPipeline,
   NamedPipelineDraft,
@@ -27,6 +32,18 @@ export type {
   CommandStep,
   CommandStepDraft,
   DbState,
+  Ask,
+  DrawnKind,
+  FolderDrawn,
+  FolderFailure,
+  FolderMarks,
+  FolderOutput,
+  FolderRenderer,
+  FolderRendererDraft,
+  FolderRenderMoved,
+  FolderRenderView,
+  FolderRunState,
+  ReadFrom,
   InstalledFont,
   NamedPipeline,
   NamedPipelineDraft,
@@ -156,6 +173,70 @@ export function setUserRenderers(renderers: UserRendererDraft[]): Promise<UserRe
  */
 export function runRenderer(id: string, content: RenderContent): Promise<RenderRun> {
   return invoke<RenderRun>("run_renderer", { id, content });
+}
+
+/** The folder renderers saved in Settings › Renderers (ADR-0044), in order. */
+export function folderRenderers(): Promise<FolderRenderer[]> {
+  return invoke<FolderRenderer[]>("folder_renderers");
+}
+
+/** Save the whole list of folder renderers; answers it as stored (ids, trimmed globs, held timeouts). */
+export function setFolderRenderers(renderers: FolderRendererDraft[]): Promise<FolderRenderer[]> {
+  return invoke<FolderRenderer[]>("set_folder_renderers", { renderers });
+}
+
+/** Where a folder render is asked for: the repository or branch, the renderer, the folder and its reads. */
+export interface FolderAsk {
+  entityId: string;
+  renderer: string;
+  folder: string;
+  /** The commit the page shows; `null` reads at the mirror's tip. */
+  commit: string | null;
+  /** The section the source lists every path in, for a repository with no clone. */
+  paths: string | null;
+  ask: Ask;
+}
+
+/**
+ * Saved folder renderer `renderer` on `folder` (ADR-0044): what is kept and
+ * the run's state, at once. `ask` says whether a run may start; the run is
+ * told on `folder-render:moved`.
+ */
+export function folderRender(at: FolderAsk): Promise<FolderRenderView> {
+  return invoke<FolderRenderView>("folder_render", {
+    entityId: at.entityId,
+    renderer: at.renderer,
+    folder: at.folder,
+    commit: at.commit,
+    paths: at.paths,
+    ask: at.ask,
+  });
+}
+
+/** Stop a folder render's run, waiting or going. */
+export function folderRenderStop(entityId: string, renderer: string, folder: string): Promise<void> {
+  return invoke<void>("folder_render_stop", { entityId, renderer, folder });
+}
+
+/** The page showing a folder render left: a run still waiting for its place is dropped. */
+export function folderRenderLeave(entityId: string, renderer: string, folder: string): Promise<void> {
+  return invoke<void>("folder_render_leave", { entityId, renderer, folder });
+}
+
+/** The bytes a folder render drew, by its token: raw from the bridge, as `entity_file_bytes` answers. */
+export async function folderRenderOutput(token: string): Promise<Uint8Array> {
+  const answer = await invoke<ArrayBuffer | ArrayLike<number>>("folder_render_output", { token });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** Keep a sanitized HTML document for a folder render's frame; answers the token the frame loads it by. */
+export function folderRenderFrame(document: string): Promise<string> {
+  return invoke<string>("folder_render_frame", { document });
+}
+
+/** Which folders of a tree the folder renderers holding a file glob take, per renderer. */
+export function folderRenderMarks(entityId: string, commit: string | null, paths: string | null): Promise<FolderMarks[]> {
+  return invoke<FolderMarks[]>("folder_render_marks", { entityId, commit, paths });
 }
 
 /** The default renderer per file pattern (#2263), in order. */

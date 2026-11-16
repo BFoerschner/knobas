@@ -3,7 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { appStatus, commandSteps, completeFirstRun, diffPipelines, frontendReady, installedFonts, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
+import type { appStatus, commandSteps, completeFirstRun, diffPipelines, folderRender, folderRenderers, folderRenderFrame, folderRenderLeave, folderRenderMarks, folderRenderOutput, folderRenderStop, setFolderRenderers, frontendReady, installedFonts, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
 import type { acceptSuggestion, actionItemTicket, cardReads, entityBriefs, artifactBytes, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneAll, cloneAllPlan, cloneAllState, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsNodes, docsOutline, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCheckouts, entityCommitDiff, entityFileBytes, entityFilePiped, entityLocalDir, entityLocalFile, entityLocalPaths, entityLocalTree, entityRangeDiff, entitySourceRangeDiff, entityThread, entityHead, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, inboxShelves, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openFolder, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, publishStandupProtocolAgain, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity, repoPipelines, repoBranchPulls, commitRepositories, entityRangeFile, entityRangeFilePages, entityRangeFiles, entitySourceRangeFiles, entityRangeNames, cancelRead } from "../../ipc/entity";
@@ -216,6 +216,14 @@ export interface Answers {
   run_embedded_html: Answer<typeof runEmbeddedHtml>;
   run_log: Answer<typeof runLog>;
   run_renderer: Answer<typeof runRenderer>;
+  folder_renderers: Answer<typeof folderRenderers>;
+  set_folder_renderers: Answer<typeof setFolderRenderers>;
+  folder_render: Answer<typeof folderRender>;
+  folder_render_stop: Answer<typeof folderRenderStop>;
+  folder_render_leave: Answer<typeof folderRenderLeave>;
+  folder_render_output: Answer<typeof folderRenderOutput>;
+  folder_render_frame: Answer<typeof folderRenderFrame>;
+  folder_render_marks: Answer<typeof folderRenderMarks>;
   run_presets: Answer<typeof runPresets>;
   run_tests: Answer<typeof runTests>;
   save_dep_view: Answer<typeof saveDepView>;

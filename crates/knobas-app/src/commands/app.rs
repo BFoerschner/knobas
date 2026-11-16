@@ -573,6 +573,156 @@ pub async fn run_renderer<R: tauri::Runtime>(
     crate::renderers::run(&pool, &id, content).await
 }
 
+/// The folder renderers saved in Settings › Renderers (ADR-0044), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn folder_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::folder_render::FolderRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::list(&pool).await
+}
+
+/// Save the whole list of folder renderers and answer it as stored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an entry with no
+/// name, a command that cannot be run, or a placeholder other than `{path}`
+/// and `{out}`,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_folder_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    renderers: Vec<crate::folder_render::FolderRendererDraft>,
+) -> Result<Vec<crate::folder_render::FolderRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::save(&pool, &renderers).await
+}
+
+/// The forge reads a folder render needs where there is no clone: `None`
+/// before the sources are up, when only a clone can be read.
+fn forge_of<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<crate::folder_render::resolve::Forge> {
+    let state = crate::sources::state(app).ok()?;
+    Some(crate::folder_render::resolve::Forge {
+        pool: state.pool.clone(),
+        secrets: state.secrets.clone(),
+        registry: state.registry.clone(),
+        live: state.live.clone(),
+    })
+}
+
+/// Saved folder renderer `renderer` on `folder` of `entity_id` (a repository
+/// or a branch) at `commit`, the mirror's tip when `None` (ADR-0044):
+/// answered at once with what is kept and the run's state; `ask` says whether
+/// a run may start. `paths` is the section the source lists every path in,
+/// for a repository with no clone. Runs are told on `folder-render:moved`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a renderer that
+/// is not saved, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for
+/// a query failure.
+#[tauri::command]
+pub async fn folder_render<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    renderer: String,
+    folder: String,
+    commit: Option<String>,
+    paths: Option<String>,
+    ask: crate::folder_render::runs::Ask,
+) -> Result<crate::folder_render::runs::FolderRenderView, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let forge = forge_of(&app);
+    crate::folder_render::ask(
+        &pool,
+        forge.as_ref(),
+        &entity_id,
+        &renderer,
+        &folder,
+        commit.as_deref(),
+        paths.as_deref(),
+        ask,
+    )
+    .await
+}
+
+/// Stop the run of `renderer` on `folder` of `entity_id`, waiting or going.
+#[tauri::command]
+pub fn folder_render_stop(entity_id: String, renderer: String, folder: String) {
+    crate::folder_render::runs::Runs::global()
+        .stop(&crate::folder_render::slot(&entity_id, &renderer, &folder));
+}
+
+/// The page showing `folder`'s render left: a run still waiting for its
+/// place is dropped, one that started finishes into the cache.
+#[tauri::command]
+pub fn folder_render_leave(entity_id: String, renderer: String, folder: String) {
+    crate::folder_render::runs::Runs::global()
+        .leave(&crate::folder_render::slot(&entity_id, &renderer, &folder));
+}
+
+/// The bytes a folder render drew, by its token, raw (an `ArrayBuffer` in the
+/// shell, not a JSON array).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token no
+/// longer kept.
+#[tauri::command]
+pub fn folder_render_output(token: String) -> Result<tauri::ipc::Response, IpcError> {
+    crate::folder_render::runs::Runs::global()
+        .output(&token)
+        .map(|bytes| tauri::ipc::Response::new(bytes.as_ref().clone()))
+        .ok_or_else(|| {
+            IpcError::not_found("that drawing is no longer kept: run the renderer again".to_owned())
+        })
+}
+
+/// Keep the shell's sanitized document of a folder render's HTML and answer
+/// the token its frame loads it by (`knobas-render://localhost/folder.<token>`),
+/// served under the file renderers' policy, no script.
+#[tauri::command]
+pub fn folder_render_frame(document: String) -> String {
+    crate::folder_render::runs::Runs::global().frame(document.into_bytes())
+}
+
+/// Which folders of `entity_id`'s tree at `commit` the folder renderers that
+/// hold a file glob take, per renderer: what the Code page's tree marks.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn folder_render_marks<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    commit: Option<String>,
+    paths: Option<String>,
+) -> Result<Vec<crate::folder_render::FolderMarks>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let forge = forge_of(&app);
+    crate::folder_render::resolve::marks(
+        &pool,
+        forge.as_ref(),
+        &entity_id,
+        commit.as_deref(),
+        paths.as_deref(),
+    )
+    .await
+}
+
 /// The default renderer per file pattern (#2263), in order.
 ///
 /// # Errors

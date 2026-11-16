@@ -76,6 +76,11 @@ export const EVENTS = {
   checkoutFetched: "checkout:fetched",
   /** `CloneAllState` — where *Clone all* is: each clone's start and end, and the run's. */
   cloneAll: "clone:all",
+  /**
+   * `FolderRenderMoved` — a folder renderer's run on a folder moved or ended
+   * (ADR-0044): the page showing that folder asks again.
+   */
+  folderRender: "folder-render:moved",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

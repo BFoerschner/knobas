@@ -512,6 +512,8 @@ pub async fn delete(
     }
     // Dropped once the row is gone, so no read builds it again in between.
     live.forget(id);
+    // Its folder renders go with it (ADR-0044).
+    crate::folder_render::runs::Runs::global().forget_source(id);
     knobas_secrets::spawn::delete(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
     // Settings that hang off the id go with it (#2440), last: a failure here
     // leaves the keychain item already gone, and at worst a row that keeps a
@@ -581,6 +583,8 @@ pub async fn set_secret(
     // (#2240): the next read builds it again over this one.
     live.forget(id);
     super::held::forget(pool, id).await;
+    // A new credential may read less: its folder renders go too (ADR-0044).
+    crate::folder_render::runs::Runs::global().forget_source(id);
     release_credential_waits(pool, id).await;
 
     let source = knobas_sync::scheduler::build_off_runtime(

@@ -116,6 +116,15 @@ export interface RepoRoute {
   base: string | null;
   /** Builds: the pipeline whose runs open inside the tab (`builds/<branch>/<pipeline id>`, each encoded whole). */
   pipeline: string | null;
+  /** Files: a folder drawn by a folder renderer (`render/<renderer id>/<folder>`, ADR-0044); absent for none. */
+  render?: FolderRenderAt;
+}
+
+/** A folder and the folder renderer that draws it (ADR-0044). */
+export interface FolderRenderAt {
+  renderer: string;
+  /** The folder's path from the top, `""` the top itself. */
+  folder: string;
 }
 
 /** Between the base and the head in a compare address: git's own, and never part of a ref name. */
@@ -130,6 +139,10 @@ const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit"]);
  */
 export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
+  if (rest[1] === RENDER && rest[2]) {
+    const render = { renderer: rest[2], folder: rest.slice(3).join("/") };
+    return { repoId, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null, render };
+  }
   if (rest[1] === LINE) {
     const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
     return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null, pipeline: null };
@@ -153,7 +166,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
 
 /** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
 export function knowsRepoTab(rest: readonly string[]): boolean {
-  return rest[1] === undefined || rest[1] === LINE || TABS.has(rest[1]);
+  return rest[1] === undefined || rest[1] === LINE || (rest[1] === RENDER && !!rest[2]) || TABS.has(rest[1]);
 }
 
 /** The address of the repository page, a tab of it, or a place inside a tab. */
@@ -175,6 +188,17 @@ export function fileHash(repoId: string, path: string): string {
 
 /** The segment a line link starts with: not a tab, the Files tab lit. */
 const LINE = "line";
+/** The segment a folder render starts with (ADR-0044): not a tab, the Files tab lit. */
+const RENDER = "render";
+
+/**
+ * The Files tab with `folder` drawn by folder renderer `renderer` (ADR-0044). The renderer comes before the folder,
+ * as a line link's line does: a path's segments are any names a tree holds.
+ */
+export function folderRenderHash(repoId: string, renderer: string, folder: string): string {
+  const tail = folder === "" ? [] : folder.split("/").map(encodeURIComponent);
+  return [repoHash(repoId), RENDER, encodeURIComponent(renderer), ...tail].join("/");
+}
 
 /**
  * The Files tab with `path` open at `line` (from 1), marked (#2251). The line

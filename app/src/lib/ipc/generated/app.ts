@@ -21,6 +21,11 @@ demo: boolean, source_count: number, app_version: string,
 secrets_in_memory: boolean, };
 
 /**
+ * What an ask may start.
+ */
+export type Ask = "look" | "open" | "again";
+
+/**
  * What a renderer writes on stdout: SVG or HTML (drawn sanitized, in a
  * sandboxed frame), or an image's bytes.
  */
@@ -81,6 +86,126 @@ detail: string | null, } | { "state": "migrating" } | { "state": "ready" } | { "
 message: string, };
 
 /**
+ * What kind of output a run made, as the Code page draws it.
+ */
+export type DrawnKind = { "kind": "image", mime: string, } | { "kind": "text" } | { "kind": "markdown" } | { "kind": "html" } | { "kind": "undrawable" };
+
+/**
+ * What a run drew.
+ */
+export type FolderDrawn = { 
+/**
+ * What `folder_render_output` reads the bytes by.
+ */
+token: string, kind: DrawnKind, size: number, 
+/**
+ * The commit the folder was copied at, where known.
+ */
+commit: string | null, from: ReadFrom, 
+/**
+ * How long the copy and the run took, in milliseconds.
+ */
+took_ms: number, 
+/**
+ * When it was drawn (RFC 3339).
+ */
+drawn_at: string, };
+
+/**
+ * Why nothing was drawn. An answer the page draws, not an error.
+ */
+export type FolderFailure = { "why": "failed", status: number | null, stderr: string, } | { "why": "timed_out", seconds: number, stderr: string, } | { "why": "too_large", cap_bytes: number, } | { "why": "not_started", reason: string, } | { "why": "no_output_file", found: number, stderr: string, } | { "why": "copy", reason: string, } | { "why": "too_big", files: number, bytes: number, cap_files: number, cap_bytes: number, from: ReadFrom, } | { "why": "no_folder" } | { "why": "stopped" };
+
+/**
+ * The folders of a tree that a renderer holding globs takes, per renderer:
+ * what the Code page's tree marks without reading each folder's listing.
+ * Renderers with no `holds` glob are left out (the page matches them by
+ * path alone).
+ */
+export type FolderMarks = { renderer: string, 
+/**
+ * Folder paths from the top (`""` the top itself), in tree order.
+ */
+folders: Array<string>, };
+
+/**
+ * What a folder renderer makes. `detect` reads it from the bytes (and the
+ * output file's extension, for Markdown).
+ */
+export type FolderOutput = "detect" | "image" | "text" | "markdown" | "html";
+
+/**
+ * The event's payload: a slot's run moved; the page showing it asks again.
+ */
+export type FolderRenderMoved = { entity_id: string, renderer: string, folder: string, 
+/**
+ * The run's state now; `None` once it ended.
+ */
+running: FolderRunState | null, };
+
+/**
+ * The answer to a page's ask.
+ */
+export type FolderRenderView = { renderer: string, folder: string, 
+/**
+ * What to show: the drawing of the folder as it is now, or the last one
+ * of an earlier state (`current` false).
+ */
+drawn: FolderDrawn | null, current: boolean, running: FolderRunState | null, 
+/**
+ * The last run of the folder as it is now failed (or the copy cannot be
+ * made); `None` while one runs.
+ */
+failure: FolderFailure | null, 
+/**
+ * Where the copy is, or would be, written from.
+ */
+from: ReadFrom | null, 
+/**
+ * The commit the folder is read at now.
+ */
+commit: string | null, };
+
+/**
+ * One saved folder renderer, Settings › Renderers › *Folder renderers*.
+ */
+export type FolderRenderer = { 
+/**
+ * Made from the name when first saved, kept through a rename.
+ */
+id: string, name: string, 
+/**
+ * The program and its arguments, as typed: quotes group words, no shell,
+ * `{path}` and `{out}` the only placeholders.
+ */
+command: string, 
+/**
+ * File globs one of the folder's own files must match (`*.lcproj`);
+ * empty takes any folder.
+ */
+holds: Array<string>, 
+/**
+ * Globs the folder's path must match (`docs/*`, `flows`); a glob with no
+ * `/` is matched against the folder's name. Empty takes any folder.
+ */
+folders: Array<string>, output: FolderOutput, 
+/**
+ * Killed after this many seconds (the copy is not counted).
+ */
+timeout_secs: number, };
+
+/**
+ * A folder renderer as Settings sends it: a new one has no id yet, and no
+ * timeout is the default.
+ */
+export type FolderRendererDraft = { id: string | null, name: string, command: string, holds: Array<string>, folders: Array<string>, output: FolderOutput, timeout_secs: number | null, };
+
+/**
+ * Where a run is.
+ */
+export type FolderRunState = { "state": "queued" } | { "state": "copying", done: number, total: number, } | { "state": "running", elapsed_ms: number, };
+
+/**
  * One installed font family.
  */
 export type InstalledFont = { 
@@ -108,6 +233,11 @@ id: string, name: string, steps: Array<PipeStep>, };
  * A named pipeline as the viewer or Settings sends it: a new one has no id.
  */
 export type NamedPipelineDraft = { id: string | null, name: string, steps: Array<PipeStep>, };
+
+/**
+ * Where the copy was written from.
+ */
+export type ReadFrom = "clone" | "forge";
 
 /**
  * What goes on stdin: text, or bytes in base64.

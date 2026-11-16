@@ -81,6 +81,11 @@ pub struct LocalEntry {
     #[serde(skip)]
     #[ts(skip)]
     pub blob: Option<String>,
+    /// git records the file as executable (mode `100755`): a folder
+    /// renderer's copy keeps the bit on Unix (ADR-0044).
+    #[serde(skip)]
+    #[ts(skip)]
+    pub executable: bool,
 }
 
 /// A repository's whole tree at one commit, as its checkout holds it.
@@ -393,6 +398,7 @@ fn parse_listing(out: &[u8]) -> (Vec<LocalEntry>, bool) {
             kind,
             size,
             blob: blob.map(str::to_owned),
+            executable: mode == "100755",
         });
     }
     (entries, false)
@@ -453,6 +459,13 @@ pub async fn file_bytes(
     let wanted = usize::try_from(size).ok()?.saturating_add(1);
     let (bytes, cut) = blob_bytes(path, blob, wanted).await?;
     (!cut).then_some(Ok(bytes))
+}
+
+/// The blob `blob` of the checkout at `path`, read up to `max` bytes; the
+/// flag says the read stopped at `max`. `None` where it cannot be read: what
+/// a folder renderer's copy is written from (ADR-0044).
+pub async fn blob(path: &Path, blob: &str, max: usize) -> Option<(Vec<u8>, bool)> {
+    blob_bytes(path, blob, max).await
 }
 
 /// `git cat-file blob <blob>`, read up to `max` bytes; the flag says the read
@@ -790,6 +803,7 @@ mod tests {
             kind,
             size: None,
             blob: None,
+            executable: false,
         };
         let tree = LocalTree::new(
             "c".repeat(40),

@@ -47,6 +47,8 @@
   import { appPagePlace } from "../openin/app-page";
   import { apps as sharedApps } from "../openin/apps.svelte";
   import TfAppPage from "../openin/TfAppPage.svelte";
+  import TfFolderRendererPage from "./TfFolderRendererPage.svelte";
+  import { folderPagePlace } from "./folder-page";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
@@ -94,6 +96,8 @@
   const sourceId = $derived("source" in place ? place.source : null);
   /** Checkouts' application page (PR #2479, 2026-11-13), `null` anywhere else. */
   const appAt = $derived(appPagePlace(rest));
+  /** Renderers' folder renderer page (ADR-0044), `null` anywhere else. */
+  const folderAt = $derived(folderPagePlace(rest));
   const appName = $derived(
     appAt === null ? null : appAt.app === null ? "Add an application" : (sharedApps.settings?.applications.find((app) => app.id === appAt.app)?.name ?? "An application"),
   );
@@ -294,6 +298,10 @@
         <TfAppearanceSection {theme} {ready} ports={sectionPorts} />
       {:else if place.section === "performance"}
         <TfPerformanceSection ports={sectionPorts} />
+      {:else if place.section === "renderers" && folderAt !== null}
+        {#key rest.join("/")}
+          <TfFolderRendererPage at={folderAt} {back} />
+        {/key}
       {:else if place.section === "renderers"}
         <TfRenderersSection {...sectionPorts.renderers ? { ports: sectionPorts.renderers } : {}} />
       {:else if place.section === "keyboard"}

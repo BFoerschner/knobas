@@ -40,6 +40,7 @@ pub mod docs;
 pub mod downloads;
 mod error;
 pub mod file_pipeline;
+pub mod folder_render;
 pub mod frame_rate;
 pub mod inbox;
 #[cfg(test)]
@@ -124,6 +125,10 @@ pub mod events {
     /// clone's start and end, and the run's (the smoothness pass, PR #2479).
     /// Broadcast: Code and Settings › Checkouts draw the same run.
     pub const CLONE_ALL: &str = "clone:all";
+    /// Payload: `folder_render::runs::FolderRenderMoved` -- a folder
+    /// renderer's run on a folder moved (queued, copying, running) or ended
+    /// (ADR-0044): the page showing that folder asks again. Broadcast.
+    pub const FOLDER_RENDER: &str = "folder-render:moved";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -402,6 +407,16 @@ pub fn manage_app_state<R: tauri::Runtime>(
     checkout::fetch::Fetches::global().on_fetched(move |fetched| {
         events::emit(&fetched_to, None, events::CHECKOUT_FETCHED, fetched);
     });
+    // A folder render moved or ended (ADR-0044); what it drew is kept on
+    // disk beside the profile, never in the database a backup dumps.
+    let moved_to = handle.clone();
+    let runs = folder_render::runs::Runs::global();
+    runs.on_moved(move |moved| {
+        events::emit(&moved_to, None, events::FOLDER_RENDER, moved);
+    });
+    if let Some(profile) = handle.try_state::<Profile>() {
+        runs.keep_on_disk(profile.dir.join("folder-renders"));
+    }
 }
 
 /// Every command the webview can call, as `run` registers them: here so the
@@ -737,6 +752,14 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::app::user_renderers,
         commands::app::set_user_renderers,
         commands::app::run_renderer,
+        commands::app::folder_renderers,
+        commands::app::set_folder_renderers,
+        commands::app::folder_render,
+        commands::app::folder_render_stop,
+        commands::app::folder_render_leave,
+        commands::app::folder_render_output,
+        commands::app::folder_render_frame,
+        commands::app::folder_render_marks,
         // #2263's default renderer per file pattern, appended at the foot.
         commands::app::renderer_defaults,
         commands::app::set_renderer_defaults,
@@ -841,6 +864,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
 /// Blocks: it runs from the event loop's exit handler, which is not async.
 /// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
 fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // A folder renderer still running dies with everything it started
+    // (ADR-0044).
+    folder_render::runs::kill_all();
     if let Some(clones) = app.try_state::<std::sync::Arc<checkout::clone::Clones>>() {
         tauri::async_runtime::block_on(checkout::clone::stop_all(&clones));
     }
@@ -1672,6 +1698,7 @@ mod tests {
             super::events::VIEW_FRESH,
             super::events::CHECKOUT_FETCHED,
             super::events::CLONE_ALL,
+            super::events::FOLDER_RENDER,
         ];
         names.sort_unstable();
         declared.sort_unstable();

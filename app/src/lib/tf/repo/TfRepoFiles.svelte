@@ -146,6 +146,11 @@
   import { checkoutListing, fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
   import TfFindBar from "../TfFindBar.svelte";
+  import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
+  import { folderRenderers as appFolderRenderers, type FolderRenderers } from "../../render/folders.svelte";
+  import { markSets, renderersFor } from "../../render/folder";
+  import { folderRenderMarks, type FolderMarks } from "../../ipc/app";
+  import { folderRenderHash, type FolderRenderAt } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -172,6 +177,10 @@
     stepCommands = appCommandSteps,
     treeSections = null,
     ondrew,
+    folderRender = null,
+    folders = appFolderRenderers,
+    folderMarks = folderRenderMarks,
+    folderPorts = ipcFolderRenderPorts,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -215,6 +224,14 @@
     treeSections?: TreeSections | null;
     /** Told once the tree has drawn, or could not be: the header holds its first look until then (the inner-pages pass). */
     ondrew?: () => void;
+    /** A folder drawn by a folder renderer in the file's place (`render/<id>/<folder>`, ADR-0044); `null` for none. */
+    folderRender?: FolderRenderAt | null;
+    /** The folder renderers (ADR-0044): the app's copy, a fresh one in tests. */
+    folders?: FolderRenderers;
+    /** Which folders the renderers holding a file glob take: the IPC, a fake in tests. */
+    folderMarks?: (entityId: string, commit: string | null, paths: string | null) => Promise<FolderMarks[]>;
+    /** What the folder's pane reaches the backend through: the IPC, a fake in tests. */
+    folderPorts?: FolderRenderPorts;
   } = $props();
 
   $effect(() => {
@@ -655,6 +672,41 @@
   // The directories above the file the address names open.
   $effect(() => {
     if (path !== null) for (const dir of ancestors(path)) open.add(dir);
+  });
+
+  // Folder renderers (ADR-0044): the saved list, once, and which folders of this tree those holding a file glob take.
+  $effect(() => {
+    void folders.ensure().catch(() => {});
+  });
+  /** The section the source lists every path in, where it is the source's (a clone's tree reads at the clone). */
+  const sourcePaths = $derived(pathsSection !== null && !pathsSection.startsWith(LOCAL) ? pathsSection : null);
+  let marks = $state.raw<ReadonlyMap<string, ReadonlySet<string>>>(new Map());
+  $effect(() => {
+    const [commit, paths, holders] = [local?.commit ?? null, sourcePaths, folders.list.some((r) => r.holds.length > 0)];
+    if (!holders || (commit === null && paths === null)) return;
+    let live = true;
+    folderMarks(at, commit, paths).then(
+      (found) => live && (marks = markSets(found)),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  /** The first renderer that takes the folder at `full`: the tree row's link. */
+  const folderRendererOf = (full: string) => renderersFor(full, folders.list, marks)[0];
+  const renderedBy = $derived(folderRender === null ? null : (folders.list.find((r) => r.id === folderRender.renderer) ?? null));
+  /** The renderers the folder drawn offers to switch to: those that take it, and the one drawing it. */
+  const folderChoices = $derived.by(() => {
+    if (folderRender === null || renderedBy === null) return [];
+    const taking = renderersFor(folderRender.folder, folders.list, marks);
+    return taking.some((r) => r.id === renderedBy.id) ? taking : [renderedBy, ...taking];
+  });
+  // The folder drawn opens in the tree, with the folders above it.
+  $effect(() => {
+    if (folderRender === null || folderRender.folder === "") return;
+    for (const dir of ancestors(folderRender.folder)) open.add(dir);
+    open.add(folderRender.folder);
   });
 
   // Every open directory is read once its parent is.
@@ -1608,9 +1660,19 @@
           aria-expanded={row.open}
           onpointerenter={() => restOn(full, row.section, "dir")}
           onpointerleave={unrest}
+          class:tf-frmarked={folderRendererOf(full) !== undefined}
+          aria-current={folderRender?.folder === full ? "true" : undefined}
           onclick={() => toggle(full)}
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >
+        {#each [folderRendererOf(full)].filter((one) => one !== undefined) as by (by.id)}
+          <!-- A folder a folder renderer takes (ADR-0044): its drawing, a link of its own beside the row. -->
+          <span class="tf-frmark"
+            ><a href={folderRenderHash(repoId, by.id, full)} title="Render with {by.name}" aria-label="Render {row.name} with {by.name}"
+              ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg></a
+            ></span
+          >
+        {/each}
       {:else if row.kind === "file"}
         <a
           href={fileHash(repoId, full)}
@@ -1716,7 +1778,28 @@
     {/if}
   </aside>
   <div class="tf-fcol">
-  {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
+  {#if path === null && folderRender === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
+  {#if folderRender !== null}
+    {#if renderedBy !== null}
+      <TfFolderRender
+        entityId={at}
+        renderer={renderedBy}
+        renderers={folderChoices}
+        folder={folderRender.folder}
+        commit={local?.commit ?? null}
+        paths={sourcePaths}
+        start={shownPage()}
+        changedInside={[...changed].some((p) => folderRender.folder === "" || p.startsWith(`${folderRender.folder}/`))}
+        switchTo={(id) => folderRenderHash(repoId, id, folderRender.folder)}
+        {fileLink}
+        {title}
+        ports={folderPorts}
+        {render}
+      />
+    {:else if folders.list.length > 0 || listings[""] !== undefined}
+      <TfNothingHere message="There is no folder renderer named “{folderRender.renderer}”." href={repoHash(repoId)} action="All files" />
+    {/if}
+  {:else}
   <div class="tf-fileview" bind:this={fileview}>
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
@@ -1890,6 +1973,7 @@
       </TfWaiting>
     {/if}
   </div>
+  {/if}
   </div>
 </div>
 

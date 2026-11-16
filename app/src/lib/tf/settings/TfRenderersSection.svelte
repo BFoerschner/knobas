@@ -62,6 +62,7 @@
   import TfDialog from "./TfDialog.svelte";
   import { needsWords, secondsWhy } from "./form-words";
   import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
+  import TfFolderRenderersTable from "./TfFolderRenderersTable.svelte";
   import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
@@ -326,6 +327,8 @@
     <!-- A removal or its Undo the backend refused, with no form open to say it in. -->
     {#if refusal !== null && editing === null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
   </div>
+
+  <TfFolderRenderersTable />
 
   {#if editing !== null}
     <TfDialog title={editing === "new" ? "Add a renderer" : `Edit ${saved[editing]?.name ?? ""}`} why={formWhy} onclose={() => (editing = null)}>

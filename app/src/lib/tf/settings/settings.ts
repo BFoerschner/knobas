@@ -7,6 +7,7 @@
  * back, so every sentence on these pages can be tested as a string.
  */
 import { appPagePlace } from "../openin/app-page";
+import { folderPagePlace } from "./folder-page";
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
@@ -82,6 +83,8 @@ export function settingsKnows(rest: readonly string[]): boolean {
   const [head, arg] = rest;
   // Checkouts' application page (PR #2479, 2026-11-13); anything else under it names nothing.
   if (head === "checkouts" && rest.length > 1) return appPagePlace(rest) !== null;
+  // A folder renderer's page (ADR-0044); anything else under Renderers names nothing.
+  if (head === "renderers" && rest.length > 1) return folderPagePlace(rest) !== null;
   return head === undefined || (head === "source" && !!arg) || SETTINGS_SECTIONS.some(([key]) => key === head);
 }
 
