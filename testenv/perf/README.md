@@ -71,6 +71,17 @@ line's measure, then measure the same commit before the change to see what the c
 Svelte compiled and its runtime resolved as the release's (`vite.config.ts`). Svelte's development mode records a stack
 trace on every state write, which made the measured app's filter keys several times dearer than the shipped one's.
 
+**A sidebar's drag** (`run.mjs --kinds drag`, the `drag-` cases; the sidebar-resize pass, 2026-11-16,
+`docs/decisions/2026-11-16-every-sidebar-drags.md`): the edge of each busy page's sidebar (`TfSideEdge`) held with real
+mouse events, a move every 4.2 ms as a 239 Hz pointer sends them, out 220 px and back twice in 2.4 s, then let go. It
+reports the drag's frame rate, its worst frame gap, whether the drag tripped the ghost (`side-pace.ts`: a page that
+cannot lay itself out at a frame's pace) and the rate from the trip on. The real lines hold no trip at 1x and 55 fps
+with no gap over 60 ms at 4x and 6x. The moves are sent without waiting on each answer, since the protocol answers a
+move once the page has handled it. `drag-fixture-compare` and `drag-fixture-compare-files` run on the fixture only
+(`--app '...?fake-ipc#/inbox' --only drag-fixture`): the saved database's repositories hold one branch. `--attach` with
+`--size` sets the attached page's size, so the cases run as well in a headless Chrome on another machine reached over
+an SSH tunnel.
+
 ## The pieces
 
 | File | Does |

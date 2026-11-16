@@ -52,6 +52,18 @@ for (const [name, lines] of Object.entries(budget.type ?? {})) {
     check(name, rate, "slowest key to paint ms", !r.error ? r.maxKeyMs : null, line.maxKeyMs, "above");
   }
 }
+for (const [name, lines] of Object.entries(budget.drag ?? {})) {
+  for (const [rate, line] of Object.entries(lines)) {
+    const r = (run.drag ?? []).find((e) => e.name === name && e.throttle === Number(rate));
+    if (!r) continue;
+    const ok = !r.error && !r.skipped;
+    // A drag that tripped the ghost (`side-pace.ts`) is held from the trip on; the frame that lands the width on release
+    // is the page's layout at the new width once, and is not the drag's (Fable's ruling, 2026-11-16).
+    check(`${name} (drag)`, rate, "drag fps", ok ? r.dragFps : null, line.fps, "below");
+    check(`${name} (drag)`, rate, "worst gap after the trip ms", ok ? (r.drag.afterTrip?.maxGap ?? r.drag.maxGapMs) : null, line.maxGapMs, "above");
+    check(`${name} (drag)`, rate, "tripped (0 or 1)", ok ? Number(r.drag.tripped) : null, line.trips, "above");
+  }
+}
 for (const [hash, lines] of Object.entries(budget.nav ?? {})) {
   for (const [rate, line] of Object.entries(lines)) {
     for (const round of ["first", "return"]) {

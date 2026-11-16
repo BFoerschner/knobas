@@ -6,7 +6,8 @@
 #   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4,6] [--only a,b | --all] [--sizes "WxH@s ..." | --sizes none]
 #                                [--out <dir>]
 #
-# By default the lists and moments the smoothness targets name (`only` below, about 15 minutes); --all runs every
+# By default the lists and moments the smoothness targets name (`only` below, about 15 minutes), and a sidebar's edge
+# dragged on the busiest pages (`drag-`, the sidebar-resize pass); --all runs every
 # scenario of run.mjs, an hour or more on the fixture, whose own query engine runs in the page. A pipeline's runs
 # (`builds-main`, `pipeline-history`) are held on the saved database (`--real`), at 1x, 4x and 6x; the fixture's
 # pipelines are short, and its own query engine's tasks fall in the scroll, so it holds no line for them.
@@ -23,7 +24,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 real="" throttle="1,4,6" out="" sizes="1920x1080@2 2560x1440@1.25"
-only="monitors,code-prs,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings"
+only="monitors,code-prs,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings,drag-"
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
@@ -42,7 +43,7 @@ KNOBAS_PERF=1 "$root/testenv/ui-checks/build-app.sh" "$root" "$out/app" || exit 
 if [ -n "$real" ]; then corpus="fake-real=$real" lines=real; else corpus="fake-scale" lines=fake; fi
 url="http://127.0.0.1:$port/?fake-ipc&$corpus#/inbox"
 "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/run.mjs" --app "$url" --out "$out/run.json" \
-  --label "frame-budget $(git -C "$root" rev-parse --short HEAD)" --throttle "$throttle" --kinds scroll,type,nav ${only:+--only "$only"} || exit 1
+  --label "frame-budget $(git -C "$root" rev-parse --short HEAD)" --throttle "$throttle" --kinds scroll,type,nav,drag ${only:+--only "$only"} || exit 1
 "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/scrollers.mjs" --app "$url" --strict --out "$out/scrollers.json" > "$out/scrollers.log"
 scrollers=$?
 tail -1 "$out/scrollers.log"
@@ -53,7 +54,7 @@ size_throttle=$(echo "$throttle" | tr ',' '\n' | grep -xE '4|6' | paste -sd, -)
 [ "$sizes" != none ] && [ -n "$size_throttle" ] && for size in $sizes; do
   echo "frame-budget: $size at ${size_throttle//,/x, }x"
   "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/run.mjs" --app "$url" --out "$out/run-$size.json" --size "$size" \
-    --label "frame-budget $(git -C "$root" rev-parse --short HEAD) $size" --throttle "$size_throttle" --kinds scroll,type,nav ${only:+--only "$only"} || exit 1
+    --label "frame-budget $(git -C "$root" rev-parse --short HEAD) $size" --throttle "$size_throttle" --kinds scroll,type,nav,drag ${only:+--only "$only"} || exit 1
   node "$here/budget.mjs" "$out/run-$size.json" --lines "$lines" --md "$out/budget-$size.md" || budget=1
 done
 "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/long.mjs" --app "http://127.0.0.1:$port/?fake-ipc&fake-hooks&$corpus#/inbox" \
