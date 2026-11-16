@@ -359,22 +359,39 @@ pub async fn list(
     .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
     let mut sources = saved_view_sources(pool, registry, &views).await?;
-    let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
-    let readings = crate::commands::search::searcher(pool, registry)
-        .await?
-        .readings(&texts, "ticket")
-        .await?;
+    // A saved view counts what its source put on it that knobas mirrors,
+    // which is what its board draws (#877); its text is not its own. So a
+    // text is read only for a view with no such count (the workers pass,
+    // 2026-11-16): each reading is a count of every live ticket the text
+    // admits, and Björn's nine views, all saved Jira views, had their texts
+    // counted on every opening of Tickets, 23,176 tickets nine times on two
+    // parallel workers, for counts nothing showed.
+    let sourced: Vec<Option<(u64, SavedViewSource)>> = views
+        .iter()
+        .map(|view| view.saved_view.as_ref().and_then(|r| sources.remove(r)))
+        .collect();
+    let texts: Vec<&str> = views
+        .iter()
+        .zip(&sourced)
+        .filter(|(_, source)| source.is_none())
+        .map(|(view, _)| view.query.as_str())
+        .collect();
+    let mut readings = if texts.is_empty() {
+        Vec::new()
+    } else {
+        crate::commands::search::searcher(pool, registry)
+            .await?
+            .readings(&texts, "ticket")
+            .await?
+    }
+    .into_iter();
     Ok(views
         .into_iter()
-        .zip(readings)
-        .map(|(view, reading)| {
-            // A saved view counts what its source put on it that knobas
-            // mirrors, which is what its board draws (#877); its text is not
-            // its own.
-            let source = view.saved_view.as_ref().and_then(|r| sources.remove(r));
+        .zip(sourced)
+        .map(|(view, source)| {
             let reading = match &source {
                 Some((count, _)) => knobas_search::Reading::Count(*count),
-                None => reading,
+                None => readings.next().unwrap_or(knobas_search::Reading::Count(0)),
             };
             let saved_view_source = source.map(|(_, source)| source);
             match reading {

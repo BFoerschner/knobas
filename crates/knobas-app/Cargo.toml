@@ -197,6 +197,10 @@ knobas-http = { path = "../knobas-http", features = ["test-util"] }
 knobas-wasm-host = { path = "../knobas-wasm-host", features = ["test-util"] }
 # The command tests need a real PostgreSQL: `test-util` starts one per binary.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
+# The search's statements planned as on Windows with a worker made to look
+# free (`knobas_search::sql::explain_with_workers_free`), for
+# `tests/it/read_plans.rs`' workers check (the workers pass, 2026-11-16).
+knobas-search = { path = "../knobas-search", features = ["test-util"] }
 # `tauri::test`: the mock runtime `tests/it/ipc.rs` invokes commands through, so
 # ruling P3's decode question is answered by the real IPC pipeline rather than
 # by reading documentation. Feature-unified with the `[dependencies]` entry

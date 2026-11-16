@@ -499,6 +499,58 @@ pub fn letter_sql(
     ))
 }
 
+/// The Docs search's statement for **one typed character** (the workers
+/// pass, 2026-11-16; Fable's ruling,
+/// `docs/decisions/2026-11-16-no-read-a-person-waits-on-starts-a-worker-on-windows.md`):
+/// [`letter_sql`]'s answer, the pages a name of which holds a word beginning
+/// with it, those whose name begins with it first, then the newest, with two
+/// differences.
+///
+/// * **Every such page is kept**, so the kind's total is how many there are
+///   ([`Matching::Pages`]): the page prints *N pages*, and a count of the
+///   rows the answer holds would say 50 for a letter thousands of names
+///   hold. A count of index entries, under the kept plan, never a rank.
+/// * **A field is asked**, the space a search is scoped to (`project:`), of
+///   each name's item, where [`letter_sql`] refuses one.
+///
+/// Before this the character was ranked over every page that holds a word
+/// beginning with it, which on Björn's PC took 50 ms on four processes and
+/// 67 on one for `r`, for an order by how many such words a page holds. Off
+/// the names it is about 2 ms, and starts no worker anywhere.
+///
+/// `None` for a query that asks what the stored characters cannot answer
+/// (an author, a parent, a reach, a name glob): [`search_sql`] answers it.
+#[must_use]
+pub fn page_letter_sql(
+    corpora: &[&Corpus],
+    letter: &str,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+) -> Option<SearchSql> {
+    if filters.filters_by_author()
+        || filters.filters_by_under()
+        || filters.filters_by_reach()
+        || !filters.names.is_empty()
+    {
+        return None;
+    }
+    let named = EffectiveFilters {
+        titles: true,
+        ..filters.clone()
+    };
+    Some(build_search_sql(
+        corpora,
+        Some(letter),
+        true,
+        &named,
+        per_group,
+        limit,
+        KindCut::Limit,
+        Matching::Pages,
+    ))
+}
+
 /// [`letter_sql`]'s answer read with no stored character: every name match
 /// of the mirror, each one's lead worked out from its row
 /// (`sync.name_prefixes`, the function the stored rows are written by), cut
@@ -572,6 +624,11 @@ enum Matching {
     /// word beginning with them, the mirror's read off `sync.item_initial`
     /// ([`letter_sql`]).
     Letter,
+    /// [`Matching::Letter`] for the Docs search's one character
+    /// ([`page_letter_sql`]): every name of the mirror that holds a word
+    /// beginning with it is kept, so a kind's total is counted, and the
+    /// query's fields (a space) are asked of each name's item.
+    Pages,
     /// [`Matching::Letter`] with the mirror's names matched and their leads
     /// worked out row by row ([`letter_sql_unstored`]).
     #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
@@ -674,7 +731,11 @@ fn build_search_sql(
     matching: Matching,
 ) -> SearchSql {
     let mut builder = Builder::default();
-    let by_letter = matches!(matching, Matching::Letter | Matching::LetterUnstored);
+    let by_letter = matches!(
+        matching,
+        Matching::Letter | Matching::Pages | Matching::LetterUnstored
+    );
+    let off_the_names = matches!(matching, Matching::Letter | Matching::Pages);
     let broad = match matching {
         Matching::Broad { names, walk } => Some((names, walk)),
         _ => None,
@@ -705,7 +766,7 @@ fn build_search_sql(
 
     // `letter_kinds` walks the stored characters' index a kind at a time,
     // and so does a broad word's `kinds`.
-    let mut sql = String::from(if matching == Matching::Letter || walk.is_some() {
+    let mut sql = String::from(if off_the_names || walk.is_some() {
         "with recursive\n"
     } else {
         "with\n"
@@ -757,7 +818,7 @@ fn build_search_sql(
     // The kinds that hold the typed characters, in the stored characters'
     // index: its first entry, then the first past each kind found (a loose
     // scan: one probe a kind, where a `distinct` reads every entry).
-    if matching == Matching::Letter && mirror.is_some() {
+    if off_the_names && mirror.is_some() {
         let _ = writeln!(
             sql,
             "letter_kinds as (\n  (select sx.kind from sync.item_initial sx\n    where sx.initial = {letter}\n    order by sx.kind limit 1)\n  union all\n  select (select sx.kind from sync.item_initial sx\n           where sx.initial = {letter} and sx.kind > lk.kind\n           order by sx.kind limit 1)\n    from letter_kinds lk\n   where lk.kind is not null\n),"
@@ -908,16 +969,36 @@ fn build_search_sql(
             }
             continue;
         }
-        if matching == Matching::Letter && Some(index) == mirror {
+        if off_the_names && Some(index) == mirror {
             // Each kind's first rows in the index's order, and no more: the
             // read stops at a kind's `per_group`th live row. A kind the query
-            // leaves out is not walked at all.
+            // leaves out is not walked at all. The Docs search's every name
+            // (`Matching::Pages`), so its kind's total is theirs.
             let stored = &crate::corpus::LIVE_ITEM_INITIAL;
             let mut predicates = vec![
                 format!("sx.initial = {letter}"),
                 "sx.kind = lk.kind".to_owned(),
             ];
+            // A field (the Docs search's space, `project:`) is the item's,
+            // which the stored characters do not hold: asked of the name's
+            // own row, with the fragments every other read of the mirror's
+            // fields asks, and not of the stored row, which would answer
+            // every field with *no such field*.
+            let asked = std::mem::take(&mut bound.fields);
             predicates.extend(corpus_predicates(stored, None, &bound));
+            bound.fields = asked;
+            let fields = field_predicates(&crate::corpus::LIVE_ITEM, &bound);
+            if !fields.is_empty() {
+                predicates.push(format!(
+                    "exists (select 1 from sync.item i{WALK_PROBE_OF_I}\n                                  where i.entity_id = sx.entity_id\n                                    and {})",
+                    fields.join("\n                                    and ")
+                ));
+            }
+            let kept = if matching == Matching::Pages {
+                String::new()
+            } else {
+                format!("\n                        limit {per_group}")
+            };
             let mut kinds = vec!["lk.kind is not null".to_owned()];
             if let Some(hidden) = &bound.hidden {
                 kinds.push(format!("lk.kind <> all({hidden})"));
@@ -927,7 +1008,7 @@ fn build_search_sql(
             }
             let _ = writeln!(
                 sql,
-                "  select t.entity_id as entity_id, {} as kind, t.rank as rank, false as named,\n         t.item_updated_at as item_updated_at, {} as corpus\n    from letter_kinds lk\n   cross join lateral (select sx.entity_id as entity_id, sx.kind as kind,\n                              sx.leads::int::real as rank, sx.item_updated_at as item_updated_at\n                         from {}\n                        where {}\n                        order by sx.leads desc, sx.item_updated_at desc nulls last, sx.entity_id\n                        limit {per_group}) t\n   where {}",
+                "  select t.entity_id as entity_id, {} as kind, t.rank as rank, false as named,\n         t.item_updated_at as item_updated_at, {} as corpus\n    from letter_kinds lk\n   cross join lateral (select sx.entity_id as entity_id, sx.kind as kind,\n                              sx.leads::int::real as rank, sx.item_updated_at as item_updated_at\n                         from {}\n                        where {}\n                        order by sx.leads desc, sx.item_updated_at desc nulls last, sx.entity_id{kept}) t\n   where {}",
                 answered_as("t.kind", &bound),
                 drawn_by(index, corpus),
                 stored.relation,
@@ -1919,6 +2000,15 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
                 .replace("{title}", corpus.title)
         ));
     }
+    predicates.extend(field_predicates(corpus, bound));
+    predicates
+}
+
+/// What `bound`'s fields ask of a row of `corpus`, one predicate a field:
+/// [`corpus_predicates`]' last, and [`page_letter_sql`]'s of the item a name
+/// belongs to.
+fn field_predicates(corpus: &Corpus, bound: &BoundFilters) -> Vec<String> {
+    let mut predicates: Vec<String> = Vec::new();
     for field in &bound.fields {
         // `fd` is the one row a fragment reads its binds from, as `ud` is for
         // `under:`. A fragment that misses yields null, and null is "does not
@@ -2238,7 +2328,25 @@ pub async fn fetch_matched<O>(pool: &sqlx::PgPool, built: SearchSql) -> Result<V
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
-    fetch_planned(pool, built, MATCHED_PLANNING).await
+    fetch_matched_as(pool, built, cfg!(windows)).await
+}
+
+/// [`fetch_matched`] planned as on Windows where `windows` says so, whatever
+/// this build runs on ([`matched_planning`]): what `Searcher` asks with its
+/// own flag, so a test plans the Windows statement anywhere.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_matched_as<O>(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    windows: bool,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    fetch_planned(pool, built, matched_planning(windows)).await
 }
 
 /// [`fetch_matched`] for a statement whose words are **one character**, still
@@ -2265,7 +2373,24 @@ pub async fn fetch_matched_by_a_letter<O>(
 where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
-    fetch_planned(pool, built, LETTER_PLANNING).await
+    fetch_matched_by_a_letter_as(pool, built, cfg!(windows)).await
+}
+
+/// [`fetch_matched_by_a_letter`] planned as on Windows where `windows` says
+/// so ([`letter_planning`]).
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the transaction or the statement fails.
+pub async fn fetch_matched_by_a_letter_as<O>(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    windows: bool,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    fetch_planned(pool, built, letter_planning(windows)).await
 }
 
 /// Run a statement [`letter_sql`] built and collect its rows.
@@ -2393,6 +2518,29 @@ const MATCHED_PLANNING: &str = "select set_config('enable_seqscan', 'off', true)
      set_config('parallel_setup_cost', '850', true), \
      set_config('max_parallel_workers_per_gather', '3', true)";
 
+/// [`MATCHED_PLANNING`] on Windows: sequential scans off, and **no worker**
+/// (the workers pass, 2026-11-16;
+/// `docs/decisions/2026-11-16-no-read-a-person-waits-on-starts-a-worker-on-windows.md`).
+/// A worker is a process PostgreSQL starts for the one query, and on Windows
+/// a start is a process start. Measured on Björn's PC against the scale
+/// data: the words that planned workers there were a launcher query with an
+/// author, 62 ms with two against 53 with none (`payout`), 60 against 56
+/// (`retry`); the Docs search's words planned none (`payout` 29 ms).
+const MATCHED_PLANNING_WINDOWS: &str = "select set_config('enable_seqscan', 'off', true), \
+     set_config('max_parallel_workers_per_gather', '0', true)";
+
+/// What [`fetch_matched`] plans under: [`MATCHED_PLANNING_WINDOWS`] where
+/// `windows`, [`MATCHED_PLANNING`] elsewhere, where a worker is about 2 ms to
+/// start.
+#[must_use]
+pub const fn matched_planning(windows: bool) -> &'static str {
+    if windows {
+        MATCHED_PLANNING_WINDOWS
+    } else {
+        MATCHED_PLANNING
+    }
+}
+
 /// [`fetch_matched_by_a_letter`]'s: sequential scans left on, and **no
 /// start-up charge for workers**, so one letter is always ranked on four
 /// processes.
@@ -2411,6 +2559,28 @@ const MATCHED_PLANNING: &str = "select set_config('enable_seqscan', 'off', true)
 const LETTER_PLANNING: &str = "select set_config('parallel_tuple_cost', '0', true), \
      set_config('parallel_setup_cost', '0', true), \
      set_config('max_parallel_workers_per_gather', '3', true)";
+
+/// [`LETTER_PLANNING`] on Windows: **no worker** (the workers pass,
+/// 2026-11-16). The one character read whole reaches this only where the
+/// names do not answer it: the launcher while bring-up's fill of the names
+/// runs, once after an upgrade, and a character no page's name holds in
+/// the Docs search. On Björn's PC the fill-time `r` is 169 ms with none
+/// against 95 with three, and `x` 14 against 38: Fable's ruling took the
+/// longer wait for the seconds of the fill over a process start on every
+/// key, as the fill already answers *the same answers, a longer wait*.
+const LETTER_PLANNING_WINDOWS: &str =
+    "select set_config('max_parallel_workers_per_gather', '0', true)";
+
+/// What [`fetch_matched_by_a_letter`] plans under: [`LETTER_PLANNING_WINDOWS`]
+/// where `windows`, [`LETTER_PLANNING`] elsewhere.
+#[must_use]
+pub const fn letter_planning(windows: bool) -> &'static str {
+    if windows {
+        LETTER_PLANNING_WINDOWS
+    } else {
+        LETTER_PLANNING
+    }
+}
 
 /// [`fetch_kept`]'s: **one plan whatever was typed**, made once a
 /// connection and kept.
@@ -2487,6 +2657,60 @@ const WORKERS_LOOK_FREE: &str = "select set_config('parallel_setup_cost', '0', t
      set_config('parallel_tuple_cost', '0', true), \
      set_config('min_parallel_table_scan_size', '0', true), \
      set_config('min_parallel_index_scan_size', '0', true)";
+
+/// How a statement of the search is planned before it runs, for
+/// [`explain_with_workers_free`]: the settings its transaction sets first.
+#[cfg(any(test, feature = "test-util"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Planned {
+    /// [`fetch_matched_as`]'s.
+    Matched,
+    /// [`fetch_matched_by_a_letter_as`]'s.
+    ByALetter,
+    /// [`fetch_named`]'s.
+    Named,
+    /// [`fetch_kept`]'s.
+    Kept,
+    /// None of its own: a statement run as built ([`query_as_with`]), on
+    /// the pool's session settings alone, as `Searcher::readings` runs
+    /// [`ids_counts_sql`]'s.
+    AsBuilt,
+}
+
+/// The plan of `built` under `planned`'s settings as on Windows where
+/// `windows` says so, and **then a worker made to look worth starting for
+/// any scan of any table** ([`WORKERS_LOOK_FREE`]), set after the
+/// statement's own settings, since those set the costs of a worker
+/// themselves. A statement that plans a `Gather` here would start a worker
+/// on a mirror large enough for one; on Windows that is a process start
+/// for the one query (the workers pass, 2026-11-16).
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain_with_workers_free(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    planned: Planned,
+    windows: bool,
+) -> Result<String, sqlx::Error> {
+    let planning = match planned {
+        Planned::Matched => Some(matched_planning(windows)),
+        Planned::ByALetter => Some(letter_planning(windows)),
+        Planned::Named => Some(NAMED_PLANNING),
+        Planned::Kept => Some(KEPT_PLANNING),
+        Planned::AsBuilt => None,
+    };
+    let mut tx = pool.begin().await?;
+    if let Some(planning) = planning {
+        sqlx::query(planning).execute(&mut *tx).await?;
+    }
+    sqlx::query(WORKERS_LOOK_FREE).execute(&mut *tx).await?;
+    let plan = explain_on(&mut tx, built).await?;
+    tx.commit().await?;
+    Ok(plan)
+}
 
 /// The plan [`fetch_named`] runs a statement under.
 ///
@@ -2630,22 +2854,30 @@ pub async fn parent_positions(
     Ok(positions)
 }
 
-/// The plan [`fetch_matched`] runs a statement under: [`explain`] with
-/// sequential scans off, in a transaction of its own.
+/// The plan [`fetch_matched_as`] runs a statement under, as on Windows
+/// where `windows` says so: [`explain`] with sequential scans off, in a
+/// transaction of its own.
 ///
 /// # Errors
 ///
 /// [`sqlx::Error`] if the statement cannot be planned.
 #[cfg(any(test, feature = "test-util"))]
-pub async fn explain_matched(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
+pub async fn explain_matched(
+    pool: &sqlx::PgPool,
+    built: SearchSql,
+    windows: bool,
+) -> Result<String, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query(MATCHED_PLANNING).execute(&mut *tx).await?;
+    sqlx::query(matched_planning(windows))
+        .execute(&mut *tx)
+        .await?;
     let plan = explain_on(&mut tx, built).await?;
     tx.commit().await?;
     Ok(plan)
 }
 
-/// The plan [`fetch_matched_by_a_letter`] runs a statement under, with the
+/// The plan [`fetch_matched_by_a_letter_as`] runs a statement under, as on
+/// Windows where `windows` says so, with the
 /// server's own size rule for workers left out (`min_parallel_table_scan_size`
 /// 0), so a test's small mirror is planned as Björn's 74 MB table is: no
 /// table under 8 MB is ever given a worker.
@@ -2657,9 +2889,12 @@ pub async fn explain_matched(pool: &sqlx::PgPool, built: SearchSql) -> Result<St
 pub async fn explain_by_a_letter_at_any_size(
     pool: &sqlx::PgPool,
     built: SearchSql,
+    windows: bool,
 ) -> Result<String, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query(LETTER_PLANNING).execute(&mut *tx).await?;
+    sqlx::query(letter_planning(windows))
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("select set_config('min_parallel_table_scan_size', '0', true)")
         .execute(&mut *tx)
         .await?;

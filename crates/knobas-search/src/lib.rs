@@ -151,6 +151,12 @@ pub struct Searcher {
     /// [`sql::RANKED_WHOLE`] and [`sql::WALK`], but for a test, whose mirror
     /// holds tens of rows ([`Self::bounded_at`]).
     bounds: (u32, u32),
+    /// Whether its statements are planned as on Windows, where no read a
+    /// person waits on asks for a parallel worker ([`sql::matched_planning`],
+    /// [`sql::letter_planning`]; the workers pass, 2026-11-16): `cfg!(windows)`,
+    /// but for a test or a probe that plans the Windows statements on another
+    /// platform ([`Self::planned_as_windows`]).
+    windows: bool,
 }
 
 impl Searcher {
@@ -167,7 +173,17 @@ impl Searcher {
             payload_paths: Vec::new(),
             notes_shown: true,
             bounds: (sql::RANKED_WHOLE, sql::WALK),
+            windows: cfg!(windows),
         }
+    }
+
+    /// The same searcher, its statements planned as on Windows where
+    /// `windows` says so, whatever this build runs on. A new searcher plans
+    /// as its platform does.
+    #[must_use]
+    pub fn planned_as_windows(mut self, windows: bool) -> Self {
+        self.windows = windows;
+        self
     }
 
     /// The same searcher, searching notes or leaving them out (#940). A new
@@ -208,6 +224,7 @@ impl Searcher {
             payload_paths: Vec::new(),
             notes_shown: true,
             bounds: (sql::RANKED_WHOLE, sql::WALK),
+            windows: cfg!(windows),
         }
     }
 
@@ -668,9 +685,9 @@ impl Searcher {
             // One character matches most of any mirror: read whole, where
             // the whole is the narrow table and not the mirror's own rows.
             Some(text) if text.chars().count() == 1 && built.matches_narrowly() => {
-                sql::fetch_matched_by_a_letter(&self.pool, built).await
+                sql::fetch_matched_by_a_letter_as(&self.pool, built, self.windows).await
             }
-            Some(_) => sql::fetch_matched(&self.pool, built).await,
+            Some(_) => sql::fetch_matched_as(&self.pool, built, self.windows).await,
             None => sql::query_as_with(built).fetch_all(&self.pool).await,
         }
     }
@@ -824,15 +841,47 @@ impl Searcher {
                 me: Vec::new(),
             });
         }
-        let built = sql::search_sql(
-            &[corpus::mirror(&self.pool).await?],
-            text,
-            parsed.prefix_last_term,
-            &filters,
-            query.limit,
-            query.limit,
-        );
-        let rows = self.rows_of(built, text).await?;
+        let stored = corpus::stored(&self.pool).await?;
+        let whole = || {
+            sql::search_sql(
+                &[stored.mirror],
+                text,
+                parsed.prefix_last_term,
+                &filters,
+                query.limit,
+                query.limit,
+            )
+        };
+        // **One typed character is answered by the pages' names** once every
+        // item has its stored characters (the workers pass, 2026-11-16;
+        // Fable's ruling): the pages a name of which holds a word beginning
+        // with it, those that begin with it first, then the newest, all of
+        // them counted ([`sql::page_letter_sql`]). A character no page's
+        // name holds is asked of the bodies as before, so *no pages* is
+        // never said of one a body holds; and so is every character until
+        // the names are whole.
+        let named = match text {
+            Some(typed)
+                if stored.names && parsed.prefix_last_term && typed.chars().count() == 1 =>
+            {
+                match sql::page_letter_sql(
+                    &[stored.mirror],
+                    typed,
+                    &filters,
+                    query.limit,
+                    query.limit,
+                ) {
+                    Some(built) => sql::fetch_named::<RawHit>(&self.pool, built).await?,
+                    None => Vec::new(),
+                }
+            }
+            _ => Vec::new(),
+        };
+        let rows = if named.is_empty() {
+            self.rows_of(whole(), text).await?
+        } else {
+            named
+        };
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
             .find(|g| g.kind == PAGE);
@@ -862,7 +911,21 @@ impl Searcher {
         // The readable texts that still need a count: (slot in `out`, words, filters).
         let mut pending: Vec<(usize, Vec<query::WordAlternative>, query::EffectiveFilters)> =
             Vec::new();
+        // **A text is counted once** however many views hold it (the workers
+        // pass, 2026-11-16): the same text reads the same, and each count is
+        // a read of every live row of `kind` the text admits. Björn's nine
+        // views held one text between them, and the statement counted his
+        // 23,176 tickets nine times. Each later view of a text is pointed at
+        // the slot of its first.
+        let mut first_of: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut same_as: Vec<(usize, usize)> = Vec::new();
         for raw in raws {
+            if let Some(first) = first_of.get(raw) {
+                same_as.push((out.len(), *first));
+                out.push(None);
+                continue;
+            }
+            first_of.insert(*raw, out.len());
             if let Err(error) = validate(SearchQuery {
                 titles: false,
                 raw: (*raw).to_owned(),
@@ -907,6 +970,9 @@ impl Searcher {
                     out[*slot] = Some(Reading::Count(u64::try_from(count).unwrap_or(0)));
                 }
             }
+        }
+        for (slot, first) in same_as {
+            out[slot] = out[first].clone();
         }
         Ok(out
             .into_iter()

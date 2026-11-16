@@ -451,7 +451,7 @@ impl Connector {
         let options = self
             .options
             .clone()
-            .options(app_session_settings(cfg!(windows)));
+            .options(app_session_settings(plans_as_windows()));
         PgPoolOptions::new()
             .max_connections(MAX_CONNECTIONS)
             // sqlx's default, spelled out: the statement limit above is
@@ -464,6 +464,21 @@ impl Connector {
     }
 }
 
+/// Whether the app's reads are planned as on Windows: `cfg!(windows)`, or,
+/// in a build with `test-util` (the windowless backend the probes run),
+/// `KNOBAS_PLAN_AS_WINDOWS=1`, so a Mac can run the page tour and the keys
+/// with every read planned as Björn's PC plans it and the server's own
+/// count of workers started (`pg_stat_database.parallel_workers_launched`)
+/// says whether any was (the workers pass, 2026-11-16). The pool's
+/// connections ([`app_session_settings`]) and `knobas_app`'s searcher read
+/// it.
+#[must_use]
+pub fn plans_as_windows() -> bool {
+    cfg!(windows)
+        || (cfg!(feature = "test-util")
+            && std::env::var_os("KNOBAS_PLAN_AS_WINDOWS").is_some_and(|v| v == "1"))
+}
+
 /// What every connection of the app's pool is opened with, on Windows where
 /// `windows` says so: the statement limit, and there no parallel worker.
 ///
@@ -473,12 +488,17 @@ impl Connector {
 /// start is 31 to 37 ms (the Windows pass, 2026-11-14), on macOS and Linux
 /// about 2. So a read a person waits on that plans two workers pays 62 to 74
 /// ms on Windows before it reads a row. The Tickets views' counts did, on
-/// every opening of Tickets: 33 ms with their two workers on the Mac and 44
-/// with none, so about 115 against 70 to 90 on Björn's PC (the long-words
-/// pass, 2026-11-16). On Windows the pool's connections therefore plan no
-/// worker unless a statement asks for some itself
-/// (`knobas_search::sql`'s one-letter read does). Elsewhere the server's own
-/// rule stands: there the workers are worth their start.
+/// every opening of Tickets (the long-words pass, 2026-11-16). On Windows
+/// the pool's connections therefore plan no worker unless a statement asks
+/// for some itself, and since the workers pass (2026-11-16) none a person
+/// waits on does there: the search's two plans that ask for three workers
+/// ask for none on Windows (`knobas_search::sql::matched_planning`,
+/// `letter_planning`), and `knobas-app`'s `tests/it/read_plans.rs` holds
+/// every read it plans to no `Gather` under these settings, and the places
+/// that set the cap to a closed list. Measured on his PC then: no page's
+/// read was faster with workers (the views' text counts 32 ms with two, 34
+/// with none, and now not read at all). Elsewhere the server's own rule
+/// stands: there a worker is about 2 ms to start.
 ///
 /// The sync and bring-up's migrations open connections of their own and
 /// keep the server's rule on every platform.

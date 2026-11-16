@@ -2400,3 +2400,100 @@ async fn a_kept_tree_is_read_again_when_a_page_moves() {
     assert!(!held.contains(&ids[5].as_str()));
     assert!(space.pages.iter().any(|p| p.title == "Handbook, renamed"));
 }
+
+/// **One typed character is answered by the pages' names** (the workers
+/// pass, 2026-11-16; Fable's ruling): the pages a name of which holds a word
+/// beginning with it, those that begin with it first and the newest of them
+/// first, then the others, as the launcher answers one character. All of
+/// them are counted, past the page's fifty; a space keeps them to it; a page
+/// whose body alone holds such a word is not one of them; and a character no
+/// page's name holds is asked of the bodies, as every query was before. On a
+/// database of its own: the total is every page's.
+#[tokio::test]
+async fn one_character_is_answered_by_the_pages_names_counted_and_in_the_space() {
+    let pool = scratch("docs_one_character").await;
+    let src = confluence(&pool).await;
+    // Fifty-five pages named by a word beginning with `r`, in ENG, the
+    // newest first: more than a search's page holds.
+    let mut leading = Vec::new();
+    for n in 0..55_i32 {
+        let id = page(
+            &pool,
+            &src,
+            &format!("r{n}"),
+            &format!("Release note {n}"),
+            "ENG",
+            &[],
+            "",
+        )
+        .await;
+        indexed(
+            &pool,
+            &id,
+            &[format!("Release note {n}"), "Shipped.".into()],
+            "tomasz",
+            n + 1,
+        )
+        .await;
+        leading.push(id);
+    }
+    // A name that holds such a word after its first, the newest page of all,
+    // in OPS; and a page whose body alone holds one, and `zebra`.
+    let held = page(&pool, &src, "held", "Payout retries", "OPS", &[], "").await;
+    indexed(
+        &pool,
+        &held,
+        &["Payout retries".into(), "Backoff.".into()],
+        "priya",
+        0,
+    )
+    .await;
+    let bodied = page(&pool, &src, "body", "Ops guide", "OPS", &[], "").await;
+    indexed(
+        &pool,
+        &bodied,
+        &[
+            "Ops guide".into(),
+            "The rollback steps, and a zebra.".into(),
+        ],
+        "priya",
+        0,
+    )
+    .await;
+    let ask = async |raw: &str, space: Option<&str>| {
+        let scoped = space.map(|key| scope(&src, key));
+        docs_search_inner(&pool, &Registry::for_process(), raw, scoped.as_ref())
+            .await
+            .unwrap()
+            .expect("a character is a query")
+    };
+    let ids = |found: &knobas_app::docs::DocsHits| -> Vec<String> {
+        found.hits.iter().map(|h| h.entity_id.clone()).collect()
+    };
+
+    let found = ask("r", None).await;
+    assert_eq!(
+        found.total, 56,
+        "every page a name of which holds an r-word"
+    );
+    assert_eq!(
+        ids(&found),
+        leading[..50],
+        "those that begin with it, newest first"
+    );
+
+    let found = ask("r", Some("OPS")).await;
+    assert_eq!(
+        (found.total, ids(&found)),
+        (1, vec![held.clone()]),
+        "in the space"
+    );
+    let found = ask("R", Some("ENG")).await;
+    assert_eq!(found.total, 55);
+
+    // No page's name holds a word beginning with `z`: the bodies answer.
+    let found = ask("z", None).await;
+    assert_eq!((found.total, ids(&found)), (1, vec![bodied.clone()]));
+    let found = ask("z", Some("ENG")).await;
+    assert_eq!(found.total, 0);
+}

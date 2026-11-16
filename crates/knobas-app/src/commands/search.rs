@@ -453,7 +453,8 @@ pub async fn searcher(
     Ok(
         knobas_search::Searcher::declaring(pool.clone(), registry.descriptors())
             .await?
-            .with_notes_shown(notes_shown),
+            .with_notes_shown(notes_shown)
+            .planned_as_windows(knobas_db::embedded::plans_as_windows()),
     )
 }
 

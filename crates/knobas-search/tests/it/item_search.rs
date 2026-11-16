@@ -1036,7 +1036,7 @@ async fn a_search_with_words_reads_through_the_narrow_tables_indexes() {
             10,
             50,
         );
-        let plan = explain_matched(&pool, built).await.unwrap();
+        let plan = explain_matched(&pool, built, false).await.unwrap();
         assert!(plan.contains(index), "titles {titles}:\n{plan}");
         assert!(
             !plan.contains("Seq Scan on item ") && !plan.contains("Seq Scan on item_search"),
@@ -1073,7 +1073,9 @@ async fn one_letter_is_ranked_on_four_processes() {
             40,
         );
         assert!(built.matches_narrowly());
-        let plan = explain_by_a_letter_at_any_size(&pool, built).await.unwrap();
+        let plan = explain_by_a_letter_at_any_size(&pool, built, false)
+            .await
+            .unwrap();
         assert!(
             plan.contains("Workers Planned: 3"),
             "{letter} on one process:\n{plan}"

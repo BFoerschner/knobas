@@ -922,7 +922,9 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
     }
     // The instrument: the one-letter read of the whole table asks for three.
     let whole = search_sql(&corpora, Some("p"), true, &filters(&s), 10, 40);
-    let plan = explain_by_a_letter_at_any_size(&pool, whole).await.unwrap();
+    let plan = explain_by_a_letter_at_any_size(&pool, whole, false)
+        .await
+        .unwrap();
     assert!(plan.contains("Workers Planned: 3"), "{plan}");
 }
 
