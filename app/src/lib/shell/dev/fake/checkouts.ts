@@ -365,6 +365,31 @@ function fakeOpen(args: Record<string, unknown>) {
   );
 }
 
+/**
+ * `open_folder` (2026-11-16): the application's own command with the folder in
+ * the checkout's place, as the backend runs it; a folder with `..` in it, or
+ * git's own, is refused as there.
+ */
+function fakeOpenFolder(args: Record<string, unknown>) {
+  const folder = String(args["folder"] ?? "").replace(/^\.\/|\/$/g, "");
+  const parts = folder.split("/");
+  if (folder === "" || parts.some((part) => part === ".." || part === ".git" || part === "") || folder.startsWith("/")) {
+    throw { code: "invalid", message: `${folder} is not a folder inside the checkout`, source_id: null };
+  }
+  const entityId = String(args["entityId"] ?? "");
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) {
+    throw { code: "not_found", message: `${entityId} has no checkout on this machine, so there is nothing to open`, source_id: null };
+  }
+  const at = `${checkout.path}/${folder}`;
+  const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
+  const app = fakeApps.find((one) => one.id === id);
+  if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
+  refuse(app.command, `'${app.command}'`);
+  const name = parts[parts.length - 1] ?? "";
+  return words(app.command).map((word) => word.replace(/\{path\}/g, at).replace(/\{file\}/g, at).replace(/\{line\}/g, "1").replace(/\{name\}/g, name));
+}
+
 /** The fake's Gitea pages (#2274), as `code_pages` declares Gitea's, after its base URL. */
 function fakePage(entityId: string, object: OpenObject): string | null {
   const repo = fakeRepoOf(entityId);
@@ -561,6 +586,7 @@ export function handlers(): Handlers {
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
     open_checkout: (args) => fakeOpen(args),
     open_object: (args) => fakeOpenObject(args),
+    open_folder: (args) => fakeOpenFolder(args),
     object_page: (args) => fakePage(String(args["entityId"] ?? ""), args["object"] as OpenObject),
     diff_tool: (args) => fakeDiffTool(args),
     open_diff_tool: (args) => {

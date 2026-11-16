@@ -25,7 +25,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
-use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open, open_object, page};
+use knobas_app::checkout::open::{
+    APPLICATIONS_KEY, GitFound, legacy_key, open, open_folder, open_object, page,
+};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
@@ -1076,6 +1078,112 @@ async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
     let started = running(&stub);
     assert!(started.is_empty(), "a refused file started {started:?}");
     assert!(!record.exists(), "nothing may have run");
+}
+
+/// A folder opens as the repository does, with the folder in the checkout's
+/// place (2026-11-16, a right-click's *Open in…* on a folder): the
+/// application's own command, `{path}`, `{file}` and `{name}` the folder's,
+/// the file command never.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_opens_with_the_repository_command_at_the_folder() {
+    let pool = pool().await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
+    let checkout = root.path().join(&repo.name);
+    fs::create_dir_all(checkout.join("src/sepa retry")).unwrap();
+    set_applications(
+        &pool,
+        &[app(
+            Some("term"),
+            "Terminal",
+            &format!("{} --cwd {{path}} {{name}} {{file}}", stub.display()),
+            Some(&format!("{} --goto {{file}}", stub.display())),
+        )],
+        None,
+    )
+    .await
+    .unwrap();
+    let folder = checkout
+        .join("src/sepa retry")
+        .to_string_lossy()
+        .into_owned();
+    let expected = [
+        "--cwd".to_owned(),
+        folder.clone(),
+        "sepa retry".to_owned(),
+        folder.clone(),
+    ];
+
+    let argv = open_folder(&pool, None, &repo.id, Some("term"), "src/sepa retry")
+        .await
+        .unwrap();
+    assert_eq!(recorded(&record).await, expected);
+    assert_eq!(argv[1..], expected, "the answer is the argv it started");
+}
+
+/// A folder is opened only when it is a folder inside the checkout on disk:
+/// not by `..`, a root, a symlink out of it, a file, one not there, the
+/// checkout itself or git's own folder. Nothing runs for any of them.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_outside_the_checkout_is_refused_and_nothing_runs() {
+    let pool = pool().await;
+    let (repo, root, stub, record, workshop) = scanned(&pool).await;
+    let checkout = root.path().join(&repo.name);
+    fs::create_dir_all(workshop.path().join("elsewhere")).unwrap();
+    fs::create_dir_all(checkout.join(".git/hooks")).unwrap();
+    std::os::unix::fs::symlink(workshop.path().join("elsewhere"), checkout.join("out")).unwrap();
+    fs::write(checkout.join("README.md"), "# pay\n").unwrap();
+    set_applications(
+        &pool,
+        &[app(
+            None,
+            "Terminal",
+            &format!("{} {{path}}", stub.display()),
+            None,
+        )],
+        None,
+    )
+    .await
+    .unwrap();
+
+    for path in [
+        "../elsewhere",
+        "/etc",
+        "out",
+        "README.md",
+        "missing",
+        ".",
+        ".git",
+        ".git/hooks",
+    ] {
+        let error = open_folder(&pool, None, &repo.id, None, path)
+            .await
+            .expect_err(path);
+        assert_eq!(error.code, IpcErrorCode::Invalid, "{path}");
+        assert!(
+            error.message.contains("not a folder inside"),
+            "{path}: {}",
+            error.message
+        );
+    }
+    let started = running(&stub);
+    assert!(started.is_empty(), "a refused folder started {started:?}");
+    assert!(!record.exists(), "nothing may have run");
+}
+
+/// A folder of a repository with no clone on this machine is refused as the
+/// repository is, naming it: there is no folder to open.
+#[tokio::test]
+async fn a_folder_of_a_repo_with_no_checkout_refuses_and_names_it() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let error = open_folder(&pool, None, &repo.id, None, "src")
+        .await
+        .expect_err("there is nothing to open");
+    assert_eq!(error.code, IpcErrorCode::NotFound);
+    assert!(error.message.contains(&repo.id), "{}", error.message);
+    assert!(error.message.contains("no checkout"), "{}", error.message);
 }
 
 /// The processes running `stub`, by `ps`'s command column. A program `open`

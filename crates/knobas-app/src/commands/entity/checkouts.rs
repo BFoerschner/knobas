@@ -253,6 +253,35 @@ pub async fn open_object(
     .await
 }
 
+/// Run an application on a folder of this entity's repository as it runs on
+/// the repository (2026-11-16, a right-click's *Open in…* on a folder): its
+/// own command, with the folder in the checkout's place, so `{path}`,
+/// `{file}` and `{name}` are the folder's. `folder` is relative to the
+/// checkout and must be a folder inside it on disk. Answers the argument
+/// vector it started.
+///
+/// # Errors
+///
+/// As `open_checkout`, and [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// for a folder that is not inside the checkout.
+#[tauri::command]
+pub async fn open_folder(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    application: Option<String>,
+    folder: String,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::open_folder(
+        &pool,
+        Some(lifecycle.registry()),
+        &entity_id,
+        application.as_deref(),
+        &folder,
+    )
+    .await
+}
+
 /// The page a code object of this entity's repository has at its source
 /// (#2274): what *Open in › Browser* hands the opener. Built from the
 /// source's typed base URL and the pages its adapter declares, never from a

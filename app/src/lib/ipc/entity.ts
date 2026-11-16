@@ -1546,6 +1546,16 @@ export function openObject(entityId: string, application: string | null, object:
 }
 
 /**
+ * Run an application on a folder of this entity's repository as it runs on
+ * the repository — `open_folder` (2026-11-16, a right-click's *Open in…* on a
+ * folder): its own command, the folder in the checkout's place. `folder` is
+ * relative to the checkout. Answers the argument vector it started.
+ */
+export function openFolder(entityId: string, application: string | null, folder: string): Promise<string[]> {
+  return invoke<string[]>("open_folder", { entityId, application, folder });
+}
+
+/**
  * The page a code object has at its source — `object_page` (#2274): what
  * *Open in › Browser* opens. Built from the source's typed base URL and the
  * pages its adapter declares; `null` when it declares none.

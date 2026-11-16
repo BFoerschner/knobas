@@ -318,6 +318,59 @@ pub async fn open_object_admitting(
     object: &Object,
     protocols: &[&str],
 ) -> Result<Vec<String>, IpcError> {
+    run_at(
+        pool,
+        registry,
+        entity_id,
+        application,
+        object,
+        None,
+        protocols,
+    )
+    .await
+}
+
+/// Run a saved application on a folder of this entity's repository, as it
+/// runs on the repository (2026-11-16, a right-click's *Open in…* on a
+/// folder): the application's own command, with the folder in the checkout's
+/// place, so `{path}`, `{file}` and `{name}` are the folder's and `{url}` the
+/// repository's page. `folder` is relative to the checkout and must be a
+/// folder inside it on disk, never git's own. Answers the argument vector it
+/// started.
+///
+/// # Errors
+///
+/// As [`open_object`], and [`Invalid`](crate::IpcErrorCode::Invalid) for a
+/// folder that is not inside the checkout.
+pub async fn open_folder(
+    pool: &PgPool,
+    registry: Option<&dyn AdapterRegistry>,
+    entity_id: &str,
+    application: Option<&str>,
+    folder: &str,
+) -> Result<Vec<String>, IpcError> {
+    run_at(
+        pool,
+        registry,
+        entity_id,
+        application,
+        &Object::Repository,
+        Some(folder),
+        &knobas_core::checkout::clone::PROTOCOLS,
+    )
+    .await
+}
+
+/// The one runner: `object` at the checkout, or at `folder` inside it.
+async fn run_at(
+    pool: &PgPool,
+    registry: Option<&dyn AdapterRegistry>,
+    entity_id: &str,
+    application: Option<&str>,
+    object: &Object,
+    folder: Option<&str>,
+    protocols: &[&str],
+) -> Result<Vec<String>, IpcError> {
     let checkout = super::resolve(pool, entity_id).await?;
     let path = checkout.path.ok_or_else(|| {
         IpcError::not_found(format!(
@@ -328,6 +381,12 @@ pub async fn open_object_admitting(
     let (file, line) = match object {
         Object::File { path, line, .. } => (Some(file_inside(&checkout, path).await?), *line),
         _ => (None, None),
+    };
+    // A folder stands in the checkout's place (2026-11-16): the repository's
+    // command runs as it does there, with the folder's `{path}` and `{name}`.
+    let folder = match folder {
+        Some(path) => Some(folder_inside(&checkout, path).await?),
+        None => None,
     };
     let stored = load(pool).await?;
     let wanted = application
@@ -384,7 +443,7 @@ pub async fn open_object_admitting(
                 "a pull request opens in its worktree, which needs the source's address",
             ));
         }
-        _ => checkout,
+        _ => folder.unwrap_or(checkout),
     };
     let code = Code::of(object, url);
     let argv = rules::fill(
@@ -520,19 +579,56 @@ pub async fn page(
 
 /// `relative` inside `checkout`, as a file that is there.
 async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+    inside_on_disk(checkout, relative, Entry::File).await
+}
+
+/// [`file_inside`] for a folder: a folder inside the checkout on disk, by its
+/// words and by where it really is, never the checkout's `.git`.
+async fn folder_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+    inside_on_disk(checkout, relative, Entry::Folder).await
+}
+
+/// What [`inside_on_disk`] must find.
+#[derive(Clone, Copy)]
+enum Entry {
+    File,
+    Folder,
+}
+
+async fn inside_on_disk(
+    checkout: &Path,
+    relative: &str,
+    entry: Entry,
+) -> Result<PathBuf, IpcError> {
+    let word = match entry {
+        Entry::File => "file",
+        Entry::Folder => "folder",
+    };
     let refuse = || {
         IpcError::invalid(format!(
-            "{relative} is not a file inside the checkout at {}",
+            "{relative} is not a {word} inside the checkout at {}",
             checkout.display()
         ))
     };
     let joined = rules::inside(checkout, relative).ok_or_else(refuse)?;
+    // Git's own folder is no folder of the repository: the tree never draws it.
+    if matches!(entry, Entry::Folder)
+        && Path::new(relative)
+            .components()
+            .any(|part| part.as_os_str() == ".git")
+    {
+        return Err(refuse());
+    }
     let root = checkout.to_path_buf();
     let probe = joined.clone();
     let inside = tokio::task::spawn_blocking(move || {
         let root = std::fs::canonicalize(root).ok()?;
         let real = std::fs::canonicalize(probe).ok()?;
-        (real.starts_with(&root) && real.is_file()).then_some(())
+        let kind = match entry {
+            Entry::File => real.is_file(),
+            Entry::Folder => real.is_dir() && real != root,
+        };
+        (real.starts_with(&root) && kind).then_some(())
     })
     .await
     .ok()

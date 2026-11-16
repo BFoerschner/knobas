@@ -464,6 +464,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::set_checkout_override,
         commands::entity::open_checkout,
         commands::entity::open_object,
+        commands::entity::open_folder,
         commands::entity::object_page,
         commands::entity::diff_tool,
         commands::entity::open_diff_tool,
