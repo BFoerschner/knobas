@@ -36,6 +36,8 @@ export interface SideSpec {
   readonly share: number;
   /** A cap in pixels as well, where a width beyond it means nothing (the ticket card, #2402). */
   readonly max?: number;
+  /** What the rest of the grid keeps whatever the width, in pixels: the outline leaves Docs' page its reading column. */
+  readonly keep?: number;
   /** Where the width is kept, when it is not `knobas.side.<id>` (the ticket card's, kept since #2402). */
   readonly key?: string;
 }
@@ -51,7 +53,7 @@ export const SIDES = {
   compare: { label: "Resize the side panel", at: "end", base: 300, min: 220, share: 0.45 },
   "diff-files": { label: "Resize the changed files", at: "start", base: 240, min: 160, share: 0.45 },
   "docs-tree": { label: "Resize the page tree", at: "start", base: 300, min: 180, share: 0.45 },
-  "docs-outline": { label: "Resize the outline", at: "end", base: 268, min: 180, share: 0.35 },
+  "docs-outline": { label: "Resize the outline", at: "end", base: 268, min: 180, share: 0.5, keep: 660 + 56 },
   settings: { label: "Resize the sections", at: "start", base: 230, min: 160, share: 0.35 },
   pr: { label: "Resize the side panel", at: "end", base: 300, min: 220, share: 0.45 },
   set: { label: "Resize the side panel", at: "end", base: 300, min: 220, share: 0.45 },
@@ -86,7 +88,7 @@ export function sideKey(id: SideId): string {
  */
 export function maxWidth(id: SideId, grid: number): number {
   const spec = specOf(id);
-  const share = grid > 0 ? spec.share * grid : Number.POSITIVE_INFINITY;
+  const share = grid > 0 ? Math.min(spec.share * grid, grid - (spec.keep ?? 0)) : Number.POSITIVE_INFINITY;
   return Math.max(spec.min, Math.min(spec.max ?? Number.POSITIVE_INFINITY, share));
 }
 
@@ -98,7 +100,8 @@ export function clampWidth(id: SideId, px: number, grid = 0): number {
 /** What the grid's custom property holds for a width: clamped in CSS as well, to the floor and the share. */
 export function cssWidth(id: SideId, px: number): string {
   const spec = specOf(id);
-  return `clamp(${spec.min}px, ${px}px, ${Math.round(spec.share * 1000) / 10}%)`;
+  const share = `${Math.round(spec.share * 1000) / 10}%`;
+  return `clamp(${spec.min}px, ${px}px, ${spec.keep === undefined ? share : `min(${share}, 100% - ${spec.keep}px)`})`;
 }
 
 export interface SideWidths {

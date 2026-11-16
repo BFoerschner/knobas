@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import Fixture from "./TfSideEdge.fixture.svelte";
+import { DragPace, forgetPace, releasedIn, REST_MS, startsAsGhost, trippedOn } from "./side-pace";
 import {
   clampWidth,
   createSideWidths,
@@ -55,13 +56,16 @@ describe("the widths", () => {
     // The ticket card keeps its cap (#2402) as well as its share.
     expect(clampWidth("ticket-card", 4000, 5120)).toBe(720);
     expect(clampWidth("ticket-card", 4000, 1000)).toBe(600);
+    expect(maxWidth("docs-outline", 1044)).toBe(328);
+    expect(maxWidth("docs-outline", 2400)).toBe(1200);
     // A grid narrower than the floor's share still gives the floor.
     expect(maxWidth("assets", 300)).toBe(240);
   });
 
   test("the property holds the width clamped in CSS too, so a window made narrower later keeps the main column", () => {
     expect(cssWidth("builds", 420)).toBe("clamp(180px, 420px, 45%)");
-    expect(cssWidth("docs-outline", 300)).toBe("clamp(180px, 300px, 35%)");
+    // The outline leaves Docs' page its reading column (660 px and the gap), so a wide outline never folds itself away.
+    expect(cssWidth("docs-outline", 300)).toBe("clamp(180px, 300px, min(50%, 100% - 716px))");
     expect(sideProperty("docs-tree")).toBe("--side-docs-tree");
   });
 
@@ -107,15 +111,21 @@ describe("the widths", () => {
 describe("the edge", () => {
   let target: HTMLElement;
   let app: Record<string, unknown> | undefined;
-  let frames: FrameRequestCallback[];
+  /** The frames asked for, by id, and the frame clock: each `frame()` runs them at the clock moved on by its gap. */
+  let frames: Map<number, FrameRequestCallback>;
+  let nextFrame: number;
+  let clock: number;
   let storage: Storage;
 
   beforeEach(() => {
-    frames = [];
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
-      frames[id - 1] = () => {};
+    frames = new Map();
+    nextFrame = 1;
+    clock = 1000;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(nextFrame, callback);
+      return nextFrame++;
     });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => void frames.delete(id));
     storage = memoryStorage();
     Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
   });
@@ -126,6 +136,7 @@ describe("the edge", () => {
     target?.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    forgetPace();
     Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
   });
 
@@ -143,9 +154,12 @@ describe("the edge", () => {
   const grid = () => target.querySelector<HTMLElement>(".grid")!;
   const edge = () => target.querySelector<HTMLElement>("[role=separator]")!;
   const drawn = (side: SideId) => grid().style.getPropertyValue(sideProperty(side));
-  const frame = () => {
-    const now = frames.splice(0);
-    for (const callback of now) callback(performance.now());
+  /** One frame, `gap` ms after the last (16.7 ms, a 60 Hz panel's pace, by default). */
+  const frame = (gap = 16.7) => {
+    clock += gap;
+    const now = [...frames.values()];
+    frames.clear();
+    for (const callback of now) callback(clock);
   };
   const pointer = (type: string, x: number, on: EventTarget = window) =>
     on.dispatchEvent(new MouseEvent(type, { button: 0, clientX: x, bubbles: true, cancelable: true }));
@@ -178,7 +192,7 @@ describe("the edge", () => {
     pointer("pointermove", 310);
     pointer("pointermove", 330);
     pointer("pointermove", 360);
-    expect(frames).toHaveLength(1);
+    expect(frames.size, "one frame asked for however many moves came").toBe(1);
     expect(drawn("builds"), "nothing is written before the frame").toBe("");
     frame();
     expect(drawn("builds")).toBe(cssWidth("builds", 360));
@@ -320,6 +334,78 @@ describe("the edge", () => {
     expect(edge().getAttribute("aria-valuenow")).toBe("512");
   });
 
+  const transform = () => edge().style.getPropertyValue("transform");
+
+  test("a page that lays itself out slower than a frame turns the drag into a ghost: the line follows, the width waits", async () => {
+    await draw("builds", "300px 1140px");
+    pointer("pointerdown", 300, edge());
+    pointer("pointermove", 320);
+    frame();
+    expect(drawn("builds")).toBe(cssWidth("builds", 320));
+    // Each written frame took 30 ms to lay out: the second slow one trips the ghost.
+    pointer("pointermove", 340);
+    frame(30);
+    expect(drawn("builds")).toBe(cssWidth("builds", 340));
+    pointer("pointermove", 360);
+    frame(30);
+    expect(drawn("builds"), "the ghost writes no width").toBe(cssWidth("builds", 340));
+    expect(transform()).toBe("translateX(20px)");
+    expect(edge().getAttribute("aria-valuenow")).toBe("360");
+    pointer("pointermove", 400);
+    frame();
+    expect(drawn("builds")).toBe(cssWidth("builds", 340));
+    expect(transform()).toBe("translateX(60px)");
+    // The pointer rests: the width lands, the line back on the edge in the same frame.
+    for (let at = 0; at < REST_MS; at += 16.7) frame();
+    frame();
+    expect(drawn("builds")).toBe(cssWidth("builds", 400));
+    expect(transform()).toBe("");
+    pointer("pointermove", 430);
+    frame();
+    expect(transform()).toBe("translateX(30px)");
+    pointer("pointerup", 450);
+    flushSync();
+    expect(drawn("builds")).toBe(cssWidth("builds", 450));
+    expect(transform()).toBe("");
+    expect(sideWidths.px("builds")).toBe(450);
+  });
+
+  test("one slow frame alone keeps the drag live", async () => {
+    await draw("builds", "300px 1140px");
+    pointer("pointerdown", 300, edge());
+    for (const [x, gap] of [[320, 16.7], [340, 40], [360, 16.7], [380, 16.7], [400, 16.7], [420, 40], [440, 16.7]] as const) {
+      pointer("pointermove", x);
+      frame(gap);
+    }
+    frame();
+    expect(drawn("builds")).toBe(cssWidth("builds", 440));
+    expect(transform()).toBe("");
+    pointer("pointerup", 440);
+    expect(startsAsGhost("builds")).toBe(false);
+  });
+
+  test("a sidebar that tripped starts its next drag as a ghost, until two releases land within a frame", async () => {
+    await draw("tickets-views", "230px 870px 340px");
+    trippedOn("tickets-views");
+    pointer("pointerdown", 230, edge());
+    pointer("pointermove", 280);
+    frame();
+    expect(drawn("tickets-views"), "a ghost from the first frame").toBe("");
+    expect(transform()).toBe("translateX(50px)");
+    pointer("pointerup", 280);
+    expect(drawn("tickets-views")).toBe(cssWidth("tickets-views", 280));
+    // The release's frame, and the one after it: laid out within the line.
+    frame();
+    frame();
+    expect(startsAsGhost("tickets-views"), "one fast release is not enough").toBe(true);
+    pointer("pointerdown", 280, edge());
+    pointer("pointermove", 300);
+    pointer("pointerup", 300);
+    frame();
+    frame();
+    expect(startsAsGhost("tickets-views")).toBe(false);
+  });
+
   test("below 900 px, where every sidebar stacks or folds behind its bar, there is no edge", async () => {
     const real = window.matchMedia;
     window.matchMedia = ((query: string) => ({
@@ -338,6 +424,47 @@ describe("the edge", () => {
     } finally {
       window.matchMedia = real;
     }
+  });
+});
+
+describe("the pace", () => {
+  test("two slow frames within four written in a row trip the ghost; spread wider they do not", () => {
+    const run = (gaps: number[]) => {
+      const pace = new DragPace(false);
+      let ts = 0;
+      pace.wrote(ts);
+      for (const gap of gaps) {
+        ts += gap;
+        pace.frame(ts);
+        pace.wrote(ts);
+      }
+      return pace.ghost;
+    };
+    expect(run([30, 30])).toBe(true);
+    expect(run([30, 16, 16, 30])).toBe(true);
+    expect(run([30, 16, 16, 16, 30])).toBe(false);
+    expect(run([19, 19, 19, 19])).toBe(false);
+    expect(run([19.5, 19.5])).toBe(true);
+  });
+
+  test("a frame that wrote nothing is not costed", () => {
+    const pace = new DragPace(false);
+    pace.wrote(0);
+    pace.frame(40);
+    pace.frame(200);
+    pace.frame(400);
+    expect(pace.ghost).toBe(false);
+  });
+
+  test("a mark clears after two fast releases in a row; a slow one starts the count again", () => {
+    trippedOn("docs-tree");
+    releasedIn("docs-tree", 12);
+    releasedIn("docs-tree", 40);
+    releasedIn("docs-tree", 12);
+    expect(startsAsGhost("docs-tree")).toBe(true);
+    releasedIn("docs-tree", 19);
+    expect(startsAsGhost("docs-tree")).toBe(false);
+    forgetPace();
   });
 });
 
