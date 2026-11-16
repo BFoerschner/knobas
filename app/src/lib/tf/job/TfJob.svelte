@@ -95,7 +95,9 @@
   import TfAttachmentPreview from "./TfAttachmentPreview.svelte";
   import { createAttachmentPreviews } from "./attachment-previews.svelte";
   import { cardSections } from "./card-sections";
-  import { cardWidth } from "./card-width.svelte";
+  import { naturalWidth } from "./card-width.svelte";
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { ticketImages } from "./attachment-image";
   import { proseMarkdown } from "../../render/prose";
@@ -600,9 +602,10 @@
     [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
   );
 
-  /** The card column's width, through the CSSOM: the app's CSP refuses `style:` in markup, not this. Re-runs as the width changes. */
-  const cardSide = (node: HTMLElement) => {
-    node.style.setProperty("--tk-side", `${cardWidth.px}px`);
+  /** The card's fit (#2402): the width at which nothing on it wraps. */
+  const fitCard = (grid: HTMLElement): number | null => {
+    const card = grid.querySelector<HTMLElement>("article.tf-ticketcard");
+    return card === null ? null : naturalWidth(card);
   };
 </script>
 
@@ -625,7 +628,8 @@
   <div class="tf-full tf-ticketpage">
   <!-- While the steps are a panel, `Esc` closes them and stays on this ticket, so the hint names the ticket, and a press closes them too (F-153). -->
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} back={stepsArePanel ? { name: key } : back} />
-  <div class="tf-ws" {@attach cardSide}>
+  <div class="tf-ws" {@attach sideWidth("ticket-card")}>
+    <TfSideEdge side="ticket-card" onfit={fitCard} />
     <TfJobCard
       {detail}
       others={reader.others}

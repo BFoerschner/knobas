@@ -78,6 +78,8 @@
 </script>
 
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { tick, untrack } from "svelte";
 
@@ -922,7 +924,8 @@
     {#if !tabKnown}
       <TfNothingHere message="This pull request has no such tab." href={prHash(prId)} action="Overview" />
     {:else}
-    <div class="tf-cbody" class:tf-pr={tab !== "diff"}>
+    <div class="tf-cbody" class:tf-pr={tab !== "diff"} {@attach sideWidth("pr")}>
+      {#if tab !== "diff"}<TfSideEdge side="pr" />{/if}
       {#if prId !== null && (tab === "diff" || filesFor === prId)}
         <!-- Kept for the visit to this pull request once opened, as a repository's tabs are (#2248): a return shows it as it
              was left, its reads behind it, with nothing built again (the inner-6x pass, 2026-11-15). -->

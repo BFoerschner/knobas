@@ -718,6 +718,8 @@ export function sectionsOf(blocks: DocBlock[]): Section[] {
  * `css/docs.css`; `tf-css.test.ts` holds the two together).
  */
 export const OUTLINE_ROOM = 268 + 56;
+/** The gap before the outline, which a resized outline (`--side-docs-outline`) keeps. */
+export const OUTLINE_GAP = 56;
 
 /** The narrowest reading column the outline stays beside, whatever the header's actions need. */
 export const READING_MIN = 660;
@@ -728,10 +730,16 @@ export const READING_MIN = 660;
  * `sync` what *Sync now* takes of that row, 0 where it has none.
  *
  * The outline folds above the page once the row would stop fitting beside it. Only when the row does not fit with the
- * outline folded either does *Sync now* move into *More*, so no button ever wraps alone.
+ * outline folded either does *Sync now* move into *More*, so no button ever wraps alone. `outline` is what the outline
+ * takes with its gap where the reader has resized it (the sidebar-resize pass), the default's otherwise.
  */
-export function readerFit(room: number, row: number, sync: number): { outlineFolds: boolean; syncInMore: boolean } {
-  return { outlineFolds: room - OUTLINE_ROOM < Math.max(row, READING_MIN), syncInMore: sync > 0 && room < row };
+export function readerFit(
+  room: number,
+  row: number,
+  sync: number,
+  outline: number = OUTLINE_ROOM,
+): { outlineFolds: boolean; syncInMore: boolean } {
+  return { outlineFolds: room - outline < Math.max(row, READING_MIN), syncInMore: sync > 0 && room < row };
 }
 
 /**

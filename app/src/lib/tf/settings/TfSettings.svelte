@@ -15,6 +15,8 @@
   status. Only the newest list read may land (`latestRead`, #107).
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { tick } from "svelte";
 
   import { pageVisible } from "../kept-pages.svelte";
@@ -242,7 +244,8 @@
     {back}
   />
   <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} {layers} />
-  <div class="tf-stg" class:tf-rail-shut={!railOpen}>
+  <div class="tf-stg" class:tf-rail-shut={!railOpen} {@attach sideWidth("settings")}>
+    <TfSideEdge side="settings" />
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <nav
       id="tf-settings-rail"

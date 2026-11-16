@@ -356,6 +356,7 @@ const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
 const TfContextMenu = (await import("../tf/context/TfContextMenu.svelte")).default;
 const { realMenuPorts } = await import("../tf/context/ports");
 const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
+const TfSideEdgeFixture = (await import("../tf/TfSideEdge.fixture.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
@@ -782,6 +783,16 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(TfRailBar, { target, props: { label: "Section", value: "Sources", open: true, controls: "rail", onpress: () => {}, onclose: () => {}, layers: createLayers() } }),
     }),
+  },
+  {
+    /** A sidebar's edge: a drag's pointer and blur listeners on the window, and its cover, live while the pointer is down. */
+    name: "TfSideEdge",
+    source: "lib/tf/TfSideEdge.svelte",
+    open: (target) => ({ app: mount(TfSideEdgeFixture, { target, props: { side: "builds" } }) }),
+    exercise: (target) =>
+      void target
+        .querySelector("[role=separator]")
+        ?.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientX: 300, bubbles: true, cancelable: true })),
   },
   {
     /** A ticket view's ⋯ menu (#812): its outside-click listener lives while it is open. */

@@ -107,7 +107,7 @@
   import { breadcrumbJob, currentJob } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
   import { scopedTicket } from "./job/scoped.svelte";
-  import { cardWidth } from "./job/card-width.svelte";
+  import { sideWidths } from "./side-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
   import { pipelineHash } from "./builds/builds";
   import { sessionValue } from "./filter/filter-state.svelte";
@@ -488,8 +488,8 @@
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
-  // The ticket page card's width (#2402), kept in the same storage.
-  cardWidth.load();
+  // Every sidebar's width (the ticket page card's among them, #2402), kept in the same storage.
+  sideWidths.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
   /**
    * A ticket a card's sections row opened its section on (#2401,

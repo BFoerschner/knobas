@@ -83,6 +83,8 @@
 </script>
 
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth, sideWidths, clampWidth } from "../side-width.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { flushSync, tick, untrack } from "svelte";
@@ -173,6 +175,8 @@
     spaceAt,
     READER_DRAWER,
     readerFit,
+    OUTLINE_ROOM,
+    OUTLINE_GAP,
     person,
     placeOf,
     reachedPages,
@@ -1153,7 +1157,9 @@
     if (drawn) syncRoom = drawn.offsetWidth + gap;
     else if (!syncInMore || beside) syncRoom = 0;
     const row = items.reduce((sum, item) => sum + item.offsetWidth, 0) + gap * Math.max(0, items.length - 1) + (drawn ? 0 : syncRoom);
-    const fit = readerFit(room, row, syncRoom);
+    // A resized outline takes its own width beside the page, within its share of the sheet, as `.tf-rd-sheet` draws it.
+    const kept = untrack(() => sideWidths.px("docs-outline"));
+    const fit = readerFit(room, row, syncRoom, kept === null ? OUTLINE_ROOM : clampWidth("docs-outline", kept, room) + OUTLINE_GAP);
     outlineFolds = fit.outlineFolds;
     syncInMore = fit.syncInMore;
   }
@@ -1165,6 +1171,8 @@
     if (sheet === null || headActs === null) return;
     void page;
     void detail;
+    // The outline resized: the observer's first answer measures the header again beside its new width.
+    void sideWidths.px("docs-outline");
     if (typeof ResizeObserver === "undefined") return untrack(fitHeader);
     const seen = new ResizeObserver(() => fitHeader());
     seen.observe(sheet);
@@ -1585,7 +1593,8 @@
 
 </script>
 
-<div class="tf-rd" class:tf-rd-drawer={drawer}>
+<div class="tf-rd" class:tf-rd-drawer={drawer} {@attach sideWidth("docs-tree")}>
+  <TfSideEdge side="docs-tree" />
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <nav
     id="tf-docs-tree"
@@ -1813,7 +1822,8 @@
       <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
       {#if back !== null}<TfBackHint {back} />{/if}
     </nav>
-      <div class="tf-rd-sheet" class:tf-rd-solo={outlineFolds} bind:this={sheet}>
+      <div class="tf-rd-sheet" class:tf-rd-solo={outlineFolds} bind:this={sheet} {@attach sideWidth("docs-outline")}>
+        {#if !outlineFolds}<TfSideEdge side="docs-outline" />{/if}
         <article class="tf-rd-page" bind:this={article}>
           <!-- The canonical header (#2238, #2286): the title, and on its line the actions in the
                Controls order, "Open in" a ghost, the page's Refresh and the view's Sync now last. -->

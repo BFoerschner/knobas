@@ -132,7 +132,7 @@
 @media (max-width: 900px) { .tf-runbody { padding-left: 16px; padding-right: 16px; } }
 
 /* ---------- Builds (#848): the pipeline list beside the selected pipeline's runs ---------- */
-.tf-bv { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
+.tf-bv { position: relative; display: grid; grid-template-columns: var(--side-builds, 300px) minmax(0, 1fr); height: 100%; }
 .tf-pl { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-pl-top { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule-2); }
 .tf-pl-top .tf-fsearch { max-width: none; flex: none; }
@@ -270,7 +270,7 @@
 .tf-runs .tf-run-trig { width: 170px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
-@media (max-width: 1240px) { .tf-bv { grid-template-columns: 240px minmax(0, 1fr); } }
+@media (max-width: 1240px) { .tf-bv { grid-template-columns: var(--side-builds, 240px) minmax(0, 1fr); } }
 /* The run table sheds by its own width, not the window's: the duration drops its bar, then a column goes at a time. */
 /* The bar goes first, alone: that is the room a job's chip needs beside the longest branch. Trigger stays 170 px until 1000 (F-346, F-357).
    A running run's progress bar goes with it: 70 px of bar and the word *running* ran over the start time in 70 px (builds at 6x, 2026-11-15). */
@@ -298,7 +298,8 @@
 
 /* ---------- Builds on the repository page (the repo-builds pass, `TfRepoBuilds.svelte`) ---------- */
 /* The branches as a rail on the left, one branch on the right; `.tf-cbody` pads the tab (code.css). */
-.tf-rbv { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 22px; align-items: start; }
+.tf-rbv { position: relative; display: grid; grid-template-columns: var(--side-repo-builds, 300px) minmax(0, 1fr); gap: 22px; align-items: start; }
+.tf-rbv > .tf-sedge { --tf-sedge-gap: 22px; }
 /* The rail is the Builds rail (`.tf-pl`) in a box, held in view while the branch's page scrolls. */
 /* Its head stays put and its rows scroll in `.tf-pl-list` (#2091's rule: bounded by the window, its last row reachable). */
 .tf-rbv > .tf-rbrail { border: 1px solid var(--rule); border-radius: 6px; display: flex; overflow: hidden; position: sticky; top: 0; max-height: calc(100vh - 250px); }

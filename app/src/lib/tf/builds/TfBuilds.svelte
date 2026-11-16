@@ -66,6 +66,8 @@
 </script>
 
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import TfScope from "../filter/TfScope.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfRailBar from "../TfRailBar.svelte";
@@ -522,7 +524,8 @@
   </details>
 {/snippet}
 
-<div class="tf-bv" class:tf-rail-shut={!railOpen}>
+<div class="tf-bv" class:tf-rail-shut={!railOpen} {@attach sideWidth("builds")}>
+  <TfSideEdge side="builds" />
   <TfRailBar label="Pipeline" value={selected?.name ?? "All"} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <nav

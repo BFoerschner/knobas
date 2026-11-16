@@ -52,6 +52,8 @@
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
   import TfFindBar from "../TfFindBar.svelte";
   import TfStateChip from "../TfStateChip.svelte";
@@ -1137,7 +1139,8 @@
     This diff is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines: it is drawn up to there, and the source's own page has the rest.
   </p>
 {/if}
-<div class:tf-dgrid={list} class:tf-rail-shut={list && !railOpen}>
+<div class:tf-dgrid={list} class:tf-rail-shut={list && !railOpen} {@attach sideWidth("diff-files")}>
+  {#if list}<TfSideEdge side="diff-files" />{/if}
   {#if list}
     <TfRailBar label="File" value={current === null ? "None" : nameOf(current)} open={railOpen} controls="{uid}-files" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
     <div class="tf-dnav tf-rail" id="{uid}-files">

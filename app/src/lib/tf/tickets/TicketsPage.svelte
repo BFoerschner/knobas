@@ -102,6 +102,8 @@
 </script>
 
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { clockLabel } from "../../time/format";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import { stamped, stampOf } from "../opener";
@@ -871,7 +873,9 @@
   let railOpen = $state(false);
 </script>
 
-<div class="tf-tickets" class:tf-rail-shut={!railOpen}>
+<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")} {@attach sideWidth("tickets-preview")}>
+  <TfSideEdge side="tickets-views" />
+  <TfSideEdge side="tickets-preview" />
   <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
   {#if subtasksOf === null}
     <TfRailBar label="View" value={view?.name ?? "All tickets"} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />

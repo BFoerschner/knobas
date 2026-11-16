@@ -335,8 +335,8 @@ test("the asset tree page is viewport-high, so its pane scrolls and the page doe
 });
 
 test("the Docs reader: tree and page, the outline the page's sticky right column, folded on the component's own threshold (#2081)", () => {
-  expect(block(code, ".tf-rd")).toMatch(/grid-template-columns:\s*300px minmax\(0, 1fr\);/);
-  expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) 268px;/);
+  expect(block(code, ".tf-rd")).toMatch(/grid-template-columns:\s*var\(--side-docs-tree, 300px\) minmax\(0, 1fr\);/);
+  expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) var\(--side-docs-outline, 268px\);/);
   const outline = block(code, ".tf-rd-outline");
   expect(outline).toMatch(/position:\s*sticky/);
   // Where it starts, under the pinned crumb row and the sheet's padding, so its heading does not move as the page scrolls (F-443).
@@ -349,7 +349,7 @@ test("the Docs reader: tree and page, the outline the page's sticky right column
   // The tree narrows at the shell's own 1240px breakpoint.
   const rail = code.indexOf("@media (max-width: 1240px) {\n  .tf-rd {");
   expect(rail, "no 1240px band for the tree").toBeGreaterThan(-1);
-  expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
+  expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*var\(--side-docs-tree, 220px\) minmax\(0, 1fr\)/);
 });
 
 test("beside the outline nothing in the Docs reader's page is capped in width, and folded its body stops at 730 px (#2081, F-432)", () => {
@@ -560,12 +560,11 @@ test("a description without markup keeps its line breaks in the reading column's
   expect(block(code, ".tf-tkdesc p.tf-asks")).toMatch(/white-space:\s*pre-line;/);
 });
 
-test("the ticket page's columns take the card's width, and below 900px they stack with the handle gone (#2402)", () => {
-  expect(block(code, ".tf-ticketpage .tf-ws")).toContain("grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr)");
+test("the ticket page's columns take the card's width, and below 900px they stack (#2402)", () => {
+  expect(block(code, ".tf-ticketpage .tf-ws")).toContain("grid-template-columns: var(--side-ticket-card, 320px) minmax(0, 1fr)");
   const narrow = code.slice(code.indexOf("@media (max-width: 900px) {\n  .tf-ticketpage {"));
   const body = narrow.slice(0, narrow.indexOf("\n}"));
   expect(body).toContain(".tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }");
-  expect(body).toContain(".tf-tkhandle { display: none; }");
 });
 
 test("an embed's frame has the border its height counts, inside a border-box (#2459)", () => {

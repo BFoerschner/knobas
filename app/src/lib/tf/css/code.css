@@ -56,7 +56,8 @@
 .tf-repohead h1 { min-height: var(--control-h); }
 .tf-repohead .tf-sub { min-height: 1lh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
-.tf-repo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-repo { position: relative; display: grid; grid-template-columns: var(--side-repo-tree, 280px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-repo > .tf-sedge { --tf-sedge-gap: 18px; }
 /* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */
 .tf-ftreebox {
   background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; position: sticky; top: 12px;
@@ -264,11 +265,13 @@
 .tf-diff .tf-pad { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--sheet-2) 6px 7px); }
 .tf-add-n { color: var(--ok); font-weight: 600; }
 .tf-del-n { color: var(--err); font-weight: 600; }
-.tf-dgrid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-dgrid { position: relative; display: grid; grid-template-columns: var(--side-diff-files, 240px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-dgrid > .tf-sedge { --tf-sedge-gap: 18px; }
 .tf-dgrid > .tf-railbar { display: none; padding: 0; background: none; border: 0; }
 @container dview (max-width: 860px) {
   .tf-dgrid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .tf-dgrid > .tf-railbar { display: flex; }
+  .tf-dgrid > .tf-sedge { display: none; }
   .tf-dgrid.tf-rail-shut > .tf-rail { display: none; }
   .tf-flist, .tf-dgrid .tf-dstick { position: static; }
 }

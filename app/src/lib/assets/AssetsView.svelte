@@ -81,6 +81,8 @@
   landed.
 -->
 <script lang="ts">
+  import TfSideEdge from "../tf/TfSideEdge.svelte";
+  import { sideWidth } from "../tf/side-width.svelte";
   import { stateWord } from "../tf/state-word";
   import { tick, untrack } from "svelte";
 
@@ -1955,7 +1957,8 @@
   {/if}
   {#if alerts.count > 0}{@render openAlerts()}{/if}
 
-  <div class="tree" class:alone={!!failure || emptyEstate} bind:this={tree}>
+  <div class="tree" class:alone={!!failure || emptyEstate} bind:this={tree} {@attach sideWidth("assets")}>
+    {#if !(failure || emptyEstate)}<TfSideEdge side="assets" />{/if}
     <div class="cols" bind:this={stripEl}>
       {#if failure === NOT_HELD}
         <div class="none gone"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
@@ -3040,7 +3043,7 @@
     position: relative;
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, 1fr) var(--side-assets, 340px);
     min-height: 0;
     overflow: hidden;
   }

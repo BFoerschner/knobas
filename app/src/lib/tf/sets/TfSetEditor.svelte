@@ -25,6 +25,8 @@
   address moves to it in place. Leaving before that leaves no row behind.
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -562,7 +564,8 @@
     <!-- Nothing is saved yet, so there is nothing to delete. -->
     {#if set.id !== ""}<div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => (deleting = true)}>Delete…</button></div>{/if}
   </header>
-  <div class="tf-cbody tf-set">
+  <div class="tf-cbody tf-set" {@attach sideWidth("set")}>
+    <TfSideEdge side="set" />
     <div class="tf-set-panels">
       {#each MEMBER_KINDS as kind (kind)}
         {@const members = set.members.filter((member) => member.kind === kind)}

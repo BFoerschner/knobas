@@ -14,6 +14,8 @@
     repository, without leaving it; *Open in Builds* for its whole page.
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { untrack } from "svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { commitRepositories, pipelineRuns, type CommitRepository, type RepoBuilds, type RepoPipelineRow, type RunRow } from "../../ipc/entity";
@@ -319,7 +321,8 @@
 {:else if !ready}
   <p class="tf-dim">Reading builds…</p>
 {:else if rows !== null && page !== null}
-  <div class="tf-rbv">
+  <div class="tf-rbv" {@attach sideWidth("repo-builds")}>
+    <TfSideEdge side="repo-builds" />
     <nav class="tf-pl tf-rbrail" aria-label="Branches">
       <div class="tf-pl-top">
         <label class="tf-fsearch"

@@ -1,5 +1,5 @@
 /* ---------- Docs: the reader (#859, requirements §10, prototype-6's .rd) ---------- */
-.tf-rd { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
+.tf-rd { position: relative; display: grid; grid-template-columns: var(--side-docs-tree, 300px) minmax(0, 1fr); height: 100%; }
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
 .tf-dl-head:not(:has(*)) { display: none; }
@@ -35,11 +35,12 @@
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
 .tf-rd-sheet {
-  display: grid; grid-template-columns: minmax(0, 1fr) 268px; column-gap: 56px; align-items: start;
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-docs-outline, 268px); column-gap: 56px; align-items: start;
   padding: 22px clamp(16px, 3vw, 48px) 90px;
 }
 /* The page runs the sheet's width beside the outline (#2081). With the outline folded, its body stops at `.tf-rd-solo`'s measure, at the end of this file. */
 .tf-rd-page { min-width: 0; }
+.tf-rd-sheet > .tf-sedge { --tf-sedge-gap: 56px; }
 /* The breadcrumb row. Its left end is the title's, its right end every page's. It stays at the top of the page's scroll, under the find bar while that is open (F-443). */
 .tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; position: sticky; top: 0; z-index: 2; }
 .tf-findbar ~ .tf-rd-crumbrow { top: 40px; }
@@ -363,7 +364,7 @@
 .tf-rd-sheet.tf-rd-solo { grid-template-columns: minmax(0, 1fr); }
 .tf-rd-solo :is(.tf-doc, .tf-rd-fold) { max-width: 730px; }
 @media (max-width: 1240px) {
-  .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
+  .tf-rd { grid-template-columns: var(--side-docs-tree, 220px) minmax(0, 1fr); }
 }
 /*
   The band `READER_DRAWER` (docs/docs.ts) names: the tree leaves the grid and is a drawer that slides

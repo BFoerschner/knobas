@@ -1,6 +1,7 @@
 /* ---------- Pull request page (#841, R-8.15, R-8.16, R-8.20) ---------- */
 /* prototype-6's `.fbody`: the tab's body beside a 300px side column. */
-.tf-cbody.tf-pr { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.tf-cbody.tf-pr { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-pr, 300px); gap: 22px; align-items: start; }
+.tf-pr > .tf-sedge { --tf-sedge-gap: 22px; }
 .tf-pr .tf-side { display: flex; flex-direction: column; gap: 14px; }
 .tf-prready, .tf-prlocal { padding: 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
 .tf-prready > span { display: flex; gap: 6px; align-items: baseline; }
