@@ -79,6 +79,7 @@ import type {
   PublishTarget,
   PullRequestWorktree,
   RangeDiff,
+  RangeFileAsk,
   RangeFilePage,
   RangeFiles,
   RangeNames,
@@ -271,6 +272,7 @@ export type {
   PullRequestWorktree,
   RangeCommit,
   RangeDiff,
+  RangeFileAsk,
   RangeFilePage,
   RangeFiles,
   RangeNames,
@@ -1694,6 +1696,22 @@ export function entityRangeFile(
   read: string | null = null,
 ): Promise<RangeFilePage> {
   return invoke<RangeFilePage>("entity_range_file", { entityId, base, head, path, oldPath, ignoreWhitespace, from, read });
+}
+
+/**
+ * The first page of each of `files` in one read — `entity_range_file_pages` (the big-compare pass, 2026-11-16): what
+ * {@link entityRangeFile} answers for each from line 0, in the order asked, one start of git for all of them; `null` for a
+ * file it could not answer whole, which the page reads alone. At most 200 files a read.
+ */
+export function entityRangeFilePages(
+  entityId: string,
+  base: string,
+  head: string,
+  files: RangeFileAsk[],
+  ignoreWhitespace: boolean,
+  read: string | null = null,
+): Promise<(RangeFilePage | null)[]> {
+  return invoke<(RangeFilePage | null)[]>("entity_range_file_pages", { entityId, base, head, files, ignoreWhitespace, read });
 }
 
 /**

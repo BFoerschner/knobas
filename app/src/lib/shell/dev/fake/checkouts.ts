@@ -611,6 +611,17 @@ export function handlers(): Handlers {
         Number(args["from"] ?? 0),
         args["ignoreWhitespace"] === true,
       ),
+    entity_range_file_pages: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      const asks = (args["files"] as { path: string }[] | undefined) ?? [];
+      return asks.map(({ path }) => {
+        try {
+          return fakeRangeFile(id, base, head, path, 0, args["ignoreWhitespace"] === true);
+        } catch {
+          return null;
+        }
+      });
+    },
     cancel_read: () => false,
     // *Clone all* (PR #2479): the corpus's repositories not on this machine, one after another.
     clone_all_plan: () => fakeCloneAllPlan(),

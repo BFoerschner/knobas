@@ -121,6 +121,7 @@ export const QUIET: ReadonlySet<string> = new Set([
   // A range read a file at a time, and a read called off (the compare pass, 2026-11-13): git and the source, never the mirror.
   "entity_range_files",
   "entity_range_file",
+  "entity_range_file_pages",
   "entity_source_range_diff",
   "entity_source_range_files",
   "cancel_read",

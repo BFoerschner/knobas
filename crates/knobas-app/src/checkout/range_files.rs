@@ -1131,41 +1131,178 @@ pub async fn range_file(
     {
         return file.map(|file| page(&file, from)).ok_or_else(missing);
     }
-    let diff = match kept().get(entity_id, base, head) {
-        Some(diff) => diff,
-        None => {
-            // The diff's pages are read four files at once: one read of the source between them (the forge-waits pass).
-            let one = one_read(entity_id, base, head);
-            let _reading = one.lock().await;
-            match kept().get(entity_id, base, head) {
-                Some(diff) => diff,
-                None => {
-                    let diff = match held_diff(pool, secrets, registry, live, entity_id, base, head)
-                        .await
-                    {
-                        Some(diff) => diff,
-                        None => {
-                            let diff = super::source_range_diff(
-                                pool, secrets, registry, live, entity_id, base, head,
-                            )
-                            .await?;
-                            let diff = Arc::new(diff);
-                            hold_diff(pool, secrets, registry, live, entity_id, &diff).await;
-                            diff
-                        }
-                    };
-                    kept().put(entity_id, base, head, &diff);
-                    diff
-                }
-            }
-        }
-    };
+    let diff = kept_diff(pool, secrets, registry, live, entity_id, base, head).await?;
     diff.files
         .iter()
         .find(|file| file.path == path && file.old_path.as_deref() == old_path)
         .or_else(|| diff.files.iter().find(|file| file.path == path))
         .map(|file| page(file, from))
         .ok_or_else(missing)
+}
+
+/// The source's compare between `base` and `head`, kept for the session's
+/// reads of its files: the one kept, else the one knobas held, else read
+/// (once, however many files ask at the same time).
+async fn kept_diff(
+    pool: &PgPool,
+    secrets: &Arc<dyn knobas_secrets::SecretStore>,
+    registry: &Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+) -> Result<Arc<RangeDiff>, IpcError> {
+    if let Some(diff) = kept().get(entity_id, base, head) {
+        return Ok(diff);
+    }
+    // The diff's pages are read four files at once: one read of the source between them (the forge-waits pass).
+    let one = one_read(entity_id, base, head);
+    let _reading = one.lock().await;
+    if let Some(diff) = kept().get(entity_id, base, head) {
+        return Ok(diff);
+    }
+    let diff = match held_diff(pool, secrets, registry, live, entity_id, base, head).await {
+        Some(diff) => diff,
+        None => {
+            let diff =
+                super::source_range_diff(pool, secrets, registry, live, entity_id, base, head)
+                    .await?;
+            let diff = Arc::new(diff);
+            hold_diff(pool, secrets, registry, live, entity_id, &diff).await;
+            diff
+        }
+    };
+    kept().put(entity_id, base, head, &diff);
+    Ok(diff)
+}
+
+/// The most files one [`range_file_pages`] reads in one start of git: a
+/// command line of paths well inside Windows' 32,767 characters.
+pub const PAGES_AT_ONCE: usize = 200;
+
+/// One file [`range_file_pages`] is asked for: as the list named it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RangeFileAsk {
+    pub path: String,
+    #[serde(default)]
+    pub old_path: Option<String>,
+}
+
+/// The first page of each of `files` in `base`..`head` of the repository
+/// `entity_id`, in one read (the big-compare pass of PR #2479, 2026-11-16):
+/// at the checkout one `git diff -M -- <paths>` for all of them, where
+/// [`range_file`] starts git once a file, which on a Windows laptop is most
+/// of a file's wait; else out of the kept compare. Each answer is the page
+/// [`range_file`] answers for that file from line 0, in the order asked;
+/// `None` for a file this read could not answer whole (past the read's
+/// ceiling, or not in the diff), which the page then reads alone. At most
+/// [`PAGES_AT_ONCE`] files.
+///
+/// # Errors
+///
+/// As [`range_file`], for the read as a whole.
+#[allow(clippy::too_many_arguments)]
+pub async fn range_file_pages(
+    pool: &PgPool,
+    secrets: &Arc<dyn knobas_secrets::SecretStore>,
+    registry: &Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+    files: &[RangeFileAsk],
+    ignore_whitespace: bool,
+) -> Result<Vec<Option<RangeFilePage>>, IpcError> {
+    if files.len() > PAGES_AT_ONCE {
+        return Err(IpcError::invalid(format!(
+            "at most {PAGES_AT_ONCE} files a read, not {}",
+            files.len()
+        )));
+    }
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(repo) = checkout_of(pool, entity_id).await
+        && let Some(found) = files_at(&repo, base, head, files, ignore_whitespace).await
+    {
+        return Ok(found
+            .iter()
+            .map(|file| file.as_ref().map(|f| page(f, 0)))
+            .collect());
+    }
+    let diff = kept_diff(pool, secrets, registry, live, entity_id, base, head).await?;
+    Ok(files
+        .iter()
+        .map(|ask| {
+            diff.files
+                .iter()
+                .find(|file| file.path == ask.path && file.old_path == ask.old_path)
+                .or_else(|| diff.files.iter().find(|file| file.path == ask.path))
+                .map(|file| page(file, 0))
+        })
+        .collect())
+}
+
+/// `files` of `base`..`head` at the checkout `repo`, in one `git diff -M --
+/// <path> [<old path>]…`, parsed: each as [`file`] reads it alone, in the
+/// order asked. `None` where the checkout cannot answer; a file the read
+/// cut, or the diff does not hold, is `None` in its place.
+async fn files_at(
+    repo: &Path,
+    base: &str,
+    head: &str,
+    files: &[RangeFileAsk],
+    ignore_whitespace: bool,
+) -> Option<Vec<Option<DiffFile>>> {
+    let all = async {
+        let Ends { git, old, new, .. } = ends(repo, base, head).await?;
+        let mut command = git_read(&git, repo);
+        command.args([
+            "-c",
+            "diff.autoRefreshIndex=false",
+            "diff",
+            "--no-ext-diff",
+            "--no-color",
+            "--no-textconv",
+            "-M",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+        ]);
+        if ignore_whitespace {
+            command.arg("-w");
+        }
+        command.env("GIT_LITERAL_PATHSPECS", "1");
+        command.args([old.as_str(), new.as_str(), "--"]);
+        for ask in files {
+            command.arg(&ask.path);
+            if let Some(old_path) = ask.old_path.as_deref().filter(|o| *o != ask.path) {
+                command.arg(old_path);
+            }
+        }
+        let (text, cut) = run_capped(command, READ_LINES, READ_BYTES).await.ok()?;
+        let (mut parsed, _) = parse_view(&String::from_utf8_lossy(&text));
+        // The last file of a cut read stopped part way: read alone, it has its own pages.
+        if cut {
+            parsed.pop();
+        }
+        Some(
+            files
+                .iter()
+                .map(|ask| {
+                    let at = parsed
+                        .iter()
+                        .position(|f| f.path == ask.path && f.old_path == ask.old_path)
+                        .or_else(|| parsed.iter().position(|f| f.path == ask.path))?;
+                    Some(parsed.swap_remove(at))
+                })
+                .collect(),
+        )
+    };
+    tokio::time::timeout(super::range::TIMEOUT, all)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// The checkout of `entity_id`, or of its repository for a branch.
@@ -1549,6 +1686,72 @@ mod tests {
             page(&big, PAGE_LINES).continues,
             "the one hunk of big.txt goes on"
         );
+    }
+
+    /// Many files in one read are each the file read alone (the big-compare
+    /// pass): all of the fixture's at once, in two halves, one at a time and
+    /// in the opposite order, the renames with their old paths beside them.
+    #[tokio::test]
+    async fn many_files_read_at_once_are_each_the_file_read_alone() {
+        let (dir, base, head) = repo();
+        let p = dir.path();
+        let all = whole(p, &base, &head);
+        let asks: Vec<RangeFileAsk> = all
+            .iter()
+            .map(|f| RangeFileAsk {
+                path: f.path.clone(),
+                old_path: f.old_path.clone(),
+            })
+            .collect();
+        let mut reversed = asks.clone();
+        reversed.reverse();
+        let half = asks.len() / 2;
+        let batches: Vec<Vec<RangeFileAsk>> = vec![
+            asks.clone(),
+            asks[..half].to_vec(),
+            asks[half..].to_vec(),
+            reversed,
+        ]
+        .into_iter()
+        .chain(asks.iter().map(|a| vec![a.clone()]))
+        .collect();
+        for batch in batches {
+            let got = files_at(p, &base, &head, &batch, false)
+                .await
+                .expect("the checkout answers");
+            assert_eq!(got.len(), batch.len());
+            for (ask, got) in batch.iter().zip(got) {
+                let alone = file(p, &base, &head, &ask.path, ask.old_path.as_deref(), false)
+                    .await
+                    .expect("the checkout answers");
+                assert_eq!(got, alone, "{} in a read of {}", ask.path, batch.len());
+                assert!(got.is_some(), "{} is in the diff", ask.path);
+            }
+        }
+        // Whitespace left out the same way.
+        let ws = files_at(p, &base, &head, &asks, true)
+            .await
+            .expect("answers");
+        for (ask, got) in asks.iter().zip(ws) {
+            let alone = file(p, &base, &head, &ask.path, ask.old_path.as_deref(), true)
+                .await
+                .expect("answers");
+            assert_eq!(got, alone, "{} with whitespace left out", ask.path);
+        }
+        // A file the diff does not hold is none, and the others still answer.
+        let mut with_stranger = asks[..2].to_vec();
+        with_stranger.insert(
+            1,
+            RangeFileAsk {
+                path: "not/there.rs".into(),
+                old_path: None,
+            },
+        );
+        let got = files_at(p, &base, &head, &with_stranger, false)
+            .await
+            .expect("answers");
+        assert!(got[1].is_none());
+        assert!(got[0].is_some() && got[2].is_some());
     }
 
     /// The names drawn first are the counted list less its counts, in its

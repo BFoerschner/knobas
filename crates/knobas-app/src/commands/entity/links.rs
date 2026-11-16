@@ -532,6 +532,53 @@ pub async fn entity_range_file<R: tauri::Runtime>(
     .await
 }
 
+/// The first page of each of `files` in `base`...`head` of the repository
+/// `entity_id`, in one read (the big-compare pass of PR #2479, 2026-11-16):
+/// what [`entity_range_file`] answers for each from line 0, in the order
+/// asked, one start of git for all of them; `None` for a file it could not
+/// answer whole, which the page reads alone. At most
+/// [`PAGES_AT_ONCE`](crate::checkout::range_files::PAGES_AT_ONCE) files.
+/// `read` as there.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) past that many files;
+/// otherwise as [`entity_range_file`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn entity_range_file_pages<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    files: Vec<crate::checkout::range_files::RangeFileAsk>,
+    ignore_whitespace: bool,
+    read: Option<String>,
+) -> Result<Vec<Option<crate::checkout::range_files::RangeFilePage>>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::range_file_pages(
+            &pool,
+            &secrets,
+            &registry,
+            &live,
+            &entity_id,
+            &base,
+            &head,
+            &files,
+            ignore_whitespace,
+        )
+        .await
+    })
+    .await
+}
+
 /// The files `base`...`head` changes as the source's compare answers it now,
 /// never local, without their lines: what a page that drew
 /// [`entity_range_files`]' predicted answer asks behind it (ADR-0041), as

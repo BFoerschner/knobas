@@ -3794,6 +3794,11 @@ read_at: DiffReadAt,
 predicted_at?: string, };
 
 /**
+ * One file [`range_file_pages`] is asked for: as the list named it.
+ */
+export type RangeFileAsk = { path: string, old_path: string | null, };
+
+/**
  * One page of one file's lines.
  */
 export type RangeFilePage = { 

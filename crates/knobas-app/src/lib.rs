@@ -782,6 +782,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_range_files,
         commands::entity::entity_range_names,
         commands::entity::entity_range_file,
+        commands::entity::entity_range_file_pages,
         commands::entity::entity_source_range_files,
         commands::entity::cancel_read,
         commands::entity::clone_all_plan,
