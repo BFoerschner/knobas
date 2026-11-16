@@ -262,6 +262,12 @@ ran on Windows.**
 Three timings on his PC, against the scale data: `ticket_views` with the server's rule and with no worker; `search`
 for `payout`, `retry` and one letter; a single character in the Docs search.
 
+**Settled by the workers pass** (`2026-11-16-no-read-a-person-waits-on-starts-a-worker-on-windows.md`): measured on
+his PC, decided by Fable. The Tickets counts that planned workers were the views' text counts, not the saved views'
+own (32 ms with two, 34 without, and now not read); points 3 and 4 above are replaced there: on Windows the one
+letter read whole and a word ranked whole ask for no worker, and the Docs search's single character is answered by
+the pages' names.
+
 # Before and after
 
 On the Mac (M2 Pro, on AC power), release builds of the windowless backend on fresh APFS clones of the saved scale
