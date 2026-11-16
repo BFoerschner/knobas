@@ -588,4 +588,85 @@ mod tests {
         );
         assert!(started.elapsed() < Duration::from_secs(5));
     }
+
+    /// The tab opened again with nothing changed is what git said, without
+    /// git; an edit, and a file git does not track, are read (the git-starts
+    /// pass, 2026-11-16).
+    #[tokio::test]
+    async fn a_checkout_nothing_touched_is_not_diffed_again_and_an_edit_is() {
+        let dir = two_long_changes();
+        let p = dir.path();
+        let reads = std::sync::atomic::AtomicU32::new(0);
+        let counted = async |path: &Path| {
+            reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            read(path).await
+        };
+        let ran = || reads.load(std::sync::atomic::Ordering::SeqCst);
+        let first = read_known_with(p, counted).await;
+        assert!(matches!(first, DiffRead::Read(_)), "{first:?}");
+        assert_eq!(read_known_with(p, counted).await, first, "the same answer");
+        assert_eq!(ran(), 1, "git ran once");
+        // Past the file system's clock tick, so an mtime can move.
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(p.join("a.txt"), "edited again\n").unwrap();
+        let edited = read_known_with(p, counted).await;
+        assert_eq!(ran(), 2, "an edit is read");
+        assert_ne!(edited, first);
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(p.join("untracked.txt"), "new\n").unwrap();
+        let DiffRead::Read(with_new) = read_known_with(p, counted).await else {
+            panic!("git did not answer");
+        };
+        assert_eq!(ran(), 3, "a new file is read");
+        assert_eq!(with_new.untracked, ["untracked.txt"]);
+        // A folder that is no repository is asked every time, and kept never.
+        let nowhere = tempfile::tempdir().unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                read_known_with(nowhere.path(), counted).await,
+                DiffRead::NotARepo
+            );
+        }
+        assert_eq!(ran(), 5);
+    }
+
+    /// The three commands run at once: with a git that takes half a second
+    /// to start, the whole read is one start's wait, not three in a row.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_three_commands_wait_for_one_start_not_three() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = two_long_changes();
+        let real = String::from_utf8(
+            std::process::Command::new("sh")
+                .args(["-c", "command -v git"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let stub = bin.path().join("git");
+        std::fs::write(
+            &stub,
+            format!("#!/bin/sh\nsleep 0.5\nexec '{}' \"$@\"\n", real.trim()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let search = std::env::join_paths(std::iter::once(bin.path().to_path_buf()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))
+        .unwrap();
+        let started = std::time::Instant::now();
+        let answer = read_guarded(&search, dir.path(), PATIENT, CAPS).await;
+        let took = started.elapsed();
+        let DiffRead::Read(diff) = answer else {
+            panic!("git did not answer: {answer:?}");
+        };
+        assert_eq!(diff.unstaged.files.len(), 2);
+        assert!(
+            took < Duration::from_millis(1300),
+            "three starts of half a second each took {took:?}: in a row they take 1.5 s"
+        );
+    }
 }

@@ -915,9 +915,17 @@ struct Raw {
 
 /// `git diff --raw --numstat -z` output as the files the patch parser would
 /// read out of the same diff, `hunks` empty: the raw records first, then
-/// one numstat record for each, in the same order. `cut`: the read stopped
-/// short, so a last record may be partial and is dropped. Answers the files
-/// and whether a record was dropped.
+/// the numstat records, each paired with its raw record by the file's path.
+/// `cut`: the read stopped short, so a last record may be partial and is
+/// dropped. Answers the files and whether a record was dropped.
+///
+/// By path, not by place (the git-starts pass, 2026-11-16): with blanks
+/// ignored the two halves need not hold the same files. A git before 2.52
+/// lists a file whose lines differ in blanks alone among the raw records and
+/// gives it no count, so every file after it took the next file's count; a
+/// git since 2.52 leaves such a file out of both, and a file only renamed
+/// out of the raw records alone. A file is listed where both name it: it
+/// has something left to show.
 pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
     let text = String::from_utf8_lossy(out);
     let mut tokens = text
@@ -925,7 +933,8 @@ pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
         .map(|t| t.trim_start_matches('\n'))
         .peekable();
     let mut raws: Vec<Raw> = Vec::new();
-    let mut counts: Vec<(Option<u32>, Option<u32>)> = Vec::new();
+    // Each count with its file's path, in the order read.
+    let mut counted: Vec<(&str, (Option<u32>, Option<u32>))> = Vec::new();
     while let Some(token) = tokens.next() {
         if token.is_empty() {
             continue;
@@ -966,20 +975,31 @@ pub fn parse_stat(out: &[u8], cut: bool) -> (Vec<DiffFile>, bool) {
         else {
             break;
         };
-        if path.is_empty() && (tokens.next().is_none() || tokens.next().is_none()) {
-            break;
-        }
-        counts.push((added.parse().ok(), deleted.parse().ok()));
+        let path = if path.is_empty() {
+            // A rename: where it was, then where it is.
+            let (Some(_), Some(new)) = (tokens.next(), tokens.next()) else {
+                break;
+            };
+            new
+        } else {
+            path
+        };
+        counted.push((path, (added.parse().ok(), deleted.parse().ok())));
     }
-    let whole = raws.len().min(counts.len());
-    let dropped = raws.len() != counts.len() || (cut && whole > 0);
-    // A cut read may have stopped inside the last record whose count came.
-    let keep = if cut { whole.saturating_sub(1) } else { whole };
+    // A cut read stopped inside the counts: the last one read may have
+    // stopped part way, and the files past it have none.
+    let dropped = cut && !raws.is_empty();
+    if cut {
+        counted.pop();
+    }
+    let counts: std::collections::HashMap<&str, (Option<u32>, Option<u32>)> =
+        counted.into_iter().collect();
     let files = raws
         .into_iter()
-        .zip(counts)
-        .take(keep)
-        .map(|(raw, (added, deleted))| file_of(raw, added, deleted))
+        .filter_map(|raw| {
+            let (added, deleted) = counts.get(raw.paths.last()?.as_str()).copied()?;
+            Some(file_of(raw, added, deleted))
+        })
         .collect();
     (files, dropped)
 }
@@ -1794,6 +1814,46 @@ mod tests {
         let (files, dropped) = parse_stat(whole, false);
         assert!(!dropped);
         assert_eq!((files[0].additions, files[0].deletions), (1, 2));
+    }
+
+    /// With blanks ignored the two halves of git's listing need not hold
+    /// the same files, and each count is its own file's whichever git wrote
+    /// them (the git-starts pass, 2026-11-16).
+    #[test]
+    fn a_count_is_paired_with_its_file_by_path() {
+        // A git before 2.52: `blanks.txt` among the raw records, with no count.
+        let older = b":100644 100644 aaaaaaa bbbbbbb M\0a.txt\0:100644 100644 1111111 2222222 M\0blanks.txt\0:100644 100644 ccccccc ddddddd M\0z.txt\x001\t2\ta.txt\x003\t4\tz.txt\0";
+        let (files, dropped) = parse_stat(older, false);
+        assert!(
+            !dropped,
+            "nothing was cut: a file with nothing to show is none"
+        );
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| (f.path.as_str(), f.additions, f.deletions))
+                .collect::<Vec<_>>(),
+            [("a.txt", 1, 2), ("z.txt", 3, 4)],
+            "z.txt keeps its own count"
+        );
+        // A git since 2.52: a file only renamed has a count and no raw record.
+        let newer = b":100644 100644 aaaaaaa bbbbbbb M\0a.txt\0:100644 100644 ccccccc ddddddd M\0z.txt\x001\t2\ta.txt\x000\t0\t\0old.txt\0new.txt\x003\t4\tz.txt\0";
+        let (files, dropped) = parse_stat(newer, false);
+        assert!(!dropped);
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| (f.path.as_str(), f.additions, f.deletions))
+                .collect::<Vec<_>>(),
+            [("a.txt", 1, 2), ("z.txt", 3, 4)]
+        );
+        // A rename with an edit is paired by where the file is now.
+        let renamed =
+            b":100644 100644 aaaaaaa bbbbbbb R090\0old.txt\0new.txt\x005\t6\t\0old.txt\0new.txt\0";
+        let (files, _) = parse_stat(renamed, false);
+        assert_eq!(files[0].path, "new.txt");
+        assert_eq!(files[0].old_path.as_deref(), Some("old.txt"));
+        assert_eq!((files[0].additions, files[0].deletions), (5, 6));
     }
 
     #[tokio::test]
