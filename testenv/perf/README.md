@@ -527,8 +527,10 @@ Each is pressed twice (`first`: the first press in the backend's life; `again`: 
 a throttle (`inner-items.json`), and printed with its starts (the subcommand and when it began after the press), how
 many were at once, and the press's useful, drawn and settled times. With `--check`, which `just git-starts` passes, a
 press that started git at all fails, but for `fetch`, `clone` and `worktree`, which are writes behind an answer.
-`local-changes` is the one action that may: the working tree is git's to read (ADR-0043), three commands at once the
-first time and after a change there, none while nothing changed. `--count` only counts, for a before.
+`local-changes` is the one action that may, on its first press: the working tree is git's to read (ADR-0043), so the
+check passes its `diff`, `diff --cached` and `status` there, three at most and at once (told apart from in a row where
+the shim sleeps 50 ms or more), and none on the press again, while nothing changed. `--count` only counts, for a
+before.
 
 ```sh
 python3 -I testenv/perf/standin-repos.py --out <dir> scale-commerce/cart-service scale-commerce/payments-gateway scale-commerce/mobile-android

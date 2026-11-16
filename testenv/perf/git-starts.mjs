@@ -11,8 +11,10 @@
 //             (`set_checkout_override`, or a clones root) and whose `PATH` starts with the shim's folder
 // --shim-log  the file the shim appends to (`KNOBAS_GIT_SHIM_LOG` in the backend's environment)
 // --delay     what the shim sleeps a start (`KNOBAS_GIT_SHIM_DELAY`, here in ms), to tell starts in a row from starts at once
-// --check     fail (exit 1) when an action starts git at all: every action here is one a person waits on. `fetch`,
-//             `clone` and `worktree` are writes behind an answer and are not counted against it
+// --check     fail (exit 1) when an action starts git: every action here is one a person waits on. `fetch`, `clone`
+//             and `worktree` are writes behind an answer and are not counted against it. One press may start git
+//             (ADR-0043): *Local changes* opened first, whose working tree stays git's, and then its three reads
+//             only, at once
 //
 // Per action and round (`first`: the first press in the backend's life; `again`: left and pressed again) it prints
 // the starts, each as its subcommand and when it began after the press, and the press's useful, drawn and settled
@@ -44,6 +46,22 @@ const encPath = (path) => path.split("/").map(enc).join("/");
 const SYNCED = `(async () => { const all = await window.__TAURI_INTERNALS__.invoke("sync_status", {}); for (const s of all) window.__fake.emit("sync:state", { ...s, running: false, run_id: (s.run_id ?? 0) + 100000 + Math.floor(Math.random() * 1000), last_outcome: "ok", last_changed: true, last_finished_at: new Date().toISOString() }); return all.length; })()`;
 /** The subcommands that write behind an answer: never on the path a person waits on. */
 const BEHIND = new Set(["fetch", "clone", "worktree"]);
+/**
+ * The one press that may start git (ADR-0043): *Local changes* reads the working tree, which stays git's. Opened
+ * first, and after the working tree changed, it starts `git diff`, `git diff --cached` and `git status` at once, so a
+ * person waits one start's time and not three. Opened again with nothing changed it starts none.
+ */
+const WORKING_TREE = { action: "local-changes", round: "first", subs: new Set(["diff", "status"]), most: 3 };
+/** What is wrong with the starts of one press, or null: none at all, or the working tree's own, at once. */
+function over(name, round, r) {
+  if (r.waited === 0) return null;
+  if (name !== WORKING_TREE.action || round !== WORKING_TREE.round) return `${r.waited} git starts on a press a person waits on`;
+  const subs = r.starts.map((s) => s.sub.split(" ")[0]);
+  if (subs.length > WORKING_TREE.most || subs.some((sub) => !WORKING_TREE.subs.has(sub))) return `${subs.join(", ")}: more than the working tree's three reads`;
+  // Told apart only where a start is slow enough to see (`--delay`).
+  if (delay >= 50 && r.atOnce < subs.length) return `its ${subs.length} starts ran in a row, not at once`;
+  return null;
+}
 
 /**
  * The actions at one throttle's items, as `open.mjs`'s inner places are written: `start` (drawn and quiet before the
@@ -191,7 +209,10 @@ for (const rate of throttles) {
       if (!a.synced) await leave(a, i);
       entry.again = await act(a);
       console.log(`${rate}x ${a.name} again: ${say(entry.again)}`);
-      for (const round of ["first", "again"]) if (check && entry[round].waited > 0) { failed++; console.log(`STARTS ${rate}x ${a.name} ${round}: ${entry[round].waited} git starts on a press a person waits on`); }
+      for (const round of ["first", "again"]) {
+        const wrong = check ? over(a.name, round, entry[round]) : null;
+        if (wrong) { failed++; console.log(`STARTS ${rate}x ${a.name} ${round}: ${wrong}`); }
+      }
     } catch (e) {
       entry.error = String(e.message || e);
       console.log(`${rate}x ${a.name}: ERROR ${entry.error}`);
@@ -203,7 +224,7 @@ for (const rate of throttles) {
 }
 await cpu(1);
 console.log("wrote", out);
-if (check) console.log(failed ? `git starts: ${failed} presses started git` : "git starts: no press started git");
+if (check) console.log(failed ? `git starts: ${failed} presses started git` : "git starts: no press started git but Local changes' first open, at once");
 c.close();
 browser.stop();
 process.exit(failed ? 1 : 0);
