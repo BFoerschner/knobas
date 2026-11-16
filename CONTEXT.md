@@ -303,6 +303,10 @@ _Avoid_: patch (the text before it is parsed), changeset, delta
 The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`. A **named pipeline** is one saved with a name, which a default per file pattern names by id (so editing it changes every pattern that uses it); a **command step** is one of the person's own programs as a step, under ADR-0033.
 _Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq's word for one step), transform
 
+**Folder renderer**:
+One of the person's own programs that takes a folder of a repository and makes a picture, text, Markdown or a page out of it, saved in Settings › Renderers and drawn on the Code page in the file's place (ADR-0044, 2026-11-16). It is given `{path}`, a copy of the folder knobas wrote at the commit shown (from the clone's objects, else the forge), and may write `{out}`; it never runs in the checkout. Which folders it takes is two glob lists: a file the folder holds, and the folder's name or path. What it drew is kept by the folder's content, so a revisit draws at once. In code `folder_render`, `FolderRenderer`.
+_Avoid_: folder preview, folder plugin, renderer alone (a file's)
+
 **Pipeline**:
 What a CI source runs: TeamCity's build configuration, a GitLab pipeline, a Jenkins job. The Builds view is drawn over pipelines and their [runs](#run); the source's own word appears once, in the view's header (ADR-0022).
 _Avoid_: build configuration (TeamCity's word), job (a [job](#job))

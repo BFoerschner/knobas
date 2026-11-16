@@ -147,7 +147,7 @@
   import TfFileMore from "./TfFileMore.svelte";
   import TfFindBar from "../TfFindBar.svelte";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
-  import { folderRenderers as appFolderRenderers, type FolderRenderers } from "../../render/folders.svelte";
+  import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
   import { markSets, renderersFor } from "../../render/folder";
   import { folderRenderMarks, type FolderMarks } from "../../ipc/app";
   import { folderRenderHash, type FolderRenderAt } from "./repo";
@@ -686,7 +686,11 @@
     if (!holders || (commit === null && paths === null)) return;
     let live = true;
     folderMarks(at, commit, paths).then(
-      (found) => live && (marks = markSets(found)),
+      (found) => {
+        if (!live) return;
+        marks = markSets(found);
+        noteMarks(repoId, marks);
+      },
       () => {},
     );
     return () => {

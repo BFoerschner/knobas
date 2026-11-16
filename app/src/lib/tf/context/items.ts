@@ -22,7 +22,7 @@ import { keyOf } from "../../time/format";
 import { shaOfCommit } from "../diff/address";
 import { appPageHash } from "../openin/app-page";
 import { menuOrder, objectMenu, repoName } from "../openin/openin";
-import { fileHash, lineHash, repoHash } from "../repo/repo";
+import { fileHash, folderRenderHash, lineHash, repoHash } from "../repo/repo";
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
@@ -103,6 +103,8 @@ export interface MenuContext {
   mirrored: (url: string) => boolean;
   /** The page's own thing: drawn without *Open*, since that is where the reader stands. */
   own?: boolean;
+  /** The folder renderers that take a folder of a repository (ADR-0044), in the person's order; absent, none. */
+  renders?: (repoId: string, path: string) => readonly { id: string; name: string }[];
 }
 
 const RULE: Entry = { rule: true };
@@ -311,6 +313,12 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         [
           ...(hash === null || ctx.own ? [] : [{ id: "open", label: "Open", act: { do: "go", hash } } satisfies Item]),
           ...(thing.kind === "folder" ? [] : [{ id: "history", label: "History", act: { do: "go", hash: repoHash(thing.repoId, "commits") } } satisfies Item]),
+          // A folder a folder renderer takes: its drawing, by each that takes it (ADR-0044).
+          ...(thing.kind === "folder"
+            ? (ctx.renders?.(thing.repoId, thing.path) ?? []).map(
+                (r): Item => ({ id: `render-${r.id}`, label: `Render with ${r.name}`, act: { do: "go", hash: folderRenderHash(thing.repoId, r.id, thing.path) } }),
+              )
+            : []),
         ],
         [
           ...openIn(thing.repoId, thing.repoId, at, ctx, facts),

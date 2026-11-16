@@ -41,3 +41,17 @@ export function createFolderRenderers(port: FolderRenderersPort = ipcFolderRende
 
 /** The app's one copy. */
 export const folderRenderers = createFolderRenderers();
+
+/**
+ * The folders each renderer holding a file glob takes, by repository, as the Files tab last read them
+ * (`folder_render_marks`): what a folder's right-click menu offers without a read of its own.
+ */
+const marksSeen = new Map<string, ReadonlyMap<string, ReadonlySet<string>>>();
+
+export function noteMarks(repoId: string, marks: ReadonlyMap<string, ReadonlySet<string>>): void {
+  marksSeen.set(repoId, marks);
+}
+
+export function marksOf(repoId: string): ReadonlyMap<string, ReadonlySet<string>> {
+  return marksSeen.get(repoId) ?? new Map();
+}

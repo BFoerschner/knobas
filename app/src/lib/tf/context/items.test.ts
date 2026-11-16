@@ -149,3 +149,14 @@ test("the read only changes labels, never the rows", () => {
   const head = { row: { entity_id: TICKET.id, kind: "ticket", source_id: "jira", title: "Payout CSV", updated_at: null, synced_at: "", path: null, state: null }, web_url: "https://jira.example/browse/PAY-231" } as unknown as EntityDetail;
   expect(ids(menuFor(TICKET, null, ctx(), { head }))).toEqual(ids(menuFor(TICKET, null, ctx())));
 });
+
+test("a folder a folder renderer takes offers its drawing by each that takes it, after Open's place (ADR-0044)", () => {
+  const thing: Thing = { kind: "folder", repoId: "gitea:t/pay", path: "flows/orders" };
+  const asked: [string, string][] = [];
+  const menu = menuFor(thing, null, { ...ctx(), renders: (repo, path) => (asked.push([repo, path]), [{ id: "lc", name: "Low code" }, { id: "tree", name: "Tree" }]) });
+  expect(asked).toEqual([["gitea:t/pay", "flows/orders"]]);
+  expect(ids(menu).slice(0, 3)).toEqual(["render-lc", "render-tree", "|"]);
+  expect(item(menu, "render-lc")).toMatchObject({ label: "Render with Low code", act: { do: "go", hash: "#/repo/gitea%3At%2Fpay/render/lc/flows/orders" } });
+  // A file is offered none.
+  expect(ids(menuFor({ kind: "file", repoId: "gitea:t/pay", path: "a.md" }, null, { ...ctx(), renders: () => [{ id: "lc", name: "Low code" }] }))).not.toContain("render-lc");
+});

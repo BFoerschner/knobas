@@ -4,6 +4,8 @@ status: accepted
 
 # Renderer and pipeline commands run under the rules of "Open in"
 
+Amended by [ADR-0044](0044-a-folder-renderer-is-given-a-copy-of-the-folder-knobas-wrote.md): a folder renderer is given two paths knobas made, `{path}` (a copy of the folder it wrote) and `{out}`, and nothing else.
+
 Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md). Spec #2234 (step 5) lets a person draw formats knobas doesn't know with a program of their own, such as `plantuml -tsvg -pipe`, and wrap a file in their own preprocessing steps. Those programs run on the content of a mirrored file, which ADR-0016 kept away from every spawned command. Decided 2026-10-30 (implementer on #2262, under the spec's ADR list): **a renderer or pipeline command is set up like an "Open in" application, and the content it works on reaches it on stdin only, never as an argument.**
 
 - The program and every argument are what the person typed in Settings › Renderers, split into words with quotes as grouping only (`knobas_core::checkout::open::words`). It takes no placeholder. The webview names a saved command by its id and sends the content; it never sends a program or an argument (#1643's rule for *Try it*, so the test pane runs a saved renderer).

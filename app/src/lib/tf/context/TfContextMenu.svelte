@@ -28,6 +28,8 @@
   import { joinInside } from "../openin/openin";
   import TfMenu from "../TfMenu.svelte";
   import { menuFor, type Act, type CodeAt, type Entry, type Item, type MenuFacts, type Text } from "./items";
+  import { folderRenderers, marksOf } from "../../render/folders.svelte";
+  import { renderersFor } from "../../render/folder";
   import { realMenuPorts, type MenuPorts } from "./ports";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
 
@@ -98,6 +100,7 @@
             sourceName: (id) => sources.find((one) => one.id === id)?.name ?? null,
             mirrored: (url) => sources.some((one) => one.base !== "" && url.startsWith(one.base)),
             own: shown.found?.own ?? false,
+            renders: (repoId, path) => renderersFor(path, folderRenderers.list, marksOf(repoId)),
           },
           facts,
         ),
@@ -105,6 +108,7 @@
 
   onMount(() => {
     void apps.ensure();
+    void folderRenderers.ensure().catch(() => {});
     ports.sources().then(
       (read) => (sources = read.map((one) => ({ id: one.id, name: one.display_name, base: one.base_url.replace(/\/+$/, "") + "/" }))),
       () => {},
