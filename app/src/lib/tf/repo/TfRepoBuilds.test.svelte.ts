@@ -6,6 +6,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { RepoPipelineRow, RunRow } from "../../ipc/entity";
+import { parseTfHash } from "../route";
 import TfRepoBuilds from "./TfRepoBuilds.svelte";
 import type { BranchOption } from "./repo";
 
@@ -233,3 +234,73 @@ test("a pipeline's thousands of runs on the repository draw the rows near the vi
   expect(target.querySelector(".tf-rbruns tbody tr.tf-wgap")).not.toBeNull();
 });
 
+
+// -- a run is a link to it on Builds (Björn, 2026-11-16: "click on the run … and open the build itself immediately") --
+
+const RUN_1187 = "#/build/tc%3AbuildType%3APayout_IntegrationTests/tc%3Abuild%3A1187";
+
+test("a run in a branch's table is a link to it on Builds, its cell the link: a press opens the run", async () => {
+  location.hash = "#/repo/x/builds";
+  draw();
+  await settle();
+  const cells = [...target.querySelectorAll<HTMLAnchorElement>(".tf-rbt td.tf-rbt-runc > a.tf-rbt-cell")];
+  expect(cells.map((a) => [a.querySelector(".tf-rbt-num")?.textContent, a.getAttribute("href")])).toEqual([
+    ["#1187", RUN_1187],
+    ["#1171", "#/build/tc%3AbuildType%3APayout_IntegrationTests/tc%3Abuild%3A1171"],
+    ["#1188", "#/build/tc%3AbuildType%3APayout_Build/tc%3Abuild%3A1188"],
+    ["#1176", "#/build/tc%3AbuildType%3APayout_Build/tc%3Abuild%3A1176"],
+  ]);
+  // The keyboard's way in: the link takes focus, and its Enter is the link's own.
+  cells[0]!.focus();
+  expect(document.activeElement).toBe(cells[0]);
+  cells[0]!.click();
+  await settle();
+  expect(location.hash).toBe(RUN_1187);
+  // The address is the run's page on Builds.
+  expect(parseTfHash(location.hash)).toEqual({
+    view: "full",
+    section: "builds",
+    head: "build",
+    rest: ["tc:buildType:Payout_IntegrationTests", "tc:build:1187"],
+  });
+  location.hash = "";
+});
+
+test("a run's row in a pipeline's runs opens the run from anywhere on it, as the press on its number would", async () => {
+  location.hash = "#/repo/x/builds";
+  draw({ pipeline: "tc:buildType:Payout_IntegrationTests" });
+  await settle();
+  const row = target.querySelector<HTMLTableRowElement>(".tf-rbruns tbody tr.tf-row")!;
+  const link = row.querySelector<HTMLAnchorElement>("a")!;
+  expect(link.getAttribute("href")).toBe(RUN_1187);
+  expect(link.textContent).toBe("#1187");
+  link.focus();
+  expect(document.activeElement).toBe(link);
+
+  row.querySelector<HTMLElement>(".tf-rbt-br")!.click();
+  await settle();
+  expect(location.hash).toBe(RUN_1187);
+
+  // A modified press is the link's modified press: the same event reaches the link, as a press on the link itself would.
+  const pressed: { meta: boolean; button: number }[] = [];
+  link.addEventListener("click", (event) => {
+    pressed.push({ meta: event.metaKey, button: event.button });
+    event.preventDefault();
+  });
+  location.hash = "#/repo/x/builds";
+  await settle();
+  row.querySelector<HTMLElement>(".tf-num")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
+  await settle();
+  expect(pressed).toEqual([{ meta: true, button: 0 }]);
+  expect(location.hash).toBe("#/repo/x/builds");
+  location.hash = "";
+});
+
+test("a run with no number yet still has its link, called queued", async () => {
+  const queued = { ...run("1190", "main", "run", "2026-08-22T12:00:00Z"), number: null };
+  draw({ pipeline: "tc:buildType:Payout_IntegrationTests", runs: () => Promise.resolve([queued]) });
+  await settle();
+  const link = target.querySelector<HTMLAnchorElement>(".tf-rbruns tbody tr.tf-row a")!;
+  expect(link.textContent).toBe("queued");
+  expect(link.getAttribute("href")).toBe("#/build/tc%3AbuildType%3APayout_IntegrationTests/tc%3Abuild%3A1190");
+});

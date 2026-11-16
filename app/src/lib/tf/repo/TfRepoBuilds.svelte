@@ -187,6 +187,17 @@
     return buildsHash(repoId, current, pipelineId);
   }
 
+  /**
+   * A press anywhere on a run's row is a press on its link, the run's number (TfPipeline's run rows, R-9.6): the
+   * same event, so a modified press or another button does what it does on the link. A link or button in the row does
+   * its own, and a selection of the row's words is not a press.
+   */
+  function openRow(event: MouseEvent & { currentTarget: HTMLTableRowElement }) {
+    if ((event.target as Element | null)?.closest("a, button, input, select, label")) return;
+    if ((window.getSelection()?.toString() ?? "") !== "") return;
+    event.currentTarget.querySelector("a")?.dispatchEvent(new MouseEvent("click", event));
+  }
+
   /** The pipeline shown inside the tab: its row, and its runs as `pipeline_runs` answers them. */
   const shownPipeline = $derived(pipeline === null ? null : (rows?.find((row) => row.entity_id === pipeline) ?? null));
   let pipelineRows = $state.raw<RunRow[] | null>(null);
@@ -244,13 +255,14 @@
     <span class="tf-rb-none" title="Never ran on {name}">Not run</span>
   {:else}
     {@const tone = runTone(run)}
+    <!-- The run, as a link to it on Builds that fills its cell (Björn, 2026-11-16: "click on the run … and open the build itself"). -->
     <a
       class="tf-rbt-cell"
       class:tf-err={tone === "err"}
       class:tf-info={tone === "run"}
       href={runHash(row.entity_id, run.entity_id)}
-      title="{row.name} on {name}: {runGlyph(run).word}, {when(run)}"
-      ><TfRunGlyph {...runGlyph(run)} />{run.number !== null ? `#${run.number} ` : ""}{when(run)}</a
+      title="Open {row.name} {run.number !== null ? `#${run.number}` : "run"} on {name}: {runGlyph(run).word}, {when(run)}"
+      ><TfRunGlyph {...runGlyph(run)} /><b class="tf-rbt-num">{run.number !== null ? `#${run.number}` : "queued"}</b><span class="tf-rbt-at">{when(run)}</span></a
     >
   {/if}
 {/snippet}
@@ -335,9 +347,9 @@
               {#if runsWin.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach runsWin.room("before")}></td></tr>{/if}
               {#each runsWin.slice(shownRuns) as run (run.entity_id)}
                 {@const name = run.branch === null ? "" : branchName(run.branch)}
-                <tr {@attach runsWin.row(run.entity_id)}>
+                <tr class="tf-row" onclick={openRow} {@attach runsWin.row(run.entity_id)}>
                   <td class="tf-nowrap"
-                    ><a href={runHash(pipeline, run.entity_id)}>{run.number !== null ? `#${run.number}` : ""}</a>
+                    ><a href={runHash(pipeline, run.entity_id)}><b>{run.number !== null ? `#${run.number}` : "queued"}</b></a>
                     <TfStateChip text={runTone(run) === "q" ? "Queued" : stateWord(run.state?.text ?? "")} tone={run.state?.tone ?? null} /></td
                   >
                   <td class="tf-mono tf-rbt-br"
@@ -416,8 +428,8 @@
                     ><TfRunGlyph {...runGlyph(here)} /><span class="tf-pi-nm" class:tf-bad={runTone(here) === "err"}>{row.name}</span></a
                   ></td
                 >
-                <td>{@render cell(row, current)}</td>
-                {#if !isDefault}<td>{@render cell(row, def)}</td>{/if}
+                <td class="tf-rbt-runc">{@render cell(row, current)}</td>
+                {#if !isDefault}<td class="tf-rbt-runc">{@render cell(row, def)}</td>{/if}
                 <td class="tf-rbt-v {said.tone}">{said.text}</td>
               </tr>
             {/each}

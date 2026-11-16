@@ -320,9 +320,16 @@
 .tf-rbt td.tf-rbt-pl a { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tf-rbt td.tf-rbt-pl .tf-pi-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-cbody .tf-rbt td.tf-rbt-pl a:hover .tf-pi-nm { text-decoration: underline; text-underline-offset: 2px; }
-.tf-cbody .tf-rbt a.tf-rbt-cell { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.tf-cbody .tf-rbt a.tf-rbt-cell.tf-err { color: var(--err); font-weight: 600; }
-.tf-cbody .tf-rbt a.tf-rbt-cell.tf-info { color: var(--info); }
+/* A run is a link to it on Builds, and its cell is the link: the cell answers the pointer and focus, its number underlines. */
+.tf-rbt td.tf-rbt-runc { padding: 0; }
+.tf-rbt td.tf-rbt-runc > .tf-rb-none { display: block; padding: 7px 10px; }
+.tf-cbody .tf-rbt a.tf-rbt-cell { display: flex; align-items: center; gap: 6px; padding: 7px 10px; min-width: 0; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-rbt a.tf-rbt-cell .tf-rbt-num { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.tf-rbt a.tf-rbt-cell .tf-rbt-at { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-cbody .tf-rbt a.tf-rbt-cell.tf-err, .tf-rbt a.tf-rbt-cell.tf-err .tf-rbt-num { color: var(--err); }
+.tf-cbody .tf-rbt a.tf-rbt-cell.tf-info, .tf-rbt a.tf-rbt-cell.tf-info .tf-rbt-num { color: var(--info); }
+.tf-rbt td.tf-rbt-runc:hover, .tf-rbt td.tf-rbt-runc:focus-within { background: var(--sheet-2); }
+.tf-cbody .tf-rbt a.tf-rbt-cell:hover .tf-rbt-num { text-decoration: underline; text-underline-offset: 2px; }
 .tf-rbt td.tf-rbt-v { font-size: var(--t-xs); color: var(--ink-2); }
 .tf-rbt td.tf-rbt-v.tf-err { color: var(--err); font-weight: 600; }
 .tf-rbt td.tf-rbt-v.tf-ok { color: var(--ok); }
@@ -339,6 +346,8 @@
 .tf-rbt col.tf-rbt-dur { width: 110px; }
 .tf-rbt td.tf-rbt-br { font-size: var(--t-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-cbody .tf-rbruns td a { color: inherit; margin-right: 6px; }
+/* A run's row is its link (TfPipeline's run rows): a row whose number has focus shows it as the pointer's hover does. */
+.tf-rbruns tr.tf-row:focus-within td { background: var(--sheet-2); }
 /* The Branches tab's *Builds* cell: the worst glyph and the words, loud only where something failed. */
 .tf-cbody .tf-rbranches td.tf-rbr-builds a { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-cbody .tf-rbranches td.tf-rbr-builds a:hover { text-decoration: underline; text-underline-offset: 2px; }
