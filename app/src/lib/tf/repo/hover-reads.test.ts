@@ -112,3 +112,43 @@ test("the page's ask after the press joins the read under way, and one after it 
   await flush();
   expect(sent).toHaveLength(2);
 });
+
+// The ux14 pass (2026-11-16): a repository's first open sent its reads 118 and 166 ms after the press at CPU 4x and 6x,
+// behind the build of the page. The press sends them, and the page's asks take them.
+test("a press on a repository's link reads its landing at once, and the page's asks take those reads", async () => {
+  vi.useRealTimers();
+  root.querySelector("#repo")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  await flush();
+  const id = "gitea:tidewater/payout-service";
+  expect(sent).toEqual([
+    { cmd: "get_entity", args: { entityId: id } },
+    { cmd: "code_facts", args: { entityIds: [id] } },
+    { cmd: "repo_branch_pulls", args: { repoId: id } },
+    { cmd: "repo_pipelines", args: { repoId: id } },
+    { cmd: "entity_view", args: { entityId: id, section: "files" } },
+    { cmd: "entity_view", args: { entityId: id, section: "commits" } },
+    { cmd: "entity_view", args: { entityId: id, section: "branches" } },
+  ]);
+  const view = { sections: [], actions: [] };
+  for (const answer of answers.slice(4)) answer(view);
+  await flush();
+  // Landed before the page asked: taken once, and an ask after that reads again.
+  expect(await entityView(id, "files")).toEqual(view);
+  await flush();
+  expect(sent).toHaveLength(7);
+  void entityView(id, "files");
+  await flush();
+  expect(sent).toHaveLength(8);
+  // A tab's link (`/commits`) and a pull request's link read nothing at the press.
+  sent.length = 0;
+  root.querySelector("#tab")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  await flush();
+  expect(sent).toEqual([]);
+});
+
+test("Enter on a repository's link reads its landing as a press does", async () => {
+  vi.useRealTimers();
+  root.querySelector("#repo")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await flush();
+  expect(sent.map((s) => s.cmd)).toContain("get_entity");
+});

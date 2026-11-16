@@ -1176,8 +1176,9 @@
       const box = title.getBoundingClientRect();
       stacked = box.height > 0 && acts.getBoundingClientRect().top >= box.bottom;
     };
-    read();
-    if (typeof ResizeObserver === "undefined") return;
+    // The observer's first call reads it after the page's layout and before its first paint: read here, it laid out the
+    // half-built page inside the build of a repository's first open (7 ms of it at CPU 6x, the ux14 pass, 2026-11-16).
+    if (typeof ResizeObserver === "undefined") return read();
     const watch = new ResizeObserver(read);
     watch.observe(header);
     watch.observe(acts);

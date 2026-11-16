@@ -893,8 +893,13 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  * `unreachable` or `internal` as {@link reachableTransitions} does.
  */
 export function entityView(entityId: string, section: string | null = null): Promise<ShownView | null> {
-  const ahead = readsAhead.get(viewKey(entityId, section));
-  if (ahead !== undefined) return ahead.then(withDateWords);
+  const key = viewKey(entityId, section);
+  const ahead = readsAhead.get(key);
+  if (ahead !== undefined) {
+    // One kept after it landed is taken once: an ask after this one reads again.
+    if (landed.has(ahead)) readsAhead.delete(key);
+    return ahead.then(withDateWords);
+  }
   return invoke<ShownView | null>("entity_view", { entityId, section }).then(withDateWords);
 }
 
@@ -904,6 +909,8 @@ export function entityView(entityId: string, section: string | null = null): Pro
  * second time. Only a read started ahead is joined, so an ask made after a refresh never gets an answer from before it.
  */
 const readsAhead = new Map<string, Promise<ShownView | null>>();
+/** The reads ahead kept after they landed (`keepMs`), each for one ask. */
+const landed = new WeakSet<Promise<ShownView | null>>();
 const viewKey = (entityId: string, section: string | null) => `${entityId}\u0000${section ?? ""}`;
 
 /** Every read ahead forgotten: a test's fresh window. */
@@ -911,15 +918,26 @@ export function forgetReadsAhead(): void {
   readsAhead.clear();
 }
 
-/** Reads `entityId`'s view at `section` ahead of a press, for {@link entityView} to join while it is out. */
-export function readViewAhead(entityId: string, section: string | null = null): Promise<ShownView | null> {
+/**
+ * Reads `entityId`'s view at `section` ahead of a press, for {@link entityView} to join while it is out. `keepMs`
+ * keeps it that long after it lands for one ask to take (a press's own reads, `tf/repo/hover-reads.ts`, the ux14 pass,
+ * 2026-11-16: started at the press, they land before the page that asks them is built).
+ */
+export function readViewAhead(entityId: string, section: string | null = null, keepMs = 0): Promise<ShownView | null> {
   const key = viewKey(entityId, section);
   const held = readsAhead.get(key);
   if (held !== undefined) return held;
   const read = invoke<ShownView | null>("entity_view", { entityId, section });
   readsAhead.set(key, read);
   const done = () => {
-    if (readsAhead.get(key) === read) readsAhead.delete(key);
+    if (readsAhead.get(key) !== read) return;
+    if (keepMs <= 0) readsAhead.delete(key);
+    else {
+      landed.add(read);
+      setTimeout(() => {
+        if (readsAhead.get(key) === read) readsAhead.delete(key);
+      }, keepMs);
+    }
   };
   read.then(done, done);
   return read;

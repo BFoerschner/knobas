@@ -7,7 +7,35 @@
  * after the press is answered from it, or joins it while it is out (`readViewAhead`). Each is asked once a session, and only after the
  * pointer has stood on the link a moment, so a pointer swept across a list asks nothing.
  */
-import { readViewAhead } from "../../ipc/entity";
+import { codeFacts, getEntity, readViewAhead, repoBranchPulls, repoPipelines } from "../../ipc/entity";
+
+/**
+ * How long a press's reads are kept after they land, for the page's own asks to take: a repository's landing at CPU 6x
+ * asked them 170 ms after the press, once it was built.
+ */
+export const PRESS_KEEP_MS = 3000;
+
+/**
+ * The reads a repository's landing makes, started at the press on its link, before the page is built (the ux14 pass,
+ * 2026-11-16): at CPU 4x and 6x the landing sent them 118 and 166 ms after the press, behind the build of the page,
+ * and its first open waited for them after that. The page's own asks take them: the mirror's reads through the answer
+ * cache (`ipc/answer-cache.ts`, in flight or kept), its views from {@link readViewAhead}. Each is the call the page
+ * makes, with the same arguments: `TfRepo.svelte`'s header, tabs and counts, the Files tab's top listing.
+ */
+export function readLandingAhead(entityId: string): void {
+  const quiet = (read: Promise<unknown>) => void read.catch(() => {});
+  quiet(getEntity(entityId));
+  quiet(codeFacts([entityId]));
+  quiet(repoBranchPulls(entityId));
+  quiet(repoPipelines(entityId));
+  for (const section of ["files", "commits", "branches"]) quiet(readViewAhead(entityId, section, PRESS_KEEP_MS));
+}
+
+/** A repository's landing that `href` names (`#/repo/<id>`), else `null`. */
+function landingOf(href: string): string | null {
+  const repo = /^#\/repo\/([^/]+)$/.exec(href);
+  return repo ? decodeURIComponent(repo[1]!) : null;
+}
 
 /** How long the pointer stands on a link before its read starts. */
 export const REST_MS = 80;
@@ -24,7 +52,12 @@ export function readOf(href: string): { entityId: string; section: string | null
 }
 
 /** Listens on `root` for the pointer resting on such a link; the returned function stops it. */
-export function installHoverReads(root: EventTarget = document, read: Read = readViewAhead, restMs = REST_MS): () => void {
+export function installHoverReads(
+  root: EventTarget = document,
+  read: Read = readViewAhead,
+  restMs = REST_MS,
+  press: ((entityId: string) => void) | null = readLandingAhead,
+): () => void {
   const asked = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let over: Element | null = null;
@@ -51,17 +84,25 @@ export function installHoverReads(root: EventTarget = document, read: Read = rea
   // A press before the rest is over makes the page's own read: the rest's would go out beside it, the source asked
   // twice (the WSL block, 2026-11-14: a pull request of 3,000 files read its 8 MB from Gitea twice at once).
   const onDown = (event: Event) => {
+    if (event.type === "keydown" && (event as KeyboardEvent).key !== "Enter") return;
     const link = (event.target as Element | null)?.closest?.("a[href^='#/repo/'], a[href^='#/pr/']") ?? null;
-    const ask = link === null ? null : readOf(link.getAttribute("href") ?? "");
+    const href = link?.getAttribute("href") ?? "";
+    const ask = link === null ? null : readOf(href);
     if (ask === null) return;
     cancel();
-    asked.add(`${ask.entityId}\u0000${ask.section ?? ""}`);
+    const key = `${ask.entityId}\u0000${ask.section ?? ""}`;
+    // A repository's landing is read at the press, all of it: a top the rest read already is joined or held.
+    const landing = landingOf(href);
+    if (landing !== null && press !== null) press(landing);
+    asked.add(key);
   };
   root.addEventListener("pointerover", onOver);
   root.addEventListener("pointerdown", onDown);
+  root.addEventListener("keydown", onDown);
   return () => {
     cancel();
     root.removeEventListener("pointerover", onOver);
     root.removeEventListener("pointerdown", onDown);
+    root.removeEventListener("keydown", onDown);
   };
 }
