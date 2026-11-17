@@ -38,8 +38,9 @@
 .tf-runs .tf-day { display: flow-root; }
 .tf .tf-runs .tf-day-first .tf-dayh { margin-top: 14px; }
 .tf-runs .tf-run-dur { width: 150px; }
-/* The last value: *Log* and *Run again…* stand in its place on hover, so it is as wide as they are. */
-.tf-runs .tf-run-at { width: 140px; }
+/* The last value: *Log* and *Run again…* stand in its place on hover, a failed run's read mark (an icon) left of them,
+   so it holds the three with a font's room to spare, and the group covers no other column (ux18). */
+.tf-runs .tf-run-at { width: 170px; }
 .tf-runs .tf-run-acts { width: 20px; padding-left: 0; text-align: right; }
 .tf-durbar { vertical-align: middle; margin-right: 6px; }
 .tf-durbar rect { fill: var(--ink-2); opacity: .35; }
@@ -294,7 +295,7 @@
   .tf-runs .tf-run-trig { width: 150px; }
   .tf-runs .tf-run-tests { width: 136px; }
   .tf-runs .tf-run-dur { width: 70px; }
-  .tf-runs .tf-run-at { width: 140px; }
+  .tf-runs .tf-run-at { width: 170px; }
   .tf-durbar, .tf-runs .tf-run-dur .tf-progress { display: none; }
 }
 /* Who started a run goes first: the branch is what you scan by, and keeps 190 px or more. */

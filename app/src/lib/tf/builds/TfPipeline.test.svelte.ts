@@ -1486,7 +1486,7 @@ test("the row's Mark as read turns it at once and back with Mark as unread; a pa
   draw();
   await settle();
   const inRow = (no: number, words: string) =>
-    [...rowOf(no).querySelectorAll<HTMLButtonElement>(".tf-rowacts button")].find((b) => b.textContent?.trim() === words);
+    [...rowOf(no).querySelectorAll<HTMLButtonElement>(".tf-rowacts button")].find((b) => b.getAttribute("aria-label") === words);
   expect(inRow(1186, "Mark as read")).toBeUndefined();
   expect(inRow(1186, "Mark as unread")).toBeUndefined();
   inRow(1187, "Mark as read")!.click();

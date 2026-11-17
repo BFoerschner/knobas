@@ -832,8 +832,13 @@
                 {#if !isStartedHere(run)}
                   <span class="tf-rowend"><span class="tf-rowacts">
                     {#if failure}
-                      <button type="button" class="tf-btn tf-sm tf-ghost" title={`${unread ? "Mark as read" : "Mark as unread"} (M)`} onclick={() => void runsRead.toggle(run)}
-                        >{unread ? "Mark as read" : "Mark as unread"}</button
+                      <!-- An icon, the words its name and tip: as words the group ran over the duration and cut it, and a
+                           press on the duration of a hovered row marked the run (ux18). A tick to read, the dot to unread. -->
+                      {@const said = unread ? "Mark as read" : "Mark as unread"}
+                      <button type="button" class="tf-iconbtn tf-sm" aria-label={said} title={`${said} (M)`} onclick={() => void runsRead.toggle(run)}
+                        ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                          >{#if unread}<path d="M3 8.5l3 3 7-7.5" />{:else}<circle cx="8" cy="8" r="3" fill="currentColor" stroke="none" />{/if}</svg
+                        ></button
                       >
                     {/if}
                     <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>

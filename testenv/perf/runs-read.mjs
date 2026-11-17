@@ -148,11 +148,11 @@ try {
       await hover(`${ROW} td`);
       await sleep(300);
       await c.send("Emulation.setCPUThrottlingRate", { rate });
-      const t = await timed(`!${dot}`, () => click(`${ROW} .tf-rowacts button`, "Mark as read"), rate);
+      const t = await timed(`!${dot}`, () => click(`${ROW} .tf-rowacts button[aria-label='Mark as read']`), rate);
       if (t === null) throw new Error("the mark drew nothing");
       one.push(t);
       await sleep(300 * rate);
-      const u = await timed(`!!${dot}`, () => click(`${ROW} .tf-rowacts button`, "Mark as unread"), rate);
+      const u = await timed(`!!${dot}`, () => click(`${ROW} .tf-rowacts button[aria-label='Mark as unread']`), rate);
       if (u === null) throw new Error("the unmark drew nothing");
       back.push(u);
       await sleep(300 * rate);
