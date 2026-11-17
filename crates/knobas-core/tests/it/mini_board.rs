@@ -1474,7 +1474,7 @@ async fn a_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
         ["PAY-4", "PAY-3", "PAY-5"]
     );
 
-    // The list by priority, highest first by the page's order, then by key, PAY-2 before PAY-10.
+    // The list by priority, highest first by the page's order, then newest first.
     let page = |after: u32, sort: &str, direction: &str| mini_board::Page {
         after,
         sort: Some(sort.to_owned()),
@@ -1504,7 +1504,7 @@ async fn a_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
     // Each column counts every ticket in it, not the page's.
     assert_eq!(first.columns.iter().map(|c| c.total).sum::<u32>(), 6);
     let second = read(Some(3), page(3, "priority", "ascending")).await;
-    assert_eq!(order(&second), ["PAY-3", "PAY-1", "PAY-5"]);
+    assert_eq!(order(&second), ["PAY-3", "PAY-5", "PAY-1"]);
     // By key, the number read as one: PAY-10 after PAY-5, and backwards the other way.
     assert_eq!(
         order(&read(Some(6), page(0, "key", "ascending")).await),
@@ -1514,10 +1514,10 @@ async fn a_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
         order(&read(Some(2), page(0, "key", "descending")).await),
         ["PAY-10", "PAY-5"]
     );
-    // By status, in the page's order of them; then by key.
+    // By status, in the page's order of them; then newest first.
     assert_eq!(
         order(&read(Some(6), page(0, "status", "descending")).await),
-        ["PAY-4", "PAY-5", "PAY-1", "PAY-2", "PAY-3", "PAY-10"]
+        ["PAY-4", "PAY-5", "PAY-2", "PAY-3", "PAY-1", "PAY-10"]
     );
     // By date, oldest first.
     assert_eq!(

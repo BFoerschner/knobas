@@ -1033,7 +1033,7 @@ async function keysRead(handler: (args: Record<string, unknown>) => unknown): Pr
 test("the argument parse reads what the barrel sends, and the recorder keeps a read a throw follows", async () => {
   const sent = barrelArguments();
   expect([...sent.get("mini_board")!].sort()).toEqual(
-    ["ctxId", "lanes", "lanesFirst", "perColumn", "project", "query", "role", "savedView"].sort(),
+    ["ctxId", "lanes", "lanesFirst", "page", "perColumn", "project", "query", "role", "savedView"].sort(),
   );
   expect([...sent.get("submit_write")!].sort()).toEqual(["linkTo", "payload"]);
   expect([...sent.get("list_sources")!]).toEqual([]);

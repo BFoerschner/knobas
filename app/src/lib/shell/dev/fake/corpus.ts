@@ -3,7 +3,7 @@
  * one link graph, and the reads that list it (`list_entities`, the mini
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
-import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
+import type { AttentionGroup, BoardPage, CodeFacts, ContextKind, ContextRow, LaneField, MiniBoardCard, Signal, SourceStatuses, StateChip } from "../../../ipc/entity";
 import type { StateValue } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -524,6 +524,9 @@ function miniBoard(args: Record<string, unknown>) {
     typeof savedView === "string"
       ? fakeJiraBoard(savedView, boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null }), null)
       : boardOf({ ...args, sources, perColumn: null });
+  // A page past the first cards (ux18): restated over the fixture, as the command reads it.
+  const page = (args["page"] as BoardPage | null | undefined) ?? null;
+  if (page !== null) return pageOf(whole, page, perColumn, lanes);
   // In lanes (#939): each lane's column capped, the first lanes sent.
   if (lanes !== null) {
     return fakeLanes(whole, lanes, perColumn, (args["lanesFirst"] as number | null | undefined) ?? null);
@@ -535,6 +538,62 @@ function miniBoard(args: Record<string, unknown>) {
     })),
     sources: whole.sources,
     lanes: [],
+    more_lanes: 0,
+  };
+}
+
+/**
+ * `mini_board`'s `page` (ux18), over the fixture: a column's next cards past `after` (the statuses it names ranked as
+ * one, newest first; in a lane, that lane's), or the list sorted by a header, its order in `order`. Restated, like the
+ * rest of this file: the command is the authority.
+ */
+function pageOf<C extends MiniBoardCard>(
+  whole: { columns: { status: string | null; cards: C[]; total: number }[]; sources: SourceStatuses[] },
+  page: BoardPage,
+  perColumn: number | null,
+  lanes: LaneField | null,
+) {
+  const take = (cards: C[]) => cards.slice(page.after, perColumn === null ? undefined : page.after + perColumn);
+  const grouped = (cards: C[]) =>
+    whole.columns
+      .map((column) => ({ ...column, cards: cards.filter((card) => column.cards.includes(card)) }))
+      .filter((column) => column.cards.length > 0);
+  if (page.sort) {
+    const sign = page.direction === "descending" ? -1 : 1;
+    const priority = (card: C) => (card.priority === null ? null : ((page.priority_order ?? []).indexOf(card.priority.toLowerCase()) + 1 || 1_000_000));
+    const value = (card: C): string | number | null => {
+      switch (page.sort) {
+        case "key": return card.key.toLowerCase();
+        case "summary": return card.title.toLowerCase();
+        case "status": return (page.status_order ?? []).indexOf(card.status) + 1 || null;
+        case "priority": return priority(card);
+        case "assignee": return card.assignee?.toLowerCase() ?? null;
+        default: return card.updated_at;
+      }
+    };
+    const all = whole.columns.flatMap((column) => column.cards).sort((a, b) => {
+      const [x, y] = [value(a), value(b)];
+      if (x === null || y === null) return x === y ? (b.updated_at ?? "").localeCompare(a.updated_at ?? "") : x === null ? 1 : -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * sign || (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
+    });
+    const kept = take(all);
+    return { columns: grouped(kept), sources: whole.sources, lanes: [], more_lanes: 0, order: kept.map((card) => card.entity_id) };
+  }
+  const named = (status: string | null) => page.statuses === undefined || page.statuses.includes(status);
+  const ranked = whole.columns
+    .filter((column) => named(column.status))
+    .flatMap((column) => column.cards)
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+  if (lanes === null || page.lane === undefined) return { columns: grouped(take(ranked)), sources: whole.sources, lanes: [], more_lanes: 0 };
+  const laned = fakeLanes(whole, lanes, null, null);
+  const lane = laned.lanes.find((one) => one.key === page.lane);
+  const inLane = new Set(lane?.columns.flatMap((cell) => cell.ids) ?? []);
+  const kept = take(ranked.filter((card) => inLane.has(card.entity_id)));
+  const ids = new Set(kept.map((card) => card.entity_id));
+  return {
+    columns: grouped(kept),
+    sources: whole.sources,
+    lanes: lane ? [{ ...lane, columns: lane.columns.map((cell) => ({ ...cell, ids: cell.ids.filter((id) => ids.has(id)) })) }] : [],
     more_lanes: 0,
   };
 }

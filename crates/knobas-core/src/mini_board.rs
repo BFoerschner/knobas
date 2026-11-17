@@ -376,64 +376,65 @@ macro_rules! page_partition {
     };
 }
 
-/// A list sorted on the server ([`Page::sort`]): each ticket's key for the
-/// header asked, read only when a page asks for a sort. `t` a text, `n` a
-/// number and `ts` a date, one of them set; `kp` and `kn` the key's letters
-/// and number, every sort's tie. Nulls sort last either way, as the list's
-/// own sort puts them; a priority the page's order does not name sorts after
-/// those it does.
+/// A list sorted on the server ([`Page::sort`]): what each ticket is sorted
+/// by, joined as sets and only for the header asked (the statement is planned
+/// with its parameters, so a read with no sort, or another header, plans none
+/// of these joins). The card (`fc`) for the priority and the assignee, its
+/// payload (`fi`) where it has none, as the board's own cut reads it; the
+/// title for the summary; the key's letters and number for the key. A tie
+/// goes newest first, then by id: the server is such a list's only sorter,
+/// so no tie has to agree with the page's (the key's two regular expressions
+/// on every row were 40 ms of a sorted page at 20,000 tickets).
 macro_rules! page_sort_keys {
     () => {
         concat!(
             "
-        left join lateral (
-          select case $8::jsonb->>'sort'
-                   when 'summary' then (select lower(t.title) from sync.item t where t.entity_id = s.entity_id)
-                   when 'assignee' then lower(coalesce(fc.assignee, ",
-            crate::declared_string!("$4", "assignee"),
-            "))
-                   when 'key' then lower(regexp_replace(ky.k, '[0-9]+$', '')) end as t,
-                 case $8::jsonb->>'sort'
-                   when 'status' then (select o.n from jsonb_array_elements_text($8::jsonb->'status_order')
-                                         with ordinality o(v, n) where o.v is not distinct from s.status)
-                   when 'priority' then (select case when pr.p is null then null else coalesce(
-                     (select o.n from jsonb_array_elements_text($8::jsonb->'priority_order')
-                        with ordinality o(v, n) where o.v = lower(pr.p)), 1000000) end
-                       from (select coalesce(fc.priority, ",
+        left join card_keys fk on ($8::jsonb->>'sort') in ('priority', 'assignee') and fk.source_id = s.source_id
+        left join sync.item_card fc on fc.entity_id = s.entity_id and fc.paths_key = fk.k
+        left join lateral (select it.entity_id, it.source_id, it.kind, it.payload #> '{}'::text[] as payload
+                             from sync.item it
+                            where ($8::jsonb->>'sort') in ('priority', 'assignee')
+                              and it.entity_id = s.entity_id and fc.entity_id is null
+                           offset 0) i on true
+        left join sync.item ft on ($8::jsonb->>'sort') = 'summary' and ft.entity_id = s.entity_id
+        cross join lateral (select case when ($8::jsonb->>'sort') = 'key'
+                                        then substring(s.entity_id from position(':' in s.entity_id) + 1) end as k) ky
+        cross join lateral (select case $8::jsonb->>'sort'
+                                     when 'priority' then coalesce(fc.priority, ",
             priority_read!("$4"),
-            ") as p) pr)
-                   when 'key' then substring(ky.k from '([0-9]+)$')::numeric end as n,
-                 case $8::jsonb->>'sort' when 'updated' then s.at end as ts,
-                 lower(regexp_replace(ky.k, '[0-9]+$', '')) as kp,
-                 substring(ky.k from '([0-9]+)$')::numeric as kn
-            from (select substring(s.entity_id from position(':' in s.entity_id) + 1) as k) ky
-            left join lateral (select c.priority, c.assignee, true as carded from sync.item_card c
-                                where c.entity_id = s.entity_id
-                                  and c.paths_key = (select k.k from card_keys k where k.source_id = s.source_id)
-                               offset 0) fc on true
-            -- A ticket with no stored card reads its payload, as the board's own cut does.
-            left join lateral (select it.entity_id, it.source_id, it.kind,
-                                      it.payload #> '{}'::text[] as payload
-                                 from sync.item it
-                                where it.entity_id = s.entity_id and fc.carded is null
-                                  and $8::jsonb->>'sort' in ('priority', 'assignee')
-                               offset 0) i on true
-           where ($8::jsonb->>'sort') is not null
-        ) fs on true"
+            ")
+                                     when 'assignee' then coalesce(fc.assignee, ",
+            crate::declared_string!("$4", "assignee"),
+            ") end as v) fv"
         )
     };
 }
 
-/// [`page_sort_keys!`]' order, then the board's own (newest first).
+/// [`page_sort_keys!`]' order, then the board's own (newest first, then by
+/// id). Nulls
+/// sort last either way, as the list's own sort puts them; a priority the
+/// page's order does not name sorts after those it does.
 macro_rules! page_sort_order {
     () => {
-        "case when $8::jsonb->>'direction' = 'ascending' then fs.t end asc nulls last,
-                                          case when $8::jsonb->>'direction' = 'descending' then fs.t end desc nulls last,
-                                          case when $8::jsonb->>'direction' = 'ascending' then fs.n end asc nulls last,
-                                          case when $8::jsonb->>'direction' = 'descending' then fs.n end desc nulls last,
-                                          case when $8::jsonb->>'direction' = 'ascending' then fs.ts end asc nulls last,
-                                          case when $8::jsonb->>'direction' = 'descending' then fs.ts end desc nulls last,
-                                          fs.kp, fs.kn, s.at desc, s.entity_id"
+        "case when $8::jsonb->>'direction' = 'ascending' then (case $8::jsonb->>'sort'
+                                            when 'summary' then lower(ft.title) when 'assignee' then lower(fv.v)
+                                            when 'key' then lower(regexp_replace(ky.k, '[0-9]+$', '')) end) end asc nulls last,
+                                          case when $8::jsonb->>'direction' = 'descending' then (case $8::jsonb->>'sort'
+                                            when 'summary' then lower(ft.title) when 'assignee' then lower(fv.v)
+                                            when 'key' then lower(regexp_replace(ky.k, '[0-9]+$', '')) end) end desc nulls last,
+                                          case when $8::jsonb->>'direction' = 'ascending' then (case $8::jsonb->>'sort'
+                                            when 'status' then array_position(array(select jsonb_array_elements_text($8::jsonb->'status_order')), s.status)
+                                            when 'priority' then (case when fv.v is null then null else coalesce(array_position(
+                                              array(select jsonb_array_elements_text($8::jsonb->'priority_order')), lower(fv.v)), 1000000) end)
+                                            when 'key' then substring(ky.k from '([0-9]+)$')::numeric end) end asc nulls last,
+                                          case when $8::jsonb->>'direction' = 'descending' then (case $8::jsonb->>'sort'
+                                            when 'status' then array_position(array(select jsonb_array_elements_text($8::jsonb->'status_order')), s.status)
+                                            when 'priority' then (case when fv.v is null then null else coalesce(array_position(
+                                              array(select jsonb_array_elements_text($8::jsonb->'priority_order')), lower(fv.v)), 1000000) end)
+                                            when 'key' then substring(ky.k from '([0-9]+)$')::numeric end) end desc nulls last,
+                                          case when $8::jsonb->>'sort' = 'updated' and $8::jsonb->>'direction' = 'ascending' then s.at end asc nulls last,
+                                          case when $8::jsonb->>'sort' = 'updated' and $8::jsonb->>'direction' = 'descending' then s.at end desc nulls last,
+                                          s.at desc, s.entity_id"
     };
 }
 
