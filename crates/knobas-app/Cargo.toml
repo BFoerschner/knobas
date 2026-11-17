@@ -178,6 +178,13 @@ toml = { version = "=0.9.12", features = ["preserve_order"] }
 objc2 = "=0.6.4"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString"] }
 
+[target.'cfg(windows)'.dependencies]
+# *WebView2's own menu, trimmed* (`webview_menu.rs`): the main window's
+# `ContextMenuRequested`, which Tauri does not expose. The copies already in
+# the lockfile through wry.
+webview2-com = "=0.38.2"
+windows-core = "=0.61.2"
+
 [target.'cfg(unix)'.dependencies]
 # A user renderer (#2262, ADR-0033) runs in a process group of its own, and
 # the whole group is killed at its timeout: a wrapper script's children go

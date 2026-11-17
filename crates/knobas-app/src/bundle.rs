@@ -136,9 +136,10 @@ pub fn open_main_window<R: Runtime>(
         .find(|window| window.label == "main")
         .expect("tauri.conf.json declares the main window")
         .clone();
-    tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
+    let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
         .on_web_resource_request(bundle.answer_missing_with_404())
         .build()?;
+    crate::webview_menu::trim(&window);
     Ok(())
 }
 

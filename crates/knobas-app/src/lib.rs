@@ -64,6 +64,7 @@ pub mod start_work;
 pub mod suggestion_pass;
 pub mod ticket_views;
 pub mod time;
+pub mod webview_menu;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};

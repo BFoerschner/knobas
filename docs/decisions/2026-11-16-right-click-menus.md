@@ -77,6 +77,11 @@ The judgment calls went to Fable (xhigh), whose rulings are followed here.
 
 WebView2's own menu: that `preventDefault()` stops it on the page, a link and selected words in the installed app; that a field's is the platform's with spelling; what a Docs embed or a renderer's frame shows inside it (no *Refresh* or *Back* that reloads the app); the context menu key on a Windows keyboard, which WebView2 also answers with a `contextmenu` of its own.
 
+**Seen on Windows (2026-11-17):** the page, links, words and the menu key as above (the ux16 pass); a field's menu
+carried Edge's *Import passwords*, *Writing direction* and *More tools*, and both frames showed *Back*, *Refresh*, *Save
+as* and *Print*. WebView2's own menu is now trimmed to an allow-list wherever it shows (`webview_menu.rs`,
+`2026-11-17-a-hover-a-drag-and-the-web-views-menu-on-the-pc.md`), and a `select` is no field.
+
 ## Reversing it
 
 Take `TfContextMenu` out of `TfShell` and the web view's menu comes back everywhere. The `open_folder` command, `TfMenu`'s point anchor and the file view's folder rule stand on their own.

@@ -139,9 +139,12 @@ function fileOfPage(hash: string): string | null {
   return thing !== null && (thing.kind === "file" || thing.kind === "line") ? thing.path : null;
 }
 
-/** Whether a right-click on `node` belongs to the web view: a field a person types in, where its own items (spelling, paste) are the point. */
+/**
+ * Whether a right-click on `node` belongs to the web view: a field a person types in, where its own items (spelling,
+ * paste) are the point. Not a `select`: it takes no typing, and the web views offer it their page menu (2026-11-17).
+ */
 export function isEditable(node: Element | null): boolean {
-  const field = node?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+  const field = node?.closest?.("input, textarea, [contenteditable]:not([contenteditable='false'])");
   if (!field) return false;
   if (field instanceof HTMLInputElement) {
     // A box that takes no typing is a control: a checkbox's right-click has nothing of the platform's to offer.

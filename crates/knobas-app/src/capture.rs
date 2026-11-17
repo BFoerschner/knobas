@@ -471,8 +471,10 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         .center()
         .focused(true)
         .build();
-    if let Err(failure) = built {
-        tracing::error!(%failure, "the capture window would not open");
+    match built {
+        // WebView2's own menu trimmed here as in the main window (`webview_menu.rs`).
+        Ok(window) => crate::webview_menu::trim(&window),
+        Err(failure) => tracing::error!(%failure, "the capture window would not open"),
     }
 }
 

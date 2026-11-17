@@ -82,12 +82,12 @@ test("a page's heading is the page's own thing", () => {
   expect(thingAt(root.querySelector(".w"), "#/inbox", ORIGIN)).toBeNull();
 });
 
-test("a field a person types in is the platform's; a checkbox is not", () => {
+test("a field a person types in is the platform's; a checkbox and a select are not", () => {
   const root = page(`<input class="t"><input type="checkbox" class="c"><textarea></textarea><div contenteditable="true"><b class="e">x</b></div><select></select>`);
   expect(isEditable(root.querySelector(".t"))).toBe(true);
   expect(isEditable(root.querySelector("textarea"))).toBe(true);
   expect(isEditable(root.querySelector(".e"))).toBe(true);
-  expect(isEditable(root.querySelector("select"))).toBe(true);
+  expect(isEditable(root.querySelector("select")), "a select takes no typing").toBe(false);
   expect(isEditable(root.querySelector(".c"))).toBe(false);
   expect(isEditable(root)).toBe(false);
 });
