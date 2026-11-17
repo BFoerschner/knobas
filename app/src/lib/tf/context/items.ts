@@ -70,7 +70,11 @@ export type Act =
   /** Make a Docs space or page Docs' home (`title` what it is called), or with `id` `null` go back to Docs' own page. */
   | { do: "docs-home"; kind: "space" | "page"; id: string | null; title: Text }
   /** Hide a Docs space from Docs' browsing, or show it again. */
-  | { do: "docs-hide"; id: string; name: string; hidden: boolean };
+  | { do: "docs-hide"; id: string; name: string; hidden: boolean }
+  /** Mark one run read or unread (ux18). */
+  | { do: "run-read"; id: string; read: boolean }
+  /** *Mark all as read* on a pipeline (ux18): every failed run of it. */
+  | { do: "pipeline-read"; id: string };
 
 export interface Item {
   id: string;
@@ -111,6 +115,8 @@ export interface MenuContext {
   renders?: (repoId: string, path: string) => readonly { id: string; name: string }[];
   /** Where Docs opens and the spaces it hides (`docs-choices.svelte.ts`); absent, no Docs item is offered. */
   docs?: { isHome(kind: "space" | "page", id: string): boolean; hidden: ReadonlySet<string> };
+  /** Whether a failed run is marked read (`runs-read.svelte.ts`, ux18); absent, no mark is offered. */
+  runs?: { isRead(runId: string): boolean };
 }
 
 const RULE: Entry = { rule: true };
@@ -298,13 +304,26 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
               ...(thing.pipelineId === null ? {} : { where: { label: "Show in runs", hash: tabHash(thing.pipelineId, "runs") } }),
             },
           },
+          // A finished failed run can be marked; any other is read by its nature and offers neither (ux18).
+          ...(thing.failed === true && ctx.runs !== undefined
+            ? [
+                ctx.runs.isRead(thing.id)
+                  ? ({ id: "unread", label: "Mark as unread", act: { do: "run-read", id: thing.id, read: false } } satisfies Item)
+                  : ({ id: "read", label: "Mark as read", act: { do: "run-read", id: thing.id, read: true } } satisfies Item),
+              ]
+            : []),
         ],
         [inSource(thing.id, ctx)],
         [copyLink()],
       );
     case "pipeline":
       return grouped(
-        [...open(thing.hash, ctx), ...fromSheet("pipeline", thing.id, title, ctx)],
+        [
+          ...open(thing.hash, ctx),
+          ...fromSheet("pipeline", thing.id, title, ctx),
+          // Every failed run of it, older ones too (ux18), with *Undo* on the toast.
+          ...(ctx.runs !== undefined ? [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item] : []),
+        ],
         [inSource(thing.id, ctx)],
         [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied the name" } }, copyLink()],
       );

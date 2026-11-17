@@ -715,6 +715,10 @@ macro_rules! mention_of {
 /// The status text is read for the builds the rule keeps. [`FAILED_BUILD_WALKED`]
 /// is the rule as it read before, which `tests/it/inbox.rs` holds this one
 /// to.
+///
+/// **A run the person read is not an item** (ux18, `0098`): one with a row
+/// in `knobas.run_read`, on either shelf. *Done* on a failed build writes
+/// that row ([`crate::run_read`]), so *read* and *done* are one answer.
 macro_rules! failed_build {
     () => {
         concat!(
@@ -792,6 +796,7 @@ macro_rules! failed_build {
                           and ",
             $crate::live_by_key!("mine"),
             "))
+            and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id)
             and (i.config is null or i.latest_green is null or i.latest_green <= i.at))"
         )
     };
@@ -859,6 +864,7 @@ macro_rules! failed_build_walked {
                           and ",
             $crate::live_by_key!("mine"),
             "))
+            and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id)
             and (i.config is null or i.latest_green is null or i.latest_green <= i.at))"
         )
     };

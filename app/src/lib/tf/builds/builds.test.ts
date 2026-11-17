@@ -27,6 +27,9 @@ import {
   repoTreeOf,
   newestFirst,
   recentNewestFirst,
+  asksAttention,
+  failedRun,
+  unreadRun,
 } from "./builds";
 
 function run(extra: Partial<RunRow> = {}): RunRow {
@@ -348,4 +351,66 @@ test("in a fold two sources share, the rows of the fewer say their source", () =
   const [repo] = repoTreeOf(list, () => [{ id: "git:web", title: "tidewater/web" }]);
   const mixed = listRows([], [repo!], "all", () => true).flatMap((r) => (r.kind === "pipeline" ? [[r.pipeline.name, r.tag]] : []));
   expect(mixed).toEqual([["CI", null], ["E2E", null], ["Web_Build", "TeamCity"]]);
+});
+
+// -- Mark builds as read (ux18) -----------------------------------------------
+
+test("only a finished failed run can be unread, and a mark reads it; before the marks are read every failure asks", () => {
+  const red = run({ entity_id: "teamcity:build:7", state: { text: "FAILURE", tone: "err" } });
+  const failingStill = run({ entity_id: "teamcity:build:8", state: { text: "FAILURE", tone: "err" }, finished: null });
+  expect(failedRun(red)).toBe(true);
+  expect(failedRun(run())).toBe(false);
+  expect(failedRun(failingStill)).toBe(false);
+  expect(unreadRun(red, new Set())).toBe(true);
+  expect(unreadRun(red, new Set(["teamcity:build:7"]))).toBe(false);
+  expect(unreadRun(red, null)).toBe(true);
+  expect(unreadRun(run(), new Set())).toBe(false);
+  expect(unreadRun(failingStill, null)).toBe(false);
+});
+
+test("a pipeline asks while its latest failure is unread; reading an older failure does not quiet it, a new one asks again", () => {
+  const newest = run({ entity_id: "teamcity:build:2", state: { text: "FAILURE", tone: "err" } });
+  const older = run({ entity_id: "teamcity:build:1", state: { text: "FAILURE", tone: "err" } });
+  const p = pipeline("A", [newest, older]);
+  expect(asksAttention(p, new Set())).toBe(true);
+  expect(asksAttention(p, new Set(["teamcity:build:1"]))).toBe(true);
+  expect(asksAttention(p, new Set(["teamcity:build:2"]))).toBe(false);
+  expect(isFailing(p)).toBe(true);
+  const again = pipeline("A", [run({ entity_id: "teamcity:build:3", state: { text: "FAILURE", tone: "err" } }), newest, older]);
+  expect(asksAttention(again, new Set(["teamcity:build:2"]))).toBe(true);
+  expect(asksAttention(pipeline("B", [run()]), new Set())).toBe(false);
+});
+
+test("a read failure keeps its time in the second ink, an unread one in err", () => {
+  const now = new Date(2026, 7, 22, 14, 32);
+  const t = (h: number, m: number) => new Date(2026, 7, 22, h, m).toISOString();
+  const p = pipeline("A", [run({ entity_id: "teamcity:build:9", started: t(10, 5), finished: t(10, 9), updated_at: t(10, 9), state: { text: "FAILURE", tone: "err" } })]);
+  expect(railTime(p, now, new Set())).toEqual({ text: "10:09", tone: "err" });
+  expect(railTime(p, now, new Set(["teamcity:build:9"]))).toEqual({ text: "10:09", tone: null });
+});
+
+test("a fold counts every failing pipeline and opens by itself only for one that asks", () => {
+  const red = (name: string, id: string) => pipeline(name, [run({ entity_id: id, state: { text: "FAILURE", tone: "err" } })], { path: ["Loud"] });
+  const [tree] = treeOf([red("A", "teamcity:build:1"), red("B", "teamcity:build:2")], new Set(["teamcity:build:1"]));
+  const loud = tree!.folds[0]!;
+  expect(loud.failing).toBe(2);
+  expect(loud.asking).toBe(1);
+  expect(foldOpen(undefined, loud, null, false)).toBe(true);
+  const [quiet] = treeOf([red("A", "teamcity:build:1"), red("B", "teamcity:build:2")], new Set(["teamcity:build:1", "teamcity:build:2"]));
+  expect(quiet!.folds[0]!.failing).toBe(2);
+  expect(quiet!.folds[0]!.asking).toBe(0);
+  expect(foldOpen(undefined, quiet!.folds[0]!, null, false)).toBe(false);
+  const [byRepo] = repoTreeOf([red("A", "teamcity:build:1")], () => [], new Set(["teamcity:build:1"]));
+  expect(byRepo!.folds[0]!.asking).toBe(0);
+});
+
+test("a bare #/builds opens on the first failure that asks, else the first failing, else the first", () => {
+  const readRed = pipeline("A", [run({ entity_id: "teamcity:build:1", state: { text: "FAILURE", tone: "err" } })]);
+  const unreadRed = pipeline("B", [run({ entity_id: "teamcity:build:2", state: { text: "FAILURE", tone: "err" } })]);
+  const green = pipeline("C", [run({ entity_id: "teamcity:build:3" })]);
+  const marks = new Set(["teamcity:build:1"]);
+  expect(pipelineOf([green, readRed, unreadRed], [], [], marks)?.name).toBe("B");
+  expect(pipelineOf([green, readRed], [], [], marks)?.name).toBe("A");
+  expect(pipelineOf([green], [], [], marks)?.name).toBe("C");
+  expect(pipelineOf([green, readRed, unreadRed], [], [readRed, green], marks)?.name).toBe("A");
 });

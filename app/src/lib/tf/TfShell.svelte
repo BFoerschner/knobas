@@ -83,6 +83,7 @@
   import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
+  import { runsRead } from "./builds/runs-read.svelte";
   import { goBackTo, goWithoutOpener, leftName, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
@@ -618,6 +619,8 @@
   onReady(ready, () => ports.diffPipelines, (on) => heldDiffPipelines.hold(on));
   // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): until they answer, Docs' own page and every space.
   onReady(ready, () => ports.docsChoices, (choices) => heldDocsChoices.hold(choices));
+  // The runs marked read (ux18): until they answer, every failed run asks, as before there were marks.
+  onReady(ready, () => () => runsRead.load(), () => {});
 
   $effect(() => {
     if (!lifecycle.ready) return;

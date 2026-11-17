@@ -121,3 +121,11 @@ test("a Docs space's address is that space as the tree Docs holds names it; one 
     forgetTree();
   }
 });
+
+test("a run the page draws as failed says so, on its row or its heading (ux18); another run does not", () => {
+  const root = page(
+    `<table><tr data-failed><td><a href="#/build/p/r1">#1</a></td><td><button class="act">Log</button></td></tr><tr><td><a href="#/build/p/r2">#2</a></td></tr></table>`,
+  );
+  expect(thingAt(root.querySelector(".act"), "#/builds", ORIGIN)?.thing).toEqual({ kind: "run", id: "r1", pipelineId: "p", hash: "#/build/p/r1", failed: true });
+  expect(thingAt(root.querySelector('a[href="#/build/p/r2"]'), "#/builds", ORIGIN)?.thing).toEqual({ kind: "run", id: "r2", pipelineId: "p", hash: "#/build/p/r2" });
+});

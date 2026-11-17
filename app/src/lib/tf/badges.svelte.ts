@@ -2,11 +2,11 @@
  * The top bar's count badges (#809, R-1.3), beside what the inbox store already
  * counts:
  *
- * - **Builds**: build configurations whose latest build failed. The room's
- *   Builds tile already asks this: `list_entities` under `latest_per_parent`
- *   keeps each configuration's newest build and tallies the set by tone, so
- *   the failing configurations are the `err` lines of that tally. No new
- *   command, and no second definition of *failing*.
+ * - **Builds**: build configurations whose latest build failed and is not
+ *   marked read (ux18), `unread_failing_builds`: the newest build of each
+ *   configuration as the room's Builds tile keeps it (`list_entities` under
+ *   `latest_per_parent`), less the ones read. The tile still counts every
+ *   failing one: there it is a fact about the work, here what still asks.
  * - **Monitors**: monitors down, `monitors_down`: the Monitors tab's own rows
  *   and state rule, counted by the backend. A paused (tombstoned) monitor is not down; it is not watching. A
  *   hidden one is left out too: its alerts reach nobody, so the count would be
@@ -25,7 +25,7 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 import { EVENTS } from "../ipc";
 import { coalesce } from "../shell/coalesce";
 import { monitorsDown, type MonitorRow } from "../ipc/assets";
-import { listEntities, type EntityPage } from "../ipc/entity";
+import { unreadFailingBuilds } from "../ipc/entity";
 import type { SourceSyncStatus } from "../ipc/sources";
 
 export interface BadgePorts {
@@ -44,33 +44,13 @@ export interface Badges {
   reset(): void;
 }
 
-/** Failing configurations, off the Builds tile's own tally. */
-export function failingIn(page: Pick<EntityPage, "tally">): number {
-  return (page.tally ?? [])
-    .filter((line) => line.tone === "err")
-    .reduce((all, line) => all + line.count, 0);
-}
-
 /** Monitors whose last reading is down, paused and hidden ones left out. */
 export function downIn(rows: Pick<MonitorRow, "state" | "tombstoned" | "hidden">[]): number {
   return rows.filter((row) => row.state === "down" && !row.tombstoned && !row.hidden).length;
 }
 
 const REAL_PORTS: BadgePorts = {
-  failingBuilds: () =>
-    listEntities(
-      {
-        sources: [],
-        kinds: ["build"],
-        updated_within_days: null,
-        order: "latest_per_parent",
-        context: null,
-        project: null,
-        include_deleted: false,
-      },
-      1,
-      0,
-    ).then(failingIn),
+  failingBuilds: () => unreadFailingBuilds(),
   // A count, not the roster: the roster carries each monitor's day of samples, and this is read on every sync's end,
   // on every page (PR #2479, the monitors-builds pass: 17.8 MB after a day at 218 monitors).
   monitorsDown: () => monitorsDown(),

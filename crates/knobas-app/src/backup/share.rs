@@ -503,6 +503,8 @@ mod tests {
             // *Hide* on the Monitors tab: one reader's choice about their
             // own screen and their own notifications.
             "monitor_hidden",
+            // *Mark as read* on a build (ux18): one reader's attention.
+            "run_read",
             "activity",
             "write_queue",
             "sync_run",

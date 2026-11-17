@@ -524,3 +524,21 @@ test("pickedMorning is 09:00 local on a day after today, and null for anything e
   expect(pickedMorning("0999-01-01", now)).toBeNull();
   expect(pickedMorning("20261-01-01", now), "a five-digit year is not a four-digit year").toBeNull();
 });
+
+// -- Done on a failed build reads its run (ux18) -------------------------------
+
+test("Done on a failed build reads its run for Builds too; Done on another item reads no run", async () => {
+  const { runsRead } = await import("../tf/builds/runs-read.svelte");
+  runsRead.forget();
+  stream = [];
+  count = 0;
+  const inbox = createInbox();
+  await inbox.complete("failed_build:teamcity:build:1187");
+  expect(runsRead.read?.has("teamcity:build:1187")).toBe(true);
+  await inbox.complete("review_request:gitea:acme/payouts#144");
+  expect([...(runsRead.read ?? [])]).toEqual(["teamcity:build:1187"]);
+  reject = { code: "internal", message: "down", source_id: null };
+  await inbox.complete("failed_build:teamcity:build:1190");
+  expect(runsRead.read?.has("teamcity:build:1190"), "a refused Done reads nothing").toBe(false);
+  runsRead.forget();
+});

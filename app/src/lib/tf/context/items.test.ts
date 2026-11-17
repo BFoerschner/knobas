@@ -199,3 +199,20 @@ test("a hidden space offers Unhide, and a space that is Docs' home offers to sto
   expect(item(entries, "docs-hide")).toMatchObject({ label: "Unhide", act: { hidden: false } });
   expect(item(entries, "docs-home").label).toBe("Stop opening Docs here");
 });
+
+test("a failed run offers Mark as read, or Mark as unread once read; a run the page does not draw as failed offers neither (ux18)", () => {
+  const failed: Thing = { kind: "run", id: "tc:9", pipelineId: "tc:Pay", hash: "#/build/tc%3APay/tc%3A9", failed: true };
+  const unread = menuFor(failed, null, ctx({ runs: { isRead: () => false } }));
+  expect(ids(unread)).toEqual(["open", "log", "tests", "rerun", "read", "|", "web", "|", "copy-link"]);
+  expect(item(unread, "read")).toMatchObject({ label: "Mark as read", act: { do: "run-read", id: "tc:9", read: true } });
+  const read = menuFor(failed, null, ctx({ runs: { isRead: (id) => id === "tc:9" } }));
+  expect(item(read, "unread")).toMatchObject({ label: "Mark as unread", act: { do: "run-read", id: "tc:9", read: false } });
+  expect(ids(menuFor({ ...failed, failed: false }, null, ctx({ runs: { isRead: () => false } })))).not.toContain("read");
+  expect(ids(menuFor(failed, null, ctx()))).not.toContain("read");
+});
+
+test("a pipeline offers Mark all as read among what it does (ux18)", () => {
+  const entries = menuFor({ kind: "pipeline", id: "tc:Pay", hash: "#/builds/tc%3APay" }, null, ctx({ runs: { isRead: () => false } }));
+  expect(item(entries, "read-all")).toMatchObject({ label: "Mark all as read", act: { do: "pipeline-read", id: "tc:Pay" } });
+  expect(ids(entries).indexOf("read-all")).toBeLessThan(ids(entries).indexOf("|"));
+});

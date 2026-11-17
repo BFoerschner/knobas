@@ -32,6 +32,7 @@
   import { renderersFor } from "../../render/folder";
   import { realMenuPorts, type MenuPorts } from "./ports";
   import { docsChoices } from "../docs/docs-choices.svelte";
+  import { runsRead } from "../builds/runs-read.svelte";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
 
   let {
@@ -103,6 +104,7 @@
             own: shown.found?.own ?? false,
             renders: (repoId, path) => renderersFor(path, folderRenderers.list, marksOf(repoId)),
             docs: { isHome: (kind, id) => docsChoices.isHome(kind, id), hidden: docsChoices.hidden },
+            runs: { isRead: (id) => runsRead.read?.has(id) ?? false },
           },
           facts,
         ),
@@ -456,6 +458,10 @@
       }
       case "docs-hide":
         return void docsChoices.setHidden(act.id, act.name, act.hidden);
+      case "run-read":
+        return void (act.read ? runsRead.markRead([act.id]) : runsRead.markUnread([act.id]));
+      case "pipeline-read":
+        return void runsRead.markAll({ runs: [], pipelines: [act.id] });
       case "clone": {
         const title = keyOf(act.repoId);
         return void ports.clone({ entityId: act.repoId, title }).then(() => push({ text: `Cloning ${title}` }), failed("Could not clone"));

@@ -1474,6 +1474,59 @@ async fn an_item_marked_done_leaves_and_returns_when_its_subject_moves() {
     );
 }
 
+/// ux18 (`0098`): a failed build whose run the person read is on neither
+/// shelf, and *Mark as unread* brings it back, its *Done* taken back with it.
+/// The negative control is a second red build of mine, which stays.
+#[tokio::test]
+async fn a_failed_build_whose_run_was_read_leaves_both_shelves_until_marked_unread() {
+    let pool = &scratch().await;
+    let read = build(
+        pool,
+        "build:1187",
+        "FAILURE",
+        "Payout_Tests",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
+    let other = build(
+        pool,
+        "build:1190",
+        "FAILURE",
+        "Ledger_Tests",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
+    let key = format!("failed_build:{read}");
+    inbox::snooze(pool, &key, now() + Duration::days(2))
+        .await
+        .unwrap();
+
+    knobas_core::run_read::mark_with(pool, &read).await.unwrap();
+    let snoozed = inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
+        .await
+        .unwrap();
+    assert!(
+        !keys(&snoozed).contains(&key),
+        "a read run is off the shelf"
+    );
+    assert!(!keys(&stream(pool).await).contains(&key));
+    assert!(
+        keys(&stream(pool).await).contains(&format!("failed_build:{other}")),
+        "only the run that was read left"
+    );
+    inbox::complete(pool, &key, now()).await.unwrap();
+    let back = knobas_core::run_read::mark_unread(pool, &[read.clone()])
+        .await
+        .unwrap();
+    assert_eq!(back, [read.clone()], "it was read");
+    assert!(
+        keys(&stream(pool).await).contains(&key),
+        "marked unread, the line is back and its *Done* went with the mark"
+    );
+}
+
 /// Jira Data Center's stamp, `2026-08-12T09:14:00.000+0200`: an offset with
 /// no colon, in a zone that is not UTC.
 fn jira_time(at: DateTime<Utc>) -> String {

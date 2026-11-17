@@ -43,9 +43,31 @@ export function recentNewestFirst<P extends Pick<PipelineRow, "recent">>(pipelin
   return { ...pipeline, recent: newestFirst(pipeline.recent) };
 }
 
-/** Whether the pipeline's latest run failed: its name is drawn in err tone. */
+/** Whether the pipeline's latest run failed: a fact, read or not (the *Failing* chip, the red glyph). */
 export function isFailing(pipeline: PipelineRow): boolean {
   return pipeline.recent[0]?.state?.tone === "err";
+}
+
+/** Whether `run` finished failed: the only kind of run that can be unread (ux18). */
+export function failedRun(run: Pick<RunRow, "finished" | "state">): boolean {
+  return run.finished !== null && run.state?.tone === "err";
+}
+
+/**
+ * Whether `run` asks for attention (ux18): finished failed and not among the runs marked read. Before the marks are
+ * read (`read` `null`) every failure asks, as it did before there were marks.
+ */
+export function unreadRun(run: Pick<RunRow, "entity_id" | "finished" | "state">, read: ReadonlySet<string> | null): boolean {
+  return failedRun(run) && !(read?.has(run.entity_id) ?? false);
+}
+
+/**
+ * Whether the pipeline asks for attention (ux18): its latest run failed and is unread. Its name is then drawn in err
+ * tone; read, the glyph stays red and the name is ink, since the pipeline still fails.
+ */
+export function asksAttention(pipeline: PipelineRow, read: ReadonlySet<string> | null): boolean {
+  const latest = pipeline.recent[0];
+  return latest !== undefined && isFailing(pipeline) && !(read?.has(latest.entity_id) ?? false);
 }
 
 /** Whether one of the pipeline's runs started and has not finished. */
@@ -128,6 +150,7 @@ export function latestTime(pipeline: PipelineRow, now: Date = new Date()): strin
 export function railTime(
   pipeline: PipelineRow,
   now: Date = new Date(),
+  read: ReadonlySet<string> | null = null,
 ): { text: string; tone: "err" | "info" | null } | null {
   const latest = pipeline.recent[0];
   if (latest === undefined) return null;
@@ -135,7 +158,8 @@ export function railTime(
   if (tone === "q") return { text: "queued", tone: null };
   if (tone === "run") return { text: latestTime(pipeline, now), tone: "info" };
   const failedAt = runAt(latest);
-  if (tone === "err") return { text: failedAt === null ? "" : shortTime(failedAt, now), tone: "err" };
+  // A failure read is still said, in the second ink: it no longer asks (ux18).
+  if (tone === "err") return { text: failedAt === null ? "" : shortTime(failedAt, now), tone: asksAttention(pipeline, read) ? "err" : null };
   return null;
 }
 
@@ -168,20 +192,22 @@ export function pipelineHash(entityId: string): string {
 
 /**
  * The pipeline an address selects. A bare `#/builds` selects the first
- * failing one, else the first, as prototype-6 opens on a failure; with the
- * job's pipelines given (*This job*, #850), the job's first failing one, else
- * its first. An id nothing carries selects none.
+ * failing one that asks for attention (ux18: its failure unread), else the
+ * first failing, else the first, as prototype-6 opens on a failure; with the
+ * job's pipelines given (*This job*, #850), the same among the job's. An id
+ * nothing carries selects none.
  */
 export function pipelineOf(
   list: readonly PipelineRow[],
   rest: readonly string[],
   onJob: readonly PipelineRow[] = [],
+  read: ReadonlySet<string> | null = null,
 ): PipelineRow | null {
   const id = rest[0];
   if (id !== undefined && id !== "") return list.find((pipeline) => pipeline.entity_id === id) ?? null;
   // With *This job* on, the job's own failure first, else its first (#850).
-  if (onJob.length > 0) return onJob.find(isFailing) ?? onJob[0] ?? null;
-  return list.find(isFailing) ?? list[0] ?? null;
+  const among = onJob.length > 0 ? onJob : list;
+  return among.find((pipeline) => asksAttention(pipeline, read)) ?? among.find(isFailing) ?? among[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +238,10 @@ export interface Fold {
   folds: Fold[];
   /** Every pipeline beneath it, at any depth. */
   count: number;
-  /** How many of those are failing. */
+  /** How many of those are failing: the count drawn, a fact. */
   failing: number;
+  /** How many of those ask for attention (ux18: their failure unread): the count's err tone, and a fold opening. */
+  asking: number;
   /** How many of those are running. */
   running: number;
 }
@@ -238,7 +266,7 @@ function byName(a: { name: string }, b: { name: string }): number {
   return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 }
 
-function fold(node: Draft, parentKey: string): Fold {
+function fold(node: Draft, parentKey: string, read: ReadonlySet<string> | null): Fold {
   // A group holding nothing but one subgroup is drawn as one row with it
   // ("Payments › Payouts"), as deep as the chain of single children goes.
   let name = node.name;
@@ -250,7 +278,7 @@ function fold(node: Draft, parentKey: string): Fold {
   const key = `${parentKey}/${name}`;
   const folds = [...at.kids.values()]
     .sort(byName)
-    .map((kid) => fold(kid, key));
+    .map((kid) => fold(kid, key, read));
   return {
     name,
     key,
@@ -258,6 +286,7 @@ function fold(node: Draft, parentKey: string): Fold {
     folds,
     count: at.pipelines.length + folds.reduce((sum, f) => sum + f.count, 0),
     failing: at.pipelines.filter(isFailing).length + folds.reduce((sum, f) => sum + f.failing, 0),
+    asking: at.pipelines.filter((p) => asksAttention(p, read)).length + folds.reduce((sum, f) => sum + f.asking, 0),
     running: at.pipelines.filter(isRunning).length + folds.reduce((sum, f) => sum + f.running, 0),
   };
 }
@@ -268,7 +297,7 @@ function fold(node: Draft, parentKey: string): Fold {
  * {@link groupsOf}, folds by name, and in each fold its own pipelines before
  * its subgroups.
  */
-export function treeOf(list: readonly PipelineRow[]): SourceTree[] {
+export function treeOf(list: readonly PipelineRow[], read: ReadonlySet<string> | null = null): SourceTree[] {
   const roots = new Map<string, { name: string; root: Draft }>();
   for (const pipeline of list) {
     let tree = roots.get(pipeline.source_id);
@@ -293,7 +322,7 @@ export function treeOf(list: readonly PipelineRow[]): SourceTree[] {
     pipelines: root.pipelines,
     folds: [...root.kids.values()]
       .sort(byName)
-      .map((kid) => fold(kid, sourceId)),
+      .map((kid) => fold(kid, sourceId, read)),
   }));
 }
 
@@ -306,11 +335,12 @@ export function foldHolds(f: Fold, id: string | null): boolean {
 /**
  * Whether a fold is open (R-9.3): as the reader last left it this session;
  * else open while something narrows the list (words, a chip, *This job*), or
- * when it holds a failure or the selected pipeline; else closed.
+ * when it holds a failure that asks for attention (ux18: unread) or the
+ * selected pipeline; else closed.
  */
 export function foldOpen(remembered: boolean | undefined, f: Fold, selected: string | null, narrowed: boolean): boolean {
   if (remembered !== undefined) return remembered;
-  return narrowed || f.failing > 0 || foldHolds(f, selected);
+  return narrowed || f.asking > 0 || foldHolds(f, selected);
 }
 
 /**
@@ -401,6 +431,7 @@ const REPOS = "repos";
 export function repoTreeOf(
   list: readonly PipelineRow[],
   reposOf: (pipeline: PipelineRow) => readonly { id: string; title: string }[],
+  read: ReadonlySet<string> | null = null,
 ): SourceTree[] {
   const byRepo = new Map<string, { title: string; pipelines: PipelineRow[] }>();
   const none: PipelineRow[] = [];
@@ -419,6 +450,7 @@ export function repoTreeOf(
     folds: [],
     count: pipelines.length,
     failing: pipelines.filter(isFailing).length,
+    asking: pipelines.filter((p) => asksAttention(p, read)).length,
     running: pipelines.filter(isRunning).length,
   });
   const folds = [...byRepo.entries()]

@@ -15,6 +15,7 @@ import { forgetEchoes, echoesOn } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfRun from "./TfRun.svelte";
+import { runsRead } from "./runs-read.svelte";
 import { detailOf, pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import type { WriteAsk } from "../../shell/refused-writes";
 
@@ -32,6 +33,7 @@ afterEach(() => {
   page = null;
   target.remove();
   forgetEchoes();
+  runsRead.forget();
 });
 
 async function settle() {
@@ -1448,4 +1450,39 @@ test("a run's view knobas held draws at once under a line saying from when; a so
   await settle();
   expect(reads, "a failure reads nothing again").toBe(1);
   expect(line()).toBe(`As knobas read it 2 h ago. ${PIPELINE.source_name} did not answer: unreachable: no response headers`);
+});
+
+// -- Mark builds as read (ux18) -----------------------------------------------
+
+test("a failed run's header offers Mark as read and m toggles it; opening it reads nothing; a passed run offers neither", async () => {
+  const asked: string[] = [];
+  runsRead.ports = {
+    read: async () => [],
+    mark: async (runs) => (asked.push(`read ${runs.join()}`), runs),
+    unmark: async (runs) => (asked.push(`unread ${runs.join()}`), runs),
+  };
+  await runsRead.load();
+  draw();
+  await settle();
+  expect(asked, "opening the run marks nothing").toEqual([]);
+  expect(target.querySelector("h1")!.hasAttribute("data-failed")).toBe(true);
+  button("Mark as read")!.click();
+  flushSync();
+  expect(button("Mark as unread")).toBeDefined();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(button("Mark as read")).toBeDefined();
+  await settle();
+  expect(asked).toEqual(["read teamcity:build:1187", "unread teamcity:build:1187"]);
+  unmount(page!);
+  page = null;
+  draw("teamcity:build:1186");
+  await settle();
+  expect(button("Mark as read")).toBeUndefined();
+  expect(button("Mark as unread")).toBeUndefined();
+  const passed = new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true });
+  window.dispatchEvent(passed);
+  await settle();
+  expect(passed.defaultPrevented, "a passed run leaves m alone").toBe(false);
+  expect(asked).toHaveLength(2);
 });

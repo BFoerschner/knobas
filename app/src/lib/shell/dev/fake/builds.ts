@@ -108,6 +108,13 @@ const CONFIGURATIONS: Record<string, string[]> = {
 
 /** prototype-6's `S.pins`: pinned until the session unpins them (#849). */
 const pins = new Set(["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_Staging"].map((c) => `${SOURCE}:buildType:${c}`));
+/** The runs marked read (ux18): none at load, as on a database before `0098`. */
+const readRuns = new Set<string>();
+
+/** Whether a fixture run is a finished failure, the only kind that can be unread. */
+function failedFake(run: RunRow): boolean {
+  return run.finished !== null && run.state?.tone === "err";
+}
 
 /**
  * prototype-6's `realCfg[...].job`: the configurations each job's pull
@@ -790,6 +797,29 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
       return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk];
     },
+    // Mark builds as read (ux18): the fixture's own set, as `knobas.run_read` holds them.
+    read_runs: () => [...readRuns],
+    mark_runs_read: (args) => {
+      const runs = (args["runs"] as string[] | undefined) ?? [];
+      const pipelines = (args["pipelines"] as string[] | undefined) ?? [];
+      const all = history(new Date());
+      const failed = pipelines.flatMap((id) => [...(all.get(configOf(id)) ?? []), ...(bulkById.get(id)?.recent ?? [])].filter(failedFake).map((run) => run.entity_id));
+      const wrote = [...new Set([...runs, ...failed])].filter((id) => !readRuns.has(id));
+      for (const id of wrote) readRuns.add(id);
+      return wrote;
+    },
+    mark_runs_unread: (args) => {
+      const gone = ((args["runs"] as string[] | undefined) ?? []).filter((id) => readRuns.has(id));
+      for (const id of gone) readRuns.delete(id);
+      return gone;
+    },
+    unread_failing_builds: () => {
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk].filter((pipeline) => {
+        const latest = pipeline.recent[0];
+        return latest !== undefined && failedFake(latest) && !readRuns.has(latest.entity_id);
+      }).length;
+    },
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");
       if (args["pinned"] === true) pins.add(id);
@@ -841,4 +871,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(pins, presets);
+keepSeed(pins, presets, readRuns);

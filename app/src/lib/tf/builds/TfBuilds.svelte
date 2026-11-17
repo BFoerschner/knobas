@@ -29,7 +29,12 @@
     *Builds* header holds it while no pipeline is drawn), history chart, and the Runs, Parameters and Triggers
     tabs.
 
-  `#/builds` selects the first failing pipeline, else the first;
+  **Read and unread** (ux18, `docs/decisions/2026-11-17-mark-builds-as-read.md`): a pipeline's name and time are err
+  only while its newest failure is unread (`asksAttention`, the window's `runsRead`); read, its glyph stays red. A
+  fold counts every failing pipeline and tones the count err, and opens by itself, only for one that asks. *Mark all as
+  read* in the tools marks every failed run of the pipelines listed, with *Undo*.
+
+  `#/builds` selects the first failing pipeline that asks, else the first failing, else the first;
   `#/builds/<entity id>` selects that one. `#/build/<pipeline>/<run>` is the
   run page (#853, `TfRun.svelte`) with its pipeline selected on the left;
   `#/build/<run>` finds the run's pipeline and moves to that address.
@@ -95,6 +100,7 @@
   import TfRun from "./TfRun.svelte";
   import TfRunGlyph from "./TfRunGlyph.svelte";
   import { pipelineOfRun } from "./run";
+  import { runsRead } from "./runs-read.svelte";
   import { RUN_BRIDGE } from "./pipeline-ports";
   import {
     CHIPS,
@@ -102,7 +108,8 @@
     foldOpen,
     groupsOf,
     recentNewestFirst,
-    isFailing,
+    asksAttention,
+    unreadRun,
     keptPipelines,
     latestTime,
     listRows,
@@ -147,6 +154,11 @@
   } & RoleFrameProps = $props();
 
   const filter = sessionFilter("builds-pipelines");
+  /** The runs marked read (ux18), `null` until read: a failure asks for attention until its run is in it. */
+  const read = $derived(runsRead.read);
+  $effect(() => {
+    if (ready) void runsRead.load();
+  });
   const lastPipeline = sessionValue("builds-last-pipeline");
   const chips = $derived(filter.chips["state"] ?? []);
 
@@ -230,7 +242,7 @@
     // The pipeline a bare `#/builds` drew stays while it is listed: picked as the first failing, it stopped failing
     // when a sync brought a passing run, and the page swapped to another under the pointer (the still-rows pass).
     const drew = rest.length === 0 && bareDrew !== null && list.find((p) => p.entity_id === bareDrew);
-    return had || drew || pipelineOf(list, rest, jobsOwn);
+    return had || drew || pipelineOf(list, rest, jobsOwn, read);
   }
   /** What a bare `#/builds` drew, for as long as the page lives. */
   let bareDrew = $state<string | null>(null);
@@ -323,7 +335,18 @@
     for (const run of pipeline.recent) for (const repo of (run.commit_id === null ? null : commitRepos?.get(run.commit_id)) ?? []) seen.set(repo.id, repo);
     return [...seen.values()];
   }
-  const trees = $derived(byRepository ? (commitRepos === null ? [] : repoTreeOf(kept, reposOf)) : treeOf(kept));
+  const trees = $derived(byRepository ? (commitRepos === null ? [] : repoTreeOf(kept, reposOf, read)) : treeOf(kept, read));
+
+  /**
+   * *Mark all as read* (ux18): every failed run of the pipelines the rail lists now, its filter applied, so unfiltered
+   * every pipeline. The unread runs drawn turn at once; the backend marks the rest of each pipeline's history.
+   */
+  function markAllRead() {
+    void runsRead.markAll({
+      runs: kept.flatMap((p) => p.recent.filter((run) => unreadRun(run, read)).map((run) => run.entity_id)),
+      pipelines: kept.map((p) => p.entity_id),
+    });
+  }
   /** Whether anything narrows the list, which opens every fold. */
   const narrowed = $derived(chips.length > 0 || scope === "job");
   /**
@@ -486,14 +509,14 @@
 
 <!-- A pipeline's name, the prefix its fold's pipelines share drawn dim (`sharedPrefix`). -->
 {#snippet name(pipeline: PipelineRow, pre: string)}
-  <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}
+  <span class="tf-pi-nm" class:tf-bad={asksAttention(pipeline, read)}
     >{#if pre !== ""}<span class="tf-pi-pre">{pre}</span>{/if}{pipeline.name.slice(pre.length)}</span
   >
 {/snippet}
 
 {#snippet item(pipeline: PipelineRow, depth: number, key: string, pre: string, tag: string | null)}
   {@const glyph = railGlyph(pipeline)}
-  {@const time = railTime(pipeline)}
+  {@const time = railTime(pipeline, undefined, read)}
   {@const latest = latestTime(pipeline)}
   {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
   <a
@@ -516,7 +539,7 @@
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
     <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key}
       ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
-        >{#if f.failing > 0}<span class="tf-count tf-err">{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
+        >{#if f.failing > 0}<span class="tf-count" class:tf-err={f.asking > 0}>{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
             class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span
           >{/if}<span class="tf-fold-n">{f.count}<span class="tf-sr">{f.count === 1 ? " pipeline" : " pipelines"}</span></span></span
       ></summary
@@ -557,11 +580,20 @@
             <button type="button" aria-pressed={chips.includes(chip)} onclick={() => toggle(chip)}>{chip}</button>
           {/each}
         </div>
-        {#if rows.some((row) => row.kind === "fold")}
-          <div class="tf-trail">
+        <div class="tf-trail">
+          {#if rows.some((row) => row.kind === "fold")}
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => setAllFolds(!anyOpen)}>{anyOpen ? "Collapse all" : "Expand all"}</button>
-          </div>
-        {/if}
+          {/if}
+          {#if kept.length > 0}
+            <!-- ux18: what the rail lists now, its filter applied. -->
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost tf-readall"
+              title={narrowed ? "Every failed run of the pipelines listed" : "Every failed run of every pipeline"}
+              onclick={markAllRead}>Mark all as read</button
+            >
+          {/if}
+        </div>
       </div>
     </div>
     <div class="tf-pl-list" bind:this={list}>

@@ -471,6 +471,29 @@ export function setPipelinePinned(pipelineId: string, pinned: boolean): Promise<
   return invoke<boolean>("set_pipeline_pinned", { pipelineId, pinned });
 }
 
+/** The live runs marked read (ux18, `read_runs`): a finished failed run not among them is unread. */
+export function readRuns(): Promise<string[]> {
+  return invoke<string[]>("read_runs");
+}
+
+/**
+ * Mark runs read (ux18, `mark_runs_read`): `runs` by id, and every finished failed run of each of `pipelines`. Answers
+ * the ids it wrote, which a run already read is not among: what *Undo* hands back to {@link markRunsUnread}.
+ */
+export function markRunsRead(runs: string[], pipelines: string[] = []): Promise<string[]> {
+  return invoke<string[]>("mark_runs_read", { runs, pipelines });
+}
+
+/** Mark runs unread (ux18, `mark_runs_unread`), taking back each one's Inbox *Done*. Answers the ids that were read. */
+export function markRunsUnread(runs: string[]): Promise<string[]> {
+  return invoke<string[]>("mark_runs_unread", { runs });
+}
+
+/** The top bar's Builds count (ux18, `unread_failing_builds`): pipelines whose newest run failed and is unread. */
+export function unreadFailingBuilds(): Promise<number> {
+  return invoke<number>("unread_failing_builds");
+}
+
 /** The pipelines on the job of a ticket, by entity id (#850). */
 export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
   return invoke<JobPipeline[]>("job_pipelines", { entityId });

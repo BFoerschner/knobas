@@ -43,6 +43,13 @@ import {
 import type { SourceSyncStatus } from "../ipc/sources";
 import { coalesce } from "../shell/coalesce";
 import { keyOf } from "../time/format";
+import { runsRead } from "../tf/builds/runs-read.svelte";
+
+/** The run a failed build's key names (`failed_build:<run id>`) is read now: Builds draws it so at once. */
+function noteRunRead(itemKey: string): void {
+  const prefix = "failed_build:";
+  if (itemKey.startsWith(prefix) && itemKey.length > prefix.length) runsRead.note(itemKey.slice(prefix.length));
+}
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
 /** An alert or item that was resolved at its source before a press reached it. The Inbox, Monitors and the launcher say the same. */
@@ -338,7 +345,8 @@ export function createInbox(ports?: InboxPorts): Inbox {
         () => io.snoozeInboxItem(itemKey, until.toISOString()),
         refused,
       ),
-    complete: (itemKey, refused) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey), refused),
+    // *Done* on a failed build reads its run (ux18): the backend wrote the mark with the answer, and Builds follows.
+    complete: (itemKey, refused) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey).then(() => noteRunRead(itemKey)), refused),
     ack: (itemKey, refused) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey)), refused),
     unack: (itemKey, refused) => act(() => {}, () => io.unackAlert(subjectOf(itemKey)), refused),
     start() {

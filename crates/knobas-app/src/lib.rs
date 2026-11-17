@@ -849,6 +849,12 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::docs_choices,
         commands::entity::set_docs_home,
         commands::entity::set_docs_space_hidden,
+        // Mark builds as read (PR #2479, ux18, `0098`), appended at the foot
+        // (§10.8).
+        commands::entity::read_runs,
+        commands::entity::mark_runs_read,
+        commands::entity::mark_runs_unread,
+        commands::entity::unread_failing_builds,
     ]
 }
 

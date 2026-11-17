@@ -62,6 +62,10 @@
 .tf-runtbl tr.tf-run-new > td { animation: tf-run-arrive 2.4s ease-out 1; }
 @keyframes tf-run-arrive { from { background-color: var(--info-bg); } to { background-color: transparent; } }
 @media (prefers-reduced-motion: reduce) { .tf-runtbl tr.tf-run-new > td { animation: none; } }
+/* An unread failure (ux18, design system *Read and unread*): an err dot hung in the number cell's gutter, so marking it
+   read or unread moves nothing on the row. The number keeps its weight: every run's number is bold already. */
+.tf-runs .tf-run-no { position: relative; padding-left: 18px; }
+.tf-runtbl .tf-unread { position: absolute; left: 7px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--err); }
 .tf-runs.tf-bsettings { padding-top: 16px; }
 .tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
 .tf-bsettings > .tf-tbl + p { margin: 12px 0 0; }

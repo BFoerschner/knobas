@@ -29,8 +29,11 @@ export type Thing =
   | { kind: "monitor"; id: string; hash: string; alerting?: boolean; ack?: () => void }
   /** A commit; `repoId` when the address names its repository. */
   | { kind: "commit"; id: string; repoId: string | null; hash: string }
-  /** A run of a pipeline; `pipelineId` when the address names it. */
-  | { kind: "run"; id: string; pipelineId: string | null; hash: string }
+  /**
+   * A run of a pipeline; `pipelineId` when the address names it. `failed` where the page draws it as a finished failed
+   * run (`data-failed` on its row or heading), which can be marked read or unread (ux18).
+   */
+  | { kind: "run"; id: string; pipelineId: string | null; hash: string; failed?: boolean }
   /** A file or a folder of a repository's tree, by its path in the repository. */
   | { kind: "file" | "folder"; repoId: string; path: string }
   /** A line of a file, from 1. */
@@ -172,6 +175,15 @@ export function isEditable(node: Element | null): boolean {
  * `hash` is the page's address, `origin` the app's.
  */
 export function thingAt(node: Element | null, hash: string = location.hash, origin: string = location.origin): Found | null {
+  const found = thingAtOnly(node, hash, origin);
+  // A run the page draws as failed says so where it stands (ux18): its row or its heading carries `data-failed`.
+  if (found !== null && found.thing.kind === "run" && found.node.closest("[data-failed]") !== null) {
+    return { ...found, thing: { ...found.thing, failed: true } };
+  }
+  return found;
+}
+
+function thingAtOnly(node: Element | null, hash: string, origin: string): Found | null {
   for (let at: Element | null = node; at !== null; at = at.parentElement) {
     const tag = TAGS.get(at);
     if (tag?.claims) {

@@ -64,7 +64,10 @@
   import { commitHash, fileHash } from "../repo/repo";
   import { fitLabel } from "../time/day-view";
   import { RunHold } from "./run-hold.svelte";
-  import { pipelineHash, runTone, stateWord } from "./builds";
+  import { failedRun, pipelineHash, runTone, stateWord } from "./builds";
+  import { runsRead } from "./runs-read.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { inTextField } from "../../shell/keys";
   import {
     chipTone,
     defaultBranch,
@@ -401,6 +404,24 @@
   });
 
   const run = $derived(held?.find((r) => r.entity_id === runId) ?? null);
+
+  /**
+   * `m` on the run page (ux18): *Mark as read* or *Mark as unread* on this run, when it finished failed. Opening it
+   * reads nothing: only a mark does. Not in a field, a dialog, or a page a keep-alive holds hidden.
+   */
+  const runShown = pageVisible();
+  onMount(() => {
+    const onkey = (event: KeyboardEvent) => {
+      if (event.key !== "m" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.defaultPrevented) return;
+      if (!runShown() || run === null || !failedRun(run)) return;
+      const at = document.activeElement;
+      if (at instanceof HTMLElement && (inTextField(at) || at.closest(".tf-dialog, select, [role='menu']") !== null)) return;
+      event.preventDefault();
+      void runsRead.toggle(run);
+    };
+    window.addEventListener("keydown", onkey);
+    return () => window.removeEventListener("keydown", onkey);
+  });
   const previous = $derived(run === null || held === null ? null : previousOnBranch(held, run));
   const mainBranch = $derived(defaultBranch(settings));
   const startedBy = $derived(run === null ? null : triggerLabel(run) || null);
@@ -546,7 +567,7 @@
   {@const at = run.started ?? run.updated_at}
   <header class="tf-fhead tf-bhead tf-holdsbelow" class:tf-unread={!drawnHead.shown}>
     <div>
-      <h1>
+      <h1 data-failed={failedRun(run) ? "" : undefined}>
         {pipeline.name} #{run.number ?? ""}
         {#if run.state !== null}<TfStateChip text={chipWord(run)} class={`tf-run-chip ${chipTone(run)}`} />{/if}
       </h1>
@@ -574,6 +595,12 @@
         >
       {:else}
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
+      {/if}
+      {#if failedRun(run)}
+        {@const unread = runsRead.unread(run)}
+        <button type="button" class="tf-btn tf-ghost" title={`${unread ? "Mark as read" : "Mark as unread"} (M)`} onclick={() => void runsRead.toggle(run)}
+          >{unread ? "Mark as read" : "Mark as unread"}</button
+        >
       {/if}
       {#if run.web_url !== null}
         <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>

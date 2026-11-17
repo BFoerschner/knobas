@@ -1,19 +1,6 @@
 import { expect, test } from "vitest";
 
-import { createBadges, downIn, failingIn, type BadgePorts } from "./badges.svelte";
-
-test("failing configurations are the err lines of the Builds tile's tally", () => {
-  expect(
-    failingIn({
-      tally: [
-        { kind: "build", tone: "err", count: 2 },
-        { kind: "build", tone: "ok", count: 5 },
-        { kind: "build", tone: "info", count: 1 },
-      ],
-    }),
-  ).toBe(2);
-  expect(failingIn({ tally: null })).toBe(0);
-});
+import { createBadges, downIn, type BadgePorts } from "./badges.svelte";
 
 test("a paused monitor is not down", () => {
   expect(

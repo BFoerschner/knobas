@@ -20,6 +20,7 @@ import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
 import { detailOf, pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { pageContext } from "../kept-pages.svelte";
+import { runsRead } from "./runs-read.svelte";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -35,6 +36,7 @@ afterEach(() => {
   page = null;
   target.remove();
   forgetEchoes();
+  runsRead.forget();
 });
 
 async function settle() {
@@ -1438,4 +1440,112 @@ test("This job with no run on its branches says so, and offers the way back to a
   await settle();
   expect(target.querySelector(".tf-runs .tf-empty")).toBeNull();
   expect(button("Show all runs")).toBeUndefined();
+});
+
+// -- Mark builds as read (ux18) -----------------------------------------------
+
+/** The window's marks over a fake backend: `marked` what it holds, `calls` what it was asked. */
+function fakeMarks(held: string[] = []) {
+  const marked = new Set(held);
+  const calls: { mark: [string[], string[]][]; unmark: string[][] } = { mark: [], unmark: [] };
+  runsRead.ports = {
+    read: async () => [...marked],
+    mark: async (runs, pipelines) => {
+      calls.mark.push([runs, pipelines]);
+      const wrote = [...runs, ...(pipelines.length > 0 ? ["teamcity:build:900"] : [])].filter((id) => !marked.has(id));
+      for (const id of wrote) marked.add(id);
+      return wrote;
+    },
+    unmark: async (runs) => {
+      calls.unmark.push(runs);
+      for (const id of runs) marked.delete(id);
+      return runs;
+    },
+  };
+  return calls;
+}
+
+const rowOf = (no: number) => target.querySelector<HTMLTableRowElement>(`tr[data-run="teamcity:build:${no}"]`)!;
+const dotOf = (no: number) => rowOf(no).querySelector(".tf-unread");
+
+test("an unread failed run carries a dot hung in its number cell; a passed one and a read one carry none", async () => {
+  fakeMarks(["teamcity:build:1185"]);
+  await runsRead.load();
+  draw();
+  await settle();
+  expect(dotOf(1187)?.textContent).toBe("Unread");
+  expect(dotOf(1186)).toBeNull();
+  expect(dotOf(1185), "read").toBeNull();
+  expect(rowOf(1187).hasAttribute("data-failed")).toBe(true);
+  expect(rowOf(1186).hasAttribute("data-failed")).toBe(false);
+});
+
+test("the row's Mark as read turns it at once and back with Mark as unread; a passed run offers neither", async () => {
+  const calls = fakeMarks();
+  await runsRead.load();
+  draw();
+  await settle();
+  const inRow = (no: number, words: string) =>
+    [...rowOf(no).querySelectorAll<HTMLButtonElement>(".tf-rowacts button")].find((b) => b.textContent?.trim() === words);
+  expect(inRow(1186, "Mark as read")).toBeUndefined();
+  expect(inRow(1186, "Mark as unread")).toBeUndefined();
+  inRow(1187, "Mark as read")!.click();
+  flushSync();
+  expect(dotOf(1187), "drawn before the write answers").toBeNull();
+  await settle();
+  expect(calls.mark).toEqual([[["teamcity:build:1187"], []]]);
+  inRow(1187, "Mark as unread")!.click();
+  flushSync();
+  expect(dotOf(1187)?.textContent).toBe("Unread");
+  await settle();
+  expect(calls.unmark).toEqual([["teamcity:build:1187"]]);
+});
+
+test("m on a failed run's row marks it read and again unread; on a passed run or outside the rows it does nothing", async () => {
+  const calls = fakeMarks();
+  await runsRead.load();
+  draw();
+  await settle();
+  const press = (at: Element) => at.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  const link = rowOf(1187).querySelector<HTMLAnchorElement>(".tf-run-no a")!;
+  link.focus();
+  press(link);
+  flushSync();
+  expect(dotOf(1187)).toBeNull();
+  press(link);
+  flushSync();
+  expect(dotOf(1187)?.textContent).toBe("Unread");
+  press(rowOf(1186).querySelector(".tf-run-no a")!);
+  const field = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
+  press(field);
+  await settle();
+  expect(calls.mark).toHaveLength(1);
+  expect(calls.unmark).toHaveLength(1);
+});
+
+test("the header's Mark all as read turns the drawn failures at once and asks the backend for the pipeline's history", async () => {
+  const calls = fakeMarks();
+  await runsRead.load();
+  draw();
+  await settle();
+  button("Mark all as read")!.click();
+  flushSync();
+  expect(dotOf(1187)).toBeNull();
+  expect(dotOf(1185)).toBeNull();
+  await settle();
+  expect(calls.mark).toEqual([[["teamcity:build:1187", "teamcity:build:1185"], [PIPELINE.entity_id]]]);
+  expect(toasts.items.some((t) => t.text === "Marked 3 runs as read" && t.action?.label === "Undo")).toBe(true);
+});
+
+test("a new failure a read brings is unread, beside a read one", async () => {
+  fakeMarks(["teamcity:build:1187"]);
+  await runsRead.load();
+  const drawn = draw();
+  await settle();
+  expect(dotOf(1187)).toBeNull();
+  drawn.next = [run(1188, "err", today(0, 30)), ...RUNS];
+  drawn.sync?.({ source_id: "teamcity", running: false, last_run: null, next_run_at: null });
+  await settle();
+  expect(dotOf(1188)?.textContent).toBe("Unread");
+  expect(dotOf(1187)).toBeNull();
 });

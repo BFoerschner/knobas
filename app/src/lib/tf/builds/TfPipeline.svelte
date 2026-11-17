@@ -18,6 +18,9 @@
     (each default with the kind its spec gives and *Change…* through the
     write queue, a select for a fixed list), *Triggers*.
 
+  **Read and unread** (ux18): an unread failed run carries a dot hung in its number cell; its row actions and `m` mark
+  it read or unread, and the header's *Mark all as read* marks every failed run of the pipeline, with *Undo*.
+
   *Run…* and *Run again…* open the Run… dialog (#852, `TfRunDialog`). *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
   *queued* at once, never as started (R-9.8).
 
@@ -59,7 +62,8 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { newestFirst, testsWords, runHash, runTone, shortTime } from "./builds";
+  import { failedRun, newestFirst, testsWords, runHash, runTone, shortTime } from "./builds";
+  import { runsRead } from "./runs-read.svelte";
   import { counted } from "../counted";
   import { pageVisible } from "../kept-pages.svelte";
   import { RunHold } from "./run-hold.svelte";
@@ -548,6 +552,24 @@
   /** A run started here and still in the write queue: a press on its row opens the queue, where it is (F-352). Once sent, the source holds it and there is nothing to open until a sync reads it. */
   const inQueue = (run: RunRow): boolean => isStartedHere(run) && run.state?.text !== "sent";
 
+  /**
+   * `m` on a run row (ux18): *Mark as read* or *Mark as unread* on the finished failed run whose row holds focus (its
+   * number, *Log*, a button). The rows hold no field; a run that cannot be unread takes nothing.
+   */
+  function runKeys(event: KeyboardEvent) {
+    if (event.key !== "m" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
+    const runId = event.target instanceof Element ? event.target.closest<HTMLElement>("tr[data-run]")?.dataset["run"] : undefined;
+    const run = runId === undefined ? undefined : heldRuns.rows.find((one) => one.entity_id === runId);
+    if (run === undefined || !failedRun(run)) return;
+    event.preventDefault();
+    void runsRead.toggle(run);
+  }
+
+  /** *Mark all as read* on this pipeline (ux18): the unread runs drawn at once, and its whole history by the backend. */
+  function markAllRead() {
+    void runsRead.markAll({ runs: (all ?? []).filter((run) => runsRead.unread(run)).map((run) => run.entity_id), pipelines: [id] });
+  }
+
   function openRow(event: MouseEvent, run: RunRow) {
     if (inQueue(run)) {
       if (!(event.target as Element | null)?.closest("a, button, input, select, label")) openWriteQueue();
@@ -656,6 +678,7 @@
         ><span class="tf-keepw" data-keep="Run on {fallback ?? 'the default branch'}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}{/if}</span></span></button
       >
     {/if}
+    <button type="button" class="tf-btn tf-ghost" title="Every failed run of this pipeline, older ones too" onclick={markAllRead}>Mark all as read</button>
     {#if onpin !== undefined}
       <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
     {/if}
@@ -689,7 +712,7 @@
       >
         {#each history as run, at (run.entity_id)}
           {@const h = barHeight(run, max)}
-          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${stateWord(resultWord(run))}`}>
+          <a href={runHash(id, run.entity_id)} data-failed={failedRun(run) ? "" : undefined} aria-label={`Run ${run.number ?? "queued"}, ${stateWord(resultWord(run))}`}>
             <title>{barTip(run)}</title>
             <rect class={`tf-bar tf-run-${runTone(run)}`} x={at * (BAR_STEP)} y={CHART_HEIGHT - h} width={BAR_WIDTH} height={h} rx="2" />
           </a>
@@ -729,7 +752,7 @@
     <FilterBar {config} {filter} shown={all === null ? null : heldRuns.rows.length} total={all?.length ?? null} held={heldBar} />
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="tf-runs" bind:this={runsBox} onpointerenter={() => (pointerOn = true)} onpointerleave={() => (pointerOn = false)}>
+  <div class="tf-runs" bind:this={runsBox} onpointerenter={() => (pointerOn = true)} onpointerleave={() => (pointerOn = false)} onkeydown={runKeys}>
     {#if heldRuns.waiting > 0}
       <!-- Over the list's top, in no room of its own: it appearing moves no run under the pointer. -->
       <div class="tf-newruns"><button type="button" title="Started since the list drew. They wait here while the pointer is on the runs, so nothing moves under it." onclick={showNew}>Show {counted(heldRuns.waiting, "new run", "new runs")}</button></div>
@@ -760,8 +783,12 @@
         <TfWindowedRows rows={day.runs} key={(run) => run.entity_id} estimate={RUN_ROW_PX} colspan={7} overscan={150}>
           {#snippet row(run, attach)}
             {@const tone = runTone(run)}
-            <tr {@attach attach} class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
+            {@const failure = !isStartedHere(run) && failedRun(run)}
+            {@const unread = failure && runsRead.unread(run)}
+            <tr {@attach attach} data-run={run.entity_id} data-failed={failure ? "" : undefined} class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
+                <!-- Unread (ux18): hung in the cell's gutter, so marking it moves nothing. -->
+                {#if unread}<span class="tf-unread" title="Unread. M marks it read."><span class="tf-sr">Unread</span></span>{/if}
                 {#if isStartedHere(run)}
                   <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
                   <TfStateChip text={stateWord(run.state?.text ?? "queued")} class="tf-info" />
@@ -798,6 +825,11 @@
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
                   <span class="tf-rowend"><span class="tf-rowacts">
+                    {#if failure}
+                      <button type="button" class="tf-btn tf-sm tf-ghost" title={`${unread ? "Mark as read" : "Mark as unread"} (M)`} onclick={() => void runsRead.toggle(run)}
+                        >{unread ? "Mark as read" : "Mark as unread"}</button
+                      >
+                    {/if}
                     <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
                     {#if run.finished !== null}
                       <button

@@ -11,6 +11,8 @@ import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import * as entityIpc from "../../ipc/entity";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
+import { runsRead } from "./runs-read.svelte";
+import { toasts } from "../../shell/toasts.svelte";
 
 // Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
 vi.mock("../../ipc/sources", async (original) => ({
@@ -40,6 +42,7 @@ afterEach(() => {
   if (page) unmount(page);
   page = null;
   target.remove();
+  runsRead.forget();
 });
 
 async function settle() {
@@ -740,4 +743,54 @@ test("By repository folds the pipelines by the repositories their runs built, th
   expect([...target.querySelectorAll(".tf-pl h3")].map((h) => h.textContent)).toEqual(["By repository"]);
   const folds = [...target.querySelectorAll(".tf-pl-fold > summary")].map((s) => s.querySelector(".tf-fold-nm")?.textContent);
   expect(folds).toEqual(["tidewater/ledger-api", "tidewater/payout-service", "No repository"]);
+});
+
+// -- Mark builds as read (ux18) -----------------------------------------------
+
+function marks(held: string[]) {
+  const asked: [string[], string[]][] = [];
+  const marked = new Set(held);
+  runsRead.ports = {
+    read: async () => [...marked],
+    mark: async (runs, pipelines) => {
+      asked.push([runs, pipelines]);
+      const wrote = runs.filter((id) => !marked.has(id));
+      for (const id of wrote) marked.add(id);
+      return wrote;
+    },
+    unmark: async (runs) => runs,
+  };
+  return asked;
+}
+
+const nameOf = (words: string) => rows().find((row) => row.querySelector(".tf-pi-nm")?.textContent === words)!;
+
+test("a failing pipeline's name is err while its latest failure is unread; read, the glyph stays red and the name is ink", async () => {
+  marks([]);
+  draw(["teamcity:buildType:Payout_Lint"]);
+  await settle();
+  const tests = () => nameOf("Payout_IntegrationTests");
+  expect(tests().querySelector(".tf-pi-nm")!.classList.contains("tf-bad")).toBe(true);
+  expect(tests().querySelector(".tf-pi-when")!.classList.contains("tf-err")).toBe(true);
+  void runsRead.markRead(["teamcity:build:1187"]);
+  flushSync();
+  expect(tests().querySelector(".tf-pi-nm")!.classList.contains("tf-bad")).toBe(false);
+  expect(tests().querySelector(".tf-pi-when")!.classList.contains("tf-err")).toBe(false);
+  expect(tests().querySelector(".tf-pi-when")!.textContent, "the time is still said").not.toBe("");
+  expect(tests().title).toContain("Failed");
+});
+
+test("the rail's Mark all as read acts on the pipelines it lists: their unread failures drawn, every one asked of the backend", async () => {
+  const asked = marks([]);
+  draw(["teamcity:buildType:Payout_Lint"]);
+  await settle();
+  const press = [...target.querySelectorAll<HTMLButtonElement>(".tf-pl-tools button")].find((b) => b.textContent?.trim() === "Mark all as read")!;
+  press.click();
+  flushSync();
+  expect(nameOf("Payout_IntegrationTests").querySelector(".tf-pi-nm")!.classList.contains("tf-bad")).toBe(false);
+  await settle();
+  const [runs, pipelines] = asked[0]!;
+  expect(runs).toEqual(["teamcity:build:1187", "teamcity:build:1185", "teamcity:build:1183", "teamcity:build:1181", "teamcity:build:1179", "teamcity:build:1177", "teamcity:build:1175"]);
+  expect(pipelines).toEqual(LIST.map((p) => p.entity_id));
+  expect(toasts.items.some((t) => t.text === "Marked 7 runs as read")).toBe(true);
 });
