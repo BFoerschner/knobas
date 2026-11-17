@@ -1,4 +1,4 @@
--- 0096_a_view_that_opens_with_every_ticket.sql -- *Show every ticket when
+-- 0097_a_view_that_opens_with_every_ticket.sql -- *Show every ticket when
 -- the view opens* on a ticket view (ux18, PR #2479;
 -- `docs/decisions/2026-11-17-a-view-that-opens-with-every-ticket.md`).
 --

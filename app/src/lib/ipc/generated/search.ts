@@ -751,7 +751,7 @@ columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, lis
  */
 list_sort: ListSort | null, 
 /**
- * *Show every ticket when the view opens* (ux18, migration `0096`): no
+ * *Show every ticket when the view opens* (ux18, migration `0097`): no
  * column, lane or list cut. The reader's, a view from a ticket system's
  * too.
  */
@@ -829,7 +829,7 @@ columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, lis
  */
 list_sort: ListSort | null, 
 /**
- * *Show every ticket when the view opens* (ux18, migration `0096`): no
+ * *Show every ticket when the view opens* (ux18, migration `0097`): no
  * column, lane or list cut. The reader's, a view from a ticket system's
  * too.
  */

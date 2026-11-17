@@ -189,7 +189,7 @@ pub struct TicketView {
     pub list_columns: Vec<String>,
     /// `None` is newest first.
     pub list_sort: Option<ListSort>,
-    /// *Show every ticket when the view opens* (ux18, migration `0096`): no
+    /// *Show every ticket when the view opens* (ux18, migration `0097`): no
     /// column, lane or list cut. The reader's, a view from a ticket system's
     /// too.
     pub show_all: bool,
