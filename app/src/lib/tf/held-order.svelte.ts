@@ -48,7 +48,8 @@ export class HeldOrder<T> {
    *
    * `byTag`: the groups draw side by side, as a board's columns do, so a new row that sorts after every drawn row of its
    * own group joins that group's end and moves nothing, wherever the other groups' rows sort (a board that shows every
-   * ticket, ux18: its whole read fills each column below the fifty it drew first).
+   * ticket, ux18: its whole read fills each column below the fifty it drew first). A row of a group with no drawn row
+   * takes the stacked rule: a new column's card waits behind *Show N new* with its column.
    */
   constructor(
     key: (row: T) => string,
@@ -92,7 +93,11 @@ export class HeldOrder<T> {
       lastHeld = at;
       if (this.#byTag) lastOf.set(place.tag, at);
     });
-    const joinsEnd = (row: T, at: number) => (this.#byTag ? at > (lastOf.get(this.#tag(row)) ?? -1) : at > lastHeld);
+    // A group with no drawn row is new to the list (a board's new column): it waits as any row would, so it is counted.
+    const joinsEnd = (row: T, at: number) => {
+      const last = this.#byTag ? lastOf.get(this.#tag(row)) : undefined;
+      return last !== undefined ? at > last : at > lastHeld;
+    };
     let waiting = 0;
     let previousRank = -1;
     let reordered = false;

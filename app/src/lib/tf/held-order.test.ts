@@ -104,3 +104,17 @@ test("groups side by side (byTag): a row new at its own group's foot joins it, w
   stacked.place([...at("todo", "a1", "a2"), ...at("done", "d1")], "open");
   expect(stacked.place([...at("todo", "a1", "a2", "a3"), ...at("done", "d1")], "open").waiting).toBe(1);
 });
+
+test("byTag: a row of a group with no drawn row waits, counted, as a new board column's card does (ux18)", () => {
+  type Card = { id: string; column: string };
+  const at = (column: string, ...ids: string[]) => ids.map((id) => ({ id, column }));
+  const board = new HeldOrder<Card>(({ id }) => id, ({ column }) => column, { byTag: true });
+  board.place([...at("todo", "a1", "a2"), ...at("done", "d1")], "open");
+  // A sync brings a status of its own, between the drawn columns: its card is counted behind *Show N new*.
+  const synced = board.place([...at("todo", "a1", "a2"), ...at("new", "n1"), ...at("done", "d1")], "open");
+  expect(synced.waiting).toBe(1);
+  expect(synced.rows.map(({ id }) => id)).toEqual(["a1", "a2", "d1"]);
+  // At the end of the board it joins, as the stacked rule lets it.
+  const last = board.place([...at("todo", "a1", "a2"), ...at("done", "d1"), ...at("later", "l1")], "open");
+  expect(last.waiting).toBe(0);
+});
