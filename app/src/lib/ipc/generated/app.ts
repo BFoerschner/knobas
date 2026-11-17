@@ -218,7 +218,26 @@ family: string,
  * `isFixedPitch`), or draws `i`, `M`, `0`, `.` and a space at one
  * advance: the picker lists these first.
  */
-monospace: boolean, };
+monospace: boolean, 
+/**
+ * The family's upright regular face is classed as a serif face (its
+ * `OS/2` table's family class, else its PANOSE serif style): *Reading*
+ * lists these first (Settings › Fonts, 2026-11-17).
+ */
+serif: boolean, 
+/**
+ * The family can draw narrow: a face of it has a `wdth` variation axis,
+ * or is a condensed member (its `OS/2` width class under normal), so
+ * `font-stretch` narrows it as `"wdth"` narrows Archivo. *Headings* lists
+ * these first and marks the rest "normal width only".
+ */
+narrows: boolean, 
+/**
+ * The upright regular face's x-height over its em (Archivo's is about
+ * .52), for *Even out*: the size that draws its lower case as tall as
+ * the bundled face's. `None` when the face does not say.
+ */
+x_height: number | null, };
 
 /**
  * One named pipeline: steps a default per file pattern names by id.
