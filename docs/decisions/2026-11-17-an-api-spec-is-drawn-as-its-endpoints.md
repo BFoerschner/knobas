@@ -92,9 +92,19 @@ servers. Its bounds, as ruled:
 - **Nothing at start-up.** The view, its CSS and its port are one chunk (38 KB, 12 KB gzipped, CSS 8 KB) loaded with the
   first spec opened (`{#await import(...)}` in `TfRepoFiles`); the worker (55 KB with js-yaml) starts with it. What
   start-up holds is the sniff (1.3 KB) and the registry's entry. The fake's fixtures are in the development build only.
+- **A fast YAML reader before js-yaml** (`render/yaml-fast.ts`). js-yaml took 45 ms of the 5,000-operation spec's open
+  (2 MB; `JSON.parse` reads the same document in 8). The reader takes the block YAML spec tools write (mappings,
+  sequences, one-line scalars and flows, literal and folded block scalars) in about half that, and answers exactly what
+  js-yaml answers or nothing: anchors, tags, a scalar or a flow over several lines, an indentation indicator, a tab in
+  an indent, a key YAML reads as a number, a second document, and every broken file go to js-yaml, which says where it
+  breaks. Its tests hold it to js-yaml's answers on every fixture and shape. The worker keeps the last four specs
+  parsed, so going back to one does not parse it again.
 - **Off the main thread.** The worker parses the spec and keeps it; the page holds an index (a row per operation, the
   tags, the schemas' names) and asks for each operation, ref and path item when it opens. Where a worker cannot start,
   the same code runs on the page's thread, and a session whose worker died is taken over there with its files.
+- **Little on the page's thread.** The PC's profile of the big open was mostly signal reads: each of 5,000 rows asked
+  the reactive sets of what is open. The rows read plain copies taken once a pass, and the filter's haystacks are built
+  at its first word and kept for the spec.
 - **Windowed.** The endpoint list is one `Windowed` list of group heads, rows and opened details, so 5,000 operations
   draw what the screen shows. A row is one line at a fixed height; an opened operation is measured once drawn.
 - **Nothing moves once drawn.** An operation opens once its schemas' refs inside the file are resolved (the worker
@@ -103,5 +113,23 @@ servers. Its bounds, as ruled:
 
 ## Timings
 
-Measured with `testenv/perf/openapi.mjs` (the built app under `?fake-ipc&fake-openapi`, a headless Chrome, CPU
-throttled), five runs a case, the median against the line. See the PR's report for the numbers of this pass.
+`testenv/perf/openapi.mjs` (the built app under `?fake-ipc&fake-openapi`, headless Chrome, the CPU throttled), five
+runs a case, the median against the line, on Björn's PC (a headless Chrome on its WSL side, driven over a tunnel; the
+PC's whole lines: a page 100 / 200 / 300 ms, a press 100 / 100 / 200 ms). In ms at 1x / 4x / 6x:
+
+| Case | 1440 x 868 @ 1 | 2560 x 1440 @ 1.25 |
+|---|---|---|
+| A small spec opened from the README | 33 / 51 / 67 | 34 / 47 / 67 |
+| A small spec, the page's first visit (from the Inbox) | 32 / 59 / 77 | 31 / 56 / 78 |
+| The 5,000-operation spec opened from the README | 49 / 165 / 224 | 56 / 176 / 243 |
+| A filter key on 5,000 operations | 10 / 40 / 62 | 12 / 49 / 69 |
+| An operation opened | 8 / 15 / 22 | 25 / 16 / 24 |
+| A `$ref` followed to its schema | 10 / 14 / 19 | 6 / 15 / 21 |
+| An operation opened on the 5,000 | 10 / 26 / 40 | 28 / 27 / 41 |
+| Scrolling the 5,000 (fps, no task over 60 ms) | 61 / 61 / 61 | 61 / 61 / 59 |
+
+Before the fast reader and the plain sets, the 5,000-operation open was 82 / 179 / 281 ms on the Mac (over its
+half-lines) and 59 / 216 / 316 on the PC. Code's other files open as before (PC, 1440, before / after): a Markdown
+README 56 / 57, 45 / 43, 68 / 66; `Cargo.toml` 20 / 27, 30 / 30, 46 / 40. The README's second line grows about 15 px
+some 50 ms after it draws, on both builds: not this change, and left to the app-wide movement audit. Nothing the view
+drew moved after it drew in any case.
