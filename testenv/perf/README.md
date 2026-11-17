@@ -413,8 +413,8 @@ each throttle and size, from the press to the frame that shows the answer:
   while idle); **swap-back**: *Into* back to the pair the moves started on.
 - **open-diff**: *Open as diff*, until the diff page lists the branch's file and draws a card's lines; `reads` counts
   its range reads.
-- **pr-jump**: in the pull request's *Files changed*, the middle file (the last is past the whole diff's 50,000-line
-  ceiling); **pr-jump-small**: a file of one line and the pure rename among the big files before it, against the same
+- **pr-jump**: in the pull request's *Files changed*, file 1,900 (the whole diff stops at its 50,000-line ceiling,
+  which since the small files' mix falls short of the middle file); **pr-jump-small**: a file of one line and the pure rename among the big files before it, against the same
   lines as `jump-small`.
 
 The page holds a picked file where it landed until the reader touches it (`TfDiffView`'s `landed`): a probe that moves the

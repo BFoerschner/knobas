@@ -19,15 +19,15 @@
 // - **jump-small** (the compare-jump pass, 2026-11-17): each small file among big ones (`big-compare.mjs`'s `MIX`: a
 //   line, two, one added, a pure rename, a binary file, a deleted one, half way down and at the list's end), picked the
 //   same way; `offBand` is how far its head stands from the band's foot once settled (0 where the scroll's end stops it
-//   lower), `drift` how far it moved after it landed, and `marked` 0 when the rail and the card mark it, else 1.
+//   lower: less room left than it would take to bring the head up), `drift` how far it moved after it landed, and `marked` 0 when the rail and the card mark it, else 1.
 // - **top**: *Back to top* in the diff's band, from the last file; `landed` is the frame *From* is on screen.
 // - **swap-from**, **swap-into**, **swap-from-2**, **swap-back**: *From* to `files-3000`, *Into* to `base-b`, *From* back
 //   to the long-lived branch (three pairs never drawn), then *Into* back to `main` (the pair the moves started on);
 //   `landed` is the frame the branch's own file is in the list with the count line, `longest` the longest task.
 // - **open-diff**: *Open as diff*; `landed` the frame the diff page lists the branch's file, `lines` its first card's
 //   lines; `reads` the range reads it made (`entity_range_files`, `entity_range_diff`, `entity_range_file`).
-// - **pr-jump**: in the pull request's *Files changed*, the middle file picked in its list (the last is past the whole
-//   diff's ceiling of 50,000 lines).
+// - **pr-jump**: in the pull request's *Files changed*, file 1,900 picked in its list (the whole diff stops at its ceiling
+//   of 50,000 lines, which since the compare-jump pass's mix falls short of the middle file).
 import { readFileSync, writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 import { MIX_LAST, MIX_SMALL } from "./big-compare.mjs";
@@ -75,6 +75,8 @@ const pathOf = (i) => `pkg/m${String(Math.floor(i / 100)).padStart(2, "0")}/file
 const MID = pathOf(2100);
 // The compare's last file: the mix at the list's end (`big-compare.mjs`'s `MIX`) since the compare-jump pass.
 const LAST = MIX_LAST;
+/** Files changed's file: the whole diff stops at 50,000 lines, which since the mix's big files falls short of `MID`. */
+const PR_MID = pathOf(1900);
 
 const PAGE = `(() => {
   if (window.__mv) return;
@@ -110,15 +112,22 @@ const PAGE = `(() => {
       let prevT = null;
       // The time in the frame's callback, not its timestamp: a frame held back by a long task is stamped before the task
       // ended, which would count a move as drawn before its work was done.
-      const tick = () => {
+      // A frame is judged as it is painted: right after it, so what its layout's resize step put right (a landed file
+      // the redraw moved, put back; the compare-jump pass, 2026-11-17) counts in that frame, not the next.
+      const after = new MessageChannel();
+      after.port1.onmessage = () => {
         const t = performance.now();
-        if (r.t0 !== null && prevT !== null && t - prevT > 50) r.frames.push(Math.round(t - prevT));
-        prevT = t;
         if (r.t0 !== null) {
           if (r.landed === null && isLanded(q, onScreen, scroller)) r.landed = t;
           if (r.lines === null && hasLines(q, onScreen, scroller)) { r.lines = t; r.card = r.watch?.() ?? null; r.top = r.card?.getBoundingClientRect().top ?? null; }
         }
         if (r.lines === null || performance.now() - r.lines < 900) requestAnimationFrame(tick);
+      };
+      const tick = () => {
+        const t = performance.now();
+        if (r.t0 !== null && prevT !== null && t - prevT > 50) r.frames.push(Math.round(t - prevT));
+        prevT = t;
+        after.port2.postMessage(0);
       };
       requestAnimationFrame(tick);
       return 1;
@@ -137,11 +146,23 @@ const PAGE = `(() => {
       const drift = r.card && r.card.isConnected && r.top !== null ? Math.round(r.card.getBoundingClientRect().top - r.top) : null;
       // Where the card's head stands from the band's foot once settled (0 where the scroll's end stops it lower, in view),
       // and whether the rail and the card mark it.
-      let offBand = null, marked = null;
+      let offBand = null, marked = null, stood = null;
+      // A move that never landed still says where its card stood, and the page's scroll, so a miss can be read.
+      const seen = r.card ?? r.watch?.() ?? null;
+      if (!seen && r.card === null) {
+        const s = scroller();
+        const drawn = [...document.querySelectorAll("${shown} .tf-diff[data-file]")].map((c) => c.dataset.file);
+        stood = { missing: true, scrollTop: Math.round(s.scrollTop), room: Math.round(s.scrollHeight - s.clientHeight), first: drawn[0], last: drawn.at(-1), n: drawn.length, marked: document.querySelector("${shown} .tf-flist [aria-current=true]")?.getAttribute("title") ?? null };
+      }
+      if (seen && seen.isConnected && r.card === null) {
+        const s = scroller();
+        stood = { off: Math.round(seen.getBoundingClientRect().top - foot()), scrollTop: Math.round(s.scrollTop), room: Math.round(s.scrollHeight - s.clientHeight), lines: !!seen.querySelector(".tf-ln") };
+      }
       if (r.card && r.card.isConnected) {
         const s = scroller();
         const off = r.card.getBoundingClientRect().top - foot();
-        const atEnd = s.scrollTop + s.clientHeight >= s.scrollHeight - 2;
+        // Stopped by the scroll's end: less room left to scroll than it would take to bring the head up to the band.
+        const atEnd = off - 2 > s.scrollHeight - s.clientHeight - s.scrollTop;
         offBand = atEnd && off > 0 && r.card.getBoundingClientRect().top < s.getBoundingClientRect().bottom - 40 ? 0 : Math.abs(Math.round(off));
         const path = r.card.dataset.file;
         const row = document.querySelector("${shown} .tf-flist [aria-current=true]");
@@ -149,7 +170,7 @@ const PAGE = `(() => {
       }
       const reads = calls.filter((c) => c.start >= r.t0 - 5 && /entity_range_(files|diff|file|names)|entity_source_range/.test(c.cmd));
       return {
-        landedMs: ms(r.landed), linesMs: ms(r.lines), settledMs: ms(end), drift, offBand, marked,
+        landedMs: ms(r.landed), linesMs: ms(r.lines), settledMs: ms(end), drift, offBand, marked, stood,
         longTasks: long, longestMs: long.length ? Math.max(...long) : 0, longTotalMs: long.reduce((a, b) => a + b, 0), slowFrames: r.frames,
         reads: reads.length, ipc: calls.filter((c) => c.start >= r.t0 - 5).map((c) => ({ cmd: c.cmd, what: c.what, start: ms(c.start), end: ms(c.end), failed: !!c.failed })),
         nodes: document.getElementsByTagName("*").length,
@@ -173,8 +194,11 @@ const PAGE = `(() => {
       for (let i = 0; i < 400; i++) {
         const row = list.querySelector('button[title="' + CSS.escape(path) + '"]');
         if (row) { row.scrollIntoView({ block: "center" }); await frame(); return 1; }
+        // In the list's order, as the tree sorts: a folder's files before its folders, and a folder before its longer-named
+        // siblings (\`pkg/m20/\` before \`pkg/m20-mix/\`).
+        const order = (p) => p.split("/").map((part, i, all) => (i < all.length - 1 ? "1" : "0") + part).join("\u0000");
         const titles = [...list.querySelectorAll("button[title]")].map((b) => b.title);
-        const before = titles.length > 0 && titles[titles.length - 1] < path;
+        const before = titles.length > 0 && order(titles[titles.length - 1]) < order(path);
         list.scrollTop += before ? Math.max(list.clientHeight, 2000) : -list.clientHeight;
         await frame();
       }
@@ -229,7 +253,7 @@ const withLines = (path) => `!!q(${JSON.stringify(`${card(path)} .tf-ln`)}) && $
 /** The last file: its head may never reach the top (the scroll ends first), so on screen is landed. */
 const inView = (path) => `(() => { const c = q(${JSON.stringify(card(path))}); const s = scroller(); if (!c || !s) return false; const a = c.getBoundingClientRect(), b = s.getBoundingClientRect(); return a.top >= __mvFoot() - 2 && a.top < b.bottom - 40; })()`;
 /** A small file: at the band's foot, or in view under it where the scroll's end stops it; with its lines where it has any. */
-const smallLanded = (path) => `(${atTop(path)} || (scroller().scrollTop + scroller().clientHeight >= scroller().scrollHeight - 2 && ${inView(path)}))`;
+const smallLanded = (path) => `(${atTop(path)} || (${inView(path)} && (() => { const s = scroller(); return q(${JSON.stringify(card(path))}).getBoundingClientRect().top - __mvFoot() - 2 > s.scrollHeight - s.clientHeight - s.scrollTop; })()))`;
 const smallLines = (path, kind) => (kind === "renamed" || kind === "binary" ? smallLanded(path) : `!!q(${JSON.stringify(`${card(path)} .tf-ln`)}) && ${smallLanded(path)}`);
 const inViewLines = (path) => `!!q(${JSON.stringify(`${card(path)} .tf-ln`)}) && ${inView(path)}`;
 
@@ -250,7 +274,7 @@ async function move(rate, name, armWith, doIt, watch = null) {
 const say = (r) =>
   r.error
     ? r.error
-    : `${r.file ? `${r.file} (${r.kind}): ` : ""}landed ${r.landedMs ?? "never"} ms, lines ${r.linesMs ?? "never"} ms, settled ${r.settledMs} ms, drift ${r.drift ?? "-"} px, off the band ${r.offBand ?? "-"} px${r.marked === 1 ? ", NOT MARKED" : ""}, long tasks ${r.longTasks.length} (longest ${r.longestMs}, total ${r.longTotalMs}), frames over 50 ms ${r.slowFrames.length}, range reads ${r.reads}, ${r.nodes} nodes`;
+    : `${r.file ? `${r.file} (${r.kind}): ` : ""}landed ${r.landedMs ?? "never"} ms, lines ${r.linesMs ?? "never"} ms, settled ${r.settledMs} ms, drift ${r.drift ?? "-"} px, off the band ${r.offBand ?? "-"} px${r.marked === 1 ? ", NOT MARKED" : ""}${r.stood ? `, stood ${JSON.stringify(r.stood)}` : ""}, long tasks ${r.longTasks.length} (longest ${r.longestMs}, total ${r.longTotalMs}), frames over 50 ms ${r.slowFrames.length}, range reads ${r.reads}, ${r.nodes} nodes`;
 
 const results = { app, repo, pr, size: size.name, at: new Date().toISOString(), moves: [] };
 const record = (r) => {
@@ -331,10 +355,10 @@ for (const rate of throttles) {
     await fresh(`#/pr/${enc(id)}/diff`, `.tf-diff`);
     await js(`__mv.scrollToEl(".tf-dview")`);
     await quiet(800);
-    // The middle file: a pull request's whole diff stops at knobas's ceiling of 50,000 lines, before the last file. Then
+    // A file before the middle: a pull request's whole diff stops at knobas's ceiling of 50,000 lines. Then
     // a file of one line and the pure rename among the big files before it (`pr-jump-small`, the compare-jump pass).
     const smalls = MIX_SMALL.filter(({ kind }) => kind === "one" || kind === "renamed").slice(0, 2);
-    for (const { path, kind, name } of [{ path: MID, kind: "mid", name: "pr-jump" }, ...smalls.map((one) => ({ ...one, name: "pr-jump-small" }))]) {
+    for (const { path, kind, name } of [{ path: PR_MID, kind: "mid", name: "pr-jump" }, ...smalls.map((one) => ({ ...one, name: "pr-jump-small" }))]) {
       await cpu(1);
       await js(`__mv.scrollToEl(".tf-dview")`);
       await quiet(800);
