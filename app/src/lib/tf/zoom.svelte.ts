@@ -6,7 +6,10 @@
  * `pageZoom`), so the page lays out as at a display scale of the display's times the level and every length stays in
  * one coordinate space. ⌘+ / ⌘= and ⌘− step it, ⌘0 puts it back to 100 % (Ctrl off the Mac, either on either, as the
  * shell's other keys), and so do ⌘ or Ctrl with the wheel, a trackpad's pinch, and on the Mac WebKit's gesture events.
- * A step lands on the webview once a frame at most however fast the wheel turns.
+ * A step lands on the webview once a frame at most however fast the wheel turns, and while one is on its way the next
+ * waits for it (Fable's ruling, the ux18 pass, 2026-11-17): each level lays the whole page out again, and three wheel
+ * notches 25 ms apart at CPU 6x on Builds were three layouts of 215 to 335 ms each, where the newest level alone is
+ * what the reader asked for.
  *
  * Kept in `localStorage` (`knobas.zoom`), as the code face is: the level suits a display, and is this machine's.
  * `main.ts` sets it before the shell mounts, so the first frame is at the kept level.
@@ -25,6 +28,8 @@ const WHEEL_IDLE_MS = 400;
 const PINCH_STEP = 1.12;
 /** The longest the first draw waits for the webview to take the kept level. */
 const BOOT_WAIT_MS = 250;
+/** The longest a level on its way holds the next one, where the webview's resize is never heard. */
+export const SETTLE_WAIT_MS = 600;
 
 /** The level as a person reads it: `110 %`. */
 export function percent(level: number): string {
@@ -92,9 +97,14 @@ export interface ZoomPorts {
   apply: ApplyZoom;
   /** Runs `draw` before the next frame; the window's `requestAnimationFrame` when omitted. */
   frame?: (draw: () => void) => void;
+  /**
+   * Calls `done` once a level the webview took has laid the page out: its resize heard and a frame drawn after it, or
+   * {@link SETTLE_WAIT_MS} at most. The window's when omitted.
+   */
+  settled?: (done: () => void) => void;
 }
 
-export function createZoom({ storage, apply, frame = nextFrame }: ZoomPorts): Zoom {
+export function createZoom({ storage, apply, frame = nextFrame, settled = heardAndDrawn }: ZoomPorts): Zoom {
   const kept = keptValue(storage, ZOOM_KEY);
   const read = Number.parseFloat(kept.read() ?? "");
   let level = $state(Number.isNaN(read) ? 1 : nearestLevel(read));
@@ -102,16 +112,34 @@ export function createZoom({ storage, apply, frame = nextFrame }: ZoomPorts): Zo
   /** The level on the webview, and whether a frame is asked to put the newest there. */
   let applied = level;
   let waiting = false;
+  /** A level is on its way to the webview: the next one waits for it to be laid out. */
+  let flying = false;
   let wheel = { sum: 0, at: -Infinity };
   let pinchFrom = 1;
 
   function land() {
     waiting = false;
-    if (applied === level) return;
+    if (flying || applied === level) return;
     applied = level;
+    flying = true;
     void Promise.resolve()
       .then(() => apply(applied))
-      .catch(() => {});
+      .then(
+        () =>
+          settled(() => {
+            flying = false;
+            // The steps that came meanwhile: the newest, once.
+            if (applied !== level) ask();
+          }),
+        // Refused: nothing is on its way, and the next step tries again.
+        () => (flying = false),
+      );
+  }
+
+  function ask() {
+    if (waiting || flying) return;
+    waiting = true;
+    frame(land);
   }
 
   function set(next: number) {
@@ -121,10 +149,7 @@ export function createZoom({ storage, apply, frame = nextFrame }: ZoomPorts): Zo
     level = to;
     if (to === 1) kept.clear();
     else kept.write(String(to));
-    if (!waiting) {
-      waiting = true;
-      frame(land);
-    }
+    ask();
   }
 
   return {
@@ -185,11 +210,27 @@ export function createZoom({ storage, apply, frame = nextFrame }: ZoomPorts): Zo
       applied = 1;
       asked = 0;
       waiting = false;
+      flying = false;
       wheel = { sum: 0, at: -Infinity };
       pinchFrom = 1;
       kept.clear();
     },
   };
+}
+
+/** The window's resize after a level was set, then the frame after it; {@link SETTLE_WAIT_MS} at most. */
+function heardAndDrawn(done: () => void) {
+  if (typeof window === "undefined") return done();
+  let over = false;
+  const finish = () => {
+    if (over) return;
+    over = true;
+    window.removeEventListener("resize", finish);
+    clearTimeout(timer);
+    nextFrame(done);
+  };
+  window.addEventListener("resize", finish);
+  const timer = setTimeout(finish, SETTLE_WAIT_MS);
 }
 
 function nextFrame(draw: () => void) {

@@ -289,3 +289,38 @@ describe("the window's input", () => {
     expect(steps).toEqual([]);
   });
 });
+
+describe("a level on its way", () => {
+  test("holds the next steps until the page is laid out at it, then lands the newest of them once", async () => {
+    const applied: number[] = [];
+    const frames: (() => void)[] = [];
+    const settles: (() => void)[] = [];
+    const zoom = createZoom({
+      storage: () => memory(),
+      apply: (level) => void applied.push(level),
+      frame: (draw) => void frames.push(draw),
+      settled: (done) => void settles.push(done),
+    });
+    const frame = async () => {
+      for (const draw of frames.splice(0)) draw();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    zoom.step(1);
+    await frame();
+    expect(applied).toEqual([1.1]);
+    // Two more notches while 110 % lays the page out: no frame lands them.
+    zoom.step(1);
+    zoom.step(1);
+    await frame();
+    expect(applied).toEqual([1.1]);
+    expect(zoom.level, "the plate says where it is going").toBe(1.5);
+    // 110 % heard and drawn: the newest level, once.
+    for (const done of settles.splice(0)) done();
+    await frame();
+    expect(applied).toEqual([1.1, 1.5]);
+    for (const done of settles.splice(0)) done();
+    await frame();
+    expect(applied).toEqual([1.1, 1.5]);
+  });
+});
