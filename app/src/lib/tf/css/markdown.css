@@ -28,6 +28,8 @@
 .tf-md blockquote { border-left: 3px solid var(--rule); padding-left: 12px; color: var(--ink-2); }
 .tf-md hr { border: 0; border-top: 1px solid var(--rule); }
 .tf-md img { max-width: 100%; }
+/* An image drawn at the size it loaded at before (`image-sizes.ts`) keeps its shape where the column is narrower. */
+.tf-md img[width][height] { height: auto; }
 .tf-md .tf-fence { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); }
 .tf-md .tf-fence > header { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 32px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); background: var(--sheet-2); }
 .tf-md .tf-fence > header .tf-fence-copy { margin-left: auto; }

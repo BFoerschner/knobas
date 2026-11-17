@@ -14,6 +14,7 @@ import { registerFence } from "../../render/markdown";
 import { installCommands } from "../../render/command";
 import type { RenderContent } from "../../ipc/app";
 import TfMarkdown from "./TfMarkdown.svelte";
+import { forgetImageSizes } from "./image-sizes";
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
@@ -632,4 +633,24 @@ test("a short text draws whole at once, and an anchor in a long one draws the re
   }
   expect(scrolled).toBe(md().querySelector("#user-content-part-119"));
   expect(md().hasAttribute("data-md-held")).toBe(false);
+});
+
+// The nothing-moves pass (2026-11-17): a README read again after a sync drew its badge from nothing, and its bytes
+// landing pushed the text under it 15 px down.
+test("an image drawn again holds the size it loaded at before, while its bytes are read", async () => {
+  forgetImageSizes();
+  const pending = () => new Promise<Uint8Array>(() => {});
+  draw("![badge](badge.png)\n\nUnder it.", { image: pending });
+  await settle();
+  const first = target.querySelector<HTMLImageElement>("img")!;
+  expect(first.hasAttribute("width"), "never seen: no size to hold").toBe(false);
+  Object.defineProperty(first, "naturalWidth", { value: 96 });
+  Object.defineProperty(first, "naturalHeight", { value: 32 });
+  first.dispatchEvent(new Event("load"));
+  unmount(view!);
+  view = null;
+  draw("![badge](badge.png)\n\nUnder it.", { image: pending });
+  await settle();
+  const again = target.querySelector<HTMLImageElement>("img")!;
+  expect([again.getAttribute("width"), again.getAttribute("height")]).toEqual(["96", "32"]);
 });

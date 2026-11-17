@@ -42,6 +42,7 @@
   } from "../../render/markdown";
   import { whileNear } from "../../shell/near-view";
   import { imageBlob } from "../../render/image";
+  import { holdImageRoom } from "./image-sizes";
   import { renderPort, type RenderPort } from "../../render/port";
   import { ipcErrorMessage } from "../../ipc";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
@@ -143,6 +144,7 @@
     if (read.open) for (const link of node.querySelectorAll<HTMLAnchorElement>("a[data-md-attachment]")) link.setAttribute("href", "#");
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-attachment]")) {
       const id = img.dataset["mdAttachment"] ?? "";
+      holdImageRoom(img, `attachment|${id}`);
       // Where the surface previews, the image is a link to the preview, named by the image's alt (#2415).
       const holder = read.open && img.closest("a") === null ? previewLink(img, id) : img;
       if (read.watch) watches.push(read.watch(img, id));
@@ -196,6 +198,7 @@
     const urls: string[] = [];
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-path]")) {
       const path = img.dataset["mdPath"] ?? "";
+      holdImageRoom(img, `${base}|${path}`);
       read(path).then(
         (bytes) => {
           if (!live) return;
