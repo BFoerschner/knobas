@@ -288,6 +288,18 @@ const PAGES = [
     { id: "app-move-up-key", kind: "enter-twice", strict: true, finding: "apps-page", press: { sel: ".tf-stg-apps button[aria-label='Move Fork up']" }, rows: ".tf-stg-apps tbody tr" },
     { id: "app-move-up-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", press: { sel: ".tf-stg-apps button[aria-label='Move Fork up']" }, rows: ".tf-stg-apps tbody tr" },
   ] },
+  // 2026-11-17 (Björn, ux17: "Clicking on edit for checkouts and open in on an application keeps spazzing around for the first few seconds
+  // running through the repositories"). *Try it on* reads checkouts in batches, each landing late here: the page must draw its rows once,
+  // and the answers only fill them in. From Settings' *Edit*, from a repository's *Open in… › Add an application*, and a folder renderer's page.
+  { page: "An application's page", route: "settings/checkouts/app/vscode", trips: [
+    { id: "app-page-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "settings/checkouts", ways: ["first", "return"], rows: ".tf-apppage .tf-stg-row, .tf-apppage h2, .tf-apprun", query: STILL_Q, tail: 1200 },
+  ] },
+  { page: "Add an application, from a repository", route: "settings/checkouts/add/mock%3Atidewater%2Fpayout-service", trips: [
+    { id: "app-add-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: REPO, ways: ["first"], rows: ".tf-apppage .tf-stg-row, .tf-apppage h2, .tf-apprun", query: STILL_Q, tail: 1200 },
+  ] },
+  { page: "A folder renderer's page", route: "settings/renderers/folder/folder-listing", trips: [
+    { id: "folder-page-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "settings/renderers", ways: ["first", "return"], rows: ".tf-apppage .tf-stg-row, .tf-apppage h2", query: `${STILL_Q}&fake-folder-render`, tail: 1200 },
+  ] },
   { page: "A repository's Open in…", route: REPO, trips: [
     { id: "openin-browser-key", kind: "enter-twice", strict: true, finding: "open-on-gitea", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", starts: "Browser" }, returns: "Open in…" },
     { id: "openin-add-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", text: "Add an application" }, leaves: true },

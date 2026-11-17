@@ -53,7 +53,8 @@
     type AppPageAt,
   } from "./app-page";
   import { insertAt, PLACEHOLDERS, runPreview, warnings, worktreeOf } from "./openin";
-  import { CHECKOUT_BATCH, realTryReads, type TryCommit, type TryPr, type TryReads, type TryRepo } from "./try-reads";
+  import { realTryReads, type TryCommit, type TryPr, type TryReads, type TryRepo } from "./try-reads";
+  import { TryRepos } from "./try-repos.svelte";
 
   let {
     at,
@@ -130,16 +131,14 @@
 
   // -- Try it on ---------------------------------------------------------------
 
-  /** The repositories with a checkout here, in the order found; `null` while the first batch is out. */
-  let repos = $state<TryRepo[] | null>(null);
-  /** Still reading checkouts after the first batch. */
-  let more = $state(false);
-  let readFailed = $state<string | null>(null);
-  let repoId = $state<string | null>(null);
-  const repo = $derived(repos?.find((one) => one.entityId === repoId) ?? null);
+  /** The repositories with a checkout here, read in batches; a batch adds to the list and never picks again (`TryRepos`). */
+  const tryOn = new TryRepos();
+  const repo = $derived(tryOn.repo);
 
+  /** The file a command is tried on: the one Open in… was pressed on, else the README (`readObjects` picks again from the list). */
+  const askedFile = untrack(() => (at.kind === "file" && at.value !== null ? at.value : "README.md"));
   let files = $state<string[] | null>(null);
-  let file = $state<string>("");
+  let file = $state<string>(askedFile);
   let commits = $state<TryCommit[] | null>(null);
   let commit = $state<string | null>(null);
   let prs = $state<TryPr[] | null>(null);
@@ -149,56 +148,25 @@
   let pages = $state<Partial<Record<OpenObjectKind, string | null>>>({});
 
   $effect(() => {
-    void untrack(() => readRepos());
+    void untrack(() => tryOn.read(reads, [at.repo, lastTried()], () => gone));
   });
 
-  async function readRepos() {
-    let rows;
-    try {
-      rows = await reads.repos();
-    } catch (cause) {
-      readFailed = ipcErrorMessage(cause);
-      repos = [];
-      return;
-    }
-    const preferred = [at.repo, lastTried()].filter((id): id is string => id !== null);
-    const order = [...preferred.filter((id) => rows.some((row) => row.entity_id === id)), ...rows.map((row) => row.entity_id).filter((id) => !preferred.includes(id))];
-    const byId = new Map(rows.map((row) => [row.entity_id, row]));
-    const found: TryRepo[] = [];
-    more = true;
-    for (let start = 0; start < order.length && !gone; start += CHECKOUT_BATCH) {
-      try {
-        const answers = await reads.checkouts(order.slice(start, start + CHECKOUT_BATCH));
-        for (const answer of answers) {
-          const row = byId.get(answer.entityId);
-          if (answer.path !== null && row) found.push({ entityId: row.entity_id, title: row.title, sourceId: row.source_id, path: answer.path, clonesRoot: answer.clonesRoot });
-        }
-      } catch {
-        // A batch that can't be read leaves its repositories out rather than claiming a checkout.
-      }
-      repos = [...found];
-      if (repoId === null) repoId = preferred.find((id) => found.some((one) => one.entityId === id)) ?? found[0]?.entityId ?? null;
-    }
-    repos = [...found];
-    more = false;
-  }
-
-  // The picked repository's objects, read again when another is picked.
+  // The picked repository's objects, read again when another is picked, and only then: a batch of checkouts coming in leaves them be.
   $effect(() => {
-    const picked = repo;
-    if (picked === null) return;
-    untrack(() => readObjects(picked));
+    const id = tryOn.pickedId;
+    if (id === null) return;
+    untrack(() => readObjects(tryOn.repo!));
   });
 
   function readObjects(picked: TryRepo) {
-    const still = () => repoId === picked.entityId;
+    const still = () => tryOn.picked === picked.entityId;
     const asked = at.repo === picked.entityId ? at : null;
     files = null;
     commits = null;
     prs = null;
     prEnds = null;
     pages = {};
-    file = asked?.kind === "file" && asked.value !== null ? asked.value : "README.md";
+    file = asked !== null ? askedFile : "README.md";
     commit = null;
     prPick = null;
     reads.files(picked.entityId).then(
@@ -268,7 +236,7 @@
       const wanted = JSON.stringify(object);
       untrack(() => reads.page(picked.entityId, object)).then(
         (url) => {
-          if (repoId === picked.entityId && JSON.stringify(objects[row.kind]) === wanted) pages = { ...pages, [row.kind]: url };
+          if (tryOn.picked === picked.entityId && JSON.stringify(objects[row.kind]) === wanted) pages = { ...pages, [row.kind]: url };
         },
         () => {},
       );
@@ -280,7 +248,7 @@
     // A file with no command of its own opens with the repository's, which its row says in words rather than twice.
     const command = kind === "file" ? draft.file.trim() : draftCommand(draft, kind);
     if (command === "") return { run: null, wait: kind === "repository" ? "Type the command, and this shows what it starts." : null };
-    if (repo === null) return { run: null, wait: repos === null || more ? "Reading the repositories on this disk…" : "Pick a repository below to see it filled in." };
+    if (repo === null) return { run: null, wait: tryOn.list === null || tryOn.more ? "Reading the repositories on this disk…" : "Pick a repository below to see it filled in." };
     const object = objects[kind];
     if (object === null) {
       const waits: Record<OpenObjectKind, string> = {
@@ -471,63 +439,62 @@
 
     <div class="tf-stg-sec">
       <h2>Try it on</h2>
-      {#if repos !== null && repos.length === 0 && !more}
+      {#if tryOn.list !== null && tryOn.list.length === 0 && !tryOn.more}
         <p class="tf-stg-p" role="status">
-          {#if readFailed !== null}Could not read the repositories: {readFailed}.{:else}No repository has a checkout on this disk yet, so there is nothing to try a command on. Open a repository and press
+          {#if tryOn.failed !== null}Could not read the repositories: {tryOn.failed}.{:else}No repository has a checkout on this disk yet, so there is nothing to try a command on. Open a repository and press
             <b>Clone</b>, or <a href="#/code">Code</a>’s <b>Clone all…</b>; it is here once it is cloned.{/if}
         </p>
       {:else}
+        <!-- Every row a command needs is drawn before the first checkout answers, so an answer only fills them in (2026-11-17). -->
         <div class="tf-stg-row">
           <label class="tf-stg-l" for="tf-app-repo">Repository<small>One with a checkout on this disk. It and the objects below fill each command in.</small></label>
           <div class="tf-stg-c tf-stg-inl">
-            <select id="tf-app-repo" class="tf-stg-in" bind:value={repoId} disabled={repos === null}>
-              {#if repos === null}<option value={null}>Reading…</option>{/if}
-              {#each repos ?? [] as one (one.entityId)}
+            <select id="tf-app-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null}>
+              {#if tryOn.list === null}<option value={null}>Reading…</option>{/if}
+              {#each tryOn.list ?? [] as one (one.entityId)}
                 <option value={one.entityId}>{one.title}</option>
               {/each}
             </select>
-            {#if more}<small class="tf-dim" role="status">Finding more…</small>{/if}
+            <small class="tf-dim tf-stg-more" role="status" class:tf-stg-done={!tryOn.more}>Finding more…</small>
           </div>
         </div>
-        {#if repo !== null}
-          {#if draft.file.trim() !== "" || draft.command.includes("{file}")}
-            <div class="tf-stg-row">
-              <label class="tf-stg-l" for="tf-app-tryfile">File<small>A path inside the checkout.</small></label>
-              <div class="tf-stg-c">
-                <input id="tf-app-tryfile" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-app-files" bind:value={file} />
-                <datalist id="tf-app-files">
-                  {#each (files ?? []).slice(0, FILES_SHOWN) as one (one)}<option value={one}></option>{/each}
-                </datalist>
-              </div>
+        {#if draft.file.trim() !== "" || draft.command.includes("{file}")}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-app-tryfile">File<small>A path inside the checkout.</small></label>
+            <div class="tf-stg-c">
+              <input id="tf-app-tryfile" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-app-files" disabled={repo === null} bind:value={file} />
+              <datalist id="tf-app-files">
+                {#each (files ?? []).slice(0, FILES_SHOWN) as one (one)}<option value={one}></option>{/each}
+              </datalist>
             </div>
-          {/if}
-          {#if draft.commit.trim() !== "" || draft.range.trim() !== ""}
-            <div class="tf-stg-row">
-              <label class="tf-stg-l" for="tf-app-trycommit">Commit<small>A range is this commit and the one before it.</small></label>
-              <div class="tf-stg-c">
-                <select id="tf-app-trycommit" class="tf-stg-in" bind:value={commit} disabled={commits === null || commits.length === 0}>
-                  {#if commits === null}<option value={commit}>Reading…</option>{:else if commits.length === 0}<option value={null}>No commits</option>{/if}
-                  {#if commit !== null && commits !== null && !commits.some((one) => one.sha === commit)}<option value={commit}>{commit.slice(0, 12)}</option>{/if}
-                  {#each (commits ?? []).slice(0, COMMITS_SHOWN) as one (one.sha)}
-                    <option value={one.sha}>{one.sha.slice(0, 7)} {one.title}</option>
-                  {/each}
-                </select>
-              </div>
+          </div>
+        {/if}
+        {#if draft.commit.trim() !== "" || draft.range.trim() !== ""}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-app-trycommit">Commit<small>A range is this commit and the one before it.</small></label>
+            <div class="tf-stg-c">
+              <select id="tf-app-trycommit" class="tf-stg-in" bind:value={commit} disabled={commits === null || commits.length === 0}>
+                {#if commits === null}<option value={commit}>Reading…</option>{:else if commits.length === 0}<option value={null}>No commits</option>{/if}
+                {#if commit !== null && commits !== null && !commits.some((one) => one.sha === commit)}<option value={commit}>{commit.slice(0, 12)}</option>{/if}
+                {#each (commits ?? []).slice(0, COMMITS_SHOWN) as one (one.sha)}
+                  <option value={one.sha}>{one.sha.slice(0, 7)} {one.title}</option>
+                {/each}
+              </select>
             </div>
-          {/if}
-          {#if draft.pr.trim() !== ""}
-            <div class="tf-stg-row">
-              <label class="tf-stg-l" for="tf-app-trypr">Pull request</label>
-              <div class="tf-stg-c">
-                <select id="tf-app-trypr" class="tf-stg-in" bind:value={prPick} disabled={prs === null || prs.length === 0}>
-                  {#if prs === null}<option value={prPick}>Reading…</option>{:else if prs.length === 0}<option value={null}>No pull requests</option>{/if}
-                  {#each (prs ?? []).slice(0, PRS_SHOWN) as one (one.id)}
-                    <option value={one.number}>#{one.number} {one.title}</option>
-                  {/each}
-                </select>
-              </div>
+          </div>
+        {/if}
+        {#if draft.pr.trim() !== ""}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-app-trypr">Pull request</label>
+            <div class="tf-stg-c">
+              <select id="tf-app-trypr" class="tf-stg-in" bind:value={prPick} disabled={prs === null || prs.length === 0}>
+                {#if prs === null}<option value={prPick}>Reading…</option>{:else if prs.length === 0}<option value={null}>No pull requests</option>{/if}
+                {#each (prs ?? []).slice(0, PRS_SHOWN) as one (one.id)}
+                  <option value={one.number}>#{one.number} {one.title}</option>
+                {/each}
+              </select>
             </div>
-          {/if}
+          </div>
         {/if}
       {/if}
     </div>

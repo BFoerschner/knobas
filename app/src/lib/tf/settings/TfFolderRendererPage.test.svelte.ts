@@ -127,3 +127,33 @@ test("a refused try says why and saves nothing", async () => {
   expect(target.querySelector<HTMLInputElement>("#tf-frp-name")!.value).toBe("A");
   expect(button("Remove")).toBeDefined();
 });
+
+test("while later batches of checkouts come in, the picked repository stays and its folders are read once (2026-11-17)", async () => {
+  // The application page's flicker (Björn, v3.2.9-ux17): each batch of checkouts drew the picked repository anew and read its folders again.
+  const others = Array.from({ length: 120 }, (_, n) => ({ entity_id: `gitea:repo:o/forge-${n}`, title: `o/forge-${n}`, source_id: "gitea" }) as EntityRow);
+  const batches: (() => void)[] = [];
+  let asked = 0;
+  const late = {
+    repos: async () => [...(await reads.repos()), ...others],
+    checkouts: (ids: readonly string[]) =>
+      new Promise<{ entityId: string; path: string | null; clonesRoot: string | null }[]>((resolve) =>
+        batches.push(() => resolve(ids.map((entityId) => ({ entityId, path: entityId === REPO ? "/clones/o/flows" : null, clonesRoot: "/clones" })))),
+      ),
+    // Asked again, it never answers: the folders would stand empty, as they did between batches.
+    files: () => (asked++ === 0 ? reads.files() : new Promise<string[]>(() => {})),
+  };
+  app = mount(TfFolderRendererPage, { target, props: { at: { renderer: null, repo: null, folder: null }, folders: store().folders, reads: late, ports: ports().p, leave: () => {} } });
+  await settle();
+  batches.shift()!();
+  await settle();
+  const folders = () => [...target.querySelectorAll("#tf-frp-folders-list option")].map((o) => o.getAttribute("value"));
+  const first = folders();
+  expect(first).toContain("flows/orders");
+  while (batches.length > 0) {
+    batches.shift()!();
+    await settle();
+    expect(target.querySelector<HTMLSelectElement>("#tf-frp-repo")!.value).toBe(REPO);
+    expect(folders()).toEqual(first);
+  }
+  expect(asked).toBe(1);
+});

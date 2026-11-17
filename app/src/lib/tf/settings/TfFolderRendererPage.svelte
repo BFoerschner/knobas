@@ -31,7 +31,8 @@
   import { PressHold } from "../press-hold.svelte";
   import { insertAt } from "../openin/openin";
   import { lastTried, noteTried } from "../openin/app-page";
-  import { CHECKOUT_BATCH, realTryReads, type TryReads, type TryRepo } from "../openin/try-reads";
+  import { realTryReads, type TryReads } from "../openin/try-reads";
+  import { TryRepos } from "../openin/try-repos.svelte";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
   import { fileHash } from "../repo/repo";
   import {
@@ -111,54 +112,23 @@
 
   // -- Try it on ---------------------------------------------------------------
 
-  let repos = $state<TryRepo[] | null>(null);
-  let more = $state(false);
-  let readFailed = $state<string | null>(null);
-  let repoId = $state<string | null>(null);
-  const repo = $derived(repos?.find((one) => one.entityId === repoId) ?? null);
+  /** The repositories with a checkout here, read in batches; a batch adds to the list and never picks again (`TryRepos`). */
+  const tryOn = new TryRepos();
+  const repo = $derived(tryOn.repo);
   let folderList = $state<string[] | null>(null);
   let folder = $state(untrack(() => at.folder ?? ""));
   let gone = false;
 
   $effect(() => {
-    void untrack(() => readRepos());
+    void untrack(() => tryOn.read(reads, [at.repo, lastTried()], () => gone));
   });
 
-  async function readRepos() {
-    let rows;
-    try {
-      rows = await reads.repos();
-    } catch (cause) {
-      readFailed = ipcErrorMessage(cause);
-      repos = [];
-      return;
-    }
-    const preferred = [at.repo, lastTried()].filter((id): id is string => id !== null);
-    const order = [...preferred.filter((id) => rows.some((row) => row.entity_id === id)), ...rows.map((row) => row.entity_id).filter((id) => !preferred.includes(id))];
-    const byId = new Map(rows.map((row) => [row.entity_id, row]));
-    const found: TryRepo[] = [];
-    more = true;
-    for (let start = 0; start < order.length && !gone; start += CHECKOUT_BATCH) {
-      try {
-        const answers = await reads.checkouts(order.slice(start, start + CHECKOUT_BATCH));
-        for (const answer of answers) {
-          const row = byId.get(answer.entityId);
-          if (answer.path !== null && row) found.push({ entityId: row.entity_id, title: row.title, sourceId: row.source_id, path: answer.path, clonesRoot: answer.clonesRoot });
-        }
-      } catch {
-        // A batch that can't be read leaves its repositories out rather than claiming a checkout.
-      }
-      repos = [...found];
-      if (repoId === null) repoId = preferred.find((id) => found.some((one) => one.entityId === id)) ?? found[0]?.entityId ?? null;
-    }
-    repos = [...found];
-    more = false;
-  }
-
   // The picked repository's folders, every folder that holds a file.
+  // Read again when another is picked, and only then: a batch of checkouts coming in leaves them be (2026-11-17).
   $effect(() => {
-    const picked = repo;
-    if (picked === null) return;
+    const id = tryOn.pickedId;
+    if (id === null) return;
+    const picked = untrack(() => tryOn.repo!);
     folderList = null;
     let live = true;
     reads.files(picked.entityId).then(
@@ -383,20 +353,20 @@
 
     <div class="tf-stg-sec">
       <h2>Try it on</h2>
-      {#if repos !== null && repos.length === 0 && !more}
+      {#if tryOn.list !== null && tryOn.list.length === 0 && !tryOn.more}
         <p class="tf-stg-p" role="status">
-          {#if readFailed !== null}Could not read the repositories: {readFailed}.{:else}No repository has a checkout on this disk yet. Open a repository and
+          {#if tryOn.failed !== null}Could not read the repositories: {tryOn.failed}.{:else}No repository has a checkout on this disk yet. Open a repository and
             press <b>Clone</b>, or <a href="#/code">Code</a>’s <b>Clone all…</b>; it is here once it is cloned.{/if}
         </p>
       {:else}
         <div class="tf-stg-row">
           <label class="tf-stg-l" for="tf-frp-repo">Repository<small>One with a checkout on this disk.</small></label>
           <div class="tf-stg-c tf-stg-inl">
-            <select id="tf-frp-repo" class="tf-stg-in" bind:value={repoId} disabled={repos === null}>
-              {#if repos === null}<option value={null}>Reading…</option>{/if}
-              {#each repos ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
+            <select id="tf-frp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null}>
+              {#if tryOn.list === null}<option value={null}>Reading…</option>{/if}
+              {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
             </select>
-            {#if more}<small class="tf-dim" role="status">Finding more…</small>{/if}
+            <small class="tf-dim tf-stg-more" role="status" class:tf-stg-done={!tryOn.more}>Finding more…</small>
           </div>
         </div>
         <div class="tf-stg-row">

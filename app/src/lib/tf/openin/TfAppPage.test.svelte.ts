@@ -386,3 +386,47 @@ test("an application the list doesn't hold says so, with the way to the list", a
   expect(text(target)).toContain("Open in… has no such application.");
   expect(target.querySelector("#tf-app-name")).toBeNull();
 });
+
+test("while later batches of checkouts come in, the picked repository and what it draws stay as they were: its files, commits and pull requests are read once (2026-11-17)", async () => {
+  // Björn, on v3.2.9-ux17: "Clicking on edit for checkouts and open in on an application keeps spazzing around for the first few
+  // seconds running through the repositories". 65 checkouts among many more repositories on the forge: the checkouts come in
+  // batches, and each batch drew the picked repository's objects again, from *Reading…*.
+  const many = [PAYOUT, ...Array.from({ length: 120 }, (_, n) => `gitea:tidewater/on-the-forge-${n}`), LEDGER];
+  const batches: (() => void)[] = [];
+  const asked = { files: 0, commits: 0, prs: 0 };
+  const late: TryReads = {
+    ...reads,
+    repos: () => Promise.resolve(many.map(row)),
+    checkouts: (ids) => new Promise((resolve) => batches.push(() => resolve(ids.map((entityId) => ({ entityId, path: checkouts[entityId] ?? null, clonesRoot: ROOT }))))),
+    // A read asked again never answers, so a page that reads again stands on *Reading…*, as it did between batches.
+    files: (repo) => (asked.files++ === 0 ? reads.files(repo) : new Promise(() => {})),
+    commits: (repo) => (asked.commits++ === 0 ? reads.commits(repo) : new Promise(() => {})),
+    prs: (repo) => (asked.prs++ === 0 ? reads.prs(repo) : new Promise(() => {})),
+  };
+  stored = { ...stored, applications: [...stored.applications, { id: "tig", name: "Tig", command: "tig -C {path}", file_command: "tig -C {path} {file}", commit_command: "tig -C {path} show {sha}", pull_request_command: "tig -C {path} log {base}..{head}" }] };
+  const at = appPagePlace(["checkouts", "app", "tig"])!;
+  app = mount(TfAppPage, { target, props: { at, apps, reads: late, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
+  /** What the page draws: each row's control and the line under each command. */
+  const drawn = () => ({
+    rows: [...target.querySelectorAll(".tf-stg-row :is(input, select)")].map((el) => el.id),
+    lines: ["command", "file", "commit", "pr"].map(line),
+    picks: ["#tf-app-repo", "#tf-app-tryfile", "#tf-app-trycommit", "#tf-app-trypr"].map((sel) => target.querySelector<HTMLInputElement>(sel)?.value ?? null),
+  });
+  // Before any checkout has answered, every row the page will have is drawn already: an answer fills them in and moves nothing.
+  const before = drawn().rows;
+  expect(before).toEqual(["tf-app-name", "tf-app-repo", "tf-app-tryfile", "tf-app-trycommit", "tf-app-trypr", "tf-app-command", "tf-app-file", "tf-app-commit", "tf-app-range", "tf-app-pr"]);
+  batches.shift()!();
+  await settle();
+  const first = drawn();
+  expect(first.rows).toEqual(before);
+  expect(first.picks[0]).toBe(PAYOUT);
+  expect(first.lines[2]).toBe('tig -C "C:\\Users\\Björn Förschner\\src\\payout-service" show c90d11e4a7b2');
+  while (batches.length > 0) {
+    batches.shift()!();
+    await settle();
+    expect(drawn()).toEqual(first);
+  }
+  expect(target.querySelectorAll("#tf-app-repo option")).toHaveLength(2);
+  expect(asked).toEqual({ files: 1, commits: 1, prs: 1 });
+});
