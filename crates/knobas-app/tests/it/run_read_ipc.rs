@@ -170,9 +170,10 @@ async fn a_pipelines_mark_writes_its_finished_failures_and_answers_what_it_wrote
     )
     .await;
 
-    let (mut wrote, line) = mark_runs_read_inner(&pool, &registry(), &[], &[tests.clone()])
-        .await
-        .unwrap();
+    let (mut wrote, line) =
+        mark_runs_read_inner(&pool, &registry(), &[], std::slice::from_ref(&tests))
+            .await
+            .unwrap();
     wrote.sort();
     assert_eq!(wrote, [red1.clone(), red2.clone()]);
     let line = line.expect("a mark that wrote says so");
@@ -229,7 +230,7 @@ async fn the_count_drops_when_the_newest_failure_is_read_and_a_new_failure_asks_
         1
     );
 
-    mark_runs_read_inner(&pool, &registry(), &[red.clone()], &[])
+    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&red), &[])
         .await
         .unwrap();
     assert_eq!(
@@ -297,11 +298,13 @@ async fn reading_a_run_and_doing_its_inbox_line_are_one_answer() {
     let other_key = format!("failed_build:{other}");
     assert!(keys(pool.clone()).await.contains(&key));
 
-    mark_runs_read_inner(&pool, &registry(), &[red.clone()], &[])
+    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&red), &[])
         .await
         .unwrap();
     assert!(!keys(pool.clone()).await.contains(&key), "read, it left");
-    mark_runs_unread_inner(&pool, &[red.clone()]).await.unwrap();
+    mark_runs_unread_inner(&pool, std::slice::from_ref(&red))
+        .await
+        .unwrap();
     assert!(
         keys(pool.clone()).await.contains(&key),
         "unread, it is back"
@@ -310,7 +313,11 @@ async fn reading_a_run_and_doing_its_inbox_line_are_one_answer() {
     complete_inbox_item_inner(&pool, &registry(), now, &other_key)
         .await
         .unwrap();
-    assert_eq!(read(&pool).await, [other.clone()], "Done read the run");
+    assert_eq!(
+        read(&pool).await,
+        std::slice::from_ref(&other),
+        "Done read the run"
+    );
     mark_runs_unread_inner(&pool, &[other]).await.unwrap();
     assert!(
         keys(pool.clone()).await.contains(&other_key),
@@ -333,10 +340,10 @@ async fn a_withdrawn_runs_mark_is_not_answered() {
         "2026-08-21T01:00:00Z",
     )
     .await;
-    mark_runs_read_inner(&pool, &registry(), &[red.clone()], &[])
+    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&red), &[])
         .await
         .unwrap();
-    assert_eq!(read(&pool).await, [red.clone()]);
+    assert_eq!(read(&pool).await, std::slice::from_ref(&red));
     sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
         .bind(&red)
         .execute(&pool)

@@ -171,12 +171,7 @@ pub async fn unread_failing_builds_inner(
     if failing.is_empty() {
         return Ok(0);
     }
-    let read: i64 = sqlx::query_scalar(
-        "select count(*) from knobas.run_read where entity_id = any($1::text[])",
-    )
-    .bind(&failing)
-    .fetch_one(pool)
-    .await?;
+    let read = knobas_core::run_read::count_read(pool, &failing).await?;
     let failing = i64::try_from(failing.len()).unwrap_or(i64::MAX);
     Ok(u32::try_from((failing - read).max(0)).unwrap_or(u32::MAX))
 }

@@ -718,7 +718,9 @@ macro_rules! mention_of {
 ///
 /// **A run the person read is not an item** (ux18, `0098`): one with a row
 /// in `knobas.run_read`, on either shelf. *Done* on a failed build writes
-/// that row ([`crate::run_read`]), so *read* and *done* are one answer.
+/// that row ([`crate::run_read`]), so *read* and *done* are one answer. A
+/// `not in` over the table's key, hashed once a statement as `gone` is: a
+/// `not exists` planned a nested loop rescanning it per build.
 macro_rules! failed_build {
     () => {
         concat!(
@@ -796,7 +798,7 @@ macro_rules! failed_build {
                           and ",
             $crate::live_by_key!("mine"),
             "))
-            and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id)
+            and i.entity_id not in (select rr.entity_id from knobas.run_read rr)
             and (i.config is null or i.latest_green is null or i.latest_green <= i.at))"
         )
     };
@@ -864,7 +866,7 @@ macro_rules! failed_build_walked {
                           and ",
             $crate::live_by_key!("mine"),
             "))
-            and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id)
+            and i.entity_id not in (select rr.entity_id from knobas.run_read rr)
             and (i.config is null or i.latest_green is null or i.latest_green <= i.at))"
         )
     };

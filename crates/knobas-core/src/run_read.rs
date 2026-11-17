@@ -118,6 +118,23 @@ pub async fn mark_read(
         .await?)
 }
 
+/// How many of `runs` are marked read: what the top bar's count takes away
+/// from the failing pipelines' newest runs.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the read fails.
+pub async fn count_read(pool: &PgPool, runs: &[String]) -> Result<i64, CoreError> {
+    Ok(
+        sqlx::query_scalar(
+            "select count(*) from knobas.run_read where entity_id = any($1::text[])",
+        )
+        .bind(runs)
+        .fetch_one(pool)
+        .await?,
+    )
+}
+
 /// The run `run` read, against an executor the caller chooses: the Inbox's
 /// *Done* on a failed build writes it in the transaction of its own answer
 /// (`crate::inbox::complete_with`'s shape).

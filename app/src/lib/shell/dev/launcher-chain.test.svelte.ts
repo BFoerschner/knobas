@@ -183,7 +183,8 @@ test("starting the timer on a ticket makes it the chosen job: #/job draws it, an
   expect(location.hash, "#/job stays the home address").toBe("#/job");
   expect(launcher(), "Start timer closes the launcher").toBeNull();
   location.hash = "#/builds";
-  await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim() === "Builds", "Builds never drew");
+  // By its section, not its words: the entry carries the Builds count (ux18: the failures still unread) beside its name.
+  await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.getAttribute("data-section") === "builds", "Builds never drew");
   await search("PAY-240");
   press("Tab");
   expect(chain()).toEqual(withLink("PAY-231"));

@@ -1517,10 +1517,10 @@ async fn a_failed_build_whose_run_was_read_leaves_both_shelves_until_marked_unre
         "only the run that was read left"
     );
     inbox::complete(pool, &key, now()).await.unwrap();
-    let back = knobas_core::run_read::mark_unread(pool, &[read.clone()])
+    let back = knobas_core::run_read::mark_unread(pool, std::slice::from_ref(&read))
         .await
         .unwrap();
-    assert_eq!(back, [read.clone()], "it was read");
+    assert_eq!(back, [read], "it was read");
     assert!(
         keys(&stream(pool).await).contains(&key),
         "marked unread, the line is back and its *Done* went with the mark"
