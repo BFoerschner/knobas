@@ -603,8 +603,28 @@ impl LiveSources {
         let view = lent.source.view(entity, section).await?;
         let read_at = Utc::now();
         self.reads().put(key.clone(), Answer::View(view.clone()));
-        self.hold(&key, &view, read_at).await;
+        self.hold_behind(key, view.clone(), read_at);
         Ok((view, None, unkept))
+    }
+
+    /// [`Self::hold`] behind the answer (the ux18 pass, 2026-11-17): a page
+    /// opened on a read the forge answers waited for its answer to be
+    /// serialized and written to the store too, a file's whole text among
+    /// it. The session's next ask is answered from [`Self::reads`] meanwhile,
+    /// and a hold never replaces a newer one (`knobas_sync::held_read::put`).
+    /// Counted with the reads behind, so [`Self::settled`] waits for it.
+    fn hold_behind(&self, key: Key, view: Option<SourceView>, read_at: DateTime<Utc>) {
+        if self.store().is_none() {
+            return;
+        }
+        self.0.pending.fetch_add(1, Ordering::SeqCst);
+        let this = self.clone();
+        tokio::spawn(async move {
+            this.hold(&key, &view, read_at).await;
+            if this.0.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
+                this.0.idle.notify_waiters();
+            }
+        });
     }
 
     /// Hold `view`, read at `read_at` under `key`, for the next session,

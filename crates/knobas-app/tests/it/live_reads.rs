@@ -1479,6 +1479,8 @@ async fn a_live_view_a_page_read_is_the_next_sessions_answer_at_once() {
     let (text, held) = f.shown_through(&first, "pr/1", None).await.unwrap();
     assert!(held.is_none(), "read now");
     assert_eq!(f.seen.reads(), 1);
+    // Its answer is held behind it (the ux18 pass).
+    first.settled().await;
 
     let next = f.session();
     let started = std::time::Instant::now();
@@ -1496,7 +1498,10 @@ async fn a_live_view_a_page_read_is_the_next_sessions_answer_at_once() {
 #[tokio::test]
 async fn an_old_held_answer_is_told_confirmed_or_not() {
     let f = fixture().await;
-    f.shown_through(&f.session(), "pr/2", None).await.unwrap();
+    let first = f.session();
+    f.shown_through(&first, "pr/2", None).await.unwrap();
+    // Its answer is held behind it (the ux18 pass).
+    first.settled().await;
     f.age_held(chrono::TimeDelta::hours(2)).await;
 
     let next = f.session();
@@ -1544,7 +1549,10 @@ async fn an_old_held_answer_is_told_confirmed_or_not() {
 #[tokio::test]
 async fn a_new_credential_drops_what_was_held() {
     let f = fixture().await;
-    f.shown_through(&f.session(), "pr/3", None).await.unwrap();
+    let first = f.session();
+    f.shown_through(&first, "pr/3", None).await.unwrap();
+    // Its answer is held behind it (the ux18 pass).
+    first.settled().await;
     sources::crud::set_secret(
         &f.pool,
         &f.secrets,
@@ -1564,9 +1572,12 @@ async fn a_new_credential_drops_what_was_held() {
 #[tokio::test]
 async fn a_fixed_view_is_held_and_never_read_behind() {
     let f = fixture().await;
-    f.shown_through(&f.session(), "commit/abc", Some("file:a"))
+    let first = f.session();
+    f.shown_through(&first, "commit/abc", Some("file:a"))
         .await
         .unwrap();
+    // Its answer is held behind it (the ux18 pass).
+    first.settled().await;
     let next = f.session();
     let (_, held) = f
         .shown_through(&next, "commit/abc", Some("file:a"))
@@ -1585,7 +1596,10 @@ async fn a_fixed_view_is_held_and_never_read_behind() {
 #[tokio::test]
 async fn a_held_read_is_in_held_read_alone() {
     let f = fixture().await;
-    f.shown_through(&f.session(), "pr/4", None).await.unwrap();
+    let first = f.session();
+    f.shown_through(&first, "pr/4", None).await.unwrap();
+    // Its answer is held behind it (the ux18 pass).
+    first.settled().await;
     let tables: Vec<(String, String)> = sqlx::query_as(
         "select table_schema::text, table_name::text from information_schema.tables
           where table_type = 'BASE TABLE'
@@ -1746,4 +1760,38 @@ async fn a_compare_list_read_from_the_source_is_answered_held_in_the_next_sessio
         reads + 1,
         "the check behind is the source's"
     );
+}
+
+/// **A page's read answers before its hold is written** (the ux18 pass,
+/// 2026-11-17): a read the forge answers is held for the next session behind
+/// the answer, so a store slow to take the write (here, locked against row
+/// writes) holds up no page; the hold lands once it can.
+#[tokio::test]
+async fn a_read_answers_before_its_hold_is_written() {
+    let f = fixture().await;
+    let mut busy = f.pool.begin().await.unwrap();
+    sqlx::query("lock table sync.held_read in exclusive mode")
+        .execute(&mut *busy)
+        .await
+        .unwrap();
+    let live = f.session();
+    let read = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        f.shown_through(&live, "pr/5", None),
+    )
+    .await
+    .expect("answered while the store cannot take the hold")
+    .unwrap();
+    assert!(read.1.is_none(), "read now");
+    let held = async || -> i64 {
+        sqlx::query_scalar("select count(*) from sync.held_read where source_id = $1")
+            .bind(&f.id)
+            .fetch_one(&f.pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(held().await, 0, "not held yet");
+    busy.commit().await.unwrap();
+    live.settled().await;
+    assert_eq!(held().await, 1, "held once the store took it");
 }
