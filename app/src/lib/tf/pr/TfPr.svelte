@@ -844,7 +844,7 @@
       <TfNothingHere message="knobas does not hold this pull request. It may not have synced yet." href="#/code/prs" action="All pull requests" />
     {/if}
   {:else}
-    <header class="tf-fhead" class:tf-unread={!drawnHead.shown}>
+    <header class="tf-fhead tf-holds" class:tf-unread={!drawnHead.shown}>
       <div>
         <h1>{name} {title}</h1>
         <div class="tf-sub">

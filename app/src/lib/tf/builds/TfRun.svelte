@@ -565,7 +565,7 @@
   <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
-  <header class="tf-fhead tf-bhead tf-holdsbelow" class:tf-unread={!drawnHead.shown}>
+  <header class="tf-fhead tf-bhead tf-holds tf-holdsbelow" class:tf-unread={!drawnHead.shown}>
     <div>
       <h1 data-failed={failedRun(run) ? "" : undefined}>
         {pipeline.name} #{run.number ?? ""}

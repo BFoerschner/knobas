@@ -279,6 +279,17 @@ test("the header draws once, whole: unseen in its room while its repository's re
   expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")?.textContent?.trim()).toBe("Open in…");
 });
 
+test("a header shown with its subline empty keeps the subline's line, as it had while held (2026-11-17)", async () => {
+  // The saved scale database, no credential: the view failed before the item answered, so *Could not read the pull
+  // request* drew under the held header, which then showed with nothing in its subline and lost that line: 19 px up.
+  await draw([PR], { ...ports(), entityView: () => Promise.reject({ code: "auth", message: "no credential" }) });
+  const head = target.querySelector(".tf-fhead")!;
+  expect(head.classList.contains("tf-unread")).toBe(false);
+  expect(text(".tf-fhead .tf-sub")).toBe("");
+  expect(head.classList.contains("tf-holds"), "the class that keeps the subline's line once shown").toBe(true);
+  expect(text(".tf-cfail")).toContain("Could not read the pull request");
+});
+
 test("somebody else's pull request names its author and offers Review…", async () => {
   const theirs = prView([COMMENT, APPROVE, EDIT, MERGE]);
   const facts = theirs.sections[0]!.blocks[0]!;

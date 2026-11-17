@@ -161,8 +161,10 @@
 .tf-fhead > .tf-acts { flex: 0 1 auto; }
 /* A detail page's header held unseen in its room until the reads it draws from have answered (`held-head.svelte.ts`): it draws once, whole. */
 .tf-fhead.tf-unread, .tf-tabs.tf-unread { visibility: hidden; }
-/* Its subline keeps a line's room while held, empty or not, so the tabs under it stay where the header shows. */
-.tf-fhead.tf-unread .tf-sub { min-height: 1lh; }
+/* Its subline keeps a line's room while held, empty or not, so the tabs under it stay where the header shows; and once
+   shown (`tf-holds`), since a subline the reads left empty (a pull request whose view failed) went to nothing as the
+   header showed, and what was drawn under it rose a line (2026-11-17). */
+.tf-fhead.tf-unread .tf-sub, .tf-fhead.tf-holds .tf-sub { min-height: 1lh; }
 /* A header whose held actions can wrap holds what is under it too (a run's), so its growing a line moves nothing seen. */
 .tf-fhead.tf-unread.tf-holdsbelow ~ * { visibility: hidden; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
