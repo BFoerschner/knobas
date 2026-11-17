@@ -2439,7 +2439,7 @@ between the first draw and the driver, and `just live-shot` runs it before its
 steps file. When AeroSpace is running (its CLI answers), the window is
 fullscreened by its window id, whatever its width, and the fullscreen ends
 with the window. Elsewhere a window narrower than `WITNESS_MIN_WIDTH` (1241
-points, pinned against `tickets.css` by `desktop-witness-test.sh`) is widened
+points, pinned against `narrow.css` by `desktop-witness-test.sh`; Tickets' preview, which set it first, is gone since ux18) is widened
 through `ax resize`. The run log then prints the size the driver runs at,
 or, below the minimum, names the size and the minimum and fails before the
 driver's first step.

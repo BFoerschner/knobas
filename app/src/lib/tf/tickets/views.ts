@@ -59,6 +59,15 @@ export function sprintEnds(iso: string): string {
 export const DEFAULT_CARD_FIELDS: CardField[] = ["type", "signals", "comments", "assignee"];
 /** The list's columns unless a view says otherwise (prototype-6's new view). */
 export const DEFAULT_LIST_COLUMNS: ListColumn[] = ["key", "summary", "status", "priority", "signals", "assignee", "updated"];
+
+/**
+ * A view's list columns, or the defaults where it names none: a list always shows Key, so none is a view whose
+ * columns nobody chose. A Jira view's row is made by the sync with none (migration `0035`'s default), and its *View
+ * settings* sent them back as they were, which the save refuses: *the list always shows Key* (found in ux18).
+ */
+export function listColumnsOf(view: Pick<TicketView, "list_columns"> | null | undefined): ListColumn[] {
+  return view && view.list_columns.length > 0 ? view.list_columns : DEFAULT_LIST_COLUMNS;
+}
 /** Every list column, in the order the list draws them (R-3.16). */
 export const LIST_COLUMN_ORDER: readonly (readonly [ListColumn, string])[] = [
   ["key", "Key"],
@@ -290,8 +299,9 @@ function draftOf(view: TicketView | null): TicketViewDraft {
     columns: view?.columns.map((column) => ({ ...column, statuses: [...column.statuses] })) ?? [],
     lanes: view?.lanes ?? "none",
     card_fields: [...(view?.card_fields ?? DEFAULT_CARD_FIELDS)],
-    list_columns: [...(view?.list_columns ?? DEFAULT_LIST_COLUMNS)],
+    list_columns: [...listColumnsOf(view)],
     list_sort: view?.list_sort ?? null,
+    show_all: view?.show_all ?? false,
     // A copy is your own view: its source decides nothing about it.
     saved_view: null,
   };

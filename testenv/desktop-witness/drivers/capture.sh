@@ -74,11 +74,6 @@ readonly CAPTURED_FROM='Captured from'                    # detail/relations.ts,
 readonly COMMENT_BOX='Comment on PAY-231'                # job/TfConversation.svelte, the reading column's compose box (#2399)
 readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's nav
 readonly TICKETS_FILTER='Filter tickets'  # tickets/TicketsPage.svelte
-# The preview's button, worded by the ticket's state (`tickets.ts`'
-# `previewAction`); each is a link to the ticket's page, which draws the job
-# page either way (spec #2396): *Open ticket* only reads, *Start work* shows the
-# steps and chooses nothing yet, *Resume work* chooses and starts the timer.
-readonly JOB_LINKS=('Start work' 'Resume work' 'Open ticket')
 readonly CAPTURE_BOX='Capture'                            # capture/CaptureWindow.svelte
 # The **window**'s title (`capture.rs`'s `.title("Capture")`), a different fact
 # from the box's `aria-label` above though the same word (#548).
@@ -172,14 +167,11 @@ unread() { ! reads "$1"; }
 
 # Tickets previews the filtered card: its summary on screen, and exactly one of
 # the preview's job links.
-job_link() {
-    local name
-    for name in "${JOB_LINKS[@]}"; do
-        if exactly_one "$name"; then printf '%s\n' "$name"; return 0; fi
-    done
-    return 1
-}
-previews_the_job() { reads "$JOB_SUMMARY" && job_link >/dev/null; }
+# A click on the card's summary opens the ticket's page (ux18: Tickets has no
+# preview to fill, so a card opens as the app's other rows do). The card is a
+# button whose name runs its key, type, summary and signals together, so the
+# pointer takes its words, as a person would.
+clicked_the_card() { "$ax" click-at "$pid" "$JOB_SUMMARY" >/dev/null 2>&1 && return 0; seen="no single '$JOB_SUMMARY' to click"; return 1; }
 
 caret_in_the_box() {
     local focused
@@ -254,15 +246,14 @@ say "notes before the capture: $notes_before"
 
 # From Tickets and not from ⌘K: on 2026-10-18 the demo profile's launcher
 # answered `PAY-231` with pages, commits and a branch and `#PAY-231` with
-# nothing. Tickets filtered by the key previews the one card, and the
-# preview's button is a link to its job.
+# nothing. Tickets filtered by the key draws the one card, and a click on it
+# opens its ticket's page.
 say "opening the job $JOB_QUERY from Tickets, so the capture has a foreground"
 press_when "$TICKETS_LINK"
 fill "$TICKETS_FILTER" "$JOB_QUERY"
-wait_until "Tickets never previewed '$JOB_QUERY' ($JOB_SUMMARY)" previews_the_job
-go=$(job_link) || die "the preview offers none of: ${JOB_LINKS[*]}"
-"$ax" press "$pid" "$go" || die "could not press '$go'"
-wait_until "Tickets is still up after '$go'" absent "$TICKETS_FILTER"
+wait_until "Tickets never drew '$JOB_QUERY' ($JOB_SUMMARY)" reads "$JOB_SUMMARY"
+wait_until "could not click the card '$JOB_SUMMARY'" clicked_the_card
+wait_until "Tickets is still up after the card's click" absent "$TICKETS_FILTER"
 lands_named job-link "$COMMENT_BOX"
 say "the job is open, so something is in front of the reader"
 

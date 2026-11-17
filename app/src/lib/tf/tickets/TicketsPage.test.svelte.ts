@@ -1,22 +1,13 @@
 /**
  * Tickets in the ticket-first shell (#810): the ticket board and the list
  * over `mini_board`, the filter bar sending its query to the server, the
- * outlined selected card and the preview.
+ * outlined selected card, and no preview beside them (ux18).
  */
 import { needles } from "./needles";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 
-import type {
-  ContextRow,
-  EntityFilter,
-  EntityRow,
-  LanesAsked,
-  MiniBoard,
-  MiniBoardCard,
-  Reached,
-  StateChip,
-} from "../../ipc/entity";
+import type { BoardPage, ContextRow, LanesAsked, MiniBoard, MiniBoardCard } from "../../ipc/entity";
 import type { QueryTranslation, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
 import { toasts } from "../../shell/toasts.svelte";
 import { growWindowsNow } from "../../shell/windowed.svelte";
@@ -29,7 +20,7 @@ import { until } from "../../shell/test-wait";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
-// bypasses them (as `promote_context` would to draw the preview, #1030).
+// bypasses them (as `promote_context` would have, #1030).
 const bridged = vi.hoisted(() => [] as string[]);
 vi.mock("@tauri-apps/api/core", async (original) => ({
   ...(await original<typeof import("@tauri-apps/api/core")>()),
@@ -136,37 +127,6 @@ interface Harness {
   opened: string[];
   /** Every `translate_ticket_view` (#1208). */
   translated: string[];
-  /** The mirror rows a reach or a context can hold. */
-  rows: EntityRow[];
-  /** What each ticket reaches (`job_reach`), by entity id. */
-  reach: Record<string, Reached[]>;
-  /** A stored context's members, by context id. */
-  members: Record<string, string[]>;
-  /** Every `list_entities` filter the page sent. */
-  lists: EntityFilter[];
-}
-
-function row(entity_id: string, kind: string, tone: StateChip["tone"] | null = null): EntityRow {
-  return {
-    entity_id,
-    kind,
-    source_id: kind === "build" ? "teamcity" : "gitea",
-    title: entity_id,
-    updated_at: null,
-    synced_at: "",
-    path: null,
-    state: tone === null ? null : { text: tone === "err" ? "failed" : "success", tone },
-  };
-}
-
-const PR = row("gitea:payout-service#142", "pr", "info");
-const BUILD_FAILED = row("teamcity:it#1187", "build", "err");
-const BUILD_OK = row("teamcity:lint#904", "build", "ok");
-/** What the reads above can answer with. */
-const AROUND_ROWS = [PR, BUILD_FAILED, BUILD_OK];
-
-function own(of: EntityRow): Reached {
-  return { entity_id: of.entity_id, kind: of.kind, step: of.entity_id, origin: { kind: "own" } };
 }
 
 /**
@@ -213,10 +173,6 @@ function harness(
     hidden: [],
     opened: [],
     translated: [],
-    rows: [...AROUND_ROWS],
-    reach: {},
-    members: {},
-    lists: [],
     ports: {
       views: () => Promise.resolve(h.views.map((row) => ({ ...row }))),
       saveView: (draft) => {
@@ -274,7 +230,6 @@ function harness(
         if (lanes) return Promise.resolve(inLanes(board, lanes, perColumn));
         return Promise.resolve(board);
       },
-      detail: (id) => Promise.resolve({ description: `The description of ${id}.`, markup: "text" }),
       // No longer a port: a page that still asked would count here (#1502).
       ...{
         contexts: () => {
@@ -282,29 +237,6 @@ function harness(
           return Promise.resolve(contexts);
         },
       },
-      // The mirror's rows, as the job's section reads ask for them: scoped by
-      // what a ticket reaches, or (what no read should ask any more) by a
-      // stored context's membership.
-      listEntities: (filter) => {
-        h.lists.push(filter);
-        const ids =
-          filter.reach != null
-            ? new Set((h.reach[filter.reach] ?? []).map((row) => row.entity_id))
-            : filter.context !== null
-              ? new Set(h.members[filter.context] ?? [])
-              : new Set(h.rows.map((row) => row.entity_id));
-        // Asked for CI with no kinds, the mirror reads the run kinds CI's
-        // fillers declare (#1295); here, the fixture's builds.
-        const roleKinds = filter.role === "ci" ? ["build"] : null;
-        const rows = h.rows.filter(
-          (row) =>
-            ids.has(row.entity_id) &&
-            (filter.kinds.length === 0 || filter.kinds.includes(row.kind)) &&
-            (roleKinds === null || roleKinds.includes(row.kind)),
-        );
-        return Promise.resolve({ rows, total: rows.length, tally: null, groups: null });
-      },
-      jobReach: (id) => Promise.resolve(h.reach[id] ?? []),
       suggestions: () =>
         Promise.resolve({
           fields: [
@@ -320,8 +252,8 @@ function harness(
 }
 
 /** Opens the page; the filter's typing pause is none unless a test asks for one. */
-async function open(h: Harness, timedTicket: string | null = null, viewId: string | null = null, typingPause = 0) {
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId, typingPause, previewPause: 0 } });
+async function open(h: Harness, _timed: string | null = null, viewId: string | null = null, typingPause = 0) {
+  page = mount(TicketsPage, { target, props: { ready: true, ports: h.ports, viewId, typingPause } });
   await settle();
 }
 
@@ -332,7 +264,6 @@ const columns = () =>
     more: col.querySelector(".tf-more")?.textContent ?? null,
   }));
 const count = () => target.querySelector(".tf-fcount")!.textContent;
-const preview = () => target.querySelector<HTMLElement>(".tf-preview")!;
 const field = () => target.querySelector<HTMLInputElement>(".tf-fbar input[data-filter]")!;
 
 function type(input: HTMLInputElement, char: string) {
@@ -370,8 +301,9 @@ test("every synced ticket on the board: a column per status, eight cards then Sh
   expect(target.querySelector(".tf-views .tf-count")!.textContent).toBe("18");
 });
 
-test("the first card is selected: outlined, and the preview shows it with Start work", async () => {
-  await open(harness());
+test("the first card is selected and outlined, and the board takes the width: no preview of it beside (ux18)", async () => {
+  const h = harness();
+  await open(h);
   const first = target.querySelector<HTMLElement>(".tf-tcard")!;
   expect(first.classList.contains("tf-sel")).toBe(true);
   expect(first.getAttribute("aria-current")).toBe("true");
@@ -381,31 +313,22 @@ test("the first card is selected: outlined, and the preview shows it with Start 
   expect(first.textContent).toContain("Story, High");
   expect(first.querySelector(".tf-av")!.textContent).toBe("MA");
   expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
-
-  expect(preview().querySelector("h2")!.textContent).toBe("Retry failed SEPA payouts");
-  expect(preview().textContent).toContain("The description of jira:PAY-1.");
-  const button = preview().querySelector<HTMLAnchorElement>(".tf-go .tf-primary")!;
-  expect(button.textContent).toBe("Start work");
-  // It opens the ticket on its steps and chooses nothing until they run (F-130).
-  expect(button.getAttribute("href")).toBe("#/ticket/jira%3APAY-1");
+  // Björn: "Remove the right sidebar from the tickets view": no pane, no edge to drag it by, and nothing read for it.
+  expect(target.querySelector(".tf-preview, [aria-label='Selected ticket']")).toBeNull();
+  expect([...target.querySelectorAll(".tf-tickets > .tf-sedge")].map((edge) => edge.getAttribute("data-at"))).toEqual(["start"]);
+  expect(bridged).not.toContain("get_entity");
+  expect(bridged).not.toContain("card_reads");
+  expect(bridged).not.toContain("promote_context");
 });
 
-test("selecting another card moves the outline and the preview's button follows its state", async () => {
-  await open(harness(), "PAY-40");
+test("a click on a card opens its ticket page, as the app's other rows do, and the way back selects it (ux18)", async () => {
+  await open(harness());
   const pick = (key: string) => target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!;
   pick("PAY-40").click();
+  expect(location.hash).toBe("#/ticket/jira%3APAY-40");
   await settle();
   expect(pick("PAY-40").classList.contains("tf-sel")).toBe(true);
   expect(pick("PAY-1").classList.contains("tf-sel")).toBe(false);
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Resume work");
-  expect(preview().textContent).toContain("Your timer is running on this ticket.");
-
-  pick("PAY-2").click();
-  await settle();
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open ticket");
-  // Somebody else's ticket is only read from here (spec #2396): its page, not the job's address.
-  expect(preview().querySelector(".tf-go .tf-primary")!.getAttribute("href")).toBe("#/ticket/jira%3APAY-2");
-  expect(preview().textContent).toContain("Assigned to jonas.becker.");
 });
 
 test("typing filters on the server, keeps focus and the caret, shows the matches and marks the words", async () => {
@@ -667,58 +590,6 @@ test("an ad-hoc context draws no Not a ticket group and is never read for", asyn
   expect(h.contextReads).toBe(0);
 });
 
-const around = () => [...preview().querySelectorAll(".tf-tktable > a")].map((row) => [...row.children].map((part) => part.textContent).join("|"));
-
-// #1030: the preview counts what the job's sections show, from the job-reach
-// read, whether or not anybody has opened the ticket's job yet.
-test("Around this ticket counts what the ticket reaches, with no context stored for it", async () => {
-  const h = harness();
-  h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
-  await open(h);
-  expect(around()).toEqual(["Code|1||›", "Builds|1|1 failing|›"]);
-  // Builds is counted as the job reads it: asked for the CI role, naming no kinds (#1295).
-  const builds = h.lists.filter((filter) => filter.order === "latest_per_parent");
-  expect(builds).toHaveLength(1);
-  expect(builds[0]).toMatchObject({ role: "ci", kinds: [], reach: "jira:PAY-1" });
-});
-
-test("Around this ticket counts a parent's link the reach brings in and the context's membership does not", async () => {
-  const h = harness([{ id: "ctx:2", kind: "ticket", title: "PAY-1", anchor_id: "jira:PAY-1", created_at: "", archived_at: null }]);
-  // The job's Builds section draws both builds: one the ticket's own, one its parent's (R-7.3).
-  h.reach["jira:PAY-1"] = [
-    own(PR),
-    own(BUILD_OK),
-    { entity_id: BUILD_FAILED.entity_id, kind: "build", step: "jira:PAY-200", origin: { kind: "parent", ticket: "jira:PAY-200" } },
-  ];
-  h.members["ctx:2"] = [PR.entity_id, BUILD_OK.entity_id];
-  await open(h);
-  expect(around()).toEqual(["Code|1||›", "Builds|2|1 failing|›"]);
-});
-
-test("Around this ticket says Nothing connected yet only when the reach is empty", async () => {
-  const h = harness();
-  h.reach["jira:PAY-2"] = [own(PR)];
-  await open(h);
-  expect(around()).toEqual([]);
-  expect(preview().textContent).toContain("Nothing connected yet.");
-  target.querySelector<HTMLButtonElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.click();
-  await settle();
-  expect(around()).toEqual(["Code|1||›"]);
-});
-
-test("selecting a card never creates a context", async () => {
-  const h = harness();
-  h.reach["jira:PAY-1"] = [own(PR)];
-  await open(h);
-  for (const key of ["PAY-2", "PAY-40", "PAY-1"]) {
-    target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!.click();
-    await settle();
-  }
-  expect(around()).toEqual(["Code|1||›"]);
-  expect(bridged).not.toContain("promote_context");
-  expect(h.lists.every((filter) => filter.context === null)).toBe(true);
-});
-
 test("Enter on a card opens its ticket page, not the job (spec #2227)", async () => {
   await open(harness());
   const first = target.querySelector<HTMLButtonElement>(".tf-tcard")!;
@@ -858,7 +729,6 @@ test("j/k and the arrows move the selection through the visible cards in reading
   field().focus();
   press("j");
   expect(selectedKey()).toBe("PAY-52");
-  expect(preview().textContent).toContain("PAY-52");
 });
 
 test("j/k walk the list's rows in their sorted order, and a double click opens the ticket page", async () => {
@@ -966,12 +836,11 @@ test("signals are drawn on the card and in the list's Signals column, each a ton
   ]);
 });
 
-test("a card counts its comments above zero and names its epic, as the preview's Epic row does", async () => {
+test("a card counts its comments above zero and names its epic", async () => {
   await open(harness());
   const mine = target.querySelector('.tf-tcard[data-entity="jira:PAY-1"]')!;
   expect(mine.querySelector(".tf-comments")!.textContent).toBe("3 comments");
-  const epicRow = () => [...preview().querySelectorAll("dt")].find((dt) => dt.textContent === "Epic")!;
-  expect(epicRow().nextElementSibling!.textContent).toBe("PAY-200 Payout reliability");
+  expect(mine.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
 
   // A count of none draws nothing, nor does a count that never answered,
   // and an epic the mirror does not hold is its key alone (ADR-0007).
@@ -979,9 +848,6 @@ test("a card counts its comments above zero and names its epic, as the preview's
   expect(other.querySelector(".tf-comments")).toBeNull();
   expect(target.querySelector('.tf-tcard[data-entity="jira:PAY-2"] .tf-comments')).toBeNull();
   expect(other.querySelector(".tf-cep")!.textContent).toBe("PAY-300");
-  other.click();
-  await settle();
-  expect(epicRow().nextElementSibling!.textContent).toBe("PAY-300");
 });
 
 test("a view whose cards leave the comment count out draws none", async () => {
@@ -1006,6 +872,7 @@ function view(id: string, name: string, group: string, position: number, extra: 
     card_fields: ["type", "signals", "comments", "assignee"],
     list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"],
     list_sort: null,
+    show_all: false,
     saved_view: null,
     count: 3,
     unreadable: null,
@@ -1082,7 +949,7 @@ test("Find a view narrows the pane by name and by query, and marks the name", as
 test("the board head is the canonical header: title left, one group right with the switch, the actions at default size, Sync now last (#2293)", async () => {
   const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug" })]);
   const sync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket: null, ports: h.ports, viewId: "mine", typingPause: 0, sync } });
+  page = mount(TicketsPage, { target, props: { ready: true, ports: h.ports, viewId: "mine", typingPause: 0, sync } });
   await settle();
   const head = target.querySelector<HTMLElement>(".tf-board-head")!;
   expect(head.matches("header.tf-fhead")).toBe(true);
@@ -1099,13 +966,6 @@ test("the board head is the canonical header: title left, one group right with t
     expect(b.classList.contains("tf-sm")).toBe(false);
   }
   expect(acts!.lastElementChild!.textContent).toBe("Sync now");
-});
-
-test("the preview's go button is the large decision (#2293)", async () => {
-  await open(harness());
-  const go = preview().querySelector(".tf-go .tf-primary")!;
-  expect(go.classList.contains("tf-btn")).toBe(true);
-  expect(go.classList.contains("tf-lg")).toBe(true);
 });
 
 test("a view opens with its text as the filter bar's base, its name and text in the header, and its own layout", async () => {
@@ -1676,14 +1536,11 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   ]);
 });
 
-test("on a Jira view the preview and the list read the ticket's status, the column its view's name (#1423)", async () => {
+test("on a Jira view the list reads the ticket's status, the column its view's name (#1423)", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
   // PAY-1 is To Do and mine, under *Ready*.
   expect(columns()[0]!.head).toBe("Ready 12");
-  const facts = [...preview().querySelectorAll(".tf-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
-  expect(facts).toContainEqual(["Status", "To do"]);
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Start work");
 
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
   await settle();
@@ -1740,7 +1597,7 @@ test("a drawn card keeps whether it names its source until the person's next rea
     const h = harness([], [], corpus);
     page = mount(TicketsPage, {
       target,
-      props: { ready: true, timedTicket: null, ports: h.ports, viewId: null, typingPause: 0, previewPause: 0, get syncRevision() { return revision.n; } },
+      props: { ready: true, ports: h.ports, viewId: null, typingPause: 0, get syncRevision() { return revision.n; } },
     });
     await settle();
     const named = (id: string) => target.querySelector(`.tf-tcard[data-entity="${CSS.escape(id)}"]`)?.querySelector(".tf-tsrc")?.textContent ?? null;
@@ -2314,9 +2171,6 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(document.activeElement?.getAttribute("data-entity")).toBe(`jira:${at}`);
   expect(drawn()).not.toContain("jira:PAY-0001");
   expect(gaps()).toHaveLength(2);
-  // The preview follows the selection to a row that was not drawn.
-  await settle();
-  expect(preview().textContent).toContain(at);
 
   // And back to the top.
   for (let step = 0; step < first.length + 20; step += 1) press("k");
@@ -2342,7 +2196,7 @@ test("*Back to All tickets* is a link that does what Esc does (F-153)", async ()
   expect(target.querySelector("h1")!.textContent).toContain("All tickets");
 });
 
-test("the preview's Sub-tasks row narrows the page where it stands, and Esc undoes it, with the bar saying so", async () => {
+test("a Sub-tasks narrowing made where the page stands is undone by Esc, with the bar saying so", async () => {
   const h = harness();
   await open(h);
   scopedTicket.openSubtasks("jira:PAY-1");
@@ -2358,4 +2212,95 @@ test("the preview's Sub-tasks row narrows the page where it stands, and Esc undo
   expect(scopedTicket.subtasksOf).toBeNull();
   expect(target.querySelector("h1")!.textContent).toContain("All tickets");
   expect(layers.open, "the way out goes with the narrowing").not.toContain(layer);
+});
+
+// -- Show every ticket when the view opens (ux18, Björn: "a toggle in the edit view page of the tickets to always show
+// all the tickets on open, so I don't have to show them myself") --
+
+const showAllBox = () =>
+  [...dialog()!.querySelectorAll<HTMLLabelElement>("label")]
+    .find((label) => label.textContent!.trim() === "Show every ticket when the view opens")!
+    .querySelector<HTMLInputElement>("input[type=checkbox]")!;
+
+test("the view editor's Show every ticket when the view opens is off by default, says what it does, and is stored with the view", async () => {
+  const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: "issuetype:Bug" })]);
+  await open(h, null, "bugs");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
+  await previewed(h);
+  const box = showAllBox();
+  expect(box.checked).toBe(false);
+  expect(box.closest(".tf-vw-all")!.textContent).toContain("Every column and lane runs to its last ticket as you scroll, Done too.");
+  box.click();
+  flushSync();
+  inDialog("Save view").click();
+  await settle();
+  expect(h.saved.at(-1)).toMatchObject({ id: "bugs", show_all: true });
+
+  // Saved, it opens checked; the list's words say what it does there.
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
+  await previewed(h);
+  expect(showAllBox().checked).toBe(true);
+  inDialog("List").click();
+  flushSync();
+  expect(showAllBox().closest(".tf-vw-all")!.textContent).toContain("The list runs to its last ticket as you scroll.");
+});
+
+test("a view stored with Show every ticket opens on fifty a column and draws them all, Done too, with no Show more; off, as before", async () => {
+  const off = harness([], [view("v", "Payments", "Mine", 0)]);
+  await open(off, null, "v");
+  expect(off.reads[0]!.perColumn).toBe(8);
+  expect(columns().map(({ cards, more }) => [cards, more])).toEqual([[8, "Show 4 more"], [1, null], [3, "Show 2 more done"]]);
+  page && unmount(page);
+  forgetTicketsSession();
+
+  const on = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })]);
+  await open(on, null, "v");
+  expect(on.reads[0]!.perColumn).toBe(50);
+  expect(columns().map(({ cards, more }) => [cards, more])).toEqual([[12, null], [1, null], [5, null]]);
+  expect(target.querySelectorAll(".tf-more")).toHaveLength(0);
+});
+
+test("a column of a view that shows every ticket past its first fifty offers no Show more: its foot reads the next page", async () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({ status: "To Do", card: card(`PAY-${i + 1}`, `Ticket ${i + 1}`) }));
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })], many);
+  await open(h, null, "v");
+  expect(h.reads[0]!.perColumn).toBe(50);
+  expect(columns()[0]!.head).toBe("To do 60");
+  expect(target.querySelectorAll(".tf-more")).toHaveLength(0);
+  expect(target.querySelectorAll(".tf-col .tf-near")).toHaveLength(1);
+});
+
+test("a view stored with Show every ticket draws its list in the server's order of the sort, with no Show N more", async () => {
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true, layout: "list" })]);
+  const board = h.ports.board;
+  const pages: (BoardPage | null | undefined)[] = [];
+  h.ports.board = (perColumn, query, savedView, lanes, role, page) => {
+    pages.push(page);
+    return board(perColumn, query, savedView, lanes, role).then((answer) => {
+      if (!page?.sort) return answer;
+      // The server's order: by key, highest first.
+      const keyed = answer.columns.flatMap((column) => column.cards).sort((a, b) => Number(b.key.split("-")[1]) - Number(a.key.split("-")[1]));
+      return { ...answer, order: keyed.map((card) => card.entity_id) };
+    });
+  };
+  await open(h, null, "v");
+  expect(pages.map((page) => page?.sort ?? null)).toEqual([null, "updated"]);
+  const keys = [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.querySelector("td")!.textContent);
+  expect(keys.slice(0, 3)).toEqual(["PAY-54", "PAY-53", "PAY-52"]);
+  expect(target.querySelector(".tf-list-more")).toBeNull();
+});
+
+test("a Jira view's settings carry Show every ticket too, and it then opens on fifty a column", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  expect(h.reads[0]!.perColumn).toBe(8);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
+  await settle();
+  showAllBox().click();
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-vw-dialog button")].find((b) => b.textContent === "Save view")!.click();
+  await settle();
+  expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", saved_view: "jira:board-21", show_all: true });
+  await settle();
+  expect(h.reads.at(-1)!.perColumn).toBe(50);
 });

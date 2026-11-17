@@ -193,6 +193,7 @@ const JIRA_VIEWS: TicketViewRow[] = [
   card_fields: [],
   list_columns: ["key" as const],
   list_sort: null,
+  show_all: false,
   saved_view: `jira:${(id as string).replace("jira-", "")}`,
   count: count as number,
   unreadable: null,

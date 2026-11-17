@@ -1,8 +1,9 @@
-/* ---------- Tickets (#810): views, the ticket board or list, the preview ---------- */
+/* ---------- Tickets (#810): views, then the ticket board or list across the rest of the width ---------- */
 /* One row bounded by the page, never sized by its content: an `auto` row made any text
-   change in the preview re-lay out the whole list table (perf audit after #2200). */
+   change re-lay out the whole list table (perf audit after #2200). The preview of the selected ticket that stood on the
+   right is gone (ux18): a click opens the ticket's page. */
 .tf-board-title h1:focus { outline: none; }
-.tf-tickets { position: relative; display: grid; grid-template-columns: var(--side-tickets-views, 230px) minmax(0, 1fr) var(--side-tickets-preview, 340px); grid-template-rows: minmax(0, 1fr); height: 100%; }
+.tf-tickets { position: relative; display: grid; grid-template-columns: var(--side-tickets-views, 230px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; }
 .tf-views { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-vlist { overflow: auto; background: var(--sheet); padding: 12px 10px 14px; flex: 1; }
 .tf-views h2 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
@@ -39,8 +40,8 @@
 /* A lane's head stays in reach while the lanes scroll sideways together. */
 .tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
 /* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go
-   on, and the eye runs down a status. It goes by the window and not the board, so opening the preview reflows no card. At 1440 px
-   four columns fit beside the preview, with a sliver of a fifth, so the board says there is more (F-160). */
+   on, and the eye runs down a status. It goes by the window and not the board. At 1440 px five columns fit beside the views,
+   with a sliver of a sixth, so the board says there is more (F-160). */
 .tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: 232px; gap: 8px; align-items: start; overflow-x: auto; background: var(--paper); }
 @media (max-width: 1500px) { .tf-cols { grid-auto-columns: 195px; } }
 .tf-lanes-more { align-self: flex-start; position: sticky; left: 22px; margin: 0 22px 14px; }
@@ -150,7 +151,7 @@
 .tf-tbl .tf-rowt { font-size: var(--t-md); font-weight: 500; }
 .tf .tf-tbl td:first-child > a.tf-mono { font-size: var(--t-sm); font-weight: 500; }
 .tf-list { container-type: inline-size; }
-/* A narrow pane keeps the columns you scan by; the preview beside it has the priority and the assignee. */
+/* A narrow pane keeps the columns you scan by; the ticket's page has the priority and the assignee. */
 @container (max-width: 760px) { .tf-tbl :is(.tf-c-priority, .tf-c-assignee) { display: none; } }
 @container (max-width: 640px) { .tf-tbl .tf-c-signals { display: none; } }
 /* A view that adds the Epic or Labels column gives them the room of the two columns that matter least here, so the summary keeps its share. */
@@ -158,18 +159,8 @@
 @container (max-width: 760px) { .tf-tbl.tf-has-epic .tf-c-labels { display: none; } }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }
-.tf-preview {
-  border-left: 1px solid var(--rule); background: var(--sheet); --under: var(--sheet); overflow: auto; padding: 18px;
-  display: flex; flex-direction: column; gap: 14px; min-height: 0;
-}
-.tf-preview .tf-k { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
-/* The ticket's title: the preview's `h2` (spec #2227). */
-.tf-preview .tf-ticket-title { font-size: var(--t-2xl); line-height: 1.2; margin: 2px 0 0; font-weight: 600; font-variation-settings: "wdth" 90; }
-.tf-preview p { color: var(--ink-2); }
-/* The description is what the pane is for: full ink, on the pane's own left edge. */
-.tf-preview p.tf-desc { white-space: pre-line; color: var(--ink); }
-.tf-preview .tf-desc .tf-md { padding: 0; font-size: var(--t-md); line-height: 1.5; color: var(--ink); }
-.tf-preview .tf-desc .tf-md p { color: inherit; }
+/* What a view that shows every ticket watches to read its next page (`near-end.ts`): no room of its own. */
+.tf-near { height: 1px; margin-top: -1px; pointer-events: none; }
 .tf-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: var(--t-sm); margin: 0; }
 .tf-facts dt { color: var(--ink-2); }
 .tf-facts dd { margin: 0; }
@@ -179,8 +170,6 @@
 .tf-go small { color: var(--ink-2); text-align: center; }
 @media (max-width: 1240px) {
   .tf-tickets { grid-template-columns: var(--side-tickets-views, 200px) minmax(0, 1fr); }
-  .tf-tickets .tf-preview { display: none; }
-  .tf-tickets > .tf-sedge[data-at="end"] { display: none; }
 }
 @media (max-width: 900px) {
   .tf-tickets { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }

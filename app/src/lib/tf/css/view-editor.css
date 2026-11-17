@@ -69,6 +69,9 @@
 .tf-vw-inline { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-vw-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--t-sm); }
 .tf-vw-checks label { display: flex; gap: 6px; align-items: center; }
+/* *Show every ticket when the view opens* (ux18): one choice, its line under its words, where the box's 6 px gap ends. */
+.tf-vw-all label { display: inline-flex; gap: 6px; align-items: center; font-size: var(--t-sm); }
+.tf-vw-all > .tf-dim { margin: 2px 0 0 19px; }
 .tf-vw-sec .tf-vw-warn, .tf-vw-prev .tf-vw-warn { font-size: var(--t-sm); margin: 4px 0; }
 .tf-vw-n { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
 .tf-vw-n b { font-size: var(--t-d2); line-height: 1; font-weight: 800; font-variation-settings: "wdth" 62; font-variant-numeric: tabular-nums; }

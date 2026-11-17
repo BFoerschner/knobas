@@ -126,6 +126,8 @@
   let lanes = $state<ViewLanes>(start.lanes);
   let cardFields = $state<CardField[]>([...start.card_fields]);
   let listColumns = $state<ListColumn[]>([...start.list_columns]);
+  /** *Show every ticket when the view opens* (ux18): kept with the view, a Jira view's too, where it is the reader's. */
+  let showAll = $state(start.show_all);
   /** `null` until the board's statuses are read, for a view with no columns of its own. */
   let columns = $state<EditColumn[] | null>(start.columns.length > 0 ? editColumns(start.columns, []) : null);
   let statuses = $state<string[]>([]);
@@ -354,6 +356,7 @@
         lanes,
         card_fields: cardFields,
         list_columns: listColumns,
+        show_all: showAll,
       });
     } catch (error) {
       failed = messageOf(error);
@@ -502,6 +505,15 @@
           <div class="tf-seg" role="group" aria-label="Layout">
             <button type="button" aria-pressed={layout === "board"} onclick={() => (layout = "board")}>Board</button>
             <button type="button" aria-pressed={layout === "list"} onclick={() => (layout = "list")}>List</button>
+          </div>
+          <!-- How much it shows on opening goes with how it shows: Björn, "always show all the tickets on open" (ux18). -->
+          <div class="tf-vw-sub tf-vw-all">
+            <label><input type="checkbox" bind:checked={showAll} /> Show every ticket when the view opens</label>
+            <p class="tf-dim">
+              {layout === "board"
+                ? "Every column and lane runs to its last ticket as you scroll, Done too. No Show more to press."
+                : "The list runs to its last ticket as you scroll. No Show more to press."}
+            </p>
           </div>
           {#if layout === "board"}
             <div class="tf-vw-sub">

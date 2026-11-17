@@ -6,13 +6,16 @@ import type { QueryTranslation, SavedViewSource, TicketViewRow } from "../../ipc
 import {
   columnLimit,
   copyKeeps,
+  DEFAULT_LIST_COLUMNS,
   draftCopy,
+  draftEdit,
   draftFromFilter,
   draftSavedViewCopy,
   draftRestore,
   drawnSavedViewColumns,
   groupViews,
   hiddenViews,
+  listColumnsOf,
   savedViewKindWords,
   savedViewSystems,
   systemsWords,
@@ -35,6 +38,7 @@ function row(id: string, group: string, position: number, extra: Partial<TicketV
     card_fields: ["signals"],
     list_columns: ["key"],
     list_sort: null,
+    show_all: false,
     saved_view: null,
     count: 1,
     unreadable: null,
@@ -266,4 +270,12 @@ test("a source's translation is search text in the grammar's keys, quoted where 
   expect(translationText(copy)).toBe('status:"In Review" under:PAY-12 -label:a -label:b assignee:me');
   expect(copyKeeps(copy)).toBe("A copy keeps every part of the query.");
   expect(copyKeeps({ ...copy, kept: 1, left_out: [{ clause: "x", reason: "y" }] })).toBe("A copy keeps 1 of 2 parts of the query.");
+});
+
+test("a view's list columns, or the defaults where it names none, as a Jira view's row from the sync does (ux18)", () => {
+  expect(listColumnsOf({ list_columns: [] })).toEqual(DEFAULT_LIST_COLUMNS);
+  expect(listColumnsOf(null)).toEqual(DEFAULT_LIST_COLUMNS);
+  expect(listColumnsOf({ list_columns: ["key", "epic"] })).toEqual(["key", "epic"]);
+  // *View settings* on such a row starts from the defaults, so its save is not refused for leaving out Key.
+  expect(draftEdit(row("jira-board-21", "Jira boards", 0, { list_columns: [] })).list_columns).toEqual(DEFAULT_LIST_COLUMNS);
 });

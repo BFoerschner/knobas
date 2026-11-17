@@ -103,13 +103,13 @@
 .tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
 .tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
 .tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
-/* The same rows on a sheet: a ticket only read, and the Tickets preview's *Around this ticket*. */
-:is(.tf-sheetcard, .tf-preview) .tf-tktable { border-color: var(--rule); background: var(--paper); }
-:is(.tf-sheetcard, .tf-preview) .tf-tktable > a, :is(.tf-sheetcard, .tf-preview) .tf-tktable > button { border-top-color: var(--rule-2); }
-:is(.tf-sheetcard, .tf-preview) .tf-tktable > :first-child { border-top: 0; }
-:is(.tf-sheetcard, .tf-preview) .tf-tktable > a:hover, :is(.tf-sheetcard, .tf-preview) .tf-tktable > button:hover { background: var(--sheet-2); }
-:is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-n, :is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-st, :is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
-:is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-st.tf-asks { color: var(--ink); }
+/* The same rows on a sheet: a ticket only read. */
+.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
+.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
+.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
+.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
+.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
 /* The one decision the card exists for stays on screen when a short window makes the card scroll. */
 .tf-ticketcard .tf-go { margin-top: auto; padding: 8px 0 18px; margin-bottom: -18px; position: sticky; bottom: -18px; background: var(--card); }
@@ -141,7 +141,7 @@
 .tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
 .tf-sheetcard p { color: var(--ink-2); }
 .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
-/* The app's one primary, as the Tickets preview draws the same button: `--fill`, so it stays below the card's yellow in dark. */
+/* The app's one primary: `--fill`, so it stays below the card's yellow in dark. */
 .tf-sheetcard .tf-go .tf-btn { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
 .tf-sheetcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 /* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the

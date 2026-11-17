@@ -303,46 +303,6 @@ export function ticketFacts(
   };
 }
 
-/**
- * The one primary button of the Tickets preview and the ticket page, and the
- * line under it (R-3.9, spec #2227), by the ticket's state as prototype-6
- * decides it: *Start work* on a To Do ticket of mine, *Open job* on a done one
- * or somebody else's, *Resume work* on the rest of mine. The state is the
- * ticket's own status, whatever column it stands in (#1423). `chooses` says
- * where it goes: *Resume work* to the job's address (`jobHash`), which makes it
- * the chosen job; *Open ticket* only reads, so to the ticket's page
- * (`ticketHash`), which chooses nothing (spec #2396); and *Start work* to the
- * ticket's page too, because it chooses nothing until its steps run (F-130).
- * `asks` is what the ticket's page does on arriving (`job/chosen.svelte.ts`).
- */
-export function previewAction(
-  card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
-  timerOnIt: boolean,
-  chosen = false,
-): { label: string; note: string; chooses: boolean; asks?: "steps" | "timer" } {
-  const lower = card.status?.toLowerCase() ?? "";
-  // Already the job: nothing to start from here, and its page has the timer.
-  if (chosen) return { label: "Open ticket", note: timerOnIt ? "Your timer is running on this ticket." : "This is the ticket you are on.", chooses: false };
-  if (lower === "to do" && card.mine) {
-    return {
-      label: "Start work",
-      note: "Shows the steps first. Nothing happens until you run them.",
-      chooses: false,
-      asks: "steps",
-    };
-  }
-  if (lower === "done") return { label: "Open ticket", note: "Done. Opening shows what was attached.", chooses: false };
-  if (!card.mine) {
-    return { label: "Open ticket", note: card.assignee ? `Assigned to ${assigneeName(card)}.` : "Unassigned.", chooses: false };
-  }
-  return {
-    label: "Resume work",
-    note: timerOnIt ? "Your timer is running on this ticket." : "Starts the timer on this ticket.",
-    chooses: true,
-    ...(timerOnIt ? {} : { asks: "timer" as const }),
-  };
-}
-
 /** What a ticket board's lanes split by (R-3.5): nothing, or one field. */
 export type LaneField = ViewLanes;
 
@@ -504,7 +464,7 @@ export function nextSort(current: ListSort, column: SortColumn): ListSort {
  * first, matched ignoring case. Order only, never wording: a priority not here sorts after
  * these, ties in key order.
  */
-const PRIORITY_ORDER = ["highest", "blocker", "critical", "high", "major", "medium", "normal", "minor", "low", "trivial", "lowest"];
+export const PRIORITY_ORDER = ["highest", "blocker", "critical", "high", "major", "medium", "normal", "minor", "low", "trivial", "lowest"];
 
 const byText = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 

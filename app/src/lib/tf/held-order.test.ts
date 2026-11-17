@@ -85,3 +85,22 @@ test("nothing is held before a list has a row", () => {
   expect(hold.place([], "x").rows).toEqual([]);
   expect(ids(hold.place([row("b"), row("a")], "x").rows)).toEqual(["b", "a"]);
 });
+
+test("groups side by side (byTag): a row new at its own group's foot joins it, wherever the other groups' rows sort (ux18)", () => {
+  type Card = { id: string; column: string };
+  const at = (column: string, ...ids: string[]) => ids.map((id) => ({ id, column }));
+  const board = new HeldOrder<Card>(({ id }) => id, ({ column }) => column, { byTag: true });
+  board.place([...at("todo", "a1", "a2"), ...at("done", "d1")], "open");
+  // A page of To Do lands: its cards sort after a2 and before d1 in reading order, at the foot of their own column.
+  const paged = board.place([...at("todo", "a1", "a2", "a3", "a4"), ...at("done", "d1")], "open");
+  expect(paged.waiting).toBe(0);
+  expect(paged.rows.filter((row) => row.column === "todo").map(({ id }) => id)).toEqual(["a1", "a2", "a3", "a4"]);
+  // One above a drawn card of its column still waits.
+  const above = board.place([...at("todo", "a0", "a1", "a2", "a3", "a4"), ...at("done", "d1")], "open");
+  expect(above.waiting).toBe(1);
+
+  // Without it, the stacked groups' rule: the new card sorts above d1, so it waits.
+  const stacked = new HeldOrder<Card>(({ id }) => id, ({ column }) => column);
+  stacked.place([...at("todo", "a1", "a2"), ...at("done", "d1")], "open");
+  expect(stacked.place([...at("todo", "a1", "a2", "a3"), ...at("done", "d1")], "open").waiting).toBe(1);
+});

@@ -340,6 +340,103 @@ macro_rules! priority_read {
 /// opens, [`cards_select!`], its select list, [`cards_from!`], its `from`,
 /// [`cards_filter!`], its `where`, and [`cards_cut!`], the rest. Joined with
 /// nothing between them they are the statement as it always read.
+/// The page `$8` asks for (ux18, a view that shows every ticket; [`Page`]):
+/// how many of each column's cards to pass over before the cut keeps its
+/// `$5`, `0` without a page.
+macro_rules! page_after {
+    () => {
+        "coalesce(($8::jsonb->>'after')::bigint, 0)"
+    };
+}
+
+/// Whether the page takes a ticket of status `$s`: every status without a
+/// page or a page's `statuses`, else one of them (a `null` among them is the
+/// column of no status).
+macro_rules! page_takes {
+    ($s:literal) => {
+        concat!(
+            "(($8::jsonb->'statuses') is null or ($8::jsonb->'statuses') @> coalesce(to_jsonb(",
+            $s,
+            "::text), 'null'::jsonb))"
+        )
+    };
+}
+
+/// The rank a column's cut counts in: its status's place, or one rank over
+/// every status the page names (a view's column that gathers several, paged
+/// as the one column it draws), or over the whole board for a list sorted on
+/// the server ([`Page::sort`]).
+macro_rules! page_partition {
+    ($pos:literal) => {
+        concat!(
+            "case when ($8::jsonb->'statuses') is null and ($8::jsonb->>'sort') is null then ",
+            $pos,
+            " else 0 end"
+        )
+    };
+}
+
+/// A list sorted on the server ([`Page::sort`]): each ticket's key for the
+/// header asked, read only when a page asks for a sort. `t` a text, `n` a
+/// number and `ts` a date, one of them set; `kp` and `kn` the key's letters
+/// and number, every sort's tie. Nulls sort last either way, as the list's
+/// own sort puts them; a priority the page's order does not name sorts after
+/// those it does.
+macro_rules! page_sort_keys {
+    () => {
+        concat!(
+            "
+        left join lateral (
+          select case $8::jsonb->>'sort'
+                   when 'summary' then (select lower(t.title) from sync.item t where t.entity_id = s.entity_id)
+                   when 'assignee' then lower(coalesce(fc.assignee, ",
+            crate::declared_string!("$4", "assignee"),
+            "))
+                   when 'key' then lower(regexp_replace(ky.k, '[0-9]+$', '')) end as t,
+                 case $8::jsonb->>'sort'
+                   when 'status' then (select o.n from jsonb_array_elements_text($8::jsonb->'status_order')
+                                         with ordinality o(v, n) where o.v is not distinct from s.status)
+                   when 'priority' then (select case when pr.p is null then null else coalesce(
+                     (select o.n from jsonb_array_elements_text($8::jsonb->'priority_order')
+                        with ordinality o(v, n) where o.v = lower(pr.p)), 1000000) end
+                       from (select coalesce(fc.priority, ",
+            priority_read!("$4"),
+            ") as p) pr)
+                   when 'key' then substring(ky.k from '([0-9]+)$')::numeric end as n,
+                 case $8::jsonb->>'sort' when 'updated' then s.at end as ts,
+                 lower(regexp_replace(ky.k, '[0-9]+$', '')) as kp,
+                 substring(ky.k from '([0-9]+)$')::numeric as kn
+            from (select substring(s.entity_id from position(':' in s.entity_id) + 1) as k) ky
+            left join lateral (select c.priority, c.assignee, true as carded from sync.item_card c
+                                where c.entity_id = s.entity_id
+                                  and c.paths_key = (select k.k from card_keys k where k.source_id = s.source_id)
+                               offset 0) fc on true
+            -- A ticket with no stored card reads its payload, as the board's own cut does.
+            left join lateral (select it.entity_id, it.source_id, it.kind,
+                                      it.payload #> '{}'::text[] as payload
+                                 from sync.item it
+                                where it.entity_id = s.entity_id and fc.carded is null
+                                  and $8::jsonb->>'sort' in ('priority', 'assignee')
+                               offset 0) i on true
+           where ($8::jsonb->>'sort') is not null
+        ) fs on true"
+        )
+    };
+}
+
+/// [`page_sort_keys!`]' order, then the board's own (newest first).
+macro_rules! page_sort_order {
+    () => {
+        "case when $8::jsonb->>'direction' = 'ascending' then fs.t end asc nulls last,
+                                          case when $8::jsonb->>'direction' = 'descending' then fs.t end desc nulls last,
+                                          case when $8::jsonb->>'direction' = 'ascending' then fs.n end asc nulls last,
+                                          case when $8::jsonb->>'direction' = 'descending' then fs.n end desc nulls last,
+                                          case when $8::jsonb->>'direction' = 'ascending' then fs.ts end asc nulls last,
+                                          case when $8::jsonb->>'direction' = 'descending' then fs.ts end desc nulls last,
+                                          fs.kp, fs.kn, s.at desc, s.entity_id"
+    };
+}
+
 macro_rules! cards {
     ($($ranked:tt)+) => {
         concat!(
@@ -480,8 +577,12 @@ macro_rules! cards_cut {
                           (select pn.kind, pn.name, i.source_id from ",
     crate::declared_parent_names!("$4"),
     " pn where i.entity_id is not null order by pn.pos desc, pn.name_ord limit 1)) par on true
-      where $5::bigint is null or r.rn <= $5
-      order by r.at desc, r.entity_id"
+      where r.rn > ",
+    page_after!(),
+    " and ($5::bigint is null or r.rn <= ",
+    page_after!(),
+    " + $5)
+      order by case when ($8::jsonb->>'sort') is not null then r.rn end, r.at desc, r.entity_id"
         )
     };
 }
@@ -490,6 +591,7 @@ macro_rules! cards_cut {
 /// counted on their own.
 macro_rules! ranked_laned {
     () => {
+        concat!(
     "     lanes as (
        select s.lane, count(*) as n,
               row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
@@ -499,15 +601,22 @@ macro_rules! ranked_laned {
      ranked as (
        select s.entity_id, s.source_id, s.at, s.status, s.lane,
               l.n as lane_count, l.place, l.lanes,
-              row_number() over (partition by l.place, array_position(
-                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
+              row_number() over (partition by l.place, ",
+        page_partition!("array_position(
+                                   (select array_agg(distinct s2.status) from scoped s2), s.status)"),
+        "
                                  order by s.at desc, s.entity_id) as rn,
               count(*) over (partition by l.place, array_position(
                                (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
          from scoped s join lanes l on l.lane = s.lane
-        where $7::bigint is null or l.place <= $7
+        where ($7::bigint is null or l.place <= $7)
+          and (($8::jsonb->>'lane') is null or s.lane = $8::jsonb->>'lane')
+          and ",
+        page_takes!("s.status"),
+        "
      )
 "
+        )
     };
 }
 /// The board's cards in lanes: [`cards!`] with [`ranked_laned!`].
@@ -528,25 +637,40 @@ const CARDS_PIECES: CardsStatement = CardsStatement {
 /// [`CARDS_UNLANED`]' `ranked`: the one lane spelled out.
 macro_rules! ranked_unlaned {
     () => {
+        concat!(
         "     columns as materialized (
        select c.status, c.n, row_number() over () as pos
          from (select s.status, count(*) as n from scoped s group by s.status) c
      ),
      numbered as (
        select s.entity_id, s.source_id, s.at, s.status, s.lane, p.pos,
-              row_number() over (partition by p.pos order by s.at desc, s.entity_id) as rn
+              row_number() over (partition by ",
+        page_partition!("p.pos"),
+        " order by ",
+        page_sort_order!(),
+        ") as rn
          from scoped s
         cross join lateral (select array_position(
-                 (select array_agg(c.status order by c.pos) from columns c), s.status) as pos) p
+                 (select array_agg(c.status order by c.pos) from columns c), s.status) as pos) p",
+        page_sort_keys!(),
+        "
+        where ",
+        page_takes!("s.status"),
+        "
      ),
      ranked as (
        select n.entity_id, n.source_id, n.at, n.status, n.lane,
               (select sum(c.n) from columns c)::bigint as lane_count,
               1::bigint as place, 1::bigint as lanes, n.rn, c.n as total
          from numbered n join columns c on c.pos = n.pos
-        where $5::bigint is null or n.rn <= $5
+        where n.rn > ",
+        page_after!(),
+        " and ($5::bigint is null or n.rn <= ",
+        page_after!(),
+        " + $5)
      )
 "
+        )
     };
 }
 /// The board's cards without lanes, `$6` and `$7` null: [`CARDS`]' one lane
@@ -690,13 +814,17 @@ macro_rules! cards_cut_carded {
                           else crd.parent_name in (select n.name from sync.item i cross join lateral ",
     crate::declared_names_as_parent!("$4"),
     " n where i.entity_id = pi.entity_id) end)) as parent_title,
-            crd.item_updated_at as updated_at, r.total, r.at
+            crd.item_updated_at as updated_at, r.total, r.at, r.rn
        from ranked r
        join lateral (select c.* from sync.item_card c
                       where c.entity_id = r.entity_id
                         and c.paths_key = (select k.k from card_keys k where k.source_id = r.source_id)
                      offset 0) crd on true
-      where $5::bigint is null or r.rn <= $5
+      where r.rn > ",
+    page_after!(),
+    " and ($5::bigint is null or r.rn <= ",
+    page_after!(),
+    " + $5)
      )
      select b.entity_id, b.source_id, b.title, b.status, b.lane, b.lane_count, b.place, b.lanes,
             b.column_totals, b.priority, b.issue_type, b.assignee, b.assignee_name, b.path,
@@ -704,9 +832,9 @@ macro_rules! cards_cut_carded {
        from (select * from board
              union all
              select '', '', '', null, '', 0, 0, 0, null, null, null, null, null, null,
-                    '{}'::text[], null, null, null, 0, null
+                    '{}'::text[], null, null, null, 0, null, 0
                from whole w where not w.whole) b
-      order by b.at desc, b.entity_id"
+      order by case when ($8::jsonb->>'sort') is not null then b.rn end, b.at desc, b.entity_id"
         )
     };
 }
@@ -850,6 +978,9 @@ pub struct CardsBinds<'a> {
     pub lanes: Option<&'a str>,
     /// `$7`: only the first this many lanes.
     pub lanes_first: Option<i64>,
+    /// `$8`: the page asked for ([`Page`]) as `jsonb`, or `None` for the
+    /// first cards of every column.
+    pub page: Option<&'a sqlx::types::Json<serde_json::Value>>,
 }
 
 /// Reads the board's card rows with a narrowing of its own in the scan
@@ -893,6 +1024,7 @@ impl CardsNarrowing for Unnarrowed {
             .bind(binds.per_column)
             .bind(binds.lanes)
             .bind(binds.lanes_first)
+            .bind(binds.page)
             .fetch_all(pool)
             .await
     }
@@ -1103,6 +1235,76 @@ pub struct MiniBoard {
     /// How many lanes there are past [`Self::lanes`], which a read that
     /// asked for its first lanes ([`Lanes::first`]) did not send.
     pub more_lanes: u32,
+    /// The cards in the order a list sorted on the server draws them
+    /// ([`Page::sort`], ux18), by id; absent on every other read, whose
+    /// columns keep their own order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub order: Option<Vec<String>>,
+}
+
+/// A page of a board past its first cards (ux18: a ticket view that shows
+/// every ticket reads each column's next cards as its window nears its last,
+/// and its list in pages sorted here). Bound as the cards statement's `$8`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "BoardPage")]
+pub struct Page {
+    /// How many of each column's cards to pass over, in its order, before
+    /// the cap keeps its next ones.
+    #[serde(default)]
+    pub after: u32,
+    /// Only these statuses (`null` the column of no status), ranked as one
+    /// column: a view's column that gathers several. Every status when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statuses: Option<Vec<Option<String>>>,
+    /// Only the lane of this key, on a board read in lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lane: Option<String>,
+    /// The list sorted here by this header (`key`, `summary`, `status`,
+    /// `priority`, `assignee`, `updated`), every ticket in one rank, and
+    /// [`MiniBoard::order`] says the order. The board's own order when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sort: Option<String>,
+    /// `ascending` or `descending`, with `sort`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub direction: Option<String>,
+    /// The statuses in the order the list's *Status* sorts them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status_order: Option<Vec<Option<String>>>,
+    /// The priorities, lowercased, in the order the list's *Priority* sorts
+    /// them; one it does not name sorts after them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub priority_order: Option<Vec<String>>,
+}
+
+impl Page {
+    /// The headers [`Page::sort`] takes.
+    pub const SORTS: &'static [&'static str] = &[
+        "key", "summary", "status", "priority", "assignee", "updated",
+    ];
+
+    /// Why this page cannot be read, or `None`.
+    #[must_use]
+    pub fn refusal(&self) -> Option<String> {
+        if let Some(sort) = &self.sort {
+            if !Self::SORTS.contains(&sort.as_str()) {
+                return Some(format!(
+                    "sort `{sort}` is not one of {}",
+                    Self::SORTS.join(", ")
+                ));
+            }
+            if !matches!(self.direction.as_deref(), Some("ascending" | "descending")) {
+                return Some("a sorted page needs a direction, ascending or descending".to_owned());
+            }
+        }
+        None
+    }
 }
 
 /// What a board's lanes split by (R-3.5): the Tickets view's *Lanes*
@@ -1436,6 +1638,8 @@ pub struct Scope<'a> {
     /// Lanes (#939): `per_column` then caps each lane's column, and
     /// [`MiniBoard::lanes`] says which cards stand in which lane.
     pub lanes: Option<Lanes>,
+    /// A page past the first cards (ux18, [`Page`]), or `None`.
+    pub page: Option<&'a Page>,
 }
 
 /// [`read_capped`] over a [`Scope`]: the room's dimensions and the Tickets
@@ -1476,7 +1680,13 @@ pub async fn read_scoped_narrowed<N: CardsNarrowing>(
         only,
         identity,
         lanes,
+        page,
     } = scope;
+    let page_bind = page
+        .map(|page| serde_json::to_value(page).map(sqlx::types::Json))
+        .transpose()
+        .map_err(|error| CoreError::Db(sqlx::Error::Encode(Box::new(error))))?;
+    let sorted = page.is_some_and(|page| page.sort.is_some());
     let mut members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
         None => None,
@@ -1503,6 +1713,7 @@ pub async fn read_scoped_narrowed<N: CardsNarrowing>(
             lanes_first: lanes
                 .and_then(|lanes| lanes.first)
                 .map(|first| i64::from(first.max(1))),
+            page: page_bind.as_ref(),
         };
         // Off the cards alone where every source of the scope is whole, and
         // as the board always read where one is not (migration `0089`): a
@@ -1557,6 +1768,7 @@ pub async fn read_scoped_narrowed<N: CardsNarrowing>(
     let mut by_lane: BTreeMap<i64, MiniBoardLane> = BTreeMap::new();
     let more_lanes = rows.first().map_or(0, |row| row.lanes);
     let mut sources: BTreeSet<String> = BTreeSet::new();
+    let order = sorted.then(|| rows.iter().map(|row| row.entity_id.clone()).collect());
     for row in rows {
         sources.insert(row.source_id.clone());
         if laned {
@@ -1632,6 +1844,7 @@ pub async fn read_scoped_narrowed<N: CardsNarrowing>(
         columns,
         lanes,
         more_lanes,
+        order,
     })
 }
 
@@ -2137,6 +2350,7 @@ mod tests {
             sources: Vec::new(),
             lanes: Vec::new(),
             more_lanes: 0,
+            order: None,
         };
         let by = LaneField::Assignee;
         let laned = in_lanes(board, Lanes { by, first: Some(2) }, Some(2));

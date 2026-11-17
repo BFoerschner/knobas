@@ -456,6 +456,7 @@ async fn assert_reads_plan_without_estimates(
                 .bind(Some(50_i64))
                 .bind(None::<String>)
                 .bind(None::<i64>)
+                .bind(None::<sqlx::types::Json<serde_json::Value>>)
         },
     )
     .await;
@@ -469,6 +470,7 @@ async fn assert_reads_plan_without_estimates(
             .bind(Some(8_i64))
             .bind(Some("epic".to_owned()))
             .bind(Some(10_i64))
+            .bind(None::<sqlx::types::Json<serde_json::Value>>)
     })
     .await;
     wrong.extend(shapes("mini_board in lanes", &plan));
@@ -499,6 +501,7 @@ async fn assert_reads_plan_without_estimates(
                 .bind(Some(per_column))
                 .bind(lane.clone())
                 .bind(first)
+                .bind(None::<sqlx::types::Json<serde_json::Value>>)
         })
         .await;
         wrong.extend(shapes(name, &plan));
@@ -524,6 +527,7 @@ async fn assert_reads_plan_without_estimates(
                 .bind(Some(8_i64))
                 .bind(None::<String>)
                 .bind(None::<i64>)
+                .bind(None::<sqlx::types::Json<serde_json::Value>>)
         },
     )
     .await;

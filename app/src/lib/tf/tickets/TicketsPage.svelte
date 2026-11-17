@@ -1,5 +1,5 @@
 <!--
-  Tickets, the ticket-first shell's home (#810, requirements §3), in three
+  Tickets, the ticket-first shell's home (#810, requirements §3), in two
   panes:
 
   - **left**, the views: *Find a view*, *All tickets* with its count, the
@@ -7,8 +7,14 @@
   - **middle**, every synced ticket as a ticket board, one column per status
     in the source's words, eight cards then *Show N more*, *Done* three, and
     fifty while the filter has words (R-3.4, #1024), split into lanes by a
-    field or not (R-3.5, #813); or as a list sorted by any header (R-3.6);
-  - **right**, the selected ticket's preview (R-3.9).
+    field or not (R-3.5, #813); or as a list sorted by any header (R-3.6).
+    A view stored with *Show every ticket when the view opens* (ux18) draws
+    every card and row, with no *Show more*.
+
+  The selected ticket's preview on the right is gone (ux18, Björn: "Remove the
+  right sidebar from the tickets view"): the board or list takes the width, and
+  a click or `Enter` opens the ticket's own page, which holds what the preview
+  showed (the facts, the description, *Around this ticket*, *Start work*).
 
   Two marks on the board and the list (spec #2396, #2398): yellow follows
   the chosen job (`job/chosen.svelte.ts`), selected or not; the selection is
@@ -28,8 +34,9 @@
   **Keys** (R-3.10): `j`/`k` and the arrows move the selection through the
   cards on screen in reading order (lane by lane, column by column, top to
   bottom; the list's rows as sorted), and focus the card. `Enter` and a
-  double click open the ticket page (`#/ticket/<id>`, spec #2227); only the
-  preview's primary button opens the job. A long list, and a board column of
+  click open the ticket page (`#/ticket/<id>`, spec #2227), which chooses
+  nothing; the right-click menu's *Work on this* and *Start timer* take the
+  ticket on. A long list, and a board column of
   24 cards or more (`TicketStack`), draw only the rows near the viewport
   (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
 
@@ -114,10 +121,6 @@
   import type { RoleFrameProps } from "../page-entry";
 
   import {
-    cardReads,
-    getEntity,
-    jobReach,
-    listEntities,
     miniBoard,
     type MiniBoard,
     type MiniBoardCard,
@@ -145,23 +148,23 @@
   import Marked from "../filter/Marked.svelte";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
-  import { columnKey, createBoardReader, messageOf, PREVIEW_PAUSE_MS, viewSession } from "./board-reader.svelte";
+  import { columnKey, createBoardReader, messageOf, viewSession } from "./board-reader.svelte";
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import { needles as readNeedles } from "./needles";
+  import { nearEnd } from "./near-end";
   import TicketCard from "./TicketCard.svelte";
   import TicketStack from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
-  import TicketPreview from "./TicketPreview.svelte";
   import { assigneeName, assigneeOptions, cardFloor, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
     columnLimit,
-    DEFAULT_LIST_COLUMNS,
     draftCopy,
     draftEdit,
     draftFromFilter,
     draftSavedViewCopy,
+    listColumnsOf,
     draftNew,
     draftRestore,
     drawnSavedViewColumns,
@@ -187,15 +190,10 @@
 
   let {
     ready,
-    timedTicket,
     ports = {
-      board: (perColumn, query, savedView, lanes, role) =>
-        miniBoard({ role: role ?? null, context: null, project: null }, perColumn, query, savedView, lanes),
+      board: (perColumn, query, savedView, lanes, role, page) =>
+        miniBoard({ role: role ?? null, context: null, project: null }, perColumn, query, savedView, lanes, page),
       openExternal,
-      detail: getEntity,
-      listEntities,
-      jobReach,
-      cardReads,
       suggestions: () => filterSuggestions(),
       views: ticketViews,
       saveView: saveTicketView,
@@ -206,22 +204,17 @@
     },
     viewId = null,
     typingPause = 90,
-    previewPause = PREVIEW_PAUSE_MS,
     back = null,
     sync,
     syncRevision = 0,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
-    /** The ticket key the timer runs on, or `null`. */
-    timedTicket: string | null;
     ports?: TicketsPorts;
     /** The ticket view `#/tickets/<id>` names, or `null` for *All tickets*. */
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
-    /** How long, in ms, a moved selection waits for the next move before its preview is read: the launcher's 120. */
-    previewPause?: number;
     /** Where `Esc` goes, which the sub-tasks bar's hint names. */
     back?: EscTarget | null;
   } & RoleFrameProps = $props();
@@ -376,9 +369,15 @@
   // Read once: the reader owns the typing pause and the generations.
   const reader = createBoardReader(ports, {
     typingPause,
-    previewPause,
     sessions: session,
-    view: () => ({ columns: ownColumns, listed: view?.columns ?? [], layout: saved.layout, lanes: saved.lanes }),
+    view: () => ({
+      columns: ownColumns,
+      listed: view?.columns ?? [],
+      layout: saved.layout,
+      lanes: saved.lanes,
+      showAll: view?.show_all ?? false,
+      sort: session.views[sessionKey]?.sort ?? saved.sort,
+    }),
   });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */
   const showing = $derived({
@@ -434,6 +433,8 @@
 
   function sortBy(column: SortColumn) {
     viewSession(session, sessionKey).sort = nextSort(showing.sort, column);
+    // A view that shows every ticket sorts its list on the server: its first page again.
+    reader.resort();
   }
 
   function clearFilter() {
@@ -537,20 +538,29 @@
       .filter((card) => card.assignee != null && (!known.has(card.assignee) || (card.assignee_name != null && known.get(card.assignee)?.name !== card.assignee_name)));
     if (found.length > 0) cardPeople = new Map([...known, ...found.map((card): [string, CardPerson] => [card.assignee ?? "", { name: card.assignee_name ?? null, mine: card.mine }])]);
   });
-  /** The list's rows: every card read, in the header's order; each card says its own status (#1423). */
+  /**
+   * The list's rows: every card read, in the header's order; each card says its own status (#1423). A view that
+   * shows every ticket draws its pages in the server's order of the sort (ux18).
+   */
   const rows = $derived(
-    sortRows(
-      boardColumns.flatMap((column) => column.cards.map((card) => ({ card }))),
-      showing.sort,
-      statusOrder(boardColumns),
-    ),
+    reader.rows !== null
+      ? reader.rows.map((card) => ({ card }))
+      : sortRows(
+          boardColumns.flatMap((column) => column.cards.map((card) => ({ card }))),
+          showing.sort,
+          statusOrder(boardColumns),
+        ),
   );
   // -- cards and rows stay where they first drew (the still-rows pass, 2026-11-11) --
   /** What the person chose, and each read they caused: a change sorts the cards again. A sync's read holds them. */
   const heldBasis = $derived(JSON.stringify([filterId, filter.text, filter.chips, filter.dropdowns, filter.scope, showing, reader.lanesShown, reader.asked]));
   type HeldCard = { tag: string; card: MiniBoardCard };
-  /** Every drawn card in reading order, each in the lane and column it drew in. */
-  const boardHold = new HeldOrder<HeldCard>(({ card }) => card.entity_id, ({ tag }) => tag);
+  /**
+   * Every drawn card in reading order, each in the lane and column it drew in. The columns stand side by side, so a card
+   * a later read brings below a column's drawn ones joins that column's foot (`byTag`): the whole read behind a view
+   * that shows every ticket, or behind a key on an expanded board, moves nothing drawn (ux18).
+   */
+  const boardHold = new HeldOrder<HeldCard>(({ card }) => card.entity_id, ({ tag }) => tag, { byTag: true });
   const placeAt = (lane: { key: string | null }, column: MiniBoardColumn) => `${lane.key ?? ""}\u0001${columnKey(column)}`;
   const heldBoard = $derived(
     showing.layout === "board" && reader.board !== null
@@ -654,7 +664,7 @@
    */
   const win = new Windowed({ count: () => listRows.length, key: (i) => listRows[i]!.card.entity_id, estimate: 52, from: 40 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
-  const shared = $derived(sharedKeys(boardColumns));
+  const shared = $derived(sharedKeys(reader.rows !== null ? [{ status: null, cards: reader.rows, total: reader.rows.length }] : boardColumns));
   /**
    * Whether each drawn card named its source, held until the person's next read (`reader.asked`): a read that only adds
    * cards (the whole read after a key's fifty a column, a sync's) can bring the twin of a card drawn above, and naming
@@ -678,7 +688,7 @@
   };
   /** The list's columns: the view's, in the list's order (R-3.16). */
   const listColumns = $derived(
-    LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
+    LIST_COLUMN_ORDER.filter(([column]) => listColumnsOf(view).includes(column)),
   );
   /** How many characters of a key `.tf-c-key` holds in the code face. */
   const KEY_ROOM = 12;
@@ -701,20 +711,15 @@
   );
   const current = $derived(visible.find((entry) => entry.card.entity_id === session.selected) ?? visible[0] ?? null);
 
-  // ---- the preview ----
-  /** The selected ticket's id: the preview re-reads when it changes, not when the board answers. */
-  const currentId = $derived(current?.card.entity_id ?? null);
-
-  $effect(() => {
-    const id = ready ? currentId : null;
-    untrack(() => reader.preview(id));
-  });
-
+  /** A boolean of its own, so a views read that answers the same row again reads no board again. */
+  const showsAll = $derived(view?.show_all ?? false);
   // The board, again for each view and once its text is known. Untracked,
   // so a read's own answer does not ask for the read again.
   $effect(() => {
     if (!ready) return;
     const scope = { key: sessionKey, base, without: subtasksOf };
+    // Saved with *Show every ticket when the view opens* turned on or off, the view is read again as it now opens.
+    void showsAll;
     untrack(() => reader.open({ ...scope, savedView: savedViewId }, filterNow()));
   });
   $effect(() => () => reader.close());
@@ -790,17 +795,7 @@
     reader.chooseLayout(next);
   }
 
-  /** At 1240 px and below there is no preview to fill (design system, *Layout*), so a click opens the ticket. */
-  function clicked(card: MiniBoardCard) {
-    select(card);
-    if (window.matchMedia("(max-width: 1240px)").matches) openTicket(card);
-  }
-
-  function select(card: MiniBoardCard) {
-    session.selected = card.entity_id;
-  }
-
-  /** A double click or `Enter`: the ticket page (spec #2227), the card selected for the way back. */
+  /** A click, a double click or `Enter`: the ticket page (spec #2227), the card selected for the way back. There is no preview to fill. */
   function openTicket(card: MiniBoardCard) {
     session.selected = card.entity_id;
     location.hash = ticketAddress(card);
@@ -873,9 +868,8 @@
   let railOpen = $state(false);
 </script>
 
-<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")} {@attach sideWidth("tickets-preview")}>
+<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")}>
   <TfSideEdge side="tickets-views" />
-  <TfSideEdge side="tickets-preview" />
   <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
   {#if subtasksOf === null}
     <TfRailBar label="View" value={view?.name ?? "All tickets"} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
@@ -1081,8 +1075,9 @@
           {/if}
           <div class="tf-cols">
             {#each columnsOf(lane) as { column, cards, done, listed } (columnKey(column))}
-              {@const more = moreLine(column, cards.length, done)}
-              {@const pointer = listPointer(column, cards.length)}
+              <!-- A view that shows every ticket offers no more: its whole read fills each column behind the first. -->
+              {@const more = reader.all ? null : moreLine(column, cards.length, done)}
+              {@const pointer = reader.all ? null : listPointer(column, cards.length)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               {@const place = placeAt(lane, column)}
               <div class="tf-col">
@@ -1106,13 +1101,17 @@
                         {needles}
                         selected={current?.card.entity_id === card.entity_id}
                         chosen={chosenJob.id === card.entity_id}
-                        onselect={() => clicked(card)}
+                        onselect={() => openTicket(card)}
                         onopen={() => openTicket(card)}
                       />
                     {/snippet}
                   </TicketStack>
                   {#if more}
                     <button type="button" class="tf-more" onclick={() => reader.expand(lane, column)}>{more}</button>
+                  {/if}
+                  {#if reader.all && cards.length < column.total}
+                    <!-- A view that shows every ticket reads this column's next page as its foot nears (ux18). -->
+                    <div class="tf-near" aria-hidden="true" {@attach nearEnd(() => reader.more(lane, column, listed), () => cards.length)}></div>
                   {/if}
                   {#if pointer}
                     <button type="button" class="tf-more tf-more-list" onclick={() => listColumn(column, listed)}>{pointer}</button>
@@ -1123,9 +1122,11 @@
           </div>
         </div>
       {/each}
-      {@const moreLanesText = reader.laned && reader.board !== null ? moreLanesLine(reader.board.more_lanes) : null}
+      {@const moreLanesText = reader.laned && !reader.all && reader.board !== null ? moreLanesLine(reader.board.more_lanes) : null}
       {#if moreLanesText}
         <button type="button" class="tf-btn tf-sm tf-lanes-more" onclick={reader.moreLanes}>{moreLanesText}</button>
+      {:else if reader.all && reader.laned && reader.board !== null && reader.board.more_lanes > 0}
+        <div class="tf-near" aria-hidden="true" {@attach nearEnd(() => reader.moreLanes(), () => reader.board?.lanes.length ?? 0)}></div>
       {/if}
     {:else}
       <div class="tf-list">
@@ -1157,7 +1158,7 @@
                 data-entity={card.entity_id}
                 tabindex="0"
                 {@attach menuThing(() => ({ kind: "ticket", id: card.entity_id, hash: ticketHash(card.entity_id) }))}
-                onclick={() => clicked(card)}
+                onclick={() => openTicket(card)}
                 ondblclick={() => openTicket(card)}
               >
                 {#each listColumns as [column] (column)}
@@ -1195,8 +1196,10 @@
             {/if}
           </tbody>
         </table>
-        {#if listCut && !reader.typing}
+        {#if listCut && !reader.typing && !reader.all}
           <button type="button" class="tf-more tf-list-more" onclick={reader.expandAll}>Show {listRest} more</button>
+        {:else if reader.rows !== null && reader.rows.length < (reader.shown ?? 0)}
+          <div class="tf-near" aria-hidden="true" {@attach nearEnd(() => reader.moreRows(), () => reader.rows?.length ?? 0)}></div>
         {/if}
       </div>
     {/if}
@@ -1225,16 +1228,4 @@
     />{/key}
   {/if}
 
-  {#if current !== null && base !== null}
-    <TicketPreview
-      card={current.card}
-      description={reader.description}
-      around={reader.around}
-      timerOnIt={timedTicket === current.card.key}
-      chosen={chosenJob.id === current.card.entity_id}
-    />
-  {:else}
-    <!-- The first ticket on screen is always selected, so no ticket here means there is none to choose. -->
-    <aside class="tf-preview" aria-label="Selected ticket">{#if reader.board !== null || base === null}<p class="tf-dim tf-small">No ticket to show here.</p>{/if}</aside>
-  {/if}
 </div>

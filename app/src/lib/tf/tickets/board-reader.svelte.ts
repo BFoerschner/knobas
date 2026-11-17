@@ -1,8 +1,9 @@
 /**
  * The Tickets page's reads (#1319, spec #1304): the board, its total, its
  * failure, the expanded columns, *Show N more* on the list, the lanes shown,
- * the typing pause and the generations that drop an older answer, and the
- * selected ticket's preview with its own generation.
+ * a view that shows every ticket (ux18), the typing pause and the generations
+ * that drop an older answer. The selected ticket's preview and its reads went
+ * with the preview (ux18).
  *
  * `TicketsPage.svelte` binds to it and keeps the drawing, the keyboard step,
  * the view CRUD and the editor. The reader touches no DOM, so its races are
@@ -13,25 +14,15 @@
  * role, whatever their adapter kind, so every count is the fillers' own and
  * nothing is narrowed here.
  */
-import type {
-  EntityDetail,
-  LanesAsked,
-  MiniBoard,
-  MiniBoardCard,
-  MiniBoardColumn,
-} from "../../ipc/entity";
+import type { BoardPage, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ViewColumn } from "../../ipc/search";
-import type { Prose } from "../../render/prose";
-import { getAsset, type AssetDetail } from "../../ipc/assets";
-import { entityCheckout, type CheckoutView } from "../../ipc/entity";
-import { cardSections, readCardReads, type CardReadPorts, type CardTable } from "../job/card-sections";
-import { bridgeTicketBoard } from "../job/ports";
-import type { ReachPorts } from "../job/sections";
 import { TICKET_SYSTEM } from "../roles.svelte";
 import {
   boardLanes,
   COLUMN_CAP,
   columnDone,
+  DEFAULT_SORT,
+  PRIORITY_ORDER,
   drawnCards,
   shownCount,
   withoutTicket,
@@ -57,21 +48,8 @@ export interface BoardReaderPorts {
     savedView?: string | null,
     lanes?: LanesAsked | null,
     role?: string,
+    page?: BoardPage | null,
   ) => Promise<MiniBoard>;
-  /** The selected ticket's description and its markup (#2308). */
-  detail: (entityId: string) => Promise<Pick<EntityDetail, "description" | "markup">>;
-  /** The job's section reads, scoped by what a ticket reaches: *Around this ticket* (#1030). */
-  listEntities: ReachPorts["listEntities"];
-  /** What a ticket reaches (`job_reach`, #817), for the Assets row. */
-  jobReach: ReachPorts["jobReach"];
-  /** One reached asset, for the Assets row's state; the bridge's when left out. */
-  getAsset?: (assetId: string) => Promise<AssetDetail>;
-  /** The board under `under:<key>`, for the Sub-tasks row; the bridge's when left out. */
-  ticketBoard?: (query: string) => Promise<MiniBoard>;
-  /** A branch's checkout on this machine, for Code's *not pushed*; the bridge's when left out. */
-  entityCheckout?: (entityId: string) => Promise<CheckoutView>;
-  /** The card's sections in one read over one walk of the reach (`card_reads`); where left out, a read a section. */
-  cardReads?: CardReadPorts["cardReads"];
 }
 
 /** One view's session: the switches over what it was saved with, and the expanded columns. */
@@ -136,6 +114,14 @@ export interface BoardView {
   /** The layout and lanes it was saved with, under the session's switches. */
   layout: "board" | "list";
   lanes: LaneField;
+  /**
+   * *Show every ticket when the view opens* (ux18): no column, lane or list offers more. Each column reads fifty and
+   * then its next {@link PAGE_CARDS} as its window nears its last card, a laned board eight a lane's column and ten
+   * lanes more as the board's foot nears, and the list pages sorted on the server (Fable's ruling, ux18).
+   */
+  showAll?: boolean;
+  /** The list's sort as the page shows it, which a view that shows every ticket sorts on the server. */
+  sort?: ListSort;
 }
 
 /** A band of the board (one, untitled, without lanes): each column with the cards it draws. */
@@ -167,11 +153,14 @@ export interface BoardReader {
   readonly laned: boolean;
   /** Whether the filter has words. */
   readonly typing: boolean;
+  /** Whether the view shows every ticket ({@link BoardView.showAll}): no column, lane or list offers more. */
+  readonly all: boolean;
+  /**
+   * The list of a view that shows every ticket, in the server's order of its sort, the pages read so far; `null`
+   * on every other list and board, which draw the board's cards.
+   */
+  readonly rows: MiniBoardCard[] | null;
   readonly bands: Band[];
-  /** The previewed ticket's description, or `null` until it answers or where it has none. */
-  readonly description: Prose | null;
-  /** What the previewed ticket reaches, by section, or `null` until it answers. */
-  readonly around: CardTable | null;
   /** Moves each time a read the person caused lands: what the drawn cards sort again on. A sync's refresh leaves it. */
   readonly asked: number;
   /** Opens a scope: the board starts fresh, and an answer for the last one is dropped. */
@@ -182,14 +171,21 @@ export interface BoardReader {
   expand(lane: Lane, column: MiniBoardColumn): void;
   /** The list's *Show N more*: every ticket read. */
   expandAll(): void;
-  /** *Show N more lanes* (#939): ten more of them. */
+  /** *Show N more lanes* (#939): ten more of them; on a view that shows every ticket, as its foot nears. */
   moreLanes(): void;
+  /**
+   * A view that shows every ticket: `column`'s next {@link PAGE_CARDS} cards (in `lane` on a laned board), as its
+   * window nears its last card. `listed`, the statuses its column gathers. Nothing while one is out for it.
+   */
+  more(lane: Lane, column: MiniBoardColumn, listed: readonly string[]): void;
+  /** A view that shows every ticket: the list's next page, as its window nears its last row. */
+  moreRows(): void;
+  /** The list's sort changed: a view that shows every ticket reads its first page again, sorted. */
+  resort(): void;
   chooseLayout(layout: "board" | "list"): void;
   chooseLanes(lanes: LaneField): void;
   /** Reads now, with no pause: a sync's re-read, which keeps the drawn cards where they are (`asked` stays). */
   refresh(): void;
-  /** Reads `id`'s preview once, or drops the one out for the last when `null`. */
-  preview(id: string | null): void;
   /** Stops the pause and drops every answer still out. */
   close(): void;
 }
@@ -200,6 +196,49 @@ function emptyBoard(): MiniBoard {
 }
 
 const sum = (board: MiniBoard) => board.columns.reduce((all, column) => all + column.total, 0);
+
+/** How many lanes a page in one lane asks for, so the server cuts none: more than any board holds (it takes a `u32`). */
+const EVERY_LANE = 1_000_000;
+
+/**
+ * How many cards a column's page reads, and rows a page of the list (Fable's ruling, ux18): at two screens from
+ * its last card a column reads its next 200, about 120 KB and 30 to 48 ms at 20,000 tickets, where a read of every
+ * ticket was 9.5 MB and 300 ms before its parse.
+ */
+export const PAGE_CARDS = 200;
+
+/** `answer`'s page of cards added below `held`'s, each in its column and lane: none drawn moves (ux18). */
+function withPage(held: MiniBoard, answer: MiniBoard, lane: string | null): MiniBoard {
+  const known = new Set(held.columns.flatMap((column) => column.cards.map((card) => card.entity_id)));
+  const columns = held.columns.map((column) => {
+    const page = answer.columns.find((other) => other.status === column.status);
+    const fresh = page?.cards.filter((card) => !known.has(card.entity_id)) ?? [];
+    return fresh.length === 0 ? column : { ...column, cards: [...column.cards, ...fresh] };
+  });
+  for (const page of answer.columns) {
+    if (!columns.some((column) => column.status === page.status)) columns.push({ ...page, cards: page.cards.filter((card) => !known.has(card.entity_id)) });
+  }
+  if (lane === null) return { ...held, columns };
+  const cells = answer.lanes.find((one) => one.key === lane)?.columns ?? [];
+  const lanes = held.lanes.map((one) => {
+    if (one.key !== lane) return one;
+    const had = new Set(one.columns.flatMap((cell) => cell.ids));
+    const merged = one.columns.map((cell) => {
+      const page = cells.find((other) => other.status === cell.status);
+      const ids = page?.ids.filter((id) => !had.has(id)) ?? [];
+      return ids.length === 0 ? cell : { ...cell, ids: [...cell.ids, ...ids] };
+    });
+    for (const page of cells) if (!merged.some((cell) => cell.status === page.status)) merged.push(page);
+    return { ...one, columns: merged };
+  });
+  return { ...held, columns, lanes };
+}
+
+/** A sorted page's cards in the server's order (`MiniBoard.order`). */
+function inOrder(answer: MiniBoard): MiniBoardCard[] {
+  const byId = new Map(answer.columns.flatMap((column) => column.cards.map((card) => [card.entity_id, card] as const)));
+  return (answer.order ?? []).flatMap((id) => byId.get(id) ?? []);
+}
 
 /** A column's key among the expanded ones: its name, `""` for *No status*. */
 export const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
@@ -219,21 +258,7 @@ export interface BoardReaderOptions {
   sessions: ViewSessions;
   /** What the view on screen says about drawing it. */
   view: () => BoardView;
-  /**
-   * How long, in ms, a moved selection waits for the next move before its preview is read: {@link PREVIEW_PAUSE_MS} on
-   * the page, none when left out. The first selection, and one that comes back from none, is read at once.
-   */
-  previewPause?: number;
 }
-
-/**
- * How long a moved selection settles before its preview is read: the launcher's preview's 120 ms (the query audit,
- * 2026-11-12: holding j sent seven requests a row, and they queued behind each other for the pool's five connections).
- */
-export const PREVIEW_PAUSE_MS = 120;
-
-/** How many previews the reader holds, so a ticket selected again draws what it showed at once. */
-const PREVIEWS_HELD = 40;
 
 /** How long, in ms, typed words wait for a board read still out before they are read anyway. */
 export const TYPED_WAIT_MOST = 400;
@@ -243,7 +268,6 @@ export const LIST_SETTLE_MS = 600;
 
 export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderOptions): BoardReader {
   const { typingPause, sessions } = options;
-  const previewPause = options.previewPause ?? 0;
   /**
    * The last answer, replaced whole and never changed in place: `$state.raw`,
    * since the list's *Show N more* reads every ticket and a deep proxy over
@@ -256,8 +280,6 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     lanesShown: LANES_AT_FIRST,
     scope: { key: "", base: null, savedView: null, without: null } as BoardScope,
     filter: { query: "", words: false } as BoardFilter,
-    description: null as Prose | null,
-    around: null as CardTable | null,
     asked: 0,
   });
   /** Bumped by every read and every key, so only the last read's answer lands. */
@@ -275,19 +297,12 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   /** When the last board read was sent, and the last filter change made (`Date.now()`). */
   let sentAt = 0;
   let keyAt = 0;
-  /** The ticket previewed, and the generation its answers carry. */
-  let previewing: string | null = null;
-  let previewed = 0;
-  /** A moved selection's pause before its preview is read. */
-  let settlingPreview: ReturnType<typeof setTimeout> | undefined;
-  /** The previews read, newest last: a ticket selected again draws its own at once while it is read again. */
-  const heldPreviews = new Map<string, { description: Prose | null; around: CardTable | null }>();
-  const holdPreview = (id: string, part: Partial<{ description: Prose | null; around: CardTable | null }>) => {
-    const held = { description: null, around: null, ...heldPreviews.get(id), ...part };
-    heldPreviews.delete(id);
-    heldPreviews.set(id, held);
-    if (heldPreviews.size > PREVIEWS_HELD) heldPreviews.delete(heldPreviews.keys().next().value!);
-  };
+  /** A view that shows every ticket: the list's pages, its generation, and whether a page is out. */
+  let rows = $state.raw<MiniBoardCard[] | null>(null);
+  let rowsReading = 0;
+  let rowsOut = false;
+  /** The columns (by lane and name) with a page out. */
+  const paging = new Set<string>();
 
   const view = $derived(options.view());
   const own = $derived(sessions.views[state.scope.key]);
@@ -297,6 +312,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const lanes = $derived(own?.lanes ?? view.lanes);
   const laned = $derived(layout === "board" && lanes !== "none");
   const typing = $derived(state.filter.words);
+  const all = $derived(view.showAll === true);
   const bands = $derived(
     boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
       (lane) => ({
@@ -304,7 +320,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         drawn: lane.columns.map((column) => {
           const listed = (view.listed ?? view.columns).find((own) => own.name === column.status)?.statuses ?? [];
           const done = columnDone(column, listed);
-          return { column, cards: drawnCards(column, pagesOf(expandKey(lane, column)), typing, done), done, listed };
+          // A view that shows every ticket draws every card read: the first read's fifty a column, then each page.
+          const cards = all ? column.cards : drawnCards(column, pagesOf(expandKey(lane, column)), typing, done);
+          return { column, cards, done, listed };
         }),
       }),
     ),
@@ -347,13 +365,77 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     return { by: lanes, first: state.lanesShown };
   }
 
+  /** Whether the list of a view that shows every ticket is read in pages sorted on the server. Sub-tasks read whole. */
+  const paged = () => all && layout === "list" && !state.scope.without;
+
+  /**
+   * A view that shows every ticket (ux18): fifty a column (eight a lane's column), its pages read as it scrolls; a
+   * sync's re-read reads each column to the depth it holds, so no card drawn goes. Its list reads one card a column
+   * here, for the counts: the rows are its pages.
+   */
+  function capAll(byPerson: boolean): number | null {
+    if (state.scope.without) return null;
+    if (paged()) return 1;
+    const first = laned ? COLUMN_CAP : TYPED_CAP;
+    if (byPerson || board === null) return first;
+    const held = laned ? board.lanes.flatMap((one) => one.columns.map((cell) => cell.ids.length)) : board.columns.map((column) => column.cards.length);
+    return Math.max(first, ...held);
+  }
+
+  /** The statuses in the order the list's *Status* sorts them: the view's columns', else the board's. */
+  function statusOrder(): (string | null)[] {
+    const own = (view.listed ?? view.columns).flatMap((column) => column.statuses);
+    if (own.length > 0) return own;
+    return [...new Set((board?.columns ?? []).flatMap((column) => [column.status, ...column.cards.map((card) => card.status)]))];
+  }
+
+  /** The list's first page, sorted on the server (or as deep as it reads now, for a sync's re-read). */
+  function readRows(byPerson: boolean) {
+    const { base, savedView } = state.scope;
+    if (base === null || !paged()) return;
+    const sort = view.sort ?? DEFAULT_SORT;
+    const page: BoardPage = {
+      after: 0,
+      sort: sort.column,
+      direction: sort.direction,
+      status_order: statusOrder(),
+      priority_order: [...PRIORITY_ORDER],
+    };
+    const depth = byPerson ? PAGE_CARDS : Math.max(PAGE_CARDS, rows?.length ?? 0);
+    const query = state.filter.query;
+    const mine = ++rowsReading;
+    rowsOut = false;
+    ports
+      .board(depth, query === "" ? null : query, savedView, null, TICKET_SYSTEM, page)
+      .then((answer) => {
+        if (mine !== rowsReading) return;
+        rows = inOrder(answer);
+        if (byPerson) state.asked += 1;
+      })
+      .catch((error: unknown) => {
+        if (mine === rowsReading) state.failed = messageOf(error);
+      });
+  }
+
+  /** A person's read of a view that shows every ticket: its board (or the list's counts), and the list's first page. */
+  function readAll() {
+    if (paged() && (view.sort ?? DEFAULT_SORT).column === "status" && (view.listed ?? view.columns).length === 0 && board === null) {
+      // The statuses' order comes with the board: the list's page waits for it.
+      read(false, true, () => readRows(true));
+      return;
+    }
+    read();
+    readRows(true);
+  }
+
   /**
    * A read with words still filters and counts the whole mirror, so on a
    * large one a short prefix is the broadest of them; it sends fifty cards a
    * column at most (R-3.4, #1024).
    */
-  function read(quick = false, byPerson = true) {
-    const asked = capFor(quick);
+  function read(quick = false, byPerson = true, then?: () => void) {
+    const asked = all ? capAll(byPerson) : capFor(quick);
+    const lanesNow = lanesAsked();
     clearTimeout(pausing);
     const { base, savedView, without } = state.scope;
     if (base === null) return;
@@ -363,7 +445,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     out += 1;
     sentAt = Date.now();
     ports
-      .board(asked, query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
+      .board(asked, query === "" ? null : query, savedView, lanesNow, TICKET_SYSTEM)
       .finally(() => {
         out -= 1;
         if (out === 0 && queued) {
@@ -382,6 +464,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         // A read the person caused (a filter, *Show more*, lanes) sorts the cards again; a sync's does not (`held-order`).
         if (byPerson) state.asked += 1;
         if (query === base) state.total = sum(drawn);
+        then?.();
       })
       .catch((error: unknown) => {
         if (mine === reading) state.failed = messageOf(error);
@@ -432,14 +515,14 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     get typing() {
       return typing;
     },
+    get all() {
+      return all;
+    },
+    get rows() {
+      return paged() ? rows : null;
+    },
     get bands() {
       return bands;
-    },
-    get description() {
-      return state.description;
-    },
-    get around() {
-      return state.around;
     },
     get asked() {
       return state.asked;
@@ -454,7 +537,12 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       clearTimeout(settling);
       state.scope = { ...scope };
       state.filter = { ...filter };
-      if (scope.base !== null) read();
+      rows = null;
+      rowsReading += 1;
+      paging.clear();
+      if (scope.base === null) return;
+      if (all) readAll();
+      else read();
     },
     /**
      * A key reads at once when no read is out and the last was sent at least
@@ -478,8 +566,13 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       // So does a board whose *Show more* drew past fifty a column (the ux13-overs pass, 2026-11-15, Fable's ruling): a
       // key on 1,243 cards read 610 KB in 54 to 62 ms, 109 to 117 ms to its rows at CPU 4x on Björn's PC; the screen
       // shows the first fifty of a column, and the rest come once the keys pause. Lanes keep their one read.
-      const quick = !laned && ((listAll && layout === "list") || (layout === "board" && expanded.length > 0 && (capFor() ?? 0) > TYPED_CAP));
+      // A view that shows every ticket reads fifty a column, its list's first page, and the rest as it scrolls.
+      const quick = !all && !laned && ((listAll && layout === "list") || (layout === "board" && expanded.length > 0 && (capFor() ?? 0) > TYPED_CAP));
       const go = () => {
+        if (all) {
+          paging.clear();
+          return readAll();
+        }
         read(quick);
         // The whole read finishes the key's own: it sorts nothing again (`held-order`), so the cards it adds join below
         // those drawn and none drawn moves.
@@ -517,12 +610,64 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     },
     moreLanes() {
       state.lanesShown += LANES_AT_FIRST;
-      read();
+      // A view that shows every ticket keeps each lane's column as deep as it reads now.
+      read(false, !all);
+    },
+    more(lane, column, listed) {
+      const { base, savedView } = state.scope;
+      const key = expandKey(lane, column);
+      if (!all || base === null || board === null || paging.has(key) || column.cards.length >= column.total) return;
+      paging.add(key);
+      const page: BoardPage = {
+        after: column.cards.length,
+        // A Jira view's column is its source's: the server cuts it by its name. A view's own gathers its statuses.
+        statuses: savedView !== null || listed.length === 0 ? [column.status] : [...listed],
+        ...(lane.key !== null ? { lane: lane.key } : {}),
+      };
+      const at = reading;
+      const query = state.filter.query;
+      const inLanes: LanesAsked | null = laned && lanes !== "none" && lane.key !== null ? { by: lanes, first: EVERY_LANE } : null;
+      ports
+        .board(PAGE_CARDS, query === "" ? null : query, savedView, inLanes, TICKET_SYSTEM, page)
+        .then((answer) => {
+          if (at !== reading || board === null) return;
+          board = withPage(board, answer, laned ? lane.key : null);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (at === reading) paging.delete(key);
+        });
+    },
+    moreRows() {
+      const { base, savedView } = state.scope;
+      const shown = board === null ? null : sum(board);
+      if (!paged() || base === null || rows === null || rowsOut || shown === null || rows.length >= shown) return;
+      rowsOut = true;
+      const sort = view.sort ?? DEFAULT_SORT;
+      const page: BoardPage = { after: rows.length, sort: sort.column, direction: sort.direction, status_order: statusOrder(), priority_order: [...PRIORITY_ORDER] };
+      const mine = rowsReading;
+      const query = state.filter.query;
+      ports
+        .board(PAGE_CARDS, query === "" ? null : query, savedView, null, TICKET_SYSTEM, page)
+        .then((answer) => {
+          if (mine !== rowsReading || rows === null) return;
+          const had = new Set(rows.map((card) => card.entity_id));
+          rows = [...rows, ...inOrder(answer).filter((card) => !had.has(card.entity_id))];
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (mine === rowsReading) rowsOut = false;
+        });
+    },
+    resort() {
+      if (paged()) readRows(true);
     },
     chooseLayout(next) {
       if (layout === next) return;
       const wasLaned = laned;
       here().layout = next;
+      // A view that shows every ticket reads its list in pages and its board by the column: the other layout reads.
+      if (all) return readAll();
       if (wasLaned !== laned) read();
     },
     chooseLanes(next) {
@@ -531,53 +676,20 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       here().lanes = next;
       state.lanesShown = LANES_AT_FIRST;
       // Each field is its own read of lanes (#939).
-      if (wasLaned || laned) read();
+      if (!wasLaned && !laned) return;
+      paging.clear();
+      read();
     },
-    refresh: () => read(false, false),
-    preview(id) {
-      if (id === previewing) return;
-      const moved = previewing !== null;
-      previewing = id;
-      const mine = ++previewed;
-      clearTimeout(settlingPreview);
-      if (id === null) return;
-      // The selection draws at once, with what is held of its preview; the reads wait until it stops moving.
-      const held = heldPreviews.get(id);
-      state.description = held?.description ?? null;
-      state.around = held?.around ?? null;
-      const read = () => {
-        if (mine !== previewed) return;
-        ports
-          .detail(id)
-          .then((detail) => {
-            if (mine !== previewed) return;
-            const description = detail.description === null ? null : { text: detail.description, markup: detail.markup };
-            holdPreview(id, { description });
-            if (description !== null) state.description = description;
-          })
-          .catch(() => {});
-        // The card's own rows, through the job-reach read: no context is needed, and
-        // none is promoted to draw this (#1030). A run counts under Builds because
-        // the Builds read answered it, as on the card (#1300).
-        void readCardReads({ ...ports, getAsset: ports.getAsset ?? getAsset, ticketBoard: ports.ticketBoard ?? bridgeTicketBoard, entityCheckout: ports.entityCheckout ?? entityCheckout }, id).then((reads) => {
-          if (mine !== previewed) return;
-          const around = cardSections(reads);
-          holdPreview(id, { around });
-          state.around = around;
-        });
-      };
-      if (moved && previewPause > 0) settlingPreview = setTimeout(read, previewPause);
-      else read();
+    refresh: () => {
+      read(false, false);
+      readRows(false);
     },
     close() {
-      clearTimeout(settlingPreview);
       clearTimeout(pausing);
       clearTimeout(settling);
       queued = null;
       reading += 1;
       epoch += 1;
-      previewing = null;
-      previewed += 1;
     },
   };
 }

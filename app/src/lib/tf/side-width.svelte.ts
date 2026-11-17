@@ -45,7 +45,6 @@ export interface SideSpec {
 /** Every sidebar in the app. A sidebar shown in several places (a diff's file list) is one entry: it is one width. */
 export const SIDES = {
   "tickets-views": { label: "Resize the views", at: "start", base: 230, min: 160, share: 0.3 },
-  "tickets-preview": { label: "Resize the selected ticket", at: "end", base: 340, min: 240, share: 0.45 },
   "ticket-card": { label: "Resize the card", at: "start", base: 320, min: 240, max: 720, share: 0.6, key: "knobas.ticket.side" },
   builds: { label: "Resize the pipelines", at: "start", base: 300, min: 180, share: 0.45 },
   "repo-tree": { label: "Resize the file tree", at: "start", base: 280, min: 160, share: 0.5 },
@@ -61,6 +60,12 @@ export const SIDES = {
 } as const satisfies Record<string, SideSpec>;
 
 export type SideId = keyof typeof SIDES;
+
+/**
+ * Widths kept for sidebars that are gone, cleared at the next load: Tickets' preview of the selected ticket
+ * (`knobas.side.tickets-preview`), taken out in ux18 (Björn: "Remove the right sidebar from the tickets view").
+ */
+const GONE_KEYS = ["knobas.side.tickets-preview"];
 
 export const SIDE_IDS = Object.keys(SIDES) as SideId[];
 
@@ -120,6 +125,7 @@ export interface SideWidths {
 
 export function createSideWidths(storage: () => KeptStorage | null): SideWidths {
   const kept = new Map<SideId, KeptValue>(SIDE_IDS.map((id) => [id, keptValue(storage, sideKey(id))]));
+  const gone = GONE_KEYS.map((key) => keptValue(storage, key));
   const read = (id: SideId): number | null => {
     const raw = kept.get(id)!.read();
     if (raw === null) return null;
@@ -144,6 +150,7 @@ export function createSideWidths(storage: () => KeptStorage | null): SideWidths 
       kept.get(id)!.clear();
     },
     load() {
+      for (const value of gone) value.clear();
       const next: Partial<Record<SideId, number>> = {};
       for (const id of SIDE_IDS) {
         const px = read(id);

@@ -169,6 +169,14 @@ const expandedBoard = (before) => `
   }
 ` + ticketsBoard(before);
 
+/**
+ * A ticket view of every ticket stored with *Show every ticket when the view opens* (ux18), made on the backend for the
+ * run ({@link makeAllViews}): its board reads fifty a column and the next 200 as a column's foot nears.
+ */
+const ALL_VIEW = "perf-every-ticket";
+/** {@link ticketsBoard} on {@link ALL_VIEW}. */
+const allBoard = (before) => ticketsBoard(before).replaceAll('"#/tickets"', JSON.stringify(`#/tickets/${ALL_VIEW}`));
+
 /** The launcher over Everything, its box focused and empty. */
 const launcher = `
   if (location.hash !== "#/tickets") location.hash = "#/tickets";
@@ -226,6 +234,7 @@ const CASES = [
   { name: "tickets-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-priority", presses: [["-priority:Hig", "h"], ["-priority:Lo", "w"], ["-priority:Mediu", "m"], ["-priority:Highes", "t"], ["-priority:Lowes", "t"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
+  { name: "tickets-all-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: allBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-expanded-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: expandedBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-expanded-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: expandedBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "everything-letter", presses: [["", "p"], ["", "r"], ["", "c"], ["", "b"], ["", "l"], ["", "g"], ["", "w"]], setup: () => launcher, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
@@ -282,6 +291,7 @@ async function press(key) {
 // the keys after it, so each statement is asked here until every connection has its plan: a letter, a word few rows
 // hold, and words many rows hold whose names are few and many. A word the database does not hold warms what it can.
 const real = new URL(app).searchParams.get("fake-real");
+if (real && picked.some((x) => x.setup === allBoard)) await makeAllViews(real);
 if (real) {
   const ask = (raw) => fetch(`http://127.0.0.1:${real}/invoke`, { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ cmd: "search", args: { query: { raw, titles: false, limit: 40, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] } } } }) }).then((r) => r.text()).catch(() => null);
@@ -337,4 +347,16 @@ if (check) {
   }
   console.log(over ? `keys: ${over} over their lines` : "keys: every key within its line");
   process.exit(over ? 1 : 0);
+}
+
+/**
+ * The views the show-every-ticket cases open (ux18), saved on the backend under their own ids: every ticket, as a board
+ * and as a list. Saved again each run, as they were.
+ */
+async function makeAllViews(port) {
+  for (const [id, layout] of [["perf-every-ticket", "board"], ["perf-every-ticket-list", "list"]]) {
+    const view = { id, name: id, group: "Mine", position: null, query: "", layout, columns: [], lanes: "none", card_fields: ["type", "signals", "comments", "assignee"], list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"], list_sort: null, show_all: true, saved_view: null };
+    const said = await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "save_ticket_view", args: { view } }) }).then((r) => r.text());
+    if (!said.includes(id)) throw new Error(`could not save the view ${id}: ${said.slice(0, 200)}`);
+  }
 }

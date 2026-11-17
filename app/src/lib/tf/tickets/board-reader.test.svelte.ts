@@ -7,8 +7,8 @@
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityFilter, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import { createBoardReader, LIST_SETTLE_MS, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
+import type { BoardPage, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import { createBoardReader, LIST_SETTLE_MS, PAGE_CARDS, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -22,6 +22,7 @@ interface Read {
   savedView: string | null | undefined;
   lanes: LanesAsked | null | undefined;
   role: string | undefined;
+  page: BoardPage | null | undefined;
   answer: (board: MiniBoard) => void;
   fail: (error: Error) => void;
 }
@@ -62,29 +63,18 @@ function board(...columns: MiniBoardColumn[]): MiniBoard {
 /** Twelve To Do (eight sent) and five Done (eight sent): the board an uncapped first read answers. */
 const FIRST = board(column("To Do", 12, 8), column("Done", 5));
 
-function fakes(previewPause?: number, cardReads?: BoardReaderPorts["cardReads"]) {
+function fakes() {
   const reads: Read[] = [];
-  const details: { id: string; answer: (text: string) => void }[] = [];
-  const reaches: string[] = [];
   const ports: BoardReaderPorts = {
-    board: (perColumn, query, savedView, lanes, role) =>
-      new Promise((answer, fail) => reads.push({ perColumn, query, savedView, lanes, role, answer, fail })),
-    detail: (id) => new Promise((answer) => details.push({ id, answer: (text) => answer({ description: text, markup: "jira_wiki" }) })),
-    listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
-    jobReach: (id) => {
-      reaches.push(id);
-      return Promise.resolve([]);
-    },
-    ticketBoard: () => Promise.resolve({ columns: [], more_lanes: 0 } as unknown as MiniBoard),
-    entityCheckout: () => Promise.reject(new Error("no checkout")),
-    ...(cardReads ? { cardReads } : {}),
+    board: (perColumn, query, savedView, lanes, role, page) =>
+      new Promise((answer, fail) => reads.push({ perColumn, query, savedView, lanes, role, page, answer, fail })),
   };
   const sessions: ViewSessions = $state({ views: {} });
   const view: BoardView = $state({ columns: [], layout: "board", lanes: "none" });
-  const reader = createBoardReader(ports, { typingPause: 40, ...(previewPause === undefined ? {} : { previewPause }), sessions, view: () => view });
+  const reader = createBoardReader(ports, { typingPause: 40, sessions, view: () => view });
   /** What each read asked for, without its answer. */
   const asked = () => reads.map(({ perColumn, query, lanes }) => (lanes ? { perColumn, query, lanes } : { perColumn, query }));
-  return { reader, reads, details, reaches, sessions, view, asked };
+  return { reader, reads, sessions, view, asked };
 }
 
 const ALL = { key: "", base: "", savedView: null };
@@ -431,46 +421,16 @@ test("a scope change starts fresh and drops what the last scope still had out", 
   expect(reader.board).toBeNull();
 });
 
-test("the preview reads once per ticket and drops the answer of one no longer previewed", async () => {
-  const { reader, details, reaches } = fakes();
-  reader.preview("jira:PAY-1");
-  reader.preview("jira:PAY-1");
-  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1"]);
-  details[0]!.answer("One.");
-  await flush();
-  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
-  expect(reader.around).toEqual({ rows: [], settled: true });
-
-  reader.preview("jira:PAY-2");
-  expect(reader.description).toBeNull();
-  reader.preview("jira:PAY-3");
-  details[1]!.answer("Two, late.");
-  await flush();
-  expect(reader.description).toBeNull();
-  details[2]!.answer("Three.");
-  await flush();
-  expect(reader.description).toEqual({ text: "Three.", markup: "jira_wiki" });
-  expect(reaches).toEqual(["jira:PAY-1", "jira:PAY-2", "jira:PAY-3"]);
-
-  // Nothing selected, then the same ticket again: it is read again.
-  reader.preview(null);
-  reader.preview("jira:PAY-3");
-  expect(details).toHaveLength(4);
-});
-
 test("close stops the pause and drops every answer still out", async () => {
-  const { reader, reads, details } = fakes();
+  const { reader, reads } = fakes();
   reader.open(ALL, NO_WORDS);
-  reader.preview("jira:PAY-1");
   reader.setFilter({ query: "x", words: true });
   reader.close();
   await vi.advanceTimersByTimeAsync(100);
   expect(reads).toHaveLength(1);
   reads[0]!.answer(FIRST);
-  details[0]!.answer("Gone.");
   await flush();
   expect(reader.board).toBeNull();
-  expect(reader.description).toBeNull();
 });
 
 test("a Jira view's column draws three when every status it lists is done, whatever its name (#1423)", async () => {
@@ -496,37 +456,167 @@ test("a Jira view's column draws three when every status it lists is done, whate
   ]);
 });
 
-test("a moved selection draws at once and reads its preview once it stops moving; one selected again draws what it showed (the query audit, 2026-11-12)", async () => {
-  const sections: string[] = [];
-  const { reader, details, reaches } = fakes(120, async (id: string, asked: EntityFilter[]) => {
-    sections.push(`${id}:${asked.length}`);
-    return { reached: [], sections: asked.map(() => []) };
-  });
-  // The first selection is read at once: there is nothing to settle.
-  reader.preview("jira:PAY-1");
-  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1"]);
-  details[0]!.answer("One.");
+
+// -- a view that shows every ticket (ux18, Björn: "always show all the tickets on open"; Fable's ruling on how) --
+
+/** A column of `total` cards of which the first `drawn` are read, keyed from `from`. */
+function cards(status: string, from: number, count: number): MiniBoardCard[] {
+  return Array.from({ length: count }, (_, i) => card(`${status[0]}-${from + i}`, null, status));
+}
+
+test("off, a view opens as it always did: eight a column, three for Done, and Show more to press", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  expect(reads[0]!.perColumn).toBe(8);
+  expect(reads[0]!.page ?? null).toBeNull();
+  reads[0]!.answer(board(column("To Do", 300, 8), { status: "Done", cards: cards("Done", 1, 8), total: 900 }));
   await flush();
-  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
-  expect(reader.around).toEqual({ rows: [], settled: true });
+  expect(reader.all).toBe(false);
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([8, 3]);
+});
 
-  // Held j over three rows: each draws at once, nothing is read until the last one has stood still for 120 ms.
-  for (const id of ["jira:PAY-2", "jira:PAY-3", "jira:PAY-4"]) {
-    reader.preview(id);
-    expect(reader.description).toBeNull();
-    await vi.advanceTimersByTimeAsync(50);
-  }
-  expect(details).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(70);
-  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1", "jira:PAY-4"]);
-  // The four sections and the reach in one read, never a `job_reach` of its own.
-  expect(sections).toEqual(["jira:PAY-1:4", "jira:PAY-4:4"]);
-  expect(reaches).toEqual([]);
+test("on, a board opens on fifty a column and draws every card it reads, Done too: no column is cut", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  reader.open(ALL, NO_WORDS);
+  expect(reads).toHaveLength(1);
+  expect(reads[0]!.perColumn).toBe(50);
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 50), total: 300 }, { status: "Done", cards: cards("Done", 1, 50), total: 900 }));
+  await flush();
+  expect(reader.all).toBe(true);
+  // No eight, no three for Done: the fifty read are drawn, and nothing else is read until a column's foot nears.
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([50, 50]);
+  expect(reads).toHaveLength(1);
+});
 
-  // Back to the first: what it showed draws in the same frame, and it is read again behind it.
-  reader.preview("jira:PAY-1");
-  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
-  expect(reader.around).toEqual({ rows: [], settled: true });
-  await vi.advanceTimersByTimeAsync(120);
-  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1", "jira:PAY-4", "jira:PAY-1"]);
+test("on, a column's foot nearing reads its next 200 past those it holds, joined below them; once a column, and none for a whole one", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 50), total: 300 }, { status: "Done", cards: cards("Done", 1, 3), total: 3 }));
+  await flush();
+  const [todo, done] = reader.bands[0]!.drawn;
+  reader.more(reader.bands[0]!.lane, todo!.column, todo!.listed);
+  reader.more(reader.bands[0]!.lane, todo!.column, todo!.listed);
+  reader.more(reader.bands[0]!.lane, done!.column, done!.listed);
+  expect(reads).toHaveLength(2);
+  expect(reads[1]!.perColumn).toBe(PAGE_CARDS);
+  expect(reads[1]!.page).toEqual({ after: 50, statuses: ["To Do"] });
+  reads[1]!.answer(board({ status: "To Do", cards: cards("To Do", 51, 200), total: 300 }));
+  await flush();
+  const drawn = reader.bands[0]!.drawn[0]!.cards;
+  expect(drawn).toHaveLength(250);
+  expect(drawn[49]!.key).toBe("T-50");
+  expect(drawn[50]!.key).toBe("T-51");
+  // The next page goes past the 250 held.
+  reader.more(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column, []);
+  expect(reads[2]!.page).toEqual({ after: 250, statuses: ["To Do"] });
+});
+
+test("on, a view's column that gathers statuses pages them as one, and a Jira view's column by its name", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  view.columns = [{ name: "Doing", statuses: ["In Progress", "In Review"], limit: null }];
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ status: "In Progress", cards: cards("In Progress", 1, 50), total: 120 }, { status: "In Review", cards: cards("In Review", 1, 50), total: 80 }));
+  await flush();
+  const [doing] = reader.bands[0]!.drawn;
+  expect(doing!.column.status).toBe("Doing");
+  reader.more(reader.bands[0]!.lane, doing!.column, doing!.listed);
+  expect(reads[1]!.page).toEqual({ after: 100, statuses: ["In Progress", "In Review"] });
+
+  const jira = fakes();
+  jira.view.showAll = true;
+  jira.view.columns = [{ name: "Doing", statuses: ["Doing"], limit: null }];
+  jira.view.listed = [{ name: "Doing", statuses: ["In Progress", "In Review"], limit: null }];
+  jira.reader.open({ key: "j", base: "", savedView: "jira:board-21" }, NO_WORDS);
+  jira.reads[0]!.answer(board({ status: "Doing", cards: cards("Doing", 1, 50), total: 400 }));
+  await flush();
+  const [column] = jira.reader.bands[0]!.drawn;
+  jira.reader.more(jira.reader.bands[0]!.lane, column!.column, column!.listed);
+  expect(jira.reads[1]!.savedView).toBe("jira:board-21");
+  expect(jira.reads[1]!.page).toEqual({ after: 50, statuses: ["Doing"] });
+});
+
+test("on, a laned board reads eight a lane's column and ten lanes, pages a lane's column in its lane, and keeps the depth for ten more lanes", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  view.lanes = "assignee";
+  reader.open(ALL, NO_WORDS);
+  expect(reads[0]!.perColumn).toBe(8);
+  expect(reads[0]!.lanes).toEqual({ by: "assignee", first: 10 });
+  const first = cards("To Do", 1, 8);
+  reads[0]!.answer({
+    columns: [{ status: "To Do", cards: first, total: 40 }],
+    sources: [],
+    lanes: [{ key: "mara", count: 40, columns: [{ status: "To Do", ids: first.map((one) => one.entity_id), total: 40 }] }],
+    more_lanes: 12,
+  });
+  await flush();
+  const band = reader.bands[0]!;
+  reader.more(band.lane, band.drawn[0]!.column, []);
+  expect(reads[1]!.lanes).toEqual({ by: "assignee", first: 1_000_000 });
+  expect(reads[1]!.page).toEqual({ after: 8, statuses: ["To Do"], lane: "mara" });
+  const next = cards("To Do", 9, 32);
+  reads[1]!.answer({
+    columns: [{ status: "To Do", cards: next, total: 40 }],
+    sources: [],
+    lanes: [{ key: "mara", count: 40, columns: [{ status: "To Do", ids: next.map((one) => one.entity_id), total: 40 }] }],
+    more_lanes: 0,
+  });
+  await flush();
+  expect(reader.bands[0]!.drawn[0]!.cards).toHaveLength(40);
+  // Ten lanes more as the foot nears, each lane's column as deep as it reads now.
+  reader.moreLanes();
+  expect(reads[2]!.lanes).toEqual({ by: "assignee", first: 20 });
+  expect(reads[2]!.perColumn).toBe(40);
+});
+
+test("on, the list reads its counts and its first 200 rows sorted on the server, the next 200 as its foot nears, and its first page again for another sort", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  view.layout = "list";
+  view.sort = { column: "priority", direction: "ascending" };
+  reader.open(ALL, NO_WORDS);
+  expect(reads.map(({ perColumn, page }) => [perColumn, page?.sort ?? null])).toEqual([[1, null], [PAGE_CARDS, "priority"]]);
+  expect(reads[1]!.page).toMatchObject({ after: 0, direction: "ascending", priority_order: expect.arrayContaining(["high", "low"]) });
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 1), total: 300 }, { status: "Done", cards: cards("Done", 1, 1), total: 100 }));
+  const page = [...cards("Done", 1, 100), ...cards("To Do", 1, 100)];
+  reads[1]!.answer({ ...board({ status: "To Do", cards: page.slice(100), total: 300 }, { status: "Done", cards: page.slice(0, 100), total: 100 }), order: page.map((one) => one.entity_id) });
+  await flush();
+  // In the server's order, not grouped by column.
+  expect(reader.rows!.slice(0, 2).map((one) => one.key)).toEqual(["D-1", "D-2"]);
+  expect(reader.rows!.at(-1)!.key).toBe("T-100");
+  reader.moreRows();
+  reader.moreRows();
+  expect(reads).toHaveLength(3);
+  expect(reads[2]!.page).toMatchObject({ after: 200, sort: "priority" });
+  const more = cards("To Do", 101, 200);
+  reads[2]!.answer({ ...board({ status: "To Do", cards: more, total: 300 }), order: more.map((one) => one.entity_id) });
+  await flush();
+  expect(reader.rows).toHaveLength(400);
+  // Every row read: no page more.
+  reader.moreRows();
+  expect(reads).toHaveLength(3);
+  view.sort = { column: "key", direction: "descending" };
+  reader.resort();
+  expect(reads[3]!.page).toMatchObject({ after: 0, sort: "key", direction: "descending" });
+});
+
+test("on, a key reads fifty a column once and no whole read follows; a sync's re-read reads each column as deep as it holds", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 50), total: 300 }));
+  await flush();
+  reader.more(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column, []);
+  reads[1]!.answer(board({ status: "To Do", cards: cards("To Do", 51, 200), total: 300 }));
+  await flush();
+  reader.refresh();
+  expect(reads[2]!.perColumn).toBe(250);
+  reads[2]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 250), total: 300 }));
+  await flush();
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS * 2);
+  expect(reads.slice(3).map(({ perColumn, query }) => [perColumn, query])).toEqual([[50, "pay"]]);
 });

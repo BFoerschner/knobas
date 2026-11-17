@@ -71,6 +71,16 @@ describe("the widths", () => {
     expect(sideProperty("docs-tree")).toBe("--side-docs-tree");
   });
 
+  test("the width kept for Tickets' preview, which is gone (ux18), is cleared at the next load", () => {
+    const storage = memoryStorage();
+    storage.setItem("knobas.side.tickets-preview", "420");
+    storage.setItem("knobas.side.tickets-views", "260");
+    const widths = createSideWidths(() => storage);
+    widths.load();
+    expect(storage.getItem("knobas.side.tickets-preview")).toBeNull();
+    expect(widths.px("tickets-views")).toBe(260);
+  });
+
   test("each sidebar keeps its own width under its own key, read back clamped, and a reset forgets it", () => {
     const storage = memoryStorage();
     const widths = createSideWidths(() => storage);
@@ -626,7 +636,6 @@ describe("every sidebar is wired", () => {
   /** Each sidebar's grid, by the selector of its rules. */
   const GRIDS: Record<SideId, string> = {
     "tickets-views": ".tf-tickets",
-    "tickets-preview": ".tf-tickets",
     "ticket-card": ".tf-ticketpage .tf-ws",
     builds: ".tf-bv",
     "repo-tree": ".tf-repo",
@@ -681,6 +690,8 @@ describe("every sidebar is wired", () => {
   test("no sidebar is left out of the list", () => {
     const named = new Set(sources.flatMap(({ text }) => [...text.matchAll(/<TfSideEdge side="([\w-]+)"/g)].map((match) => match[1])));
     expect([...named].sort()).toEqual([...SIDE_IDS].sort());
-    expect(Object.keys(SIDES)).toHaveLength(14);
+    // Tickets' preview of the selected ticket went in ux18, and its edge with it.
+    expect(Object.keys(SIDES)).toHaveLength(13);
+    expect(Object.keys(SIDES)).not.toContain("tickets-preview");
   });
 });

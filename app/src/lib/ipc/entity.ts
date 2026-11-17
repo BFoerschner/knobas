@@ -57,6 +57,7 @@ import type {
   JobLinkSets,
   JobPipeline,
   LaneField,
+  BoardPage,
   LinkRow,
   LinkSetDetail,
   LinkSetDraft,
@@ -219,6 +220,7 @@ export type {
   KindTally,
   LaneColumn,
   LaneField,
+  BoardPage,
   LineComment,
   LineComments,
   LineThread,
@@ -1274,6 +1276,10 @@ export interface LanesAsked {
  * `lanes` (#939, #1098) puts the board in lanes on the server: `perColumn`
  * then caps each lane's column, and only the first `lanes.first` lanes are
  * sent, biggest first (`MiniBoard.lanes`, `MiniBoard.more_lanes`).
+ *
+ * `page` (ux18) reads past the first cards, for a view that shows every ticket: a column's next `perColumn`
+ * cards `after` those it holds (of the `statuses` its column gathers, in a `lane`), or the list sorted on the
+ * server by a header, its order in `MiniBoard.order`.
  */
 export function miniBoard(
   filter: Pick<EntityFilter, "role" | "context" | "project">,
@@ -1281,6 +1287,7 @@ export function miniBoard(
   query?: string | null,
   savedView?: string | null,
   lanes?: LanesAsked | null,
+  page?: BoardPage | null,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
@@ -1291,6 +1298,7 @@ export function miniBoard(
     savedView: savedView ?? null,
     lanes: lanes?.by ?? null,
     lanesFirst: lanes?.first ?? null,
+    page: page ?? null,
   });
 }
 

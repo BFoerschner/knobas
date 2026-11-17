@@ -169,6 +169,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::mini_board::SourceStatuses::export_all(cfg)?;
     knobas_core::mini_board::MiniBoard::export_all(cfg)?;
     knobas_core::mini_board::LaneField::export_all(cfg)?;
+    knobas_core::mini_board::Page::export_all(cfg)?;
     knobas_core::mini_board::MiniBoardLane::export_all(cfg)?;
     knobas_core::mini_board::LaneColumn::export_all(cfg)?;
     knobas_core::project::Project::export_all(cfg)?;

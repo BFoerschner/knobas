@@ -23,7 +23,6 @@ import {
   listPointer,
   columnWords,
   nextSort,
-  previewAction,
   sharedKeys,
   sortRows,
   splitLanes,
@@ -116,32 +115,6 @@ test("initials are a person's first and last names' letters, an account's first 
   expect(initials("Lena Hoffmann")).toBe("LH");
   expect(initials("jonas")).toBe("JO");
   expect(initials(null)).toBe("–");
-});
-
-test("the preview's button: Start work, Resume work or Open ticket by the ticket's state", () => {
-  const mine = (status: string) => ({ assignee: "mara", mine: true, status });
-  const theirs = { assignee: "jonas.becker", mine: false, status: "To Do" };
-  // *Start work* shows the steps and chooses nothing until they run (F-130).
-  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: false, asks: "steps" });
-  expect(previewAction(mine("In Progress"), false)).toEqual({
-    label: "Resume work",
-    note: "Starts the timer on this ticket.",
-    chooses: true,
-    asks: "timer",
-  });
-  expect(previewAction(mine("In Progress"), true)).toEqual({ label: "Resume work", note: "Your timer is running on this ticket.", chooses: true });
-  // *Open job* only reads (spec #2396): it goes to the ticket's page and chooses nothing.
-  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open ticket", chooses: false });
-  expect(previewAction(theirs, false)).toEqual({ label: "Open ticket", note: "Assigned to jonas.becker.", chooses: false });
-  expect(previewAction({ assignee: null, mine: false, status: "To Do" }, false).note).toBe("Unassigned.");
-});
-
-test("the preview's button reads the card's status, not the column it stands in (#1423)", () => {
-  // PAY-233 is To Do and mine, under a Jira view's *Ready*; a done one under *Shipped*.
-  const [ready] = named("Ready", ["To Do"]).cards;
-  expect(previewAction({ ...ready!, assignee: "mara", mine: true }, false).label).toBe("Start work");
-  const [shipped] = named("Shipped", ["Done"]).cards;
-  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open ticket");
 });
 
 function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {

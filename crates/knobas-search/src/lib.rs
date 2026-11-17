@@ -1286,6 +1286,7 @@ impl knobas_core::mini_board::CardsNarrowing for Narrowing {
             .bind(binds.per_column)
             .bind(binds.lanes)
             .bind(binds.lanes_first)
+            .bind(binds.page)
             .fetch_all(pool)
             .await
     }

@@ -1380,3 +1380,168 @@ async fn a_board_without_lanes_carries_none() {
     assert!(board.lanes.is_empty());
     assert_eq!(board.more_lanes, 0);
 }
+
+/// A page past a column's first cards (ux18, a ticket view that shows every
+/// ticket): the next cards in the column's own order, the columns a page
+/// names ranked as one, and a list sorted on the server by a header, its
+/// order in `order` and each column still counting all its tickets.
+#[tokio::test]
+async fn a_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
+    let pool = scratch().await;
+    let mut ids = Vec::new();
+    for (n, status, priority, day) in [
+        (1, "To Do", "Low", 10),
+        (2, "To Do", "High", 14),
+        (3, "To Do", "Medium", 12),
+        (4, "In Progress", "High", 13),
+        (5, "In Progress", "Low", 11),
+        (10, "To Do", "High", 9),
+    ] {
+        let id = ticket(&pool, &format!("PAY-{n}"), Some(status), Some(priority)).await;
+        touched(&pool, &id, &format!("2026-08-{day:02}T09:00:00Z")).await;
+        ids.push(id);
+    }
+    let read = async |per_column: Option<u32>, page: mini_board::Page| {
+        mini_board::read_scoped(
+            &pool,
+            mini_board::Scope {
+                page: Some(&page),
+                ..mini_board::Scope::default()
+            },
+            &declarations(),
+            per_column,
+        )
+        .await
+        .unwrap()
+    };
+    let keys = |board: &MiniBoard, status: &str| -> Vec<String> {
+        board
+            .columns
+            .iter()
+            .filter(|column| column.status.as_deref() == Some(status))
+            .flat_map(|column| column.cards.iter().map(|card| card.key.clone()))
+            .collect()
+    };
+
+    // To Do newest first is PAY-2, PAY-3, PAY-1, PAY-10: past the first two, the next two.
+    let next = read(
+        Some(2),
+        mini_board::Page {
+            after: 2,
+            ..mini_board::Page::default()
+        },
+    )
+    .await;
+    assert_eq!(keys(&next, "To Do"), ["PAY-1", "PAY-10"]);
+    assert_eq!(keys(&next, "In Progress"), Vec::<String>::new());
+    assert_eq!(
+        next.columns
+            .iter()
+            .find(|c| c.status.as_deref() == Some("To Do"))
+            .unwrap()
+            .total,
+        4
+    );
+    assert!(next.order.is_none());
+
+    // Two statuses named: one rank over both, newest first across them.
+    let gathered = read(
+        Some(3),
+        mini_board::Page {
+            after: 1,
+            statuses: Some(vec![
+                Some("To Do".to_owned()),
+                Some("In Progress".to_owned()),
+            ]),
+            ..mini_board::Page::default()
+        },
+    )
+    .await;
+    let mut both: Vec<(_, String)> = gathered
+        .columns
+        .iter()
+        .flat_map(|column| {
+            column
+                .cards
+                .iter()
+                .map(|card| (card.updated_at, card.key.clone()))
+        })
+        .collect();
+    both.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    // Newest first over both: PAY-2 (14), PAY-4 (13), PAY-3 (12), PAY-5 (11), ...: past one, three.
+    assert_eq!(
+        both.into_iter().map(|(_, key)| key).collect::<Vec<_>>(),
+        ["PAY-4", "PAY-3", "PAY-5"]
+    );
+
+    // The list by priority, highest first by the page's order, then by key, PAY-2 before PAY-10.
+    let page = |after: u32, sort: &str, direction: &str| mini_board::Page {
+        after,
+        sort: Some(sort.to_owned()),
+        direction: Some(direction.to_owned()),
+        priority_order: Some(vec![
+            "high".to_owned(),
+            "medium".to_owned(),
+            "low".to_owned(),
+        ]),
+        status_order: Some(vec![
+            Some("To Do".to_owned()),
+            Some("In Progress".to_owned()),
+        ]),
+        ..mini_board::Page::default()
+    };
+    let first = read(Some(3), page(0, "priority", "ascending")).await;
+    let order = |board: &MiniBoard| -> Vec<String> {
+        board
+            .order
+            .clone()
+            .unwrap()
+            .iter()
+            .map(|id| id.trim_start_matches("jira:").to_owned())
+            .collect()
+    };
+    assert_eq!(order(&first), ["PAY-2", "PAY-4", "PAY-10"]);
+    // Each column counts every ticket in it, not the page's.
+    assert_eq!(first.columns.iter().map(|c| c.total).sum::<u32>(), 6);
+    let second = read(Some(3), page(3, "priority", "ascending")).await;
+    assert_eq!(order(&second), ["PAY-3", "PAY-1", "PAY-5"]);
+    // By key, the number read as one: PAY-10 after PAY-5, and backwards the other way.
+    assert_eq!(
+        order(&read(Some(6), page(0, "key", "ascending")).await),
+        ["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5", "PAY-10"]
+    );
+    assert_eq!(
+        order(&read(Some(2), page(0, "key", "descending")).await),
+        ["PAY-10", "PAY-5"]
+    );
+    // By status, in the page's order of them; then by key.
+    assert_eq!(
+        order(&read(Some(6), page(0, "status", "descending")).await),
+        ["PAY-4", "PAY-5", "PAY-1", "PAY-2", "PAY-3", "PAY-10"]
+    );
+    // By date, oldest first.
+    assert_eq!(
+        order(&read(Some(2), page(0, "updated", "ascending")).await),
+        ["PAY-10", "PAY-1"]
+    );
+
+    // A page that names no sort it can read is refused before any read.
+    assert!(
+        mini_board::Page {
+            sort: Some("signals".to_owned()),
+            direction: Some("ascending".to_owned()),
+            ..mini_board::Page::default()
+        }
+        .refusal()
+        .is_some()
+    );
+    assert!(
+        mini_board::Page {
+            sort: Some("key".to_owned()),
+            ..mini_board::Page::default()
+        }
+        .refusal()
+        .is_some()
+    );
+    assert!(mini_board::Page::default().refusal().is_none());
+}

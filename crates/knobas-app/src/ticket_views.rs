@@ -189,6 +189,10 @@ pub struct TicketView {
     pub list_columns: Vec<String>,
     /// `None` is newest first.
     pub list_sort: Option<ListSort>,
+    /// *Show every ticket when the view opens* (ux18, migration `0096`): no
+    /// column, lane or list cut. The reader's, a view from a ticket system's
+    /// too.
+    pub show_all: bool,
     /// The saved view (a board or filter, `sync.saved_view`'s entity id) a
     /// view from a ticket system shows (#877; named for the role by #1245);
     /// `None` on a view somebody made.
@@ -218,6 +222,9 @@ pub struct TicketViewDraft {
     #[ts(as = "Vec<ListColumn>")]
     pub list_columns: Vec<String>,
     pub list_sort: Option<ListSort>,
+    /// *Show every ticket when the view opens* (ux18); off when left out.
+    #[serde(default)]
+    pub show_all: bool,
     pub saved_view: Option<String>,
 }
 
@@ -299,7 +306,7 @@ pub struct Unsynced {
 macro_rules! fields {
     () => {
         "id, name, view_group, position, query, layout, columns, lanes, card_fields, \
-         list_columns, list_sort, saved_view"
+         list_columns, list_sort, show_all, saved_view"
     };
 }
 
@@ -326,6 +333,7 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
             .map(serde_json::from_value)
             .transpose()
             .map_err(IpcError::internal)?,
+        show_all: row.get("show_all"),
         saved_view: row.get("saved_view"),
     })
 }
@@ -781,14 +789,14 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
             .await?;
     let row = sqlx::query(concat!(
         "insert into knobas.ticket_view as v (id, name, view_group, position, query, layout, columns, \
-                                              lanes, card_fields, list_columns, list_sort, saved_view)
-         values ($1, $2, $3, coalesce($4, $5), $6, $7, $8, $9, $10, $11, $12, $13)
+                                              lanes, card_fields, list_columns, list_sort, saved_view, show_all)
+         values ($1, $2, $3, coalesce($4, $5), $6, $7, $8, $9, $10, $11, $12, $13, $14)
          on conflict (id) do update set
            name = excluded.name, view_group = excluded.view_group,
            position = coalesce($4, v.position), query = excluded.query, layout = excluded.layout,
            columns = excluded.columns, lanes = excluded.lanes, card_fields = excluded.card_fields,
            list_columns = excluded.list_columns, list_sort = excluded.list_sort,
-           saved_view = excluded.saved_view, updated_at = now()
+           saved_view = excluded.saved_view, show_all = excluded.show_all, updated_at = now()
          returning ",
         fields!()
     ))
@@ -805,6 +813,7 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
     .bind(json(&draft.list_columns)?)
     .bind(draft.list_sort.as_ref().map(json).transpose()?)
     .bind(&draft.saved_view)
+    .bind(draft.show_all)
     .fetch_one(&mut *tx)
     .await?;
     let view = view_of(&row)?;
@@ -962,6 +971,7 @@ mod tests {
             card_fields: vec!["type".to_owned(), "assignee".to_owned()],
             list_columns: vec!["key".to_owned(), "summary".to_owned()],
             list_sort: None,
+            show_all: false,
             saved_view: None,
         }
     }

@@ -998,11 +998,10 @@ pin_label $tf/settings/TfDialog.svelte 'reachable(`.tf-body :is(${FIELD})`)\[0\]
 pin_label $tf/route.ts 'tickets: "Tickets"' "the top bar's Tickets link keeps its name"
 pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter tickets"' \
     "the Tickets filter keeps the name the capture driver fills"
-for go in 'label: "Start work"' 'label: "Open ticket"' 'label: "Resume work"'; do
-    pin_label $tf/tickets/tickets.ts "$go" "the ticket preview still words its job link $go"
-done
-pin_label $tf/tickets/TicketPreview.svelte 'href={action.chooses ? jobHash(card.entity_id) : ticketHash(card.entity_id)}>{action.label}</a>' \
-    "the ticket preview's button is still a link to the ticket's page, by the job's address or the ticket's"
+pin_label $tf/tickets/TicketsPage.svelte 'onselect={() => openTicket(card)}' \
+    "a click on a Tickets card still opens its ticket's page, where the capture driver clicks"
+pin_label $tf/tickets/TicketCard.svelte '<span class="tf-s"><Marked text={card.title} {needles} /></span>' \
+    "the card still draws its summary as words of their own, which the capture driver clicks"
 pin_label ../fixtures/tidewater/work.json '"summary": "Retry failed SEPA payouts"' \
     "the demo's PAY-231 still has the summary the capture driver waits for"
 
@@ -1227,17 +1226,18 @@ fi
 # --- the window's size, before any driver or steps file (#2056) --------------
 #
 # A tiling window manager hands a new window whatever share of the screen is
-# left, and below Tickets' 1240 px breakpoint the preview the capture driver
-# opens its job from is never drawn. `witness_window_size` is the one step the
+# left, and below the app's 1240 px breakpoint the side rails close and the
+# nav gives up its words (`narrow.css`). `witness_window_size` is the one step the
 # harness and live-shot run before their driver: fullscreen under AeroSpace,
 # widen by accessibility elsewhere, then refuse below the minimum, naming both.
 # Against a stub `ax` and a stub `aerospace` on a PATH that holds no real one.
 
-# The minimum is the breakpoint's, read from the stylesheet that hides the
-# preview, so moving the breakpoint without the minimum turns this red.
-breakpoint=$(awk '/@media \(max-width: [0-9]+px\)/ { match($0, /[0-9]+/); w = substr($0, RSTART, RLENGTH) }
-    /\.tf-tickets \.tf-preview \{ display: none; \}/ { print w; exit }' ../app/src/lib/tf/css/tickets.css)
-check "the minimum width is one past the breakpoint that hides Tickets' preview" \
+# The minimum is the breakpoint's, read from the stylesheet where the nav gives
+# up its words (Tickets' preview, which set it before, is gone: ux18), so moving
+# the breakpoint without the minimum turns this red.
+breakpoint=$(awk '/@media \(max-width: [0-9]+px\) and \(min-width: 901px\)/ { match($0, /[0-9]+/); w = substr($0, RSTART, RLENGTH) }
+    /\.tf-search \.tf-label, \.tf-search kbd \{ display: none; \}/ && w { print w; exit }' ../app/src/lib/tf/css/narrow.css)
+check "the minimum width is one past the app's narrow breakpoint" \
     "$((breakpoint + 1))" "$WITNESS_MIN_WIDTH"
 
 check "window_width_verdict: a window at the minimum is ok" ok \

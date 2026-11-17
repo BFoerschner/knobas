@@ -751,6 +751,12 @@ columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, lis
  */
 list_sort: ListSort | null, 
 /**
+ * *Show every ticket when the view opens* (ux18, migration `0096`): no
+ * column, lane or list cut. The reader's, a view from a ticket system's
+ * too.
+ */
+show_all: boolean, 
+/**
  * The saved view (a board or filter, `sync.saved_view`'s entity id) a
  * view from a ticket system shows (#877; named for the role by #1245);
  * `None` on a view somebody made.
@@ -770,7 +776,11 @@ id: string | null, name: string, group: string,
 /**
  * `None` keeps a saved view where it is and puts a new one last.
  */
-position: number | null, query: string, layout: "board" | "list", columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, list_columns: Array<ListColumn>, list_sort: ListSort | null, saved_view: string | null, };
+position: number | null, query: string, layout: "board" | "list", columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, list_columns: Array<ListColumn>, list_sort: ListSort | null, 
+/**
+ * *Show every ticket when the view opens* (ux18); off when left out.
+ */
+show_all: boolean, saved_view: string | null, };
 
 /**
  * One row of the views pane: the view, and what its text reads as today.
@@ -818,6 +828,12 @@ columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, lis
  * `None` is newest first.
  */
 list_sort: ListSort | null, 
+/**
+ * *Show every ticket when the view opens* (ux18, migration `0096`): no
+ * column, lane or list cut. The reader's, a view from a ticket system's
+ * too.
+ */
+show_all: boolean, 
 /**
  * The saved view (a board or filter, `sync.saved_view`'s entity id) a
  * view from a ticket system shows (#877; named for the role by #1245);

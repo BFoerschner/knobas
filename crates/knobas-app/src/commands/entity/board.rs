@@ -47,6 +47,13 @@ use super::*;
 /// first `lanes_first` lanes, biggest first, are sent
 /// ([`knobas_core::mini_board::MiniBoard::lanes`]). Omitted, the board has
 /// no lanes, as before.
+///
+/// `page` (ux18) reads past the first cards, for a ticket view that shows
+/// every ticket ([`knobas_core::mini_board::Page`]): a column's next cards
+/// (`after` those it holds, of the `statuses` its column gathers, in a
+/// `lane`), or the list sorted here by a header, its order in
+/// [`knobas_core::mini_board::MiniBoard::order`]. Omitted, the first cards,
+/// as before.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn mini_board(
@@ -59,24 +66,32 @@ pub async fn mini_board(
     saved_view: Option<String>,
     lanes: Option<knobas_core::mini_board::LaneField>,
     lanes_first: Option<u32>,
+    page: Option<knobas_core::mini_board::Page>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    if let Some(why) = page
+        .as_ref()
+        .and_then(knobas_core::mini_board::Page::refusal)
+    {
+        return Err(IpcError::invalid(why));
+    }
     let pool = lifecycle.pool()?;
     let lanes = lanes.map(|by| knobas_core::mini_board::Lanes {
         by,
         first: lanes_first,
     });
     if let Some(view) = saved_view {
-        return saved_view_board_laned(
+        return saved_view_board_paged(
             &pool,
             lifecycle.registry(),
             &view,
             per_column,
             query.as_deref(),
             lanes,
+            page.as_ref(),
         )
         .await;
     }
-    mini_board_laned(
+    mini_board_paged(
         &pool,
         lifecycle.registry(),
         Room {
@@ -87,6 +102,7 @@ pub async fn mini_board(
         per_column,
         query.as_deref(),
         lanes,
+        page.as_ref(),
     )
     .await
 }
@@ -146,6 +162,23 @@ pub async fn mini_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    mini_board_paged(pool, registry, room, per_column, query, lanes, None).await
+}
+
+/// [`mini_board_laned`] past its first cards: see [`mini_board`]'s `page`.
+///
+/// # Errors
+///
+/// See [`mini_board_inner`].
+pub async fn mini_board_paged(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    room: Room<'_>,
+    per_column: Option<u32>,
+    query: Option<&str>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+    page: Option<&knobas_core::mini_board::Page>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let Room {
         ctx_id,
         role,
@@ -162,6 +195,7 @@ pub async fn mini_board_laned(
                     sources: Vec::new(),
                     lanes: Vec::new(),
                     more_lanes: 0,
+                    order: None,
                 });
             }
             fillers
@@ -177,6 +211,7 @@ pub async fn mini_board_laned(
         only,
         identity: &identity,
         lanes,
+        page,
     };
     Ok(match admits {
         knobas_search::Admits::Every => {
@@ -284,6 +319,27 @@ pub async fn saved_view_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    saved_view_board_paged(pool, registry, view, per_column, query, lanes, None).await
+}
+
+/// [`saved_view_board_laned`] past its first cards (ux18): see
+/// [`mini_board`]'s `page`. A column's page is cut in the source's order, as
+/// its first cards are; the list sorted by a header is read through the
+/// cards statement over the view's tickets, which sorts it as it sorts any
+/// board's.
+///
+/// # Errors
+///
+/// See [`saved_view_board`].
+pub async fn saved_view_board_paged(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    view: &str,
+    per_column: Option<u32>,
+    query: Option<&str>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+    page: Option<&knobas_core::mini_board::Page>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let Some(layout) = crate::ticket_views::saved_view_layout(pool, view).await? else {
         return Err(IpcError::not_found(format!(
             "no Jira view is called {view}"
@@ -303,6 +359,64 @@ pub async fn saved_view_board_laned(
         lanes.map(|lanes| lanes.by),
     )
     .await?;
+    if let Some(page) = page.filter(|page| page.sort.is_some()) {
+        // The tickets the view's columns draw, a status on none left out as
+        // the board leaves it, sorted by the cards statement.
+        let drawn: Vec<String> = layout
+            .arrange(statuses.columns, placed_id, None)
+            .into_iter()
+            .flat_map(|(_, tickets, _)| tickets.into_iter().map(|ticket| ticket.entity_id))
+            .collect();
+        return Ok(knobas_core::mini_board::read_scoped(
+            pool,
+            knobas_core::mini_board::Scope {
+                only: Some(&drawn),
+                identity: &identity,
+                page: Some(page),
+                ..knobas_core::mini_board::Scope::default()
+            },
+            &declarations,
+            per_column,
+        )
+        .await?);
+    }
+    if let Some(page) = page {
+        let arranged = paged(
+            layout.arrange(statuses.columns, placed_id, None),
+            page,
+            per_column,
+        );
+        let mut board = read_kept(
+            pool,
+            arranged.clone(),
+            &statuses.sources,
+            &identity,
+            &declarations,
+        )
+        .await?;
+        if let Some(lanes) = lanes {
+            // The page's one lane, its cells the cards the page kept.
+            let (kept, _) = knobas_core::mini_board::lanes_of(
+                arranged
+                    .iter()
+                    .map(|(status, tickets, _)| (status, tickets.as_slice())),
+                |ticket| {
+                    (
+                        ticket.entity_id.as_str(),
+                        ticket.lane.as_str(),
+                        ticket.updated_at,
+                    )
+                },
+                knobas_core::mini_board::Lanes {
+                    by: lanes.by,
+                    first: None,
+                },
+                None,
+            );
+            board.lanes = kept;
+        }
+        return Ok(board);
+    }
     let Some(lanes) = lanes else {
         let arranged = layout.arrange(statuses.columns, placed_id, per_column);
         return read_kept(pool, arranged, &statuses.sources, &identity, &declarations).await;
@@ -339,6 +453,37 @@ pub async fn saved_view_board_laned(
     Ok(board)
 }
 
+/// A saved view's columns, already in the source's order, cut to `page`
+/// (ux18): only the columns it names and the lane it names, each past the
+/// `after` cards it passes over and then `per_column` of them. The columns
+/// it names are one column to the page, ranked in the source's order, as a
+/// gathered column of a view of your own is ranked by date.
+fn paged(
+    arranged: Vec<(Option<String>, Vec<knobas_core::mini_board::Placed>, u32)>,
+    page: &knobas_core::mini_board::Page,
+    per_column: Option<u32>,
+) -> Vec<(Option<String>, Vec<knobas_core::mini_board::Placed>, u32)> {
+    let after = page.after as usize;
+    let take = per_column.map_or(usize::MAX, |cap| cap as usize);
+    arranged
+        .into_iter()
+        .filter(|(status, _, _)| {
+            page.statuses
+                .as_ref()
+                .is_none_or(|statuses| statuses.contains(status))
+        })
+        .map(|(status, tickets, total)| {
+            let tickets = tickets
+                .into_iter()
+                .filter(|ticket| page.lane.as_ref().is_none_or(|lane| &ticket.lane == lane))
+                .skip(after)
+                .take(take)
+                .collect();
+            (status, tickets, total)
+        })
+        .collect()
+}
+
 /// A placed ticket's id, which a saved view's order ranks it by.
 fn placed_id(ticket: &knobas_core::mini_board::Placed) -> &str {
     &ticket.entity_id
@@ -368,6 +513,7 @@ fn unlaned(
         sources,
         lanes: Vec::new(),
         more_lanes: 0,
+        order: None,
     }
 }
 

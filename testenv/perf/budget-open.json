@@ -31,7 +31,22 @@
     "moved": 0
    }
   },
-  "ticket-preview": {
+  "tickets-all-list": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
+  "tickets-all-view": {
    "1": {
     "usefulMs": 100,
     "moved": 0

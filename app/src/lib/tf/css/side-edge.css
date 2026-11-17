@@ -2,7 +2,6 @@
 /* Each sidebar's width is one custom property on its grid, read by its `grid-template-columns` with the default as the
    fallback. Not inherited: a drag sets it every frame, and an inherited property would restyle every row under the grid. */
 @property --side-tickets-views { syntax: "*"; inherits: false; }
-@property --side-tickets-preview { syntax: "*"; inherits: false; }
 @property --side-ticket-card { syntax: "*"; inherits: false; }
 @property --side-builds { syntax: "*"; inherits: false; }
 @property --side-repo-tree { syntax: "*"; inherits: false; }

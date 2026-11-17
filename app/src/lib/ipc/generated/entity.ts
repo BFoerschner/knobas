@@ -202,6 +202,46 @@ data: string, };
 export type AttentionGroup = "review_requested" | "my_pull_requests" | "open_pull_requests" | "my_branches" | "branches" | "other_branches";
 
 /**
+ * A page of a board past its first cards (ux18: a ticket view that shows
+ * every ticket reads each column's next cards as its window nears its last,
+ * and its list in pages sorted here). Bound as the cards statement's `$8`.
+ */
+export type BoardPage = { 
+/**
+ * How many of each column's cards to pass over, in its order, before
+ * the cap keeps its next ones.
+ */
+after: number, 
+/**
+ * Only these statuses (`null` the column of no status), ranked as one
+ * column: a view's column that gathers several. Every status when absent.
+ */
+statuses?: Array<string | null>, 
+/**
+ * Only the lane of this key, on a board read in lanes.
+ */
+lane?: string, 
+/**
+ * The list sorted here by this header (`key`, `summary`, `status`,
+ * `priority`, `assignee`, `updated`), every ticket in one rank, and
+ * [`MiniBoard::order`] says the order. The board's own order when absent.
+ */
+sort?: string, 
+/**
+ * `ascending` or `descending`, with `sort`.
+ */
+direction?: string, 
+/**
+ * The statuses in the order the list's *Status* sorts them.
+ */
+status_order?: Array<string | null>, 
+/**
+ * The priorities, lowercased, in the order the list's *Priority* sorts
+ * them; one it does not name sorts after them.
+ */
+priority_order?: Array<string>, };
+
+/**
  * A branch of a repository as the mirror holds it, with the open pull
  * request opened from it (the forge-rounds pass, 2026-11-15): what the
  * repository header's *New pull request* is decided on, with no read of the
@@ -2991,7 +3031,13 @@ lanes: Array<MiniBoardLane>,
  * How many lanes there are past [`Self::lanes`], which a read that
  * asked for its first lanes ([`Lanes::first`]) did not send.
  */
-more_lanes: number, };
+more_lanes: number, 
+/**
+ * The cards in the order a list sorted on the server draws them
+ * ([`Page::sort`], ux18), by id; absent on every other read, whose
+ * columns keep their own order.
+ */
+order?: Array<string>, };
 
 /**
  * One ticket on the board.

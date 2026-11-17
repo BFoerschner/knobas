@@ -108,6 +108,8 @@ pub(crate) enum Bind {
     MaybeText(Option<String>),
     MaybeTexts(Option<Vec<String>>),
     MaybeI64(Option<i64>),
+    /// A board's page (`$8`, ux18): a `jsonb`, null for the first cards.
+    MaybeJson(Option<sqlx::types::Json<serde_json::Value>>),
 }
 
 /// A generated statement and the arguments that go with it.
@@ -1441,6 +1443,7 @@ pub(crate) fn board_sql(
             Bind::MaybeI64(binds.per_column),
             text(binds.lanes),
             Bind::MaybeI64(binds.lanes_first),
+            Bind::MaybeJson(binds.page.cloned()),
         ],
         declarations: Some("$4".to_owned()),
     };
@@ -2299,6 +2302,7 @@ where
             Bind::MaybeText(value) => query.bind(value),
             Bind::MaybeTexts(value) => query.bind(value),
             Bind::MaybeI64(value) => query.bind(value),
+            Bind::MaybeJson(value) => query.bind(value),
         };
     }
     query
@@ -2944,6 +2948,7 @@ async fn explain_on(
             Bind::MaybeText(value) => query.bind(value),
             Bind::MaybeTexts(value) => query.bind(value),
             Bind::MaybeI64(value) => query.bind(value),
+            Bind::MaybeJson(value) => query.bind(value),
         };
     }
     Ok(query

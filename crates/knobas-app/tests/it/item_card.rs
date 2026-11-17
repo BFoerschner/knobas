@@ -697,6 +697,7 @@ async fn the_board_without_lanes_is_the_board_in_lanes_asked_for_none() {
                     .bind(per_column)
                     .bind(None::<String>)
                     .bind(None::<i64>)
+                    .bind(None::<sqlx::types::Json<serde_json::Value>>)
                     .fetch_all(&mut *tx)
                     .await
                     .unwrap();
@@ -1185,6 +1186,7 @@ async fn the_board_off_the_cards_alone_is_the_board_joined() {
         .bind(binds.3)
         .bind(&binds.4)
         .bind(binds.5)
+        .bind(None::<sqlx::types::Json<serde_json::Value>>)
         .fetch_all(tx)
         .await
         .unwrap()

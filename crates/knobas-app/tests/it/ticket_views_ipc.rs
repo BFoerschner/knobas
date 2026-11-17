@@ -81,6 +81,7 @@ fn draft(name: &str, query: &str) -> TicketViewDraft {
         card_fields: vec!["type".to_owned(), "signals".to_owned()],
         list_columns: vec!["key".to_owned(), "summary".to_owned(), "status".to_owned()],
         list_sort: None,
+        show_all: false,
         saved_view: None,
     }
 }
@@ -182,6 +183,7 @@ async fn a_view_keeps_what_it_was_saved_with_and_there_is_no_cap() {
             card_fields: whole.card_fields.clone(),
             list_columns: whole.list_columns.clone(),
             list_sort: whole.list_sort.clone(),
+            show_all: false,
             saved_view: whole.saved_view.clone(),
         }
     );
@@ -319,4 +321,47 @@ async fn a_word_the_screen_does_not_know_is_refused() {
             .await
             .unwrap();
     assert_eq!(written, 0);
+}
+
+/// *Show every ticket when the view opens* (ux18): stored with the view and
+/// read back, off for a draft that leaves it out, and saved over as any other
+/// setting is.
+#[tokio::test]
+async fn a_views_show_every_ticket_is_stored_with_it_and_off_by_default() {
+    let pool = pool().await;
+    let p = project();
+    let off = ticket_views::save(&pool, draft(&format!("Off {p}"), ""))
+        .await
+        .unwrap();
+    assert!(!off.show_all);
+    let on = ticket_views::save(
+        &pool,
+        TicketViewDraft {
+            show_all: true,
+            ..draft(&format!("On {p}"), "")
+        },
+    )
+    .await
+    .unwrap();
+    assert!(on.show_all);
+    assert!(listed(&pool, &[&on.id]).await[0].view.show_all);
+    // A draft from a caller that does not know the setting leaves it off.
+    let sent: TicketViewDraft = serde_json::from_value(serde_json::json!({
+        "id": null, "name": format!("Old {p}"), "group": "Team", "position": null, "query": "",
+        "layout": "board", "columns": [], "lanes": "none", "card_fields": [], "list_columns": ["key"],
+        "list_sort": null, "saved_view": null
+    }))
+    .unwrap();
+    assert!(!ticket_views::save(&pool, sent).await.unwrap().show_all);
+    let back = ticket_views::save(
+        &pool,
+        TicketViewDraft {
+            id: Some(on.id.clone()),
+            show_all: false,
+            ..draft(&format!("On {p}"), "")
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!back.show_all);
 }

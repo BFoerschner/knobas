@@ -38,17 +38,27 @@ export class HeldOrder<T> {
   /** Moves on a release, so a `$derived` that placed rows places them again. */
   #released = $state(0);
   #keepLeft: boolean;
+  #byTag: boolean;
   /** Rows the person's own press brings in (*Wake*): they take their place where they sort, at once. */
   #admitted = new Set<string>();
 
   /**
    * `key` names a row across reads. `tag`, where given, is the group a row draws under (Code's *Yours*, *Merged or
    * closed*): a drawn row keeps the group it drew in, read by {@link HeldOrder.tagOf}, until the person acts.
+   *
+   * `byTag`: the groups draw side by side, as a board's columns do, so a new row that sorts after every drawn row of its
+   * own group joins that group's end and moves nothing, wherever the other groups' rows sort (a board that shows every
+   * ticket, ux18: its whole read fills each column below the fifty it drew first).
    */
-  constructor(key: (row: T) => string, tag: (row: T) => string = () => "", { keepLeft = true }: { keepLeft?: boolean } = {}) {
+  constructor(
+    key: (row: T) => string,
+    tag: (row: T) => string = () => "",
+    { keepLeft = true, byTag = false }: { keepLeft?: boolean; byTag?: boolean } = {},
+  ) {
     this.#key = key;
     this.#tag = tag;
     this.#keepLeft = keepLeft;
+    this.#byTag = byTag;
   }
 
   /** The group `row` drew in, or its own where it has not drawn. */
@@ -74,9 +84,15 @@ export class HeldOrder<T> {
     const held = this.#held;
     const keys = fresh.map((row) => this.#key(row));
     let lastHeld = -1;
+    /** By group, where `byTag`: the place in `fresh` of its last drawn row. */
+    const lastOf = new Map<string, number>();
     keys.forEach((key, at) => {
-      if (held.has(key)) lastHeld = at;
+      const place = held.get(key);
+      if (place === undefined) return;
+      lastHeld = at;
+      if (this.#byTag) lastOf.set(place.tag, at);
     });
+    const joinsEnd = (row: T, at: number) => (this.#byTag ? at > (lastOf.get(this.#tag(row)) ?? -1) : at > lastHeld);
     let waiting = 0;
     let previousRank = -1;
     let reordered = false;
@@ -90,7 +106,7 @@ export class HeldOrder<T> {
         place.row = row;
         if (place.rank < previousRank) reordered = true;
         previousRank = place.rank;
-      } else if (at > lastHeld) {
+      } else if (joinsEnd(row, at)) {
         // Where it sorts is after every drawn row: it joins the end and moves nothing.
         held.set(key, { rank: this.#next++, row, tag: this.#tag(row) });
       } else if (this.#admitted.has(key)) {

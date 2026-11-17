@@ -16,6 +16,20 @@
      "moved": 0
     }
    },
+   "tickets-all-letter": {
+    "1": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 200,
+     "moved": 0
+    },
+    "6": {
+     "rowsMs": 200,
+     "moved": 0
+    }
+   },
    "tickets-not-project": {
     "1": {
      "rowsMs": 100,
