@@ -141,6 +141,13 @@
 //                 the address is `list` again with focus on the row holding `lands`, in view and not a control a second press would press; and unless Back
 //                 from the list goes to `route`, not to a page of it.
 //
+//   frame-scroll  2026-11-17 (Björn: "When I have an application render an html for code folders I can't scroll it even though it's longer than the page").
+//                 A renderer's long page in its sandboxed `frame` (a folder renderer's under `fake-folder-render=page <words>`, the *Cat* file renderer's
+//                 under `fake-render-page=<words>`). Fails if the frame's sandbox isn't "", if `header` or the frame's bottom is out of the pane at rest
+//                 (`fits`), unless a wheel over it scrolls the page (and not the pane), sideways too with `wide`, unless after a press in it PageDown,
+//                 ↓ and Space each scroll it, and unless ⌘ or Ctrl with the wheel over it zooms the window and scrolls nothing, held from the app and
+//                 again after a press on `header` takes focus back from the page (with focus in the page the app hears no key). Puts the zoom back at 100 %.
+//
 //   rows-still    The still-rows pass (PR #2479, 2026-11-11; Björn: "another repo just pops in where my cursor was"). Records the box of every
 //                 `rows` element in view, each frame, from the first draw (3 rows, or all there are) until the page has settled, and fails if
 //                 one of those rows moves or changes height, leaves, or a row comes in above one of them in its column. `query` holds `fake-late`, so each
@@ -329,6 +336,19 @@ const PAGES = [
   { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, trips: [
     { id: "folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" } },
     { id: "folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" }, rows: ".tf-frender-run" },
+  ] },
+  // A renderer's long page scrolls in its frame (2026-11-17), whatever it says of its own overflow.
+  { page: "A folder renderer's long page", route: `${REPO}/render/folder-listing/src`, trips: [
+    ...[["plain", ""], ["hidden", "hidden"], ["vh", "vh"], ["fixed", "fixed"], ["inner", "inner"], ["wide", "wide"]].map(([name, words]) => ({
+      id: `frame-scroll-folder-${name}`, kind: "frame-scroll", finding: "frame-scroll", query: `&fake-folder-render=${encodeURIComponent(`page ${words}`.trim())}`,
+      frame: ".tf-frender-frame", header: ".tf-frender > header", fits: true, wide: name === "wide",
+    })),
+  ] },
+  { page: "A file renderer's long page", route: `${REPO}/files/docs/report.cat.html`, trips: [
+    ...[["plain", ""], ["hidden", "hidden"], ["wide", "wide"]].map(([name, words]) => ({
+      id: `frame-scroll-file-${name}`, kind: "frame-scroll", finding: "frame-scroll", query: `&fake-render-page=${encodeURIComponent(words)}`,
+      frame: ".tf-rframe", header: ".tf-fileview header", wide: name === "wide",
+    })),
   ] },
   { page: "A folder's row on the tree", route: REPO, trips: [
     { id: "folder-glyph-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 900 }], press: { sel: ".tf-frmark a" }, leaves: true },
@@ -3146,6 +3166,134 @@ async function worker(queue, results) {
     return { reasons, note: `${notes.join("; ")}; Back to ${after}` };
   }
 
+  async function frameScroll(t) {
+    const reasons = [];
+    const notes = [];
+    const [w, h] = t.size ?? [1440, 900];
+    await fit(w, h);
+    const attached = [];
+    const off = chrome.listen((m) => { if (m.method === "Target.attachedToTarget") attached.push(m.params); });
+    try {
+      await open(t);
+      const box = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, top: r.top, bottom: r.bottom }; })()`;
+      let frame = null;
+      for (let i = 0; i < 80 && !frame; i++) {
+        frame = await evaluate(box(t.frame));
+        if (!frame) await sleep(100);
+      }
+      if (!frame) throw new Error(`no ${t.frame} drawn`);
+      await sleep(600);
+      frame = await evaluate(box(t.frame));
+      const sandbox = await evaluate(`document.querySelector(${JSON.stringify(t.frame)}).getAttribute("sandbox")`);
+      if (sandbox !== "") reasons.push(`the frame's sandbox is ${JSON.stringify(sandbox)}, not ""`);
+      const pane = await evaluate(`(() => { const m = document.querySelector(".tf-main"); const r = m.getBoundingClientRect(); return { top: r.top, bottom: r.top + m.clientHeight }; })()`);
+      const header = await evaluate(box(t.header));
+      if (!header || header.top < pane.top) reasons.push(`at rest the header ${t.header} is out of the pane (${header?.top} above ${pane.top})`);
+      if (t.fits && frame.bottom > pane.bottom + 1) reasons.push(`at rest the frame ends at ${Math.round(frame.bottom)}, under the pane's bottom at ${Math.round(pane.bottom)}, so its scrollbar is out of sight`);
+
+      // The frame's document: a target of its own (a sandboxed frame is out of process in Chrome), else a world in the page's frame tree.
+      await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+      await sleep(200);
+      const target = attached.filter((a) => a.targetInfo.type === "iframe").at(-1);
+      let inFrame;
+      if (target) {
+        inFrame = async (expression) => (await send("Runtime.evaluate", { expression, returnByValue: true }, target.sessionId)).result?.result?.value;
+      } else {
+        const tree = (await send("Page.getFrameTree")).result.frameTree;
+        const child = (tree.childFrames ?? []).map((c) => c.frame).at(-1);
+        if (!child) throw new Error("the frame's document can't be reached");
+        const world = (await send("Page.createIsolatedWorld", { frameId: child.id, worldName: "frame-scroll" })).result;
+        inFrame = async (expression) => (await send("Runtime.evaluate", { expression, returnByValue: true, contextId: world.executionContextId })).result?.result?.value;
+      }
+      const at = async () => JSON.parse(await inFrame(`JSON.stringify((() => { const s = document.scrollingElement; let inner = 0; for (const e of document.querySelectorAll("body *")) inner = Math.max(inner, e.scrollTop); return { y: Math.max(s.scrollTop, inner), x: s.scrollLeft }; })())`));
+      const paneAt = () => evaluate(`document.querySelector(".tf-main").scrollTop`);
+      const cx = frame.x + frame.w / 2;
+      const cy = Math.min(frame.y + frame.h / 2, (frame.top + pane.bottom) / 2);
+      const wheel = async (deltaX, deltaY, modifiers = 0) => {
+        await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: cx, y: cy, deltaX, deltaY, modifiers });
+        await sleep(150);
+      };
+
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy });
+      const start = await at();
+      const paneStart = await paneAt();
+      for (let i = 0; i < 3; i++) await wheel(0, 100);
+      await sleep(300);
+      const wheeled = await at();
+      const paneWheeled = await paneAt();
+      if (wheeled.y <= start.y) reasons.push(`a wheel over the page left it at ${wheeled.y}`);
+      if (paneWheeled !== paneStart) reasons.push(`a wheel over the page scrolled the pane from ${paneStart} to ${paneWheeled}`);
+      notes.push(`wheel ${start.y} to ${wheeled.y}, pane ${paneStart} to ${paneWheeled}`);
+      if (t.wide) {
+        await wheel(200, 0);
+        await sleep(300);
+        const side = await at();
+        if (side.x <= wheeled.x) reasons.push(`a sideways wheel over the wide page left it at ${side.x}`);
+        notes.push(`sideways ${wheeled.x} to ${side.x}`);
+      }
+
+      // ⌘ or Ctrl held from the app, the pointer on the page: the wheel zooms the window and scrolls nothing.
+      const level = () => evaluate(`localStorage.getItem("knobas.zoom")`);
+      const zoomed = async (label) => {
+        const before = await level();
+        const from = await at();
+        await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: cx, y: cy, deltaX: 0, deltaY: -100, modifiers: 2 });
+        await sleep(400);
+        const after = await level();
+        const to = await at();
+        if (after === before) reasons.push(`${label}, Ctrl and the wheel over the page left the zoom at ${before ?? "100 %"}`);
+        if (to.y !== from.y) reasons.push(`${label}, Ctrl and the wheel over the page scrolled it from ${from.y} to ${to.y}`);
+        notes.push(`${label}: zoom ${before ?? "1"} to ${after}`);
+      };
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, modifiers: 2 });
+      await zoomed("held from the app");
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 });
+      // A plain wheel after the key's release scrolls again.
+      const released = await at();
+      await wheel(0, 100);
+      await wheel(0, 100);
+      await sleep(300);
+      if ((await at()).y <= released.y) reasons.push(`after Ctrl was let go, the wheel no longer scrolls the page`);
+
+      // A press in the page, then the keys.
+      const keys = [["PageDown", "PageDown", 34], ["ArrowDown", "ArrowDown", 40], [" ", "Space", 32]];
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1 });
+      await sleep(200);
+      for (const [name, code, vk] of keys) {
+        const from = await at();
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code, windowsVirtualKeyCode: vk, ...(name === " " ? { text: " " } : {}) });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: vk });
+        await sleep(350);
+        const to = await at();
+        if (to.y <= from.y) reasons.push(`after a press in the page, ${code} left it at ${from.y}`);
+        notes.push(`${code} ${from.y} to ${to.y}`);
+      }
+
+      // A press on the header takes focus back from the page: Ctrl and the wheel over it zoom the window again.
+      const hp = await evaluate(box(`${t.header} .tf-p`));
+      if (!hp) throw new Error(`no ${t.header} .tf-p to press`);
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: hp.x + 4, y: hp.y + hp.h / 2, button: "left", clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: hp.x + 4, y: hp.y + hp.h / 2, button: "left", clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy });
+      await sleep(150);
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, modifiers: 2 });
+      await zoomed("after a press on the header");
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 });
+      notes.push(`frame ${Math.round(frame.top)} to ${Math.round(frame.bottom)}, pane to ${Math.round(pane.bottom)}`);
+    } finally {
+      off?.();
+      await send("Target.setAutoAttach", { autoAttach: false, waitForDebuggerOnStart: false, flatten: true }).catch(() => {});
+      // Back to 100 %, from the app's own key, with focus in the app.
+      await evaluate(`document.querySelector(".tf-main")?.focus?.(); document.activeElement?.blur?.(); 1`).catch(() => {});
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 }).catch(() => {});
+      await key("Control+0").catch(() => {});
+      await evaluate(`localStorage.removeItem("knobas.zoom"); 1`).catch(() => {});
+      await fit(1440, 900);
+    }
+    return { reasons, note: notes.join("; ") };
+  }
+
   async function rightClick(t) {
     await open(t);
     const reasons = [];
@@ -3241,7 +3389,7 @@ async function worker(queue, results) {
     return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
   }
 
-  const KINDS = { "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };

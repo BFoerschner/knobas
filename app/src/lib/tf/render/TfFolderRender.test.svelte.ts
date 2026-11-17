@@ -7,7 +7,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { FolderAsk, FolderRenderer, FolderRenderView } from "../../ipc/app";
-import type { FrameBridge } from "../../render/frame";
+import { PAGE_SCROLLS, type FrameBridge } from "../../render/frame";
 import TfFolderRender, { type FolderRenderPorts } from "./TfFolderRender.svelte";
 
 const LISTER: FolderRenderer = { id: "lister", name: "Lister", command: "tree {path}", holds: [], folders: [], output: "detect", timeout_secs: 30 };
@@ -145,6 +145,9 @@ test("an HTML page that tries to reach the app is drawn sanitized in a frame tha
   const doc = f.frames[0]!;
   expect(doc).toContain("<h1>Flows</h1>");
   expect(doc).not.toMatch(/<script|onerror|javascript:|__TAURI/i);
+  // It scrolls (2026-11-17): the page's root scrolls whatever it says, and the frame takes its room in the pane.
+  expect(doc).toContain(PAGE_SCROLLS);
+  expect(frame.style.getPropertyValue("--tf-room")).toMatch(/^\d+px$/);
 
   // Without the app's bridge (dev, tests) the sanitized page is the frame's own document, still sandboxed.
   unmount(app!);

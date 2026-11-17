@@ -56,6 +56,7 @@ export function frameDocument(output: "svg" | "html", body: string): string {
     return wrap(
       DOMPurify.sanitize(body, { USE_PROFILES: { html: true, svg: true }, FORBID_TAGS: ["form", "iframe", "object", "embed"], FORCE_BODY: true }),
       null,
+      PAGE_SCROLLS,
     );
   }
   const svg = sanitizeSvg(body);
@@ -80,9 +81,21 @@ function imageOf(svg: SVGSVGElement | null, width: number | null, height: number
   return `<img alt=""${size} src="data:image/svg+xml;base64,${base64Of(new TextEncoder().encode(markup))}">`;
 }
 
+/**
+ * What an HTML page's frame adds to its head (Björn, 2026-11-17: "When I have an application render an html for code
+ * folders I can't scroll it even though it's longer than the page"). A generated page often hides its own overflow,
+ * `html, body { overflow: hidden }` or a body of `height: 100vh` that clips, because its own script scrolls it or lays
+ * it out. No script runs in the frame, so such a page was stuck at its first screen. The page's root scrolls and its
+ * body clips nothing, whatever the page says: an `!important` in a cascade layer outranks every unlayered `!important`
+ * whatever its selector, and this layer, named first in the document, outranks any layer the page names after it. The
+ * page has no `<html>` or `<body>` of its own (the sanitizer keeps neither), so no style attribute of theirs is left
+ * to beat it. A box of the page's own that clips (a fixed shell with `overflow: hidden`) stays as it is drawn.
+ */
+export const PAGE_SCROLLS = "<style>@layer knobas-frame{:root{overflow:auto!important}:root>body{overflow:visible!important}}</style>";
+
 /** The frame's document; a sized drawing (`scheme` given) takes no body margin, so the frame is the drawing's size. */
-function wrap(inner: string, scheme: "light" | "dark" | null): string {
-  if (scheme === null) return `<!doctype html><html><head><meta charset="utf-8"></head><body>${inner}</body></html>`;
+function wrap(inner: string, scheme: "light" | "dark" | null, head = ""): string {
+  if (scheme === null) return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${inner}</body></html>`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"></head><body marginwidth="0" marginheight="0">${inner}</body></html>`;
 }
 

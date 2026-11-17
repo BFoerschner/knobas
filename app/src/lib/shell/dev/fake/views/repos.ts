@@ -21,6 +21,7 @@ import { ago, agoStamp } from "../../../time";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 import { ITEMS_YAML, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
+import { fakePage } from "../folder-render";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -454,6 +455,9 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
       ...(query.has("fake-openapi") ? openapiFiles() : {}),
+      // `?fake-render-page=<words>` (2026-11-17): a long page the saved *Cat* renderer draws as HTML, shaped by the words
+      // as a folder renderer's `page` is (`fakePage`: `hidden`, `vh`, `wide`, `fixed`, `inner`).
+      ...(query.has("fake-render-page") ? { "docs/report.cat.html": fakePage("docs/report.cat.html", `page ${query.get("fake-render-page") ?? ""}`) } : {}),
     };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;

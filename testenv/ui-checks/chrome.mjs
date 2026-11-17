@@ -46,7 +46,8 @@ export async function launch(prefix) {
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     if (m.method) for (const l of listeners) l(m);
   };
-  const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++seq; const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method} took over 60 s`)); }, 60000); waiting.set(id, (m) => { clearTimeout(timer); resolve(m); }); ws.send(JSON.stringify({ id, method, params })); });
+  // `sessionId`: a target attached flat (Target.setAutoAttach), such as a frame in a process of its own.
+  const send = (method, params = {}, sessionId = undefined) => new Promise((resolve, reject) => { const id = ++seq; const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method} took over 60 s`)); }, 60000); waiting.set(id, (m) => { clearTimeout(timer); resolve(m); }); ws.send(JSON.stringify({ id, method, params, sessionId })); });
   const evaluate = async (expression) => {
     const a = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (a.result?.exceptionDetails) throw new Error(a.result.exceptionDetails.exception?.description ?? a.result.exceptionDetails.text);
@@ -63,7 +64,8 @@ export async function launch(prefix) {
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code, windowsVirtualKeyCode: keyCode, modifiers, ...(name === "Enter" && !modifiers ? { text: "\r" } : {}) });
     await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: keyCode, modifiers });
   };
-  return { send, evaluate, key, stop, listen: (l) => listeners.push(l) };
+  // `listen` hands back the call that stops the listener.
+  return { send, evaluate, key, stop, listen: (l) => { listeners.push(l); return () => { const i = listeners.indexOf(l); if (i >= 0) listeners.splice(i, 1); }; } };
 }
 
 // How long nothing may change before a page counts as quiet, the longest wait for it, and the old fixed wait, which a page

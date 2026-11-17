@@ -439,6 +439,8 @@
 
 /* A command renderer's run (#2262): the sandboxed frame, and a failure above the source (mockups/code-area .stepfail). */
 .tf-rframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--paper); }
+/* ⌘ or Ctrl held: the wheel over a frame lands on the app, which zooms (render/frame-room.ts). */
+.tf-rframe.tf-zoomthrough { pointer-events: none; }
 .tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
 .tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }
 
@@ -546,12 +548,14 @@
 .tf-frender-clock { margin-left: auto; font-variant-numeric: tabular-nums; }
 .tf-frender-out { background: var(--sheet); }
 .tf-frender-zoom { padding: 6px 12px; gap: 8px; }
-/* Fitted, the image is as wide as the pane at most; zoomed, it is its width and the box scrolls both ways. */
-.tf-frender-img { padding: 18px; overflow: auto; max-height: calc(100vh - 220px); background: var(--sheet); }
+/* Fitted, the image is as wide as the pane at most; zoomed, it is its width and the box scrolls both ways. The box and
+   the page's frame take --tf-room, the room down to the pane's bottom (render/frame-room.ts), so the header and the
+   scrollbars are in the window at rest; the guess under it is for the first frame of a page with no pane. */
+.tf-frender-img { padding: 18px; overflow: auto; max-height: var(--tf-room, calc(100vh - 220px)); background: var(--sheet); }
 .tf-frender-img.tf-fit { display: grid; place-items: center; }
-.tf-frender-img.tf-fit img { max-width: 100%; max-height: calc(100vh - 256px); object-fit: contain; }
+.tf-frender-img.tf-fit img { max-width: 100%; max-height: calc(var(--tf-room, calc(100vh - 220px)) - 36px); object-fit: contain; }
 .tf-frender-img img { display: block; image-rendering: auto; }
-.tf-frender-frame { min-height: calc(100vh - 220px); }
+.tf-frender-frame { min-height: 0; height: var(--tf-room, calc(100vh - 220px)); }
 .tf-frender .tf-empty { display: grid; justify-items: center; gap: 10px; }
 /* A folder a folder renderer takes (ADR-0044): a quiet glyph at the row's end, its link to the drawing. A box of no
    height after the row, so the tree's window (24 px a row) counts nothing for it. */

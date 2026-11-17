@@ -16,6 +16,9 @@
   relative links opening files at the folder; HTML sanitized (DOMPurify) and
   drawn in a frame with `sandbox=""`, served from the backend's render scheme
   by a token under a policy with no script and no request (`render/frame.ts`).
+  The frame and the image's box take the room down to the pane's bottom, and
+  the frame lets ⌘ or Ctrl and the wheel through to the window's zoom
+  (`render/frame-room.ts`).
 -->
 <script lang="ts" module>
   import {
@@ -61,6 +64,7 @@
   import { frameDocument, type FrameBridge } from "../../render/frame";
   import { tauriBridge } from "../../render/command";
   import { FRAME_SCHEME } from "../../render/frame";
+  import { fitRoom, zoomThrough } from "../../render/frame-room";
   import { typedImageBlob } from "../../render/image";
   import type { RenderPort } from "../../render/port";
   import { renderPort } from "../../render/port";
@@ -350,7 +354,7 @@
             <span class="tf-pdf-zoom">{zoom === null ? "Fit" : `${Math.round(zoom * 100)}%`}</span>
             <button type="button" class="tf-iconbtn tf-sm" aria-label="Zoom in" title="Zoom in" onclick={() => step(1, fitted())}>+</button>
           </div>
-          <div class="tf-frender-img" class:tf-fit={zoom === null}>
+          <div class="tf-frender-img" class:tf-fit={zoom === null} {@attach fitRoom(".tf-frender")}>
             <img
               bind:this={img}
               src={shown.image}
@@ -359,7 +363,7 @@
             />
           </div>
         {:else if drawn.kind.kind === "html" && shown.frame !== undefined}
-          <iframe class="tf-rframe tf-frender-frame" sandbox="" title="{renderer.name}'s page" src={shown.frame.src} srcdoc={shown.frame.srcdoc}></iframe>
+          <iframe class="tf-rframe tf-frender-frame" sandbox="" title="{renderer.name}'s page" src={shown.frame.src} srcdoc={shown.frame.srcdoc} {@attach fitRoom(".tf-frender")} {@attach zoomThrough}></iframe>
         {:else if drawn.kind.kind === "markdown" && shown.text !== undefined}
           <div class="tf-rendered"><TfMarkdown text={shown.text} base={folder} {fileLink} {render} /></div>
         {:else if drawn.kind.kind === "text" && shown.text !== undefined}

@@ -6,8 +6,9 @@
  * None is saved until one is, so every other page draws as it did; `?fake-folder-render` starts with one,
  * *Folder listing*, which takes every folder. The fake runs no program: a run is queued, copies, runs for
  * 1.5 s and draws the folder's name and the renderer's command as text, each step told on
- * `folder-render:moved` as the backend tells it. A command holding `fail` fails with stderr, and one holding
- * `png` draws a 1 × 1 PNG.
+ * `folder-render:moved` as the backend tells it. A command holding `fail` fails with stderr, one holding
+ * `png` draws a 1 × 1 PNG, and one holding `page` draws a long HTML page ({@link fakePage}). `?fake-folder-render=<command
+ * words>` gives *Folder listing* that command (`?fake-folder-render=page+hidden` draws a page that hides its overflow).
  */
 import type { FolderAsk, FolderDrawn, FolderRenderer, FolderRendererDraft, FolderRenderView } from "../../../ipc/app";
 import type { FakeBridge, Handlers } from "../fake-tauri";
@@ -23,6 +24,27 @@ const running = new Map<string, ReturnType<typeof setTimeout>>();
 let tokens = 0;
 
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
+
+/**
+ * The HTML a command holding `page` draws: 200 rows down the folder, a heading over them, and by the command's other
+ * words a page as generators write them: `wide` 3,000 px wide, `hidden` with `html, body { overflow: hidden }`, `vh`
+ * with a body of `height: 100vh` that clips, `fixed` with a header fixed at the top, `inner` scrolling a box of its own.
+ */
+export function fakePage(folder: string, command: string): string {
+  const has = (word: string) => command.split(/\s+/).includes(word);
+  const css = [
+    "body { font: 14px/1.5 system-ui, sans-serif; margin: 0; }",
+    "h1 { margin: 0; padding: 12px 16px; background: #1f6feb; color: #fff; font-size: 18px; }",
+    "li { padding: 2px 0; }",
+    has("wide") ? ".tf-wide { width: 3000px; height: 24px; background: linear-gradient(90deg, #fde68a, #93c5fd); }" : "",
+    has("hidden") ? "html, body { overflow: hidden; }" : "",
+    has("vh") ? "html, body { height: 100vh; overflow: hidden; }" : "",
+    has("fixed") ? "h1 { position: fixed; top: 0; left: 0; right: 0; } ol { margin-top: 56px; }" : "",
+    has("inner") ? "body { height: 100vh; display: flex; flex-direction: column; } main { flex: 1; overflow: auto; }" : "",
+  ].join("\n");
+  const rows = Array.from({ length: 200 }, (_, i) => `<li>${folder || "(the top folder)"} row ${i + 1}</li>`).join("");
+  return `<style>${css}</style><h1>${folder || "The top folder"}</h1><main>${has("wide") ? '<div class="tf-wide"></div>' : ""}<ol id="rows">${rows}</ol><p id="end">The end.</p></main>`;
+}
 
 const slotOf = (at: Pick<FolderAsk, "entityId" | "renderer" | "folder">) => `${at.entityId}\u0000${at.renderer}\u0000${at.folder}`;
 
@@ -60,8 +82,9 @@ onFakeReset(() => {
 });
 
 export function seed(params: URLSearchParams): void {
+  const words = params.get("fake-folder-render")?.trim() || "tree";
   seeded = params.has("fake-folder-render")
-    ? [{ id: "folder-listing", name: "Folder listing", command: "tree {path}", holds: [], folders: [], output: "text", timeout_secs: 30 }]
+    ? [{ id: "folder-listing", name: "Folder listing", command: `${words} {path}`, holds: [], folders: [], output: words.split(/\s+/).includes("page") ? "html" : "text", timeout_secs: 30 }]
     : [];
   saved = seeded.map((r) => ({ ...r }));
 }
@@ -99,11 +122,14 @@ export function handlers(): Handlers {
           } else {
             const token = `fake-${++tokens}`;
             const png = renderer.command.includes("png");
-            const made = png ? PNG : new TextEncoder().encode(`${at.folder || "(the top folder)"}\n  drawn by ${renderer.name}: ${renderer.command}\n`);
+            const page = renderer.command.split(/\s+/).includes("page");
+            const made = png
+              ? PNG
+              : new TextEncoder().encode(page ? fakePage(at.folder, renderer.command) : `${at.folder || "(the top folder)"}\n  drawn by ${renderer.name}: ${renderer.command}\n`);
             bytes.set(token, made);
             drawn.set(slot, {
               token,
-              kind: png ? { kind: "image", mime: "image/png" } : { kind: "text" },
+              kind: png ? { kind: "image", mime: "image/png" } : page ? { kind: "html" } : { kind: "text" },
               size: made.length,
               commit: at.commit,
               from: "clone",

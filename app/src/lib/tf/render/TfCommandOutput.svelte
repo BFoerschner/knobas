@@ -10,12 +10,15 @@
   under its own policy, so its styles apply (#2304, `render/frame.ts`). An image is the backend's data URL decoded and drawn from a blob,
   an SVG sanitized (`render/image.ts`). A failure,
   a timeout or too much output draws what the command said above the source,
-  as the mockup's broken renderer does.
+  as the mockup's broken renderer does. A page scrolls in its frame even where
+  it hides its own overflow (`render/frame.ts`), and the frame lets ⌘ or Ctrl
+  and the wheel through to the window's zoom (`render/frame-room.ts`).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { RenderRun } from "../../ipc/app";
   import { commandIdOf, contentFor, failureLine, frameSource, ipcCommands, tauriBridge, type CommandPort, type FrameBridge } from "../../render/command";
+  import { zoomThrough } from "../../render/frame-room";
   import { dataUrlImage } from "../../render/image";
   import type { Renderer } from "../../render/registry";
   import TfBytesImage from "./TfBytesImage.svelte";
@@ -71,7 +74,7 @@
     {/if}
   {:else}
     {@const frame = frameSource(run.output, run.body, bridge)}
-    <iframe class="tf-rframe" sandbox="" title={renderer.name} src={"src" in frame ? frame.src : undefined} srcdoc={"srcdoc" in frame ? frame.srcdoc : undefined}></iframe>
+    <iframe class="tf-rframe" sandbox="" title={renderer.name} src={"src" in frame ? frame.src : undefined} srcdoc={"srcdoc" in frame ? frame.srcdoc : undefined} {@attach zoomThrough}></iframe>
   {/if}
 {:else}
   {#if failed !== null}

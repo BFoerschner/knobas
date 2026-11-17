@@ -339,7 +339,7 @@
         </div>
       </div>
       <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-frp-out">It makes</label>
+        <label class="tf-stg-l" for="tf-frp-out">It makes<small>A page is drawn without its scripts. It scrolls in its frame even where it hides its overflow, but not inside a box of its own that clips.</small></label>
         <div class="tf-stg-c">
           <select id="tf-frp-out" class="tf-stg-in" bind:value={draft.output}>
             {#each OUTPUTS as one (one.value)}<option value={one.value}>{one.label}</option>{/each}
