@@ -28,6 +28,8 @@
 .tf-oas-title { margin: 0; font-size: var(--t-2xl); font-weight: 700; font-variation-settings: "wdth" 85; line-height: 1.2; overflow-wrap: anywhere; }
 .tf-oas-vers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 0; font-size: var(--t-xs); }
 .tf-oas-hdesc { margin-top: 10px; }
+/* A spec's Markdown (its description, an operation's) sits in the view's column at body size, not as a README's page. */
+.tf-oas .tf-md { padding: 0; font-size: var(--t-md); max-width: 820px; }
 .tf-oas-desc { margin: 0 0 8px; font-size: var(--t-md); white-space: pre-line; overflow-wrap: anywhere; }
 .tf-oas-servers { margin: 12px 0 0; display: grid; gap: 3px; }
 .tf-oas-servers dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: var(--t-sm); }
@@ -119,6 +121,8 @@
 .tf-oas-req { flex: none; }
 .tf-oas-pdesc { margin: 2px 0 0 22px; font-size: var(--t-sm); color: var(--ink-2); overflow-wrap: anywhere; white-space: pre-line; }
 .tf-oas-param .tf-oas-pdesc, .tf-oas-hline .tf-oas-pdesc { margin-left: 0; }
+/* A schema's own words under its line start where its line does; a property's sit under its name. */
+.tf-oas-top ~ .tf-oas-pdesc, .tf-oas-top ~ .tf-oas-enum { margin-left: 0; }
 .tf-oas-enum { margin: 2px 0 0 22px; font-size: var(--t-xs); overflow-wrap: anywhere; }
 .tf-oas-param .tf-oas-enum { margin-left: 0; }
 .tf-oas-enum code { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 0 3px; border-radius: 3px; background: var(--sheet); }

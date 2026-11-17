@@ -28,28 +28,36 @@ const place = (at, path) => `${REPO}/at/${encodeURIComponent(at)}/${path}`;
 const LINES = { page: { 1: 100, 4: 200, 6: 300 }, press: { 1: 100, 4: 100, 6: 200 } };
 const line = (kind, t) => (machine === "pc" ? LINES[kind][t] : LINES[kind][t] / 2);
 
-const { port: debug, stop } = await launch({ size });
+// `--attach <port>` drives a headless Chrome started elsewhere (on the PC's WSL side, through a tunnel), and `--app`
+// is where that Chrome finds the built app.
+const attachTo = arg("--attach", null);
+const app = arg("--app", `http://127.0.0.1:${port}`);
+const { port: debug, stop } = attachTo === null ? await launch({ size }) : { port: Number(attachTo), stop: () => {} };
 const c = await attach(debug);
 await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
-await c.send("Page.navigate", { url: `http://127.0.0.1:${port}/?fake-ipc&fake-openapi#/inbox` });
+await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-openapi#/inbox` });
 await sleep(2500);
 
 // In the page: run `act`, then wait for `selector` (and its text, where given) in a painted frame; the ms between, and
 // whether the rows of `watch` it drew then stood elsewhere 600 ms later.
 const timed = (act, selector, text = null, watch = null) =>
   c.js(`new Promise((resolve, reject) => {
-    const found = () => [...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => ${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)}));
+    // Shown only: the Code page keeps a repository's page alive, so the last run's rows are in the DOM, hidden.
+    const shown = (e) => e.getClientRects().length > 0 && e.checkVisibility();
+    const found = () => [...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => shown(e) && (${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)})));
     const t0 = performance.now();
     (${act})();
     const deadline = t0 + 15000;
-    const tops = () => [...document.querySelectorAll(${JSON.stringify(watch ?? "nothing-here")})].slice(0, 30).map((e) => Math.round(e.getBoundingClientRect().top));
+    // The rows drawn at first, and where each stands: rows drawn after them (the overscan below) are not a move.
+    const tops = () => new Map([...document.querySelectorAll(${JSON.stringify(watch ?? "nothing-here")})].filter(shown).slice(0, 30).map((e) => [e, Math.round(e.getBoundingClientRect().top)]));
+    const movedSince = (first) => [...first].some(([e, top]) => !e.isConnected || !shown(e) || Math.round(e.getBoundingClientRect().top) !== top);
     const tick = () => {
       if (found()) return requestAnimationFrame(() => {
         const ms = performance.now() - t0;
         const first = tops();
-        setTimeout(() => resolve({ ms, moved: JSON.stringify(first) !== JSON.stringify(tops()) }), 600);
+        setTimeout(() => resolve({ ms, moved: movedSince(first) }), 600);
       });
       if (performance.now() > deadline) return reject(new Error("never drew ${selector.replace(/"/g, "'")}"));
       requestAnimationFrame(tick);
@@ -66,10 +74,12 @@ const settle = () => sleep(700);
 const SMALL = "api/openapi.yaml";
 const BIG = "api/big.yaml";
 const CASES = [
-  { name: "readme", label: "a Markdown README opened (another file)", kind: "page", before: go("#/inbox"), act: go(file("README.md")), sel: ".tf-fileview .tf-md" },
-  { name: "source", label: "a source file opened (another file)", kind: "page", before: go("#/inbox"), act: go(file("Cargo.toml")), sel: ".tf-fileview .tf-code .tf-l" },
-  { name: "small", label: "a small spec opened", kind: "page", before: go("#/inbox"), act: go(file(SMALL)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn" },
-  { name: "big", label: "a 5,000-operation spec opened", kind: "page", before: go("#/inbox"), act: go(file(BIG)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn" },
+  // A file opened from another file of the tree, as a press in it does; a README from a source file and back.
+  { name: "readme", label: "a Markdown README opened from Cargo.toml (another file)", kind: "page", before: go(file("Cargo.toml")), act: go(file("README.md")), sel: ".tf-fileview .tf-md", watch: ".tf-fileview .tf-md > *" },
+  { name: "source", label: "Cargo.toml opened from the README (another file)", kind: "page", before: go(file("README.md")), act: go(file("Cargo.toml")), sel: ".tf-fileview .tf-code .tf-l", watch: ".tf-fileview .tf-code .tf-l" },
+  { name: "small", label: "a small spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(SMALL)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn, .tf-oas-title" },
+  { name: "big", label: "a 5,000-operation spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(BIG)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn, .tf-oas-title" },
+  { name: "landing", label: "a small spec opened from the Inbox (the page's first visit at it)", kind: "page", before: go("#/inbox"), act: go(file(SMALL)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn, .tf-oas-title" },
   { name: "filter", label: "a filter key on 5,000 operations", kind: "press", before: `async () => { location.hash = ${JSON.stringify(file(BIG))}; }`, prep: typeIn(""), act: typeIn("delete resource12"), sel: ".tf-oas-count", text: "of 5000" },
   { name: "open-op", label: "an operation opened", kind: "press", before: go(file(SMALL)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-opbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-opbtn", "/pets/{petId}"), sel: ".tf-oas-detail .tf-oas-resp" },
   { name: "follow", label: "a $ref followed to its schema", kind: "press", before: go(place("get /pets/{petId}", SMALL)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-sbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-detail .tf-oas-top .tf-oas-ref"), sel: '[data-k="ds:Pet"] .tf-oas-pname' },

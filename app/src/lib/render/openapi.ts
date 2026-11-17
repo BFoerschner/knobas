@@ -19,6 +19,8 @@
  */
 import { JSON_SCHEMA, load } from "js-yaml";
 
+import { fastYaml } from "./yaml-fast";
+
 export const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"] as const;
 
 /** One operation's row in the list. */
@@ -198,9 +200,9 @@ export class SpecFiles {
     return this.#index;
   }
 
-  /** Parses and checks the spec at `root`. */
+  /** Parses and checks the spec at `root`; a text read lately is not parsed again (`recent`). */
   open(text: string): Opened {
-    const parsed = parseDoc(text, this.root);
+    const parsed = recentParse(text, this.root);
     if (!parsed.ok) return parsed;
     const checked = indexSpec(parsed.doc, writtenVersion(text));
     if (!checked.ok) return checked;
@@ -298,6 +300,28 @@ function writtenVersion(text: string): string | undefined {
   return /^(["']?)openapi\1[ \t]*:[ \t]*(["']?)(\d+(?:\.\d+)*)/m.exec(text.slice(0, 64 * 1024))?.[3];
 }
 
+/**
+ * The specs parsed lately, by their text, the newest last: going back to a spec (another file, then this one again)
+ * does not parse it again. Documents are only read once parsed, so sessions share them.
+ */
+const recent = new Map<string, { ok: true; doc: unknown }>();
+const RECENT = 4;
+
+function recentParse(text: string, path: string): ReturnType<typeof parseDoc> {
+  const held = recent.get(text);
+  if (held !== undefined) {
+    recent.delete(text);
+    recent.set(text, held);
+    return held;
+  }
+  const parsed = parseDoc(text, path);
+  if (parsed.ok) {
+    recent.set(text, parsed);
+    if (recent.size > RECENT) recent.delete(recent.keys().next().value!);
+  }
+  return parsed;
+}
+
 /** The document in `text`: JSON where it starts with `{`, else YAML, or the parser's error and its line. */
 export function parseDoc(text: string, path: string): { ok: true; doc: unknown } | { ok: false; error: string; line: number | null } {
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
@@ -308,6 +332,9 @@ export function parseDoc(text: string, path: string): { ok: true; doc: unknown }
       // YAML reads JSON too, and says on which line it stopped, which WebKit's JSON.parse does not.
     }
   }
+  // The YAML spec tools write, read fast; anything else, and every broken file, by js-yaml (`yaml-fast.ts`).
+  const fast = fastYaml(body);
+  if (fast !== undefined) return { ok: true, doc: fast };
   try {
     return { ok: true, doc: load(body, { schema: JSON_SCHEMA, json: true, filename: path }) };
   } catch (cause) {
