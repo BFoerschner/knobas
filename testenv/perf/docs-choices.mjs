@@ -16,6 +16,10 @@
 //   node testenv/perf/docs-choices.mjs --app <url without hash, with fake-real=<port>> [--throttle 1,4,6]
 //        [--size WxH@s] [--reps 7] [--out f.json]
 //
+// The saved scale database holds four spaces. For many, run it on the fixture instead, whose `fake-docs-spaces=<n>`
+// adds n spaces and `fake-docs-hidden=<n>` hides the first n of them from the start (`?fake-ipc&fake-scale&
+// fake-docs-spaces=60&fake-docs-hidden=57`): then the choices are the URL's, and there is no home case.
+//
 // Lines: a click 100 / 100 / 200 ms, a page 100 / 200 / 300 ms at 1x / 4x / 6x (Björn's), halved on the Mac as the
 // other budgets halve them. Exits 1 when a median is over its line. The choices are put back as found at the end.
 import { writeFileSync } from "node:fs";
@@ -26,7 +30,6 @@ const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1
 const app = opt("--app");
 if (!app) { console.error("--app <url> is required"); process.exit(2); }
 const real = new URL(app).searchParams.get("fake-real");
-if (!real) { console.error("--app needs fake-real=<port>: the choices are set on the backend"); process.exit(2); }
 const throttles = (opt("--throttle") ?? "1,4,6").split(",").map(Number);
 const reps = Number(opt("--reps") ?? 7);
 const size = sizeFrom(args);
@@ -38,17 +41,19 @@ const HOME_SPACE = "SCLENG";
 const invoke = (cmd, a = {}) =>
   fetch(`http://127.0.0.1:${real}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd, args: a }) }).then(async (r) => {
     const text = await r.text();
-    if (!r.ok) throw new Error(`${cmd}: ${r.status} ${text}`);
-    return text === "" ? null : JSON.parse(text);
+    const answer = text === "" ? {} : JSON.parse(text);
+    if (!r.ok || !("ok" in answer)) throw new Error(`${cmd}: ${r.status} ${text}`);
+    return answer.ok;
   });
 
-const before = await invoke("docs_choices");
-const outline = await invoke("docs_outline");
+const before = real ? await invoke("docs_choices") : null;
+const outline = real ? await invoke("docs_outline") : { spaces: [] };
 const ids = outline.spaces.map((s) => `${s.source_id}/${s.key}`);
 const home = outline.spaces.find((s) => s.key === HOME_SPACE);
-console.log(`${ids.length} spaces; Docs' home will be ${home ? `${home.source_id}/${home.key}` : "missing"}`);
+if (real) console.log(`${ids.length} spaces; Docs' home will be ${home ? `${home.source_id}/${home.key}` : "missing"}`);
 
 async function choose({ hidden, homeId }) {
+  if (!real) return;
   for (const id of ids) await invoke("set_docs_space_hidden", { space: id, hidden: hidden.includes(id) });
   await invoke("set_docs_home", { home: homeId === null ? null : { kind: "space", id: homeId, title: HOME_SPACE } });
 }
@@ -112,7 +117,7 @@ async function timed(cond, act, rate) {
 const SHOWN = ".tf-rd-tree .tf-dl-body > details:not(.tf-dk-fold) > summary.tf-spc";
 const shownCount = `document.querySelectorAll(${JSON.stringify(SHOWN)}).length`;
 const settledDocs = `document.querySelector(".tf-kept:not([hidden]) .tf-dh-row") && !document.querySelector(".tf-kept:not([hidden]) [aria-busy=true], .tf-kept:not([hidden]) .tf-skel")`;
-const docsHome = `location.hash === "#/docs" && document.querySelectorAll(${JSON.stringify(SHOWN)}).length === 3 && ${settledDocs}`;
+const docsHome = `location.hash === "#/docs" && document.querySelector(".tf-rd-tree .tf-dk-fold") && ${settledDocs}`;
 const spaceHome = `location.hash.startsWith("#/docs/space/") && ${settledDocs}`;
 
 const results = { app, size: size.name, at: new Date().toISOString(), rows: [] };
@@ -160,7 +165,7 @@ try {
   // Docs' first open and its return, with all but three spaces hidden, then with Docs' home a space.
   for (const [name, choice, cond] of [
     ["hidden", { hidden: ids.slice(3), homeId: null }, docsHome],
-    ["home", { hidden: [], homeId: home ? `${home.source_id}/${home.key}` : null }, spaceHome],
+    ...(real ? [["home", { hidden: [], homeId: home ? `${home.source_id}/${home.key}` : null }, spaceHome]] : []),
   ]) {
     await choose(choice);
     for (const rate of throttles) {
@@ -186,7 +191,7 @@ try {
   }
 } finally {
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
-  await choose({ hidden: before.hidden, homeId: before.home?.kind === "space" ? before.home.id : null }).catch((e) => console.error(`could not put the choices back: ${e}`));
+  if (before) await choose({ hidden: before.hidden, homeId: before.home?.kind === "space" ? before.home.id : null }).catch((e) => console.error(`could not put the choices back: ${e}`));
   if (opt("--out")) writeFileSync(opt("--out"), JSON.stringify(results, null, 1));
   chrome.stop();
 }

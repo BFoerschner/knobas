@@ -547,7 +547,7 @@ function generic(page: FakePage, by: string): Body {
  * fillers as the server's is (#1296), so with Confluence filling no wiki the
  * tree holds no space, no page read last and no *For you*.
  */
-function tree(bulk: FakePage[]): DocsTree {
+function tree(bulk: FakePage[], extra: readonly DocSpace[] = []): DocsTree {
   if (!wikiFilled() || fakeEmpty("docs")) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
     source_id: SOURCE,
@@ -567,6 +567,7 @@ function tree(bulk: FakePage[]): DocsTree {
       name: SCALE_SPACES[key] ?? BULK_NAME,
       pages: bulk.filter((p) => p.space === key).map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
     });
+  spaces.push(...extra);
   return {
     spaces,
     last_read: "confluence:sepa",
@@ -908,6 +909,17 @@ var call = "${call}";
   return { ...doc, blocks: swap(doc.blocks) };
 }
 
+/** `n` spaces of 20 pages each, *Area 1* to *Area n*: `fake-docs-spaces`. */
+function manySpaces(n: number): DocSpace[] {
+  return Array.from({ length: n }, (_, s) => ({
+    source_id: SOURCE,
+    source_name: SOURCE_NAME,
+    key: `AREA${s + 1}`,
+    name: `Area ${s + 1}`,
+    pages: Array.from({ length: 20 }, (_, i) => ({ entity_id: `${SOURCE}:area-${s + 1}-${i + 1}`, title: `Area ${s + 1} page ${i + 1}`, parent: i === 0 ? null : `${SOURCE}:area-${s + 1}-1` })),
+  }));
+}
+
 /** Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): kept for the page's life, as the backend's rows are kept. */
 const choices: { home: DocsHome | null; hidden: Set<string> } = { home: null, hidden: new Set() };
 const answerChoices = (): DocsChoices => ({ home: choices.home, hidden: [...choices.hidden].sort() });
@@ -916,12 +928,16 @@ const answerChoices = (): DocsChoices => ({ home: choices.home, hidden: [...choi
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
   const bulk = params.has("fake-scale") ? scalePages(5_000) : bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
+  // `fake-docs-spaces=<n>`: n more spaces of 20 pages each, *Area 1* to *Area n*, the many spaces a person hides
+  // (PR #2479, 2026-11-17); `fake-docs-hidden=<n>` hides the first n of them from the start.
+  const extra = manySpaces(Number(params.get("fake-docs-spaces") ?? 0) || 0);
+  for (const space of extra.slice(0, Number(params.get("fake-docs-hidden") ?? 0) || 0)) choices.hidden.add(`${space.source_id}/${space.key}`);
   return {
-    docs_tree: () => tree(bulk),
+    docs_tree: () => tree(bulk, extra),
     // The instant-open pass (2026-11-12): the fixture's spaces are small, so its outline and every part asked for are
     // the tree whole, which is a cut of the tree as the backend's are.
-    docs_outline: () => tree(bulk),
-    docs_nodes: () => tree(bulk).spaces,
+    docs_outline: () => tree(bulk, extra),
+    docs_nodes: () => tree(bulk, extra).spaces,
     docs_choices: () => answerChoices(),
     set_docs_home: (args) => {
       choices.home = (args["home"] as DocsHome | null | undefined) ?? null;
