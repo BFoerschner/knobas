@@ -181,7 +181,7 @@
   </header>
   <!-- Drawn with the sets it filters, not over the waiting rows: on none it went, and what was under it moved up (the nothing-moves pass). -->
   {#if sets !== null && sets.length > 0}
-    <FilterBar {config} {filter} shown={sets === null ? null : rows.length} total={sets?.length ?? null} />
+    <FilterBar {config} {filter} shown={rows.length} total={sets.length} />
   {/if}
   <div class="tf-cbody tf-sets">
     {#if hint !== null}
