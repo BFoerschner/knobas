@@ -545,13 +545,18 @@
               onfocus={() => (last = row.field)}
             />
             {#if line.run !== null || line.wait !== null}
+              <!-- One box of two lines in every state, with Try it beside it: the command filling in moves nothing (2026-11-17). A longer one scrolls in its box. -->
               <div class="tf-apprun">
-                {#if line.run !== null}
-                  <code class="tf-mono" aria-label="It will run, {row.label.toLowerCase()}">{line.run}</code>
-                  <button type="button" class="tf-btn tf-sm" disabled={!named} title={named ? `Saves it, then runs this on ${repo?.title}` : (why ?? undefined)} onclick={() => void tryIt(row.kind)}>Try it</button>
-                {:else}
-                  <span class="tf-dim">{line.wait}</span>
-                {/if}
+                <div class="tf-apprun-box" role="textbox" aria-readonly="true" aria-multiline="true" tabindex="0" aria-label="It will run, {row.label.toLowerCase()}">
+                  {#if line.run !== null}<code class="tf-mono">{line.run}</code>{:else}<span class="tf-dim">{line.wait}</span>{/if}
+                </div>
+                <button
+                  type="button"
+                  class="tf-btn tf-sm"
+                  disabled={!named || line.run === null}
+                  title={line.run === null ? undefined : named ? `Saves it, then runs this on ${repo?.title}` : (why ?? undefined)}
+                  onclick={() => void tryIt(row.kind)}>Try it</button
+                >
               </div>
             {/if}
           </div>

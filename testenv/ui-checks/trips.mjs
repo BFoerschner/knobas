@@ -3127,9 +3127,10 @@ async function worker(queue, results) {
       const focus = JSON.parse(await evaluate(`JSON.stringify((() => {
         const a = document.activeElement;
         const b = a?.getBoundingClientRect();
-        return { row: ((a?.closest("tr") ?? a)?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60), inView: !!b && b.height > 0 && b.top >= 0 && b.bottom <= innerHeight };
+        // Its row's words, and the link's own name. (In this template literal a backslash must be doubled to reach the page.)
+        return { row: ((a?.closest("tr") ?? a)?.textContent ?? "").replace(/\\s+/g, " ").trim().slice(0, 60), name: a?.getAttribute("aria-label") ?? "", inView: !!b && b.height > 0 && b.top >= 0 && b.bottom <= innerHeight };
       })())`));
-      if (!focus.row.includes(step.lands)) reasons.push(`${step.name}: focus is on "${focus.row}", not on ${step.lands}`);
+      if (!focus.row.includes(step.lands) && !focus.name.includes(step.lands)) reasons.push(`${step.name}: focus is on "${focus.row}", not on ${step.lands}`);
       else if (!focus.inView) reasons.push(`${step.name}: ${step.lands} has focus out of view`);
       notes.push(`${step.name}: "${focus.row.slice(0, 24)}"`);
     }

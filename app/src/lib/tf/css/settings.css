@@ -177,10 +177,16 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* The application page (PR #2479, 2026-11-13): each command's field over the line it will run, with *Try it* beside that line. */
 .tf-stg-c.tf-appcmd { flex-direction: column; align-items: stretch; gap: 6px; }
 .tf-appcmd .tf-stg-in { width: 100%; }
-/* A line waiting for its repository is as tall as one filled in with its *Try it*, so the answer moves nothing under it (2026-11-17). */
-.tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-sm); min-height: var(--control-h-sm); }
-.tf-apprun code { flex: 1 1 auto; min-width: 0; padding: 3px 8px; background: var(--sheet-2); border-radius: 4px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-.tf-apprun .tf-dim { padding: 3px 0; }
+/* *It will run*: one box two lines high in every state, waiting or filled, so the repository answering moves nothing under it, and a
+   command typed or a repository picked doesn't either (2026-11-17). Two lines hold the usual command whole; a longer one scrolls in
+   its box, whose gutter is kept so the scrollbar's coming never wraps the words again. */
+.tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-sm); }
+.tf-apprun-box {
+  flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: 44px; line-height: 19px; padding: 3px 8px;
+  overflow-y: auto; scrollbar-gutter: stable; background: var(--sheet-2); border-radius: 4px;
+}
+.tf-apprun-box:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tf-apprun code { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-apppage .tf-phs { margin: 4px 0 6px; }
 /* *Try it on*'s *Finding more…* keeps its box once the reading is done, so a row it wrapped stays as tall. */
 .tf-stg-more.tf-stg-done { visibility: hidden; }
