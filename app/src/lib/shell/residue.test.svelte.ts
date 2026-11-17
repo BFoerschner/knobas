@@ -369,8 +369,8 @@ const TfContextMenu = (await import("../tf/context/TfContextMenu.svelte")).defau
 const { realMenuPorts } = await import("../tf/context/ports");
 const TfZoomLevel = (await import("../tf/TfZoomLevel.svelte")).default;
 const { createZoom } = await import("../tf/zoom.svelte");
-/** A zoom of its own whose frames run at once: what is counted is the plate's, not the webview's frame. */
-const plateZoom = createZoom({ storage: () => null, apply: () => {}, frame: (draw) => draw() });
+/** A zoom of its own whose frames and layouts land at once: what is counted is the plate's, not the webview's. */
+const plateZoom = createZoom({ storage: () => null, apply: () => {}, frame: (draw) => draw(), settled: (done) => done() });
 const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const TfSideEdgeFixture = (await import("../tf/TfSideEdge.fixture.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
