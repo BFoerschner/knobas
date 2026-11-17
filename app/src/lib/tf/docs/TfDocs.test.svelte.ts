@@ -3386,7 +3386,7 @@ test("a search that could not ask offers Try again, which asks again with the sa
     if (fail) throw { code: "internal", message: "502", source_id: null };
     return HITS;
   });
-  await draw(["search", "ledger"], ports({ docsSearch, searchPause: 0 }));
+  await draw(["search", "ledger"], ports({ docsSearch }));
   expect(target.querySelector(".tf-dh-answer")?.textContent).toContain("Could not search");
   fail = false;
   [...target.querySelectorAll<HTMLButtonElement>(".tf-dh-answer button")].find((b) => b.textContent === "Try again")!.click();
