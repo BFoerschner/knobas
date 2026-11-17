@@ -37,7 +37,7 @@ const standing: SourceView = {
       title: "Overview",
       count: null,
       deferred: false,
-      blocks: [{ type: "entities", rows: [{ entity_id: `${REPO}#12`, title: "Retry SEPA payouts", meta: null, chip: "open", tone: null, url: null }] }],
+      blocks: [{ type: "entities", title: null, rows: [{ entity_id: `${REPO}#12`, title: "Retry SEPA payouts", meta: null, chip: "open", tone: null, url: null }] }],
     },
   ],
   actions: [],
