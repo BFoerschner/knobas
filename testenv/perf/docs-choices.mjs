@@ -20,8 +20,8 @@
 // adds n spaces and `fake-docs-hidden=<n>` hides the first n of them from the start (`?fake-ipc&fake-scale&
 // fake-docs-spaces=60&fake-docs-hidden=57`): then the choices are the URL's, and there is no home case.
 //
-// Lines: a click 100 / 100 / 200 ms, a page 100 / 200 / 300 ms at 1x / 4x / 6x (Björn's), halved on the Mac as the
-// other budgets halve them. Exits 1 when a median is over its line. The choices are put back as found at the end.
+// Lines: a click 100 / 100 / 200 ms, halved on the Mac as `right-click.mjs` halves them; a page 100 / 200 / 300 ms at
+// 1x / 4x / 6x, Björn's, as `budget-open.json`'s real lines hold a page on the Mac too. Exits 1 when a median is over its line. The choices are put back as found at the end.
 import { writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
@@ -66,6 +66,10 @@ await viewport(c, size);
 
 /** A fresh load at `hash`, settled. */
 async function load(hash) {
+  // Through a blank page: a navigation that changes only the hash fires no load event, and is no fresh load.
+  const blank = c.once("Page.loadEventFired");
+  await c.send("Page.navigate", { url: "about:blank" });
+  await blank;
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: `${app}${hash}` });
   await loaded;
@@ -107,7 +111,7 @@ async function timed(cond, act, rate) {
   await arm(cond);
   await act();
   for (let i = 0; i < 60; i++) {
-    const t = await c.js("window.__dc");
+    const t = await c.js("window.__dc ?? null");
     if (t !== null) return t;
     await sleep(50 * rate);
   }
@@ -122,10 +126,10 @@ const spaceHome = `location.hash.startsWith("#/docs/space/") && ${settledDocs}`;
 
 const results = { app, size: size.name, at: new Date().toISOString(), rows: [] };
 let over = 0;
-function report(name, rate, times, line) {
+function report(name, rate, times, line, halved = true) {
   times.sort((a, b) => a - b);
   const median = times.length ? times[Math.floor((times.length - 1) / 2)] : null;
-  const held = mac ? line / 2 : line;
+  const held = mac && halved ? line / 2 : line;
   const bad = median === null || median > held;
   if (bad) over++;
   results.rows.push({ name, rate, times, median, line: held });
@@ -146,7 +150,7 @@ try {
       await sleep(300);
       await c.send("Emulation.setCPUThrottlingRate", { rate });
       const t = await timed(`${shownCount} === ${n - 1}`, () => click(".tf-ctx-m [role=menuitem]", "left", "Hide from Docs"), rate);
-      if (t === null) throw new Error("the hide drew nothing");
+      if (typeof t !== "number") throw new Error("the hide drew nothing");
       hide.push(t);
       await sleep(300 * rate);
       await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
@@ -154,7 +158,7 @@ try {
       await sleep(300);
       await c.send("Emulation.setCPUThrottlingRate", { rate });
       const u = await timed(`${shownCount} === ${n}`, () => click(".tf-rd-tree .tf-dk-fold .tf-dk-row button"), rate);
-      if (u !== null) unhide.push(u);
+      if (typeof u === "number") unhide.push(u);
       await sleep(300 * rate);
     }
     report("hide", rate, hide, CLICK[rate]);
@@ -176,17 +180,19 @@ try {
         await load("#/time");
         await c.send("Emulation.setCPUThrottlingRate", { rate });
         const t = await timed(cond, () => click(".tf-nav a[data-section=docs]"), rate);
-        if (t !== null) first.push(t);
+        if (typeof t === "number") first.push(t);
+        else console.log(`  ${name} ${rate}x: a first open drew nothing it waits for`);
         await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
         await sleep(1500);
         await click(".tf-nav a[data-section=inbox]");
         await sleep(2500);
         await c.send("Emulation.setCPUThrottlingRate", { rate });
         const b = await timed(cond, () => click(".tf-nav a[data-section=docs]"), rate);
-        if (b !== null) back.push(b);
+        if (typeof b === "number") back.push(b);
+        else console.log(`  ${name} ${rate}x: a return drew nothing it waits for`);
       }
-      report(`open-${name}`, rate, first, PAGE[rate]);
-      report(`back-${name}`, rate, back, PAGE[rate]);
+      report(`open-${name}`, rate, first, PAGE[rate], false);
+      report(`back-${name}`, rate, back, PAGE[rate], false);
     }
   }
 } finally {

@@ -244,9 +244,10 @@ const CASES = [
   { name: "everything-four-letters", presses: [["pay", "o"], ["ret", "r"], ["con", "f"], ["dep", "l"], ["led", "g"], ["bat", "c"], ["sta", "g"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-five-letters", presses: [["retr", "y"], ["conf", "i"], ["batc", "h"], ["sche", "d"], ["chec", "k"], ["part", "n"], ["time", "o"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   // Docs' spaces filter (PR #2479, 2026-11-17): a letter into the empty box, and a second into one holding a letter, over
-  // the scale database's spaces. It reads nothing: its rows are the first frame after the key.
+  // the scale database's spaces, each second letter one that changes which spaces match. It reads nothing: its rows are
+  // the first frame after the key.
   { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
-  { name: "docs-spaces-two-letters", presses: [["s", "c"], ["e", "n"], ["o", "p"], ["a", "r"], ["s", "a"], ["r", "e"], ["n", "o"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
+  { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));
