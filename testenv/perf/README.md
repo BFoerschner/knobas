@@ -400,15 +400,25 @@ length) and its 4x twin, with a pull request open from each in the cloned reposi
 each throttle and size, from the press to the frame that shows the answer:
 
 - **jump-mid**, **jump-last**: a file half way down the file list and the last, picked in the list after the page and
-  the list were scrolled to it; `lines` is the frame its lines are drawn with its head at the view's top (in view, for
-  the last), `drift` how far it moved after.
+  the list were scrolled to it; `lines` is the frame its lines are drawn with its head at the foot of the diff's band
+  (within 2 px; in view, for the last), `drift` how far it moved after, `offBand` where its head stands from the band's
+  foot once settled.
+- **jump-small** (the compare-jump pass, 2026-11-17): each small file among big ones, picked the same way: a line, two,
+  an added line, a pure rename, a binary file and a deleted one, between files of 400 changed lines half way down the
+  list (`pkg/m20-mix`) and at its end (`zz-mix`; its last file is the compare's last since then). Over its line when the
+  head is more than 2 px off the band's foot once settled (`offBand`; 0 where the scroll's end stops it lower), moved
+  after it landed (`drift`), or not marked in the file list and on its card (`marked`).
 - **top**: *Back to top* from the last file, until *From* is on screen.
 - **swap-from**, **swap-into**, **swap-from-2**: three pairs never drawn (the page reads the next picks' names ahead
   while idle); **swap-back**: *Into* back to the pair the moves started on.
 - **open-diff**: *Open as diff*, until the diff page lists the branch's file and draws a card's lines; `reads` counts
   its range reads.
 - **pr-jump**: in the pull request's *Files changed*, the middle file (the last is past the whole diff's 50,000-line
-  ceiling).
+  ceiling); **pr-jump-small**: a file of one line and the pure rename among the big files before it, against the same
+  lines as `jump-small`.
+
+The page holds a picked file where it landed until the reader touches it (`TfDiffView`'s `landed`): a probe that moves the
+page itself sends a `wheel` first, as `compare-moves.mjs`' `scrollToEl` does, or the file is put back.
 
 ```sh
 just open-budget --real <port> --moves                     # make, press at three sizes, remove

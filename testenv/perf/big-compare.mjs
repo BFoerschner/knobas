@@ -39,6 +39,43 @@ export const OTHER_BASE = "base-b";
 export const MANY = ["many-commits", "many-commits-b"];
 export const MANY_COMMITS = 300;
 export const MANY_PER = 14;
+/**
+ * Small files among big ones (the compare-jump pass, 2026-11-17; Björn: "in the compare view it doesn't scroll to some
+ * smaller diffed files"): the long-lived branches' first commit changes two folders of them, one half way down the file
+ * list (`pkg/m20-mix`, between `pkg/m20` and `pkg/m21`) and one at its end (`zz-mix`). Between files of 400 changed
+ * lines stand a file of one changed line, one of two, one added of a line, a pure rename, a binary file and a deleted
+ * one. `compare-moves.mjs`'s `jump-small` picks each small one; `MIX_LAST` is the compare's last file.
+ */
+export const MIX = {
+  "pkg/m20-mix": [["a-big.ts", "big"], ["b-one.ts", "one"], ["c-big.ts", "big"], ["d-added.ts", "added"], ["e-big.ts", "big"], ["f-two.ts", "two"], ["g-big.ts", "big"], ["h-moved.ts", "renamed"], ["i-big.ts", "big"], ["j-logo.png", "binary"], ["k-big.ts", "big"], ["l-gone.ts", "deleted"], ["m-big.ts", "big"]],
+  "zz-mix": [["a-big.ts", "big"], ["b-one.ts", "one"], ["c-big.ts", "big"], ["d-two.ts", "two"], ["e-one.ts", "one"]],
+};
+export const MIX_SMALL = Object.entries(MIX).flatMap(([dir, files]) => files.filter(([, kind]) => kind !== "big").map(([name, kind]) => ({ path: `${dir}/${name}`, kind })));
+export const MIX_LAST = "zz-mix/e-one.ts";
+/** A mixed file as `main` holds it (null: not there) and as the branch leaves it (null: deleted). */
+function mixed(path, kind, branch) {
+  const lines = (n, f) => Array.from({ length: n }, (_, l) => f(l)).join("\n") + "\n";
+  const png = (tag) => `\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01${tag}\0\0\0\0IEND`;
+  switch (kind) {
+    case "big":
+      return [lines(400, (l) => `// ${path}, line ${l + 1}`), lines(400, (l) => (l % 2 ? `// ${path}, line ${l + 1}` : `// ${path}, line ${l + 1} on ${branch}`))];
+    case "one":
+      return [`export const one = "${path}";\n`, `export const one = "${path} on ${branch}";\n`];
+    case "two":
+      return [lines(6, (l) => `// ${path}, line ${l + 1}`), lines(6, (l) => (l === 2 ? `// ${path}, line 3 on ${branch}` : `// ${path}, line ${l + 1}`))];
+    case "added":
+      return [null, `export const added = "${branch}";\n`];
+    case "renamed":
+      return [null, lines(20, (l) => `// moved, line ${l + 1}`)];
+    case "binary":
+      return [png("main"), png(branch.slice(0, 4))];
+    case "deleted":
+      return [lines(3, (l) => `// ${path}, line ${l + 1}`), null];
+  }
+}
+/** The rename's old path: where `main` has the file the branch moves to `h-moved.ts` whole. */
+const movedFrom = (dir) => `${dir}/old/h.ts`;
+
 /** Commit titles of every length, as a team writes them: what the commits list draws one to a line. */
 const TITLES = [
   "Fix typo",
@@ -94,6 +131,12 @@ function stream() {
   const T = 1794528000;
   commit("refs/heads/main", T, "Ten thousand files\n");
   for (let i = 0; i < DIRS * PER_DIR; i++) file(pathOf(i), original(i));
+  for (const [dir, files] of Object.entries(MIX))
+    for (const [name, kind] of files) {
+      const [before] = mixed(`${dir}/${name}`, kind, "main");
+      if (before !== null) file(`${dir}/${name}`, before);
+      if (kind === "renamed") file(movedFrom(dir), mixed(`${dir}/${name}`, kind, "main")[1]);
+    }
   file("README.md", "# big-compare\n\nA `main` of 10,000 files and branches that change 300, 3,000 and 10,000 of them (testenv/perf/big-compare.mjs).\n");
   out.push("\n");
   out.push(`reset refs/tags/knobas-main\nfrom refs/heads/main\n\n`);
@@ -112,6 +155,15 @@ function stream() {
       const title = `${TITLES[c % TITLES.length]} (${c + 1})`;
       commit(`refs/heads/${name}`, T + 7200 * (b + 1) + c * 60, `${title}\n`, c === 0 ? "refs/tags/knobas-main" : null);
       if (c === 0) file(`A-${name}.md`, `# ${name}\n\n${MANY_COMMITS} commits over ${MANY_COMMITS * MANY_PER} files of main.\n`);
+      if (c === 0)
+        for (const [dir, files] of Object.entries(MIX))
+          for (const [file_, kind] of files) {
+            const path = `${dir}/${file_}`;
+            const after = mixed(path, kind, name)[1];
+            if (kind === "renamed") out.push(`D ${movedFrom(dir)}\n`);
+            if (after === null) out.push(`D ${path}\n`);
+            else file(path, after);
+          }
       for (let i = c * MANY_PER; i < (c + 1) * MANY_PER; i++) file(pathOf(i), many(i, name, c));
       out.push("\n");
     }

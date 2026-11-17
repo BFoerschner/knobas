@@ -14,8 +14,12 @@
 // Each move is timed from the press to the frame that shows its answer, with every long task on the main thread in
 // between and the IPC calls it made:
 // - **jump-mid**, **jump-last**: a file half way down the list and the last, picked in the file list; `landed` is the
-//   frame its card's head is at the top of the view, `lines` the frame its lines are drawn there, `drift` how far its
-//   head moved from `lines` until the page settled.
+//   frame its card's head is at the top of the view, under the diff's band (within 2 px of its foot), `lines` the frame
+//   its lines are drawn there, `drift` how far its head moved from `lines` until the page settled.
+// - **jump-small** (the compare-jump pass, 2026-11-17): each small file among big ones (`big-compare.mjs`'s `MIX`: a
+//   line, two, one added, a pure rename, a binary file, a deleted one, half way down and at the list's end), picked the
+//   same way; `offBand` is how far its head stands from the band's foot once settled (0 where the scroll's end stops it
+//   lower), `drift` how far it moved after it landed, and `marked` 0 when the rail and the card mark it, else 1.
 // - **top**: *Back to top* in the diff's band, from the last file; `landed` is the frame *From* is on screen.
 // - **swap-from**, **swap-into**, **swap-from-2**, **swap-back**: *From* to `files-3000`, *Into* to `base-b`, *From* back
 //   to the long-lived branch (three pairs never drawn), then *Into* back to `main` (the pair the moves started on);
@@ -26,6 +30,7 @@
 //   diff's ceiling of 50,000 lines).
 import { readFileSync, writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
+import { MIX_LAST, MIX_SMALL } from "./big-compare.mjs";
 
 const args = process.argv.slice(2);
 const size = sizeFrom(args);
@@ -68,7 +73,8 @@ const wants = (name) => only === null || only.some((o) => name.startsWith(o));
 /** `big-compare.mjs`'s paths: `main`'s file `i`. */
 const pathOf = (i) => `pkg/m${String(Math.floor(i / 100)).padStart(2, "0")}/file${String(i).padStart(5, "0")}.ts`;
 const MID = pathOf(2100);
-const LAST = pathOf(4199);
+// The compare's last file: the mix at the list's end (`big-compare.mjs`'s `MIX`) since the compare-jump pass.
+const LAST = MIX_LAST;
 
 const PAGE = `(() => {
   if (window.__mv) return;
@@ -86,6 +92,9 @@ const PAGE = `(() => {
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push({ t: e.startTime, d: e.duration }); }).observe({ type: "longtask", buffered: true }); } catch {}
   const onScreen = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); return r.height > 0 && r.bottom > 0 && r.top < innerHeight; };
   const scroller = () => document.querySelector("${shown}")?.closest(".tf-main") ?? document.querySelector(".tf-main");
+  /** Where a jump lands a file's head: the foot of the diff's band, else the scroller's top. */
+  const foot = () => { const band = document.querySelector("${shown} .tf-dband"); return band ? band.getBoundingClientRect().bottom : scroller().getBoundingClientRect().top; };
+  window.__mvFoot = foot;
   let run = null;
   window.__mv = {
     /** Arms a move: \`landed\` and \`lines\` are expressions over \`q\` (querySelector in the shown page) and \`onScreen\`. */
@@ -126,9 +135,21 @@ const PAGE = `(() => {
       const end = Math.max(r.last, r.lines ?? 0, r.landed ?? 0);
       const long = longs.filter((l) => l.t >= r.t0 - 1 && l.t <= end).map((l) => Math.round(l.d));
       const drift = r.card && r.card.isConnected && r.top !== null ? Math.round(r.card.getBoundingClientRect().top - r.top) : null;
+      // Where the card's head stands from the band's foot once settled (0 where the scroll's end stops it lower, in view),
+      // and whether the rail and the card mark it.
+      let offBand = null, marked = null;
+      if (r.card && r.card.isConnected) {
+        const s = scroller();
+        const off = r.card.getBoundingClientRect().top - foot();
+        const atEnd = s.scrollTop + s.clientHeight >= s.scrollHeight - 2;
+        offBand = atEnd && off > 0 && r.card.getBoundingClientRect().top < s.getBoundingClientRect().bottom - 40 ? 0 : Math.abs(Math.round(off));
+        const path = r.card.dataset.file;
+        const row = document.querySelector("${shown} .tf-flist [aria-current=true]");
+        marked = r.card.classList.contains("tf-current") && row?.getAttribute("title") === path ? 0 : 1;
+      }
       const reads = calls.filter((c) => c.start >= r.t0 - 5 && /entity_range_(files|diff|file|names)|entity_source_range/.test(c.cmd));
       return {
-        landedMs: ms(r.landed), linesMs: ms(r.lines), settledMs: ms(end), drift,
+        landedMs: ms(r.landed), linesMs: ms(r.lines), settledMs: ms(end), drift, offBand, marked,
         longTasks: long, longestMs: long.length ? Math.max(...long) : 0, longTotalMs: long.reduce((a, b) => a + b, 0), slowFrames: r.frames,
         reads: reads.length, ipc: calls.filter((c) => c.start >= r.t0 - 5).map((c) => ({ cmd: c.cmd, what: c.what, start: ms(c.start), end: ms(c.end), failed: !!c.failed })),
         nodes: document.getElementsByTagName("*").length,
@@ -139,6 +160,8 @@ const PAGE = `(() => {
       const el = document.querySelector("${shown} " + sel);
       const s = scroller();
       if (!el || !s) return 0;
+      // A reader's scroll starts with their wheel: a pick the page holds lets go of it (TfDiffView's \`landed\`).
+      s.dispatchEvent(new WheelEvent("wheel"));
       s.scrollTop += el.getBoundingClientRect().top - s.getBoundingClientRect().top;
       return 1;
     },
@@ -197,11 +220,17 @@ async function fresh(hash, ready) {
 }
 
 const card = (path) => `.tf-diff[data-file="${path}"]`;
-/** A card's head at the view's top (under the band, within its height and a little) and its lines drawn. */
-const atTop = (path) => `(() => { const c = q(${JSON.stringify(card(path))}); const s = scroller(); if (!c || !s) return false; const d = c.getBoundingClientRect().top - s.getBoundingClientRect().top; return d > -4 && d < 120; })()`;
+/**
+ * A card's head at the view's top, at the foot of the diff's band within 2 px: under the band, a short file's head never
+ * showed (the compare-jump pass, 2026-11-17; this took 120 px below the scroller's top before).
+ */
+const atTop = (path) => `(() => { const c = q(${JSON.stringify(card(path))}); if (!c) return false; return Math.abs(c.getBoundingClientRect().top - __mvFoot()) <= 2; })()`;
 const withLines = (path) => `!!q(${JSON.stringify(`${card(path)} .tf-ln`)}) && ${atTop(path)}`;
 /** The last file: its head may never reach the top (the scroll ends first), so on screen is landed. */
-const inView = (path) => `(() => { const c = q(${JSON.stringify(card(path))}); const s = scroller(); if (!c || !s) return false; const a = c.getBoundingClientRect(), b = s.getBoundingClientRect(); return a.top >= b.top - 4 && a.top < b.bottom - 40; })()`;
+const inView = (path) => `(() => { const c = q(${JSON.stringify(card(path))}); const s = scroller(); if (!c || !s) return false; const a = c.getBoundingClientRect(), b = s.getBoundingClientRect(); return a.top >= __mvFoot() - 2 && a.top < b.bottom - 40; })()`;
+/** A small file: at the band's foot, or in view under it where the scroll's end stops it; with its lines where it has any. */
+const smallLanded = (path) => `(${atTop(path)} || (scroller().scrollTop + scroller().clientHeight >= scroller().scrollHeight - 2 && ${inView(path)}))`;
+const smallLines = (path, kind) => (kind === "renamed" || kind === "binary" ? smallLanded(path) : `!!q(${JSON.stringify(`${card(path)} .tf-ln`)}) && ${smallLanded(path)}`);
 const inViewLines = (path) => `!!q(${JSON.stringify(`${card(path)} .tf-ln`)}) && ${inView(path)}`;
 
 async function move(rate, name, armWith, doIt, watch = null) {
@@ -221,7 +250,7 @@ async function move(rate, name, armWith, doIt, watch = null) {
 const say = (r) =>
   r.error
     ? r.error
-    : `landed ${r.landedMs ?? "never"} ms, lines ${r.linesMs ?? "never"} ms, settled ${r.settledMs} ms, drift ${r.drift ?? "-"} px, long tasks ${r.longTasks.length} (longest ${r.longestMs}, total ${r.longTotalMs}), frames over 50 ms ${r.slowFrames.length}, range reads ${r.reads}, ${r.nodes} nodes`;
+    : `${r.file ? `${r.file} (${r.kind}): ` : ""}landed ${r.landedMs ?? "never"} ms, lines ${r.linesMs ?? "never"} ms, settled ${r.settledMs} ms, drift ${r.drift ?? "-"} px, off the band ${r.offBand ?? "-"} px${r.marked === 1 ? ", NOT MARKED" : ""}, long tasks ${r.longTasks.length} (longest ${r.longestMs}, total ${r.longTotalMs}), frames over 50 ms ${r.slowFrames.length}, range reads ${r.reads}, ${r.nodes} nodes`;
 
 const results = { app, repo, pr, size: size.name, at: new Date().toISOString(), moves: [] };
 const record = (r) => {
@@ -255,6 +284,18 @@ for (const rate of throttles) {
     record(await move(rate, name, [land, lines], () => js(`__mv.press(${JSON.stringify(`.tf-cdiff .tf-flist button[title="${path}"]`)})`), card(path)));
     await settle();
   }
+  if (wants("jump-small"))
+    for (const { path, kind } of MIX_SMALL) {
+      await cpu(1);
+      await js(`__mv.scrollToEl(".tf-cdiff .tf-dview")`);
+      await quiet(800);
+      await js(`__mv.railTo(${JSON.stringify(path)})`);
+      await quiet(800);
+      await cpu(rate);
+      const r = await move(rate, "jump-small", [smallLanded(path), smallLines(path, kind)], () => js(`__mv.press(${JSON.stringify(`.tf-cdiff .tf-flist button[title="${path}"]`)})`), card(path));
+      record({ ...r, file: path, kind, drift: r.drift === null ? null : Math.abs(r.drift) });
+      await settle();
+    }
   if (wants("top")) {
     // From deep in the diff: the band's *Back to top*, where there is one.
     const top = `onScreen(q("#tf-cmp-from"))`;
@@ -262,7 +303,7 @@ for (const rate of throttles) {
     await settle();
   }
   if (wants("swap")) {
-    await js(`(${"() => { const s = document.querySelector('" + shown + "')?.closest('.tf-main'); if (s) s.scrollTop = 0; return 1; }"})()`);
+    await js(`(${"() => { const s = document.querySelector('" + shown + "')?.closest('.tf-main'); if (s) { s.dispatchEvent(new WheelEvent('wheel')); s.scrollTop = 0; } return 1; }"})()`);
     await quiet(600);
     // `swap-back` returns to a pair drawn before (the one the moves started on); the other three are pairs never drawn.
     const swaps = [
@@ -290,12 +331,20 @@ for (const rate of throttles) {
     await fresh(`#/pr/${enc(id)}/diff`, `.tf-diff`);
     await js(`__mv.scrollToEl(".tf-dview")`);
     await quiet(800);
-    // The middle file: a pull request's whole diff stops at knobas's ceiling of 50,000 lines, before the last file.
-    await js(`__mv.railTo(${JSON.stringify(MID)})`);
-    await quiet(800);
-    await cpu(rate);
-    record(await move(rate, "pr-jump", [atTop(MID), withLines(MID)], () => js(`__mv.press(${JSON.stringify(`.tf-flist button[title="${MID}"]`)})`), card(MID)));
-    await settle();
+    // The middle file: a pull request's whole diff stops at knobas's ceiling of 50,000 lines, before the last file. Then
+    // a file of one line and the pure rename among the big files before it (`pr-jump-small`, the compare-jump pass).
+    const smalls = MIX_SMALL.filter(({ kind }) => kind === "one" || kind === "renamed").slice(0, 2);
+    for (const { path, kind, name } of [{ path: MID, kind: "mid", name: "pr-jump" }, ...smalls.map((one) => ({ ...one, name: "pr-jump-small" }))]) {
+      await cpu(1);
+      await js(`__mv.scrollToEl(".tf-dview")`);
+      await quiet(800);
+      await js(`__mv.railTo(${JSON.stringify(path)})`);
+      await quiet(800);
+      await cpu(rate);
+      const r = await move(rate, name, [atTop(path), kind === "renamed" ? atTop(path) : withLines(path)], () => js(`__mv.press(${JSON.stringify(`.tf-flist button[title="${path}"]`)})`), card(path));
+      record(name === "pr-jump" ? r : { ...r, file: path, kind, drift: r.drift === null ? null : Math.abs(r.drift) });
+      await settle();
+    }
   }
 }
 writeFileSync(out, JSON.stringify(results, null, 1));
@@ -309,7 +358,7 @@ if (budget) {
       const got = m[field];
       if (got === null || got === undefined || got > most) {
         over++;
-        console.log(`OVER ${m.throttle}x ${m.size} ${m.move} ${field}: ${got ?? (m.error ?? "never")} against ${most}`);
+        console.log(`OVER ${m.throttle}x ${m.size} ${m.move}${m.file ? ` ${m.file}` : ""} ${field}: ${got ?? (m.error ?? "never")} against ${most}`);
       }
     }
   }

@@ -1560,24 +1560,30 @@
  "moves": {
   "jump-mid": {
    "1": {
-    "linesMs": 100
+    "linesMs": 100,
+    "offBand": 2
    },
    "4": {
-    "linesMs": 100
+    "linesMs": 100,
+    "offBand": 2
    },
    "6": {
-    "linesMs": 200
+    "linesMs": 200,
+    "offBand": 2
    }
   },
   "jump-last": {
    "1": {
-    "linesMs": 100
+    "linesMs": 100,
+    "offBand": 2
    },
    "4": {
-    "linesMs": 100
+    "linesMs": 100,
+    "offBand": 2
    },
    "6": {
-    "linesMs": 200
+    "linesMs": 200,
+    "offBand": 2
    }
   },
   "top": {
@@ -1651,13 +1657,56 @@
   },
   "pr-jump": {
    "1": {
-    "linesMs": 100
+    "linesMs": 100,
+    "offBand": 2
    },
    "4": {
-    "linesMs": 100
+    "linesMs": 100,
+    "offBand": 2
    },
    "6": {
-    "linesMs": 200
+    "linesMs": 200,
+    "offBand": 2
+   }
+  },
+  "jump-small": {
+   "1": {
+    "linesMs": 100,
+    "offBand": 2,
+    "drift": 1,
+    "marked": 0
+   },
+   "4": {
+    "linesMs": 100,
+    "offBand": 2,
+    "drift": 1,
+    "marked": 0
+   },
+   "6": {
+    "linesMs": 200,
+    "offBand": 2,
+    "drift": 1,
+    "marked": 0
+   }
+  },
+  "pr-jump-small": {
+   "1": {
+    "linesMs": 100,
+    "offBand": 2,
+    "drift": 1,
+    "marked": 0
+   },
+   "4": {
+    "linesMs": 100,
+    "offBand": 2,
+    "drift": 1,
+    "marked": 0
+   },
+   "6": {
+    "linesMs": 200,
+    "offBand": 2,
+    "drift": 1,
+    "marked": 0
    }
   }
  }
