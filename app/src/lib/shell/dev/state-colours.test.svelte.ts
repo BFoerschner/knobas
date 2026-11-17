@@ -61,11 +61,11 @@ test("the dev fake draws a section and its line for builds, monitors, pull reque
   for (const s of sections) expect(text(s.querySelector(".tf-sc-line"))).not.toBe("");
   // The fake's two seen Jira statuses: Blocked at its category's info, To Do (category to do) uncoloured.
   expect(column("Tickets", "Active")).toEqual(["In progress", "In review", "Blocked"]);
-  expect(section("Tickets")!.querySelector<HTMLElement>('button[aria-label="Move Blocked"]')!.title).toContain("From its Jira category");
+  expect(section("Tickets")!.querySelector<HTMLElement>('button[aria-label="Colour of Blocked"]')!.title).toContain("From its Jira category");
   expect(column("Tickets", "No colour")).toEqual(["To do"]);
 
   section("Builds")!
-    .querySelector('button[aria-label="Move Failed"]')!
+    .querySelector('button[aria-label="Colour of Failed"]')!
     .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
   await until(() => column("Builds", "Active").includes("Failed"), "Failed never moved to Active");
   expect(sent.filter((c) => c.cmd === "set_tone_override").map((c) => c.args)).toEqual([{ kind: "build", word: "FAILURE", tone: "info" }]);

@@ -3,7 +3,7 @@
  * the six columns a section draws, the column a word sits in, where ← and →
  * take it, the order its chips read in, and what each origin is called.
  */
-import type { StateWordColour, ToneChoice, ToneOrigin } from "../../ipc/sources";
+import type { KindStateColours, StateWordColour, ToneChoice, ToneOrigin } from "../../ipc/sources";
 
 /** The board's columns, left to right: the five tones, then *No colour*. */
 export const COLUMNS: readonly ToneChoice[] = ["ok", "warn", "err", "info", "muted", "none"];
@@ -74,4 +74,46 @@ export function drives(kind: string): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * One change a reader made on the board, before its answer: `to` a column, or `null` for *Reset*; `word` `null` for
+ * *Reset all* of the kind.
+ */
+export type ColourMove = { kind: string; word: string | null; to: ToneChoice | null };
+
+/**
+ * `kinds` as they read once `move` is stored, as `sources::state_colours::read` would answer: a set is *yours* in its
+ * column; a reset falls back to the adapter's tone for a declared word, else to the category's (no colour for a to-do
+ * status), else to nothing. What the board draws while the write is out, so a move lands at once.
+ */
+export function applied(kinds: readonly KindStateColours[], move: ColourMove): KindStateColours[] {
+  return kinds.map((k) =>
+    k.kind !== move.kind
+      ? k
+      : {
+          ...k,
+          words: k.words.map((w): StateWordColour => {
+            if (move.word !== null && w.word !== move.word) return w;
+            if (move.to !== null) return { ...w, yours: move.to, tone: move.to === "none" ? null : move.to, origin: "yours" };
+            return {
+              ...w,
+              yours: null,
+              tone: w.declared ? w.declared_tone : w.category_tone,
+              origin: w.declared ? "adapter" : k.has_category ? "category" : "unset",
+            };
+          }),
+        },
+  );
+}
+
+/**
+ * The moves still to send once `move` joins `waiting` (the first of which, when `inFlight`, is already sent): a newer
+ * move of a word replaces its older one still waiting, and *Reset all* replaces every waiting move of its kind, so only
+ * the newest target of a word is sent (Fable's ruling, 2026-11-17).
+ */
+export function queuedWith(waiting: readonly ColourMove[], inFlight: boolean, move: ColourMove): ColourMove[] {
+  const sent = inFlight ? waiting.slice(0, 1) : [];
+  const rest = waiting.slice(sent.length).filter((q) => !(q.kind === move.kind && (move.word === null || q.word === move.word)));
+  return [...sent, ...rest, move];
 }

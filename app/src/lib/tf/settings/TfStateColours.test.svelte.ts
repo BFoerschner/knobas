@@ -97,7 +97,7 @@ const section = (name: string) => target.querySelector<HTMLElement>(`section[ari
 const column = (name: string, tone: string) =>
   [...(section(name)?.querySelectorAll(`[role="group"][aria-label="${columnName(tone as ToneChoice)}"] .tf-sc-word`) ?? [])].map(text);
 const chip = (word: string) => target.querySelector<HTMLElement>(`.tf-sc-chip[aria-label="${stateWord(word)}"]`);
-const grip = (word: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="Move ${stateWord(word)}"]`);
+const grip = (word: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="Colour of ${stateWord(word)}"]`);
 const press = (word: string, key: string) => grip(word)!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 
 test("each word sits in its tone's column; declared words first, then seen words alphabetically", async () => {
@@ -172,37 +172,130 @@ test("→ from muted sets No colour; → at No colour and ← at ok do nothing",
   expect(ports.setToneOverride).not.toHaveBeenCalled();
 });
 
-test("a drop on a column sets that column's tone, as the keys do", async () => {
+/** A pointer event as a person's: the primary pointer, its main button. */
+function pointer(type: string, x: number, y: number): Event {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+  Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true } });
+  return event;
+}
+
+const columnEl = (name: string, tone: ToneChoice) => section(name)!.querySelector<HTMLElement>(`[role="group"][aria-label="${columnName(tone)}"]`)!;
+
+/** Press a chip's word, move past a tremble to where the hit test answers `onto`, and let go there; then the click a release makes. */
+function dragOnto(word: string, onto: Element | null) {
+  document.elementsFromPoint = () => (onto === null ? [] : [onto]);
+  const handle = grip(word)!;
+  handle.dispatchEvent(pointer("pointerdown", 10, 10));
+  handle.dispatchEvent(pointer("pointermove", 60, 14));
+  const lifted = chip(word)!.classList.contains("tf-lifted");
+  const highlighted = onto?.closest(".tf-sc-col")?.classList.contains("tf-sc-over") ?? false;
+  handle.dispatchEvent(pointer("pointerup", 60, 14));
+  handle.click();
+  return { lifted, highlighted };
+}
+
+test("a chip dragged by pointer onto a column sets that column's tone, and the release opens no menu", async () => {
   const ports = fakePorts([tickets()]);
   await draw(ports);
 
-  chip("Blocked")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
-  const err = section("Tickets")!.querySelector('[role="group"][aria-label="Error"]')!;
-  err.dispatchEvent(new Event("dragover", { bubbles: true, cancelable: true }));
-  err.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+  const seen = dragOnto("Blocked", columnEl("Tickets", "err").querySelector(".tf-sc-colh"));
+  flushSync();
+  expect(seen).toEqual({ lifted: true, highlighted: false });
+  // Drawn at once, before the write answers.
+  expect(column("Tickets", "err")).toEqual(["Closed", "Blocked"]);
   await settle();
-
   expect(ports.setToneOverride).toHaveBeenCalledWith("ticket", "Blocked", "err");
   expect(column("Tickets", "err")).toEqual(["Closed", "Blocked"]);
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(chip("Blocked")!.classList.contains("tf-lifted")).toBe(false);
 
-  // A drop back on the column it came from sends nothing.
+  // A drop back on its own column, or on another kind's column, or on nothing sends nothing.
   ports.setToneOverride.mockClear();
-  chip("Done")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
-  section("Tickets")!.querySelector('[role="group"][aria-label="Good"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+  dragOnto("Done", columnEl("Tickets", "ok"));
+  await settle();
+  expect(document.querySelector('[role="menu"]'), "the click a drag's release makes is no press").toBeNull();
+  dragOnto("Done", null);
+  await settle();
+  expect(ports.setToneOverride).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+test("a drag shows where it would land: the column under the pointer is marked while the chip is lifted", async () => {
+  await draw(fakePorts([tickets()]));
+  document.elementsFromPoint = () => [columnEl("Tickets", "warn")];
+  grip("Done")!.dispatchEvent(pointer("pointerdown", 10, 10));
+  grip("Done")!.dispatchEvent(pointer("pointermove", 60, 14));
+  flushSync();
+  expect(columnEl("Tickets", "warn").classList.contains("tf-sc-over")).toBe(true);
+  expect(chip("Done")!.style.transform).toBe("translate(50px, 4px)");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  flushSync();
+  expect(columnEl("Tickets", "warn").classList.contains("tf-sc-over")).toBe(false);
+  expect(chip("Done")!.style.transform).toBe("");
+});
+
+test("a press on a word opens a menu of the six columns, its own checked; a pick lands it there and focus stays with it", async () => {
+  const ports = fakePorts([tickets()]);
+  await draw(ports);
+
+  expect(grip("Blocked")!.getAttribute("aria-haspopup")).toBe("menu");
+  grip("Blocked")!.click();
+  await settle();
+  const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+  const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+  expect(items.map(text)).toEqual(["Good", "Warning", "Error", "Active", "Quiet", "No colour✓"]);
+  expect(items.map((i) => i.getAttribute("aria-checked"))).toEqual(["false", "false", "false", "false", "false", "true"]);
+  expect(grip("Blocked")!.getAttribute("aria-expanded")).toBe("true");
+
+  items[3]!.click();
+  flushSync();
+  expect(column("Tickets", "info")).toEqual(["In progress", "Blocked"]);
+  await settle();
+  expect(ports.setToneOverride).toHaveBeenCalledWith("ticket", "Blocked", "info");
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(grip("Blocked"));
+});
+
+test("a pick of the column a word is in sends nothing", async () => {
+  const ports = fakePorts([tickets()]);
+  await draw(ports);
+  grip("Done")!.click();
+  await settle();
+  [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((i) => text(i).startsWith("Good"))!.click();
   await settle();
   expect(ports.setToneOverride).not.toHaveBeenCalled();
 });
 
-test("a drag that ends without a drop leaves nothing held: a later drop from elsewhere sends nothing", async () => {
+test("a move is drawn before its write answers, and presses while one is out are kept, the newest target of a word sent once", async () => {
   const ports = fakePorts([tickets()]);
+  const answers: (() => void)[] = [];
+  const real = ports.setToneOverride.getMockImplementation()!;
+  ports.setToneOverride.mockImplementation(
+    (kind, w, tone) => new Promise((resolve) => answers.push(() => void real(kind, w, tone).then(resolve))),
+  );
   await draw(ports);
 
-  chip("Blocked")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
-  chip("Blocked")!.dispatchEvent(new Event("dragend", { bubbles: true }));
-  // Text dragged in from outside the board: no dragstart on a chip.
-  section("Tickets")!.querySelector('[role="group"][aria-label="Error"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+  press("Done", "ArrowRight");
+  flushSync();
+  expect(column("Tickets", "warn")).toEqual(["Done"]);
+  // Three more presses while the first write is out: none is dropped.
+  press("Done", "ArrowRight");
+  press("Done", "ArrowRight");
+  press("Done", "ArrowRight");
+  flushSync();
+  expect(column("Tickets", "muted")).toEqual(["Done"]);
+  expect(ports.setToneOverride).toHaveBeenCalledTimes(1);
+
+  answers.shift()!();
   await settle();
-  expect(ports.setToneOverride).not.toHaveBeenCalled();
+  // The first answer (warn) is stored, and the waiting move is still drawn over it: the chip never steps back.
+  expect(column("Tickets", "muted")).toEqual(["Done"]);
+  expect(ports.setToneOverride).toHaveBeenCalledTimes(2);
+  expect(ports.setToneOverride).toHaveBeenLastCalledWith("ticket", "Done", "muted");
+  answers.shift()!();
+  await settle();
+  expect(column("Tickets", "muted")).toEqual(["Done"]);
+  expect(ports.setToneOverride).toHaveBeenCalledTimes(2);
 });
 
 test("only a word you moved is marked; where the others come from is in the title; Reset clears that word (F-634)", async () => {
@@ -285,8 +378,11 @@ test("Reset all clears the whole kind", async () => {
   await draw(ports);
 
   [...section("Tickets")!.querySelectorAll("button")].find((b) => text(b) === "Reset all")!.click();
+  flushSync();
+  expect(column("Tickets", "muted"), "drawn at once").toEqual(["Closed"]);
   await settle();
   expect(ports.clearToneOverrides).toHaveBeenCalledWith("ticket", null);
+  expect(column("Tickets", "muted")).toEqual(["Closed"]);
 });
 
 test("a failing set raises a toast and leaves the chip where the stored answer puts it", async () => {
@@ -296,6 +392,8 @@ test("a failing set raises a toast and leaves the chip where the stored answer p
   await draw(ports);
 
   press("Done", "ArrowRight");
+  flushSync();
+  expect(column("Tickets", "warn")).toEqual(["Done"]);
   await settle();
   expect(column("Tickets", "ok")).toEqual(["Done"]);
   expect(column("Tickets", "warn")).toEqual([]);

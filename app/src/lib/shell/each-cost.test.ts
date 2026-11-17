@@ -276,7 +276,7 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfSourcePage.svelte  runs": "capped where it is read or drawn: one source's last runs, which the read cuts",
   "tf/settings/TfSources.svelte  sources": "the profile's own settings, tens at most: the configured sources",
   "tf/settings/TfStateColours.svelte  runs(line)": "the runs of one line's or one name's words",
-  "tf/settings/TfStateColours.svelte  stored": "the profile's own settings, tens at most: the reader's state colours",
+  "tf/settings/TfStateColours.svelte  drawn": "the profile's own settings, tens at most: the reader's state colours",
   "tf/settings/TfStateColours.svelte  words.filter((w) => columnOf(w) === column)": "a handful by what it is: the state words the sources use",
   "tf/tickets/SavedViewSourceLine.svelte  queries": "a handful by what it is: one view's queries",
   "tf/tickets/SavedViewSourceLine.svelte  savedViewSource.unsynced": "a handful by what it is: the projects one view names that no source syncs",

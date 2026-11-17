@@ -505,6 +505,10 @@
 .tf-parg:focus-visible, .tf-pgrip:focus-visible, .tf-px:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
 .tf-pstep.tf-pbad { border-color: var(--err); background: var(--err-bg); color: var(--err); }
+/* A grip's drag (`pointer-drag.ts`): the step lifts and follows the pointer; the step it would take the place of is outlined. */
+.tf-pgrip { touch-action: none; }
+.tf-pstep.tf-lifted { position: relative; z-index: 3; box-shadow: var(--shadow); cursor: grabbing; }
+.tf-pstep.tf-pover { border-color: var(--ink-2); }
 .tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
 .tf-pmenu { display: inline-flex; }
 .tf-menu.tf-pmenu-m { width: 320px; font-size: var(--t-sm); }

@@ -2,7 +2,8 @@
   The pipeline bar (#2264, spec #2234 step 5; `mockups/code-area/pipeline.html`, state *editing*): the steps
   between the open file's bytes and its renderer, edited in place.
 
-  `bytes → step → step → renderer`. Each step has a grip (drag it, or focus it and press ← or →), its name, its
+  `bytes → step → step → renderer`. Each step has a grip (drag it by pointer, `pointer-drag.ts`, since HTML5 drag never
+  drops on Windows; or focus it and press ← or →), its name, its
   arguments inline (a jq filter, a decompressor, a format) and a remove button. *Add step* lists the built-in
   steps (`render/pipeline.ts`). A changed jq filter is sent a moment after typing stops, or at once on `Enter`;
   every other change at once. *Reset* takes the steps away and leaves the bar open for new ones. *Close* puts the bar
@@ -20,6 +21,7 @@
   import { FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
   import { inlineEditor } from "../inline-editor";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import { pointerDrag } from "../pointer-drag";
   import TfMenu from "../TfMenu.svelte";
 
   let {
@@ -80,7 +82,8 @@
   let face = $state<HTMLButtonElement | null>(null);
   let bar = $state<HTMLDivElement | null>(null);
   let typing: ReturnType<typeof setTimeout> | null = null;
-  let dragged: number | null = null;
+  /** The step a dragged grip is over, for its highlight. */
+  let over = $state<number | null>(null);
   /** The *Save as default* form, while it is open. */
   let saving = $state<{ name: string; pattern: string } | null>(null);
   let storing = $state(false);
@@ -156,10 +159,17 @@
     }
   }
 
-  function drop(event: DragEvent, index: number) {
-    event.preventDefault();
-    if (dragged !== null) move(dragged, index);
-    dragged = null;
+  /** A grip's drag: its step follows the pointer, and a release on another step moves it there. */
+  function stepDrag(index: number) {
+    return pointerDrag<number>({
+      lifted: (grip) => grip.closest<HTMLElement>(".tf-pstep") ?? grip,
+      target: (at) => {
+        const step = at.closest<HTMLElement>(".tf-pstep[data-index]");
+        return step !== null && bar?.contains(step) ? Number(step.dataset.index) : null;
+      },
+      over: (to) => (over = to),
+      drop: (to) => move(index, to),
+    });
   }
 </script>
 
@@ -173,14 +183,17 @@
         class:tf-pbad={failedAt === i}
         class:tf-puser={step.step === "command"}
         role="group"
+        class:tf-pover={over === i}
         aria-label="Step {i + 1}, {name}"
-        draggable="true"
-        ondragstart={() => (dragged = i)}
-        ondragend={() => (dragged = null)}
-        ondragover={(event) => event.preventDefault()}
-        ondrop={(event) => drop(event, i)}
+        data-index={i}
       >
-        <button type="button" class="tf-pgrip" aria-label="Move {name}" title="Drag, or press ← or →" onkeydown={(event) => gripKeys(event, i)}
+        <button
+          type="button"
+          class="tf-pgrip"
+          aria-label="Move {name}"
+          title="Drag, or press ← or →"
+          onkeydown={(event) => gripKeys(event, i)}
+          {@attach stepDrag(i)}
           ><svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"
             ><circle cx="3" cy="2" r="1" /><circle cx="7" cy="2" r="1" /><circle cx="3" cy="6" r="1" /><circle cx="7" cy="6" r="1" /><circle
               cx="3"

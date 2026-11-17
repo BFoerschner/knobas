@@ -172,8 +172,20 @@ select.tf-stg-in { padding-inline-start: 4px; }
   content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--ink-2); box-sizing: border-box;
 }
 .tf-sc-chip { max-width: 100%; cursor: grab; gap: 2px 4px; flex-wrap: wrap; white-space: normal; }
-.tf-sc-word { cursor: grab; overflow-wrap: anywhere; min-width: 0; text-align: left; }
+.tf-sc-word { overflow-wrap: anywhere; min-width: 0; text-align: left; }
 .tf-sc-chip .tf-sc-reset { margin-left: 6px; color: var(--muted); font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+/* A press on a word opens its menu, so the word is a button by look as well as by role; a drag lifts the chip over the
+   board and follows the pointer (`pointer-drag.ts`), and the column it would land in takes the drop's tint. Nothing in the
+   board moves while a chip is lifted: the chip's own box stays where it was, only its picture travels. */
+.tf-sc-word { cursor: pointer; }
+.tf-sc-chip { touch-action: none; user-select: none; }
+.tf-sc-chip.tf-lifted { position: relative; z-index: 3; cursor: grabbing; box-shadow: var(--shadow); }
+.tf-sc-col.tf-sc-over { border-style: solid; border-color: var(--ink-2); background: var(--sheet-2); }
+.tf-menu.tf-sc-m { min-width: 180px; font-size: var(--t-sm); }
+.tf-menu.tf-sc-m > button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border: 0; border-radius: 4px; background: none; color: var(--ink); font: inherit; }
+.tf-menu.tf-sc-m > button:is(:hover, :focus-visible), .tf-menu.tf-sc-m > button.tf-on { background: var(--sheet-2); }
+.tf-sc-mnone { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--ink-2); box-sizing: border-box; background: none; }
+.tf-sc-mtick { margin-left: auto; color: var(--ink-2); }
 /* The application page (PR #2479, 2026-11-13): each command's field over the line it will run, with *Try it* beside that line. */
 .tf-stg-c.tf-appcmd { flex-direction: column; align-items: stretch; gap: 6px; }
 .tf-appcmd .tf-stg-in { width: 100%; }
