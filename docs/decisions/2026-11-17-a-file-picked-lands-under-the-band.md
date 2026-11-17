@@ -78,4 +78,8 @@ What still waits: the same measure on Björn's PC (WebView2), owed with the next
 
 ## Gates
 
-TBD
+On dc03fbce, in a clean clone, with the trimmed gates: `just check-front` passed (svelte-check 1,551 files, 0 errors;
+vitest 370 files, 5,602 passed, 1 skipped); `just check-scripts` passed; `testenv/desktop-witness-test.sh` 305 checks;
+the press trips with `--strict` 304 of 305 under the Mac's queue, the one failing (`nav-reopen-log-tr`, a run's log
+reopened at 13 px, not the top) failing the same, twice each, on c40a3db3, the head before this pass. `pixel-same.py`
+not run: no screen it shoots changes (what changed is where a jump lands). The timing is this pass's own cases above.
