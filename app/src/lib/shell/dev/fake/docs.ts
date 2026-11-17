@@ -923,6 +923,8 @@ function manySpaces(n: number): DocSpace[] {
 /** Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): kept for the page's life, as the backend's rows are kept. */
 const choices: { home: DocsHome | null; hidden: Set<string> } = { home: null, hidden: new Set() };
 const answerChoices = (): DocsChoices => ({ home: choices.home, hidden: [...choices.hidden].sort() });
+// Back to nothing chosen after every test (`fake-seed.ts`).
+keepSeed(choices);
 
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
