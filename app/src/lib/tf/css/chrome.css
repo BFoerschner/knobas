@@ -27,6 +27,8 @@
   background: var(--rule); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
 .tf-count.tf-err { background: var(--err-bg); color: var(--err); }
+/* A tab row whose counts come and go holds two figures' room for each (the nothing-moves pass, `TfRepo`). */
+.tf-countroom .tf-count { box-sizing: border-box; min-width: calc(2ch + 12px); text-align: center; vertical-align: baseline; }
 .tf-spacer { flex: 1; }
 .tf-search {
   display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--field);
@@ -157,6 +159,10 @@
 .tf-fhead { padding: 16px 22px 12px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: flex-start; }
 .tf-fhead > :is(div:first-child, h1, .tf-board-title, .tf-fr-title) { flex: 1 1 360px; min-width: 0; }
 .tf-fhead > .tf-acts { flex: 0 1 auto; }
+/* A detail page's header held unseen in its room until the reads it draws from have answered (`held-head.svelte.ts`): it draws once, whole. */
+.tf-fhead.tf-unread, .tf-tabs.tf-unread { visibility: hidden; }
+/* Its subline keeps a line's room while held, empty or not, so the tabs under it stay where the header shows. */
+.tf-fhead.tf-unread .tf-sub { min-height: 1lh; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */

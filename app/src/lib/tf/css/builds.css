@@ -95,6 +95,8 @@
 /* A passing step is quiet (its tint with ink words), so a failed or running step is the only loud thing on the bar. */
 .tf-stepsbar { margin: 0 22px 14px; height: 30px; border-radius: 5px; overflow: hidden; }
 .tf-stepsbar > svg { display: block; }
+/* Its room while the log is read, and where the log has no steps: a quiet outline, its words muted (the nothing-moves pass). */
+.tf-stepsbar.tf-sbnone { box-sizing: border-box; border: 1px solid var(--rule); display: flex; align-items: center; padding: 0 10px; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-sbseg { fill: var(--ok-bg); }
 .tf-sbgap { fill: var(--sheet); }
 .tf-sbseg.tf-err { fill: var(--err); }

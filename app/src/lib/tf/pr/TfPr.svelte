@@ -155,6 +155,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
+  import { heldHead } from "../held-head.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { diffOf, rangeOf } from "./files";
@@ -232,6 +233,8 @@
   let viewFailed = $state<string | null>(null);
   let repo = $state<EntityRow | null>(null);
   let checkout = $state<CheckoutView | null>(null);
+  /** Whether the read for the pull request's repository has answered, found or not: *Open in…* waits on it. */
+  let repoRead = $state(false);
   let mine = $state(false);
   /** The account the reader has in the pull request's source, `null` where none is configured. */
   let me = $state<string | null>(null);
@@ -251,6 +254,7 @@
     view = undefined;
     viewFailed = null;
     repo = null;
+    repoRead = false;
     checkout = null;
     mine = false;
     me = null;
@@ -282,6 +286,16 @@
       live = false;
     };
   });
+
+  /**
+   * The header draws once, whole (`held-head.svelte.ts`): its title and *Refresh* are the item's, its writes the view's and
+   * *Open in…* its repository's, which landed 200 ms apart and moved the buttons left under the pointer. The tabs under it wait
+   * with it, their counts being the view's; *Open in…* keeps its own room while its repository is read past the hold.
+   */
+  const drawnHead = heldHead(
+    () => prId,
+    () => (detail !== null && view !== undefined && repoRead) || failed !== null,
+  );
 
   /** The surface the page's echoes are tagged with, for `watchEchoes` (#2103). */
   const PR_SURFACE = "pr";
@@ -437,6 +451,7 @@
       (rows) => {
         if (!live()) return;
         repo = repoOfRow(row, rows);
+        repoRead = true;
         if (repo === null) return;
         ports.entityCheckout(repo.entity_id).then(
           (answer) => {
@@ -445,7 +460,9 @@
           () => {},
         );
       },
-      () => {},
+      () => {
+        if (live()) repoRead = true;
+      },
     );
   }
 
@@ -827,7 +844,7 @@
       <TfNothingHere message="knobas does not hold this pull request. It may not have synced yet." href="#/code/prs" action="All pull requests" />
     {/if}
   {:else}
-    <header class="tf-fhead">
+    <header class="tf-fhead" class:tf-unread={!drawnHead.shown}>
       <div>
         <h1>{name} {title}</h1>
         <div class="tf-sub">
@@ -885,12 +902,18 @@
             object={{ kind: "pull_request", number: Number(number.slice(1)), base: header.base, head: header.head, branch: header.head, item: prId }}
             ends={() => (prId === null ? Promise.resolve(null) : ports.entityView(prId, "files").then(rangeOf))}
           />
+        {:else if !repoRead}
+          <!-- Its room while the repository is read (the nothing-moves pass): that read waits on the item's, and landed past the
+               header's hold, pushing every button 111 px left. -->
+          <span class="tf-openin tf-hidden" aria-hidden="true"
+            ><span class="tf-btn tf-ghost">Open in…<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"></svg></span></span
+          >
         {/if}
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
-    <nav class="tf-tabs" aria-label="Pull request">
+    <nav class="tf-tabs" class:tf-unread={!drawnHead.shown} aria-label="Pull request">
       {#each PR_TABS as entry (entry.id)}
         {@const count = counts[entry.id]}
         <a href={prHash(prId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}

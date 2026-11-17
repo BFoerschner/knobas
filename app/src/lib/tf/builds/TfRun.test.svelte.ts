@@ -329,6 +329,31 @@ test("the header names the pipeline and number with the result, then branch, who
   expect(button("Stop")).toBeUndefined();
 });
 
+test("the header draws once, whole: unseen in its room until the run's item has answered, so its Sync now can't push Re-run left (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  draw("teamcity:build:1187", undefined, { getEntity: async (id) => (await late, detailOf(id)) });
+  await settle();
+  const head = document.querySelector(".tf-bhead")!;
+  expect(head.classList.contains("tf-unread")).toBe(true);
+  answer();
+  await settle();
+  expect(head.classList.contains("tf-unread")).toBe(false);
+});
+
+test("the steps bar keeps its room from the first frame: an empty track while the log is read, then what it found (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  draw("teamcity:build:1187", undefined, { log: async () => (await late, null) });
+  await settle();
+  const bar = document.querySelector(".tf-stepsbar");
+  expect(bar, "the bar's room while the log is read").not.toBeNull();
+  expect(bar!.textContent?.trim()).toBe("");
+  answer();
+  await settle();
+  expect(document.querySelector(".tf-stepsbar")!.textContent?.trim(), "a run with no log keeps the room and says so").toBe("No log");
+});
+
 test("Re-run queues the run's branch and values again, and says so", async () => {
   const drawn = draw();
   await settle();

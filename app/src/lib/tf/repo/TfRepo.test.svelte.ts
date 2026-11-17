@@ -284,6 +284,26 @@ async function settle() {
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const tree = () => [...target.querySelectorAll(".tf-ftree a, .tf-ftree button")].map(text);
 
+test("the header and the tabs draw once, whole: unseen in their room until the facts, the checkout and the counts have answered (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const stand = ports();
+  await draw([REPO], { ...stand, codeFacts: async (ids) => (await late, stand.codeFacts(ids)) });
+  const head = target.querySelector(".tf-repohead")!;
+  const tabs = target.querySelector(".tf-tabs")!;
+  expect(head.classList.contains("tf-unread"), "held while the facts are read").toBe(true);
+  expect(tabs.classList.contains("tf-unread"), "the tabs with it").toBe(true);
+  answer();
+  await settle();
+  expect(head.classList.contains("tf-unread")).toBe(false);
+  expect(tabs.classList.contains("tf-unread")).toBe(false);
+  expect(text(target.querySelector(".tf-fhead .tf-reposub"))).toBe("Payments, Rust, last push today 12:30.");
+  // Each tab that can carry a count holds a count's room with none, so one a sync brings pushes no tab.
+  const counted = [...tabs.querySelectorAll("a")].filter((a) => /Branches|Pull requests|Builds/.test(a.textContent ?? ""));
+  expect(counted.length).toBe(3);
+  for (const tab of counted) expect(tab.querySelector(".tf-count"), text(tab)).not.toBeNull();
+});
+
 test("the header names the repository, its last push and its checkout; the tabs follow with their counts", async () => {
   await draw([REPO]);
 

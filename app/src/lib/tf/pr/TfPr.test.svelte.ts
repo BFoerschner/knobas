@@ -264,6 +264,21 @@ test("the header names the pull request, its state, head into base and the reade
   expect(text(".tf-crumbs .tf-esc")).toBe("Back to Code Esc");
 });
 
+test("the header draws once, whole: unseen in its room while its repository's read is out, so Open in… can't push the buttons left (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const base = ports();
+  await draw([PR], { ...base, listEntities: async (...a) => (await late, base.listEntities(...a)) });
+  const head = target.querySelector(".tf-fhead")!;
+  expect(head.classList.contains("tf-unread"), "held while the repository is read").toBe(true);
+  expect(buttons(), "its buttons are drawn, in their room").toContain("Merge…");
+  expect(target.querySelector(".tf-fhead .tf-acts .tf-openin.tf-hidden"), "Open in… keeps its room past the hold").not.toBeNull();
+  answer();
+  await settle();
+  expect(head.classList.contains("tf-unread"), "shown once it has answered").toBe(false);
+  expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")?.textContent?.trim()).toBe("Open in…");
+});
+
 test("somebody else's pull request names its author and offers Review…", async () => {
   const theirs = prView([COMMENT, APPROVE, EDIT, MERGE]);
   const facts = theirs.sections[0]!.blocks[0]!;

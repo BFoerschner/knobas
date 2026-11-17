@@ -55,6 +55,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { settleEchoes } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
+  import { heldHead } from "../held-head.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import { jumpAcross } from "../opener";
@@ -157,6 +158,8 @@
   /** The run's one log read: the steps bar draws over it, and the Log tab is handed it. */
   let logRead: Promise<RunLog | null> | null = null;
   let logSettled = false;
+  /** Whether the run's log read has answered: the steps bar's room says what it found, once it has. Apart from `logSettled`, which the Log tab's port reads inside its effect. */
+  let logAnswered = $state(false);
   /** The step a click on the bar opens the Log tab at; `seq` tells two clicks on one step apart. */
   let openStep = $state<{ step: number; seq: number } | null>(null);
   let openSeq = 0;
@@ -165,6 +168,8 @@
   let rereads = $state(0);
   /** The run as `get_entity` reads it (#2137): what its *Refresh* and banners draw over; `null` until read. */
   let detail = $state<EntityDetail | null>(null);
+  /** Whether `get_entity` has answered for the run, found or not: the header's *Refresh* or *Sync now* waits on it. */
+  let detailRead = $state(false);
   /** The header's *Refresh* or *Sync now* (#2107). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
@@ -172,6 +177,14 @@
     const wanted = { pipelineId, runId };
     untrack(() => open(wanted.pipelineId, wanted.runId));
   });
+  /**
+   * The header draws once, whole (`held-head.svelte.ts`): *Re-run* is the view's and *Refresh* or *Sync now* the item's, which
+   * landed after the header and pushed *Re-run* and *Open in TeamCity* 105 px left. The tabs under it wait with it: their counts are the view's.
+   */
+  const drawnHead = heldHead(
+    () => runId,
+    () => detailRead && viewRead,
+  );
 
   /**
    * What the source's credential cannot write on the run's pipeline (#2040), and the run's fields
@@ -199,7 +212,9 @@
     failure = null;
     settings = null;
     log = null;
+    logAnswered = false;
     detail = null;
+    detailRead = false;
     refresh.reset();
     void findRun(pipe, id, mine);
     void readLog(id, mine);
@@ -212,9 +227,13 @@
   function readDetail(id: string, mine: number): Promise<void> {
     return ports.getEntity(id).then(
       (answer) => {
-        if (mine === token) detail = answer;
+        if (mine !== token) return;
+        detail = answer;
+        detailRead = true;
       },
-      () => {},
+      () => {
+        if (mine === token) detailRead = true;
+      },
     );
   }
 
@@ -324,9 +343,12 @@
         if (mine !== token) return;
         log = answer;
         logSettled = true;
+        logAnswered = true;
       },
       () => {
-        if (mine === token) logSettled = true;
+        if (mine !== token) return;
+        logSettled = true;
+        logAnswered = true;
       },
     );
     return read;
@@ -406,6 +428,9 @@
   let barPx = $state(0);
   let pen: CanvasRenderingContext2D | null = null;
   function measureBar(bar: HTMLElement) {
+    // Read now, before the bar first paints: the observer's first answer came a frame late, and the steps fitted to no width
+    // drew once and then moved by a few pixels (the nothing-moves pass).
+    barPx = bar.clientWidth;
     if (typeof ResizeObserver === "undefined") return;
     const seen = new ResizeObserver(() => (barPx = bar.clientWidth));
     seen.observe(bar);
@@ -517,7 +542,7 @@
   <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
-  <header class="tf-fhead tf-bhead">
+  <header class="tf-fhead tf-bhead" class:tf-unread={!drawnHead.shown}>
     <div>
       <h1>
         {pipeline.name} #{run.number ?? ""}
@@ -575,6 +600,10 @@
         {/each}
       </svg>
     </div>
+  {:else}
+    <!-- The bar's room from the first frame (the nothing-moves pass, 2026-11-17): the log is read live from the source, and the bar
+         landing with it pushed the run's panels 29 px down. An empty track while it reads, then what it found. -->
+    <div class="tf-stepsbar tf-sbnone">{#if logAnswered}<span>{log === null ? "No log" : "No steps in the log"}</span>{/if}</div>
   {/if}
 
   {#if stale !== null}
@@ -587,7 +616,7 @@
     <p class="tf-dim tf-runs">Runs could not be read: {runsFailed}</p>
   {/if}
 
-  <nav class="tf-tabs" aria-label="Run">
+  <nav class="tf-tabs" class:tf-unread={!drawnHead.shown} aria-label="Run">
     {#each RUN_TABS as entry (entry.id)}
       <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab && !noTab ? "page" : undefined}
         >{entry.name}{#if entry.id === "tests" && testsCount > 0}{" "}<span class="tf-count tf-err">{testsCount} failed</span

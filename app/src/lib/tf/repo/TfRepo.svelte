@@ -299,6 +299,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
+  import { heldHead } from "../held-head.svelte";
   import { provideTabRereads } from "./refreshed.svelte";
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
@@ -404,6 +405,9 @@
   let prs = $state<EntityRow[] | null>(null);
   /** The repository's team and language (#973); `undefined` until `code_facts` answers. */
   let facts = $state<CodeFacts | undefined>(undefined);
+  /** Whether `code_facts` and the checkout's read have answered, held or not: the header's subline and *Open in…* wait on them. */
+  let factsAnswered = $state(false);
+  let checkoutAnswered = $state(false);
   /** The header's *Refresh* or *Sync now* (#2135). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
   providePageVisible(() => visible);
@@ -437,9 +441,11 @@
     branchesFailed = false;
     branchRefused = null;
     checkout = undefined;
+    checkoutAnswered = false;
     local = null;
     prs = null;
     facts = undefined;
+    factsAnswered = false;
     branchPulls = null;
     untrack(() => refresh.reset());
     readRepo(id, alive, false);
@@ -448,6 +454,19 @@
       live = false;
     };
   });
+
+  /**
+   * The header draws once, whole (`held-head.svelte.ts`): its title and *Sync now* are the item's, its subline's facts
+   * `code_facts`'s and *Open in…* or *Clone* the checkout's; drawn as each landed, the title came a frame after the header,
+   * *Clone* and *Sync now* pushed the branch picker 161 px left, and the facts pushed the clone's sign right. The tabs under
+   * it are held with it until their counts have answered: a count landing alone widened its tab and pushed the rest right.
+   */
+  const drawnHead = heldHead(
+    () => repoId,
+    () =>
+      (detail !== null && factsAnswered && checkoutAnswered && (branches !== null || branchesFailed) && prs !== null && (builds !== null || buildsFailed !== null)) ||
+      failed !== null,
+  );
 
   /** The checkout again on focus, and once when the page is shown again (#2249). */
   function checkoutAgain() {
@@ -484,9 +503,13 @@
   async function readRepo(id: string, alive: () => boolean, again: boolean): Promise<void> {
     const factsRead = ports.codeFacts([id]).then(
       (answer) => {
-        if (alive()) facts = answer.find((entry) => entry.entity_id === id);
+        if (!alive()) return;
+        facts = answer.find((entry) => entry.entity_id === id);
+        factsAnswered = true;
       },
-      () => {},
+      () => {
+        if (alive()) factsAnswered = true;
+      },
     );
     await Promise.all([factsRead, readBranches(id, alive, again), readRow(id, alive, again), readBranchPulls(id, alive)]);
   }
@@ -773,6 +796,7 @@
       (view) => {
         if (!alive()) return;
         checkout = view;
+        checkoutAnswered = true;
         const tree = view.tree;
         if (tree?.status !== "read" || tree.changed + tree.untracked === 0) {
           local = null;
@@ -785,7 +809,9 @@
           () => {},
         );
       },
-      () => {},
+      () => {
+        if (alive()) checkoutAnswered = true;
+      },
     );
   }
 
@@ -919,6 +945,8 @@
   );
 
   /** A tab's count, drawn only above zero once its read answered. */
+  /** The tabs that can carry a count: each keeps the count's room with none (the nothing-moves pass). */
+  const COUNTED: ReadonlySet<RepoTabId> = new Set<RepoTabId>(["builds", "branches", "prs"]);
   function countOf(id: RepoTabId): { n: number; warn: boolean; err?: boolean } | null {
     if (id === "builds" && builds !== null && builds.pipelines.length > 0)
       return buildsFailing > 0 ? { n: buildsFailing, warn: false, err: true } : { n: builds.pipelines.length, warn: false };
@@ -1217,7 +1245,7 @@
       <TfNothingHere message="knobas does not hold this repository. It may not have synced yet." href="#/code" action="All repositories" />
     {/if}
   {:else}
-    <header class="tf-fhead tf-repohead" {@attach watchStack}>
+    <header class="tf-fhead tf-repohead" class:tf-unread={!drawnHead.shown} {@attach watchStack}>
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
@@ -1272,13 +1300,15 @@
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
-    <nav class="tf-tabs" aria-label="Repository">
+    <!-- A tab that can carry a count keeps a two-figure count's room with none, so one a later read or a sync brings widens
+         nothing and pushes no tab (the nothing-moves pass). -->
+    <nav class="tf-tabs tf-countroom" class:tf-unread={!drawnHead.shown} aria-label="Repository">
       {#each REPO_TABS as entry, n (entry.id)}
         {@const count = countOf(entry.id)}
         {#if n > 0 && REPO_TABS[n - 1]!.group !== entry.group}<span class="tf-tabgrp" aria-hidden="true"></span>{/if}
         <a href={tabHref(held, repoId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn} class:tf-err={count.err === true} title={entry.id === "builds" && count.err === true ? `${count.n} failing on ${defaultBranch?.name ?? "the default branch"} or your branch` : undefined}>{count.n}</span
-            >{/if}</a
+            >{:else if COUNTED.has(entry.id)}{" "}<span class="tf-count tf-hidden" aria-hidden="true"></span>{/if}</a
         >
       {/each}
     </nav>

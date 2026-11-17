@@ -293,7 +293,9 @@
 }
 .tf-dstick .tf-minif { flex: none; }
 .tf-dstick .tf-flist { position: static; max-height: none; min-height: 0; }
+/* Every row stands 2 px in, the pill's inset, so the file you are in taking the pill (a frame after the list draws) moves no row (the nothing-moves pass). */
 .tf-flist button {
+  margin: 0 2px; width: calc(100% - 4px);
   display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
   font: var(--t-sm) var(--mono); font-variant-ligatures: var(--mono-ligatures); align-items: center; text-align: left; cursor: pointer;
 }
@@ -301,7 +303,7 @@
 .tf-flist button:hover { background: var(--sheet-2); }
 /* The file you are in is the rail's ink pill, as every rail's selected row is. */
 .tf-flist button[aria-current="true"] {
-  background: var(--fill); color: var(--sheet); border-radius: 4px; margin: 0 2px; width: calc(100% - 4px);
+  background: var(--fill); color: var(--sheet); border-radius: 4px;
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
 }
 .tf-flist button[aria-current="true"] :is(.tf-add-n, .tf-del-n) { color: inherit; }
