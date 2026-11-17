@@ -104,7 +104,7 @@
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
   import TfWrittenAt from "./TfWrittenAt.svelte";
-  import { Windowed } from "../../shell/windowed.svelte";
+  import { Windowed, landOn, listScrolled } from "../../shell/windowed.svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { menuThing } from "../context/thing";
   import { thousands } from "../counted";
@@ -725,15 +725,19 @@
   const treeKey = (row: (typeof tree)[number]) => (row.kind === "dir" ? `dir\n${row.path}` : keyOf(row.file));
   const railWin = new Windowed({ count: () => tree.length, key: (i) => treeKey(tree[i]!), estimate: 31, scrolls: true });
 
-  /** File `key`'s card, drawn first where the list holds it back. */
+  /**
+   * File `key`'s card, drawn first where the list holds it back. A card drawn once and taken out by the window since
+   * leaves its binding null, not undefined (the compare-jump pass, 2026-11-17: a pick of a file drawn earlier near the
+   * view, then scrolled away from, did nothing at all), so it is the card's box that says whether it is drawn.
+   */
   function cardFor(key: string): Card | undefined {
-    if (cards[key] === undefined) {
+    if (cards[key] == null || cardOf(key) === null) {
       const at = drawn.findIndex((file) => keyOf(file) === key);
       if (at < 0) return undefined;
       fileWin.reveal(at);
       flushSync();
     }
-    return cards[key];
+    return cards[key] ?? undefined;
   }
 
   /** The line whose comment box is open: its file and its place. */
@@ -874,10 +878,49 @@
   const SCROLLED = 2;
   const nameOf = (key: string) => key.slice(key.lastIndexOf("/") + 1);
 
+  /**
+   * A file chosen (picked in the list, `j`/`k`): its head lands at the scroller's top, under the band where there is
+   * one, and is held there through what draws after it until the reader scrolls (the compare-jump pass, 2026-11-17).
+   * Scrolled into view at the scroller's top, a file sat under the band: a short one (a line or two, a rename, a binary
+   * or collapsed file) could not push its sticky head out from under it, so the reader saw the next file's head and
+   * the rail marked the one before. And the topmost row on screen then held the page, the file before the picked one,
+   * whose lines arriving pushed it down.
+   */
   function go(key: string) {
     current = key;
-    cardFor(key)?.scrollTo();
+    const card = cardFor(key);
+    const el = cardOf(key);
+    landed = null;
+    if (card !== undefined && el !== null && scroller !== null) {
+      landOn(el, scroller, el.getBoundingClientRect().top - topOfFiles(scroller));
+      landed = key;
+    } else card?.scrollTo();
     hold();
+  }
+
+  /**
+   * The file a pick landed, until the reader touches the page (a wheel, a press, a touch, a key): a scroll before that
+   * is the page's, not the reader's, and the file goes back to the band's foot in the frame it would have moved. The
+   * page near the list's end, shortened for a layout while a file's lines came in, was cut back to its new end and
+   * stayed there once the lines filled it out again (the compare-jump pass, 2026-11-17: the last files, picked, landed
+   * a screen or more from where they were put).
+   */
+  let landed: string | null = null;
+  const letGo = () => (landed = null);
+
+  /** Puts the landed file back where it was put, if the page moved it. */
+  function reland(box: Element): boolean {
+    const el = landed === null ? null : cardOf(landed);
+    if (el === null) return false;
+    const off = el.getBoundingClientRect().top - topOfFiles(box);
+    if (Math.abs(off) < 1) return false;
+    landOn(el, box, off);
+    return true;
+  }
+
+  /** Where the files' view starts on screen: the scroller's top, or the band's foot where the band sticks over it. */
+  function topOfFiles(box: Element): number {
+    return box.getBoundingClientRect().top + box.clientTop + (list && band !== null ? band.getBoundingClientRect().height : 0);
   }
 
   /** A file picked in the list: it opens if it was collapsed, and the list folds again, before the page moves to it. */
@@ -898,18 +941,29 @@
     scroller = found;
     filesHost = host;
     if (found === null) return;
-    const read = () => {
+    const read = (event?: Event) => {
       // A page kept hidden has no boxes to measure, every card at the top: it keeps the file it was in until shown. The
       // shell's scroller stays shown around a hidden kept page, so it is the files' own box that says.
       if (host.checkVisibility?.() === false) return;
       if (heldAt !== null && Math.abs(found.scrollTop - heldAt) < SCROLLED) return;
+      // The lists holding the chosen file where it landed (lines read in above it) moved the page, not the reader.
+      if (heldAt !== null && event !== undefined && listScrolled(event)) {
+        heldAt = found.scrollTop;
+        return;
+      }
+      // The page moved under a pick the reader has not touched since: the file goes back.
+      if (heldAt !== null && event !== undefined && landed !== null && reland(found)) {
+        heldAt = found.scrollTop;
+        return;
+      }
       heldAt = null;
       const last = drawn.at(-1);
       if (last !== undefined && found.scrollHeight > found.clientHeight && found.scrollTop + found.clientHeight >= found.scrollHeight - SCROLLED) {
         current = keyOf(last);
         return;
       }
-      const top = found.getBoundingClientRect().top + 8;
+      // Under the band: a file whose head stands at its foot is the one you are in.
+      const top = topOfFiles(found) + 8;
       let at: string | null = null;
       // The files drawn are the ones near the view: the one at its top is among them.
       for (const file of fileWin.slice(drawn)) {
@@ -923,12 +977,21 @@
       current = at ?? (first === undefined ? null : keyOf(first));
     };
     found.addEventListener("scroll", read, { passive: true });
+    const touched = ["wheel", "pointerdown", "touchstart"] as const;
+    for (const name of touched) found.addEventListener(name, letGo, { passive: true, capture: true });
+    // Before the view's own keys, so a `j` lets go of the last pick and lands its own.
+    window.addEventListener("keydown", letGo, { capture: true });
     // The first read waits for the files' first layout (a resize observer's first call, before the frame paints): read as
     // they are attached, its visibility and boxes laid out the half-built page in the task that builds it (the inner-6x
     // pass, 2026-11-15: a style pass of 1,200 elements in a return to *Files changed* at 6x).
+    const off = () => {
+      found.removeEventListener("scroll", read);
+      for (const name of touched) found.removeEventListener(name, letGo, { capture: true });
+      window.removeEventListener("keydown", letGo, { capture: true });
+    };
     if (typeof ResizeObserver === "undefined") {
       read();
-      return () => found.removeEventListener("scroll", read);
+      return off;
     }
     const first = new ResizeObserver(() => {
       first.disconnect();
@@ -937,7 +1000,7 @@
     first.observe(host);
     return () => {
       first.disconnect();
-      found.removeEventListener("scroll", read);
+      off();
     };
   }
 
@@ -1045,6 +1108,7 @@
     if (!root) return;
     root.scrollTop = 0;
     heldAt = null;
+    landed = null;
     root.focus({ preventScroll: true });
   }
 

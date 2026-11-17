@@ -383,24 +383,28 @@ export class Windowed<K = string> {
     /** Whether the list's place is read (`place`), and whether that read waits for the flush to end. */
     let placed = false;
     let queued = false;
-    const place = () => {
+    const place = (phase: Phase) => {
       queued = false;
       if (!node.isConnected) return;
+      if (phase === "room") {
+        // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
+        clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
+        const style = getComputedStyle(node);
+        base.top = parseFloat(style.paddingTop) || 0;
+        base.bottom = parseFloat(style.paddingBottom) || 0;
+        base.read = true;
+        // The undrawn rows' room first: a box that clips the list and holds only it (the Inbox's sheet) ends at the rows
+        // drawn so far until the room is in, and read before it would take that for the view's bottom.
+        if (!(node instanceof HTMLTableSectionElement) && !own) {
+          pad(node, "padding-top", this.before && base.top + this.before);
+          pad(node, "padding-bottom", this.after && base.bottom + this.after);
+        }
+        return;
+      }
+      if (!base.read) return;
       placed = true;
       this.#placed = true;
-      // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
-      clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
       this.#clips = clips;
-      const style = getComputedStyle(node);
-      base.top = parseFloat(style.paddingTop) || 0;
-      base.bottom = parseFloat(style.paddingBottom) || 0;
-      base.read = true;
-      // The undrawn rows' room first: a box that clips the list and holds only it (the Inbox's sheet) ends at the rows
-      // drawn so far until the room is in, and read before it would take that for the view's bottom.
-      if (!(node instanceof HTMLTableSectionElement) && !own) {
-        pad(node, "padding-top", this.before && base.top + this.before);
-        pad(node, "padding-bottom", this.after && base.bottom + this.after);
-      }
       read();
       this.#growFor(this.#set);
       resized?.observe(node);
@@ -447,6 +451,8 @@ export class Windowed<K = string> {
     // Scroll events do not bubble; a capturing listener hears every box's.
     document.addEventListener("scroll", read, { capture: true, passive: true });
     window.addEventListener("resize", read, { passive: true });
+    const reread = () => read();
+    viewReads.add(reread);
     const unscale = onScaleChange(() => this.#rescale());
     return () => {
       unscale();
@@ -456,6 +462,7 @@ export class Windowed<K = string> {
       if (this.#listNode === node) this.#listNode = null;
       document.removeEventListener("scroll", read, { capture: true });
       window.removeEventListener("resize", read);
+      viewReads.delete(reread);
       resized?.disconnect();
       headings?.disconnect();
       if (this.#clips === clips) this.#clips = [];
@@ -667,23 +674,63 @@ function freezeCols(
   };
 }
 
+/** A list's place is read in two steps: every list's room is written, then where each sits is read. */
+type Phase = "room" | "read";
 /** The lists attached in this flush that have not read where they sit yet (`list`). */
-const unplaced = new Set<() => void>();
+const unplaced = new Set<(phase: Phase) => void>();
 
 /**
  * Reads where `place`'s list sits once the flush that attached it is over, with every other list attached in it: the
  * first read lays the page out, and the rest find it laid out. Before that read a list draws its overscan's rows.
  */
-function placeSoon(place: () => void) {
+function placeSoon(place: (phase: Phase) => void) {
   if (unplaced.size === 0) queueMicrotask(placeWindowsNow);
   unplaced.add(place);
+}
+
+/**
+ * A jump to `el`, a drawn row or something in one (a diff's file picked in its list): `box` scrolls by `px`, and `el`
+ * is the row every list holds where it lands, through the redraws that follow (rows near it measured, lines read in
+ * above it), until the reader scrolls. The scroll is the lists' own, so it takes no other row for the reader's.
+ *
+ * Without it the anchor was the topmost row on screen once the jump's scroll was heard: under a band stuck over the
+ * scroller's top (`TfDiffView`), the file before the picked one, whose growth then pushed the picked one down.
+ */
+export function landOn(el: HTMLElement, box: Element, px: number) {
+  if (px !== 0) {
+    box.scrollTop += px;
+    shared.scrolled = { box, top: box.scrollTop };
+    // Every list reads the view it now shows, in this task: one that read a view the page was moved from (a scroll
+    // cut back, put right here) would take `el`'s rows out for a frame.
+    for (const reread of viewReads) reread();
+  }
+  shared.pinnedAt = null;
+  shared.anchor = { el, y: el.getBoundingClientRect().top, box, scroll: box.scrollTop };
+}
+
+/** Each attached list's read of the view, for {@link landOn}. */
+const viewReads = new Set<() => void>();
+
+/** Lets go of every list's read of the view: a test's fresh window. */
+export function forgetViewReads() {
+  viewReads.clear();
+}
+
+/** Whether `event` is a scroll a list made to hold its anchor (or a {@link landOn}), not the reader's. */
+export function listScrolled(event: Event): boolean {
+  return shared.ownEvent === event;
 }
 
 /** Reads now where every list attached and not yet placed sits: before a list's place is asked of it, and in tests. */
 export function placeWindowsNow() {
   const all = [...unplaced];
   unplaced.clear();
-  for (const each of all) each();
+  // Every list's room before any list reads the page (the compare-jump pass, 2026-11-17): a file's lines come in as a
+  // windowed list that, unplaced, holds no room for its rows past the overscan; read after another list's read laid the
+  // page out, it had made the page 5,000 px shorter for that layout, and a page scrolled near its end was cut back to it
+  // and stayed there, a file picked near the list's end landing far from where it was put.
+  for (const each of all) each("room");
+  for (const each of all) each("read");
 }
 
 /** The lists placed whose overscan below the view waits for the frame that shows their rows (`growSoon`). */

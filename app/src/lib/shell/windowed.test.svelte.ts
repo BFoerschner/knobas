@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { checkScale } from "./device-scale.svelte";
 import { gridLength } from "./windowed";
-import { growWindowsNow, laidOut, placeWindowsNow, Windowed } from "./windowed.svelte";
+import { growWindowsNow, laidOut, landOn, listScrolled, placeWindowsNow, Windowed } from "./windowed.svelte";
 
 /**
  * Draws, then reads where each windowed list sits, as the end of the flush that attached it does, and draws again;
@@ -295,6 +295,97 @@ test("a row held on a page keep-alive hid does not scroll the page shown after i
   expect(scrolled).toBe(500);
   stop();
   vi.unstubAllGlobals();
+});
+
+test("a jump holds the row it lands on, not the row above it still showing under a band, while what is above it grows (the compare-jump pass)", () => {
+  // Björn, 2026-11-17: in Compare some smaller files were not scrolled to. A file picked lands under the diff's band,
+  // which covers the scroller's top; the file before it still shows there, and as the topmost row on screen it was the
+  // one held, so its lines arriving pushed the picked file down.
+  const observers: { targets: Element[]; report: (entries: ResizeObserverEntry[]) => void }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      targets: Element[] = [];
+      constructor(report: (entries: ResizeObserverEntry[]) => void) {
+        observers.push({ targets: this.targets, report });
+      }
+      observe(el: Element) {
+        this.targets.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  document.body.innerHTML = '<div class="main" style="overflow-y: auto"><div class="l"><div class="ra"></div><div class="rb"></div></div></div>';
+  const main = document.querySelector<HTMLElement>(".main")!;
+  const [ra, rb] = [document.querySelector<HTMLElement>(".ra")!, document.querySelector<HTMLElement>(".rb")!];
+  let scrolled = 0;
+  // The file before is 500 px tall until its lines come; the picked one is a line long. The list starts 1,000 px down.
+  let above = 500;
+  Object.defineProperty(main, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(main, "clientHeight", { value: 1_000 });
+  Object.defineProperty(main, "scrollHeight", { value: 50_000 });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const at = (top: number, height: number) => ({ width: 200, height, top, bottom: top + height, left: 0, right: 200, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    if (this === main) return at(0, 1_000);
+    if (this === ra) return at(1_000 - scrolled, above);
+    if (this === rb) return at(1_000 + above + 12 - scrolled, 63);
+    return at(1_000 - scrolled, above + 75);
+  });
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    win.list(document.querySelector(".l")!);
+    win.row(0)(ra);
+    win.row(1)(rb);
+  });
+  placed();
+  // The reader scrolls down to the diff: the file before is the top row on screen.
+  scrolled = 900;
+  main.dispatchEvent(new Event("scroll"));
+  // The pick: the picked file's top to the band's foot, 44 px down.
+  landOn(rb, main, rb.getBoundingClientRect().top - 44);
+  expect(rb.getBoundingClientRect().top).toBe(44);
+  // The scroll that raised is the lists' own, not the reader's: it holds nothing new.
+  const landing = new Event("scroll");
+  main.dispatchEvent(landing);
+  expect(listScrolled(landing)).toBe(true);
+  // The file before draws its lines, 300 px more of them: the picked file stays at the band's foot.
+  above = 800;
+  const sizes = observers.find((o) => o.targets.includes(ra))!;
+  sizes.report([{ target: ra, borderBoxSize: [{ blockSize: 800, inlineSize: 200 }], contentRect: { height: 800 } } as unknown as ResizeObserverEntry]);
+  expect(rb.getBoundingClientRect().top).toBe(44);
+  // The reader's own scroll is not the lists'.
+  scrolled += 40;
+  const reader = new Event("scroll");
+  main.dispatchEvent(reader);
+  expect(listScrolled(reader)).toBe(false);
+  stop();
+  vi.unstubAllGlobals();
+});
+
+test("lists attached together each hold their rows' room before any of them reads the page (the compare-jump pass)", () => {
+  // A file's lines came in as a windowed list holding no room for its rows past the first screen until it read where it
+  // sat; another list's read before then laid the page out 5,000 px short, and a page scrolled near its end was cut
+  // back for good.
+  document.body.innerHTML = '<div class="main" style="overflow-y: auto"><div class="la"></div><div class="lb"></div></div>';
+  const [la, lb] = [document.querySelector<HTMLElement>(".la")!, document.querySelector<HTMLElement>(".lb")!];
+  const seen: string[] = [];
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    // Each read of the page notes whether both lists held their room then.
+    seen.push(`${la.style.paddingBottom !== ""} ${lb.style.paddingBottom !== ""}`);
+    return { width: 200, height: 800, top: 0, bottom: 800, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+  });
+  const a = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const b = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    a.list(la);
+    b.list(lb);
+  });
+  flushSync();
+  placeWindowsNow();
+  expect(seen.length).toBeGreaterThan(0);
+  expect(new Set(seen)).toEqual(new Set(["true true"]));
+  stop();
 });
 
 test("the drawn rows hold still while the view moves inside them, and move to it once it comes within the margin of their edge (PR #2479)", () => {

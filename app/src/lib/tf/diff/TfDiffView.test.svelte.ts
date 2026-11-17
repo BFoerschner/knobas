@@ -17,6 +17,7 @@ import { layers } from "../layers.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createDiffLayout, LAYOUT_KEY } from "./diff-layout.svelte";
 import TfDiffView from "./TfDiffView.svelte";
+import { growWindowsNow, placeWindowsNow } from "../../shell/windowed.svelte";
 
 const ctx = (old: number, nu: number, text: string): DiffLine => ({ kind: "context", old, new: nu, text });
 const del = (old: number, text: string): DiffLine => ({ kind: "del", old, new: null, text });
@@ -505,6 +506,128 @@ test("a pick holds the pill while the page stands where the pick put it, the rea
   scrolled(700);
   scrolled(900);
   expect(pill()).toBe("src/c.rs");
+});
+
+test("a file picked lands with its head at the band's foot, and the rail marks it, a file of one line among long ones too (the compare-jump pass)", () => {
+  // Björn, 2026-11-17: "in the compare view it doesn't scroll to some smaller diffed files". Scrolled into view at the
+  // scroller's top, a picked file sat under the band stuck there: one too short to push its sticky head out from under
+  // it showed the next file's head instead, and the rail, reading the scroller's top, marked the file before.
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  let top = 0;
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => top, set: (px: number) => (top = px) });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 20_000 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 800 });
+  // Where each file starts down the page: a long one, a file of one line, another long one. The band is 44 px tall.
+  const starts: Record<string, number> = { "src/a.rs": 300, "src/b.rs": 3_000, "src/c.rs": 3_075 };
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const path = this.getAttribute("data-file");
+    const [y, height] = this.classList.contains("tf-dband") ? [0, 44] : path !== null && path in starts ? [starts[path]! - top, 63] : [0, 0];
+    return { top: y, bottom: y + height, left: 0, right: 0, width: 0, height, x: 0, y, toJSON: () => ({}) } as DOMRect;
+  };
+  try {
+    draw({ files: [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")], layout: createDiffLayout(() => null) }, page);
+    const pill = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+    target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/b.rs']")!.click();
+    flushSync();
+    // Its head at the band's foot, not under the band at the scroller's top.
+    expect(top).toBe(3_000 - 44);
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+    expect(pill()).toBe("src/b.rs");
+    expect(cardOf("src/b.rs").classList.contains("tf-current")).toBe(true);
+    // The reader scrolls a little: the file whose head is at the band's foot is still the one marked.
+    top += 10;
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+    expect(pill()).toBe("src/b.rs");
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = rect;
+  }
+});
+
+/**
+ * A page of `n` one-line files in a scroller 800 px tall, each card 120 px with 12 between them, starting 300 px down:
+ * where everything stands follows the scroll, as a browser lays it out.
+ */
+function laidOutPage(n: number) {
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  page.style.overflowY = "auto";
+  target.appendChild(page);
+  let top = 0;
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => top, set: (px: number) => (top = Math.max(0, px)) });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 300 + n * 132 + 800 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 800 });
+  const paths = Array.from({ length: n }, (_, i) => `src/f${String(i).padStart(3, "0")}.rs`);
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const path = this.getAttribute("data-file");
+    const at = path === null ? -1 : paths.indexOf(path);
+    const [y, height] =
+      this === page ? [0, 800] : this.classList.contains("tf-dband") ? [0, 44] : this.classList.contains("tf-dcards") ? [300 - top, n * 132] : at >= 0 ? [300 + at * 132 - top, 120] : [0, 0];
+    return { top: y, bottom: y + height, left: 0, right: 0, width: 0, height, x: 0, y, toJSON: () => ({}) } as DOMRect;
+  };
+  draw({ files: paths.map((path) => file(path)), layout: createDiffLayout(() => null) }, page);
+  placeWindowsNow();
+  flushSync();
+  growWindowsNow();
+  flushSync();
+  const scrolled = (to: number) => {
+    top = to;
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+  };
+  const pick = (path: string) => {
+    target.querySelector<HTMLButtonElement>(`.tf-flist button[title='${path}']`)!.click();
+    flushSync();
+  };
+  const headOf = (path: string) => target.querySelector<HTMLElement>(`[data-file="${path}"]`)?.getBoundingClientRect().top ?? null;
+  return { page, paths, scrolled, pick, headOf, top: () => top, restore: () => (HTMLElement.prototype.getBoundingClientRect = rect) };
+}
+
+test("a file drawn once and taken out by the window since is drawn again and landed when picked (the compare-jump pass)", () => {
+  // In Compare, a pick of a file drawn earlier near the view and scrolled away from did nothing: its card's binding
+  // was null, not undefined, so the view took it for drawn and scrolled to nothing.
+  const page = laidOutPage(60);
+  try {
+    page.pick(page.paths[40]!);
+    expect(page.headOf(page.paths[40]!)).toBe(44);
+    expect(page.headOf(page.paths[41]!)).not.toBeNull();
+    // The reader wheels back to the top: the files near 40 leave the window.
+    page.page.dispatchEvent(new Event("wheel"));
+    page.scrolled(0);
+    expect(page.headOf(page.paths[41]!)).toBeNull();
+    page.pick(page.paths[41]!);
+    expect(page.headOf(page.paths[41]!)).toBe(44);
+    expect(target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title")).toBe(page.paths[41]);
+  } finally {
+    page.restore();
+  }
+});
+
+test("a landed file the page moves before the reader touches it goes back, in the same frame; once the reader scrolls it stays put (the compare-jump pass)", () => {
+  // Near the list's end, a layout while a file's lines came in made the page shorter for a moment, and the browser cut
+  // the scroll back to the new end: the file picked stayed a screen or more below where it was put.
+  const page = laidOutPage(60);
+  try {
+    const path = page.paths[30]!;
+    page.pick(path);
+    expect(page.headOf(path)).toBe(44);
+    const landedAt = page.top();
+    // The page is cut back 2,000 px, with no wheel, press or key: the file goes back.
+    page.scrolled(landedAt - 2_000);
+    expect(page.top()).toBe(landedAt);
+    expect(page.headOf(path)).toBe(44);
+    // The reader's wheel, then scroll: theirs.
+    page.page.dispatchEvent(new Event("wheel"));
+    page.scrolled(landedAt - 500);
+    expect(page.top()).toBe(landedAt - 500);
+  } finally {
+    page.restore();
+  }
 });
 
 test("a page kept hidden keeps its current file through a read again, so its pill never moves when it is shown", () => {

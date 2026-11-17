@@ -25,6 +25,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // wait for those frames let go, so the next test's lists wait for frames of their own.
   "shell/windowed.svelte.ts#ungrown": async () => (await import("./windowed.svelte")).growWindowsNow(),
   "shell/windowed.svelte.ts#growWait": async () => (await import("./windowed.svelte")).growWindowsNow(),
+  // Each attached list's read of the view, for a landing (the compare-jump pass, 2026-11-17): a list leaves it as it is
+  // torn down; one a test left attached is let go, so the next test's landing reads none of it.
+  "shell/windowed.svelte.ts#viewReads": async () => (await import("./windowed.svelte")).forgetViewReads(),
   // How many dialogs are open (PR #2479): a test that left one drawn would keep the toasts lowered for the next.
   "tf/modals.svelte.ts#modals": async () => {
     (await import("../tf/modals.svelte")).modals.open = 0;
