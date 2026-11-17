@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import Fixture from "./TfSideEdge.fixture.svelte";
-import { DragPace, forgetPace, releasedIn, REST_MS, startsAsGhost, trippedOn } from "./side-pace";
+import { DragPace, forgetPace, landedIn, markSlow, rereadPace, REST_MS, SLOW_MS, startsAsGhost, STORE_PREFIX } from "./side-pace";
 import {
   clampWidth,
   createSideWidths,
@@ -344,27 +344,25 @@ describe("the edge", () => {
     pointer("pointermove", 320);
     frame();
     expect(drawn("builds")).toBe(cssWidth("builds", 320));
-    // Each written frame took 30 ms to lay out: the second slow one trips the ghost.
+    // The first written frame took 30 ms to lay out: it alone turns this drag into a ghost (2026-11-17).
     pointer("pointermove", 340);
     frame(30);
-    expect(drawn("builds")).toBe(cssWidth("builds", 340));
-    pointer("pointermove", 360);
-    frame(30);
-    expect(drawn("builds"), "the ghost writes no width").toBe(cssWidth("builds", 340));
+    expect(drawn("builds"), "the ghost writes no width").toBe(cssWidth("builds", 320));
     expect(transform()).toBe("translateX(20px)");
-    expect(edge().getAttribute("aria-valuenow")).toBe("360");
-    pointer("pointermove", 400);
+    expect(edge().getAttribute("aria-valuenow")).toBe("340");
+    expect(startsAsGhost("builds"), "one slow frame marks no sidebar").toBe(false);
+    pointer("pointermove", 380);
     frame();
-    expect(drawn("builds")).toBe(cssWidth("builds", 340));
+    expect(drawn("builds")).toBe(cssWidth("builds", 320));
     expect(transform()).toBe("translateX(60px)");
     // The pointer rests: the width lands, the line back on the edge in the same frame.
     for (let at = 0; at < REST_MS; at += 16.7) frame();
     frame();
-    expect(drawn("builds")).toBe(cssWidth("builds", 400));
+    expect(drawn("builds")).toBe(cssWidth("builds", 380));
     expect(transform()).toBe("");
     pointer("pointermove", 430);
     frame();
-    expect(transform()).toBe("translateX(30px)");
+    expect(transform()).toBe("translateX(50px)");
     pointer("pointerup", 450);
     flushSync();
     expect(drawn("builds")).toBe(cssWidth("builds", 450));
@@ -372,10 +370,10 @@ describe("the edge", () => {
     expect(sideWidths.px("builds")).toBe(450);
   });
 
-  test("one slow frame alone keeps the drag live", async () => {
+  test("one slow frame after the first keeps the drag live", async () => {
     await draw("builds", "300px 1140px");
     pointer("pointerdown", 300, edge());
-    for (const [x, gap] of [[320, 16.7], [340, 40], [360, 16.7], [380, 16.7], [400, 16.7], [420, 40], [440, 16.7]] as const) {
+    for (const [x, gap] of [[320, 16.7], [330, 16.7], [340, 40], [360, 16.7], [380, 16.7], [400, 16.7], [420, 40], [440, 16.7]] as const) {
       pointer("pointermove", x);
       frame(gap);
     }
@@ -388,7 +386,7 @@ describe("the edge", () => {
 
   test("a sidebar that tripped starts its next drag as a ghost, until two releases land within a frame", async () => {
     await draw("tickets-views", "230px 870px 340px");
-    trippedOn("tickets-views");
+    markSlow("tickets-views");
     pointer("pointerdown", 230, edge());
     pointer("pointermove", 280);
     frame();
@@ -406,6 +404,41 @@ describe("the edge", () => {
     frame();
     frame();
     expect(startsAsGhost("tickets-views")).toBe(false);
+  });
+
+  test("a landing at rest counts toward clearing a mark, as a release does", async () => {
+    await draw("builds", "300px 1140px");
+    markSlow("builds");
+    pointer("pointerdown", 300, edge());
+    pointer("pointermove", 360);
+    frame();
+    expect(transform()).toBe("translateX(60px)");
+    // The pointer rests: the width lands, and the frame after it comes within the line.
+    for (let at = 0; at < REST_MS; at += 16.7) frame();
+    frame();
+    expect(drawn("builds")).toBe(cssWidth("builds", 360));
+    frame();
+    expect(startsAsGhost("builds"), "one fast landing is not enough").toBe(true);
+    pointer("pointerup", 380);
+    frame();
+    frame();
+    expect(startsAsGhost("builds"), "the release is the second").toBe(false);
+  });
+
+  test("a slow machine's first drag marks the sidebar: its next drag starts as a ghost", async () => {
+    await draw("tickets-views", "230px 870px 340px");
+    pointer("pointerdown", 230, edge());
+    pointer("pointermove", 250);
+    frame();
+    pointer("pointermove", 270);
+    frame(40);
+    expect(transform(), "a ghost after the first slow frame").toBe("translateX(20px)");
+    pointer("pointerup", 290);
+    // The release lays the page out as slowly: the second slow frame in four.
+    frame();
+    frame(40);
+    expect(startsAsGhost("tickets-views")).toBe(true);
+    expect(storage.getItem(STORE_PREFIX + "tickets-views")).toBe("1");
   });
 
   test("below 900 px, where every sidebar stacks or folds behind its bar, there is no edge", async () => {
@@ -442,29 +475,126 @@ describe("the pace", () => {
       }
       return pace.ghost;
     };
-    expect(run([30, 30])).toBe(true);
-    expect(run([30, 16, 16, 30])).toBe(true);
-    expect(run([30, 16, 16, 16, 30])).toBe(false);
+    expect(run([16, 30, 30])).toBe(true);
+    expect(run([16, 30, 16, 16, 30])).toBe(true);
+    expect(run([16, 30, 16, 16, 16, 30])).toBe(false);
     expect(run([19, 19, 19, 19])).toBe(false);
-    expect(run([19.5, 19.5])).toBe(true);
+    expect(run([16, 19.5, 19.5])).toBe(true);
+  });
+
+  test("the first written frame alone turns its drag into a ghost when it is slow, and marks nothing", () => {
+    const first = (gap: number) => {
+      const pace = new DragPace(false);
+      pace.wrote(0);
+      const turned = pace.frame(gap);
+      return { turned, ghost: pace.ghost, marked: pace.marked };
+    };
+    expect(first(SLOW_MS + 0.5)).toEqual({ turned: true, ghost: true, marked: false });
+    expect(first(SLOW_MS)).toEqual({ turned: false, ghost: false, marked: false });
+    expect(first(16.7)).toEqual({ turned: false, ghost: false, marked: false });
+  });
+
+  test("two slow frames in four mark the sidebar, a ghost's landings among them", () => {
+    const pace = new DragPace(false, "builds");
+    pace.wrote(0);
+    pace.frame(30);
+    expect(pace.ghost).toBe(true);
+    expect(startsAsGhost("builds")).toBe(false);
+    // The ghost lands at rest, and that frame is slow too.
+    pace.wrote(500, true);
+    pace.frame(540);
+    expect(pace.marked).toBe(true);
+    expect(startsAsGhost("builds")).toBe(true);
+    forgetPace();
+  });
+
+  test("a release's landing is costed: slow, it marks a sidebar whose first frame was slow", () => {
+    const pace = new DragPace(false, "repo-builds");
+    pace.wrote(0);
+    pace.frame(25);
+    pace.released(45);
+    expect(startsAsGhost("repo-builds")).toBe(true);
+    forgetPace();
+  });
+
+  test("a mark outlives a restart, and clearing it clears what is stored", () => {
+    const held = new Map<string, string>();
+    const kept = {
+      get length() {
+        return held.size;
+      },
+      clear: () => held.clear(),
+      getItem: (key: string) => held.get(key) ?? null,
+      key: (index: number) => [...held.keys()][index] ?? null,
+      removeItem: (key: string) => void held.delete(key),
+      setItem: (key: string, value: string) => void held.set(key, value),
+    } as Storage;
+    Object.defineProperty(window, "localStorage", { value: kept, configurable: true, writable: true });
+    try {
+      rereadPace();
+      markSlow("docs-tree");
+      expect(held.has(STORE_PREFIX + "docs-tree")).toBe(true);
+      rereadPace();
+      expect(startsAsGhost("docs-tree"), "read back after a restart").toBe(true);
+      expect(startsAsGhost("builds")).toBe(false);
+      landedIn("docs-tree", 12);
+      landedIn("docs-tree", 12);
+      expect(held.has(STORE_PREFIX + "docs-tree")).toBe(false);
+      rereadPace();
+      expect(startsAsGhost("docs-tree")).toBe(false);
+    } finally {
+      forgetPace();
+      Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
+    }
+  });
+
+  test("a storage that throws keeps the mark for the session", () => {
+    const refusing = {
+      get length(): number {
+        throw new Error("blocked");
+      },
+      key: () => {
+        throw new Error("blocked");
+      },
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+      clear: () => {},
+    } as unknown as Storage;
+    Object.defineProperty(window, "localStorage", { value: refusing, configurable: true, writable: true });
+    try {
+      rereadPace();
+      markSlow("compare");
+      expect(startsAsGhost("compare")).toBe(true);
+      landedIn("compare", 10);
+      landedIn("compare", 10);
+      expect(startsAsGhost("compare")).toBe(false);
+    } finally {
+      forgetPace();
+      Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
+    }
   });
 
   test("a frame that wrote nothing is not costed", () => {
     const pace = new DragPace(false);
     pace.wrote(0);
-    pace.frame(40);
+    pace.frame(10);
     pace.frame(200);
     pace.frame(400);
     expect(pace.ghost).toBe(false);
   });
 
   test("a mark clears after two fast releases in a row; a slow one starts the count again", () => {
-    trippedOn("docs-tree");
-    releasedIn("docs-tree", 12);
-    releasedIn("docs-tree", 40);
-    releasedIn("docs-tree", 12);
+    markSlow("docs-tree");
+    landedIn("docs-tree", 12);
+    landedIn("docs-tree", 40);
+    landedIn("docs-tree", 12);
     expect(startsAsGhost("docs-tree")).toBe(true);
-    releasedIn("docs-tree", 19);
+    landedIn("docs-tree", 19);
     expect(startsAsGhost("docs-tree")).toBe(false);
     forgetPace();
   });

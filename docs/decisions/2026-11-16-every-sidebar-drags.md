@@ -56,7 +56,9 @@ Builds (half of it is the rail's own rows) and shows clipped content. As built (
 - The ghost: the columns keep the last width written; the held line follows the pointer by a transform, clamped where
   the width clamps; the width lands when the pointer has rested within 2 px for 150 ms, and on release, the transform
   reset in the same frame. Same line, no tint.
-- Memory: a sidebar that tripped starts its later drags as a ghost for the session. The frame that lands the width on
+- Memory: a sidebar that tripped starts its later drags as a ghost for the session. (Changed 2026-11-17, on the PC:
+  a slow first frame alone makes its drag a ghost, the mark is kept across restarts and cleared by two fast landings
+  at rest or on release; `2026-11-17-a-hover-a-drag-and-the-web-views-menu-on-the-pc.md`.) The frame that lands the width on
   release is costed the same way, and two releases in a row within 19 ms, each changing the width, clear the mark.
 - Measured, not listed per sidebar: the same Builds rail is 60 fps at 1x and 27 at 6x.
 

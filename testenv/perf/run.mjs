@@ -11,6 +11,8 @@
 //            a headless Chrome; --match picks its page by URL prefix, and --app is then optional
 // --throttle Emulation.setCPUThrottlingRate, one pass per rate: it slows the page's main thread only, not the
 //            compositor, raster or the GPU
+// --pace     cold: no sidebar's drag mark kept from an earlier drag (`side-pace.ts`), what a first drag pays; warm:
+//            the marks kept. The drag cases only
 // --guard    a command run before every scenario (its words split on spaces); a non-zero exit stops the run. On a
 //            person's own machine: "are they away", so nothing drives the screen under them
 //
@@ -256,6 +258,9 @@ for (const rate of throttles) {
         await cpu(1);
         await fresh(null);
         await js(`(async () => { ${sc.setup} })()`);
+        // `--pace cold`: no sidebar marked slow (`side-pace.ts` keeps the marks in localStorage since 2026-11-17), so the
+        // drag shows what a first drag on this machine pays; `warm` keeps what earlier drags marked.
+        if (opt("--pace") === "cold") await js(`(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("knobas.side-pace.")) localStorage.removeItem(k); return 1; })()`);
         const edgeSel = `.tf-kept:not([hidden]) .tf-sedge[data-side="${sc.side}"], .tf-sedge[data-side="${sc.side}"]`;
         // Where to hold it: the edge's middle, within the window. `out` is the way that widens the sidebar.
         const at = await js(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(edgeSel)})].find((x) => __fr.visible(x)); if (!e) return null; const r = e.getBoundingClientRect(); const top = Math.max(r.top, 0), bottom = Math.min(r.bottom, innerHeight); window.__dragGrid = e.parentElement; window.__dragProp = "--side-${sc.side}"; return { x: Math.round(r.left + r.width / 2), y: Math.round((top + bottom) / 2), out: e.dataset.at === "end" ? -1 : 1, w: Number(e.getAttribute("aria-valuenow")), nodes: document.getElementsByTagName("*").length }; })()`);
@@ -291,7 +296,7 @@ for (const rate of throttles) {
         }
         // The frames of the drag itself, before the pointer lets go: how often the width moved, whether it tripped the
         // ghost, and the rate and worst gap from the trip on (Fable's ruling: no page trips at 1x; after a trip, 55 fps).
-        const moving = await js(`(() => { const s = window.__dragSeen; s.on = false; const f = s.frames; const gaps = f.slice(1).map((x, i) => x[0] - f[i][0]); const trip = f.findIndex((x) => x[2] === 1); const after = trip === -1 ? [] : f.slice(trip); const span = after.length > 1 ? after[after.length - 1][0] - after[0][0] : 0; const r = (x) => Math.round(x * 10) / 10; return { frames: f.length, moved: f.filter((x) => x[1]).length, maxGap: r(Math.max(0, ...gaps)), trippedAt: trip, afterTrip: trip === -1 ? null : { frames: after.length, fps: span ? r(((after.length - 1) / span) * 1000) : 0, maxGap: r(Math.max(0, ...after.slice(1).map((x, i) => x[0] - after[i][0]))) } }; })()`);
+        const moving = await js(`(() => { const s = window.__dragSeen; s.on = false; const f = s.frames; const gaps = f.slice(1).map((x, i) => x[0] - f[i][0]); const trip = f.findIndex((x) => x[2] === 1); const after = trip === -1 ? [] : f.slice(trip); const before = trip === -1 ? f : f.slice(0, trip + 1); const span = after.length > 1 ? after[after.length - 1][0] - after[0][0] : 0; const r = (x) => Math.round(x * 10) / 10; return { frames: f.length, moved: f.filter((x) => x[1]).length, maxGap: r(Math.max(0, ...gaps)), trippedAt: trip, trippedAfterMs: trip === -1 ? null : r(f[trip][0] - f[0][0]), beforeTrip: { slow: before.slice(1).filter((x, i) => x[0] - before[i][0] > 19).length, maxGap: r(Math.max(0, ...before.slice(1).map((x, i) => x[0] - before[i][0]))) }, afterTrip: trip === -1 ? null : { frames: after.length, fps: span ? r(((after.length - 1) / span) * 1000) : 0, maxGap: r(Math.max(0, ...after.slice(1).map((x, i) => x[0] - after[i][0]))) } }; })()`);
         await mouse("mouseMoved", at.x + at.out * 120);
         await mouse("mouseReleased", at.x + at.out * 120);
         const page = await watching;
@@ -301,7 +306,7 @@ for (const rate of throttles) {
         const span = shown.window;
         entry.sent = sent;
         entry.followed = moving.frames ? Math.round((moving.moved / moving.frames) * 100) : 0;
-        entry.drag = { maxGapMs: moving.maxGap, tripped: moving.trippedAt !== -1, trippedAtFrame: moving.trippedAt, afterTrip: moving.afterTrip };
+        entry.drag = { maxGapMs: moving.maxGap, tripped: moving.trippedAt !== -1, trippedAtFrame: moving.trippedAt, trippedAfterMs: moving.trippedAfterMs, beforeTrip: moving.beforeTrip, afterTrip: moving.afterTrip };
         // The drag's own rate: after a trip, the ghost's frames; else every frame of the drag.
         entry.dragFps = moving.afterTrip?.fps ?? page.fps;
         entry.raf = { fps: page.fps, droppedPct: page.droppedPct, work: page.frameWork, gap: page.gap, jsMsPerFrame: page.jsMsPerFrame };
@@ -311,7 +316,7 @@ for (const rate of throttles) {
         entry.width = await js(`Number(document.querySelector(${JSON.stringify(edgeSel)})?.getAttribute("aria-valuenow"))`);
         // Back to the default for the next scenario: nothing kept.
         await js(`localStorage.removeItem(${JSON.stringify(sc.side === "ticket-card" ? "knobas.ticket.side" : `knobas.side.${sc.side}`)}); 1`);
-        console.log(`${rate}x drag ${sc.name}: ${sent} moves, rAF ${page.fps} fps, dropped ${page.droppedPct}%, work p50/p99/max ${page.frameWork.p50}/${page.frameWork.p99}/${page.frameWork.max} ms | followed ${entry.followed}% of ${moving.frames} frames, worst gap ${moving.maxGap} ms, ${moving.afterTrip ? `ghost from frame ${moving.trippedAt}: ${moving.afterTrip.fps} fps, worst gap ${moving.afterTrip.maxGap} ms` : "live"} | style ${entry.style.n} passes, elements p50/max ${entry.style.elements.p50}/${entry.style.elements.max} | longest task ${entry.longest.maxMs} ms | ${Object.entries(entry.main.pct).slice(0, 4).map(([k, v]) => `${k} ${v}%`).join(" ")} | ${at.nodes} nodes, ${at.w} -> ${entry.width} px`);
+        console.log(`${rate}x drag ${sc.name}: ${sent} moves, rAF ${page.fps} fps, dropped ${page.droppedPct}%, work p50/p99/max ${page.frameWork.p50}/${page.frameWork.p99}/${page.frameWork.max} ms | followed ${entry.followed}% of ${moving.frames} frames, worst gap ${moving.maxGap} ms, ${moving.afterTrip ? `ghost from frame ${moving.trippedAt} (${moving.trippedAfterMs} ms; before it ${moving.beforeTrip.slow} gaps over 19 ms, worst ${moving.beforeTrip.maxGap}): ${moving.afterTrip.fps} fps, worst gap ${moving.afterTrip.maxGap} ms` : "live"} | style ${entry.style.n} passes, elements p50/max ${entry.style.elements.p50}/${entry.style.elements.max} | longest task ${entry.longest.maxMs} ms | ${Object.entries(entry.main.pct).slice(0, 4).map(([k, v]) => `${k} ${v}%`).join(" ")} | ${at.nodes} nodes, ${at.w} -> ${entry.width} px`);
       } catch (e) { entry.error = String(e.message || e); console.log(`${rate}x drag ${sc.name}: ERROR ${entry.error}`); await cpu(1); }
       results.drag.push(entry);
       save();

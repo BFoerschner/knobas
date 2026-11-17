@@ -30,7 +30,7 @@
     specOf,
     type SideId,
   } from "./side-width.svelte";
-  import { DragPace, releasedIn, REST_MS, REST_PX, startsAsGhost, trippedOn } from "./side-pace";
+  import { DragPace, REST_MS, REST_PX, startsAsGhost } from "./side-pace";
 
   let {
     side,
@@ -96,7 +96,7 @@
     const property = sideProperty(side);
     const target = edge;
     const id = side;
-    const pace = new DragPace(startsAsGhost(id));
+    const pace = new DragPace(startsAsGhost(id), id);
     let x = x0;
     /** The width the grid draws, and where the pointer would put it. */
     let width = from;
@@ -118,7 +118,7 @@
     // Every frame while the pointer is down, so a frame that wrote a width is costed by the one after it (`DragPace`).
     let frame = 0;
     const tick = (ts: number) => {
-      if (pace.frame(ts)) trippedOn(id);
+      pace.frame(ts);
       const next = aim();
       if (!pace.ghost) {
         if (write(next)) pace.wrote(ts);
@@ -127,7 +127,10 @@
           restX = x;
           restAt = ts;
         }
-        if (ts - restAt >= REST_MS && next !== width) write(next);
+        // A landing at rest: costed as a written frame is (`DragPace`), what marks a sidebar slow or clears it.
+        if (ts - restAt >= REST_MS && next !== width) {
+          if (write(next)) pace.wrote(ts, true);
+        }
         else if (next !== width) {
           // Only the line follows the pointer, where the width would clamp.
           target.style.transform = `translateX(${sign * (next - width)}px)`;
@@ -162,8 +165,8 @@
       if (keep) {
         const before = width;
         write(aim());
-        // The frame that lays the page out at the new width, costed as a drag's frame is: what clears a ghost's mark.
-        if (width !== before) requestAnimationFrame((t1) => requestAnimationFrame((t2) => releasedIn(id, t2 - t1)));
+        // The frame that lays the page out at the new width, costed as a drag's frame is: a landing.
+        if (width !== before) requestAnimationFrame((t1) => requestAnimationFrame((t2) => pace.released(t2 - t1)));
       }
       if (moved) {
         if (keep) sideWidths.set(id, width, at.grid);
