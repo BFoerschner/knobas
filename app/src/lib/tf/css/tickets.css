@@ -41,8 +41,11 @@
 .tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
 /* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go
    on, and the eye runs down a status. It goes by the window and not the board. At 1440 px five columns fit beside the views,
-   with a sliver of a sixth, so the board says there is more (F-160). */
-.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: 232px; gap: 8px; align-items: start; overflow-x: auto; background: var(--paper); }
+   with a sliver of a sixth, so the board says there is more (F-160). From about 2000 px a column is a seventh of the window
+   beyond the views, so a wide window's board runs across it instead of leaving most of it empty, up to 520 px: a title of
+   about 70 characters on a line, the most a line reads well at (`docs/decisions/2026-11-17-the-board-across-a-wide-window.md`).
+   More cards a column was not taken: a key's draw is the cards on screen, and at 5120 px it is near its line. */
+.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: clamp(232px, calc((100vw - 400px) / 7), 520px); gap: 8px; align-items: start; overflow-x: auto; background: var(--paper); }
 @media (max-width: 1500px) { .tf-cols { grid-auto-columns: 195px; } }
 .tf-lanes-more { align-self: flex-start; position: sticky; left: 22px; margin: 0 22px 14px; }
 /* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. The body is as
@@ -134,13 +137,17 @@
 /* The List's columns stand still (F-151, F-144): a filter, a pill or a sort moves none of them, and each has its width here.
    The summary is the column you read, so it takes the rest. A value too long for its column ends in an ellipsis, with the
    whole of it in its title. A signal wraps instead, because each one is a sentence. */
-.tf-list .tf-tbl { table-layout: fixed; }
+/* On a wide window the list stops where a long summary ends, so a row's status and assignee stay in reach of its words
+   instead of a screen away; the summary keeps at most about 1,000 px. */
+.tf-list .tf-tbl { table-layout: fixed; --tf-epic-w: 0px; --tf-labels-w: 0px; max-width: calc(1640px + var(--tf-epic-w) + var(--tf-labels-w)); }
+.tf-list .tf-tbl.tf-has-epic { --tf-epic-w: 96px; }
+.tf-list .tf-tbl.tf-has-labels { --tf-labels-w: 120px; }
 .tf-list .tf-c-key { width: 116px; }
 .tf-list .tf-c-status { width: 92px; }
 .tf-list .tf-c-priority { width: 76px; }
 .tf-list .tf-c-signals { width: 136px; }
 .tf-list .tf-c-assignee { width: 92px; }
-.tf-list .tf-c-updated { width: 80px; }
+.tf-list .tf-c-updated { width: 120px; }
 .tf-list .tf-c-epic { width: 96px; }
 .tf-list .tf-c-labels { width: 120px; }
 .tf-list tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
