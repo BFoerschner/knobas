@@ -397,7 +397,8 @@
 .tf-dl-filter .tf-fbar { position: static; padding: 0; border: 0; background: none; flex-wrap: nowrap; }
 .tf-dl-filter .tf-fsearch { max-width: none; min-width: 0; flex: 1 1 auto; }
 .tf-dl-filter .tf-ftail { flex: none; }
-.tf-dl-filter .tf-fcount:not(:has(.tf-fcount-n:not(:empty))) { display: none; }
+/* With nothing typed there is no count: the field is as wide as the picker above it. */
+.tf-dl-filter .tf-ftail:not(:has(.tf-fcount-n:not(:empty))) { display: none; }
 /* The fold of hidden spaces: Monitors' fold's summary (`.tf-mon-fold`), at the end of the rail's spaces and of the home's tiles. */
 .tf-dk-fold { margin-top: 8px; border-top: 1px solid var(--rule-2); }
 .tf .tf-dk-fold > summary {
@@ -411,8 +412,12 @@
 .tf .tf-dk-row > a { flex: 1 1 auto; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-dk-row .tf-count { flex: none; }
 .tf-dk-row .tf-btn { flex: none; }
+/* In the rail its words and rows start where the spaces' names do, past the chevron. */
+.tf-dk-rail > summary .tf-dim { flex-basis: 100%; padding-left: 14px; }
+.tf-dk-rail .tf-dk-rows { padding-left: 14px; }
 .tf-dk-home { margin-top: 20px; }
-.tf-dk-home > summary { padding-inline: 0; }
+/* On the home it starts on the tiles' edge. */
+.tf .tf-dk-home > summary { padding-inline: 0; }
 .tf-dk-home .tf-dk-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2px 16px; }
 .tf-dk-home .tf-dk-row > a { padding: 4px 0; text-decoration: none; font-size: var(--t-md); }
 .tf-dk-home .tf-dk-row > a:hover { text-decoration: underline; }
