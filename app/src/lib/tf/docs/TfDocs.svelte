@@ -656,7 +656,7 @@
   // ---- the spaces Docs browses (PR #2479, 2026-11-17, `docs-choices.svelte.ts`) ----
   /** The rail's filter over its spaces, Code's own bar, its words kept for the session as Code's are. */
   const spaceFilter = sessionFilter("docs-spaces");
-  const SPACE_FILTER: FilterConfig = { id: "docs-spaces", placeholder: "Filter spaces", noun: "spaces", one: "space" };
+  const SPACE_FILTER: FilterConfig = { id: "docs-spaces", placeholder: "Filter spaces", noun: "spaces", one: "space", findKey: false };
   const filteringSpaces = $derived(spaceFilter.text.trim() !== "");
   /** The rail's spaces: the shown ones, then the hidden ones for the fold at their end, both kept to the filter's words. */
   const rail = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, spaceFilter.text));
@@ -664,14 +664,6 @@
   const pickable = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, ""));
   /** The rail draws one space that is hidden: a page of it is open, or it was picked. */
   const shownHidden = $derived(shownSpace !== undefined && docsChoices.hidden.has(spaceId(shownSpace)));
-  // Words typed in the filter ask for the list of spaces it narrows, wherever the rail was.
-  let filteredFor = untrack(() => spaceFilter.text);
-  $effect(() => {
-    const text = spaceFilter.text;
-    if (text === filteredFor) return;
-    filteredFor = text;
-    if (text.trim() !== "") untrack(() => (picked = "*"));
-  });
 
   /**
    * Docs' home the mirror no longer holds (a page deleted, a space gone): Docs opens on its own page in its place, as
@@ -1670,8 +1662,9 @@
             </optgroup>
           {/if}
         </select>
-        {#if !searching && tree.spaces.length > 1}
-          <!-- Code's own bar (Björn, 2026-11-17: "a small filter, like in the code pages"): its words narrow the spaces by name and key. -->
+        {#if !searching && shownSpace === undefined && tree.spaces.length > 1}
+          <!-- Code's own bar (Björn, 2026-11-17: "a small filter, like in the code pages"): its words narrow the spaces by name and key.
+               Drawn while the rail lists the spaces, which is what it narrows: on a page or a space the rail is that space's tree. -->
           <div class="tf-dl-filter">
             <FilterBar config={SPACE_FILTER} filter={spaceFilter} shown={filteringSpaces ? rail.shown.length : null} total={filteringSpaces ? pickable.shown.length : null} />
           </div>

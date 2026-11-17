@@ -114,7 +114,7 @@
     >
     <input
       bind:this={field}
-      {@attach filterKeys()}
+      {@attach filterKeys(config.findKey === false ? { rail: true } : {})}
       value={filter.text}
       oninput={typed}
       placeholder={config.placeholder}

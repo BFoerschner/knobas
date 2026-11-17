@@ -273,11 +273,33 @@ test("the filter's words are kept on a return, as Code's are", async () => {
   expect(railSpaces()).toEqual(["Archive 2019"]);
 });
 
-test("typing in the filter on a page widens the rail from that page's space to the spaces it narrows", async () => {
+test("the filter is drawn while the rail lists the spaces, not over a page's or a space's own tree, and its words wait for the list", async () => {
   await draw(["confluence:30"]);
-  expect(railSpaces(), "the page's own space's tree, no list").toEqual([]);
-  type("eng");
+  expect(rail().querySelector("input[aria-label='Filter spaces']"), "a page: the rail is its space's tree").toBeNull();
+  unmount(view!);
+  view = null;
+  await draw(["space", "ENG"]);
+  expect(rail().querySelector("input[aria-label='Filter spaces']"), "a space's own page: its tree").toBeNull();
+  unmount(view!);
+  view = null;
+  sessionFilter("docs-spaces").text = "eng";
+  await draw([]);
+  expect(rail().querySelector<HTMLInputElement>("input[aria-label='Filter spaces']")?.value).toBe("eng");
   expect(railSpaces()).toEqual(["Engineering"]);
+});
+
+test("⌘F on Docs' home leaves the spaces' filter alone: it is the launcher's, Docs' search", async () => {
+  const { installFindKey } = await import("../filter-keys");
+  const launcher = vi.fn();
+  const stop = installFindKey(launcher);
+  try {
+    await draw([]);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true }));
+    expect(launcher).toHaveBeenCalledTimes(1);
+    expect(document.activeElement?.getAttribute("aria-label")).not.toBe("Filter spaces");
+  } finally {
+    stop();
+  }
 });
 
 // ---- a home the mirror lost ----

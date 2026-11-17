@@ -63,7 +63,12 @@ in the rail and on the home, so the place to browse was the launcher.
   picker, drawn without a band of its own. Typing narrows the rail's spaces to those whose name (with its source where
   another source's space shares it) or key holds every word, as typed, with nothing read. Its count says *3 of 40
   spaces*. `Esc` clears it (`filterKeys`). Its words are kept for the session (`sessionFilter("docs-spaces")`), as
-  Code's are, so a return finds them. Typing on a page widens the rail from that page's space to the list it narrows.
+  Code's are, so a return finds them. It is drawn while the rail lists the spaces, which is what it narrows; on a page or
+  a space's own page the rail is that space's tree, as before, and *All spaces* in the picker brings the list and the
+  filter back (a 420 px tall window's tree lost a row to it otherwise, the press trips' `kept-docs-tree`).
+- **⌘F is not the filter's.** On Docs' home ⌘F opened the launcher on Docs' search, and still does: the filter is a
+  box ⌘F never takes (`filterKeys`' `rail`, a bar's `findKey: false`), since it finds nothing in the page. On a page
+  ⌘F opens the page's find bar, as before.
 - **The fold too** (Monitors' rule, #2462): the filter applies inside the hidden fold, which lists the hidden spaces
   the words match, and opens by itself when they match no shown space, until the reader closes it. *No space's name or
   key holds zzz.* with *Clear* when nothing matches at all.
@@ -92,7 +97,8 @@ IPC, additive: `docs_choices`, `set_docs_home`, `set_docs_space_hidden`, and the
 - Vitest: `TfDocs.choices.test.svelte.ts` (the rail's list and its fold, *Unhide* at once with *Undo*, a failed hide
   put back, the picker's *Hidden spaces*, a page of a hidden space and its note, the home's tiles, count and fold, a
   search hit marked, the filter by name and by key with its count, `Esc`, the fold under the filter opening by itself,
-  the words kept on a return, typing on a page, a home page and a home space gone, a page not held that is not the
+  the words kept on a return, no filter over a page's or a space's tree, ⌘F still the launcher's, a home page and a
+  home space gone, a page not held that is not the
   home); `docs-choices.test.ts` (the addresses, a later press standing over an earlier answer, *Undo*, a failed write, a
   read a write overtook, the rail's split and filter); `TfShell.test.svelte.ts` (the entry's first press at a home
   space, the place left winning, inside Docs going home, `#/docs` not taking the home's place, a search kept, a page

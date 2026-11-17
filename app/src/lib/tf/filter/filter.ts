@@ -94,6 +94,8 @@ export interface FilterConfig {
    * scope, the chips and the dropdowns.
    */
   search?: boolean;
+  /** `false` for a field ⌘F never takes (`filterKeys`' `rail`): one that narrows a rail's list, Docs' spaces. */
+  findKey?: boolean;
 }
 
 /** Where one view's filter stands. */

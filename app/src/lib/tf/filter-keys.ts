@@ -25,6 +25,11 @@ export interface FilterKeysOptions {
   close?: () => void;
   /** A box beside the page rather than for it: *Find a view*, *Go to file*, *Filter changed files*. ⌘F takes one only where the page has no other. */
   aside?: boolean;
+  /**
+   * A box that narrows a rail's own list and finds nothing in the page: Docs' spaces (PR #2479, 2026-11-17). ⌘F never
+   * takes it, so on its page ⌘F still means what it meant there, the launcher's search.
+   */
+  rail?: boolean;
 }
 
 /** A box ⌘F went to, and what held focus then. A blur forgets it, so a box you tab into or press later falls through as usual. */
@@ -49,7 +54,7 @@ function answer(box: HTMLInputElement, options: FilterKeysOptions): boolean {
 
 export function filterKeys(options: FilterKeysOptions = {}): Attachment<HTMLInputElement> {
   return (box) => {
-    box.setAttribute("data-filter", options.aside === true ? "aside" : "");
+    box.setAttribute("data-filter", options.rail === true ? "rail" : options.aside === true ? "aside" : "");
     const off = on(box, "keydown", (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       if (!answer(box, options)) return;
@@ -66,7 +71,7 @@ export function filterKeys(options: FilterKeysOptions = {}): Attachment<HTMLInpu
 
 /** The box ⌘F goes to: the first one drawn that is the page's own, else the first drawn. A page a keep-alive holds hidden draws none. */
 function shownBox(): HTMLInputElement | null {
-  const boxes = [...document.querySelectorAll<HTMLInputElement>("input[data-filter]")].filter((box) => box.getClientRects().length > 0);
+  const boxes = [...document.querySelectorAll<HTMLInputElement>("input[data-filter]")].filter((box) => box.dataset["filter"] !== "rail" && box.getClientRects().length > 0);
   return boxes.find((box) => box.dataset["filter"] !== "aside") ?? boxes[0] ?? null;
 }
 

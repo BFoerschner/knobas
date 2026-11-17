@@ -875,8 +875,8 @@ const pageNewPage = () => [...target.querySelectorAll(".tf-rd-page .tf-fhead .tf
 
 test("Docs draws no search field and leaves / to the shell, which opens the launcher on #d (#2425)", async () => {
   await draw(["confluence:2"]);
-  // The one field is the spaces' filter (PR #2479, 2026-11-17), which narrows the rail's spaces and searches no page.
-  expect([...target.querySelectorAll("nav[aria-label='Docs'] input")].map((input) => input.getAttribute("aria-label"))).toEqual(["Filter spaces"]);
+  expect(target.querySelector("nav[aria-label='Docs'] input")).toBeNull();
+  expect(target.querySelector(".tf-fsearch")).toBeNull();
   expect(target.querySelector(".tf-dl-q"), "no search is on").toBeNull();
   const slash = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
   window.dispatchEvent(slash);
