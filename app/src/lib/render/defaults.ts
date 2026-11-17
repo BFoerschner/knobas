@@ -24,7 +24,7 @@
  *   picks its own by its name.
  */
 import type { NamedPipeline, RendererDefault } from "../ipc/app";
-import { accepts, type Renderer } from "./registry";
+import { accepts, fits, type Renderer } from "./registry";
 
 export type { RendererDefault };
 
@@ -74,14 +74,15 @@ export function defaultPipeline(
 
 /** What `file` opens with under `defaults`, among `all` (the registry, in order). */
 export function openWith(
-  file: { path: string; binary: boolean },
+  file: { path: string; binary: boolean; text?: string },
   all: readonly Renderer[],
   defaults: readonly RendererDefault[],
 ): Opened {
-  const fits = (r: Renderer) => !file.binary || r.input === "bytes";
   const matching = taking(file.path, defaults);
+  // A renderer that recognises its files by content (`sniff`) is held to it under a mapping too: `*.yaml` mapped to
+  // OpenAPI draws a spec as one and every other YAML file as before.
   const offered = all.filter(
-    (r) => fits(r) && (r.patterns.some((p) => accepts(p, file.path)) || matching.some((d) => d.renderer === r.id)),
+    (r) => fits(r, file) && (r.patterns.some((p) => accepts(p, file.path)) || matching.some((d) => d.renderer === r.id)),
   );
   for (const d of matching) {
     const renderer = offered.find((r) => r.id === d.renderer);
