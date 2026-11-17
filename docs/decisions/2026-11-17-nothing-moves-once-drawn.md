@@ -21,7 +21,11 @@
 | Standup | *Publish to Confluence* | 6 to 12 px | the stored target, read after it drew, took its ellipsis |
 | A pull request's Files changed | the file rows | 2 px, 4 px narrower | the current file's pill (2 px inset) came a frame late |
 | Tickets, *List* pressed | the filter field, the chips, *Assignee* | 181 px, 534 px | the list's bar has no *Lanes*, and the bar wraps |
-| Settings › Checkouts, an application's page | the Commands section | 50 to 125 px | its own pass |
+| A run, at 1440 px | the Run and Artifacts panels | 29 px down | *Refresh run* wrapped the held header's actions under its title, and the header grew a line while unseen |
+| Sets | the sub-task switch | 73 px up | drawn under the waiting rows, which gave way to the empty state |
+| A Docs page, on return at 2560 x 1440 | *New page…*, *More*, *Open in Confluence* | 23 px left | the view's *Sync now* drew before the page's row, and *Refresh page* took its place |
+| A repository's file, a README, with a sync ending | everything under its badge image | 15 px down | the re-read drew the README anew and its image grew from nothing when its bytes came |
+| Settings › Checkouts, an application's page | the Commands section | 50 to 175 px | its own pass (`0a500041`); on the saved scale database, where no repository has a checkout, *Try it on*'s rows still give way to one line after the checkout read, 175 px up |
 
 The first pass also counted the frame between a link setting the address and its `hashchange` reaching the router, in which the page left is still drawn; the probe now starts at the first DOM change after that event. Inbox, Code's lists, Tickets' board, Builds, a pipeline, Docs (home, space, page), Monitors, Sets, Time, the launcher, the menus and every other Settings page held still.
 
@@ -33,6 +37,8 @@ The first pass also counted the frame between a link setting the address and its
 - **A control's words keep the room of its longest**: *Publish to Confluence…*'s ellipsis, held unseen once a target is stored.
 - **A control one layout has and another lacks keeps its room unseen and out of the Tab order** in the other: Tickets' *Lanes* on the list.
 - A width read before the first paint, not after it (the steps bar); a selection that changes colour, not box (a diff's file rows).
+- A header whose held actions can wrap holds the page under it too (a run's, `tf-holdsbelow`); a control drawn under waiting rows waits for them (Sets' switch, its filter bar).
+- An image a text has drawn before is drawn at the size it loaded at, while its bytes are read again (`tf/markdown/image-sizes.ts`).
 
 **Decided with Fable (2026-11-17, xhigh).** (1) The ticket card holds its sections and its actions together, keeping the sections first, rather than moving the actions above them; (2) the epic chip waits for its title rather than widening; (3) the run's steps bar keeps its room with words rather than collapsing for a run without steps, since the log is read live and can take longer than any hold; (4) the list keeps *Lanes*' room; (5) the hold is 500 ms: it covers a slow laptop's 300 ms reads with margin, and longer leaves a page looking broken.
 
