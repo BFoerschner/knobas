@@ -32,6 +32,7 @@
     card,
     onwin,
     floor = null,
+    atMost = null,
   }: {
     /** Every card the column draws, in order. */
     cards: MiniBoardCard[];
@@ -46,7 +47,13 @@
      * and one more, not a quarter of a screen more (the ux14 pass, 2026-11-16).
      */
     floor?: ((card: MiniBoardCard) => number) | null;
+    /**
+     * At most this many cards from the top in this frame, or `null`: a view that shows every ticket draws eight a column
+     * in the frame its board lands (ux18), and the window's room still holds every card, so the column stands as tall.
+     */
+    atMost?: number | null;
   } = $props();
+  const drawn = (shown: readonly MiniBoardCard[]) => (atMost !== null && win.start === 0 && shown.length > atMost ? shown.slice(0, atMost) : shown);
 
   const byKey = $derived(floor === null ? null : new Map(cards.map((one) => [one.entity_id, one])));
   const floorOf = (key: string) => {
@@ -76,7 +83,7 @@
 </script>
 
 <div class="tf-cards" {@attach win.list} {@attach held}>
-  {#each win.slice(win.on ? cards : cut(cards)) as one (one.entity_id)}
+  {#each drawn(win.slice(win.on ? cards : cut(cards))) as one (one.entity_id)}
     {@render card(one, win.row(one.entity_id))}
   {:else}
     <span class="tf-dim tf-nothing">Nothing here</span>

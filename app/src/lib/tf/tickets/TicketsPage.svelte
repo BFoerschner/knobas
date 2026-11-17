@@ -629,11 +629,12 @@
    * A view that shows every ticket opens on fifty a column, and a column of fifty fills to the screen's foot, about 15
    * cards where any other view draws eight: twice the work of the frame its board lands, a 194 ms task at CPU 6x on
    * Björn's PC against 105 with the setting off (ux18). That frame draws the eight a column any view draws, and the
-   * rest of the screen's cards the frame after, below them: nothing drawn moves.
+   * rest of the screen's cards the frame after, below them: nothing drawn moves. The column keeps every card's room
+   * meanwhile (`TicketStack`'s `atMost`), so it stands as tall and its near-end mark stays out of reach.
    */
-  function openShare(place: string, cards: MiniBoardCard[]): MiniBoardCard[] {
-    if (!reader.all || !firstFrame || cards.length <= COLUMN_CAP || (drewWhole.get(place) ?? 0) > 0) return cards;
-    return cards.slice(0, COLUMN_CAP);
+  function openShare(place: string, cards: MiniBoardCard[]): number | null {
+    if (!reader.all || !firstFrame || cards.length <= COLUMN_CAP || (drewWhole.get(place) ?? 0) > 0) return null;
+    return COLUMN_CAP;
   }
   /** What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. */
   const cardFloorOf = (card: MiniBoardCard) => cardFloor(card, view?.card_fields ?? null);
@@ -1101,7 +1102,7 @@
                   >
                 </h3>
                 <div class="tf-stack">
-                  <TicketStack cards={openShare(place, heldCards.get(place) ?? [])} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
+                  <TicketStack cards={heldCards.get(place) ?? []} atMost={openShare(place, heldCards.get(place) ?? [])} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
                     {#snippet card(card, row)}
                       <TicketCard
                         {card}
