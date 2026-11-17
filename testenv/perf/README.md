@@ -632,6 +632,21 @@ them, while `--source` is kept syncing. A view answered from what knobas held is
 node testenv/perf/lane-probe.mjs --port 5411 --probes jira.json --source live-jira --out jira-after.json
 ```
 
+## State colours: `state-colours.mjs`
+
+From the state-colours bug of PR #2479 (2026-11-17, `docs/decisions/2026-11-17-state-colours-draw-at-once-and-move-on-every-platform.md`),
+against the windowless backend on the saved scale database. At each throttle it times Settings › Appearance's board from
+leaving Keyboard to its ticket chips drawn (and fails if one moves in the 700 ms after), and a change four ways with
+real input by CDP, each from its input to the frame that draws the chip in its new column: a pick in a word's menu, a
+pointer drag onto another column, → on the focused word, and *Reset*. Then `applied`: the launcher over Tickets draws a
+ticket of that status at its default, and in the error tone once its status is set to *Error*. A board from before the fix
+has no menu and drags by HTML5, so its run is `--cases open,key,reset`.
+
+```sh
+node testenv/perf/state-colours.mjs --app "http://127.0.0.1:<static>/?fake-ipc&fake-hooks&fake-real=<port>" \
+  --size 2560x1440@1.25 --reps 3 [--throttle 1,4,6] [--cases open,menu,drag,key,reset,applied] [--word "In Review" --key PAY-228]
+```
+
 ## The soak: `just soak`
 
 What a page costs after it has been used for a while, from the hover-lag pass of PR #2479 (2026-11-16,
