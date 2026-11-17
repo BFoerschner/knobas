@@ -61,8 +61,8 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
   { name: "tickets-list", start: "#/tickets", press: `${shown} button, ${shown} [role=tab]`, text: "List", hash: "#/tickets", away: "time", returnBy: { nav: "tickets" } },
-  { name: "ticket-preview", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/tickets", away: "Escape" },
-  { name: "ticket", start: "#/tickets", setup: `${shown} .tf-tcard`, press: `aside.tf-preview a[href^="#/ticket/"]`, hash: "#/ticket/", away: "Escape", tabs: true },
+  // A card's press opens its ticket's page (Tickets has no preview since ux18).
+  { name: "ticket", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", away: "Escape", tabs: true },
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },
@@ -90,7 +90,7 @@ const PLACES = [
   { name: "launcher", start: "#/tickets", key: CMD_K, hash: null, ready: "[role=dialog] [role=option]", anywhere: true, away: "Escape" },
   { name: "ticket-menu", start: "#/tickets", right: `${shown} .tf-tcard`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "create-monitor", optional: true, start: "#/monitors/unmonitored", press: `${shown} button`, text: "Create monitor", starts: true, hash: null, ready: "[role=dialog]", away: "Escape" },
-  { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setup2: `aside.tf-preview a[href^="#/ticket/"]`, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },
+  { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setupOnce: true, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },
   { name: "add-source", start: "#/settings/sources", press: `${shown} button, ${shown} a`, text: "Add a source", starts: true, hash: null, away: "Escape" },
 ];
 const picked = (p) => (!only || only.some((w) => p.name === w || p.name.startsWith(w))) && !skip.some((w) => p.name === w || p.name.startsWith(w));
@@ -189,7 +189,6 @@ async function measure(p, rate) {
     await cpu(1);
     await fresh(p.start);
     if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
-    if (p.setup2) { await press(await find(p.setup2)); await quiet(1200); }
     await sleep(firstAfter);
     await cpu(rate);
     if (rounds.includes("first")) {
@@ -207,7 +206,8 @@ async function measure(p, rate) {
     }
     if (rounds.includes("return")) {
       await leave(p);
-      if (p.setup && !p.setup2) { await press(await find(p.setup)); await quiet(1200); }
+      // A setup that opens the place's page is pressed once; one that opens a menu the return closed, again.
+      if (p.setup && !p.setupOnce) { await press(await find(p.setup)); await quiet(1200); }
       entry.return = await record(p.returnBy ? { ...p, ...p.returnBy, press: undefined, text: undefined } : p);
       console.log(`${rate}x ${p.name} return: ${say(entry.return)}`);
       await quiet(800);
