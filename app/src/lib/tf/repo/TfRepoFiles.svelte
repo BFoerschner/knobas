@@ -129,6 +129,7 @@
     fileHash,
     fileLines,
     lineHash,
+    placeHash,
     likelySections,
     pickDefaultFile,
     repoHash,
@@ -163,6 +164,7 @@
     branch,
     path,
     line = null,
+    place = null,
     changed,
     editing = false,
     job = null,
@@ -195,6 +197,8 @@
     path: string | null;
     /** The line a line link marks, from 1; `null` for none. */
     line?: number | null;
+    /** A place inside a rendered file the address names (an OpenAPI spec's operation or schema, ux18); `null` for none. */
+    place?: string | null;
     /** The paths the local checkout changed. */
     changed: ReadonlySet<string>;
     /** The address is the file's edit (`edit/<path>`). */
@@ -1501,6 +1505,17 @@
   });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
+  /** A file of the repository at a place inside it (ux18): where an OpenAPI spec's ref into another file opens. */
+  const placeLink = (to: string, at: string | null) => (at === null ? fileHash(repoId, to) : placeHash(repoId, to, at));
+  /** *Copy link* on an operation of a spec (ux18): the address that opens the file at it. */
+  async function copyPlace(path: string, at: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(placeHash(repoId, path, at));
+      push({ text: `Copied link to ${label}`, subject: "copy-place" });
+    } catch (cause) {
+      push({ text: `Could not copy: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
 
   function toggle(dir: string) {
     if (open.has(dir)) open.delete(dir);
@@ -1811,7 +1826,7 @@
       <TfNothingHere message="There is no folder renderer named “{folderRender.renderer}”." href={repoHash(repoId)} action="All files" />
     {/if}
   {:else}
-  <div class="tf-fileview" bind:this={fileview}>
+  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} bind:this={fileview}>
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
@@ -1953,6 +1968,24 @@
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
         <TfBytesImage read={image.read} path={drawn.path} size={image.bytes.length} />
+      {:else if drawAs === "openapi"}
+        <!-- An OpenAPI spec (ux18): its view and its worker load with the first spec opened, never at start-up. -->
+        {@const spec = drawn}
+        {#snippet oasProse(words: string)}
+          <TfMarkdown text={words} base={parentOf(spec.path)} {fileLink} {render} image={imageRead} />
+        {/snippet}
+        {#await import("../render/TfOpenApi.svelte") then { default: TfOpenApi }}
+          <TfOpenApi
+            text={spec.text}
+            path={spec.path}
+            read={imageRead}
+            at={path === spec.path ? place : null}
+            fileHref={placeLink}
+            oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
+            onsource={() => picks.set(spec.path, "source")}
+            prose={oasProse}
+          />
+        {/await}
       {:else if drawAs === "markdown"}
         <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} /></div>
         <TfFindBar root={() => rendered} within="in this file" />

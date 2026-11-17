@@ -1289,6 +1289,7 @@
                   branch={branchName}
                   path={placeOf(one).path}
                   line={placeOf(one).line}
+                  place={placeOf(one).place ?? null}
                   folderRender={placeOf(one).render ?? null}
                   {changed}
                   editing={placeOf(one).tab === "edit"}

@@ -118,6 +118,11 @@ export interface RepoRoute {
   pipeline: string | null;
   /** Files: a folder drawn by a folder renderer (`render/<renderer id>/<folder>`, ADR-0044); absent for none. */
   render?: FolderRenderAt;
+  /**
+   * Files: a place inside a rendered file (`at/<place>/<path>`, ux18): an OpenAPI spec's operation (`get /pets/{id}`)
+   * or schema (`schemas/Pet`), encoded whole; absent for none.
+   */
+  place?: string;
 }
 
 /** A folder and the folder renderer that draws it (ADR-0044). */
@@ -143,6 +148,9 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
     const render = { renderer: rest[2], folder: rest.slice(3).join("/") };
     return { repoId, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null, render };
   }
+  if (rest[1] === AT && rest[2]) {
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: null, commit: null, branch: null, base: null, pipeline: null, place: rest[2] };
+  }
   if (rest[1] === LINE) {
     const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
     return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null, pipeline: null };
@@ -166,7 +174,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
 
 /** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
 export function knowsRepoTab(rest: readonly string[]): boolean {
-  return rest[1] === undefined || rest[1] === LINE || (rest[1] === RENDER && !!rest[2]) || TABS.has(rest[1]);
+  return rest[1] === undefined || rest[1] === LINE || ((rest[1] === RENDER || rest[1] === AT) && !!rest[2]) || TABS.has(rest[1]);
 }
 
 /** The address of the repository page, a tab of it, or a place inside a tab. */
@@ -190,6 +198,8 @@ export function fileHash(repoId: string, path: string): string {
 const LINE = "line";
 /** The segment a folder render starts with (ADR-0044): not a tab, the Files tab lit. */
 const RENDER = "render";
+/** The segment a place inside a rendered file starts with (ux18): not a tab, the Files tab lit. */
+const AT = "at";
 
 /**
  * The Files tab with `folder` drawn by folder renderer `renderer` (ADR-0044). The renderer comes before the folder,
@@ -206,6 +216,14 @@ export function folderRenderHash(repoId: string, renderer: string, folder: strin
  */
 export function lineHash(repoId: string, path: string, line: number): string {
   return [repoHash(repoId), LINE, String(line), ...path.split("/").map(encodeURIComponent)].join("/");
+}
+
+/**
+ * The Files tab with `path` open at `place` inside it (ux18): an OpenAPI spec's operation or schema. The place comes
+ * before the path, encoded whole, as a line link's line does.
+ */
+export function placeHash(repoId: string, path: string, place: string): string {
+  return [repoHash(repoId), AT, encodeURIComponent(place), ...path.split("/").map(encodeURIComponent)].join("/");
 }
 
 /** A commit's diff under the Commits tab. */

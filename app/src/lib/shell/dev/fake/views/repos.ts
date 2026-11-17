@@ -20,6 +20,7 @@ import { lineDiff } from "../../../../tf/diff/line-diff";
 import { ago, agoStamp } from "../../../time";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
+import { ITEMS_YAML, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -419,6 +420,19 @@ const BINARY: Record<string, () => Uint8Array> = {
   "docs/scan.pdf": SCAN_PDF,
   "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
 };
+/** `?fake-openapi` (ux18): a spec of the pet store with a ref into another file, and one of 5,000 operations. */
+let specs: Record<string, string> | null = null;
+function openapiFiles(): Record<string, string> {
+  specs ??= {
+    "api/openapi.yaml": PETS_30_YAML,
+    "api/split.yaml": SPLIT_31_YAML,
+    "api/schemas/order.yaml": ORDER_YAML,
+    "api/paths/items.yaml": ITEMS_YAML,
+    "api/big.yaml": bigSpec(5000),
+  };
+  return specs;
+}
+
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
 
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
@@ -436,6 +450,7 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-pipeline") ? Object.fromEntries(Object.keys(WRAPPED).map((path) => [path, ""])) : {}),
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
+      ...(query.has("fake-openapi") ? openapiFiles() : {}),
     };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;

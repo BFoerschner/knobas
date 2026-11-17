@@ -1,0 +1,144 @@
+// The OpenAPI view's timing (ux18, `docs/decisions/2026-11-17-an-api-spec-is-drawn-as-its-endpoints.md`): the pages and
+// presses it touches, in a headless Chrome over the built app under ?fake-ipc&fake-openapi, at each CPU throttle. Each
+// case is timed in the page, from the press (an address set, a click, a key's input) to the frame its first useful
+// thing is drawn in, five times, and the median is reported against the line: a page 100 / 200 / 300 ms and a press
+// 100 / 100 / 200 ms at 1x / 4x / 6x (on the Mac, half of each). The scroll of the 5,000-operation list reports its
+// frame rate, its worst frame gap and its longest task; an open reports whether a row it drew moved after it drew.
+//
+//   testenv/ui-checks/with-built.sh <built> <port> node testenv/perf/openapi.mjs --port <port> [--size WxH@s] [--throttle 1,4,6] [--only a,b] [--machine pc]
+//
+// `--only readme,source` runs the other files' opens alone, for a build without the view (the before of a before and
+// after). Prints one line a case and throttle, and exits 1 when a median is over its line for the machine.
+import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+
+const args = process.argv.slice(2);
+const arg = (name, fallback) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : fallback;
+};
+const port = Number(arg("--port", "5340"));
+const size = sizeFrom(args);
+const throttles = arg("--throttle", "1,4,6").split(",").map(Number);
+const machine = arg("--machine", "mac");
+const only = arg("--only", null)?.split(",") ?? null;
+const RUNS = 5;
+const REPO = "#/repo/mock%3Atidewater%2Fpayout-service";
+const file = (path) => `${REPO}/files/${path}`;
+const place = (at, path) => `${REPO}/at/${encodeURIComponent(at)}/${path}`;
+const LINES = { page: { 1: 100, 4: 200, 6: 300 }, press: { 1: 100, 4: 100, 6: 200 } };
+const line = (kind, t) => (machine === "pc" ? LINES[kind][t] : LINES[kind][t] / 2);
+
+const { port: debug, stop } = await launch({ size });
+const c = await attach(debug);
+await viewport(c, size);
+await c.send("Page.enable");
+await c.send("Runtime.enable");
+await c.send("Page.navigate", { url: `http://127.0.0.1:${port}/?fake-ipc&fake-openapi#/inbox` });
+await sleep(2500);
+
+// In the page: run `act`, then wait for `selector` (and its text, where given) in a painted frame; the ms between, and
+// whether the rows of `watch` it drew then stood elsewhere 600 ms later.
+const timed = (act, selector, text = null, watch = null) =>
+  c.js(`new Promise((resolve, reject) => {
+    const found = () => [...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => ${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)}));
+    const t0 = performance.now();
+    (${act})();
+    const deadline = t0 + 15000;
+    const tops = () => [...document.querySelectorAll(${JSON.stringify(watch ?? "nothing-here")})].slice(0, 30).map((e) => Math.round(e.getBoundingClientRect().top));
+    const tick = () => {
+      if (found()) return requestAnimationFrame(() => {
+        const ms = performance.now() - t0;
+        const first = tops();
+        setTimeout(() => resolve({ ms, moved: JSON.stringify(first) !== JSON.stringify(tops()) }), 600);
+      });
+      if (performance.now() > deadline) return reject(new Error("never drew ${selector.replace(/"/g, "'")}"));
+      requestAnimationFrame(tick);
+    };
+    tick();
+  })`);
+const go = (hash) => `() => { location.hash = ${JSON.stringify(hash)}; }`;
+const click = (sel, text = null) =>
+  `() => [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => ${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)})).click()`;
+const typeIn = (value) =>
+  `() => { const box = document.querySelector('.tf-oas-band input'); box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
+const settle = () => sleep(700);
+
+const SMALL = "api/openapi.yaml";
+const BIG = "api/big.yaml";
+const CASES = [
+  { name: "readme", label: "a Markdown README opened (another file)", kind: "page", before: go("#/inbox"), act: go(file("README.md")), sel: ".tf-fileview .tf-md" },
+  { name: "source", label: "a source file opened (another file)", kind: "page", before: go("#/inbox"), act: go(file("Cargo.toml")), sel: ".tf-fileview .tf-code .tf-l" },
+  { name: "small", label: "a small spec opened", kind: "page", before: go("#/inbox"), act: go(file(SMALL)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn" },
+  { name: "big", label: "a 5,000-operation spec opened", kind: "page", before: go("#/inbox"), act: go(file(BIG)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn" },
+  { name: "filter", label: "a filter key on 5,000 operations", kind: "press", before: `async () => { location.hash = ${JSON.stringify(file(BIG))}; }`, prep: typeIn(""), act: typeIn("delete resource12"), sel: ".tf-oas-count", text: "of 5000" },
+  { name: "open-op", label: "an operation opened", kind: "press", before: go(file(SMALL)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-opbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-opbtn", "/pets/{petId}"), sel: ".tf-oas-detail .tf-oas-resp" },
+  { name: "follow", label: "a $ref followed to its schema", kind: "press", before: go(place("get /pets/{petId}", SMALL)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-sbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-detail .tf-oas-top .tf-oas-ref"), sel: '[data-k="ds:Pet"] .tf-oas-pname' },
+  { name: "big-op", label: "an operation opened on 5,000", kind: "press", before: go(file(BIG)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-opbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-opbtn"), sel: ".tf-oas-detail .tf-oas-resp" },
+].filter((k) => only === null || only.includes(k.name));
+
+// The scroll of the 5,000-operation list: 40 px a frame for two seconds, its frames and its longest task.
+const scroll = () =>
+  c.js(`new Promise((resolve) => {
+    const list = document.querySelector('.tf-oas-list');
+    let box = list.parentElement;
+    while (box && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+    box = box ?? document.scrollingElement;
+    let long = 0;
+    const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) long = Math.max(long, e.duration); });
+    po.observe({ type: 'longtask' });
+    const gaps = [];
+    let last = performance.now();
+    const t0 = last;
+    let frames = 0;
+    const step = (now) => {
+      frames++;
+      gaps.push(now - last);
+      last = now;
+      box.scrollTop += 40;
+      if (now - t0 < 2000) requestAnimationFrame(step);
+      else { po.disconnect(); resolve({ fps: frames / ((now - t0) / 1000), worst: Math.max(...gaps.slice(1)), long, rows: document.querySelectorAll('.tf-oas-opbtn').length }); }
+    };
+    requestAnimationFrame(step);
+  })`);
+
+let over = 0;
+const out = [];
+for (const t of throttles) {
+  await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+  for (const k of CASES) {
+    const times = [];
+    let moved = false;
+    for (let i = 0; i < RUNS; i++) {
+      await c.js(`(${k.before})()`);
+      await settle();
+      if (k.prep) {
+        await c.js(`(${k.prep})()`);
+        await settle();
+      }
+      const r = await timed(k.act, k.sel, k.text ?? null, k.watch ?? null);
+      times.push(r.ms);
+      moved ||= r.moved;
+    }
+    times.sort((a, b) => a - b);
+    const median = times[Math.floor(times.length / 2)];
+    const limit = line(k.kind, t);
+    const ok = median <= limit && !moved;
+    if (!ok) over++;
+    const row = `${t}x ${size.name} ${k.label}: ${median.toFixed(1)} ms (line ${limit})${moved ? ", MOVED" : ""} ${ok ? "ok" : "OVER"}  [${times.map((x) => x.toFixed(0)).join(" ")}]`;
+    out.push(row);
+    console.log(row);
+  }
+  if (only === null || only.includes("scroll")) {
+    await c.js(`(${go(file(BIG))})()`);
+    await sleep(2500);
+    const s = await scroll();
+    const ok = s.fps >= 55 && s.long <= 60;
+    if (!ok) over++;
+    const row = `${t}x ${size.name} scroll of 5,000 operations: ${s.fps.toFixed(1)} fps, worst gap ${s.worst.toFixed(1)} ms, longest task ${s.long.toFixed(0)} ms, ${s.rows} rows drawn ${ok ? "ok" : "OVER"}`;
+    out.push(row);
+    console.log(row);
+  }
+}
+await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+stop();
+process.exit(over > 0 ? 1 : 0);
