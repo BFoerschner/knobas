@@ -185,11 +185,13 @@ const columnEl = (name: string, tone: ToneChoice) => section(name)!.querySelecto
 function dragOnto(word: string, onto: Element | null) {
   document.elementsFromPoint = () => (onto === null ? [] : [onto]);
   const handle = grip(word)!;
+  // As a real pointer: past its first move it is over the board, not the chip, until it is captured.
+  const elsewhere = onto ?? document.body;
   handle.dispatchEvent(pointer("pointerdown", 10, 10));
-  handle.dispatchEvent(pointer("pointermove", 60, 14));
+  elsewhere.dispatchEvent(pointer("pointermove", 60, 14));
   const lifted = chip(word)!.classList.contains("tf-lifted");
   const highlighted = onto?.closest(".tf-sc-col")?.classList.contains("tf-sc-over") ?? false;
-  handle.dispatchEvent(pointer("pointerup", 60, 14));
+  elsewhere.dispatchEvent(pointer("pointerup", 60, 14));
   handle.click();
   return { lifted, highlighted };
 }

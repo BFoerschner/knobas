@@ -44,9 +44,11 @@ function pointer(type: string, x: number, y: number): Event {
 /** Press `handle`, move past a tremble to where the hit test answers `onto`, and let go there. */
 function dragOnto(handle: Element, onto: Element | null) {
   document.elementsFromPoint = () => (onto === null ? [] : [onto]);
+  // As a real pointer: past its first move it is over the other step, not the grip.
+  const elsewhere = onto ?? document.body;
   handle.dispatchEvent(pointer("pointerdown", 10, 10));
-  handle.dispatchEvent(pointer("pointermove", 40, 12));
-  handle.dispatchEvent(pointer("pointerup", 40, 12));
+  elsewhere.dispatchEvent(pointer("pointermove", 40, 12));
+  elsewhere.dispatchEvent(pointer("pointerup", 40, 12));
 }
 
 test("a step's grip dragged by pointer onto another step moves it there (HTML5 drag never drops on Windows)", () => {

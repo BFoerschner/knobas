@@ -59,6 +59,9 @@ export function pointerDrag<T>(drag: PointerDrag<T>): Attachment<HTMLElement> {
       lifted = null;
       at = null;
       window.removeEventListener("keydown", escape, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", cancel, true);
       if (was === null) return;
       was.classList.remove("tf-lifted");
       was.style.transform = "";
@@ -84,6 +87,10 @@ export function pointerDrag<T>(drag: PointerDrag<T>): Attachment<HTMLElement> {
       if (event.button !== 0 || !event.isPrimary || !(event.target instanceof Element)) return;
       if (drag.ignore?.(event.target)) return;
       start = { x: event.clientX, y: event.clientY, id: event.pointerId };
+      // On the window, not the handle: a real pointer leaves a small chip on its first move, before any capture.
+      window.addEventListener("pointermove", move, true);
+      window.addEventListener("pointerup", up, true);
+      window.addEventListener("pointercancel", cancel, true);
     };
 
     const move = (event: PointerEvent) => {
@@ -110,16 +117,10 @@ export function pointerDrag<T>(drag: PointerDrag<T>): Attachment<HTMLElement> {
     const cancel = () => end(false);
 
     handle.addEventListener("pointerdown", down);
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", cancel);
     handle.addEventListener("lostpointercapture", cancel);
     return () => {
       end(false);
       handle.removeEventListener("pointerdown", down);
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", cancel);
       handle.removeEventListener("lostpointercapture", cancel);
     };
   };
