@@ -908,9 +908,14 @@
   let landed: string | null = null;
   const letGo = () => (landed = null);
 
-  /** Puts the landed file back where it was put, if the page moved it. */
+  /**
+   * Puts the landed file back where it was put, if the page moved it. The lists have read the view it was moved to by
+   * then, and may have taken the file's card out: it is drawn again first.
+   */
   function reland(box: Element): boolean {
-    const el = landed === null ? null : cardOf(landed);
+    if (landed === null) return false;
+    cardFor(landed);
+    const el = cardOf(landed);
     if (el === null) return false;
     const off = el.getBoundingClientRect().top - topOfFiles(box);
     if (Math.abs(off) < 1) return false;
@@ -998,8 +1003,15 @@
       read();
     });
     first.observe(host);
+    // The files growing or shrinking above a landed pick (their lines coming in) move it with no scroll to hear: it is
+    // put back after the layout that moved it, before that frame is painted.
+    const grew = new ResizeObserver(() => {
+      if (landed !== null && heldAt !== null && host.checkVisibility?.() !== false && reland(found)) heldAt = found.scrollTop;
+    });
+    grew.observe(host);
     return () => {
       first.disconnect();
+      grew.disconnect();
       off();
     };
   }
