@@ -170,3 +170,12 @@ test("another file a ref read is kept with the least lately used dropped past th
   files.addFile("c.yaml", "C: 1\n");
   expect([files.has("spec.yaml"), files.has("a.yaml"), files.has("b.yaml"), files.has("c.yaml")]).toEqual([true, true, false, true]);
 });
+
+test("a spec opened again is not parsed again: its document is the one read before", () => {
+  const first = new SpecFiles("api/openapi.yaml");
+  first.open(PETS_30_YAML);
+  const again = new SpecFiles("api/openapi.yaml");
+  again.open(PETS_30_YAML);
+  const info = (files: SpecFiles) => (files.resolve("api/openapi.yaml", "#/info") as { node: unknown }).node;
+  expect(info(again)).toBe(info(first));
+});
