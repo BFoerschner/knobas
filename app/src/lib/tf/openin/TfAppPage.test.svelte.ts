@@ -21,7 +21,7 @@ import type { TryReads } from "./try-reads";
 
 const PAYOUT = "gitea:tidewater/payout-service";
 const LEDGER = "gitea:tidewater/ledger";
-const ROOT = "C:\\Users\\Björn Förschner\\src";
+const ROOT = "C:\\Users\\Tëst Üser\\src";
 
 function settings(): CheckoutSettings {
   return {
@@ -185,7 +185,7 @@ test("adding: placeholders insert, It will run fills the repository it came from
   await settle();
   expect(field("command").value).toBe("MyGitViewer {path}");
   // Filled as the backend runs it: the Windows checkout is one argument, in double quotes.
-  expect(line("command")).toBe('MyGitViewer "C:\\Users\\Björn Förschner\\src\\payout-service"');
+  expect(line("command")).toBe('MyGitViewer "C:\\Users\\Tëst Üser\\src\\payout-service"');
   expect(target.querySelectorAll(".tf-banner[role='status']")).toHaveLength(0);
 
   add.click();
@@ -281,7 +281,7 @@ test("editing: Try it saves the edit over the entry, runs it by its id, and leav
   expect(text(target.querySelector("h1"))).toBe("Terminal");
   expect(field("name").value).toBe("Terminal");
   type("command", "wt -d {path} --title {name}");
-  expect(line("command")).toBe('wt -d "C:\\Users\\Björn Förschner\\src\\payout-service" --title payout-service');
+  expect(line("command")).toBe('wt -d "C:\\Users\\Tëst Üser\\src\\payout-service" --title payout-service');
   tryButton("command").click();
   await settle();
   expect(saved.at(-1)![0].map((draft) => [draft.id, draft.command])).toEqual([
@@ -365,7 +365,7 @@ test("a commit from Open in… is the one tried; a range is it and the one befor
   type("commit", "tig -C {path} show {sha}");
   await settle();
   expect(target.querySelector<HTMLSelectElement>("#tf-app-trycommit")!.value).toBe("7be0e4f15c60");
-  expect(line("commit")).toBe('tig -C "C:\\Users\\Björn Förschner\\src\\payout-service" show 7be0e4f15c60');
+  expect(line("commit")).toBe('tig -C "C:\\Users\\Tëst Üser\\src\\payout-service" show 7be0e4f15c60');
   type("range", "git -C {path} difftool -d {base} {head}");
   // 7be0e4f15c60 is the oldest of the two, so it has no commit before it here.
   expect(line("range")).toBe("A range needs two commits; the repository has fewer.");
@@ -373,11 +373,11 @@ test("a commit from Open in… is the one tried; a range is it and the one befor
   pick.value = "c90d11e4a7b2";
   pick.dispatchEvent(new Event("change", { bubbles: true }));
   flushSync();
-  expect(line("range")).toBe('git -C "C:\\Users\\Björn Förschner\\src\\payout-service" difftool -d 7be0e4f15c60 c90d11e4a7b2');
+  expect(line("range")).toBe('git -C "C:\\Users\\Tëst Üser\\src\\payout-service" difftool -d 7be0e4f15c60 c90d11e4a7b2');
 
   type("pr", "tig -C {path} log {base}..{head}");
   await settle();
-  expect(line("pr")).toBe('tig -C "C:\\Users\\Björn Förschner\\src\\pull-requests\\tidewater\\payout-service-142" log main..feature/retry');
+  expect(line("pr")).toBe('tig -C "C:\\Users\\Tëst Üser\\src\\pull-requests\\tidewater\\payout-service-142" log main..feature/retry');
   tryButton("pr").click();
   await settle();
   expect(opened.at(-1)).toEqual([PAYOUT, "tig", { kind: "pull_request", number: 142, base: "main", head: "feature/retry", branch: "feature/retry", item: `${PAYOUT}#142` }]);
@@ -423,7 +423,7 @@ test("while later batches of checkouts come in, the picked repository and what i
   const first = drawn();
   expect(first.rows).toEqual(before);
   expect(first.picks[0]).toBe(PAYOUT);
-  expect(first.lines[2]).toBe('tig -C "C:\\Users\\Björn Förschner\\src\\payout-service" show c90d11e4a7b2');
+  expect(first.lines[2]).toBe('tig -C "C:\\Users\\Tëst Üser\\src\\payout-service" show c90d11e4a7b2');
   while (batches.length > 0) {
     batches.shift()!();
     await settle();

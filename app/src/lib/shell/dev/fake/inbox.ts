@@ -127,7 +127,7 @@ function prototype(): InboxEntry[] {
     entry("review_request:mock:payout-service#150", "review_request", "mock", "mock:payout-service#150", "pr",
       "Payout CSV export", "jonas asked for your review", 10, ["approve", "comment"]),
     entry("alert:kuma:3", "alert", "kuma", "asset:knobas-jira", "asset",
-      "jira", "knobas-jira is down", 80, [], "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)"),
+      "jira", "knobas-jira is down", 80, [], "knobas test estate / TEST-PC / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)"),
     entry("mention:confluence:sepa", "mention", "confluence", "confluence:sepa", "page",
       "SEPA retry design", "you are mentioned here", 115, ["comment"]),
     entry("failed_build:teamcity:build:Payout_IntegrationTests-1187", "failed_build", "teamcity", "teamcity:build:Payout_IntegrationTests-1187", "build",

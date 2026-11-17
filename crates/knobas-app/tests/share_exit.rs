@@ -77,7 +77,7 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 const CONTAINER: &str = "asset:knobas-teamcity";
 const SERVER: &str = "asset:wsl";
 const CONTAINER_PATH: &str =
-    "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
+    "knobas test estate / TEST-PC / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
 
 /// The ticket the sharer's link names.
 ///

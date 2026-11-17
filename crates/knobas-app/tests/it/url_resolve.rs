@@ -395,7 +395,7 @@ async fn a_tombstoned_item_still_resolves_to_its_id() {
 async fn something_that_is_not_a_web_url_is_refused_rather_than_missed() {
     let pool = corpus("url_refusal").await;
     for not_a_url in [
-        "file:///Users/bjoern/notes.md",
+        "file:///Users/tester/notes.md",
         "vscode://file/tmp",
         "PAY-231",
         "jira.example/browse/PAY-231",

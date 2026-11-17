@@ -195,7 +195,7 @@ suites, and the closing `live-down`. A run that finds it held **waits**,
 saying once who holds it and since when:
 
 ```text
-live: teamcity-live-seeded: the JVM lock is held by 'teamcity-live-seeded' in /Users/dev/knobas/.worktrees/issue-683 (pid 51234, since 14:02:11); waiting up to 2700s
+live: teamcity-live-seeded: the JVM lock is held by 'teamcity-live-seeded' in /Users/tester/knobas/.worktrees/issue-683 (pid 51234, since 14:02:11); waiting up to 2700s
 live: teamcity-live-seeded: took the JVM lock after 312s
 ```
 
@@ -475,7 +475,8 @@ lives on the remote machine:
   `http://jira:8080/status`, `http://confluence:8090/status`), as `gitea`
   always did, so they reach the products on the compose network rather than
   through `host.docker.internal`, where the products (bound to 127.0.0.1) do
-  not answer. `notebook` pings the Mac's Tailscale address, `100.92.199.117`.
+  not answer. `notebook` pings the Mac's Tailscale address, which
+  `KNOBAS_LIVE_NOTEBOOK_IP` in `testenv/live.env` gives (*Monitors* below).
   On a freshly seeded Kuma that ping takes long enough to fail that a full
   sync in the first minute may not see `notebook` yet. A second run does.
 
@@ -1918,9 +1919,11 @@ a `gitea-live forgejo` run would turn that half red.
 
 Until 2026-11-01 the engine was OrbStack's, in a Linux VM on this notebook,
 and the products ran there on demand; the file also held the mockd container
-and its three ports. The box's values in the file (Windows host
-`DESKTOP-QUUAHUB`, Ubuntu 26.04 in WSL 2 with 12 cores and 12 GB, docker.io
-29.1.3, the bridge at `172.17.0.1`) are the real box's, as of 2026-11-01.
+and its three ports. The box's values in the file (Ubuntu 26.04 in WSL 2
+with 12 cores and 12 GB, docker.io 29.1.3, the bridge at `172.17.0.1`) are
+the real box's, as of 2026-11-01. The two machines' names are not: the file
+calls the Windows host `TEST-PC` and the notebook `test-notebook` (2026-11-17,
+the repository is public).
 
 Until 2026-10-12 the file also held three Hetzner servers, their engines and
 the SSH tunnel's forwards, and lived in `testenv/hetzner/` with the
@@ -1942,7 +1945,7 @@ knobas-owned; monitors are mirrored").
 
 | Monitor | Type | Checks | Goes red when |
 |---|---|---|---|
-| `notebook` | ping | `100.92.199.117` | the notebook's Tailscale address stops answering the Kuma on the WSL box |
+| `notebook` | ping | `KNOBAS_LIVE_NOTEBOOK_IP` (`192.0.2.10` in the file) | the notebook's Tailscale address stops answering the Kuma on the WSL box |
 | `teamcity` | http | `http://teamcity:8111/login.html` | TeamCity is stopped |
 | `jira` | http | `http://jira:8080/status` | ditto |
 | `confluence` | http | `http://confluence:8090/status` | ditto |
@@ -1961,16 +1964,21 @@ The endpoints are the unauthenticated ones each product answers `200` on
 (`/login.html`, `/status`, `/status`); the obvious REST paths answer `401`,
 which `accepted_statuscodes: ["200-299"]` reads as down.
 
-**The `notebook` ping watches `100.92.199.117`**, the notebook's Tailscale
-address, which the Kuma on the WSL box reaches it at, and
-`testenv/estate.json` states it as the notebook's `ip`. Literal rather than a
-name because a ping carries a bare address and the estate states one, which
-is what lets `monitor_url_host` (the suggestion rule that reads a ping's
-`hostname` against an asset's `ip`, #479) reach a ping on the real estate at
-all. Until 2026-11-01 it watched `0.250.250.254`, what `host.docker.internal`
-resolved to inside OrbStack's VM. If the address moves, change it here, in
-`monitors.json` and in the estate file together (`estate_file.rs` holds the
-two equal).
+**The `notebook` ping watches the notebook's Tailscale address**, which the
+Kuma on the WSL box reaches it at. The repository is public, so `monitors.json`
+and `testenv/estate.json` (the notebook's `ip`) hold the documentation address
+`192.0.2.10`, and the seed takes the real one from `KNOBAS_LIVE_NOTEBOOK_IP` in
+`testenv/live.env`. Unset, a ping Kuma already holds keeps its address; on an
+emptied Kuma the ping is seeded at `192.0.2.10` and stays down until the line is
+added (2026-11-17). An address rather than a name because a ping carries a
+bare address and the estate states one, which is what lets `monitor_url_host`
+(the suggestion rule that reads a ping's `hostname` against an asset's `ip`,
+#479) reach the ping in the fixture; on the live estate the two now differ, and
+the estate file's `monitors` name links the notebook to its ping. Until
+2026-11-01 it watched `0.250.250.254`, what `host.docker.internal` resolved to
+inside OrbStack's VM. If the address moves, change `KNOBAS_LIVE_NOTEBOOK_IP`;
+the two files keep their placeholder together (`estate_file.rs` holds them
+equal).
 
 **Can the Kuma container send ICMP?** Yes, measured on the pinned image (2.5.3)
 under OrbStack on 2026-09-06: the container runs as `uid=0(root)`,

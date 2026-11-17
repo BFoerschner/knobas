@@ -21,7 +21,7 @@ test("a started argv reads as one line, an argument with a space in double quote
 });
 
 // Björn runs Windows (2026-11-13): a checkout there is `C:\Users\...`, with backslashes and often a space.
-const WIN = "C:\\Users\\Björn Förschner\\src\\knobas";
+const WIN = "C:\\Users\\Tëst Üser\\src\\knobas";
 
 test("on Windows {name} is the checkout folder's own name, and a file joins with the checkout's separator", () => {
   expect(folderName(WIN)).toBe("knobas");
@@ -29,14 +29,14 @@ test("on Windows {name} is the checkout folder's own name, and a file joins with
   expect(fill("viewer {name}", { path: WIN, file: null, line: null })).toBe("viewer knobas");
   expect(
     fillObject("code.cmd --goto {file}:{line}", { path: WIN, object: { kind: "file", path: "src/lib.rs", line: 7, at: null }, url: null }),
-  ).toBe("code.cmd --goto C:\\Users\\Björn Förschner\\src\\knobas\\src\\lib.rs:7");
+  ).toBe("code.cmd --goto C:\\Users\\Tëst Üser\\src\\knobas\\src\\lib.rs:7");
 });
 
 test("It will run splits the command as the backend does, then fills each word, so a path with a space stays one argument", () => {
   expect(splitWords('"C:\\Program Files\\Tool\\tool.exe" --open {path}')).toEqual(["C:\\Program Files\\Tool\\tool.exe", "--open", "{path}"]);
   expect(splitWords("a '' b")).toEqual(["a", "", "b"]);
   expect(runPreview('"C:\\Program Files\\Tool\\tool.exe" --open {path}', { path: WIN, object: { kind: "repository" }, url: null })).toBe(
-    '"C:\\Program Files\\Tool\\tool.exe" --open "C:\\Users\\Björn Förschner\\src\\knobas"',
+    '"C:\\Program Files\\Tool\\tool.exe" --open "C:\\Users\\Tëst Üser\\src\\knobas"',
   );
   expect(runPreview('tool "unclosed', { path: WIN, object: { kind: "repository" }, url: null })).toBeNull();
 });

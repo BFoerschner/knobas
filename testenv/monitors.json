@@ -2,7 +2,7 @@
   {
     "name": "notebook",
     "type": "ping",
-    "hostname": "100.92.199.117",
+    "hostname": "192.0.2.10",
     "interval": 60
   },
   {

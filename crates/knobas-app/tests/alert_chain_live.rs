@@ -676,7 +676,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     );
     assert_eq!(
         item.item.detail.as_deref(),
-        Some("knobas test estate / devs-MacBook-Pro"),
+        Some("knobas test estate / test-notebook"),
         "and the path above the asset is on its second line (F-115)"
     );
     assert!(

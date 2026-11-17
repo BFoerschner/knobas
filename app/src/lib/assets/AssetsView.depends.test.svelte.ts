@@ -56,7 +56,7 @@ const ESTATE = [GITEA, TEAMCITY, AGENT, ENGINE];
 const TUNNEL: RouteRow = {
   id: "route:notebook-gitea",
   asset_id: "asset:notebook",
-  asset_name: "devs-MacBook-Pro",
+  asset_name: "test-notebook",
   target_id: GITEA.id,
   target_name: GITEA.name,
   name: "Gitea",

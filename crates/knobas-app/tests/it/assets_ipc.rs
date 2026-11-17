@@ -3202,7 +3202,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
             .collect::<Vec<_>>(),
         [
             "knobas test estate",
-            "DESKTOP-QUUAHUB",
+            "TEST-PC",
             "Ubuntu 26.04 (WSL 2)",
             "Docker engine (WSL)",
             "knobas-jira-db",
@@ -3610,7 +3610,7 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
             "knobas-confluence",
             "knobas-jira",
             "knobas-teamcity",
-            "devs-MacBook-Pro",
+            "test-notebook",
         ],
         "the asset each name is waiting on, named as the tree names it"
     );
@@ -5053,7 +5053,7 @@ async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certifica
         "knobas-teamcity",
         serde_json::json!({
             "id": "1", "name": "knobas-teamcity", "type": "port",
-            "url": null, "hostname": "46.224.117.158", "port": "8111",
+            "url": null, "hostname": "203.0.113.10", "port": "8111",
             "state": "down", "state_code": 0.0, "response_time_ms": null,
             "uptime": {}, "cert_days_remaining": null,
         }),
@@ -5101,7 +5101,7 @@ async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certifica
     assert_eq!(teamcity.monitor_type.as_deref(), Some("port"));
     assert_eq!(
         teamcity.target.as_deref(),
-        Some("46.224.117.158:8111"),
+        Some("203.0.113.10:8111"),
         "a check with no URL is watched at its host and port"
     );
     assert_eq!(teamcity.response_time_ms, None);
@@ -6441,7 +6441,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             .path
             .as_deref(),
         Some(
-            "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / \
+            "knobas test estate / TEST-PC / Ubuntu 26.04 (WSL 2) / \
              Docker engine (WSL) / knobas-teamcity"
         )
     );

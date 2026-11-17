@@ -1968,8 +1968,8 @@ uses. The token refusal is the one decision the arm makes and it is witnessed (m
 
 **(e)** The reading is right, and I confirmed it read-only rather than taking it from the body:
 `docker context ls` shows the three contexts as `ssh://knobas-confluence`, `ssh://knobas-jira`,
-`ssh://knobas-teamcity`; `ssh -G` on each resolves to `46.224.125.111`, `46.224.117.158` and
-`2.28.72.189`, port 22, with no `ProxyJump` and no `ProxyCommand`; `testenv/hetzner/tunnel` lines
+`ssh://knobas-teamcity`; `ssh -G` on each resolves to `203.0.113.11`, `203.0.113.10` and
+`203.0.113.12`, port 22, with no `ProxyJump` and no `ProxyCommand`; `testenv/hetzner/tunnel` lines
 52–54 start `ssh -N … -L 127.0.0.1:$port:127.0.0.1:$port $rflag $rval knobas-$role` and nothing
 else. A `docker --context knobas-jira ps` is an ssh session of its own to the server's address,
 and no forward is in its path. **The phrase is corrected nowhere.** *"Through the tunnel"* in the

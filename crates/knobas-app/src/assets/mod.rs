@@ -8139,7 +8139,7 @@ mod tests {
         // key holding a string: text, like `role`.
         assert_eq!(
             bag["ip"],
-            serde_json::json!({ "kind": "text", "value": "100.92.199.117" })
+            serde_json::json!({ "kind": "text", "value": "192.0.2.10" })
         );
 
         let vm = parsed

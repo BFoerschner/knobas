@@ -80,9 +80,15 @@ const HOST_KEY_AUTHENTICATED = process.env.KNOBAS_KEY_AUTHENTICATED === "1";
 const log = (...a) => console.error("kuma-seed:", ...a);
 const die = (msg) => { log("FAILED:", msg); process.exit(1); };
 
-// monitors.json is read as it is: every value in it is literal. (Until #634 it
-// carried `${VAR}` placeholders for the Hetzner servers' addresses, resolved
-// from a gitignored hosts.env; the servers are gone and so is the expansion.)
+// monitors.json is read as it is: every value in it is literal but one. (Until
+// #634 it carried `${VAR}` placeholders for the Hetzner servers' addresses,
+// resolved from a gitignored hosts.env; the servers are gone and so is the
+// expansion.) The one: the `notebook` ping's address. The repository is
+// public, so the file holds a documentation address (192.0.2.10) and the real
+// one comes from KNOBAS_LIVE_NOTEBOOK_IP in testenv/live.env; unset, a ping
+// Kuma already holds keeps the address it has, so a seed never turns a working
+// ping into one that watches nothing (Fable's ruling, 2026-11-17).
+const NOTEBOOK_IP = process.env.KNOBAS_LIVE_NOTEBOOK_IP ?? "";
 const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"));
 
 // The guard on the connection and on every callback and push below (#1961):
@@ -244,8 +250,14 @@ for (const m of rows) {
       wanted.has(m.name) ? "-- a second monitor of that name" : "-- monitors.json no longer names it");
 }
 
-for (const m of monitors) {
-  const have = byName.get(m.name);
+for (const file of monitors) {
+  const have = byName.get(file.name);
+  const m = file.name === "notebook" && file.type === "ping"
+    ? { ...file, hostname: NOTEBOOK_IP || have?.hostname || file.hostname }
+    : file;
+  if (m.hostname === file.hostname && file.name === "notebook" && !NOTEBOOK_IP) {
+    log("notebook: no KNOBAS_LIVE_NOTEBOOK_IP in testenv/live.env, so the ping watches", file.hostname, "and stays down");
+  }
   const changed = have ? drift(have, m) : null;
   if (have && changed.length === 0) { log("keeping", JSON.stringify(m.name)); continue; }
   if (have) {
