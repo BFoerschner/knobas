@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { entityView, readViewAhead } from "../../ipc/entity";
-import { installHoverReads, readOf, REST_MS } from "./hover-reads";
+import { installHoverReads, landingGuess, readOf, REST_MS } from "./hover-reads";
 
 const sent: { cmd: string; args: unknown }[] = [];
 let answers: ((value: unknown) => void)[] = [];
@@ -144,6 +144,26 @@ test("a press on a repository's link reads its landing at once, and the page's a
   root.querySelector("#tab")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
   await flush();
   expect(sent).toEqual([]);
+});
+
+// The ux16 overs pass (2026-11-17): the landing's README guess was a second round after its listing, behind the page's
+// build (130 ms more at 6x on Björn's PC). The press asks it once the record names the source's tree sections.
+test("a press asks the landing's README guess once the record names the tree's sections", async () => {
+  vi.useRealTimers();
+  root.innerHTML = `<a id="readme" href="#/repo/gitea%3Atidewater%2Freadme-service">repo</a>`;
+  root.querySelector("#readme")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  await flush();
+  const id = "gitea:tidewater/readme-service";
+  expect(landingGuess(id), "not before the record says how the source names a file").toBeNull();
+  answers[0]!({ tree: { dir: "files:", file: "file:" } });
+  await flush();
+  expect(sent.at(-1)).toEqual({ cmd: "entity_view", args: { entityId: id, section: "file:README.md" } });
+  expect(landingGuess(id)).toBe("file:README.md");
+  // The landing's own ask of it takes the read under way.
+  const n = sent.length;
+  void entityView(id, "file:README.md");
+  await flush();
+  expect(sent).toHaveLength(n);
 });
 
 test("Enter on a repository's link reads its landing as a press does", async () => {

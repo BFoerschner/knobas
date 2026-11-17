@@ -8,6 +8,21 @@
  * pointer has stood on the link a moment, so a pointer swept across a list asks nothing.
  */
 import { codeFacts, getEntity, readViewAhead, repoBranchPulls, repoPipelines } from "../../ipc/entity";
+import { likelySections } from "./repo";
+
+/** The file a landing that names none opens first, its README, as the Files tab guesses it (`TfRepoFiles.svelte`). */
+export const LANDING_README = "README.md";
+
+/** The README guess a press asked, by entity: the section. */
+const guessed = new Map<string, string>();
+
+/**
+ * The section a press on the repository's link asked of `entityId` as its README guess ({@link readLandingAhead}), or
+ * `null`: the landing takes it even where its top listing came first.
+ */
+export function landingGuess(entityId: string): string | null {
+  return guessed.get(entityId) ?? null;
+}
 
 /**
  * How long a press's reads are kept after they land, for the page's own asks to take: a repository's landing at CPU 6x
@@ -24,7 +39,17 @@ export const PRESS_KEEP_MS = 3000;
  */
 export function readLandingAhead(entityId: string): void {
   const quiet = (read: Promise<unknown>) => void read.catch(() => {});
-  quiet(getEntity(entityId));
+  // The README guess as the landing makes it (the ux16 overs pass, 2026-11-17): asked once the record names the source's
+  // tree sections, which comes back before the page's build at 6x, so the README is not a second round after it. On
+  // Björn's PC the landing asked it once its listing had come, behind the build, and waited 130 ms more at 6x.
+  quiet(
+    getEntity(entityId).then((detail) => {
+      const likely = likelySections(LANDING_README, detail.tree ?? null);
+      if (likely === null) return;
+      guessed.set(entityId, likely.file);
+      quiet(readViewAhead(entityId, likely.file, PRESS_KEEP_MS));
+    }),
+  );
   quiet(codeFacts([entityId]));
   quiet(repoBranchPulls(entityId));
   quiet(repoPipelines(entityId));

@@ -136,6 +136,7 @@
     sourceName,
     type TextPlace,
   } from "./repo";
+  import { LANDING_README, landingGuess } from "./hover-reads";
   import TfWaiting from "../TfWaiting.svelte";
   import TfHeldNote from "../TfHeldNote.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
@@ -772,7 +773,9 @@
   // copy draws the README and the guess goes unread: one read of the store, and the read behind it, spent for the round.
   // A Markdown README is the default `pickDefaultFile` takes first; where the listing names another file, or none, the
   // guess goes unread and the listing's own section is read.
-  const LANDING_GUESS = "README.md";
+  // A press on the repository's link asked the same guess before the page was built (`readLandingAhead`, the ux16 overs
+  // pass): taken where the listing came first and names it, so the README draws with the listing, not a round after it.
+  const LANDING_GUESS = LANDING_README;
   $effect(() => {
     const declared = treeSections;
     if (path !== null) return;
@@ -780,6 +783,10 @@
       // The listing names its own default: a guess it did not take goes, so no later open of that file takes a read from now.
       untrack(() => {
         if (shown !== LANDING_GUESS) early.delete(fileKey(LANDING_GUESS));
+        else if (!early.has(fileKey(LANDING_GUESS))) {
+          const pressed = landingGuess(at);
+          if (pressed !== null && !hasDrawnFile(at, pressed)) askEarly(pressed, fileKey(LANDING_GUESS));
+        }
       });
       return;
     }
