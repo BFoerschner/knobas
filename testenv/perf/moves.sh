@@ -40,24 +40,27 @@ corpora=()
 [ -z "$fixture" ] || corpora+=("fixture|http://127.0.0.1:$port/?fake-ipc&fake-scale&fake-sources-healthy&fake-hooks&fake-late=$late#/time")
 [ -z "$real" ] || corpora+=("real|http://127.0.0.1:$port/?fake-ipc&fake-hooks&fake-real=$real#/time")
 status=0
-run_all() {
-  for corpus in "${corpora[@]}"; do
-    name=${corpus%%|*} url=${corpus#*|}
-    for size in $sizes; do
-      echo "moves: $name at $size, ${throttle//,/x, }x${sync:+, syncing}"
-      pids=()
-      for shard in $(seq 1 "$workers"); do
-        node "$here/moves.mjs" --app "$url" --out "$out/$name-$size-$shard.json" --size "$size" --throttle "$throttle" \
-          --shard "$shard/$workers" ${sync:+$sync} ${only:+--only "$only"} ${attach:+--attach "$attach"} --check --max-minutes 120 \
-          > "$out/$name-$size-$shard.log" 2>&1 &
-        pids+=($!)
-      done
-      for pid in "${pids[@]}"; do wait "$pid" || status=1; done
-      grep -hE "^(MOVED|ERROR)" "$out/$name-$size-"*.log
+# The built app on loopback for the length of the run, as `with-built.sh` serves it.
+if curl -fsS -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then echo "moves: something already answers on $port" >&2; exit 1; fi
+python3 -I -m http.server "$port" --bind 127.0.0.1 --directory "$out/app" >/dev/null 2>&1 &
+server=$!
+trap 'kill "$server" 2>/dev/null' EXIT
+for _ in $(seq 1 100); do curl -fsS -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null && break; sleep 0.1; done
+for corpus in "${corpora[@]}"; do
+  name=${corpus%%|*} url=${corpus#*|}
+  for size in $sizes; do
+    echo "moves: $name at $size, ${throttle//,/x, }x${sync:+, syncing}"
+    pids=()
+    for shard in $(seq 1 "$workers"); do
+      node "$here/moves.mjs" --app "$url" --out "$out/$name-$size-$shard.json" --size "$size" --throttle "$throttle" \
+        --shard "$shard/$workers" ${sync:+"$sync"} ${only:+--only "$only"} ${attach:+--attach "$attach"} --check --max-minutes 120 \
+        > "$out/$name-$size-$shard.log" 2>&1 &
+      pids+=($!)
     done
+    for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+    grep -hE "^(MOVED|ERROR)" "$out/$name-$size-"*.log
   done
-}
-"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" bash -c "$(declare -f run_all); $(declare -p corpora sizes throttle workers sync only attach out here); status=0; run_all; exit \$status" || status=1
+done
 echo "moves: results in $out"
 [ "$status" -eq 0 ] && echo "moves: nothing moved" || echo "moves: something moved (MOVED lines above)"
 exit "$status"
