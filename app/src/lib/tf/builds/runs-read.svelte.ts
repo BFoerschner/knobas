@@ -48,6 +48,19 @@ export class RunsRead {
   #read = $state.raw<ReadonlySet<string> | null>(null);
   ports: RunsReadPorts = REAL;
   #loading: Promise<void> | null = null;
+  /** The failed runs each open pipeline page holds, by pipeline: *Mark all* turns them at once, older pages too. */
+  #held = new Map<string, readonly string[]>();
+
+  /**
+   * A pipeline page's failed runs, held while it draws them. *Mark all as read* on that pipeline, from the rail or its
+   * own header, draws them read before the backend answers. Returns the release.
+   */
+  hold(pipelineId: string, runs: readonly string[]): () => void {
+    this.#held.set(pipelineId, runs);
+    return () => {
+      if (this.#held.get(pipelineId) === runs) this.#held.delete(pipelineId);
+    };
+  }
 
   /** The marks as one set, `null` until read: what the pure rules in `builds.ts` take. */
   get read(): ReadonlySet<string> | null {
@@ -120,11 +133,12 @@ export class RunsRead {
   }
 
   /**
-   * *Mark all as read*: the unread runs drawn at once, and every failed run of `scope.pipelines`, older pages
-   * included, by the backend. Says how many it marked, with *Undo*; a press that marked nothing says so.
+   * *Mark all as read*: the unread runs drawn, and those an open page of one of `scope.pipelines` holds
+   * ({@link RunsRead.hold}), at once; every failed run of `scope.pipelines`, older pages included, by the backend. Says how many it marked, with *Undo*; a press that marked nothing says so.
    */
   async markAll(scope: MarkScope): Promise<string[]> {
-    const drawn = scope.runs.filter((id) => !(this.#read?.has(id) ?? false));
+    const shown = [...scope.runs, ...scope.pipelines.flatMap((id) => this.#held.get(id) ?? [])];
+    const drawn = [...new Set(shown)].filter((id) => !(this.#read?.has(id) ?? false));
     this.#with(drawn);
     let wrote: string[];
     try {
@@ -144,6 +158,7 @@ export class RunsRead {
   forget(): void {
     this.#read = null;
     this.#loading = null;
+    this.#held.clear();
     this.ports = REAL;
   }
 }

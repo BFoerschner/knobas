@@ -107,3 +107,21 @@ test("the Inbox's Done reads its run here too, and a mark made while the marks w
   expect(runs.unread(failed("teamcity:build:3"))).toBe(false);
   expect(runs.unread(failed("teamcity:build:4"))).toBe(false);
 });
+
+test("Mark all as read turns the runs an open pipeline page holds at once, and a page let go holds none", async () => {
+  let answer: (ids: string[]) => void = () => {};
+  const runs = store({ mark: vi.fn(() => new Promise<string[]>((resolve) => (answer = resolve))) });
+  await runs.load();
+  const release = runs.hold("teamcity:buildType:A", ["teamcity:build:70", "teamcity:build:71"]);
+  runs.hold("teamcity:buildType:B", ["teamcity:build:80"]);
+  const pending = runs.markAll({ runs: ["teamcity:build:1"], pipelines: ["teamcity:buildType:A"] });
+  expect(runs.unread(failed("teamcity:build:70")), "drawn before the backend answers").toBe(false);
+  expect(runs.unread(failed("teamcity:build:80")), "another pipeline's page is not in scope").toBe(true);
+  expect(runs.ports.mark).toHaveBeenCalledWith(["teamcity:build:1", "teamcity:build:70", "teamcity:build:71"], ["teamcity:buildType:A"]);
+  answer(["teamcity:build:1", "teamcity:build:70", "teamcity:build:71"]);
+  await pending;
+  release();
+  await runs.markUnread(["teamcity:build:1", "teamcity:build:70", "teamcity:build:71"]);
+  void runs.markAll({ runs: [], pipelines: ["teamcity:buildType:A"] });
+  expect(runs.unread(failed("teamcity:build:70")), "the page was let go").toBe(true);
+});

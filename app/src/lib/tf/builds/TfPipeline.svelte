@@ -565,9 +565,15 @@
     void runsRead.toggle(run);
   }
 
-  /** *Mark all as read* on this pipeline (ux18): the unread runs drawn at once, and its whole history by the backend. */
+  /** The failed runs drawn here, held for the window's *Mark all as read* (ux18): from the rail too, they turn at once. */
+  $effect(() => {
+    const failures = (all ?? []).filter(failedRun).map((run) => run.entity_id);
+    return runsRead.hold(id, failures);
+  });
+
+  /** *Mark all as read* on this pipeline (ux18): the runs drawn at once (`hold`), and its whole history by the backend. */
   function markAllRead() {
-    void runsRead.markAll({ runs: (all ?? []).filter((run) => runsRead.unread(run)).map((run) => run.entity_id), pipelines: [id] });
+    void runsRead.markAll({ runs: [], pipelines: [id] });
   }
 
   function openRow(event: MouseEvent, run: RunRow) {
