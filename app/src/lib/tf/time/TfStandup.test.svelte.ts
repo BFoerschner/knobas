@@ -332,7 +332,8 @@ test("each panel heading's action is a plain small button on the heading line, n
   const headed = [...target.querySelectorAll(".tf-su .tf-panel > header .tf-btn")].map((b) => [b.textContent?.trim(), b.className]);
   expect(headed).toEqual([
     ["Copy as text", "tf-btn tf-sm tf-ghost"],
-    ["Publish to Confluence", "tf-btn tf-sm tf-primary"],
+    // `tf-ellroom`: a stored target keeps the ellipsis's room, unseen (the nothing-moves pass).
+    ["Publish to Confluence", "tf-btn tf-sm tf-primary tf-ellroom"],
   ]);
 });
 

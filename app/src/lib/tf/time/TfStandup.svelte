@@ -873,13 +873,15 @@
         {#if publication === null || going !== null || canAgain || pressHeld}
           <button
             class="tf-btn tf-sm tf-primary"
+            class:tf-ellroom={going === null && !(pressHeld && published) && publication === null && target !== null}
             bind:this={press}
             disabled={publication === null && (!loaded || protocol === null)}
             aria-disabled={going !== null || pressHeld || (publication === null && publishing) ? "true" : undefined}
             {...going === null ? refusedAttrs(publication === null ? publishRefusal : againRefusal) : {}}
             onclick={pressed}
           >
-            <!-- The first publish asks where, so it has the ellipsis; with a target stored it acts at once. -->
+            <!-- The first publish asks where, so it has the ellipsis; with a target stored it acts at once. The ellipsis keeps its room
+                 either way, as the stored target is read after the button draws, and the button narrowed under the pointer when it landed. -->
             {going ?? (pressHeld && published ? "Sent" : publication === null ? `Publish to Confluence${target === null ? "…" : ""}` : "Publish again")}
           </button>
         {/if}

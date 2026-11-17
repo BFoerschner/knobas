@@ -1008,9 +1008,11 @@
     {/if}
     {#if base !== null}
       {#snippet lanesSwitch()}
-        <!-- prototype-6 offers lanes on the ticket board only. -->
-        {#if showing.layout === "board"}
-          <label class="tf-fsel">
+        <!-- prototype-6 offers lanes on the ticket board only. The list keeps the select's room, unseen and out of the Tab order, as a
+             header keeps an action a tab does not offer: the bar wraps, and taking the select out reflowed it under the reader
+             (the nothing-moves pass, 2026-11-17). -->
+        {@const off = showing.layout !== "board"}
+          <label class="tf-fsel" class:tf-hidden={off} inert={off} aria-hidden={off ? "true" : undefined}>
             Lanes
             <select
               aria-label="Lanes"
@@ -1022,7 +1024,6 @@
               {/each}
             </select>
           </label>
-        {/if}
       {/snippet}
       <FilterBar
         {config}

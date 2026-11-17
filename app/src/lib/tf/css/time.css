@@ -190,6 +190,8 @@
 .tf-su-publine { display: grid; padding: 5px 8px; border-radius: 4px; border-left: 3px solid var(--rule); background: var(--sheet-2); font-size: var(--t-sm); color: var(--ink-2); }
 .tf-su-publine > span { grid-area: 1 / 1; }
 .tf-su-publine > .tf-off { visibility: hidden; }
+/* *Publish to Confluence* keeps its ellipsis's room with a target stored, which is read after it draws (the nothing-moves pass). */
+.tf-ellroom::after { content: "…"; visibility: hidden; margin-inline-start: -6px; } /* -6 px: `.tf-btn`'s gap, which a flex item of its own takes */
 .tf-su-publine.tf-su-pubchanged { border-left-color: var(--warn); color: var(--ink); }
 .tf-su-people { display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; margin-bottom: 8px; }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }

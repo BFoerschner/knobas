@@ -924,7 +924,9 @@ test("the Board / List and Lanes switches hold for the session only: nothing is 
     expect(lanesSelect()!.value).toBe("epic");
     layoutButton("List").click();
     await settle();
-    expect(lanesSelect()).toBeNull();
+    // The list keeps the select's room, unseen and out of reach (the nothing-moves pass): the bar does not reflow.
+    expect(lanesSelect()!.closest("label")!.classList.contains("tf-hidden")).toBe(true);
+    expect(lanesSelect()!.closest("label")!.inert).toBe(true);
     // Away and back within the session: both switches held.
     unmount(page!);
     page = null;
