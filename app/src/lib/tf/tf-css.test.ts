@@ -594,3 +594,23 @@ test("a scroller that keeps its bar's gutter paints its clip in --paper, so WebV
     expect(clips(scroller).some((rule) => /background(-color)?:\s*var\(--paper\)/.test(rule.body)), `${scroller} > .tf-sclip`).toBe(true);
   }
 });
+
+// The Windows pass on ux16 (2026-11-17): every clip became positioned for its own paint layer (#2508), and Builds'
+// painted clip under a kept gutter, positioned, made WebView2 hit-test each wheel event on the main thread
+// (`FindScrollTargetOnMainThread` for 40 of 40): its runs and a pipeline's history moved at 71 and 81 pictures a
+// second under a wheel at 4x on Björn's PC, 30 and 31 at 6x. Unpositioned, 0 of 40, and 236 and 237 at 4x again.
+test("a scroller that keeps its bar's gutter keeps its painted clip unpositioned, so WebView2 hit-tests its wheel off the main thread", () => {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selectors: selector!.split(",").map((s) => s.trim()), body: body! }));
+  const clips = (scroller: string) => rules.filter((rule) => rule.selectors.includes(`${scroller} > .tf-sclip`));
+  const gutters = rules
+    .filter((rule) => /scrollbar-gutter:\s*stable/.test(rule.body))
+    .flatMap((rule) => rule.selectors)
+    .filter((scroller) => clips(scroller).length > 0);
+  expect(gutters, "Builds' scroller keeps a gutter, so this test checks something").toContain(".tf-shost > .tf-bmain");
+  // The rule that positions every clip is less specific than a scroller's own, so the scroller's own decides.
+  expect(rules.some((rule) => rule.selectors.includes(".tf-sclip") && /position:\s*relative/.test(rule.body)), "clips are positioned elsewhere").toBe(true);
+  for (const scroller of gutters) {
+    expect(clips(scroller).some((rule) => /(^|;)\s*position:\s*static\s*(;|$)/.test(rule.body)), `${scroller} > .tf-sclip`).toBe(true);
+  }
+});

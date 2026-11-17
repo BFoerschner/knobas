@@ -119,6 +119,14 @@ same. Nothing changed that the eye can see, so nothing went to the design review
 - **The styled scrollbar on Windows.** Whether WebView2 paints its thumb on the main thread as Chrome on the Mac does,
   and so whether the positioned content saves there what it saves here.
 
+**Found on Windows (the ux16 pass, 2026-11-17).** One clip may not be positioned: Builds' (`.tf-shost > .tf-bmain >
+.tf-sclip`), which keeps a gutter and is painted in `--paper` for ClearType's sake (`0998d62d`). Positioned, WebView2
+hit-tested every wheel event over it on the main thread (`FindScrollTargetOnMainThread`, 40 of 40), and Builds' runs
+and a pipeline's history moved at 71 and 81 pictures a second under a wheel at 4x, 30 and 31 at 6x, where ux14 held
+237 and 229. With that one clip static (`builds.css`), 0 of 40 and 236 and 237 at 4x, 224 and 229 at 6x, in
+knobas's own window on the ux16 build. Every other clip stays positioned: their lists stayed on the compositor at
+235 to 240 at 1x, 4x and 6x.
+
 ## Gates
 
 On the code head (6ced3d31; the docs after it change no code), in a clean clone: `just check-front` ok

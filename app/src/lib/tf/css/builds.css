@@ -235,6 +235,11 @@
      on Björn's PC and 26 at 6x (ux12: 229 and 207). Painted, the compositor scrolls it again, 235 at 4x, with the same
      ClearType pixels (the ux13 Windows pass, 2026-11-15). `will-change` gave the scroll back too, but without ClearType. */
   .tf-shost > .tf-bmain > .tf-sclip { background: var(--paper); }
+  /* And unpositioned, over the rule that gives every clip a paint layer of its own (`chrome.css`, #2508): positioned,
+     this painted clip made WebView2 hit-test every wheel event on the main thread, and Builds' runs moved at 71
+     pictures a second at 4x and 30 at 6x on Björn's PC (ux16; ux14 237 and 229). Static, the compositor finds the
+     scroller itself again: 236 and 224 (the ux16 Windows pass, 2026-11-17). */
+  .tf-shost > .tf-bmain > .tf-sclip { position: static; }
   .tf-shost > .tf-bmain > .tf-sclip > .tf-sbody { width: 100%; }
   .tf-bmain .tf-fhead.tf-bhead { container: bhead / inline-size; }
   @container bhead (max-width: 1086px) {
