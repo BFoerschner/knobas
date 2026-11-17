@@ -203,7 +203,7 @@
         {/each}
       </tbody>
     </table>
-    <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={appPageHash()} data-land={landKey("checkouts", LAND_ADD)}>Add an application</a></div>
+    <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" data-land={landKey("checkouts", LAND_ADD)} href={appPageHash()}>Add an application</a></div>
   </div>
   <div class="tf-stg-sec">
     <h2>Pull request worktrees</h2>
