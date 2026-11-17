@@ -108,6 +108,10 @@ pub struct Lifecycle {
     /// Here rather than on `AppState`, because the reads that answer before
     /// the database is up (the Add-source form's adapter list) need it too.
     registry: Arc<dyn AdapterRegistry>,
+    /// The one counter of the state words the mirror has seen (the
+    /// state-colours bug, 2026-11-17): the *State colours* read, bring-up and
+    /// the scheduler's events share it, so a source is counted once.
+    seen_words: crate::sources::state_colours::SeenCounter,
 }
 
 impl Default for Lifecycle {
@@ -137,6 +141,7 @@ impl Lifecycle {
             generation: AtomicU64::new(0),
             suspended: Mutex::new(None),
             restart_gate: tokio::sync::Mutex::new(()),
+            seen_words: crate::sources::state_colours::SeenCounter::new(Arc::clone(&registry)),
             registry,
         }
     }
@@ -145,6 +150,12 @@ impl Lifecycle {
     #[must_use]
     pub fn registry(&self) -> &dyn AdapterRegistry {
         self.registry.as_ref()
+    }
+
+    /// The counter of seen state words ([`SeenCounter`](crate::sources::state_colours::SeenCounter)).
+    #[must_use]
+    pub fn seen_words(&self) -> &crate::sources::state_colours::SeenCounter {
+        &self.seen_words
     }
 
     /// Where bring-up has got to.

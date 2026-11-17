@@ -1060,6 +1060,15 @@ async fn bring_up_app<R: tauri::Runtime>(
         if let Err(error) = commands::search::searcher(&pool, &registry).await {
             tracing::error!(?error, "the adapters' declarations could not be stored");
         }
+        // The state words each source's items were seen holding (migration
+        // `0096`), counted in the background for a source never counted or
+        // counted under other declarations: once after `0096`, and after an
+        // adapter changed what it declares. *State colours* waits for this
+        // count rather than walking the mirror itself; with nothing stale it
+        // is one read of a few rows.
+        lifecycle
+            .seen_words()
+            .request(&pool, sources::state_colours::Owed::Stale);
         // Each ticket's card, stored for the board and the search's words
         // (migration `0075`), filled in the background for the tickets that
         // have none: after `0075` itself, and after the declarations above

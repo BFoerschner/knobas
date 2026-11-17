@@ -857,9 +857,13 @@ const SEEDED_TONES: [(&str, ToneChoice); 2] =
 /// so a row that arrived is also a row the far machine applies: the restored
 /// Jira source config is what puts `ticket` in the answer.
 async fn yours(pool: &sqlx::PgPool) -> Vec<(String, ToneChoice, ToneOrigin)> {
-    let kinds = knobas_app::sources::state_colours::read(pool, &Registry::for_process())
-        .await
-        .expect("read the state colours");
+    let kinds = knobas_app::sources::state_colours::read(
+        pool,
+        &Registry::for_process(),
+        &knobas_app::sources::state_colours::SeenCounter::new(Arc::new(Registry::for_process())),
+    )
+    .await
+    .expect("read the state colours");
     kinds
         .iter()
         .filter(|kind| kind.kind == "ticket")

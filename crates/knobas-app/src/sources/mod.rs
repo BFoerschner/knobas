@@ -650,14 +650,28 @@ pub async fn bring_up<R: tauri::Runtime>(
             secrets: Arc::clone(&deps.secrets),
             // The owed links of #1050 resolved after every run (`ArrivalLinks`),
             // and a suggestion pass requested after every OK one (#1485).
-            events: Arc::new(crate::suggestion_pass::SuggestOnSync::new(
-                write_queue::ArrivalLinks::new(
-                    TauriEvents::new(app.clone()),
-                    deps.pool.clone(),
-                    Arc::clone(&registry),
-                    background.clone(),
+            // And the state words a run's source shows counted again after
+            // a run that wrote (the state-colours bug, 2026-11-17).
+            events: Arc::new(state_colours::CountOnSync::new(
+                crate::suggestion_pass::SuggestOnSync::new(
+                    write_queue::ArrivalLinks::new(
+                        TauriEvents::new(app.clone()),
+                        deps.pool.clone(),
+                        Arc::clone(&registry),
+                        background.clone(),
+                    ),
+                    deps.suggestions,
                 ),
-                deps.suggestions,
+                // The process's counter, which the read waits on; a test app
+                // that manages no lifecycle counts on one of its own.
+                {
+                    use tauri::Manager as _;
+                    app.try_state::<crate::Lifecycle>().map_or_else(
+                        || state_colours::SeenCounter::new(Arc::clone(&registry)),
+                        |lifecycle| lifecycle.seen_words().clone(),
+                    )
+                },
+                deps.pool.clone(),
             )),
             timing: SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),

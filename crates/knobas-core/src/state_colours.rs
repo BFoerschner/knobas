@@ -334,6 +334,273 @@ pub async fn seen_words(
         .collect())
 }
 
+/// One open candidate of one kind, and the candidates its words fall back
+/// to ([`fallback`]): what a source's stored seen words are counted under.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct OpenKind {
+    pub kind: String,
+    pub at: PayloadPath,
+    pub fallback: Vec<crate::payload::StatePath>,
+}
+
+/// What one source's seen words are counted under: each open candidate its
+/// declarations name, with that kind's fallback. Stored beside the counts
+/// (`sync.state_word_source.paths`), so a source whose declarations changed
+/// since is counted again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceWords {
+    pub source_id: String,
+    pub kinds: Vec<OpenKind>,
+}
+
+impl SourceWords {
+    /// `kinds`, one source's declarations, as [`open_paths`] and [`fallback`]
+    /// read them. `None` for a source with no open candidate: it has no seen
+    /// words to count.
+    #[must_use]
+    pub fn of(source_id: &str, kinds: &[KindPaths]) -> Option<SourceWords> {
+        let fallback = fallback(kinds);
+        let open: Vec<OpenKind> = open_paths(source_id, kinds)
+            .map(|path| OpenKind {
+                fallback: fallback
+                    .iter()
+                    .find(|f| f.kind == path.kind)
+                    .map(|f| f.state.clone())
+                    .unwrap_or_default(),
+                kind: path.kind,
+                at: path.at,
+            })
+            .collect();
+        (!open.is_empty()).then(|| SourceWords {
+            source_id: source_id.to_owned(),
+            kinds: open,
+        })
+    }
+
+    fn paths(&self) -> serde_json::Value {
+        serde_json::to_value(&self.kinds).unwrap_or(serde_json::Value::Null)
+    }
+}
+
+/// One source's words, grouped by what decides their fallback tone: per
+/// open candidate's kind, each trimmed non-empty string its live items hold
+/// there, with the values (`vals`, a JSON array, null for a miss) its
+/// [`fallback`] candidates' paths lead to, and how many items hold that
+/// pair. The tones are resolved per group in Rust ([`resolve_state`]), so a
+/// payload is read once, not walked through the declarations per item:
+/// 270 ms over 20,007 Jira tickets where [`SEEN_WORDS`] took 2.5 s quiet and
+/// 11 to 14 s on a loaded Mac (2026-11-17).
+///
+/// [`resolve_state`]: crate::payload::resolve_state
+const SEEN_GROUPS: &str = "with o as materialized (
+       select p->>'kind' as kind,
+              array(select jsonb_array_elements_text(p->'at')) as segs,
+              array(select array_to_string(array(select jsonb_array_elements_text(f.at)), chr(31))
+                      from jsonb_array_elements(p->'fallback') with ordinality as f(at, n)
+                     order by f.n) as fb
+         from jsonb_array_elements($2::jsonb) p)
+     select o.kind, btrim(x.p #>> o.segs) as word,
+            (select coalesce(jsonb_agg(x.p #> string_to_array(f.s, chr(31)) order by f.n), '[]'::jsonb)
+               from unnest(o.fb) with ordinality as f(s, n)) as vals,
+            count(*) as n
+       from o
+       join sync.item i on i.source_id = $1 and i.kind = o.kind
+      cross join lateral (select i.payload #> '{}'::text[] as p offset 0) x
+      where jsonb_typeof(x.p #> o.segs) = 'string'
+        and btrim(x.p #>> o.segs) <> ''
+        and i.entity_id not in (select e.id from knobas.entity e where e.deleted_at is not null)
+      group by 1, 2, 3";
+
+/// The tone a group of [`SEEN_GROUPS`] falls back to: its values put where
+/// the fallback candidates look, read by the one Rust rule.
+fn fallback_tone(fallback: &[crate::payload::StatePath], vals: &serde_json::Value) -> Option<Tone> {
+    let vals = vals.as_array()?;
+    let mut payload = serde_json::Map::new();
+    let candidates: Vec<crate::payload::StatePath> = fallback
+        .iter()
+        .enumerate()
+        .map(|(n, candidate)| {
+            if let Some(value) = vals.get(n) {
+                payload.insert(n.to_string(), value.clone());
+            }
+            crate::payload::StatePath {
+                at: PayloadPath::of([n.to_string()]),
+                text_at: None,
+                ..candidate.clone()
+            }
+        })
+        .collect();
+    crate::payload::resolve_state(&serde_json::Value::Object(payload), &candidates)?.tone
+}
+
+/// The stored spelling of a fallback tone: its word, `''` for none.
+fn tone_word(tone: Option<Tone>) -> String {
+    tone.and_then(|t| serde_json::to_value(t).ok())
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// Count `source`'s seen words again and store them in place of the last
+/// count (`sync.state_word_seen`), with what they were counted under
+/// (`sync.state_word_source`): after a run of the source wrote to the
+/// mirror, and on a read that finds the source never counted or counted
+/// under other declarations. Two counts of one source take turns.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the read or the write fails.
+pub async fn count_seen_words(pool: &PgPool, source: &SourceWords) -> Result<(), CoreError> {
+    let param: Vec<serde_json::Value> = source
+        .kinds
+        .iter()
+        .map(|k| {
+            serde_json::json!({
+                "kind": k.kind,
+                "at": k.at,
+                "fallback": k.fallback.iter().map(|c| &c.at).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let mut tx = pool.begin().await?;
+    sqlx::query("select pg_advisory_xact_lock(hashtext('sync.state_word_seen'), hashtext($1))")
+        .bind(&source.source_id)
+        .execute(&mut *tx)
+        .await?;
+    let groups: Vec<(String, String, serde_json::Value, i64)> = sqlx::query_as(SEEN_GROUPS)
+        .bind(&source.source_id)
+        .bind(serde_json::Value::Array(param))
+        .fetch_all(&mut *tx)
+        .await?;
+    let mut counted: std::collections::BTreeMap<(String, String, String), i64> =
+        std::collections::BTreeMap::new();
+    for (kind, word, vals, n) in groups {
+        let fallback = source
+            .kinds
+            .iter()
+            .find(|k| k.kind == kind)
+            .map_or(&[][..], |k| k.fallback.as_slice());
+        let tone = tone_word(fallback_tone(fallback, &vals));
+        *counted.entry((kind, word, tone)).or_default() += n;
+    }
+    let (mut kinds, mut words, mut tones, mut counts) = (vec![], vec![], vec![], vec![]);
+    for ((kind, word, tone), n) in counted {
+        kinds.push(kind);
+        words.push(word);
+        tones.push(tone);
+        counts.push(n);
+    }
+    sqlx::query("delete from sync.state_word_seen where source_id = $1")
+        .bind(&source.source_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "insert into sync.state_word_seen (source_id, kind, word, tone, items)
+         select $1, k, w, t, n from unnest($2::text[], $3::text[], $4::text[], $5::bigint[]) as u(k, w, t, n)",
+    )
+    .bind(&source.source_id)
+    .bind(&kinds)
+    .bind(&words)
+    .bind(&tones)
+    .bind(&counts)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "insert into sync.state_word_source (source_id, paths) values ($1, $2)
+         on conflict (source_id) do update set paths = excluded.paths, counted_at = now()",
+    )
+    .bind(&source.source_id)
+    .bind(source.paths())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// The sources of `sources` with no stored count under the declarations
+/// they have now: never counted (the first read after the migration), or
+/// counted under others (an adapter changed its declarations).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the read fails.
+pub async fn uncounted<'a>(
+    pool: &PgPool,
+    sources: &'a [SourceWords],
+) -> Result<Vec<&'a SourceWords>, CoreError> {
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<&str> = sources.iter().map(|s| s.source_id.as_str()).collect();
+    let marks: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "select source_id, paths from sync.state_word_source where source_id = any($1)",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(sources
+        .iter()
+        .filter(|source| {
+            let paths = source.paths();
+            !marks
+                .iter()
+                .any(|(id, at)| *id == source.source_id && *at == paths)
+        })
+        .collect())
+}
+
+/// The words the mirror has seen at `sources`' open candidates, as
+/// [`seen_words`] answers, read from the stored counts ([`count_seen_words`]):
+/// a read of a few rows a source, never a walk of the mirror. A source with
+/// no count ([`uncounted`]) offers no word; the caller counts it first. A
+/// word's fallback is the most common among its items across the sources, a
+/// tie going to no tone, then to the tone's word, as [`SEEN_WORDS`]'
+/// `mode()` has it.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the read fails.
+pub async fn stored_seen_words(
+    pool: &PgPool,
+    sources: &[SourceWords],
+) -> Result<Vec<SeenWord>, CoreError> {
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<&str> = sources.iter().map(|s| s.source_id.as_str()).collect();
+    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+        "select kind, word, tone, items from sync.state_word_seen where source_id = any($1)",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    let mut tally: std::collections::BTreeMap<(String, String), Vec<(String, i64)>> =
+        std::collections::BTreeMap::new();
+    for (kind, word, tone, n) in rows {
+        let tones = tally.entry((kind, word)).or_default();
+        match tones.iter_mut().find(|(t, _)| *t == tone) {
+            Some((_, total)) => *total += n,
+            None => tones.push((tone, n)),
+        }
+    }
+    Ok(tally
+        .into_iter()
+        .map(|((kind, word), mut tones)| {
+            tones.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            let fallback = tones
+                .first()
+                .filter(|(t, _)| !t.is_empty())
+                .and_then(|(t, _)| {
+                    serde_json::from_value(serde_json::Value::String(t.clone())).ok()
+                });
+            SeenWord {
+                kind,
+                word,
+                fallback,
+            }
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
