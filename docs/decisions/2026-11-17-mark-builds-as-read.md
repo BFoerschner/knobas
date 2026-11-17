@@ -38,4 +38,16 @@ The judgment calls went to Fable (xhigh); its rulings are followed here.
 
 ## Timing
 
-See the PR comment of this pass.
+On Björn's PC, headless Chrome in WSL, the backend the Mac's windowless one over the saved scale database (91 pipelines, 20 failing, 2,620 runs) through an SSH tunnel; real presses, 7 each, medians at 1x / 4x / 6x (`testenv/perf/runs-read.mjs`):
+
+| Press, to the frame that shows it | 1440x868@1 | 2560x1440@1.25 | Line |
+|---|---|---|---|
+| *Mark as read* on a row (the dot gone) | 32 / 30 / 46 | 32 / 46 / 64 | 100 / 100 / 200 |
+| *Mark as unread* | 33 / 32 / 48 | 33 / 42 / 66 | 100 / 100 / 200 |
+| *Mark all as read* on the rail (no name in err, no dot) | 33 / 35 / 53 | 33 / 45 / 71 | 100 / 100 / 200 |
+| its toast, after the backend's write | 83 / 98 / 99 | 83 / 99 / 114 | 100 / 200 / 300 |
+| *Undo* (the failures back) | 33 / 35 / 55 | 33 / 44 / 67 | 100 / 100 / 200 |
+
+The backend's `mark_runs_read` of every pipeline: median 20 ms, worst 54 ms. Builds' first open and return, a pipeline's and a run's (`open.mjs`, the open budget's places), on the PC: every one inside its line at both sizes; Builds first open drawn 46 / 113 / 151 ms (1440) and 46 / 139 / 209 ms (2560) at 1x / 4x / 6x.
+
+A first Mac run drew *Mark all* only when the backend answered (65 ms at 1x, 103 ms at 6x): the open pipeline page's older failures were not among the rail's runs. A pipeline page now holds its failed runs with the store (`hold`), so they turn at once too.
