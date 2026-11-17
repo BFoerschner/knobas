@@ -169,6 +169,15 @@ page did. The places are the saved scale database's (`SCLENG`, a TeamCity pipeli
 things differ from the app: a headless Chrome sends at most six requests to the backend at once, where Tauri's IPC
 has no such limit, and the backend is the example's mock runtime, whose answers are the app's.
 
+A box held unseen in its room (`visibility: hidden`: a detail page's header and tabs waiting for their reads, Backup's
+ticks, a ticket's actions; `docs/decisions/2026-11-17-nothing-moves-once-drawn.md`) is not useful until it shows, so a
+hold counts in the time it delays. The places held that way have their own: Settings › Backup and Renderers, Sets, and
+Tickets' *List* pressed (`settings-backup`, `settings-renderers`, `sets`, `tickets-list-switch`, first open and return
+only); a ticket's, a pull request's and a Docs page's held part is timed as their `held` mark. `--only` takes a name or
+the start of one, and a name ending in `$` alone (`--only 'ticket$'` is not Tickets' board). With the Mac's lock taken,
+`--attach <port>` drives a headless Chrome on the WSL box, as `moves.mjs` does (*Nothing moves*); its page reaches the
+app and the backend on the Mac through `ssh -R`, which adds the tunnel's round trip to each read.
+
 ## The inner pages: `just open-budget --inner`
 
 A repository's landing and tabs, its files, a commit, Compare, *New pull request*, a pull request's tabs and a run's

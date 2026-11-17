@@ -9,7 +9,7 @@
 // press the same on a board whose every column had its *Show more* pressed four times (`EXPAND_PAGES`): 1,243 cards
 // on the scale database, the board the Windows pass measured (2026-11-14).
 //
-//   node testenv/perf/keys.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--repeat 5]
+//   node testenv/perf/keys.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--repeat 5] [--attach <port>]
 //                              [--check budget.json --lines real]
 //
 // Each case is set up, then its key is pressed as real input over the DevTools protocol (`Input.dispatchKeyEvent`).
@@ -41,7 +41,9 @@ const settleMs = Number(opt("--settle") ?? 1500);
 const check = opt("--check");
 const lines = opt("--lines") ?? "real";
 
-const browser = await launch({ size });
+// `--attach <port>`: a Chrome already listening (one on the WSL box through a tunnel, when the Mac's lock is taken).
+const attachPort = opt("--attach");
+const browser = attachPort ? { port: Number(attachPort), stop() {} } : await launch({ size });
 const c = await attach(browser.port);
 await c.send("Page.enable");
 await c.send("Runtime.enable");

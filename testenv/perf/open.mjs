@@ -4,7 +4,7 @@
 // again on its return, at each CPU throttle. `open-probe.js` is the page half.
 //
 //   node testenv/perf/open.mjs --app <url> --out <file.json> [--throttle 1,4] [--only a,b] [--rounds first,return]
-//                               [--check budget-open.json --lines real] [--set nav|inner] [--items inner-items.json]
+//                               [--attach <debug port>] [--check budget-open.json --lines real] [--set nav|inner] [--items inner-items.json]
 //                               [--no-big-folders] [--set extremes [--no-seed] [--keep-extremes]]
 //
 // --set   `nav` (the default): the nav pages and the detail pages their rows open; `inner` (the inner-pages pass,
@@ -93,15 +93,15 @@ const PLACES = [
   // The same view with the setting off: eight a column, the line it is held to beside the setting's cost.
   { name: "tickets-all-off", start: "#/time", go: "#/tickets/perf-every-ticket-off", hash: "#/tickets/perf-every-ticket-off", useful: ".tf-tcard", min: 5, away: "time" },
   { name: "tickets-all-list", start: "#/time", go: "#/tickets/perf-every-ticket-list", hash: "#/tickets/perf-every-ticket-list", useful: ".tf-tbl tbody tr[data-entity]", min: 5, away: "time" },
-  { name: "ticket", parent: "tickets", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", useful: ".tf-ticketpage .tf-tkhead, .tf-ticketpage .tf-facts", min: 2, back: "Escape" },
+  { name: "ticket", parent: "tickets", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", useful: ".tf-ticketpage .tf-tkhead, .tf-ticketpage .tf-facts", min: 2, marks: { held: [[".tf-ticketpage .tf-tkacts", 1]] }, back: "Escape" },
   { name: "code", start: "#/time", press: nav("code"), hash: "#/code", useful: `a[href^="#/repo/"], a[href^="#/pr/"]`, min: 5, away: "time" },
   { name: "repo", parent: "code", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", useful: ".tf-repohead, .tf-tabs", min: 2, back: "Escape" },
-  { name: "pull-request", parent: "code", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", useful: ".tf-pr .tf-side, .tf-pr .tf-md, .tf-pr .tf-cfail", min: 1, back: "Escape" },
+  { name: "pull-request", parent: "code", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", useful: ".tf-pr .tf-side, .tf-pr .tf-md, .tf-pr .tf-cfail", min: 1, marks: { held: [[".tf-fhead.tf-holds", 1]] }, back: "Escape" },
   { name: "docs", start: "#/time", press: nav("docs"), hash: "#/docs", useful: ".tf-dh-row", min: 5, away: "time" },
   { name: "docs-space", parent: "docs", start: "#/docs", press: `${shown} a.tf-dh-spacelink[href="#/docs/space/SCLENG"]`, hash: "#/docs/space/", useful: ".tf-dh-row", min: 10, back: "Escape" },
   { name: "docs-page", parent: "docs", start: "#/docs/space/SCLENG", press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", useful: ".tf-rd-main h1", min: 1, titled: true, back: "Escape" },
   // A page come back to by Docs' entry from another section (2026-11-13): `before` opens it once, and it has no first visit.
-  { name: "docs-page-back", start: "#/docs/space/SCLENG", before: `${shown} a.tf-dh-rowt[href^="#/page/"]`, returnsOnly: true, press: nav("docs"), hash: "#/page/", useful: ".tf-rd-main h1", min: 1, away: "time" },
+  { name: "docs-page-back", start: "#/docs/space/SCLENG", before: `${shown} a.tf-dh-rowt[href^="#/page/"]`, returnsOnly: true, press: nav("docs"), hash: "#/page/", useful: ".tf-rd-main h1", min: 1, marks: { held: [[".tf-rd-head .tf-acts", 1]] }, away: "time" },
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
@@ -112,6 +112,13 @@ const PLACES = [
   { name: "standup", parent: "time", start: "#/time", press: `${shown} a[href="#/time/standup"]`, hash: "#/time/standup", useful: ".tf-su-h, .tf-su-body", min: 2, back: `${shown} a[href="#/time"]` },
   { name: "time", start: "#/docs", press: nav("time"), hash: "#/time", useful: ".tf-tm-wrap", min: 1, away: "docs" },
   { name: "settings", start: "#/time", press: GEAR, hash: "#/settings", useful: ".tf-stg-src", min: 3, back: "Escape" },
+  // The parts held unseen until their reads answer (the nothing-moves pass, 2026-11-17): usable once they show, as
+  // `open-probe.js` counts no box held unseen. A Settings section is pressed from the rail and comes back from Sources;
+  // the list is pressed on Tickets and comes back from Board. They have no round from another section.
+  { name: "settings-backup", rounds: ["first", "return"], start: "#/settings/sources", press: `${shown} a[href="#/settings/backup"]`, hash: "#/settings/backup", useful: ".tf-stg-checks .tf-ck", min: 3, back: `${shown} a[href="#/settings/sources"]` },
+  { name: "settings-renderers", rounds: ["first", "return"], start: "#/settings/sources", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", useful: ".tf-stg-sec h2", min: 2, back: `${shown} a[href="#/settings/sources"]` },
+  { name: "sets", start: "#/time", press: nav("sets"), hash: "#/sets", useful: ".tf-sets .tf-row, .tf-sets .tf-empty", min: 1, away: "time" },
+  { name: "tickets-list-switch", rounds: ["first", "return"], start: "#/tickets", press: `${shown} .tf-seg[aria-label="Layout"] button:last-child`, hash: "#/tickets", useful: ".tf-tbl tbody tr[data-entity]", min: 5, back: `${shown} .tf-seg[aria-label="Layout"] button:first-child` },
   { name: "launcher", start: "#/tickets", key: { key: "k", code: "KeyK", modifiers: 4, windowsVirtualKeyCode: 75 }, hash: "#/", useful: "[role=dialog] [role=option], .tf-launch li, .tf-lr", min: 3, back: "Escape", anywhere: true },
 ];
 /**
@@ -168,7 +175,8 @@ const NAV_SHOWN = `[...document.querySelectorAll(".tf-nav a")].some((a) => a.get
 const SECTIONS = ["tickets", "inbox", "code", "builds", "docs", "monitors", "time", "settings"];
 /** Every source ends a run that changed something, as the backend tells the window (`sync:state`). */
 const SYNCED = `(async () => { const all = await window.__TAURI_INTERNALS__.invoke("sync_status", {}); for (const s of all) window.__fake.emit("sync:state", { ...s, running: false, run_id: (s.run_id ?? 0) + 100000 + Math.floor(Math.random() * 1000), last_outcome: "ok", last_changed: true, last_finished_at: new Date().toISOString() }); return all.length; })()`;
-const picked = (p) => !only || only.some((w) => p.name === w || p.name.startsWith(w));
+/** `--only`: a place by its name or the start of it; a name ending in `$` is that place alone. */
+const picked = (p) => !only || only.some((w) => (w.endsWith("$") ? p.name === w.slice(0, -1) : p.name === w || p.name.startsWith(w)));
 
 // The big folders are made only for a run that presses one.
 if (withBig && placesAt(1).filter(picked).some((p) => /^(forge-)?folder-/.test(p.name))) {
@@ -219,7 +227,9 @@ if (set === "nav" && PLACES.filter(picked).some((p) => p.name.startsWith("ticket
     await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "save_ticket_view", args: { view } }) });
   }
 }
-const browser = await launch({ size });
+// `--attach <port>`: a Chrome already listening (one on the WSL box through a tunnel, when the Mac's lock is taken).
+const attachPort = opt("--attach");
+const browser = attachPort ? { port: Number(attachPort), stop() {} } : await launch({ size });
 const c = await attach(browser.port);
 const js = (code, timeout = 60000) => c.js(code, { timeout });
 await c.send("Page.enable");
@@ -331,12 +341,13 @@ for (const rate of throttles) {
       await sleep(firstAfter);
       await quiet(600);
       await cpu(rate);
-      if (rounds.includes("first") && !place.returnsOnly) {
+      const has = (round) => rounds.includes(round) && (!place.rounds || place.rounds.includes(round));
+      if (has("first") && !place.returnsOnly) {
         entry.first = await measure(place);
         console.log(`${rate}x ${place.name} first: ${say(entry.first)}`);
         await quiet(1000);
       }
-      if (rounds.includes("return")) {
+      if (has("return")) {
         if (!rounds.includes("first") && !place.returnsOnly) { await measure(place); await quiet(1000); }
         if (place.back) await leave(place.back);
         else await leave(nav(place.away));
@@ -346,7 +357,7 @@ for (const rate of throttles) {
         await quiet(1000);
       }
       for (const round of ["late", "synced"]) {
-        if (!rounds.includes(round)) continue;
+        if (!has(round)) continue;
         // Away: every other section in turn (`late`), or one (`synced`) and every source's run ending with news.
         const own = place.parent ?? place.hash.slice(2);
         const tour = round === "late" ? SECTIONS.filter((s) => s !== own) : [place.away ?? (own === "time" ? "docs" : "time")];

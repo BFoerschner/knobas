@@ -13,6 +13,8 @@
     document.body;
   const visible = (e) => {
     if (!e.isConnected) return false;
+    // A box held unseen in its room (`visibility: hidden`, a header waiting for its reads, 2026-11-17) is not yet useful.
+    if (e.checkVisibility && !e.checkVisibility({ visibilityProperty: true })) return false;
     const r = e.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return false;
     return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;

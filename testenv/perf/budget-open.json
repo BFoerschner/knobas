@@ -331,6 +331,66 @@
     "drawnMs": 300,
     "moved": 0
    }
+  },
+  "settings-backup": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
+  "settings-renderers": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
+  "sets": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
+  "tickets-list-switch": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
   }
  },
  "inner": {
