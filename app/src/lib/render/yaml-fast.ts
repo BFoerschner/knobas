@@ -24,8 +24,8 @@ export function fastYaml(text: string): unknown {
   }
 }
 
-const INT = /^-?(?:0|[1-9][0-9]*)$/;
-const FLOAT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/;
+/** js-yaml's JSON-schema int and float, as one: an int it reads with `parseInt` reads the same with `Number`. */
+const NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/;
 
 /** A plain scalar as js-yaml's JSON schema resolves it: `null`, `true`, `false`, a JSON-shaped number, else a string. */
 function plain(s: string): unknown {
@@ -33,14 +33,9 @@ function plain(s: string): unknown {
   if (c === 110 /* n */ && s === "null") return null;
   if (c === 116 /* t */ && s === "true") return true;
   if (c === 102 /* f */ && s === "false") return false;
-  if (c === 45 || (c >= 48 && c <= 57)) {
-    if (INT.test(s)) {
-      const n = (s.charCodeAt(0) === 45 ? -1 : 1) * parseInt(s.charCodeAt(0) === 45 ? s.slice(1) : s, 10);
-      if (Number.isFinite(n)) return n;
-    } else if (FLOAT.test(s)) {
-      const n = Number(s);
-      if (Number.isFinite(n)) return n;
-    }
+  if ((c === 45 || (c >= 48 && c <= 57)) && NUMBER.test(s)) {
+    const n = Number(s);
+    if (Number.isFinite(n)) return n;
   }
   return s;
 }
@@ -213,11 +208,8 @@ class Reader {
       // An empty node is the empty string under the JSON schema, as js-yaml reads it.
       return "";
     }
-    const value = this.#inline(r, n);
-    const k = this.#next();
-    // A line under an inline value, deeper than its key, continues it: a scalar over several lines.
-    if (k > n) throw UNSURE;
-    return value;
+    // A line under it deeper than its key (a scalar over several lines) is refused where the block reads on.
+    return this.#inline(r, n);
   }
 
   /** A block sequence at indent `n`. */

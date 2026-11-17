@@ -24,7 +24,7 @@ test("every spec fixture reads the same as js-yaml reads it, the 5,000-operation
 
 test("the shapes spec tools write read the same", () => {
   same(`# a comment\n---\nopenapi: 3.0.0 # trailing\ninfo:\n  title: "A \\"quoted\\" \\u00e9 title"\n  version: '1.0 ''beta'''\n`);
-  same(`a:\n- x\n- y\nb:\n  - 1\n  - -2\n  - 3.5\n  - 1e3\n  - true\n  - null\n  - ~\n  - .inf\n  - 0x1F\n  - 1.0.0\n`);
+  same(`a:\n- x\n- y\nb:\n  - 1\n  - -2\n  - 3.5\n  - 1e3\n  - true\n  - null\n  - ~\n  - .inf\n  - 0x1F\n  - 1.0.0\n  - -0\n  - 9007199254740993\n  - 1.5e-3\n`);
   same(`"200":\n  description: OK\n'404': {description: Missing}\n200: x\n`);
   same(`list:\n  - name: id\n    in: path\n    schema: { type: string, enum: [a, "b", 'c'] }\n  -   name: two\n      required: true\n  - plain\n  - [1, [2, {x: y}]]\n  -\n    nested: yes\n`);
   same(`d: |\n  line one\n    indented\n\n  after a blank\nk: |-\n  kept\n\n\np: |+\n  plus\n\nf: >\n  folded\n  together\n\n  paragraph\ng: >-\n  folded strip\nlast: x\n`);
@@ -38,6 +38,8 @@ test("the shapes spec tools write read the same", () => {
 test("what it does not read for certain it leaves to js-yaml", () => {
   const unsure = [
     `a: &x 1\nb: *x\n`,
+    `a: &x 1\n`,
+    `a: 1\nb: [-0, 9007199254740993]\n`.replace("1\nb", "1\nb: {c: &y 2}\nd"),
     `a: !!str 1\n`,
     `a: "over\n  two lines"\n`,
     `a: plain\n  continued\n`,
