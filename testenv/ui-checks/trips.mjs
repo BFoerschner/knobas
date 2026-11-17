@@ -138,7 +138,8 @@
 //
 //   list-return   2026-11-17 (Björn: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…").
 //                 From `route`, open `list`, then each of `steps` by real pointer: `open` (a `sel` on the row holding `row`'s words), `fill`, `press`. Fails unless
-//                 the address is `list` again with focus on the row holding `lands`, in view; and unless Back from the list goes to `route`, not to a page of it.
+//                 the address is `list` again with focus on the row holding `lands`, in view and not a control a second press would press; and unless Back
+//                 from the list goes to `route`, not to a page of it.
 //
 //   rows-still    The still-rows pass (PR #2479, 2026-11-11; Björn: "another repo just pops in where my cursor was"). Records the box of every
 //                 `rows` element in view, each frame, from the first draw (3 rows, or all there are) until the page has settled, and fails if
@@ -310,7 +311,7 @@ const PAGES = [
       { name: "add", open: { sel: ".tf-stg-acts a", row: "Add an application" }, fill: [["#tf-app-name", "Trip App"], ["#tf-app-command", "trip-app {path}"]], press: "Add application", lands: "Trip App" },
       { name: "save", open: { sel: ".tf-stg-apps a", row: "Fork" }, fill: [["#tf-app-command", "open -a Fork --new {path}"]], press: "Save", lands: "Fork" },
       { name: "cancel", open: { sel: ".tf-stg-apps a", row: "Terminal" }, press: "Cancel", lands: "Terminal" },
-      { name: "cancel an add", open: { sel: ".tf-stg-acts a", row: "Add an application" }, press: "Cancel", lands: "Add an application" },
+      { name: "cancel an add", open: { sel: ".tf-stg-acts a", row: "Add an application" }, press: "Cancel", lands: "Open in" },
       { name: "remove", open: { sel: ".tf-stg-apps a", row: "Fork" }, press: "Remove", lands: "IntelliJ IDEA" },
     ] },
     { id: "folders-list-return", kind: "list-return", strict: true, finding: "apps-page", query: "&fake-folder-render", list: "settings/renderers", steps: [
@@ -3128,10 +3129,12 @@ async function worker(queue, results) {
         const a = document.activeElement;
         const b = a?.getBoundingClientRect();
         // Its row's words, and the link's own name. (In this template literal a backslash must be doubled to reach the page.)
-        return { row: ((a?.closest("tr") ?? a)?.textContent ?? "").replace(/\\s+/g, " ").trim().slice(0, 60), name: a?.getAttribute("aria-label") ?? "", inView: !!b && b.height > 0 && b.top >= 0 && b.bottom <= innerHeight };
+        return { row: ((a?.closest("tr") ?? a)?.textContent ?? "").replace(/\\s+/g, " ").trim().slice(0, 60), name: a?.getAttribute("aria-label") ?? "", control: !!a?.matches("a[href], button, input, select, textarea, [role=button]"), inView: !!b && b.height > 0 && b.top >= 0 && b.bottom <= innerHeight };
       })())`));
       if (!focus.row.includes(step.lands) && !focus.name.includes(step.lands)) reasons.push(`${step.name}: focus is on "${focus.row}", not on ${step.lands}`);
       else if (!focus.inView) reasons.push(`${step.name}: ${step.lands} has focus out of view`);
+      // The press rule: a second press on the way back must land on nothing it would press (a row's *Edit* opens the page again).
+      if (focus.control) reasons.push(`${step.name}: focus landed on a control ("${focus.name || focus.row}"), which a second press would press`);
       notes.push(`${step.name}: "${focus.row.slice(0, 24)}"`);
     }
     // Back from the list: the page Settings was opened from, never one of its pages again.

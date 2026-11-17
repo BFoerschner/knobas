@@ -176,8 +176,8 @@
       {/if}
     </div>
   </div>
-  <div class="tf-stg-sec">
-    <h2>Open in…</h2>
+  <div class="tf-stg-sec" data-land-list="checkouts">
+    <h2 tabindex="-1" data-land={landKey("checkouts", LAND_ADD)}>Open in…</h2>
     <p class="tf-stg-p">
       The default is listed first in Open in… and runs on <b>Enter</b>. <span class="tf-mono">{"{path}"}</span> is the checkout,
       <span class="tf-mono">{"{file}"}</span> and <span class="tf-mono">{"{line}"}</span> the file you have open.
@@ -186,7 +186,7 @@
       <thead><tr><th>Application</th><th>Opens a checkout</th><th>Opens a file</th><th><span class="tf-sr">Actions</span></th></tr></thead>
       <tbody>
         {#each settings.applications as app, index (app.id)}
-          <tr>
+          <tr class="tf-land" tabindex="-1" data-land={landKey("checkouts", app.id)}>
             <td><b>{app.name}</b>{#if app.id === settings.default_application}{" "}<TfStateChip text="default" />{/if}</td>
             <td class="tf-small"><span class="tf-mono">{app.command}</span></td>
             <td class="tf-small">{#if app.file_command}<span class="tf-mono">{app.file_command}</span>{:else}<span class="tf-dim">opens the checkout</span>{/if}</td>
@@ -196,14 +196,14 @@
                   <button class="tf-btn tf-sm tf-ghost" onclick={() => void makeDefault(app.id, app.name)}>Make default</button>
                 {/if}
                 <button class="tf-btn tf-sm tf-ghost" disabled={index === 0} title={index === 0 ? "It is first" : `Move ${app.name} up`} aria-label="Move {app.name} up" onclick={() => void moveUp(index)}>↑</button>
-                <a class="tf-btn tf-sm" href={appPageHash({ app: app.id })} data-land={landKey("checkouts", app.id)}>Edit</a>
+                <a class="tf-btn tf-sm" href={appPageHash({ app: app.id })}>Edit</a>
               </span>
             </td>
           </tr>
         {/each}
       </tbody>
     </table>
-    <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" data-land={landKey("checkouts", LAND_ADD)} href={appPageHash()}>Add an application</a></div>
+    <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={appPageHash()}>Add an application</a></div>
   </div>
   <div class="tf-stg-sec">
     <h2>Pull request worktrees</h2>

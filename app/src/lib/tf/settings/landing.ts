@@ -5,9 +5,10 @@
  * included, *Remove* on the entry that took its place (or *Add*), *Cancel* on the entry it was opened on.
  *
  * The page notes it as it leaves for the list; the list takes it once drawn and focuses its `[data-land]` of that key,
- * scrolled into view. The shell's return (`return-place.ts`) puts the scroll back and focuses what was pressed, which a
- * new entry or a removed one isn't, so the list focuses after the return's first look. Taken once: a later visit to the
- * list lands nowhere.
+ * scrolled into view: the entry's row, or the list's heading when there is no entry. Neither is a control, so a second
+ * Enter or press on the way back presses nothing (the press rule; a row's *Edit* would open the page again). The shell's
+ * return (`return-place.ts`) focuses what was pressed to leave on its first look, so the list focuses again once it has.
+ * Taken once: a later visit to the list lands nowhere.
  */
 
 export type LandingList = "checkouts" | "folder-renderers";
@@ -52,8 +53,8 @@ export function land(list: LandingList, key: string): boolean {
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         const at = document.activeElement;
-        // Only if the return took it, or nothing holds it: a reader who moved on keeps their focus.
-        const taken = at === null || at === document.body || (at instanceof HTMLElement && at.dataset["land"] !== undefined && at.dataset["land"].startsWith(`${list}:`));
+        // Only if the return took it (into the list's own box), or nothing holds it: a reader who moved on keeps their focus.
+        const taken = at === null || at === document.body || at.closest(`[data-land-list="${list}"]`) !== null;
         if (target.isConnected && at !== target && taken) go();
       }),
     );

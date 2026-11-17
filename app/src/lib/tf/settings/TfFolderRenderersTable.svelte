@@ -37,8 +37,8 @@
   const outputOf = (value: string) => OUTPUTS.find((o) => o.value === value)?.label.replace(/ \(.*\)$/, "") ?? value;
 </script>
 
-<div class="tf-stg-sec">
-  <h2>Folder renderers</h2>
+<div class="tf-stg-sec" data-land-list="folder-renderers">
+  <h2 tabindex="-1" data-land={landKey("folder-renderers", LAND_ADD)}>Folder renderers</h2>
   <p class="tf-stg-p">
     A program of yours that takes a folder and makes a picture, text, Markdown or a page out of it. The Code page draws a folder it takes in the
     file’s place. It runs on a copy of the folder at the commit shown, never in your checkout.
@@ -52,16 +52,16 @@
       <thead><tr><th>Renderer</th><th>Command</th><th>Takes</th><th>Makes</th><th><span class="tf-sr">Actions</span></th></tr></thead>
       <tbody>
         {#each folders.list as r (r.id)}
-          <tr>
+          <tr class="tf-land" tabindex="-1" data-land={landKey("folder-renderers", r.id)}>
             <td><b>{r.name}</b></td>
             <td class="tf-small"><span class="tf-mono">{r.command}</span></td>
             <td class="tf-small">{takesLine(r)}</td>
             <td class="tf-small">{outputOf(r.output)}, {secondsLabel(r.timeout_secs)}</td>
-            <td class="tf-right"><a class="tf-btn tf-sm tf-ghost" href={folderPageHash({ renderer: r.id })} aria-label="Edit {r.name}" data-land={landKey("folder-renderers", r.id)}>Edit</a></td>
+            <td class="tf-right"><a class="tf-btn tf-sm tf-ghost" href={folderPageHash({ renderer: r.id })} aria-label="Edit {r.name}">Edit</a></td>
           </tr>
         {/each}
       </tbody>
     </table>
   {/if}
-  <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={folderPageHash()} data-land={landKey("folder-renderers", LAND_ADD)}>Add a folder renderer</a></div>
+  <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={folderPageHash()}>Add a folder renderer</a></div>
 </div>

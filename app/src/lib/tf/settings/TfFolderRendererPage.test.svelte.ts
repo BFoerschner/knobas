@@ -208,6 +208,7 @@ test("each way back to the list names the entry it lands on, and the list focuse
   landOn("folder-renderers", "b");
   app = mount(TfFolderRenderersTable, { target, props: { folders: s.folders } });
   await settle();
-  expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit B");
+  expect(document.activeElement?.tagName).toBe("TR");
+  expect(document.activeElement?.querySelector("a")?.getAttribute("aria-label")).toBe("Edit B");
   expect(takeLanding("folder-renderers")).toBeNull();
 });

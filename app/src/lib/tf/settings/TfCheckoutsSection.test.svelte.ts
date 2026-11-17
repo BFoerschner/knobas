@@ -249,24 +249,28 @@ test("the section's buttons are small, Add an application among them (#2343)", a
   expect(atDefault).toEqual([]);
 });
 
-test("back from an application's page, the list focuses the entry it named, scrolled into view, once (2026-11-17)", async () => {
+test("back from an application's page, the list focuses the entry's row it named, scrolled into view, once; never a control a second press would press (2026-11-17)", async () => {
   // Björn, ux17: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…".
   const scrolled: string[] = [];
   const was = HTMLElement.prototype.scrollIntoView;
   HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
-    scrolled.push(this.getAttribute("href") ?? "");
+    scrolled.push(this.dataset["land"] ?? "");
   };
   try {
     landOn("checkouts", "fork");
     await draw();
-    expect(document.activeElement?.getAttribute("href")).toBe("#/settings/checkouts/app/fork");
-    expect(scrolled).toContain("#/settings/checkouts/app/fork");
+    // The row, not its *Edit*: a second Enter on the way back must press nothing (the press rule).
+    expect(document.activeElement?.tagName).toBe("TR");
+    expect(document.activeElement?.textContent).toContain("Fork");
+    expect(scrolled).toContain("checkouts:fork");
     expect(takeLanding("checkouts"), "taken once").toBeNull();
     unmount(view!);
     view = null;
     landOn("checkouts", "add");
     await draw();
-    expect(document.activeElement?.getAttribute("href")).toBe("#/settings/checkouts/add");
+    // No entry to land on (Cancel on Add): the list's heading.
+    expect(document.activeElement?.tagName).toBe("H2");
+    expect(document.activeElement?.textContent).toBe("Open in…");
     unmount(view!);
     view = null;
     // Drawn with nothing named, it takes no focus.

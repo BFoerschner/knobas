@@ -191,6 +191,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* *Try it on*'s *Finding more…* keeps its box once the reading is done, so a row it wrapped stays as tall. */
 .tf-stg-more.tf-stg-done { visibility: hidden; }
 .tf-appremove { margin-left: auto; }
+/* Where a list lands back from an entry's page (2026-11-17): the entry's row, outlined inside the table's edge. */
+.tf-land:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 /* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
 .tf-stg-l small.tf-req { display: inline; margin-left: 4px; }
