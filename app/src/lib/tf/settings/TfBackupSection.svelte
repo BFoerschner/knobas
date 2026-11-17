@@ -74,6 +74,12 @@
   let savedSets = $state(false);
   /** Whether a tone override exists (#2469): its tick, on `savedLists`' terms. */
   let savedTones = $state(false);
+  /**
+   * How many of those four reads have answered: the ticks draw once all have (the nothing-moves pass), since a tick a late
+   * read added among them pushed the ticks after it 116 px right.
+   */
+  let ticksRead = $state(0);
+  const ticked = () => (ticksRead += 1);
   /** The share ticks: the ratified defaults; smart lists, ticket views, link sets and state colours only when one exists. */
   let parts = $state<ShareParts>({
     ...shareDefaults,
@@ -135,28 +141,32 @@
         parts = { ...parts, smart_lists: savedLists };
       })
       // Not knowing is the safe half: no tick, and the part goes off.
-      .catch(() => (savedLists = false));
+      .catch(() => (savedLists = false))
+      .finally(ticked);
     void ports
       .ticketViews()
       .then((views) => {
         savedViews = views.length > 0;
         parts = { ...parts, ticket_views: savedViews };
       })
-      .catch(() => (savedViews = false));
+      .catch(() => (savedViews = false))
+      .finally(ticked);
     void ports
       .linkSets()
       .then((sets) => {
         savedSets = sets.length > 0;
         parts = { ...parts, link_sets: savedSets };
       })
-      .catch(() => (savedSets = false));
+      .catch(() => (savedSets = false))
+      .finally(ticked);
     void ports
       .stateColours()
       .then((kinds) => {
         savedTones = kinds.some((kind) => kind.words.some((word) => word.yours !== null));
         parts = { ...parts, state_colours: savedTones };
       })
-      .catch(() => (savedTones = false));
+      .catch(() => (savedTones = false))
+      .finally(ticked);
   });
 
   /** Whether the schedule was stored. */
@@ -312,7 +322,7 @@
   <div class="tf-stg-sec">
     <h2>Share with a colleague</h2>
     <p class="tf-stg-p">An export they can import. Passwords never go in it.</p>
-    <div class="tf-stg-checks">
+    <div class="tf-stg-checks" class:tf-hidden={ticksRead < 4}>
       {#each ticks as tick (tick.part)}
         <label class="tf-ck"><input type="checkbox" bind:checked={parts[tick.part]} /> {tick.label}</label>
       {/each}

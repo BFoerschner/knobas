@@ -473,6 +473,18 @@ test("an action's key with no saved list draws the same tick, and the part goes 
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
 });
 
+test("the ticks draw once all four of their reads have answered, so a late one's tick can't push the others right (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  await open("backup", sectionPorts({ ticketViews: vi.fn(async () => (await late, [{ id: "my-work" }])) }));
+  const checks = target.querySelector(".tf-stg-checks")!;
+  expect(checks.classList.contains("tf-hidden"), "held while the ticket views are read").toBe(true);
+  answer();
+  await settle();
+  expect(checks.classList.contains("tf-hidden")).toBe(false);
+  expect([...checks.querySelectorAll("label")].map((el) => el.textContent?.trim())).toContain("Ticket views");
+});
+
 test("a ticket view draws its tick, on by default (#812)", async () => {
   const p = await open("backup", sectionPorts({ ticketViews: vi.fn(() => Promise.resolve([{ id: "my-work" }])) }));
   expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Ticket views");

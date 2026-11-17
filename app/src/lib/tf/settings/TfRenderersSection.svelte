@@ -63,6 +63,7 @@
   import { needsWords, secondsWhy } from "./form-words";
   import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
   import TfFolderRenderersTable from "./TfFolderRenderersTable.svelte";
+  import { folderRenderers, type FolderRenderers } from "../../render/folders.svelte";
   import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
@@ -74,16 +75,30 @@
     pipelines = namedPipelines,
     stepCommands = commandSteps,
     piping = diffPipelines,
+    folders = folderRenderers,
   }: {
     ports?: RendererPorts;
     defaults?: RendererDefaults;
     pipelines?: NamedPipelines;
     stepCommands?: CommandSteps;
     piping?: DiffPipelinesSetting;
+    /** The folder renderers' list: the app's unless a test hands its own. */
+    folders?: FolderRenderers;
   } = $props();
 
   /** `null` until the read answers. */
   let saved = $state<UserRenderer[] | null>(null);
+  /**
+   * Whether the folder renderers' read has answered, held or not. The sections draw once it and `saved` have (the
+   * nothing-moves pass): the folder renderers' table landing alone pushed *Default renderers* 30 px down.
+   */
+  let foldersRead = $state(false);
+  $effect(() => {
+    folders.load().then(
+      () => (foldersRead = true),
+      () => (foldersRead = true),
+    );
+  });
   /** The renderer being edited: an index into `saved`, `"new"`, or none. */
   let editing = $state<number | "new" | null>(null);
   let form = $state({ name: "", command: "", patterns: "", fences: "", input: "text" as RendererInput, output: "svg" as CommandOutput, timeout: "10", diff: false });
@@ -294,7 +309,7 @@
     <button id="tf-rnd-pipes" type="button" class="tf-stg-sw" role="switch" aria-checked={piping.on} aria-label="Run pipelines on diffs" onclick={togglePiping}><i></i></button>
   </div>
 </div>
-{#if saved !== null}
+{#if saved !== null && foldersRead}
   <div class="tf-stg-sec">
     <h2>Command renderers</h2>
     <p class="tf-stg-p">
@@ -328,7 +343,7 @@
     {#if refusal !== null && editing === null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
   </div>
 
-  <TfFolderRenderersTable />
+  <TfFolderRenderersTable {folders} />
 
   {#if editing !== null}
     <TfDialog title={editing === "new" ? "Add a renderer" : `Edit ${saved[editing]?.name ?? ""}`} why={formWhy} onclose={() => (editing = null)}>

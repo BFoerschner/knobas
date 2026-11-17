@@ -11,6 +11,7 @@ import TfRenderersSection, { type RendererPorts } from "./TfRenderersSection.sve
 import type { RendererDefault } from "../../render/defaults";
 import { createRendererDefaults } from "../../render/defaults.svelte";
 import { createDiffPipelines } from "../diff/diff-pipelines.svelte";
+import { createFolderRenderers } from "../../render/folders.svelte";
 
 /** A `render.defaults` row that answers what it was last sent (#2263). */
 function storedDefaults(start: RendererDefault[] = []) {
@@ -435,3 +436,20 @@ test.each([null, "Add a renderer…", "Add a command step…", "Add a pipeline�
     expect(buttonsAtDefault()).toEqual([]);
   },
 );
+
+test("the sections draw once the folder renderers have answered too, so their table can't push Default renderers down (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const folders = createFolderRenderers({
+    read: async () => (await late, [{ id: "lc", name: "Low code", command: "lc {path} {out}.png", holds: ["*.lcproj"], folders: [], output: "image", timeout_secs: 60 }] as never),
+    save: async (list) => list as never,
+  });
+  app = mount(TfRenderersSection, { target, props: { ports: backend().ports, defaults: storedDefaults().store, folders } });
+  await settle();
+  const headings = () => [...target.querySelectorAll(".tf-stg-sec h2")].map((h) => h.textContent?.trim());
+  expect(headings(), "nothing below the switch while the folder renderers are read").not.toContain("Default renderers");
+  answer();
+  await settle();
+  expect(headings()).toEqual(expect.arrayContaining(["Command renderers", "Folder renderers", "Default renderers"]));
+  expect(target.querySelector(".tf-rnd-own"), "the folder renderers' table with them").not.toBeNull();
+});
