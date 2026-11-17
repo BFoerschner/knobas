@@ -1115,38 +1115,58 @@
 
   /**
    * The pointer resting on a link to a compare (*New pull request*, the Compare tab, a branch's row) asks its list, so the
-   * source's round trip runs while the hand is on its way to the press, as a file's in the tree does (`REST_MS`).
+   * source's round trip runs while the hand is on its way to the press, as a file's in the tree does (`REST_MS`); the
+   * press itself (a pointer's, or Enter on the link) asks it at once, where the pointer came quicker than its rest
+   * (Fable's ruling, the ux18 pass, 2026-11-17): the forge's round starts at the press, not once Compare has built.
    */
   const COMPARE_REST_MS = 80;
   let comparing: ReturnType<typeof setTimeout> | null = null;
-  function restOnCompare(event: PointerEvent) {
-    if (comparing !== null) clearTimeout(comparing);
-    comparing = null;
+  /** The compare a link under `target` opens: its repository and two ends; `null` for any other link. */
+  function compareAt(target: EventTarget | null): { id: string; from: string; to: string } | null {
     const id = repoId;
     const base = defaultBranch?.name ?? null;
-    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (link === null || id === null || base === null) return;
+    const link = target instanceof Element ? target.closest("a[href]") : null;
+    if (link === null || id === null || base === null) return null;
     const href = link.getAttribute("href") ?? "";
     const stem = repoHash(id, "compare");
-    if (href !== stem && !href.startsWith(`${stem}/`)) return;
+    if (href !== stem && !href.startsWith(`${stem}/`)) return null;
     let tail: string;
     try {
       tail = href === stem ? (compareProposed ?? "") : decodeURIComponent(href.slice(stem.length + 1));
     } catch {
-      return;
+      return null;
     }
     const cut = tail.indexOf("...");
     const [from, to] = cut < 0 ? [base, tail] : [tail.slice(0, cut), tail.slice(cut + 3)];
+    return { id, from, to };
+  }
+  function restOnCompare(event: PointerEvent) {
+    if (comparing !== null) clearTimeout(comparing);
+    comparing = null;
+    const at = compareAt(event.target);
+    if (at === null) return;
     comparing = setTimeout(() => {
       comparing = null;
-      askCompareEarly(ports.rangeFiles, id, from, to);
+      askCompareEarly(ports.rangeFiles, at.id, at.from, at.to);
     }, COMPARE_REST_MS);
+  }
+  function pressOnCompare(event: PointerEvent | KeyboardEvent) {
+    if (event instanceof KeyboardEvent ? event.key !== "Enter" : event.button !== 0) return;
+    const at = compareAt(event.target);
+    if (at === null) return;
+    if (comparing !== null) clearTimeout(comparing);
+    comparing = null;
+    askCompareEarly(ports.rangeFiles, at.id, at.from, at.to);
   }
   /** Heard on the page, not on each link: the links are drawn by the header, the tabs and a tab's rows. */
   function watchCompareLinks(element: HTMLElement) {
     element.addEventListener("pointerover", restOnCompare, { passive: true });
+    element.addEventListener("pointerdown", pressOnCompare, { passive: true });
+    element.addEventListener("keydown", pressOnCompare, { passive: true });
     return () => {
       element.removeEventListener("pointerover", restOnCompare);
+      element.removeEventListener("pointerdown", pressOnCompare);
+      element.removeEventListener("keydown", pressOnCompare);
       if (comparing !== null) clearTimeout(comparing);
     };
   }

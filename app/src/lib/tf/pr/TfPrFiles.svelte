@@ -69,7 +69,7 @@
   import { rangeContext } from "../diff/context";
   import { pickedEnds, type PrPick } from "../diff/pick";
   import { diffOf } from "./files";
-  import { fillEnds, rangeFill, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "../diff/fill";
+  import { fillEnds, rangeFill, seedPages, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "../diff/fill";
   import type { DiffFill } from "../diff/diff";
   import TfPrPicker from "./TfPrPicker.svelte";
 
@@ -150,7 +150,11 @@
   function readRange(repo: string, base: string, head: string, name: string): Promise<{ diff: RangeDiff; fill: DiffFill | null }> {
     if (rangeFiles === null || rangeFile === null) return rangeDiff(repo, base, head, false).then((diff) => ({ diff, fill: null }));
     const lines = rangeFile;
-    return rangeFiles(repo, base, head, false, name).then((diff) => ({ diff, fill: rangeFill(lines, repo, fillEnds(diff, base, head), false, stopRead, rangeFilePages ?? undefined, diff.read_at === "checkout") }));
+    return rangeFiles(repo, base, head, false, name).then((answered) => {
+      // The first files' lines the list came with, kept for the fill's first asks (Fable's ruling, the ux18 pass).
+      const diff = seedPages(repo, answered);
+      return { diff, fill: rangeFill(lines, repo, fillEnds(diff, base, head), false, stopRead, rangeFilePages ?? undefined, diff.read_at === "checkout") };
+    });
   }
   /** The fills of the clone's diff and of a pick's, while each is drawn. */
   let predictedFill = $state.raw<DiffFill | null>(null);

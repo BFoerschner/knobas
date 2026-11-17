@@ -75,7 +75,7 @@
   import { proseMarkdown } from "../../render/prose";
   import type { DiffFile, DiffRange, RangeCommit, RangeDiff, RangeFiles } from "../../ipc/entity";
   import type { DiffFill } from "../diff/diff";
-  import { fillEnds, keepList, namesList, rangeFill } from "../diff/fill";
+  import { fillEnds, keepList, namesList, rangeFill, seedPages } from "../diff/fill";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
@@ -481,9 +481,11 @@
         : listing !== undefined
           ? listing(repoId, from, to, false, read)
           : (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false);
-    return answer.then((diff) => {
+    return answer.then((answered) => {
       landed = true;
       if (!alive()) return;
+      // The first files' lines the list came with, kept for the fill's first asks (Fable's ruling, the ux18 pass).
+      const diff = listing === undefined ? answered : seedPages(repoId, answered as RangeFiles);
       reading = false;
       failed = null;
       missing = false;
@@ -545,7 +547,8 @@
     if (heldAt === undefined) predicted = { section: asked, checked: false };
     else held = { section: asked, at: heldAt, done: false, failed: null };
     const differs = ask(repoId, from, to).then(
-      (fresh) => {
+      (answered) => {
+        const fresh = listing !== undefined && fillAt !== null ? seedPages(repoId, answered as RangeFiles) : answered;
         const same = sameDiff(shown, fresh);
         if (alive() && filesFor === asked) {
           keepCommits(asked, fresh, same);

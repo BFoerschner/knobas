@@ -72,6 +72,17 @@ pub struct RangeFiles {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub held_at: Option<String>,
+    /// The first page of the files a page draws first, where the lines are
+    /// in hand as the list is answered (the ux18 pass, 2026-11-17): the
+    /// source's compare just read, or the one knobas held or kept, between
+    /// two whole shas. Each is what [`range_file`] answers for its file from
+    /// line 0, whole, in the page's draw order ([`first_pages`]), so the
+    /// page draws the first files' lines with the list, with no second
+    /// read. Absent on every other answer (a checkout's list holds no text):
+    /// the page asks for the lines as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub first_pages: Option<Vec<RangeFilePage>>,
 }
 
 /// The names of the files a range changes, without their counts (the
@@ -275,6 +286,34 @@ async fn held_list(
         .held_answer(&lent, entity_id, &held_ask(base, head))
         .await?;
     let held: HeldList = serde_json::from_value(answer).ok()?;
+    // The lines the page reads first, where knobas keeps or holds the
+    // whole diff between the list's two shas: the read the page's first
+    // pages would make one hop later.
+    let first = match &held.range {
+        Some(range) if whole(&range.base) && whole(&range.head) => {
+            let diff = match kept().get(entity_id, &range.base, &range.head) {
+                Some(diff) => Some(diff),
+                None => {
+                    let diff = held_diff(
+                        pool,
+                        secrets,
+                        registry,
+                        live,
+                        entity_id,
+                        &range.base,
+                        &range.head,
+                    )
+                    .await;
+                    if let Some(diff) = &diff {
+                        kept().put(entity_id, &range.base, &range.head, diff);
+                    }
+                    diff
+                }
+            };
+            diff.and_then(|diff| first_pages(&diff.files, Some(range)))
+        }
+        _ => None,
+    };
     Some(RangeFiles {
         files: held.files,
         truncated: held.truncated,
@@ -282,6 +321,7 @@ async fn held_list(
         read_at: DiffReadAt::Source,
         predicted_at: None,
         held_at: Some(read_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+        first_pages: first,
     })
 }
 
@@ -440,8 +480,80 @@ fn keep(entity_id: &str, base: &str, head: &str, diff: RangeDiff) -> (RangeFiles
         read_at: diff.read_at,
         predicted_at: diff.predicted_at.clone(),
         held_at: None,
+        first_pages: first_pages(&diff.files, diff.range.as_ref()),
     };
     (answer, diff)
+}
+
+/// At most this many files' first pages go beside a list ([`first_pages`]):
+/// the view's first read of the files near it asks as many
+/// (`TfDiffView`'s `NEAR_AT_ONCE`).
+pub const FIRST_FILES: usize = 40;
+/// At most this many lines across the first pages beside a list.
+pub const FIRST_LINES: usize = 4_000;
+/// At most this many bytes of line text across the first pages beside a
+/// list: the worst parse the page pays for them, about 25 ms at 6x, is under
+/// the IPC round they replace.
+pub const FIRST_BYTES: usize = 256 * 1024;
+/// How many files [`first_pages`] looks at for ones that fit, in draw order.
+const FIRST_LOOKED: usize = 200;
+/// A file over this many changed lines draws *Load diff* in place of its
+/// lines (`tree.ts`' `LOAD_OVER`), so the page reads none of them at first.
+const LOAD_OVER: u32 = 1_500;
+
+/// The first page of each of the files a page draws first, out of a whole
+/// diff `files` between the two whole shas of `range` (Fable's ruling, the
+/// ux18 pass, 2026-11-17): in the order the page's tree draws them (each
+/// folder's files after the root's, folders by path, files by name within,
+/// `tree.ts`' `treeOf`), the binary ones, those with no changed line and
+/// those over [`LOAD_OVER`] passed over, each page [`page`]`(file, 0)`
+/// whole, up to [`FIRST_FILES`] files, [`FIRST_LINES`] lines and
+/// [`FIRST_BYTES`] bytes of text. A file that does not fit what is left is
+/// passed over and the next looked at, up to [`FIRST_LOOKED`], so one big
+/// file at the root starves nothing after it. `None` where the range is not
+/// two whole shas (the page keeps a page only by them) or nothing fits.
+fn first_pages(
+    files: &[DiffFile],
+    range: Option<&knobas_source::view::DiffRange>,
+) -> Option<Vec<RangeFilePage>> {
+    let range = range?;
+    if !(whole(&range.base) && whole(&range.head)) {
+        return None;
+    }
+    let split = |path: &str| -> (String, String) {
+        match path.rfind('/') {
+            Some(at) => (path[..at].to_owned(), path[at + 1..].to_owned()),
+            None => (String::new(), path.to_owned()),
+        }
+    };
+    let mut order: Vec<((String, String), &DiffFile)> =
+        files.iter().map(|file| (split(&file.path), file)).collect();
+    order.sort_by(|a, b| a.0.cmp(&b.0));
+    let (mut lines, mut bytes) = (0usize, 0usize);
+    let mut pages = Vec::new();
+    for (_, file) in order.into_iter().take(FIRST_LOOKED) {
+        if pages.len() >= FIRST_FILES {
+            break;
+        }
+        let changed = file.additions + file.deletions;
+        if file.change == DiffChange::Binary || changed == 0 || changed > LOAD_OVER {
+            continue;
+        }
+        let first = page(file, 0);
+        let (n, b) = first.file.hunks.iter().fold((0, 0), |(n, b), hunk| {
+            (
+                n + hunk.lines.len(),
+                b + hunk.lines.iter().map(|line| line.text.len()).sum::<usize>(),
+            )
+        });
+        if lines + n > FIRST_LINES || bytes + b > FIRST_BYTES {
+            continue;
+        }
+        lines += n;
+        bytes += b;
+        pages.push(first);
+    }
+    (!pages.is_empty()).then_some(pages)
 }
 
 /// A file as the list carries it: everything but its lines.
@@ -644,6 +756,7 @@ impl LocalStat {
             read_at: DiffReadAt::Checkout,
             predicted_at,
             held_at: None,
+            first_pages: None,
         }
     }
 }
@@ -1871,6 +1984,129 @@ mod tests {
             stat(&p, &base, &head, true).await.is_none(),
             "whitespace ignored is another list"
         );
+    }
+
+    fn range_of(base: &str, head: &str) -> knobas_source::view::DiffRange {
+        knobas_source::view::DiffRange {
+            repository: "repo".to_owned(),
+            base: base.to_owned(),
+            head: head.to_owned(),
+            commits: Vec::new(),
+            reviewed: None,
+        }
+    }
+
+    /// **The source's list carries the first pages the page draws first**
+    /// (Fable's ruling, the ux18 pass, 2026-11-17): in the tree's draw
+    /// order, binary files, files with no changed line and files over
+    /// `LOAD_OVER` passed over, each the page `range_file_pages` answers out
+    /// of the kept compare (`page(file, 0)`); none where the range is not
+    /// two whole shas.
+    #[tokio::test]
+    async fn a_source_list_carries_the_first_pages_in_the_pages_draw_order() {
+        let (dir, base, head) = repo();
+        let files = whole(dir.path(), &base, &head);
+        let diff = RangeDiff {
+            files: files.clone(),
+            truncated: false,
+            range: Some(range_of(&base, &head)),
+            read_at: DiffReadAt::Source,
+            predicted_at: None,
+        };
+        let (answer, kept_diff) = keep("repo:first-pages", "main", "topic", diff);
+        let first = answer.first_pages.expect("the lines are in hand");
+        let drawn: Vec<&str> = first.iter().map(|p| p.file.path.as_str()).collect();
+        // The root's files by name, then each folder's; no binary, no empty, not `big.txt`'s 8,000 lines.
+        assert_eq!(
+            drawn,
+            [
+                "added.md",
+                "edit.rs",
+                "gone.txt",
+                "with space.txt",
+                "ünï.txt",
+                "src/deep/moved.rs",
+            ]
+        );
+        for one in &first {
+            let in_kept = kept_diff
+                .files
+                .iter()
+                .find(|f| f.path == one.file.path)
+                .unwrap();
+            assert_eq!(one, &page(in_kept, 0), "{}", one.file.path);
+        }
+        assert!(
+            answer.files.iter().all(|f| f.hunks.is_empty()),
+            "the list itself still carries no lines"
+        );
+        let by_name = RangeDiff {
+            files,
+            truncated: false,
+            range: Some(range_of("main", &head)),
+            read_at: DiffReadAt::Source,
+            predicted_at: None,
+        };
+        assert!(
+            keep("repo:first-pages", "main", "x", by_name)
+                .0
+                .first_pages
+                .is_none(),
+            "kept only by two whole shas"
+        );
+    }
+
+    /// The first pages stop at `FIRST_FILES` files, and a file that does
+    /// not fit the lines left is passed over, not the end of them.
+    #[test]
+    fn the_first_pages_hold_to_their_budget_and_a_big_file_starves_nothing() {
+        let file = |path: &str, n: usize| {
+            let lines = (0..n)
+                .map(|i| knobas_source::diff::DiffLine {
+                    kind: knobas_source::diff::DiffLineKind::Add,
+                    old: None,
+                    new: Some(u32::try_from(i).unwrap() + 1),
+                    text: format!("line {i}"),
+                })
+                .collect();
+            DiffFile {
+                path: path.to_owned(),
+                old_path: None,
+                change: DiffChange::Added,
+                additions: u32::try_from(n).unwrap(),
+                deletions: 0,
+                hunks: vec![Hunk {
+                    header: format!("@@ -0,0 +1,{n} @@"),
+                    lines,
+                }],
+                truncated: false,
+                similarity: None,
+                old_mode: None,
+                new_mode: None,
+                blob: None,
+                threads: Vec::new(),
+            }
+        };
+        let sha = |c: char| c.to_string().repeat(40);
+        let range = range_of(&sha('a'), &sha('b'));
+        // A root file of 1,400 lines first, then three of 1,400: the fourth would pass 4,000.
+        let mut files = vec![
+            file("a.txt", 1_400),
+            file("b.txt", 1_400),
+            file("c.txt", 1_400),
+        ];
+        files.push(file("d.txt", 10));
+        let first = first_pages(&files, Some(&range)).unwrap();
+        assert_eq!(
+            first
+                .iter()
+                .map(|p| p.file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["a.txt", "b.txt", "d.txt"],
+            "c.txt does not fit; d.txt after it does"
+        );
+        let many: Vec<DiffFile> = (0..100).map(|n| file(&format!("f{n:03}.txt"), 2)).collect();
+        assert_eq!(first_pages(&many, Some(&range)).unwrap().len(), FIRST_FILES);
     }
 
     #[test]

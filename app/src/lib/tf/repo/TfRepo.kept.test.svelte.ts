@@ -637,3 +637,23 @@ test("with a clone nothing is asked early at the landing; the pointer resting on
   await new Promise((resolve) => setTimeout(resolve, 120));
   expect(asked.map((a) => [a.base, a.head])).toEqual([["main", "feature/PAY-231-sepa-retry"]]);
 });
+
+test("the press on a compare's link asks its list at once, as a person's read, and Compare takes it instead of asking again", async () => {
+  forgetEarlyCompares();
+  const { asked, rangeFiles } = listing();
+  const cloned = async () => ({ repo_entity_id: REPO, repo_url: null, path: "/Users/me/code/payout-service", found_by: "clones_root", clones_root: null, clone_command: null, tree: null }) as never;
+  await drawLive([REPO], ports({ rangeFiles, entityCheckout: cloned }));
+  await settle();
+  expect(asked).toEqual([]);
+
+  // Fable's ruling (the ux18 pass, 2026-11-17): the forge's round starts at the press, not once Compare has built.
+  const link = target.querySelector<HTMLAnchorElement>(".tf-repohead a.tf-primary")!;
+  link.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  link.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+  expect(asked.map((a) => [a.base, a.head]), "at the press, before the rest's 80 ms").toEqual([["main", "feature/PAY-231-sepa-retry"]]);
+  expect(asked[0]!.read).toMatch(/^compare-early-/);
+  await go(COMPARE("feature/PAY-231-sepa-retry"));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(asked, "Compare took the press's read").toHaveLength(1);
+});

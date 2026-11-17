@@ -42,6 +42,7 @@
     type PipeRun,
     type PipeStep,
     type RangeDiff,
+    type RangeFiles,
     type SourceView,
   } from "../../ipc/entity";
 
@@ -85,7 +86,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { caretOf, isSha, shortEnd } from "./sha";
-  import { fillEnds, keptList, rangeFill, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "./fill";
+  import { fillEnds, keptList, rangeFill, seedPages, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "./fill";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
   import type { DiffFill } from "./diff";
   import type { EscTarget } from "../escape";
@@ -217,8 +218,10 @@
     reading = true;
     const answer: Promise<RangeDiff> = listing !== undefined && ports.rangeFile !== undefined ? listing(id, from, to, ws, name) : ports.rangeDiff(id, from, to, ws);
     return answer.then(
-      (diff) => {
+      (answered) => {
         if (!alive()) return;
+        // The first files' lines the list came with, kept for the fill's first asks (Fable's ruling, the ux18 pass).
+        const diff = listing !== undefined && ports.rangeFile !== undefined ? seedPages(id, answered as RangeFiles) : answered;
         reading = false;
         fill =
           listing !== undefined && ports.rangeFile !== undefined

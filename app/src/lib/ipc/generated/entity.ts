@@ -3889,7 +3889,18 @@ predicted_at?: string,
  * page draws it at once under the held line and asks the source's list
  * behind it ([`source_range_files`]). Absent on every other answer.
  */
-held_at?: string, };
+held_at?: string, 
+/**
+ * The first page of the files a page draws first, where the lines are
+ * in hand as the list is answered (the ux18 pass, 2026-11-17): the
+ * source's compare just read, or the one knobas held or kept, between
+ * two whole shas. Each is what [`range_file`] answers for its file from
+ * line 0, whole, in the page's draw order ([`first_pages`]), so the
+ * page draws the first files' lines with the list, with no second
+ * read. Absent on every other answer (a checkout's list holds no text):
+ * the page asks for the lines as before.
+ */
+first_pages?: Array<RangeFilePage>, };
 
 /**
  * The names of the files a range changes, without their counts (the

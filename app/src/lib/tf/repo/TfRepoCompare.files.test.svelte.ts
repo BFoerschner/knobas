@@ -8,7 +8,9 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { DiffFile, RangeFilePage, RangeFiles } from "../../ipc/entity";
+import { forgetKeptPages, keptList } from "../diff/fill";
 import TfRepoCompare from "./TfRepoCompare.svelte";
+import { drawnCompare, forgetEarlyCompares } from "./compare-early";
 
 const REPO = "gitea:tidewater/payout-service";
 const BASE = "ba5e000000000000000000000000000000000000";
@@ -151,4 +153,24 @@ test("Create pull request goes while the list is still being read", async () => 
   target.querySelector<HTMLFormElement>(".tf-cform")!.requestSubmit();
   await settle();
   expect(sent).toHaveLength(1);
+});
+
+test("the first files' lines the list came with draw with it, with no read of their pages, and nothing kept holds them", async () => {
+  // No pair drawn before: the earlier tests drew this one at the clone.
+  forgetKeptPages();
+  forgetEarlyCompares();
+  const { lists, pages } = draw("feature/a");
+  const seeded: RangeFilePage = {
+    file: { ...listed("pay.py"), hunks: [{ header: "@@ -0,0 +1,1 @@", lines: [{ kind: "add", old: null, new: 1, text: "seeded line of pay.py" }] }] },
+    from: 0,
+    continues: false,
+    next: null,
+  };
+  lists[0]!.answer({ ...list([listed("pay.py"), listed("retry.py")]), first_pages: [seeded] });
+  await settle();
+  expect(text(target.querySelector('.tf-diff[data-file="pay.py"] .tf-dbody'))).toContain("seeded line of pay.py");
+  expect(pages.map((p) => p.path), "only the file the list brought no lines for").toEqual(["retry.py"]);
+  expect(drawnCompare(REPO, "main", "feature/a")?.list.first_pages).toBeUndefined();
+  expect(keptList(REPO, BASE, HEAD)?.first_pages).toBeUndefined();
+  forgetKeptPages();
 });

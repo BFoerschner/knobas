@@ -73,6 +73,23 @@ function keepPage(range: string, key: string, page: FilePage): void {
   }
 }
 
+/**
+ * **The first pages a list came with, kept** (Fable's ruling, the ux18 pass, 2026-11-17): where the backend held a
+ * compare's lines as it answered its list (`RangeFiles.first_pages`: the source's compare just read, or the one it held),
+ * each page is kept as a read of it would keep it, by the list's two whole shas, so the view's first asks find them
+ * (`DiffFill.cached`) and draw the first files' lines in the list's own frame, with no second read. Answers the list
+ * without them, which is what a page keeps or draws: a kept list must not hold the lines past {@link KEPT_LINES}.
+ */
+export function seedPages<T extends RangeFiles>(entityId: string, list: T): T {
+  const pages = list.first_pages;
+  if (pages === undefined) return list;
+  const { first_pages: _, ...bare } = list;
+  const range = list.range === null ? null : rangeKeyOf(entityId, list.range, false);
+  if (range !== null)
+    for (const page of pages) keepPage(range, pageKeyOf(page.file, 0), { hunks: page.file.hunks, continues: page.continues, next: page.next, truncated: page.file.truncated });
+  return bare as T;
+}
+
 /** Forget every page kept, for a test. */
 export function forgetKeptPages(): void {
   pagesKept.clear();
