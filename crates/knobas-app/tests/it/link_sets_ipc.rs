@@ -1175,6 +1175,10 @@ async fn the_name_roles_move_no_derived_row_either_way() {
     let epic = issue(&pool, &p, 1, None, Some("mara")).await;
     issue(&pool, &p, 2, Some(&epic), Some("jonas")).await;
 
+    // This test's own tickets only: the module's other tests write tickets of
+    // their own into the same database while this one runs, and a read of
+    // every row saw theirs land between its two reads.
+    let mine = format!("jira:{p}-%");
     let derived = async |pool: &PgPool| -> Vec<String> {
         let mut rows = Vec::new();
         for table in [
@@ -1185,8 +1189,9 @@ async fn the_name_roles_move_no_derived_row_either_way() {
             "item_pipeline",
         ] {
             let lines: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "select '{table} ' || t::text from sync.{table} t order by 1"
+                "select '{table} ' || t::text from sync.{table} t where t.entity_id like $1 order by 1"
             )))
+            .bind(&mine)
             .fetch_all(pool)
             .await
             .unwrap();
@@ -1194,8 +1199,9 @@ async fn the_name_roles_move_no_derived_row_either_way() {
         }
         let cells: Vec<String> = sqlx::query_scalar(
             "select 'key_cell ' || entity_id || ' ' || coalesce(key_cell::text, '')
-               from sync.item order by 1",
+               from sync.item where entity_id like $1 order by 1",
         )
+        .bind(&mine)
         .fetch_all(pool)
         .await
         .unwrap();

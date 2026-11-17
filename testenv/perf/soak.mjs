@@ -133,10 +133,13 @@ const PAGE = `(() => {
     wait();
   }); return 1; };
   // A pointer kept moving: every move between watch(true) and watch(false), timed to the end of the frame that draws it.
-  let watching = false, open = [], moves = [];
-  addEventListener("pointermove", (e) => { if (watching) open.push(e.timeStamp); }, { capture: true, passive: true });
-  const frame = () => requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => { const end = performance.now(); for (const t of open) moves.push([t, end - t]); open = []; if (watching) frame(); }; ch.port2.postMessage(0); });
-  s.watch = (on) => { if (on && !watching) { watching = true; open = []; moves = []; frame(); return []; } watching = on; return moves; };
+  // A frame is asked for only when a move waits on one. A frame callback and a message on every frame (as this was
+  // until 2026-11-17) allocated enough at 239 Hz that the page ran a full collection every 9 to 10 s, 46 to 49 ms at
+  // 6x on Windows, and the move that met one read 60 to 245 ms: the probe's own work, not the page's.
+  let watching = false, armed = false, open = [], moves = [];
+  const frame = () => { armed = true; requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => { armed = false; const end = performance.now(); for (const t of open) moves.push([t, end - t]); open = []; }; ch.port2.postMessage(0); }); };
+  addEventListener("pointermove", (e) => { if (!watching) return; open.push(e.timeStamp); if (!armed) frame(); }, { capture: true, passive: true });
+  s.watch = (on) => { if (on && !watching) { watching = true; open = []; moves = []; return []; } watching = on; return moves; };
   window.__soak = s;
 })()`;
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: PAGE });

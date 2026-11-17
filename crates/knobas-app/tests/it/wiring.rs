@@ -117,6 +117,9 @@ fn no_grant_reaches_further_than_the_app_does() {
         granted,
         vec![
             "core:default",
+            // The window's zoom (`zoom.svelte.ts`, 2026-11-16): `core:default`
+            // grants no write to the webview's zoom.
+            "core:webview:allow-set-webview-zoom",
             "opener:allow-open-url",
             "opener:allow-open-path",
             "notification:allow-is-permission-granted",
