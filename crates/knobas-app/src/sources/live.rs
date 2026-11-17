@@ -784,6 +784,7 @@ impl LiveSources {
         }
         self.0.pending.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
+        let lately = written_lately(&key.entity);
         let work = async move {
             while let Ask::Read(ask) = &key.ask {
                 let held = this
@@ -836,7 +837,12 @@ impl LiveSources {
         };
         #[cfg(feature = "test-util")]
         let work = knobas_http::counted::inherit(work);
-        tokio::spawn(work);
+        // Nobody waits on it: behind a person's reads of the source ([`behind_lane`]).
+        if lately {
+            tokio::spawn(work);
+        } else {
+            tokio::spawn(behind_lane(work));
+        }
     }
 
     /// Hold a read's JSON `answer` to `ask`, read at `read_at` under `key`.
@@ -1044,6 +1050,7 @@ impl LiveSources {
         self.0.pending.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
         let source = Arc::clone(source);
+        let lately = keys.iter().any(|key| written_lately(&key.entity));
         let work = async move {
             let mut views = Vec::new();
             let mut asks = Vec::new();
@@ -1129,7 +1136,12 @@ impl LiveSources {
         // A test's request counter counts the read behind as the ask's own.
         #[cfg(feature = "test-util")]
         let work = knobas_http::counted::inherit(work);
-        tokio::spawn(work);
+        // Nobody waits on it: behind a person's reads of the source ([`behind_lane`]).
+        if lately {
+            tokio::spawn(work);
+        } else {
+            tokio::spawn(behind_lane(work));
+        }
     }
 
     /// Drop what is kept of `source`'s grants: a write it refused says the
@@ -1209,6 +1221,64 @@ impl LiveSources {
             .expect("the read cache")
             .drop_generation(generation);
     }
+}
+
+/// A read behind a drawn answer, in the background lane (the ux16 overs
+/// pass, 2026-11-17): its requests stand aside while a person's reads of the
+/// same server wait or are out ([`knobas_http::Lane::Background`]), as the
+/// sync's do. Nobody waits on it: the page drew what knobas held and is told
+/// if this one differs. On Björn's PC a compare's first open waited 450 ms
+/// for Gitea's answer where Gitea answers it in 40 to 90 ms alone: the
+/// branch view the page drew from what knobas held was read again behind it
+/// at the same moment, eight requests (every commit with its files, all
+/// branches, the open pull requests, the statuses) on the server beside the
+/// compare's two, and the server answered all of them at once.
+///
+/// Not after a person's write: a read behind a view of the repository (or
+/// item) a write of theirs landed on in the last [`WRITTEN_FOR`] goes as a
+/// person's read, since it is what shows them the write took (a merge, a
+/// comment, a branch made) once the page's own echo of it goes.
+fn behind_lane<F: std::future::Future>(work: F) -> impl std::future::Future<Output = F::Output> {
+    knobas_http::behind(work)
+}
+
+/// How long after a person's write lands its repository's or item's reads
+/// behind go as a person's ([`behind_lane`]): the write's read back and the
+/// source's run after it are seconds; a page left open longer reads behind
+/// as any other.
+pub const WRITTEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn written() -> &'static Mutex<Vec<(String, std::time::Instant)>> {
+    static WRITTEN: std::sync::OnceLock<Mutex<Vec<(String, std::time::Instant)>>> =
+        std::sync::OnceLock::new();
+    WRITTEN.get_or_init(Mutex::default)
+}
+
+/// A repository or item as far as a write's reach goes: the id up to a
+/// branch, commit (`@`) or pull request (`#`), so a merge of `repo#12`
+/// reaches the repository's branches and `repo@refs/heads/x`'s view.
+fn reach(entity: &str) -> &str {
+    entity.find(['@', '#']).map_or(entity, |at| &entity[..at])
+}
+
+/// A person's write landed on `entity` (the write queue's
+/// `FollowLandings`): its repository's or item's reads behind go as a
+/// person's for [`WRITTEN_FOR`].
+pub fn note_write(entity: &str) {
+    let mut all = written().lock().expect("the writes noted");
+    all.retain(|(_, at)| at.elapsed() < WRITTEN_FOR);
+    all.push((reach(entity).to_owned(), std::time::Instant::now()));
+}
+
+/// Whether a write of a person's landed on `entity`'s reach within
+/// [`WRITTEN_FOR`].
+fn written_lately(entity: &str) -> bool {
+    let reach = reach(entity);
+    written()
+        .lock()
+        .expect("the writes noted")
+        .iter()
+        .any(|(noted, at)| noted == reach && at.elapsed() < WRITTEN_FOR)
 }
 
 /// Why a write is drawn disabled when its grants could not be read (#2306):

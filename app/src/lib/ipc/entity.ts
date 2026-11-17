@@ -904,6 +904,16 @@ export function entityView(entityId: string, section: string | null = null): Pro
 }
 
 /**
+ * {@link entityView} for a view a page draws beside the read it waits on, not instead of it (the ux16 overs pass,
+ * 2026-11-17): Compare's branch standing beside the compare's list. Its requests to the source go in the background
+ * lane, once the page's own are answered; what knobas holds is answered at once as for any view. On Björn's PC the
+ * standing's eight requests went out with the compare's two, and the compare took 600 ms at 6x where it takes 40 to 90.
+ */
+export function entityViewBehind(entityId: string, section: string | null = null): Promise<ShownView | null> {
+  return invoke<ShownView | null>("entity_view", { entityId, section, behind: true }).then(withDateWords);
+}
+
+/**
  * Views read ahead of a press (`tf/repo/hover-reads.ts`, the inner-pages pass of 2026-11-12), by entity and section,
  * while they are out: the page's own ask after the press joins the read under way rather than asking the source a
  * second time. Only a read started ahead is joined, so an ask made after a refresh never gets an answer from before it.

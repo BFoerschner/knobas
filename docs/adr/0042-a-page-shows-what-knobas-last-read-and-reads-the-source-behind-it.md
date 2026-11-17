@@ -66,6 +66,16 @@ The inner-pages pass of PR #2479 (Björn: "did you check the inner pages as well
 - **Gitea** draws a repository's `branches` with the source's own rows over the branch records, in the source's order, so where nothing moved the source's answer lands on the same list; and its `commits` as the default branch's tip, the source's first row, with no count, the rest joining after it when the source answers. A repository the mirror holds no branch of draws nothing, not an empty list.
 - **The held line keeps its room** once drawn: the words go when the fresh answer lands, the line's place stays, so the list under it does not move up.
 
+## A read behind waits for a person's reads of the same server (amended 2026-11-17)
+
+The ux16 Windows pass of PR #2479: Compare's first open on a repository without a clone took 485 / 669 / 430 ms at CPU 1x / 4x / 6x on Björn's PC, where Gitea answers its compare in 40 to 90 ms. A timing proxy in front of Gitea showed why: the branch's standing, drawn from what knobas held, was read again behind it at the same moment, eight requests (the repository, the branch, the open pull requests, the branch's compare of every commit with its files, the behind count, the statuses, all branches) on the server beside the compare's two, and the server answered them together (`docs/decisions/2026-11-17-a-page-s-waited-read-goes-first.md`). Ruled by Fable, the pass's one decision agent, for Björn.
+
+- **A read behind runs in the background lane** (`knobas_http::behind`): its requests stand aside while a person's to the same server wait or are out, and 150 ms after, as the sync's do, and never more than a second at a time. Nobody waits on it; the page drew what knobas held and is told if the source moved.
+- **Not after a person's write**: for 30 s after a write of theirs lands, the reads behind its repository's or item's views go as a person's, since they are what shows the write took.
+- **A page may ask a view behind its waited read** (`entity_view`'s `behind`): Compare's branch standing and a commit's view, which only add to what the compare's list and the commit's diff draw. What knobas holds of them is answered at once as before.
+- A pull request's first *Files* read made behind still keeps its diff for the next open (`knobas_http::is_behind`), as a page's own read does; the sync's, in the same lane, does not.
+- Measured during a sync of the scale estate: a branch standing read behind Compare drew 0.9 to 1.1 s after the press, against 0.6 to 0.8 before; Fable's line is 2 s.
+
 ## Rejected
 
 - **Keep ADR-0032's memory-only cache and add a skeleton.** Every restart made every page wait again; at a source 5 s away that is 15 s for a pull request or a run, on every first open of the day.

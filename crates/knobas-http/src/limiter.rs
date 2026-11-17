@@ -76,6 +76,15 @@
 //! limiter, so the origin sees no more requests a second, and no bigger
 //! burst, than before.
 //!
+//! **A read behind a drawn answer waits as the sync does** ([`behind`], the
+//! ux16 overs pass, 2026-11-17; ADR-0042): a page draws what knobas held and
+//! the app reads the source again behind it; nobody waits on that read, so
+//! its requests go in [`Lane::Background`]. Before, they were interactive,
+//! and on Björn's PC a branch's standing read behind Compare put eight
+//! requests on Gitea beside the compare's two, which then took 600 ms at 6x
+//! where it takes 40 to 90 alone. [`is_behind`] tells such a read from the
+//! sync's, for what treats the lane as the sync's.
+//!
 //! **The sync is not starved** ([`BACKGROUND_FLOOR`]): once an origin's
 //! background requests have stood aside for a second without one let
 //! through, they stop yielding and keep no reserve, and a person's requests
@@ -384,12 +393,15 @@ pub(crate) fn stopped_on(quota: &LocalQuota) {
 /// quota lets through: a person's requests go first ([module](self) docs).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Lane {
-    /// A request somebody is waiting for: a live read behind an open page or
-    /// a hover's prefetch, a *Test connection*, a write they pressed and
-    /// watch a toast for. What every request not marked otherwise is.
+    /// A request somebody is waiting for: a page's live read, a hover's
+    /// prefetch, a *Test connection*, a write they pressed and watch a toast
+    /// for. What every request not marked otherwise is. Not a read behind an
+    /// answer a page already drew ([`behind`], the ux16 overs pass,
+    /// 2026-11-17): nobody waits on that one.
     #[default]
     Interactive,
-    /// A request nobody is waiting on: a sync run, the write queue's tick.
+    /// A request nobody is waiting on: a sync run, the write queue's tick, a
+    /// read asked ahead (`ahead:`), a read behind a drawn answer ([`behind`]).
     /// It yields while an interactive request for its origin waits, for at
     /// most [`BACKGROUND_FLOOR`].
     Background,
@@ -450,6 +462,29 @@ pub async fn on_lane<F: Future>(lane: Lane, call: F) -> F::Output {
 #[must_use]
 pub fn current_lane() -> Lane {
     LANE.try_with(|lane| *lane).unwrap_or_default()
+}
+
+tokio::task_local! {
+    /// Set by [`behind`]: the requests sent on this task read again what a
+    /// page already drew.
+    static BEHIND: ();
+}
+
+/// Run `call` as a read behind an answer a page already drew (ADR-0042; the
+/// ux16 overs pass, 2026-11-17): in [`Lane::Background`], so its requests
+/// stand aside while a person's to the same server wait or are out, and
+/// marked so ([`is_behind`]), so a sender that tells the sync apart by its
+/// lane still knows this is no sync. Nobody waits on such a read: the page
+/// drew what knobas held and is told if the source moved.
+pub async fn behind<F: Future>(call: F) -> F::Output {
+    BEHIND.scope((), LANE.scope(Lane::Background, call)).await
+}
+
+/// Whether the requests sent here are a read behind ([`behind`]): in the
+/// background lane, but no sync's.
+#[must_use]
+pub fn is_behind() -> bool {
+    BEHIND.try_with(|()| ()).is_ok()
 }
 
 /// A quota: sustained requests a second and how many may go at once.
@@ -1127,7 +1162,25 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::{InstanceLimiter, Paced, PoisonError, Rate};
+    use super::{InstanceLimiter, Lane, Paced, PoisonError, Rate};
+
+    /// A read behind a drawn answer waits in the background lane and says it
+    /// is one (the ux16 overs pass, 2026-11-17); the sync's, in the same
+    /// lane, does not, and neither does a person's.
+    #[tokio::test]
+    async fn a_read_behind_is_in_the_background_lane_and_says_so() {
+        assert_eq!(
+            (super::current_lane(), super::is_behind()),
+            (Lane::Interactive, false)
+        );
+        let behind = super::behind(async { (super::current_lane(), super::is_behind()) }).await;
+        assert_eq!(behind, (Lane::Background, true));
+        let sync = super::on_lane(Lane::Background, async {
+            (super::current_lane(), super::is_behind())
+        })
+        .await;
+        assert_eq!(sync, (Lane::Background, false));
+    }
 
     /// One entry per origin, however its quota moves, and a dropped holder
     /// does not stay on the books: building a limiter prunes the dead.

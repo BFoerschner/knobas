@@ -535,6 +535,50 @@ async fn the_held_files_are_what_the_page_draws_from_the_forge_byte_for_byte() {
     );
 }
 
+/// A page's read behind a drawn answer runs in the background lane since
+/// the ux16 overs pass (2026-11-17), as the sync does, and still leaves its
+/// keeping read behind it, as a page's own read does: it reads through the
+/// app's kept instance, which a later open reads again (Fable's ruling,
+/// condition 1). The sync's read, in the same lane, leaves none.
+#[tokio::test]
+async fn a_read_behind_keeps_the_diff_as_a_pages_read_does_and_the_sync_does_not() {
+    let (f, _) = fixture().await;
+    let count = |live: LiveSources, how: &'static str| {
+        let f = &f;
+        async move {
+            let before = f.requests().await;
+            let read = f.shown(&live, 7);
+            let _ = match how {
+                "page" => read.await,
+                "behind" => knobas_http::behind(read).await,
+                _ => knobas_http::on_lane(knobas_http::Lane::Background, read).await,
+            };
+            // A keeping read in the background lane waits for the quota's
+            // reserve: counted once the forge has heard nothing for 600 ms.
+            let mut seen = f.requests().await;
+            for _ in 0..20 {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                let now = f.requests().await;
+                if now == seen {
+                    break;
+                }
+                seen = now;
+            }
+            seen - before
+        }
+    };
+    // The process's first read asks who the token is and the server's version, once.
+    count(LiveSources::default(), "page").await;
+    let page = count(LiveSources::default(), "page").await;
+    let behind = count(LiveSources::default(), "behind").await;
+    let sync = count(LiveSources::default(), "sync").await;
+    assert_eq!(
+        behind, page,
+        "a read behind leaves the keeping read a page's leaves"
+    );
+    assert!(sync < page, "the sync's leaves none: {sync} against {page}");
+}
+
 /// A run in which no pull request's commits moved asks the forge nothing and
 /// writes nothing; a moved head, or a moved merge base, is read again.
 #[tokio::test]

@@ -38,6 +38,8 @@ struct Seen {
     failing: std::sync::atomic::AtomicBool,
     /// How many times `refused_writes` was asked.
     grants: AtomicUsize,
+    /// The lane each view read was sent on (`knobas_http::current_lane`).
+    lanes: Mutex<Vec<knobas_http::Lane>>,
 }
 
 impl Seen {
@@ -197,6 +199,11 @@ impl Source for Fake {
             .lock()
             .unwrap()
             .push((entity.to_owned(), section.map(str::to_owned)));
+        self.seen
+            .lanes
+            .lock()
+            .unwrap()
+            .push(knobas_http::current_lane());
         // Taken when the read is sent, as a server answers the state it
         // had then: a push during a slow read is not in its answer.
         let version = if key(entity).starts_with("moving/") {
@@ -752,6 +759,49 @@ async fn a_moving_view_answers_from_the_cache_and_reads_again_behind() {
     assert_eq!(f.seen.reads(), 2, "one read behind it");
     let third = f.read("moving/repo", Some("branches")).await.unwrap();
     assert!(third.contains("v1"), "the push is the next read's: {third}");
+}
+
+/// A read behind a kept answer goes in the background lane (the ux16 overs
+/// pass, 2026-11-17): its requests stand aside for a person's reads of the
+/// same server, as the sync's do. On Björn's PC the read behind a branch's
+/// held view went out with Compare's own and Gitea answered the compare in
+/// 450 to 600 ms where it answers it in 40 to 90 alone. The page's own read
+/// stays a person's.
+#[tokio::test]
+async fn a_read_behind_goes_in_the_background_lane() {
+    let f = fixture().await;
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    assert_eq!(
+        *f.seen.lanes.lock().unwrap(),
+        vec![
+            knobas_http::Lane::Interactive,
+            knobas_http::Lane::Background
+        ],
+        "the page's read a person's, the read behind it the background's"
+    );
+}
+
+/// A person's write keeps the reads behind its repository's views a
+/// person's for a while (the ux16 overs pass, Fable's ruling): they are what
+/// shows the write took once the page's echo of it goes.
+#[tokio::test]
+async fn a_read_behind_after_a_write_goes_as_a_persons() {
+    let f = fixture().await;
+    f.read("moving/written", Some("branches")).await.unwrap();
+    // A merge of a pull request of it landed: `<repository>#<n>` reaches the repository.
+    knobas_app::sources::live::note_write(&format!("{}:moving/written#12", f.id));
+    f.read("moving/written", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    assert_eq!(
+        *f.seen.lanes.lock().unwrap(),
+        vec![
+            knobas_http::Lane::Interactive,
+            knobas_http::Lane::Interactive
+        ],
+        "the read behind a write's repository goes as a person's"
+    );
 }
 
 /// The kept answer does not wait for the read behind it: over a source that

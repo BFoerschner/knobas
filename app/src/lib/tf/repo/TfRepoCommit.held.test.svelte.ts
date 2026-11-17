@@ -70,3 +70,38 @@ test("a view the source cannot answer leaves the commit's row and its diff drawn
   expect(text).not.toContain("could not be read");
   expect(text, "no branch offered without the source's view").not.toContain("New branch from here");
 });
+
+// The ux16 overs pass (2026-11-17): the commit's view only adds to what the row and the diff draw, so its requests go
+// behind the diff's (`behindView`); its three went out with the diff's one and slowed it on Björn's PC.
+test("the commit's view is read behind the diff the page waits on", async () => {
+  const asked: string[] = [];
+  view = mount(TfRepoCommit, {
+    target,
+    props: {
+      ports: {
+        entityView: async () => {
+          asked.push("view");
+          return null;
+        },
+        behindView: async () => {
+          asked.push("behind");
+          return null;
+        },
+        getEntity: async () => DETAIL,
+        commitDiff: async () => {
+          asked.push("diff");
+          return LOCAL;
+        },
+        fileBytes: async () => new Uint8Array(),
+        piped: async () => ({}) as never,
+      },
+      repoId: REPO,
+      commitId: COMMIT,
+      now: new Date("2026-11-09T12:00:00Z"),
+      onNewBranch: () => {},
+    },
+  });
+  await settle();
+  expect(asked.sort()).toEqual(["behind", "diff"]);
+  expect(target.textContent).toContain("src/sepa/retry.rs");
+});

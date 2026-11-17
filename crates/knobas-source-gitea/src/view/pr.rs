@@ -422,11 +422,14 @@ impl PullView<'_> {
     /// Not behind a read on the background lane: those are the sync's (the
     /// held-files pass, 2026-11-15), through an instance that ends with its
     /// run, so nothing kept would be read again and the three requests would
-    /// be spent for nothing. The read left behind waits in its caller's lane:
-    /// a task spawned starts outside it.
+    /// be spent for nothing. A page's read behind a drawn answer is in that
+    /// lane too since the ux16 overs pass (2026-11-17), through the app's
+    /// kept instance, and keeps as before ([`knobas_http::is_behind`]). The
+    /// read left behind waits in its caller's lane: a task spawned starts
+    /// outside it.
     fn keep_behind(&self, pull: &Pull, keeping: diffs::Keeping) {
         let lane = knobas_http::current_lane();
-        if lane == knobas_http::Lane::Background {
+        if lane == knobas_http::Lane::Background && !knobas_http::is_behind() {
             return;
         }
         let head = pull.head.as_ref().and_then(|h| h.sha.clone());

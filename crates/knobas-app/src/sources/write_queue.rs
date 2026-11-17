@@ -1060,6 +1060,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
         self.inner.activity_new(row);
     }
     fn write_landed(&self, write: &QueuedWrite) {
+        // The page that made it reads its echo back behind its views: as a
+        // person's read for a while (`live::note_write`, the ux16 overs pass).
+        crate::sources::live::note_write(&write.entity_id);
         if let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade()) {
             let (task, landed) = (scheduler.clone(), write.clone());
             // Counted before the flush that sent it returns, and until the

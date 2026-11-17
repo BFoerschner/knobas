@@ -95,6 +95,11 @@
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
     /** A page's view (ADR-0042): what knobas last read, with when (`held_at`) and the rows the mirror lacks (`unsynced`). */
     entityView: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
+    /**
+     * A view drawn beside the read the page waits on (`entityViewBehind`, the ux16 overs pass): Compare's branch standing,
+     * whose requests to the source wait for the compare's own. `entityView` where absent.
+     */
+    behindView?: (entityId: string, section: string | null) => Promise<ShownView | SourceView | null>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     entityCheckoutDiff: (entityId: string) => Promise<DiffRead>;
     setCheckoutOverride: (entityId: string, path: string | null) => Promise<CheckoutView>;
@@ -232,6 +237,7 @@
     entityLocalPaths,
     entitySourceRangeDiff,
     entityView,
+    entityViewBehind,
     getEntity,
     jobReach,
     listContexts,
@@ -317,6 +323,7 @@
       getEntity: (entityId) => getEntity(entityId),
       listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
       entityView: (entityId, section) => entityView(entityId, section),
+      behindView: (entityId, section) => entityViewBehind(entityId, section),
       entityCheckout: (entityId) => entityCheckout(entityId),
       entityCheckoutDiff: (entityId) => entityCheckoutDiff(entityId),
       setCheckoutOverride: (entityId, path) => setCheckoutOverride(entityId, path),

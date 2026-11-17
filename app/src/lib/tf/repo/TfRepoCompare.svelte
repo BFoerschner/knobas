@@ -126,7 +126,7 @@
     guessed = null,
     onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "rangeFilePages" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "behindView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "rangeFilePages" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -351,10 +351,12 @@
   /**
    * The branch's standing. It adds the commits list and an open pull request's line to a form that can be sent
    * without them, so a source that does not answer leaves the page as drawn (ADR-0042): the diff is read on its own.
+   * Behind the diff (`behindView`, the ux16 overs pass, 2026-11-17): what knobas holds of it draws at once, and its
+   * requests to the source wait for the compare's, which on Björn's PC took 450 to 600 ms beside them and 40 to 90 alone.
    */
   function readStanding(id: string, alive: () => boolean, again = false): Promise<unknown> {
     void again;
-    return ports.entityView(id, null).then(
+    return (ports.behindView ?? ports.entityView)(id, null).then(
       (answer) => {
         if (alive()) standing = branchStanding(answer);
       },

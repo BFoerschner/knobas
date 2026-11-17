@@ -40,7 +40,7 @@
     onNewBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "fileBytes" | "piped" | "commitDiff">;
+    ports: Pick<RepoPorts, "entityView" | "behindView" | "getEntity" | "fileBytes" | "piped" | "commitDiff">;
     repoId: string;
     commitId: string;
     now: Date;
@@ -152,9 +152,13 @@
     return Promise.all([rowRead, viewRead, diffRead]);
   }
 
-  /** The commit's view: its parent and *New branch from here…*; a failed read draws neither. */
+  /**
+   * The commit's view: its parent and *New branch from here…*; a failed read draws neither. Behind the diff the page
+   * waits on (`behindView`, the ux16 overs pass, 2026-11-17): its three requests to the source went out with the diff's
+   * one and slowed it.
+   */
   function readView(id: string, mine: () => boolean): Promise<unknown> {
-    return ports.entityView(id, null).then(
+    return (ports.behindView ?? ports.entityView)(id, null).then(
       (view) => {
         if (!mine()) return;
         parent = parentOf(view);

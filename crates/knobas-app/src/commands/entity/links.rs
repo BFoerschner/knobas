@@ -324,6 +324,15 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
 /// source is read behind it and told on `view:fresh`; only a view never read
 /// waits for the source ([`crate::sources::crud::shown`]).
 ///
+/// **`behind`** (the ux16 overs pass, 2026-11-17): a view the page draws
+/// beside a read it waits on, not instead of it -- Compare's branch standing
+/// beside the compare's list. Its requests go in the background lane
+/// ([`knobas_http::Lane::Background`]), so they reach the source once the
+/// page's own are answered: on Björn's PC the standing's eight requests went
+/// out with the compare's two and Gitea answered the compare in 600 ms at 6x
+/// where it answers it in 40 to 90 alone. What knobas holds is answered at
+/// once either way. Left out, the read is a person's, as before.
+///
 /// # Errors
 ///
 /// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
@@ -335,18 +344,23 @@ pub async fn entity_view<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     entity_id: String,
     section: Option<String>,
+    behind: Option<bool>,
 ) -> Result<Option<crate::sources::live::ShownView>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::crud::shown(
+    let read = crate::sources::crud::shown(
         &state.pool,
         &state.secrets,
         &state.registry,
         &state.live,
         &entity_id,
         section.as_deref(),
-    )
-    .await
-    .map_err(|error| crate::sources::to_ipc(&error, None))
+    );
+    let answer = if behind == Some(true) {
+        knobas_http::behind(read).await
+    } else {
+        read.await
+    };
+    answer.map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
 /// The diff from `base` to `head` of the repository `entity_id` (#2272,
