@@ -1332,6 +1332,198 @@ pub async fn forget_run_embedded_html(pool: &PgPool, source_id: &str) -> Result<
     Ok(())
 }
 
+// -- where Docs opens, and the spaces it hides (PR #2479, 2026-11-17) --------
+//
+// Björn: "change in the docs area the default open page", and "hide areas
+// that I'm not using? I still want it to be searchable, just not visible".
+// Both are the reader's choices about their own screen, stored as
+// `knobas.setting` rows like *Run embedded HTML*: no migration, a backup
+// carries them and a share export does not (`backup/share.rs`). A hidden
+// space is a row of its own, so hiding one is one write and never a
+// read-modify-write of a list another press could race.
+
+/// The `knobas.setting` key holding where Docs opens.
+pub const DOCS_HOME_KEY: &str = "docs.home";
+
+/// The prefix of a hidden space's `knobas.setting` key, followed by the
+/// space as the front end's `spaceId` names it, `<source>/<key>`.
+pub const HIDDEN_SPACE_PREFIX: &str = "docs.hidden_space.";
+
+/// What Docs' home is: a space's own page, or one page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum DocsHomeKind {
+    Space,
+    Page,
+}
+
+/// Where Docs opens when nothing in it is chosen: the nav entry's first press,
+/// after a restart too, and the launcher's *Docs* row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DocsHome {
+    pub kind: DocsHomeKind,
+    /// A space as `<source>/<key>`, or a page's entity id.
+    pub id: String,
+    /// What it was called when it was chosen, so Settings names it after the
+    /// mirror lost it.
+    pub title: String,
+}
+
+/// The reader's choices about Docs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DocsChoices {
+    /// Where Docs opens; `None` opens its home, `#/docs`.
+    pub home: Option<DocsHome>,
+    /// The spaces hidden from Docs' browsing, as `<source>/<key>`, sorted.
+    /// Search still finds their pages and links into them still open.
+    pub hidden: Vec<String>,
+}
+
+/// Whether `id` names a space as `<source>/<key>`: a source id holds no `/`
+/// or `:`, and neither part is empty.
+fn space_named(id: &str) -> bool {
+    id.split_once('/')
+        .is_some_and(|(source, key)| !source.is_empty() && !key.is_empty() && !source.contains(':'))
+}
+
+/// Whether `id` names a page: an entity id is `<source>:<id>`.
+fn page_named(id: &str) -> bool {
+    id.split_once(':')
+        .is_some_and(|(source, rest)| !source.is_empty() && !rest.is_empty())
+}
+
+/// The choices as stored. A `docs.home` row that does not read as a home
+/// reads as none.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn choices(pool: &PgPool) -> Result<DocsChoices, IpcError> {
+    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "select key, value from knobas.setting
+          where key = $1 or left(key, length($2)) = $2
+          order by key",
+    )
+    .bind(DOCS_HOME_KEY)
+    .bind(HIDDEN_SPACE_PREFIX)
+    .fetch_all(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let mut out = DocsChoices::default();
+    for (key, value) in rows {
+        if key == DOCS_HOME_KEY {
+            out.home = serde_json::from_value(value).ok();
+        } else if let Some(space) = key.strip_prefix(HIDDEN_SPACE_PREFIX)
+            && value.as_bool() == Some(true)
+        {
+            out.hidden.push(space.to_owned());
+        }
+    }
+    Ok(out)
+}
+
+/// Store where Docs opens, or forget it with `None`, and answer the choices.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that names no space or
+/// page as its kind says, [`Internal`](crate::IpcErrorCode::Internal) if the
+/// write fails.
+pub async fn set_home(pool: &PgPool, home: Option<DocsHome>) -> Result<DocsChoices, IpcError> {
+    match home {
+        None => {
+            sqlx::query("delete from knobas.setting where key = $1")
+                .bind(DOCS_HOME_KEY)
+                .execute(pool)
+                .await
+                .map_err(IpcError::internal)?;
+        }
+        Some(home) => {
+            let named = match home.kind {
+                DocsHomeKind::Space => space_named(&home.id),
+                DocsHomeKind::Page => page_named(&home.id),
+            };
+            if !named {
+                return Err(IpcError::invalid(format!(
+                    "{} names no {} Docs can open",
+                    home.id,
+                    match home.kind {
+                        DocsHomeKind::Space => "space",
+                        DocsHomeKind::Page => "page",
+                    }
+                )));
+            }
+            let value = serde_json::to_value(&home).map_err(IpcError::internal)?;
+            crate::settings::write_value(pool, DOCS_HOME_KEY, &value).await?;
+        }
+    }
+    choices(pool).await
+}
+
+/// Hide space `space` (`<source>/<key>`) from Docs' browsing, or show it
+/// again, and answer the choices. Nothing is deleted: the sync keeps
+/// mirroring it and search keeps finding it.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a `space` that is not
+/// `<source>/<key>`, [`Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+pub async fn set_space_hidden(
+    pool: &PgPool,
+    space: &str,
+    hidden: bool,
+) -> Result<DocsChoices, IpcError> {
+    if !space_named(space) {
+        return Err(IpcError::invalid(format!(
+            "{space} names no space: a space is <source>/<key>"
+        )));
+    }
+    let key = format!("{HIDDEN_SPACE_PREFIX}{space}");
+    if hidden {
+        crate::settings::write_value(pool, &key, &serde_json::Value::Bool(true)).await?;
+    } else {
+        sqlx::query("delete from knobas.setting where key = $1")
+            .bind(&key)
+            .execute(pool)
+            .await
+            .map_err(IpcError::internal)?;
+    }
+    choices(pool).await
+}
+
+/// Drop `source_id`'s hidden spaces and a home in it, when the source is
+/// deleted: a source added again under its id shows every space, as every
+/// new source does.
+///
+/// # Errors
+///
+/// The database's error if the delete fails.
+pub async fn forget_docs_choices(pool: &PgPool, source_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "delete from knobas.setting
+          where left(key, length($1)) = $1
+             or (key = $2 and (value->>'id' like $3 escape '\\' or value->>'id' like $4 escape '\\'))",
+    )
+    .bind(format!("{HIDDEN_SPACE_PREFIX}{source_id}/"))
+    .bind(DOCS_HOME_KEY)
+    .bind(format!("{}/%", like_escaped(source_id)))
+    .bind(format!("{}:%", like_escaped(source_id)))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// `text` with `LIKE`'s wildcards and escape taken literally.
+fn like_escaped(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 // -- the Docs search (#860) -------------------------------------------------
 
 /// How many hits the Docs search draws. The header counts every match.

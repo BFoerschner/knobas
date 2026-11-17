@@ -104,3 +104,20 @@ test("the selection counts only when the press is inside it", () => {
   selection.removeAllRanges();
   expect(selectionAt(root.querySelector(".a"), selection)).toBeNull();
 });
+
+test("a Docs space's address is that space as the tree Docs holds names it; one it does not hold is no thing (2026-11-17)", async () => {
+  const { heldTree, forgetTree } = await import("../docs/tree-store");
+  heldTree.tree = {
+    spaces: [{ source_id: "confluence", source_name: "Confluence", key: "ENG", name: "Engineering", pages: [] }],
+    last_read: null,
+    for_you: [],
+  };
+  try {
+    expect(thingOfHash("#/docs/space/ENG")).toEqual({ kind: "space", id: "confluence/ENG", name: "Engineering", hash: "#/docs/space/ENG" });
+    expect(thingOfHash("#/docs/space/confluence%3AENG")).toMatchObject({ kind: "space", id: "confluence/ENG" });
+    expect(thingOfHash("#/docs/space/NOPE")).toBeNull();
+    expect(thingOfHash("#/docs")).toBeNull();
+  } finally {
+    forgetTree();
+  }
+});

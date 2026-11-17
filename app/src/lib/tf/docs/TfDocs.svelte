@@ -123,6 +123,11 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { dismiss, push, undoable } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
+  import FilterBar from "../filter/FilterBar.svelte";
+  import type { FilterConfig } from "../filter/filter";
+  import TfDocsHidden from "./TfDocsHidden.svelte";
+  import { menuThing } from "../context/thing";
+  import { DOCS_HOME, docsChoices } from "./docs-choices.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { resolveTicket, username } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
@@ -198,6 +203,7 @@
     stemsOf,
     provideEmbeds,
     keepDrawn,
+    railSpaces,
   } from "./docs";
   import { replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
@@ -646,6 +652,46 @@
   });
   const pickerValue = $derived(shownSpace ? spaceId(shownSpace) : "*");
   const total = $derived(tree?.spaces.reduce((n, s) => n + pageCount(s), 0) ?? 0);
+
+  // ---- the spaces Docs browses (PR #2479, 2026-11-17, `docs-choices.svelte.ts`) ----
+  /** The rail's filter over its spaces, Code's own bar, its words kept for the session as Code's are. */
+  const spaceFilter = sessionFilter("docs-spaces");
+  const SPACE_FILTER: FilterConfig = { id: "docs-spaces", placeholder: "Filter spaces", noun: "spaces", one: "space" };
+  const filteringSpaces = $derived(spaceFilter.text.trim() !== "");
+  /** The rail's spaces: the shown ones, then the hidden ones for the fold at their end, both kept to the filter's words. */
+  const rail = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, spaceFilter.text));
+  /** Every space Docs shows, for the Space picker; the hidden ones follow under their own heading. */
+  const pickable = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, ""));
+  /** The rail draws one space that is hidden: a page of it is open, or it was picked. */
+  const shownHidden = $derived(shownSpace !== undefined && docsChoices.hidden.has(spaceId(shownSpace)));
+  // Words typed in the filter ask for the list of spaces it narrows, wherever the rail was.
+  let filteredFor = untrack(() => spaceFilter.text);
+  $effect(() => {
+    const text = spaceFilter.text;
+    if (text === filteredFor) return;
+    filteredFor = text;
+    if (text.trim() !== "") untrack(() => (picked = "*"));
+  });
+
+  /**
+   * Docs' home the mirror no longer holds (a page deleted, a space gone): Docs opens on its own page in its place, as
+   * if none were chosen, and says why. The choice is kept, so a page that comes back is the home again.
+   */
+  const homeGone = $derived.by(() => {
+    const home = docsChoices.home;
+    if (home === null || tree === null) return false;
+    if (home.kind === "page") return place.kind === "page" && place.id === home.id && pageMissing;
+    if (place.kind !== "space" || spaceHere !== undefined) return false;
+    return place.source === null ? home.id.endsWith(`/${place.key}`) : home.id === `${place.source}/${place.key}`;
+  });
+  $effect(() => {
+    if (!homeGone) return;
+    const title = untrack(() => docsChoices.home?.title ?? "");
+    untrack(() => {
+      replaceAddress(DOCS_HOME);
+      push({ text: `Docs' home, ${title}, is not in knobas now, so Docs opened on its own page. Settings › Docs chooses another.` });
+    });
+  });
   const parent = $derived(page?.ancestors.at(-1));
   const current = $derived(page?.entity_id ?? target);
   const searching = $derived(query.trim() !== "");
@@ -1612,10 +1658,24 @@
       {#if !jobOn && tree !== null && tree.spaces.length > 0}
         <select aria-label="Space" value={pickerValue} title={shownSpace?.name ?? undefined} onchange={pick}>
           <option value="*">All spaces ({total})</option>
-          {#each tree.spaces as space (spaceId(space))}
+          {#each pickable.shown as space (spaceId(space))}
             <option value={spaceId(space)}>{spaceLabel(space, tree.spaces)}</option>
           {/each}
+          {#if pickable.hidden.length > 0}
+            <!-- Hidden from browsing, not from choosing: a hidden space is still one pick away, under its own heading. -->
+            <optgroup label="Hidden spaces">
+              {#each pickable.hidden as space (spaceId(space))}
+                <option value={spaceId(space)}>{spaceLabel(space, tree.spaces)}</option>
+              {/each}
+            </optgroup>
+          {/if}
         </select>
+        {#if !searching && tree.spaces.length > 1}
+          <!-- Code's own bar (Björn, 2026-11-17: "a small filter, like in the code pages"): its words narrow the spaces by name and key. -->
+          <div class="tf-dl-filter">
+            <FilterBar config={SPACE_FILTER} filter={spaceFilter} shown={filteringSpaces ? rail.shown.length : null} total={filteringSpaces ? pickable.shown.length : null} />
+          </div>
+        {/if}
       {/if}
       {#if searching}
         <p class="tf-dl-q">Search <b>{query.trim()}</b> <button type="button" class="tf-linkish" onclick={clearSearch}>Clear</button></p>
@@ -1636,6 +1696,7 @@
             {me}
             answered={answerHere}
             spaces={tree?.spaces ?? []}
+            hidden={docsChoices.hidden}
             onall={widenSearch}
             onpick={openHit}
           />
@@ -1683,7 +1744,10 @@
         {:else if tree.spaces.length === 0}
           <p class="tf-dl-note">{hasSource ? "No pages have synced yet." : "No wiki source is set up yet."}</p>
         {:else if shownSpace === undefined}
-          {#each tree.spaces as space (spaceId(space))}
+          {#if filteringSpaces && rail.shown.length === 0 && rail.hidden.length === 0}
+            <p class="tf-dl-note">No space's name or key holds {spaceFilter.text.trim()}. <button type="button" class="tf-linkish" onclick={() => (spaceFilter.text = "")}>Clear</button></p>
+          {/if}
+          {#each rail.shown as space (spaceId(space))}
             {@const holds = space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}
             {@const from = spaceSource(space, tree.spaces)}
             <details
@@ -1693,11 +1757,18 @@
                 else if (!holds) openSpaces.add(spaceId(space));
               }}
             >
-              <summary class="tf-spc"><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
+              <summary class="tf-spc" {@attach menuThing(() => ({ kind: "space", id: spaceId(space), name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
               <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} need={lazy ? needFold : undefined} /></div>
             </details>
           {/each}
+          <TfDocsHidden hidden={rail.hidden} spaces={tree.spaces} where="rail" only={filteringSpaces && rail.shown.length === 0} />
         {:else if shownSpace}
+          {#if shownHidden}
+            {@const name = spaceTitle(shownSpace, tree.spaces)}
+            <p class="tf-dl-note tf-dl-hidn">
+              {name} is hidden from Docs. <button type="button" class="tf-linkish" onclick={() => void docsChoices.setHidden(spaceId(shownSpace), name, false)}>Unhide</button>
+            </p>
+          {/if}
           <TfDocTree space={shownSpace} {current} reveal={revealed} opened={foldsOf(spaceId(shownSpace))} need={lazy ? needFold : undefined} />
         {/if}
       {/if}
@@ -1767,6 +1838,7 @@
         {job}
         groups={jobGroups}
         jobFirst={jobOn}
+        hidden={docsChoices.hidden}
         {sync}
         notice={answerHere || hitsHere ? searchAnswer : undefined}
         onretry={() => void readTree(false)}
@@ -1785,6 +1857,8 @@
           {#each [0, 1, 2, 3, 4, 5] as line (line)}<span class="tf-skel-bar"></span>{/each}
         </div>
       {/if}
+    {:else if homeGone}
+      <!-- Docs' home is gone: the address goes to Docs' own page in this frame's effect, so nothing says "not held" first. -->
     {:else if place.kind === "space"}
       <TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: "Space" }]} {back} />
       <TfNothingHere message="knobas does not hold this space. It may not have synced yet." href="#/docs" action="Docs home" />

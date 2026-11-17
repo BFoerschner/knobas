@@ -24,6 +24,7 @@
     me,
     answered = false,
     spaces = [],
+    hidden = new Set<string>(),
     onall,
     onpick,
   }: {
@@ -41,6 +42,11 @@
     answered?: boolean;
     /** The tree's spaces, so a hit's space says its source where another's has its name. */
     spaces?: readonly DocSpace[];
+    /**
+     * The spaces hidden from Docs' browsing (PR #2479, 2026-11-17): search still finds their pages, and a hit of one says
+     * so after its place, since the rail and the home no longer show where it is.
+     */
+    hidden?: ReadonlySet<string>;
     /** Widen the search: to every space, or from the job's pages to all pages. */
     onall: () => void;
     /** A hit is opened: the reader keeps the query. */
@@ -68,6 +74,7 @@
 {#each found.hits as hit (hit.entity_id)}
   {@const label = snippetLabel(hit.snippet)}
   {@const where = hitWhere(hit, kept !== "space", spaces)}
+  {@const fromHidden = hit.space !== null && hidden.has(`${hit.entity_id.slice(0, Math.max(0, hit.entity_id.indexOf(":")))}/${hit.space.key}`)}
   <a
     class="tf-dl-hit"
     href={pageHash(hit.entity_id)}
@@ -78,7 +85,7 @@
     <span class="tf-t"
       ><TfMarked text={hit.title} {stems} /></span
     >
-    {#if where !== ""}<span class="tf-pth">{where}</span>{/if}
+    {#if where !== "" || fromHidden}<span class="tf-pth">{where}{#if fromHidden}{where === "" ? "" : ", "}<span class="tf-dk-mark">in a hidden space</span>{/if}</span>{/if}
     <span class="tf-sn"
       >{#if label}<b>{label}</b>{" "}{/if}{#each hit.snippet.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark
           >{:else}{seg.text}{/if}{/each}</span

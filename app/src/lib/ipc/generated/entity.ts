@@ -1378,6 +1378,20 @@ linked: boolean, };
 export type DocWrite = "comment" | "update_page" | "create_page";
 
 /**
+ * The reader's choices about Docs.
+ */
+export type DocsChoices = { 
+/**
+ * Where Docs opens; `None` opens its home, `#/docs`.
+ */
+home: DocsHome | null, 
+/**
+ * The spaces hidden from Docs' browsing, as `<source>/<key>`, sorted.
+ * Search still finds their pages and links into them still open.
+ */
+hidden: Array<string>, };
+
+/**
  * The Docs search's answer (#860, R-10.3).
  */
 export type DocsHits = { 
@@ -1398,6 +1412,26 @@ unknown_tokens: Array<string>,
  * The best pages, best first.
  */
 hits: Array<DocHit>, };
+
+/**
+ * Where Docs opens when nothing in it is chosen: the nav entry's first press,
+ * after a restart too, and the launcher's *Docs* row.
+ */
+export type DocsHome = { kind: DocsHomeKind, 
+/**
+ * A space as `<source>/<key>`, or a page's entity id.
+ */
+id: string, 
+/**
+ * What it was called when it was chosen, so Settings names it after the
+ * mirror lost it.
+ */
+title: string, };
+
+/**
+ * What Docs' home is: a space's own page, or one page.
+ */
+export type DocsHomeKind = "space" | "page";
 
 /**
  * What [`nodes`] reads: pages by id, each with the path to it drawn open.

@@ -16,6 +16,8 @@
  * And a page's heading is that page's thing (`own`: its menu has no *Open*, the reader is there).
  */
 import { parseTfHash } from "../route";
+import { placeOf, spaceAt, spaceId, spaceTitle } from "../docs/docs";
+import { heldTree } from "../docs/tree-store";
 
 export type Thing =
   /** An item of a source, opened at its address. `kind` is the address's kind, not the source's word. */
@@ -39,6 +41,12 @@ export type Thing =
   | { kind: "test"; name: string }
   /** A link to a page on the web, in synced text or drawn by the app. */
   | { kind: "web"; url: string }
+  /**
+   * A Docs space (PR #2479, 2026-11-17): `id` its `spaceId` (`<source>/<key>`) and `name` as Docs draws it, read off the
+   * tree Docs already holds (`tree-store.ts`), so it can be made Docs' home or hidden. A space the tree does not hold is
+   * no thing.
+   */
+  | { kind: "space"; id: string; name: string; hash: string }
   /** An Inbox line, by its key: the Inbox page's own writes on it (`ops`, the backend's offer on the line). */
   | { kind: "inbox"; key: string; title: string; open: string | null; ops: readonly string[]; entityId: string | null; sourceId: string | null };
 
@@ -100,6 +108,12 @@ export function thingOfHash(hash: string): Thing | null {
       return { kind: "commit", id: first, repoId: null, hash: at("commit", first) };
     case "page":
       return { kind: "page", id: first, hash: at("page", first) };
+    case "docs": {
+      const tree = heldTree.tree;
+      if (first !== "space" || second === undefined || tree === null) return null;
+      const space = spaceAt(placeOf(route.rest), tree);
+      return space === undefined ? null : { kind: "space", id: spaceId(space), name: spaceTitle(space, tree.spaces), hash };
+    }
     case "asset":
       return { kind: "asset", id: first, hash: at("asset", first) };
     case "sets":

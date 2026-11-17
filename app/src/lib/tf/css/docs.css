@@ -391,3 +391,31 @@
   .tf-rd-backdrop { animation: none; }
 }
 
+
+/* ---------- the spaces Docs hides, and the rail's filter (PR #2479, 2026-11-17, `docs-choices.svelte.ts`) ---------- */
+/* Code's filter bar, in the rail's head: no band of its own, the field as wide as the picker above it, its count after. */
+.tf-dl-filter .tf-fbar { position: static; padding: 0; border: 0; background: none; flex-wrap: nowrap; }
+.tf-dl-filter .tf-fsearch { max-width: none; min-width: 0; flex: 1 1 auto; }
+.tf-dl-filter .tf-ftail { flex: none; }
+.tf-dl-filter .tf-fcount:not(:has(.tf-fcount-n:not(:empty))) { display: none; }
+/* The fold of hidden spaces: Monitors' fold's summary (`.tf-mon-fold`), at the end of the rail's spaces and of the home's tiles. */
+.tf-dk-fold { margin-top: 8px; border-top: 1px solid var(--rule-2); }
+.tf .tf-dk-fold > summary {
+  list-style: none; cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2);
+  padding: 10px 8px 6px; display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; white-space: normal;
+}
+.tf-dk-fold > summary::-webkit-details-marker { display: none; }
+.tf-dk-fold > summary .tf-dim { font-weight: 400; }
+.tf-dk-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 2px; }
+/* Dimmed, as a hidden monitor's row is: still a link to the space's own page. */
+.tf .tf-dk-row > a { flex: 1 1 auto; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-dk-row .tf-count { flex: none; }
+.tf-dk-row .tf-btn { flex: none; }
+.tf-dk-home { margin-top: 20px; }
+.tf-dk-home > summary { padding-inline: 0; }
+.tf-dk-home .tf-dk-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2px 16px; }
+.tf-dk-home .tf-dk-row > a { padding: 4px 0; text-decoration: none; font-size: var(--t-md); }
+.tf-dk-home .tf-dk-row > a:hover { text-decoration: underline; }
+/* A search hit in a hidden space says so after its place. */
+.tf-dk-mark { font-style: italic; }
+.tf-dl-hidn { padding-bottom: 4px; }

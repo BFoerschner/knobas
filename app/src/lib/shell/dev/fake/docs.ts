@@ -56,6 +56,8 @@ import { keepSeed } from "../fake-seed";
 import { SCALE_SPACES, scalePages } from "../fake-scale";
 import type {
   DocBlock,
+  DocsChoices,
+  DocsHome,
   DocHit,
   DocInline,
   DocPage,
@@ -906,6 +908,10 @@ var call = "${call}";
   return { ...doc, blocks: swap(doc.blocks) };
 }
 
+/** Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): kept for the page's life, as the backend's rows are kept. */
+const choices: { home: DocsHome | null; hidden: Set<string> } = { home: null, hidden: new Set() };
+const answerChoices = (): DocsChoices => ({ home: choices.home, hidden: [...choices.hidden].sort() });
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
@@ -916,6 +922,17 @@ export function handlers(params: URLSearchParams): Handlers {
     // the tree whole, which is a cut of the tree as the backend's are.
     docs_outline: () => tree(bulk),
     docs_nodes: () => tree(bulk).spaces,
+    docs_choices: () => answerChoices(),
+    set_docs_home: (args) => {
+      choices.home = (args["home"] as DocsHome | null | undefined) ?? null;
+      return answerChoices();
+    },
+    set_docs_space_hidden: (args) => {
+      const space = String(args["space"] ?? "");
+      if (args["hidden"] === true) choices.hidden.add(space);
+      else choices.hidden.delete(space);
+      return answerChoices();
+    },
     docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {

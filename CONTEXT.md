@@ -433,6 +433,13 @@ _Avoid_: command palette, spotlight
 The last address a reader stood on in a section of the nav, however deep (a Docs page or space, a ticket, a pull request at its tab, a run at its tab, a marked monitor, a link set, a source's page in Settings): where the section's nav entry, the gear or `⌘,` comes back to from another section, as the kept page that was left (2026-11-13, `docs/decisions/2026-11-13-a-nav-entry-comes-back-to-where-you-were.md`). Pressed inside the section, the entry goes to the section's own page as it was left instead (its tab, saved view, pipeline or search). Not a card row's narrowing and not home. A launcher row naming a section opens the section's own page, not its place.
 _Avoid_: last page, history (Back steps through history; a place is one per section)
 
+**Docs' home**:
+Where Docs opens when nothing in it is chosen: a space's own page or one page, or, with none chosen, Docs' own page (`#/docs`). The Docs entry's first press, the entry pressed inside Docs and the launcher's *Docs* row go there; a [section's place](#sections-place) in Docs still wins on a return. Set from a space's or a page's right-click menu (*Open Docs here*) or Settings › Docs; one the mirror lost opens `#/docs` (2026-11-17, `docs/decisions/2026-11-17-where-docs-opens-and-the-spaces-it-hides.md`). Knobas-local, a `knobas.setting` row.
+_Avoid_: start page, default page (`#/docs` is Docs' own page, which the crumb leads to)
+
+**Hidden space**:
+A Docs space taken off Docs' browsing: no tree in the rail's list, no tile on Docs' own page, last in the Space picker, and a row of the fold at the end of each list. Search still finds its pages, a link into it opens, and the sync keeps mirroring it. Knobas-local, a `knobas.setting` row a space; a backup carries it and a share export does not.
+
 **Coverage**:
 Per query, which sources could answer a filter and which have nothing it can match, measured on the corpus each source contributed and never on what matched. A source that answered and found nobody says something different from one whose items never name a person.
 _Avoid_: capability (a static claim on the descriptor; this is a measured one about a corpus), support

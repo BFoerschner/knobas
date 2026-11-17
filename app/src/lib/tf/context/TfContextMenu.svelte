@@ -31,6 +31,7 @@
   import { folderRenderers, marksOf } from "../../render/folders.svelte";
   import { renderersFor } from "../../render/folder";
   import { realMenuPorts, type MenuPorts } from "./ports";
+  import { docsChoices } from "../docs/docs-choices.svelte";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
 
   let {
@@ -101,6 +102,7 @@
             mirrored: (url) => sources.some((one) => one.base !== "" && url.startsWith(one.base)),
             own: shown.found?.own ?? false,
             renders: (repoId, path) => renderersFor(path, folderRenderers.list, marksOf(repoId)),
+            docs: { isHome: (kind, id) => docsChoices.isHome(kind, id), hidden: docsChoices.hidden },
           },
           facts,
         ),
@@ -184,6 +186,7 @@
       case "test":
       case "web":
       case "inbox":
+      case "space":
         break;
       default:
         entity = thing.id;
@@ -445,6 +448,14 @@
         );
       case "app":
         return runApp(act.entityId, act.app, act.name, act.at);
+      case "docs-home": {
+        if (act.id === null) return void docsChoices.setHome(null);
+        const home = (title: string | null | undefined) => void docsChoices.setHome({ kind: act.kind, id: act.id!, title: title ?? act.id! });
+        const title = now(act.title);
+        return title !== undefined ? home(title) : void later(act.title, from).then(home);
+      }
+      case "docs-hide":
+        return void docsChoices.setHidden(act.id, act.name, act.hidden);
       case "clone": {
         const title = keyOf(act.repoId);
         return void ports.clone({ entityId: act.repoId, title }).then(() => push({ text: `Cloning ${title}` }), failed("Could not clone"));

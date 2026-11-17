@@ -130,6 +130,10 @@ const NOTE = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), which the shell reads once ready: none chosen.
+  docsChoices: () => Promise.resolve({ home: null, hidden: [] }),
+  setDocsHome: () => Promise.resolve({ home: null, hidden: [] }),
+  setDocsSpaceHidden: () => Promise.resolve({ home: null, hidden: [] }),
   // What a capture would attach (#503): the main window records its room and
   // its foreground here whenever either changes. Nothing in this file opens a
   // capture window, so it only has to answer.
@@ -594,6 +598,7 @@ function sectionPorts() {
     listSources: () => deferred([]),
     listAdapters: () => deferred([]),
     monitoringSettings: () => deferred({ sample_retention_days: 30, response_time_warn_ms: 2000 }),
+    docsOutline: () => deferred({ spaces: [{ source_id: "confluence", source_name: "Confluence", key: "ENG", name: "Engineering", pages: [] }], last_read: null, for_you: [] }),
     setMonitoringSettings: (settings: { sample_retention_days: number; response_time_warn_ms: number }) => deferred(settings),
     backupStatus: () =>
       deferred({
@@ -2417,6 +2422,8 @@ const CASES: Case[] = [
   sectionCase("TfNotificationsSection", "notifications"),
   sectionCase("TfStandupSection", "standup"),
   sectionCase("TfMonitoringSection", "monitoring"),
+  // Settings › Docs (PR #2479, 2026-11-17): its spaces' read lands late.
+  sectionCase("TfDocsSection", "docs"),
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
   sectionCase("TfPerformanceSection", "performance"),

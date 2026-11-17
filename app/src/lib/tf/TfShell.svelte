@@ -40,6 +40,8 @@
     commandSteps?: () => Promise<import("../ipc/app").CommandStep[]>;
     /** *Run pipelines on diffs* (#2270), held once the database answers; on without it. */
     diffPipelines?: () => Promise<boolean>;
+    /** Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), held once the database answers; Docs' own page and none hidden without it. */
+    docsChoices?: () => Promise<import("../ipc/entity").DocsChoices>;
   }
 </script>
 
@@ -50,6 +52,8 @@
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
   import { diffPipelines as heldDiffPipelines } from "./diff/diff-pipelines.svelte";
+  import { docsChoices as readDocsChoices } from "../ipc/entity";
+  import { docsChoices as heldDocsChoices } from "./docs/docs-choices.svelte";
   import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
   import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
   import { defaultPipeline } from "../render/defaults";
@@ -142,6 +146,8 @@
       namedPipelines,
       commandSteps,
       diffPipelines,
+      // Named only when called, as `docs-choices.svelte.ts`' own reads are.
+      docsChoices: async () => readDocsChoices(),
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -401,11 +407,20 @@
     sectionPlaces[section] = hash;
   });
   /**
+   * Docs' own page as the entry knows it: a search it was left on, else where Docs opens, its home when one is chosen
+   * (PR #2479, 2026-11-17, `docs-choices.svelte.ts`). With none chosen, that is `#/docs`, as it was.
+   */
+  function docsOwn(): string {
+    const tab = sectionTabs.docs;
+    const at = tab === undefined ? null : parseTfHash(tab);
+    return tab !== undefined && at?.view === "full" && at.rest[0] === "search" ? tab : heldDocsChoices.start;
+  }
+  /**
    * Where a nav entry goes: from another section, back to where you were in it; inside it, to the section's own page as
    * it was left (its tab, view, pipeline or search), which a press there moves nothing on.
    */
   const navHref = (section: Exclude<Section, "job">) => {
-    const own = sectionTabs[section] ?? sectionHash(section);
+    const own = section === "docs" ? docsOwn() : (sectionTabs[section] ?? sectionHash(section));
     return sectionOf(route) === section ? own : (sectionPlaces[section] ?? own);
   };
 
@@ -600,6 +615,8 @@
   onReady(ready, () => ports.commandSteps, (list) => heldCommandSteps.hold(list));
   // *Run pipelines on diffs* (#2270): until it answers, it is on.
   onReady(ready, () => ports.diffPipelines, (on) => heldDiffPipelines.hold(on));
+  // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): until they answer, Docs' own page and every space.
+  onReady(ready, () => ports.docsChoices, (choices) => heldDocsChoices.hold(choices));
 
   $effect(() => {
     if (!lifecycle.ready) return;

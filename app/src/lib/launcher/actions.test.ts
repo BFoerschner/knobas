@@ -26,6 +26,7 @@ test("the palette lists every section the shell has an address for, in the top b
     "Settings › Desktop notifications",
     "Settings › Standup",
     "Settings › Monitoring",
+    "Settings › Docs",
     "Settings › Notes and capture",
     "Settings › Backup and export",
     "Settings › Appearance",
@@ -65,6 +66,7 @@ test("every row's address parses back to the section it names", () => {
     ["Settings › Desktop notifications", "settings/notifications"],
     ["Settings › Standup", "settings/standup"],
     ["Settings › Monitoring", "settings/monitoring"],
+    ["Settings › Docs", "settings/docs"],
     ["Settings › Notes and capture", "settings/notes"],
     ["Settings › Backup and export", "settings/backup"],
     ["Settings › Appearance", "settings/appearance"],
@@ -130,4 +132,14 @@ test("a place matches at the start of a word of its name, and a settings section
 test("where nothing else answered, what a place holds counts too, after the names", () => {
   expect(names("theme")).toEqual([]);
   expect(names("theme", true)).toEqual(["Settings › Appearance"]);
+});
+
+test("the Docs row opens where Docs opens: Docs' home when one is chosen (PR #2479, 2026-11-17)", async () => {
+  const { docsChoices } = await import("../tf/docs/docs-choices.svelte");
+  const docs = () => navigationActions().find((row) => row.id === "docs")!.hash;
+  expect(docs()).toBe("#/docs");
+  docsChoices.hold({ home: { kind: "space", id: "confluence/ENG", title: "Engineering" }, hidden: [] });
+  expect(docs()).toBe("#/docs/space/confluence%3AENG");
+  docsChoices.hold({ home: { kind: "page", id: "confluence:9", title: "Eng home" }, hidden: [] });
+  expect(docs()).toBe("#/page/confluence%3A9");
 });

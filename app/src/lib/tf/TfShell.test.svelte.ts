@@ -103,6 +103,8 @@ vi.mock("../ipc/entity", async (importOriginal) => ({
     }),
 }));
 
+import { docsChoices as heldDocsChoices } from "./docs/docs-choices.svelte";
+
 let target: HTMLElement;
 let shell: ReturnType<typeof mount> | null = null;
 
@@ -237,6 +239,7 @@ function start(
     userRenderers?: TfShellPorts["userRenderers"];
     rendererDefaults?: TfShellPorts["rendererDefaults"];
     namedPipelines?: TfShellPorts["namedPipelines"];
+    docsChoices?: TfShellPorts["docsChoices"];
     keys?: KeyStore;
     secretPorts?: Pick<SettingsPorts, "listSources" | "listAdapters" | "appStatus" | "setSourceSecret" | "syncNow">;
   } = {},
@@ -281,6 +284,7 @@ function start(
         ...(over.userRenderers ? { userRenderers: over.userRenderers } : {}),
         ...(over.rendererDefaults ? { rendererDefaults: over.rendererDefaults } : {}),
         ...(over.namedPipelines ? { namedPipelines: over.namedPipelines } : {}),
+        docsChoices: over.docsChoices ?? (() => Promise.resolve({ home: null, hidden: [] })),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -838,6 +842,35 @@ test("Docs' entry from another section comes back to the page left, and pressed 
   expect(navEntry("Docs").getAttribute("href"), "a space is a place too").toBe("#/docs/space/ENG");
   await at("#/docs");
   await at("#/code");
+  expect(navEntry("Docs").getAttribute("href")).toBe("#/docs");
+});
+
+test("with Docs' home chosen, the Docs entry opens there, a place left in Docs still wins, and inside Docs it goes home (2026-11-17)", async () => {
+  const home = { kind: "space" as const, id: "confluence/ENG", title: "Engineering" };
+  start({ nav: windowNav, docsChoices: () => Promise.resolve({ home, hidden: [] }) });
+  await settle();
+  expect(navEntry("Docs").getAttribute("href"), "the first open, after a restart too").toBe("#/docs/space/confluence%3AENG");
+  navEntry("Docs").click();
+  await settle();
+  expect(location.hash).toBe("#/docs/space/confluence%3AENG");
+  await at("#/page/4711");
+  expect(navEntry("Docs").getAttribute("href"), "in Docs, the entry goes to Docs' home").toBe("#/docs/space/confluence%3AENG");
+  await at("#/inbox");
+  expect(navEntry("Docs").getAttribute("href"), "the page left still wins on a return").toBe("#/page/4711");
+  await at("#/docs");
+  await at("#/page/4711");
+  expect(navEntry("Docs").getAttribute("href"), "Docs' own page, by its crumb, does not take the home's place").toBe("#/docs/space/confluence%3AENG");
+  await at("#/docs/search/retry");
+  await at("#/page/4711");
+  expect(navEntry("Docs").getAttribute("href"), "a search left is still the entry's own page").toBe("#/docs/search/retry");
+});
+
+test("a page as Docs' home is where the entry opens, and with none chosen it is Docs' own page again (2026-11-17)", async () => {
+  start({ nav: windowNav, docsChoices: () => Promise.resolve({ home: { kind: "page", id: "confluence:9", title: "Eng home" }, hidden: [] }) });
+  await settle();
+  expect(navEntry("Docs").getAttribute("href")).toBe("#/page/confluence%3A9");
+  heldDocsChoices.hold({ home: null, hidden: [] });
+  flushSync();
   expect(navEntry("Docs").getAttribute("href")).toBe("#/docs");
 });
 

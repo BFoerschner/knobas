@@ -66,7 +66,11 @@ export type Act =
   | { do: "inbox"; op: "ack" | "done"; key: string; title: string }
   /** Run application `app` (by id) on `at` of the checkout of `entityId`; `folderOnly` is an application with no file command, which opens the file's folder. */
   | { do: "app"; entityId: string; app: string; name: string; at: CodeAt }
-  | { do: "clone"; repoId: string };
+  | { do: "clone"; repoId: string }
+  /** Make a Docs space or page Docs' home (`title` what it is called), or with `id` `null` go back to Docs' own page. */
+  | { do: "docs-home"; kind: "space" | "page"; id: string | null; title: Text }
+  /** Hide a Docs space from Docs' browsing, or show it again. */
+  | { do: "docs-hide"; id: string; name: string; hidden: boolean };
 
 export interface Item {
   id: string;
@@ -105,6 +109,8 @@ export interface MenuContext {
   own?: boolean;
   /** The folder renderers that take a folder of a repository (ADR-0044), in the person's order; absent, none. */
   renders?: (repoId: string, path: string) => readonly { id: string; name: string }[];
+  /** Where Docs opens and the spaces it hides (`docs-choices.svelte.ts`); absent, no Docs item is offered. */
+  docs?: { isHome(kind: "space" | "page", id: string): boolean; hidden: ReadonlySet<string> };
 }
 
 const RULE: Entry = { rule: true };
@@ -200,6 +206,17 @@ function grouped(...groups: Entry[][]): Entry[] {
 
 function open(hash: string, ctx: MenuContext): Item[] {
   return ctx.own ? [] : [{ id: "open", label: "Open", act: { do: "go", hash } }];
+}
+
+/**
+ * *Open Docs here* on a Docs space or page (PR #2479, 2026-11-17): it becomes Docs' home, where the Docs entry and the
+ * launcher's Docs row go; on Docs' home it reads *Stop opening Docs here*, which goes back to Docs' own page.
+ */
+function docsHome(kind: "space" | "page", id: string, title: Text, ctx: MenuContext): Item[] {
+  if (ctx.docs === undefined) return [];
+  return ctx.docs.isHome(kind, id)
+    ? [{ id: "docs-home", label: "Stop opening Docs here", act: { do: "docs-home", kind, id: null, title } }]
+    : [{ id: "docs-home", label: "Open Docs here", act: { do: "docs-home", kind, id, title } }];
 }
 
 function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[] {
@@ -305,7 +322,21 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         { id: "copy-title", label: thing.kind === "page" || thing.kind === "note" ? "Copy title" : "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied" } },
         ...(web.length > 0 ? [copyLink()] : []),
       ];
-      return grouped([...open(thing.hash, ctx), ...own, ...ack], web, copies);
+      const home = thing.kind === "page" ? docsHome("page", thing.id, { read: "title" }, ctx) : [];
+      return grouped([...open(thing.hash, ctx), ...own, ...ack, ...home], web, copies);
+    }
+    case "space": {
+      const hidden = ctx.docs?.hidden.has(thing.id) ?? false;
+      return grouped(
+        [
+          ...open(thing.hash, ctx),
+          ...docsHome("space", thing.id, thing.name, ctx),
+          ...(ctx.docs === undefined
+            ? []
+            : [{ id: "docs-hide", label: hidden ? "Unhide" : "Hide from Docs", act: { do: "docs-hide", id: thing.id, name: thing.name, hidden: !hidden } } satisfies Item]),
+        ],
+        [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: thing.name, said: "Copied the name" } }],
+      );
     }
     case "file":
     case "folder":

@@ -2497,3 +2497,131 @@ async fn one_character_is_answered_by_the_pages_names_counted_and_in_the_space()
     let found = ask("z", Some("ENG")).await;
     assert_eq!(found.total, 0);
 }
+
+/// Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): stored as
+/// `knobas.setting` rows, read back as written, an id that names no space or
+/// page refused, and a deleted source's rows gone with it. On a database of
+/// its own: `docs.home` is one row for the whole database.
+#[tokio::test]
+async fn docs_choices_are_kept_and_go_with_their_source() {
+    use knobas_app::docs::{DocsChoices, DocsHome, DocsHomeKind};
+    let pool = scratch("docs_choices").await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    let none = knobas_app::docs::choices(&pool).await.unwrap();
+    assert_eq!(
+        none,
+        DocsChoices::default(),
+        "nothing chosen: Docs' own page, every space"
+    );
+
+    let home = DocsHome {
+        kind: DocsHomeKind::Space,
+        id: "conf/ENG".into(),
+        title: "Engineering".into(),
+    };
+    let answer = knobas_app::docs::set_home(&pool, Some(home.clone()))
+        .await
+        .unwrap();
+    assert_eq!(answer.home.as_ref(), Some(&home));
+    knobas_app::docs::set_space_hidden(&pool, "conf/ARC", true)
+        .await
+        .unwrap();
+    knobas_app::docs::set_space_hidden(&pool, "other/X", true)
+        .await
+        .unwrap();
+    let read = knobas_app::docs::choices(&pool).await.unwrap();
+    assert_eq!(
+        read.home,
+        Some(home),
+        "read back as written, across a restart"
+    );
+    assert_eq!(
+        read.hidden,
+        vec!["conf/ARC".to_owned(), "other/X".to_owned()]
+    );
+
+    let shown = knobas_app::docs::set_space_hidden(&pool, "conf/ARC", false)
+        .await
+        .unwrap();
+    assert_eq!(
+        shown.hidden,
+        vec!["other/X".to_owned()],
+        "unhidden: its row is gone"
+    );
+
+    let page = DocsHome {
+        kind: DocsHomeKind::Page,
+        id: "conf:9".into(),
+        title: "Eng home".into(),
+    };
+    knobas_app::docs::set_home(&pool, Some(page.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        knobas_app::docs::choices(&pool).await.unwrap().home,
+        Some(page)
+    );
+
+    for (kind, id) in [
+        (DocsHomeKind::Space, "conf"),
+        (DocsHomeKind::Space, "/ENG"),
+        (DocsHomeKind::Page, "conf/ENG"),
+        (DocsHomeKind::Page, ":9"),
+    ] {
+        let refused = knobas_app::docs::set_home(
+            &pool,
+            Some(DocsHome {
+                kind,
+                id: id.into(),
+                title: String::new(),
+            }),
+        )
+        .await;
+        assert!(refused.is_err(), "{id} names no {kind:?}");
+    }
+    assert!(
+        knobas_app::docs::set_space_hidden(&pool, "no-key", true)
+            .await
+            .is_err()
+    );
+
+    // Deleting `conf` takes its home and its hidden spaces, and leaves `other`'s.
+    knobas_app::docs::set_space_hidden(&pool, "conf/ARC", true)
+        .await
+        .unwrap();
+    knobas_app::docs::set_space_hidden(&pool, "conf_x/ARC", true)
+        .await
+        .unwrap();
+    knobas_app::docs::forget_docs_choices(&pool, "conf")
+        .await
+        .unwrap();
+    let left = knobas_app::docs::choices(&pool).await.unwrap();
+    assert_eq!(left.home, None, "a home in the deleted source goes");
+    assert_eq!(
+        left.hidden,
+        vec!["conf_x/ARC".to_owned(), "other/X".to_owned()],
+        "`_` is no wildcard: conf_x stays"
+    );
+
+    // A source whose id holds `_` forgets its own home, not one whose id the `_` would match as a wildcard.
+    let elsewhere = DocsHome {
+        kind: DocsHomeKind::Page,
+        id: "cxf:1".into(),
+        title: "Elsewhere".into(),
+    };
+    knobas_app::docs::set_home(&pool, Some(elsewhere.clone()))
+        .await
+        .unwrap();
+    knobas_app::docs::forget_docs_choices(&pool, "c_f")
+        .await
+        .unwrap();
+    assert_eq!(
+        knobas_app::docs::choices(&pool).await.unwrap().home,
+        Some(elsewhere),
+        "`_` in a source id is no wildcard"
+    );
+
+    let cleared = knobas_app::docs::set_home(&pool, None).await.unwrap();
+    assert_eq!(cleared.home, None);
+}

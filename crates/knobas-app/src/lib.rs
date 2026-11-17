@@ -844,6 +844,11 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // Settings › Appearance › *Code font* (PR #2479, 2026-11-16): the
         // installed font families, appended at the foot (§10.8).
         commands::app::installed_fonts,
+        // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17),
+        // appended at the foot (§10.8).
+        commands::entity::docs_choices,
+        commands::entity::set_docs_home,
+        commands::entity::set_docs_space_hidden,
     ]
 }
 

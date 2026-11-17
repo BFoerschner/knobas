@@ -450,3 +450,55 @@ pub async fn move_notes_payloads(
     }
     Ok(payloads)
 }
+
+// -- where Docs opens, and the spaces it hides (PR #2479, 2026-11-17) --------
+
+/// Where Docs opens and the spaces hidden from its browsing
+/// (`crate::docs::choices`), read once the database answers.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn docs_choices(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::docs::DocsChoices, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::choices(&pool).await
+}
+
+/// Store where Docs opens, `None` for its home, and answer the choices.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id of no space or page,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_docs_home(
+    lifecycle: State<'_, Lifecycle>,
+    home: Option<crate::docs::DocsHome>,
+) -> Result<crate::docs::DocsChoices, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::set_home(&pool, home).await
+}
+
+/// Hide a space (`<source>/<key>`) from Docs' browsing, or show it again,
+/// and answer the choices. Search still finds its pages.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a space not named
+/// `<source>/<key>`, [`Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_docs_space_hidden(
+    lifecycle: State<'_, Lifecycle>,
+    space: String,
+    hidden: bool,
+) -> Result<crate::docs::DocsChoices, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::set_space_hidden(&pool, &space, hidden).await
+}

@@ -214,6 +214,8 @@ export interface SectionPorts {
   /** Which pages the publish target's picker offers the source's credential cannot add pages under (#2053); the IPC read when omitted. */
   refusedWrites?: RefusedWritesPort;
   monitoringSettings: () => Promise<MonitoringSettings>;
+  /** Settings › Docs' spaces (PR #2479, 2026-11-17); the IPC read when omitted. */
+  docsOutline?: () => Promise<import("../../ipc/entity").DocsTree>;
   setMonitoringSettings: (settings: MonitoringSettings) => Promise<MonitoringSettings>;
   backupStatus: () => Promise<BackupStatus>;
   backupNow: () => Promise<BackupRecord>;

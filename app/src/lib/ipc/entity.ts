@@ -42,6 +42,8 @@ import type {
   DocPage,
   DocsHits,
   DocsNodesAsked,
+  DocsChoices,
+  DocsHome,
   DocsTree,
   DocSpace,
   DownloadTarget,
@@ -183,6 +185,9 @@ export type {
   DocWrite,
   DocsHits,
   DocsNodesAsked,
+  DocsChoices,
+  DocsHome,
+  DocsHomeKind,
   DocsTree,
   DownloadTarget,
   EntityDetail,
@@ -1895,6 +1900,24 @@ export function docsOutline(): Promise<DocsTree> {
  */
 export function docsNodes(asked: DocsNodesAsked): Promise<DocSpace[]> {
   return invoke<DocSpace[]>("docs_nodes", { asked });
+}
+
+/**
+ * Where Docs opens and the spaces hidden from its browsing — `docs_choices`
+ * (PR #2479, 2026-11-17): `knobas.setting` rows, read once the database answers.
+ */
+export function docsChoices(): Promise<DocsChoices> {
+  return invoke<DocsChoices>("docs_choices");
+}
+
+/** Store where Docs opens, `null` for its home (`#/docs`) — `set_docs_home`. Answers the choices now stored. */
+export function setDocsHome(home: DocsHome | null): Promise<DocsChoices> {
+  return invoke<DocsChoices>("set_docs_home", { home });
+}
+
+/** Hide space `space` (`<source>/<key>`) from Docs' browsing, or show it again — `set_docs_space_hidden`. Search still finds it. */
+export function setDocsSpaceHidden(space: string, hidden: boolean): Promise<DocsChoices> {
+  return invoke<DocsChoices>("set_docs_space_hidden", { space, hidden });
 }
 
 /**

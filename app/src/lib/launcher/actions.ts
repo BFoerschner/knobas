@@ -9,6 +9,7 @@
  */
 import { NAV, SECTION_NAME, type Section, sectionHash } from "../tf/route";
 import { SETTINGS_SECTIONS, type SettingsSection, settingsHash } from "../tf/settings/settings";
+import { docsChoices } from "../tf/docs/docs-choices.svelte";
 
 /** One row of the `>` palette. */
 export interface LauncherAction {
@@ -42,6 +43,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   notifications: "What knobas tells you about, and how",
   standup: "Where the standup protocol is published",
   monitoring: "How Uptime Kuma data is read",
+  docs: "Where Docs opens and the spaces it hides",
   notes: "Notes and how you capture them",
   backup: "Export and restore what knobas keeps",
   appearance: "Theme and density",
@@ -74,7 +76,8 @@ export function navigationActions(): LauncherAction[] {
       id: section,
       label: SECTION_NAME[section],
       detail: SECTION_DETAIL[section],
-      hash: sectionHash(section),
+      // Docs opens where its home is, when one is chosen (PR #2479, 2026-11-17).
+      hash: section === "docs" ? docsChoices.start : sectionHash(section),
     })),
     ...SETTINGS_SECTIONS.map(([section, name]) => ({
       id: `settings-${section}`,

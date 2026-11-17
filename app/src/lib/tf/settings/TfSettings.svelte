@@ -52,6 +52,7 @@
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
+  import TfDocsSection from "./TfDocsSection.svelte";
   import TfNotesSection from "./TfNotesSection.svelte";
   import TfNotificationsSection from "./TfNotificationsSection.svelte";
   import TfStandupSection from "./TfStandupSection.svelte";
@@ -90,7 +91,7 @@
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
-  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts", "performance", "renderers"]);
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "docs", "notes", "backup", "logs", "checkouts", "performance", "renderers"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
@@ -292,6 +293,8 @@
         <TfStandupSection ports={sectionPorts} {layers} />
       {:else if place.section === "monitoring"}
         <TfMonitoringSection ports={sectionPorts} />
+      {:else if place.section === "docs"}
+        <TfDocsSection {...sectionPorts.docsOutline ? { outline: sectionPorts.docsOutline } : {}} />
       {:else if place.section === "backup"}
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}

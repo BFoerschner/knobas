@@ -199,3 +199,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 }
 .tf-cf-spec > pre { padding: 8px 0; }
 .tf-cf-spec figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); }
+
+/* Settings › Docs' spaces (PR #2479, 2026-11-17): a box per space, in columns as wide as a name, so many spaces read as a list. */
+.tf-stg-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 16px; margin-top: 4px; }
+.tf-stg-spaces .tf-ck { min-width: 0; font-size: var(--t-md); align-items: center; }
+.tf-stg-spn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-stg-spaces .tf-dim { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }

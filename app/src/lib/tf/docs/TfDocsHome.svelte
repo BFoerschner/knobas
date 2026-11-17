@@ -13,6 +13,10 @@
   is missing (*Open Settings › Sources*) or has not synced yet (*Sync now*, centred
   under that sentence and the only one on the page). Each state's one action is a page
   body's small button, as every empty state's is.
+
+  A space hidden from Docs (PR #2479, 2026-11-17, `docs-choices.svelte.ts`) has no tile: it is a row of the fold after
+  the tiles, and the header's count says how many are hidden, as Monitors' says *4 monitors, 2 hidden*. Its pages are
+  still in *Continue reading*, *For you* and the job's panel, which are about the reader, not about browsing.
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
@@ -22,7 +26,8 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { sourceRoles, WIKI } from "../roles.svelte";
-  import { continueReading, forYouHash, forYouWhy, pageCount, pageHash, pagesByLevel, spaceHash, spaceId, spaceName, spaceSource, type JobPageGroup } from "./docs";
+  import { continueReading, forYouHash, forYouWhy, pageCount, pageHash, pagesByLevel, railSpaces, spaceHash, spaceId, spaceName, spaceSource, type JobPageGroup } from "./docs";
+  import TfDocsHidden from "./TfDocsHidden.svelte";
 
   let {
     tree,
@@ -30,6 +35,7 @@
     job = null,
     groups = [],
     jobFirst = false,
+    hidden = new Set<string>(),
     sync,
     notice,
     onretry,
@@ -44,6 +50,8 @@
     groups?: JobPageGroup[];
     /** Whether *This job* is on, which puts the job's pages first. */
     jobFirst?: boolean;
+    /** The spaces hidden from Docs' browsing (`spaceId`s): no tile, a row of the fold after the tiles. */
+    hidden?: ReadonlySet<string>;
     /** The frame's *Sync now*, last in the header. */
     sync?: Snippet | undefined;
     /** What a search's address has to say above the lists. */
@@ -59,6 +67,8 @@
   const JOB_PAGES = 5;
 
   const total = $derived(tree?.spaces.reduce((n, space) => n + pageCount(space), 0) ?? 0);
+  /** The tiles' spaces and the fold's. */
+  const split = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, hidden, ""));
   const last = $derived(tree === null ? null : continueReading(tree));
   const forYou = $derived(tree?.for_you ?? []);
   /**
@@ -129,7 +139,7 @@
     <div>
       <h1>Docs</h1>
       {#if tree !== null && total > 0}
-        <div class="tf-sub">{counted(tree.spaces.length, "space", "spaces")}, {counted(total, "page", "pages")}</div>
+        <div class="tf-sub">{counted(tree.spaces.length, "space", "spaces")}{#if split.hidden.length > 0}{" "}({split.hidden.length} hidden){/if}, {counted(total, "page", "pages")}</div>
       {/if}
     </div>
     {#if sync && !empty}
@@ -193,7 +203,7 @@
       {#if !jobFirst}{@render jobList()}{/if}
       <section aria-label="Spaces">
         <div class="tf-dh-spaces">
-          {#each tree.spaces as space (spaceId(space))}
+          {#each split.shown as space (spaceId(space))}
             {@const rows = tileRows(space)}
             {@const from = spaceSource(space, tree.spaces)}
             <article class="tf-panel tf-headed tf-dh-space">
@@ -217,6 +227,7 @@
             </article>
           {/each}
         </div>
+        <TfDocsHidden hidden={split.hidden} spaces={tree.spaces} where="home" />
       </section>
     </div>
   {/if}

@@ -42,6 +42,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // the bundled face with no ligatures, and reads the installed fonts afresh.
   "tf/code-face.svelte.ts#codeFace": async () => (await import("../tf/code-face.svelte")).codeFace.reset(),
   "tf/settings/TfCodeFont.svelte#asked": async () => (await import("../tf/settings/TfCodeFont.svelte")).forgetInstalledFonts(),
+  // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), read from the backend: each test starts on Docs'
+  // own page with every space shown, over the real IPC.
+  "tf/docs/docs-choices.svelte.ts#docsChoices": async () => (await import("../tf/docs/docs-choices.svelte")).docsChoices.forget(),
   // The window's zoom (2026-11-16), stored in `localStorage`: each test starts at 100 %, nothing kept.
   "tf/zoom.svelte.ts#zoom": async () => (await import("../tf/zoom.svelte")).zoom.forget(),
   // The device scale and who hears it change (the zoom, 2026-11-16): each test reads the ratio afresh, with nobody listening.

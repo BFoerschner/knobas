@@ -165,3 +165,37 @@ test("a folder a folder renderer takes offers its drawing by each that takes it,
   // A file is offered none.
   expect(ids(menuFor({ kind: "file", repoId: "gitea:t/pay", path: "a.md" }, null, { ...ctx(), renders: () => [{ id: "lc", name: "Low code" }] }))).not.toContain("render-lc");
 });
+
+// ---- where Docs opens and the spaces it hides (PR #2479, 2026-11-17) ----
+
+const docs = (home: { kind: "space" | "page"; id: string } | null, hidden: string[] = []) => ({
+  isHome: (kind: "space" | "page", id: string) => home !== null && home.kind === kind && home.id === id,
+  hidden: new Set(hidden),
+});
+const PAGE_THING: Thing = { kind: "page", id: "confluence:9", hash: "#/page/confluence%3A9" };
+const SPACE: Thing = { kind: "space", id: "confluence/ENG", name: "Engineering", hash: "#/docs/space/ENG" };
+
+test("a Docs page offers Open Docs here after Open, which makes it Docs' home by its title", () => {
+  const entries = menuFor(PAGE_THING, null, ctx({ docs: docs(null) }));
+  expect(ids(entries).slice(0, 2)).toEqual(["open", "docs-home"]);
+  expect(item(entries, "docs-home")).toMatchObject({ label: "Open Docs here", act: { do: "docs-home", kind: "page", id: "confluence:9", title: { read: "title" } } });
+});
+
+test("on Docs' home the item reads Stop opening Docs here, which goes back to Docs' own page", () => {
+  const entries = menuFor(PAGE_THING, null, ctx({ docs: docs({ kind: "page", id: "confluence:9" }) }));
+  expect(item(entries, "docs-home")).toMatchObject({ label: "Stop opening Docs here", act: { do: "docs-home", id: null } });
+});
+
+test("a space: Open, Open Docs here, Hide from Docs, then Copy name", () => {
+  const entries = menuFor(SPACE, null, ctx({ docs: docs(null) }));
+  expect(ids(entries)).toEqual(["open", "docs-home", "docs-hide", "|", "copy-name"]);
+  expect(item(entries, "docs-home").act).toEqual({ do: "docs-home", kind: "space", id: "confluence/ENG", title: "Engineering" });
+  expect(item(entries, "docs-hide")).toMatchObject({ label: "Hide from Docs", act: { do: "docs-hide", id: "confluence/ENG", name: "Engineering", hidden: true } });
+  expect(item(entries, "copy-name").act).toEqual({ do: "copy", text: "Engineering", said: "Copied the name" });
+});
+
+test("a hidden space offers Unhide, and a space that is Docs' home offers to stop", () => {
+  const entries = menuFor(SPACE, null, ctx({ docs: docs({ kind: "space", id: "confluence/ENG" }, ["confluence/ENG"]) }));
+  expect(item(entries, "docs-hide")).toMatchObject({ label: "Unhide", act: { hidden: false } });
+  expect(item(entries, "docs-home").label).toBe("Stop opening Docs here");
+});

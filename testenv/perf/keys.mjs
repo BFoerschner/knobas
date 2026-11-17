@@ -73,7 +73,8 @@ const PAGE = `
   const onScreen = (e) => { const b = e.getBoundingClientRect(); return b.height > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth; };
   /** The reads the key sent at once: every one sent before the first of them answered (rows, in the header). */
   const atOnce = (mine) => { const ends = mine.filter((x) => x.end !== null).map((x) => x.end); if (!ends.length) return mine; const first = Math.min(...ends); return mine.filter((x) => x.start <= first); };
-  const answeredAt = (r) => { const mine = atOnce(calls.filter((x) => r.key !== null && x.start >= r.key && r.reads.some(([cmd, holds, lacks]) => x.cmd === cmd && (!holds || x.what.includes(holds)) && (!lacks || !x.what.includes(lacks))))); return mine.length && mine.every((x) => x.end !== null) ? Math.max(...mine.map((x) => x.end)) : null; };
+  // A key that sends no read (Docs' spaces filter, which narrows what the page holds): its rows are the first frame that changed after it.
+  const answeredAt = (r) => { if (r.reads.length === 0) return r.key; const mine = atOnce(calls.filter((x) => r.key !== null && x.start >= r.key && r.reads.some(([cmd, holds, lacks]) => x.cmd === cmd && (!holds || x.what.includes(holds)) && (!lacks || !x.what.includes(lacks))))); return mine.length && mine.every((x) => x.end !== null) ? Math.max(...mine.map((x) => x.end)) : null; };
   const tick = (t) => {
     if (!run || run.done) return;
     frames.push(t);
@@ -108,7 +109,7 @@ const PAGE = `
       if (r.key === null) return { error: "no key" };
       const mine = calls.filter((x) => x.start >= r.key && r.reads.some(([cmd, holds, lacks]) => x.cmd === cmd && (!holds || x.what.includes(holds)) && (!lacks || !x.what.includes(lacks))));
       const answered = atOnce(mine).filter((x) => x.end !== null);
-      const lastEnd = answered.length ? Math.max(...answered.map((x) => x.end)) : null;
+      const lastEnd = r.reads.length === 0 ? r.key : answered.length ? Math.max(...answered.map((x) => x.end)) : null;
       const after = (t) => frames.find((f) => f >= t) ?? null;
       const changesAfter = lastEnd === null ? [] : r.changes.filter((t) => t >= lastEnd);
       const firstChange = changesAfter[0] ?? null;
@@ -200,6 +201,21 @@ const launcherHolding = (before) => `
   box.setSelectionRange(box.value.length, box.value.length);
   return true;`;
 
+/**
+ * Docs' rail, its spaces' filter focused and holding `before` (PR #2479, 2026-11-17, Björn: "a small filter, like in
+ * the code pages"): every space listed, none picked, so the key narrows the whole list.
+ */
+const docsSpaces = (before) => `
+  if (location.hash !== "#/docs") location.hash = "#/docs";
+  ${until(vis(".tf-rd-tree .tf-dl-filter input"))}
+  const box = document.querySelector(".tf-rd-tree .tf-dl-filter input");
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  if (box.value !== ${JSON.stringify(before)}) { set.call(box, ${JSON.stringify(before)}); box.dispatchEvent(new InputEvent("input", { bubbles: true })); }
+  ${sleepIn(800)}
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  return true;`;
+
 // Each press is a key never asked before in the session, so the answer cache (`ipc/answer-cache.ts`) never answers it:
 // a person types something new. `before` is what the box holds when the key is pressed. The launcher's letters are none
 // of the English stopwords (a, d, i, m, o, s, t, y), which the search answered with nothing in a millisecond until the
@@ -227,6 +243,10 @@ const CASES = [
   // change the list: `retr` to `retry` drops `retro`, `refun` to `refund` is ranked by the whole word.
   { name: "everything-four-letters", presses: [["pay", "o"], ["ret", "r"], ["con", "f"], ["dep", "l"], ["led", "g"], ["bat", "c"], ["sta", "g"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-five-letters", presses: [["retr", "y"], ["conf", "i"], ["batc", "h"], ["sche", "d"], ["chec", "k"], ["part", "n"], ["time", "o"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  // Docs' spaces filter (PR #2479, 2026-11-17): a letter into the empty box, and a second into one holding a letter, over
+  // the scale database's spaces. It reads nothing: its rows are the first frame after the key.
+  { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
+  { name: "docs-spaces-two-letters", presses: [["s", "c"], ["e", "n"], ["o", "p"], ["a", "r"], ["s", "a"], ["r", "e"], ["n", "o"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));

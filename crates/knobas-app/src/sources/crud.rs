@@ -519,6 +519,8 @@ pub async fn delete(
     // leaves the keychain item already gone, and at worst a row that keeps a
     // source added again under the id with embeds off, the safe side.
     crate::docs::forget_run_embedded_html(pool, id).await?;
+    // Its hidden spaces and a Docs home in it (PR #2479, 2026-11-17), as its embeds' row.
+    crate::docs::forget_docs_choices(pool, id).await?;
     Ok(())
 }
 
