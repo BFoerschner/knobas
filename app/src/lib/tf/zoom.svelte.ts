@@ -98,8 +98,9 @@ export interface ZoomPorts {
   /** Runs `draw` before the next frame; the window's `requestAnimationFrame` when omitted. */
   frame?: (draw: () => void) => void;
   /**
-   * Calls `done` once a level the webview took has laid the page out: its resize heard and a frame drawn after it, or
-   * {@link SETTLE_WAIT_MS} at most. The window's when omitted.
+   * Called as a level is sent to the webview; calls `done` once the page is laid out at it: its resize heard and a
+   * frame drawn after it, or {@link SETTLE_WAIT_MS} at most, whether or not the webview's call has returned. The
+   * window's when omitted.
    */
   settled?: (done: () => void) => void;
 }
@@ -120,20 +121,24 @@ export function createZoom({ storage, apply, frame = nextFrame, settled = heardA
   function land() {
     waiting = false;
     if (flying || applied === level) return;
-    applied = level;
+    const to = level;
+    applied = to;
     flying = true;
+    let over = false;
+    const done = () => {
+      if (over) return;
+      over = true;
+      flying = false;
+      // The steps that came meanwhile: the newest, once.
+      if (applied !== level) ask();
+    };
+    // Listening from the moment the level is sent: WebView2 lays the page out, and its resize is heard, before the
+    // call that set it returns (measured on Björn's PC: a listener added after it waited out the whole bound).
+    settled(done);
     void Promise.resolve()
-      .then(() => apply(applied))
-      .then(
-        () =>
-          settled(() => {
-            flying = false;
-            // The steps that came meanwhile: the newest, once.
-            if (applied !== level) ask();
-          }),
-        // Refused: nothing is on its way, and the next step tries again.
-        () => (flying = false),
-      );
+      .then(() => apply(to))
+      // Refused: nothing is on its way, and the next step tries again.
+      .catch(done);
   }
 
   function ask() {

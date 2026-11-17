@@ -323,4 +323,29 @@ describe("a level on its way", () => {
     await frame();
     expect(applied).toEqual([1.1, 1.5]);
   });
+
+  test("listens from the moment a level is sent: a layout heard before the webview's call returns lets the next land", async () => {
+    const applied: number[] = [];
+    const frames: (() => void)[] = [];
+    const settles: (() => void)[] = [];
+    const zoom = createZoom({
+      storage: () => memory(),
+      // WebView2 lays the page out, and the resize is heard, before `setZoom` answers: here it never does.
+      apply: (level) => {
+        applied.push(level);
+        return new Promise(() => {});
+      },
+      frame: (draw) => void frames.push(draw),
+      settled: (done) => void settles.push(done),
+    });
+    zoom.step(1);
+    for (const draw of frames.splice(0)) draw();
+    expect(settles, "listening as the level is sent").toHaveLength(1);
+    zoom.step(1);
+    for (const done of settles.splice(0)) done();
+    for (const draw of frames.splice(0)) draw();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(applied).toEqual([1.1, 1.25]);
+  });
 });
