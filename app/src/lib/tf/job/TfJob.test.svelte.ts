@@ -1365,3 +1365,39 @@ test("the reading column draws a description its source writes in Jira's wiki ma
   expect(target.querySelector(".tf-tkdesc .tf-asks")).toBeNull();
   expect(target.querySelector(".tf-tkdesc")!.textContent).toContain("The ticket has no description.");
 });
+
+// The nothing-moves pass (2026-11-17): each section row that landed pushed the card's actions 33 px down, and the epic chip
+// widened from its key to its key and title 100 ms after it drew.
+test("the card's sections and its actions draw together, once every section's read has answered", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const base = ports();
+  open("PAY-231", { ports: { ...base, listEntities: async (filter) => (filter.role === "ci" ? await late : undefined, base.listEntities(filter)) } });
+  await settle();
+  const acts = target.querySelector(".tf-tkacts")!;
+  expect(acts.classList.contains("tf-hidden"), "the actions held in their room while Builds is read").toBe(true);
+  expect(target.querySelector(".tf-tksecs"), "no section drawn alone").toBeNull();
+  answer();
+  await settle();
+  expect(acts.classList.contains("tf-hidden")).toBe(false);
+  expect(target.querySelector(".tf-tksecs"), "the sections with them").not.toBeNull();
+});
+
+test("the epic chip draws once its parent's title has answered, never its key alone first", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const child = ticket({ row: { ...ticket().row, path: "PAY-200" } });
+  const parent = ticket({ row: { ...ticket().row, entity_id: "jira:PAY-200", title: "Payout reliability" } });
+  const base = ports();
+  open("PAY-231", {
+    ports: {
+      ...base,
+      getEntity: async (id) => (id === ID ? child : id === "jira:PAY-200" ? (await late, parent) : base.getEntity(id)),
+    },
+  });
+  await settle();
+  expect(target.querySelector(".tf-tkepicchip"), "held while the title is read").toBeNull();
+  answer();
+  await settle();
+  expect(target.querySelector(".tf-tkepicchip")?.textContent?.replace(/\s+/g, " ").trim()).toBe("PAY-200 Payout reliability");
+});

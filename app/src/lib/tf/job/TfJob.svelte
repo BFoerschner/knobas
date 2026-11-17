@@ -634,6 +634,7 @@
       {detail}
       others={reader.others}
       parentTitle={reader.parentTitle}
+      parentRead={reader.parentRead}
       {mine}
       {me}
       {pinned}

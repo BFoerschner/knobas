@@ -36,6 +36,7 @@
 -->
 <script lang="ts">
   import TfKey from "../TfKey.svelte";
+  import { heldHead } from "../held-head.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { MediaQuery } from "svelte/reactivity";
@@ -54,6 +55,7 @@
     detail,
     others = [],
     parentTitle = null,
+    parentRead = true,
     mine = false,
     me = null,
     pinned,
@@ -69,6 +71,8 @@
     others?: EntityDetail[];
     /** The direct parent's title, for the epic chip; `null` draws its key alone. */
     parentTitle?: string | null;
+    /** Whether the parent's title read has answered: the chip draws once it has, or once the hold is up. */
+    parentRead?: boolean;
     /** Whether the ticket is the reader's own (`isMine`): the assignee's avatar in full ink, *(you)* after the name. */
     mine?: boolean;
     /** The reader's username in the ticket's source (`username`): the reporter in full ink when it is the reader, and the reader's share of the logged time. */
@@ -105,6 +109,20 @@
   const reporterName = $derived(detail.reporter_name ?? reporter);
   const assigneeName = $derived(detail.author_name ?? detail.author);
   const logged = $derived(loggedRow(detail, me));
+  /**
+   * Nothing on the card moves once drawn (the nothing-moves pass, 2026-11-17, `held-head.svelte.ts`). The epic chip waits
+   * for its parent's title, as the key alone widened 97 px to the key and title 100 ms later; the sections and the actions
+   * under them wait together for every section's read, as each row that landed pushed *Open in* and *Link something to
+   * it* 33 px down. Each shows after the hold at the latest, with what has answered.
+   */
+  const epicHeld = heldHead(
+    () => detail.row.entity_id,
+    () => parentRead,
+  );
+  const rowsHeld = heldHead(
+    () => detail.row.entity_id,
+    () => table.settled,
+  );
   /** A meter segment's width, through the CSSOM: the app's CSP refuses `style=""` in markup, not this. */
   const width = (share: number) => (node: HTMLElement) => {
     node.style.width = `${share.toFixed(1)}%`;
@@ -191,7 +209,7 @@
   <dl class="tf-facts">
     {#if epic !== null && epicId !== null}
       <dt>Epic</dt>
-      <dd><a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}><TfKeyed text={epic} lead /></a></dd>
+      <dd>{#if epicHeld.shown}<a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}><TfKeyed text={epic} lead /></a>{/if}</dd>
     {/if}
     {#if reporter !== null}
       <dt>Reporter</dt>
@@ -229,12 +247,12 @@
       </dd>
     {/if}
   </dl>
-  {#if table.rows.length > 0}
+  {#if rowsHeld.shown && table.rows.length > 0}
     <TfCardRows rows={table.rows} entityId={detail.row.entity_id} ticketKey={key} />
   {:else if table.settled}
     <p class="tf-tknone">Nothing connected yet.</p>
   {/if}
-  <div class="tf-tktable tf-tkacts">
+  <div class="tf-tktable tf-tkacts" class:tf-hidden={!rowsHeld.shown} inert={!rowsHeld.shown}>
     {#if detail.web_url}
       {@const url = detail.web_url}
       <a href={url} onclick={(event) => openWeb(event, url)}

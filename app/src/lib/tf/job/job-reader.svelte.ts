@@ -83,6 +83,11 @@ export interface JobReader {
    * while it is read, or when it cannot be.
    */
   readonly parentTitle: string | null;
+  /**
+   * Whether the parent's title read has answered (or there is no parent to read): the epic chip draws once it has, so it
+   * doesn't widen from the key to the key and title under the reader (the nothing-moves pass, 2026-11-17).
+   */
+  readonly parentRead: boolean;
   /** Why the job could not be read, or `null`. */
   readonly failure: string | null;
   /** Every configured source, for which ticket is the person's own. */
@@ -139,6 +144,7 @@ function fresh() {
     detail: undefined as EntityDetail | null | undefined,
     others: [] as EntityDetail[],
     parentTitle: null as string | null,
+    parentRead: false,
     code: null as EntityRow[] | null,
     failure: null as string | null,
     thread: null as Thread | null,
@@ -260,8 +266,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
   /** The parent's title for the epic chip; a parent that cannot be read keeps the path line alone. */
   async function readParent(ticket: EntityDetail, mine: number) {
     const parent = parentOf(ticket.row);
-    if (parent === null) return;
     try {
+      if (parent === null) return;
       const title = ports.entityBriefs
         ? (await ports.entityBriefs([parent]))[0]?.title
         : (await ports.getEntity(parent)).row.title;
@@ -269,6 +275,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       if (mine === token) state.parentTitle = title;
     } catch {
       // The chip says the key alone.
+    } finally {
+      if (mine === token) state.parentRead = true;
     }
   }
 
@@ -354,6 +362,9 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     get parentTitle() {
       return state.parentTitle;
+    },
+    get parentRead() {
+      return state.parentRead;
     },
     get failure() {
       return state.failure;
