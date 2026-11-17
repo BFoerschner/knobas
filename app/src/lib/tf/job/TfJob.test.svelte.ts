@@ -1372,7 +1372,7 @@ test("the card's sections and its actions draw together, once every section's re
   let answer!: () => void;
   const late = new Promise<void>((resolve) => (answer = resolve));
   const base = ports();
-  open("PAY-231", { ports: { ...base, listEntities: async (filter) => (filter.role === "ci" ? await late : undefined, base.listEntities(filter)) } });
+  open("PAY-231", { ports: { ...base, listEntities: async (filter, ...rest) => (filter.role === "ci" ? await late : undefined, base.listEntities(filter, ...rest)) } });
   await settle();
   const acts = target.querySelector(".tf-tkacts")!;
   expect(acts.classList.contains("tf-hidden"), "the actions held in their room while Builds is read").toBe(true);
