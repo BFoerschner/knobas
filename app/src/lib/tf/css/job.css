@@ -121,7 +121,7 @@
 .tf-sheetcard.tf-ticketcard.tf-tkcut .tf-go { border-top-color: var(--rule); }
 /* The card's fold holds its facts and rows at their spacing. Only stacked does it have a summary, or close. */
 .tf-tkstack { flex: none; }
-.tf-tkstack > * + * { margin-top: 14px; }
+.tf-tkstack > :where(:not(:first-child)) { margin-top: 14px; }
 .tf-tkstack > summary { display: none; }
 .tf-tkcardtitle { display: none; }
 @media (max-width: 900px) {
@@ -214,7 +214,7 @@
 .tf-panel.tf-headed { background: none; border: 0; border-radius: 0; }
 .tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 0 0 6px; min-height: calc(var(--control-h-sm) + 6px); }
 .tf-headed > :not(header) { background: var(--sheet); border: solid var(--rule); border-width: 0 1px; }
-.tf-headed > header + * { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
+.tf-headed > :where(:nth-child(2)):not(header) { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
 .tf-headed > :not(header):last-child { border-bottom-width: 1px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
 .tf-panel > header h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-open {

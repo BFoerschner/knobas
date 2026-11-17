@@ -177,6 +177,66 @@ test("the anchor rule names what a :has() stands on", () => {
   expect(caught(".tf-board-wrap:has(.tf-lane) { color: red }")).toBe(0);
 });
 
+/**
+ * The complex selectors of a list with a sibling combinator (`+`, `~`) beside a compound that names nothing, nested
+ * lists included. In a component's `<style>` Svelte adds its own class to every compound it scopes, so only a
+ * `:global` selector there is read.
+ */
+function unnamedSiblings(list: Node, source: string, scoped: boolean): Node[] {
+  const found: Node[] = [];
+  for (const complex of list.children ?? []) {
+    const rels = complex.children ?? [];
+    const read = !scoped || source.slice(complex.start, complex.end).includes(":global");
+    const sibling = (rel: Node) => {
+      const name = (rel as Node & { combinator?: { name: string } | null }).combinator?.name;
+      return name === "+" || name === "~";
+    };
+    if (read && rels.some((rel, i) => i > 0 && sibling(rel) && (!named(rels[i - 1]!.selectors ?? []) || !named(rel.selectors ?? [])))) found.push(complex);
+    for (const rel of rels) {
+      for (const s of rel.selectors ?? []) if (s.type === "PseudoClassSelector" && PSEUDO_WITH_SELECTORS.has(s.name ?? "") && s.args) found.push(...unnamedSiblings(s.args, source, scoped && s.name !== "global"));
+    }
+  }
+  return found;
+}
+
+/** `file:line  selector` for each sibling rule beside a compound that names nothing. */
+function siblingOffenders(file: string, source: string, sheet: Node): string[] {
+  return selectorLists(sheet).flatMap((list) =>
+    unnamedSiblings(list, source, file.endsWith(".svelte")).map((complex) => `${file.slice(ROOT.length + 1)}:${source.slice(0, complex.start).split("\n").length}  ${source.slice(complex.start, complex.end)}`),
+  );
+}
+
+/**
+ * A sibling combinator beside a compound that names no class, id, tag or attribute makes Chromium restyle a whole
+ * list on each row it draws (the list-scroll pass, 2026-11-17). A subject that names nothing (`.tf-md > * + *`,
+ * `.tf-headed > header + *`, `.tf-fhead.tf-unread ~ *`) is tried against every element on the page, and trying its
+ * `+` or `~` marks each element's parent as having children that sibling rules read: the Tickets list's `tbody`
+ * among them. A left side that names nothing (`:not(.tf-rowacts) ~ .tf-rowacts`, `* + *`) goes into the one
+ * sibling invalidation set Chromium cannot key on anything. Then each row a windowed list inserted into a marked
+ * parent applied that set to the parent's whole subtree: 400 to 530 elements restyled a pass on Tickets' list
+ * scroll, 13 to 19 ms at CPU 6x, where the rows drawn are about 50. A subject or neighbour with a class, or a
+ * positional pseudo-class on a named subject (`.tf-rowacts:not(:first-child)`), says the same at no such cost.
+ */
+test("no sibling combinator stands beside a compound that names no class, id, tag or attribute", () => {
+  expect(sheets().flatMap(({ file, source, sheet }) => siblingOffenders(file, source, sheet))).toEqual([]);
+});
+
+test("the sibling rule catches the shapes that restyled the Tickets list, and passes named neighbours", () => {
+  const caught = (css: string, file = "x.css") => siblingOffenders(join(ROOT, file), css, parseCss(css) as unknown as Node).length;
+  expect(caught(".tf-md > * + * { color: red }")).toBe(1);
+  expect(caught(".tf-headed > header + * { color: red }")).toBe(1);
+  expect(caught(".tf-fhead.tf-unread.tf-holdsbelow ~ * { color: red }")).toBe(1);
+  expect(caught(".tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { color: red }")).toBe(1);
+  expect(caught("@media (width > 1px) { .a :is(.b + *) { color: red } }")).toBe(1);
+  expect(caught(":global(.a > * + *) { color: red }", "x.svelte")).toBe(1);
+  expect(caught(".a > * + * { color: red }", "x.svelte")).toBe(0);
+  expect(caught(".tf-lane + .tf-lane { color: red }")).toBe(0);
+  expect(caught(".tf-md li + li { color: red }")).toBe(0);
+  expect(caught(".tf-rowend > .tf-rowacts:not(:first-child) { color: red }")).toBe(0);
+  expect(caught(".tf-md > :where(:not(:first-child)) { color: red }")).toBe(0);
+  expect(caught(":is(.a, .b) + .c { color: red }")).toBe(0);
+});
+
 /** Every element whose class list holds `tf-panel`, with the next tag after it: `header` for a headed panel. */
 function panels(): { where: string; headed: boolean; opensWithHeader: boolean }[] {
   const out: { where: string; headed: boolean; opensWithHeader: boolean }[] = [];

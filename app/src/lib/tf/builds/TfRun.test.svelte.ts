@@ -339,10 +339,12 @@ test("the header draws once, whole: unseen in its room until the run's item has 
   const head = document.querySelector(".tf-bhead")!;
   expect(head.classList.contains("tf-unread")).toBe(true);
   // What is under it waits with it: the actions wrapping under the title grew the held header a line.
-  expect(head.classList.contains("tf-holdsbelow")).toBe(true);
+  expect(document.querySelector(".tf-runbody")!.classList.contains("tf-heldbelow")).toBe(true);
+  expect(document.querySelector(".tf-stepsbar")!.classList.contains("tf-heldbelow")).toBe(true);
   answer();
   await settle();
   expect(head.classList.contains("tf-unread")).toBe(false);
+  expect(document.querySelectorAll(".tf-heldbelow")).toHaveLength(0);
 });
 
 test("the steps bar keeps its room from the first frame: an empty track while the log is read, then what it found (the nothing-moves pass)", async () => {

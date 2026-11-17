@@ -20,12 +20,15 @@
     detail,
     refresh,
     reread,
+    held = false,
   }: {
     detail: EntityDetail;
     /** The detail's *Refresh*: its failure line, and what *Try again* runs. */
     refresh: DetailRefresh;
     /** Read the detail again, over what it drew. */
     reread: () => Promise<void> | void;
+    /** Held unseen in its room with the header above it (`tf-heldbelow`, a run's page). */
+    held?: boolean;
   } = $props();
 
   /**
@@ -42,17 +45,17 @@
 </script>
 
 {#if detail.deleted_at !== null}
-  <div class="tf-banner tf-warn tf-withdrawn" role="status">
+  <div class="tf-banner tf-warn tf-withdrawn" class:tf-heldbelow={held} role="status">
     Withdrawn upstream, last seen {ageLabel(detail.deleted_at)} ago. Kept because links and notes may point at it.
   </div>
 {/if}
 {#if !detail.source.enabled}
-  <div class="tf-banner tf-warn tf-turnedoff" role="status">
+  <div class="tf-banner tf-warn tf-turnedoff" class:tf-heldbelow={held} role="status">
     Its source is turned off: {detail.source.display_name} is disabled, so this item is hidden everywhere else. Re-enable the source to bring it back.
   </div>
 {/if}
 {#if refresh.failed !== null}
-  <div class="tf-banner tf-err tf-refresh-failed" role="alert">
+  <div class="tf-banner tf-err tf-refresh-failed" class:tf-heldbelow={held} role="alert">
     <span>{refresh.failed.replace("the source", detail.source.display_name)}.</span>
     <button type="button" class="tf-btn tf-sm" onclick={again}>Try again</button>
   </div>

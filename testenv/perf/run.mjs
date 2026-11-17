@@ -97,6 +97,9 @@ window.__s = {
 // The lists of both reports, on the scale database's data (a fixture run finds the same pages by their routes).
 const SCROLL = [
   { name: "tickets-board", setup: `await __s.board(); await __s.expand(); return ".tf-cols";` },
+  // The board in lanes by assignee, four presses of *Show N more lanes* in, scrolled down the lanes (the list-scroll
+  // pass, 2026-11-17).
+  { name: "tickets-laned", setup: `await __s.board(); const pick = __s.vis("select[aria-label='Lanes']")[0]; pick.value = "assignee"; pick.dispatchEvent(new Event("change", { bubbles: true })); await __s.until(() => __s.vis(".tf-lane").length > 1, 20000); for (let i = 0; i < 4; i++) { if (!(await __s.click(/^Show \\d+ more lanes?$/))) break; await __fr.sleep(900); } await __fr.sleep(800); return ".tf-board-wrap";` },
   { name: "tickets-list", setup: `await __s.list(); await __s.click(/^Show \\d+ more$/); await __s.until(() => __fr.pick(".tf-board-wrap").scrollHeight > 200000, 30000); await __fr.sleep(800); return ".tf-board-wrap";` },
   { name: "inbox", setup: `await __s.go("#/inbox"); return null;` },
   { name: "code-prs", setup: `await __s.go("#/code/prs", 2500); return null;` },

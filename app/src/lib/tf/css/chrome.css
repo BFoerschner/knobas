@@ -165,8 +165,10 @@
    shown (`tf-holds`), since a subline the reads left empty (a pull request whose view failed) went to nothing as the
    header showed, and what was drawn under it rose a line (2026-11-17). */
 .tf-fhead.tf-unread .tf-sub, .tf-fhead.tf-holds .tf-sub { min-height: 1lh; }
-/* A header whose held actions can wrap holds what is under it too (a run's), so its growing a line moves nothing seen. */
-.tf-fhead.tf-unread.tf-holdsbelow ~ * { visibility: hidden; }
+/* A header whose held actions can wrap holds what is under it too (a run's), so its growing a line moves nothing seen:
+   each part under it says so itself. Not `.tf-fhead.tf-unread ~ *`: a sibling rule whose subject names nothing made
+   Chromium restyle every row of a table on each row a scroll drew (`style-cost.test.ts`). */
+.tf-heldbelow { visibility: hidden; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
@@ -272,7 +274,7 @@
     position: absolute; right: 100%; top: 50%; transform: translateY(-50%); z-index: 1; white-space: nowrap;
     opacity: 0; pointer-events: none; transition: opacity 120ms ease-out;
   }
-  .tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { margin-right: var(--control-gap); }
+  .tf-rowend > .tf-rowacts:not(:first-child) { margin-right: var(--control-gap); }
   /* An open menu is in the float host, so its group holds on by the opener's `aria-expanded`, with the row no longer hovered. */
   :is(tr, li, .tf-rowhost, .tf-ib, .tf-r):hover .tf-rowacts, .tf-rowacts.tf-on, .tf-rowacts:has(:focus-visible), .tf-rowacts:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
   :is(tr, li, .tf-rowhost, .tf-r):hover:has(.tf-rowacts) .tf-rowval.tf-covered, :is(tr, li, .tf-rowhost, .tf-r):has(.tf-rowacts :is(:focus-visible, [aria-expanded="true"])) .tf-rowval.tf-covered { visibility: hidden; }

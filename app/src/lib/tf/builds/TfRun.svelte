@@ -184,7 +184,7 @@
   /**
    * The header draws once, whole (`held-head.svelte.ts`): *Re-run* is the view's and *Refresh* or *Sync now* the item's, which
    * landed after the header and pushed *Re-run* and *Open in TeamCity* 105 px left. The tabs under it wait with it: their counts are the view's.
-   * So does the rest of the page (`tf-holdsbelow`): *Refresh run* wraps the actions under the title at 1440 px, and the header
+   * So does the rest of the page (`tf-heldbelow` on each part under it): *Refresh run* wraps the actions under the title at 1440 px, and the header
    * growing a line while it was held pushed the panels 29 px down.
    */
   const drawnHead = heldHead(
@@ -572,7 +572,7 @@
   <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
-  <header class="tf-fhead tf-bhead tf-holds tf-holdsbelow" class:tf-unread={!drawnHead.shown}>
+  <header class="tf-fhead tf-bhead tf-holds" class:tf-unread={!drawnHead.shown}>
     <div>
       <h1 data-failed={failedRun(run) ? "" : undefined}>
         {pipeline.name} #{run.number ?? ""}
@@ -615,10 +615,10 @@
       <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} noun="run" />
     </div>
   </header>
-  {#if detail !== null}<TfDetailBanners {detail} {refresh} reread={rereadRun} />{/if}
+  {#if detail !== null}<TfDetailBanners {detail} {refresh} reread={rereadRun} held={!drawnHead.shown} />{/if}
 
   {#if segments.length > 0}
-    <div class="tf-stepsbar" {@attach measureBar}>
+    <div class="tf-stepsbar" class:tf-heldbelow={!drawnHead.shown} {@attach measureBar}>
       <svg role="group" aria-label="Steps" width="100%" height="30">
         {#each segments as segment (segment.index)}
           <a
@@ -639,17 +639,17 @@
   {:else}
     <!-- The bar's room from the first frame (the nothing-moves pass, 2026-11-17): the log is read live from the source, and the bar
          landing with it pushed the run's panels 29 px down. An empty track while it reads, then what it found. -->
-    <div class="tf-stepsbar tf-sbnone">{#if logAnswered}<span>{log === null ? "No log" : "No steps in the log"}</span>{/if}</div>
+    <div class="tf-stepsbar tf-sbnone" class:tf-heldbelow={!drawnHead.shown}>{#if logAnswered}<span>{log === null ? "No log" : "No steps in the log"}</span>{/if}</div>
   {/if}
 
   {#if stale !== null}
-    <div class="tf-stale tf-bstale">
+    <div class="tf-stale tf-bstale" class:tf-heldbelow={!drawnHead.shown}>
       {stale.text}
       {#if stale.fix !== null}<a href={stale.fix.href}>{stale.fix.words}</a>{/if}
     </div>
   {/if}
   {#if runsFailed !== null}
-    <p class="tf-dim tf-runs">Runs could not be read: {runsFailed}</p>
+    <p class="tf-dim tf-runs" class:tf-heldbelow={!drawnHead.shown}>Runs could not be read: {runsFailed}</p>
   {/if}
 
   <nav class="tf-tabs" class:tf-unread={!drawnHead.shown} aria-label="Run">
@@ -661,7 +661,7 @@
     {/each}
   </nav>
 
-  <div class="tf-runbody">
+  <div class="tf-runbody" class:tf-heldbelow={!drawnHead.shown}>
     {#if view !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={pipeline.source_name} failed={heldFailed} />{/if}
     {#if viewFailed !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}
       <p class="tf-dim">The run could not be read from {pipeline.source_name}: {viewFailed}</p>

@@ -28,7 +28,7 @@
 /* *Snooze…* and *Done* hold one place down the list (F-155): the group keeps its room at the row's end, shown or not, and a
    row's own action stands left of it. The other lists hang the group over a value column, and the Inbox has none. */
 .tf-ib .tf-rowacts { position: static; transform: none; }
-.tf-ib .tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { margin-right: 0; }
+.tf-ib .tf-rowend > .tf-rowacts:not(:first-child) { margin-right: 0; }
 .tf-ib .tf-what .tf-dot { position: absolute; margin: .5em 0 0 -14px; }
 .tf-ib .tf-ctx { grid-column: 2; padding-left: 14px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
