@@ -11,11 +11,19 @@ export function nearEnd(reach: () => void, held: () => number) {
   return (node: HTMLElement) => {
     void held();
     if (typeof IntersectionObserver === "undefined") return;
-    const seen = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) reach();
-    }, { root: scrollerOf(node), rootMargin: "0px 0px 200% 0px" });
-    seen.observe(node);
-    return () => seen.disconnect();
+    let seen: IntersectionObserver | null = null;
+    // Its scroller is read the frame after it drew: read while the page mounts, each mark's computed style forced the
+    // page's whole style to be worked out in the middle of the mount.
+    const frame = requestAnimationFrame(() => {
+      seen = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) reach();
+      }, { root: scrollerOf(node), rootMargin: "0px 0px 200% 0px" });
+      seen.observe(node);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      seen?.disconnect();
+    };
   };
 }
 

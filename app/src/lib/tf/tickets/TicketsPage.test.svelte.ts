@@ -2255,6 +2255,8 @@ test("a view stored with Show every ticket opens on fifty a column and draws the
 
   const on = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })]);
   await open(on, null, "v");
+  // The frame after the board lands, which draws the rest of each column's cards.
+  await nextFrame();
   expect(on.reads[0]!.perColumn).toBe(50);
   expect(columns().map(({ cards, more }) => [cards, more])).toEqual([[12, null], [1, null], [5, null]]);
   expect(target.querySelectorAll(".tf-more")).toHaveLength(0);
@@ -2283,7 +2285,17 @@ test("a view stored with Show every ticket draws its list in the server's order 
       return { ...answer, order: keyed.map((card) => card.entity_id) };
     });
   };
+  // Its counts' read answers before its first page: the list draws none of that read's rows meanwhile.
+  let release!: () => void;
+  const held = new Promise<void>((done) => (release = done));
+  const sorted = h.ports.board;
+  h.ports.board = (perColumn, query, savedView, lanes, role, page) =>
+    page?.sort ? held.then(() => sorted(perColumn, query, savedView, lanes, role, page)) : sorted(perColumn, query, savedView, lanes, role, page);
   await open(h, null, "v");
+  expect(target.querySelectorAll(".tf-tbl tbody tr[data-entity]")).toHaveLength(0);
+  expect(target.querySelector(".tf-empty[aria-busy='true']")).not.toBeNull();
+  release();
+  await settle();
   expect(pages.map((page) => page?.sort ?? null)).toEqual([null, "updated"]);
   const keys = [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.querySelector("td")!.textContent);
   expect(keys.slice(0, 3)).toEqual(["PAY-54", "PAY-53", "PAY-52"]);
@@ -2303,4 +2315,24 @@ test("a Jira view's settings carry Show every ticket too, and it then opens on f
   expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", saved_view: "jira:board-21", show_all: true });
   await settle();
   expect(h.reads.at(-1)!.perColumn).toBe(50);
+});
+
+test("a view that shows every ticket draws eight a column in the frame its board lands, and the screen's cards the frame after (ux18)", async () => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })], bulk("To Do", 20, "Bulk"));
+  await open(h, null, "v");
+  expect(columns()).toEqual([{ head: "To do 20", cards: 8, more: null }]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(performance.now());
+  await settle();
+  vi.mocked(window.requestAnimationFrame).mockRestore();
+  vi.mocked(window.cancelAnimationFrame).mockRestore();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
+  // The eight drawn first stay where they drew.
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
 });

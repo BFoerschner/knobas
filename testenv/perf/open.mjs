@@ -87,9 +87,12 @@ const shown = ".tf-kept:not([hidden])";
 const PLACES = [
   { name: "inbox", start: "#/time", press: nav("inbox"), hash: "#/inbox", useful: ".tf-ib", min: 5, away: "time" },
   { name: "tickets-board", start: "#/time", press: nav("tickets"), hash: "#/tickets", useful: ".tf-tcard", min: 5, away: "time" },
-  // A view of every ticket that shows them all on opening (ux18), from the rail: fifty a column, its pages as it scrolls.
-  { name: "tickets-all-view", parent: "tickets", start: "#/tickets", press: `.tf-views a[href="#/tickets/perf-every-ticket"]`, hash: "#/tickets/perf-every-ticket", useful: ".tf-tcard", min: 5, back: `.tf-views a[href="#/tickets"]` },
-  { name: "tickets-all-list", parent: "tickets", start: "#/tickets", press: `.tf-views a[href="#/tickets/perf-every-ticket-list"]`, hash: "#/tickets/perf-every-ticket-list", useful: ".tf-tbl tbody tr[data-entity]", min: 5, back: `.tf-views a[href="#/tickets"]` },
+  // A view of every ticket that shows them all on opening (ux18), by its address from Time, so no other view's cards are
+  // on the page when it opens: fifty a column, its pages as it scrolls; its list, sorted on the server, a page of 200.
+  { name: "tickets-all-view", start: "#/time", go: "#/tickets/perf-every-ticket", hash: "#/tickets/perf-every-ticket", useful: ".tf-tcard", min: 5, away: "time" },
+  // The same view with the setting off: eight a column, the line it is held to beside the setting's cost.
+  { name: "tickets-all-off", start: "#/time", go: "#/tickets/perf-every-ticket-off", hash: "#/tickets/perf-every-ticket-off", useful: ".tf-tcard", min: 5, away: "time" },
+  { name: "tickets-all-list", start: "#/time", go: "#/tickets/perf-every-ticket-list", hash: "#/tickets/perf-every-ticket-list", useful: ".tf-tbl tbody tr[data-entity]", min: 5, away: "time" },
   { name: "ticket", parent: "tickets", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", useful: ".tf-ticketpage .tf-tkhead, .tf-ticketpage .tf-facts", min: 2, back: "Escape" },
   { name: "code", start: "#/time", press: nav("code"), hash: "#/code", useful: `a[href^="#/repo/"], a[href^="#/pr/"]`, min: 5, away: "time" },
   { name: "repo", parent: "code", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", useful: ".tf-repohead, .tf-tabs", min: 2, back: "Escape" },
@@ -211,8 +214,8 @@ if (set === "extremes") {
 // The show-every-ticket views (ux18), made on the backend for the run as `keys.mjs` makes them.
 if (set === "nav" && PLACES.filter(picked).some((p) => p.name.startsWith("tickets-all"))) {
   const port = new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real");
-  for (const [id, layout] of [["perf-every-ticket", "board"], ["perf-every-ticket-list", "list"]]) {
-    const view = { id, name: id, group: "Mine", position: null, query: "", layout, columns: [], lanes: "none", card_fields: ["type", "signals", "comments", "assignee"], list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"], list_sort: null, show_all: true, saved_view: null };
+  for (const [id, layout, all] of [["perf-every-ticket", "board", true], ["perf-every-ticket-list", "list", true], ["perf-every-ticket-off", "board", false]]) {
+    const view = { id, name: id, group: "Mine", position: null, query: "", layout, columns: [], lanes: "none", card_fields: ["type", "signals", "comments", "assignee"], list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"], list_sort: null, show_all: all, saved_view: null };
     await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "save_ticket_view", args: { view } }) });
   }
 }

@@ -160,6 +160,8 @@ export interface BoardReader {
    * on every other list and board, which draw the board's cards.
    */
   readonly rows: MiniBoardCard[] | null;
+  /** Whether that list's first page is still out: it draws nothing of its counts' read meanwhile. */
+  readonly rowsWaiting: boolean;
   readonly bands: Band[];
   /** Moves each time a read the person caused lands: what the drawn cards sort again on. A sync's refresh leaves it. */
   readonly asked: number;
@@ -520,6 +522,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     },
     get rows() {
       return paged() ? rows : null;
+    },
+    get rowsWaiting() {
+      return paged() && rows === null;
     },
     get bands() {
       return bands;

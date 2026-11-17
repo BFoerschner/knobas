@@ -155,7 +155,7 @@
   import TicketCard from "./TicketCard.svelte";
   import TicketStack from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
-  import { assigneeName, assigneeOptions, cardFloor, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -625,6 +625,16 @@
     if (!firstFrame || cards.length <= FIRST_FRAME_CARDS || (drewWhole.get(place) ?? 0) >= FIRST_FRAME_CARDS) return cards;
     return cards.slice(0, FIRST_FRAME_CARDS);
   }
+  /**
+   * A view that shows every ticket opens on fifty a column, and a column of fifty fills to the screen's foot, about 15
+   * cards where any other view draws eight: twice the work of the frame its board lands, a 194 ms task at CPU 6x on
+   * Björn's PC against 105 with the setting off (ux18). That frame draws the eight a column any view draws, and the
+   * rest of the screen's cards the frame after, below them: nothing drawn moves.
+   */
+  function openShare(place: string, cards: MiniBoardCard[]): MiniBoardCard[] {
+    if (!reader.all || !firstFrame || cards.length <= COLUMN_CAP || (drewWhole.get(place) ?? 0) > 0) return cards;
+    return cards.slice(0, COLUMN_CAP);
+  }
   /** What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. */
   const cardFloorOf = (card: MiniBoardCard) => cardFloor(card, view?.card_fields ?? null);
   const listHold = new HeldOrder<{ card: MiniBoardCard }>(({ card }) => card.entity_id);
@@ -1043,7 +1053,7 @@
       </div>
     {:else if reader.failed !== null}
       <div class="tf-empty"><p>The tickets could not be read: {reader.failed}</p></div>
-    {:else if reader.board === null || !framed}
+    {:else if reader.board === null || !framed || reader.rowsWaiting}
       <div class="tf-empty" aria-busy="true"></div>
     {:else if reader.shown === 0 && isFiltering(filter)}
       <div class="tf-empty">
@@ -1091,7 +1101,7 @@
                   >
                 </h3>
                 <div class="tf-stack">
-                  <TicketStack cards={heldCards.get(place) ?? []} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
+                  <TicketStack cards={openShare(place, heldCards.get(place) ?? [])} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
                     {#snippet card(card, row)}
                       <TicketCard
                         {card}
