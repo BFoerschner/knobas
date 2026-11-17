@@ -1351,6 +1351,14 @@ frame-budget *args:
 open-budget *args:
     testenv/perf/open-budget.sh {{args}}
 
+# The movement gate (the nothing-moves pass of PR #2479, 2026-11-17, `testenv/perf/README.md`, *Nothing moves*; Björn:
+# "Check if any other page moves after it's drawn. That's not good behavior."): opens every place a person can open in a
+# headless Chrome, first open and return, at 1x and 4x, at 1440x868@1 and 2560x1440@1.25, and fails when anything drawn
+# moves or changes size by more than 2 px in the 5 s after the place's first useful frame. On the fixture with every
+# read landing late; `--real <port>` adds the saved scale database, `--sync` a sync ending every 1.5 s while each records.
+moves *args:
+    testenv/perf/moves.sh {{args}}
+
 # The keys budget (the broad-filters pass of PR #2479, 2026-11-13, `testenv/perf/README.md`): presses the keys that keep
 # most of a page, Tickets' first letter, a `-project:` and a `-priority:`, and a single letter under Everything, as real
 # input in a headless Chrome at 1x, 4x and 6x, and fails when the rows a key asks for draw later than their line in

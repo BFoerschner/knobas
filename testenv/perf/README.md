@@ -446,6 +446,40 @@ node testenv/perf/open.mjs --app "<app>?fake-ipc&fake-hooks&fake-real=5411#/time
 - A place's useful selector waits for its first rows on screen; a page that draws in pieces (the 5 MB page) is useful
   at its first section, and `settled` says when its pieces near the view are drawn.
 
+## Nothing moves: `just moves`
+
+The movement gate (the nothing-moves pass, 2026-11-17, `docs/decisions/2026-11-17-nothing-moves-once-drawn.md`; Björn:
+"Check if any other page moves after it's drawn. That's not good behavior."). `moves.mjs` opens every place a person
+can open by the press a person makes: every nav page and its tabs, a repository and each of its tabs, a file, a commit,
+*Open in…* and *Add an application*, a pull request and its tabs, a pipeline, a run and its tabs, the Docs home, a space
+and a page, Monitors, a monitor, Sets, Time and its tabs, the Assets tree and an asset, every Settings section, a source's
+page and an application's page, the launcher, a ticket card's right-click menu and the dialogs (*Create monitor…*,
+*Link something to it*, *Add a source…*). Each on its first open after the app started and on its return.
+
+`moves-probe.js`, in the page, tracks from the first frame the place is drawn (the DOM changed after the press, or after
+the `hashchange` a link's address brings, a task after the address itself) the box of every row, heading, button, link,
+field, tab, option and the focused element in the shown page, any dialog or menu, and the top and status bars, every frame
+for 5 s past the first useful frame (nothing visible waiting). A box that moves or changes size by more than `--px` (2) is
+a mover, with when, by how much, and what came in or grew above it in its column or beside it in its row that frame.
+Layout-shift entries are kept beside it. Left out: what a running animation or transition moves, and for 150 ms after it
+ends; anything after the person's own input; a box held unseen (`visibility: hidden`) in its room; a heading whose box only
+narrows or widens with its words in place; and the press's own swap, a control the page left drawn while it read that takes
+the new item's words in the frame the pressed item lands, keeping one edge, with nothing else moving.
+
+```sh
+just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25
+just moves --real 5411                       # and the saved scale database (*On a real database*)
+just moves --real 5411 --sync                # every source ends a run that changed something every 1.5 s while each records
+just moves --only repo,pull-request --sizes 1440x868@1 --throttle 4
+```
+
+`--workers 3` (the default) runs three browsers, each a share of the places: a move is the order of frames, not their
+time. `--trace <selector>` on `moves.mjs` prints what a box's children are each frame they change, which names a mover's
+cause. The fixture's late reads (`fake-late`) are each under the 500 ms a header waits for its reads
+(`tf/held-head.svelte.ts`), as the saved scale database's are at 4x; a read slower than that draws the header anyway, and
+what it brings must keep its own room. With the Mac's lock taken, Chrome on the WSL box serves as well: `--attach <port>`
+on a headless Chrome there, its debug port and the app's reached through `ssh -L` and `-R`.
+
 ## A broad key: `just keys-budget`
 
 How long one key takes to show the rows it asks for, from the broad-filters pass of PR #2479 (2026-11-13, rulings in
