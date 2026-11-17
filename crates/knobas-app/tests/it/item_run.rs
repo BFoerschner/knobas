@@ -557,3 +557,35 @@ async fn the_fill_steps_past_an_item_a_sync_holds_and_fills_it_after() {
     let after = held(&pool).await;
     assert_eq!((after.unstored, after.differing), (0, 0), "{after:?}");
 }
+
+/// **A fill with nothing to write is one read** (the ux18 pass, 2026-11-17),
+/// as `item_row`'s: with every run's row written by the triggers the fill
+/// runs no batch; one run without its row, and it walks and writes it again.
+#[tokio::test]
+async fn a_fill_with_every_run_written_runs_no_batch() {
+    let (pool, tc, ..) = mirror("item_run_owed").await;
+    let run = format!("{tc}:build:2");
+    assert_eq!(
+        held(&pool).await.unstored,
+        0,
+        "the triggers wrote every row"
+    );
+    assert_eq!(
+        knobas_core::item_run::fill(&pool).await.unwrap(),
+        0,
+        "nothing owed, no batch"
+    );
+    assert!(place(&pool, &run).await.is_some());
+    sqlx::query("delete from sync.item_run where entity_id = $1")
+        .bind(&run)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        knobas_core::item_run::fill(&pool).await.unwrap() > 0,
+        "owed one"
+    );
+    assert!(place(&pool, &run).await.is_some(), "written again");
+    assert_eq!(held(&pool).await.unstored, 0);
+    assert_eq!(knobas_core::item_run::fill(&pool).await.unwrap(), 0);
+}

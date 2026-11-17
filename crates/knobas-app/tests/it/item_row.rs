@@ -382,3 +382,37 @@ async fn the_rows_follow_every_write_and_the_fill_restores_them() {
         "a filled row is left alone"
     );
 }
+
+/// **A fill with nothing to write is one read** (the ux18 pass, 2026-11-17):
+/// every start walked every item for its row and wrote none, 1.1 s of the
+/// database's time after Ready on Björn's PC. With every row written by the
+/// triggers the fill runs no batch; one item without its row, and it walks
+/// and writes it again.
+#[tokio::test]
+async fn a_fill_with_every_row_written_runs_no_batch() {
+    let (pool, gitea) = mirror("item_row_owed").await;
+    let pull = format!("{gitea}:tidewater/ledger#1");
+    assert_eq!(
+        held(&pool).await.unstored,
+        0,
+        "the triggers wrote every row"
+    );
+    assert_eq!(
+        knobas_core::item_row::fill(&pool).await.unwrap(),
+        0,
+        "nothing owed, no batch"
+    );
+    assert!(place(&pool, &pull).await.is_some());
+    sqlx::query("delete from sync.item_row where entity_id = $1")
+        .bind(&pull)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        knobas_core::item_row::fill(&pool).await.unwrap() > 0,
+        "owed one"
+    );
+    assert!(place(&pool, &pull).await.is_some(), "written again");
+    assert_eq!(held(&pool).await.unstored, 0);
+    assert_eq!(knobas_core::item_row::fill(&pool).await.unwrap(), 0);
+}

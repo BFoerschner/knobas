@@ -1350,3 +1350,51 @@ async fn a_source_is_whole_while_every_ticket_has_its_card() {
         .await
         .unwrap();
 }
+
+/// **A fill with nothing to write is one read** (the ux18 pass, 2026-11-17),
+/// as `item_row`'s: with every ticket's card written by the triggers the
+/// fill runs no batch; one ticket without its card, and it walks and writes
+/// it again.
+#[tokio::test]
+async fn a_fill_with_every_card_written_runs_no_batch() {
+    let pool = scratch("item-card-owed").await;
+    let jira = source(&pool, "jira").await;
+    upsert(&pool, &jira, &jira_tickets()).await;
+    assert_eq!(
+        knobas_core::item_card::fill(&pool).await.unwrap(),
+        0,
+        "nothing owed, no batch"
+    );
+    let ticket = format!("{jira}:PAY-900");
+    let cards = async || -> i64 {
+        sqlx::query_scalar("select count(*) from sync.item_card c join sync.item i using (entity_id) where i.source_id = $1")
+            .bind(&jira)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let had = cards().await;
+    assert!(had > 0);
+    upsert(
+        &pool,
+        &jira,
+        &[(
+            "PAY-900",
+            "One more",
+            json!({ "key": "PAY-900", "fields": {} }),
+        )],
+    )
+    .await;
+    sqlx::query("delete from sync.item_card where entity_id = $1")
+        .bind(&ticket)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cards().await, had);
+    assert!(
+        knobas_core::item_card::fill(&pool).await.unwrap() > 0,
+        "owed one"
+    );
+    assert_eq!(cards().await, had + 1, "written again");
+    assert_eq!(knobas_core::item_card::fill(&pool).await.unwrap(), 0);
+}

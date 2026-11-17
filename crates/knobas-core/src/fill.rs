@@ -10,6 +10,14 @@
 //! trigger writes the row of an item it changed, but a run that locks an
 //! item and leaves it unchanged writes none, so the walk passes over the
 //! items again, after [`AGAIN_AFTER`], while a pass stepped past any.
+//!
+//! **A fill with nothing to write costs one read** ([`walk_owed`], the ux18
+//! pass, 2026-11-17): every start ran the three walks over every item to
+//! write nothing, 78 + 80 + 17 batches and 1.1 s of the database's time
+//! after Ready on Björn's PC (2.6 s on a loaded Mac). Each fill now asks
+//! first whether any item it would write a row for has none, in one
+//! anti-join over the stored rows' keys (8 to 18 ms each on that mirror),
+//! and walks only when one has.
 
 use std::time::Duration;
 
@@ -20,6 +28,29 @@ use crate::CoreError;
 /// How long the walk waits before passing over the items again, when a pass
 /// stepped past some: a sync's run holds its items until it commits.
 pub const AGAIN_AFTER: Duration = Duration::from_secs(2);
+
+/// Run `statement` (`select last, skipped from sync.fill_item_*_beside($1,
+/// $2)`) over every item as [`walk`] does, but only when `owed` (`select
+/// <bool>`, whether an item the statement would write a row for has none)
+/// answers true: a mirror whose rows are whole costs the one read, and
+/// answers no batch. `owed` must be true wherever a batch would write, or
+/// the fill would leave an item without its row; a true where nothing is
+/// written only costs the walk it saved.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the read or a batch fails.
+pub(crate) async fn walk_owed(
+    pool: &PgPool,
+    owed: &'static str,
+    statement: &'static str,
+    batch: i32,
+) -> Result<u32, CoreError> {
+    if !sqlx::query_scalar::<_, bool>(owed).fetch_one(pool).await? {
+        return Ok(0);
+    }
+    walk(pool, statement, batch).await
+}
 
 /// Run `statement` (`select last, skipped from sync.fill_item_*_beside($1,
 /// $2)`, bound to the last item looked at and the batch's size) over every

@@ -18,6 +18,15 @@ use crate::CoreError;
 /// when 500 took 68 ms.
 pub const BATCH: i32 = 300;
 
+/// Whether a ticket has no card the fill would write
+/// ([`crate::fill::walk_owed`]): `sync.item_card_rows` gives every ticket a
+/// card while any adapter declares cards, so this is exactly where a batch
+/// would write. One anti-join over the cards' keys, 8 to 18 ms on Björn's
+/// scale where the walk that wrote nothing took 1.9 s on a loaded Mac.
+const OWED: &str = "select exists (select from sync.card_adapters()) \
+     and exists (select from sync.item i where i.kind = 'ticket' \
+                   and not exists (select from sync.item_card c where c.entity_id = i.entity_id))";
+
 /// Fill every ticket that has no stored card, [`BATCH`] at a time in id
 /// order, each batch its own transaction under the shared key the item
 /// triggers take (`sync.fill_item_cards_beside`, migration `0091`), then mark
@@ -25,15 +34,18 @@ pub const BATCH: i32 = 300;
 /// the rows no one wrote meanwhile and steps past a ticket a running sync
 /// holds, passing over the tickets again while it stepped past any
 /// ([`crate::fill`]), so a sync running beside it keeps its own and the two
-/// never deadlock. Answers how many batches it ran.
+/// never deadlock. Answers how many batches it ran: none, after one read,
+/// where every ticket has its card ([`OWED`]), which is every start after
+/// the first.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if a batch fails; the batches before it are kept, and
 /// the next fill goes on from the first ticket without a card.
 pub async fn fill(pool: &PgPool) -> Result<u32, CoreError> {
-    let batches = crate::fill::walk(
+    let batches = crate::fill::walk_owed(
         pool,
+        OWED,
         "select last, skipped from sync.fill_item_cards_beside($1, $2)",
         BATCH,
     )
