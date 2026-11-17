@@ -143,3 +143,33 @@ test("keepScroll sets a page back only at the address it was left at; another ad
   expect(main.scrollTop).toBe(0);
   main.remove();
 });
+
+test("a hide during a move takes each box's place from the move's note, reading no box after the next page is in", async () => {
+  const { noteScrolls } = await import("./scrolled");
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const tree = scroller(document.createElement("nav"));
+  anchor.append(tree);
+  main.append(anchor);
+  document.body.append(main);
+  run(() => keepScroll(() => anchor, () => page.shown));
+  main.scrollTop = 840;
+  tree.scrollTop = 120;
+
+  // The move notes the places, then builds the next page: from here a read of a box would lay that page out.
+  noteScrolls();
+  let reads = 0;
+  for (const el of [main, tree]) {
+    const top = el.scrollTop;
+    Object.defineProperty(el, "scrollTop", { get: () => (reads++, top), set: () => {}, configurable: true });
+  }
+  show(false);
+  expect(reads, "no box read at the hide").toBe(0);
+  scroller(main);
+  scroller(tree);
+  show(true);
+  expect(main.scrollTop).toBe(840);
+  expect(tree.scrollTop).toBe(120);
+  main.remove();
+});

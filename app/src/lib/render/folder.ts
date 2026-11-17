@@ -11,6 +11,7 @@
  */
 import type { FolderFailure, FolderMarks, FolderRenderer, FolderRunState, ReadFrom } from "../ipc/app";
 import { secondsLabel } from "../time/format";
+import { thousands } from "../tf/counted";
 
 function glob(pattern: string): RegExp {
   const body = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
@@ -49,7 +50,7 @@ export function runningLine(name: string, state: FolderRunState, from: ReadFrom 
     case "copying":
       return state.total === 0
         ? `Copying the folder from ${where(from)}…`
-        : `Copying ${state.done.toLocaleString("en-US")} of ${state.total.toLocaleString("en-US")} files from ${where(from)}…`;
+        : `Copying ${thousands(state.done)} of ${thousands(state.total)} files from ${where(from)}…`;
     case "running":
       return `Running ${name}…`;
   }
@@ -84,8 +85,8 @@ export function failureLines(failure: FolderFailure): { line: string; stderr: st
     case "too_big":
       return {
         line:
-          `The folder holds ${failure.files.toLocaleString("en-US")} files and ${mib(failure.bytes)}; ` +
-          `knobas copies up to ${failure.cap_files.toLocaleString("en-US")} files and ${mib(failure.cap_bytes)} from ${where(failure.from)}.`,
+          `The folder holds ${thousands(failure.files)} files and ${mib(failure.bytes)}; ` +
+          `knobas copies up to ${thousands(failure.cap_files)} files and ${mib(failure.cap_bytes)} from ${where(failure.from)}.`,
         stderr: "",
       };
     case "no_folder":

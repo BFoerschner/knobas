@@ -33,6 +33,7 @@
     this card's part of `n`/`p`, `c` and `j`/`k` (#2268).
 -->
 <script module lang="ts">
+  import { thousands } from "../counted";
   /** Where a file header's *Open in…* opens the file (#2274): its repository and the commit or branch it is read at. */
   export interface OpenAt {
     entityId: string;
@@ -333,7 +334,7 @@
   const badge = $derived(badgeOf(file));
   const chip = $derived(isLock(file.path) ? "lock file" : isGenerated(file.path) ? "generated" : null);
   const changed = $derived(file.additions + file.deletions);
-  const n = (count: number) => count.toLocaleString("en-US");
+  const n = (count: number) => thousands(count);
   const strays = $derived(
     talk.drafts.filter((d) => d.path === file.path && !file.hunks.some((h) => h.lines.some((line) => talk.draftsAt(file.path, line).includes(d)))),
   );

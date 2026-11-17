@@ -26,6 +26,7 @@
   import { localFiles } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
+  import { thousands } from "../counted";
 
   let {
     repoId,
@@ -122,7 +123,7 @@
     <TfDiffView {files} />
     {#if read.unstaged.truncated || read.staged.truncated}
       <p class="tf-dim tf-local-note">
-        The diff is cut here: it is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines. Your editor has all of it.
+        The diff is cut here: it is over knobas's ceiling of {thousands(DIFF_CEILING)} lines. Your editor has all of it.
       </p>
     {/if}
     {#if untracked.length > 0}

@@ -14,6 +14,7 @@ import { EVENTS, ipcErrorMessage } from "../../ipc";
 import { cloneAll, cloneAllPlan, cloneAllState, type CloneAllPlan, type CloneAllState } from "../../ipc/entity";
 import { push, type ToastSpec } from "../../shell/toasts.svelte";
 import { clones as sharedClones, type Clones } from "./clones.svelte";
+import { thousands } from "../counted";
 
 export interface CloneAllPorts {
   plan: () => Promise<CloneAllPlan>;
@@ -31,7 +32,7 @@ export const realCloneAllPorts: CloneAllPorts = {
 
 /** How many repositories, said as a person says it. */
 export function repositories(n: number): string {
-  return `${n.toLocaleString("en-US")} ${n === 1 ? "repository" : "repositories"}`;
+  return `${thousands(n)} ${n === 1 ? "repository" : "repositories"}`;
 }
 
 /** The run's one summary toast: what was cloned, what was already there, and every failure with its reason. */

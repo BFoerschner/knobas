@@ -20,6 +20,7 @@
   import { onViewFresh } from "./view-fresh.svelte";
   import { commitHash, repoHash, viewRows } from "./repo";
   import { authorOf, initials } from "./file-tree";
+  import { thousands } from "../counted";
 
   let {
     ports,
@@ -115,7 +116,7 @@
     {/if}
     {#if by?.when}<span class="tf-dim tf-small">{by.when}</span>{/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}
-      >{total === null ? "History" : `${total.toLocaleString("en-US")} ${total === 1 ? "commit" : "commits"}`}</a
+      >{total === null ? "History" : `${thousands(total)} ${total === 1 ? "commit" : "commits"}`}</a
     >
   </div>
 {/if}

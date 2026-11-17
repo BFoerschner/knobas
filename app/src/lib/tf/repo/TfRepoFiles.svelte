@@ -153,6 +153,7 @@
   import { markSets, renderersFor } from "../../render/folder";
   import { folderRenderMarks, type FolderMarks } from "../../ipc/app";
   import { folderRenderHash, type FolderRenderAt } from "./repo";
+  import { thousands } from "../counted";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -1768,7 +1769,7 @@
           <p class="tf-gonote">No file matches “{goTyped.trim()}”. <button type="button" class="tf-linkish" onclick={() => (goTyped = "")}>Clear</button></p>
         {/if}
         {#if searched?.truncated}
-          <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {searched.paths.length.toLocaleString("en-US")} files.</p>
+          <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {thousands(searched.paths.length)} files.</p>
         {/if}
       {:else}
         {#if treeFailed !== null}
@@ -1786,7 +1787,7 @@
     {/if}
     <!-- What the source could not list at once says so under the tree, never among its rows (the big-folder pass, 2026-11-13). -->
     {#if unkept !== null && local === null && !going}
-      <p class="tf-gonote">This branch holds {unkept.toLocaleString("en-US")} entries, more than knobas keeps: its folders are read from {sourceName(source)} as they open.</p>
+      <p class="tf-gonote">This branch holds {thousands(unkept)} entries, more than knobas keeps: its folders are read from {sourceName(source)} as they open.</p>
     {/if}
     {#if readAlone && local === null && !going}
       <p class="tf-gonote">Folders past this repository's first 20,000 entries are read one at a time.</p>
@@ -1794,7 +1795,7 @@
     {#if !going}
       {#each Object.entries(cutDirs).filter(([dir]) => dir === "" || open.has(dir)) as [dir, cut] (dir)}
         <p class="tf-gonote">
-          <span class="tf-mono">{dir || title || "The top folder"}</span> shows its first {cut.shown.toLocaleString("en-US")} entries; the rest are
+          <span class="tf-mono">{dir || title || "The top folder"}</span> shows its first {thousands(cut.shown)} entries; the rest are
           {#if cut.url}<a href={cut.url} onclick={openLink}>on {sourceName(source)}</a>{:else}on {sourceName(source)}{/if}.
         </p>
       {/each}

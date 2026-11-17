@@ -9,7 +9,7 @@
  */
 import { untrack } from "svelte";
 
-import { scrolledWithin } from "./scrolled";
+import { notedScrolls, scrolledWithin } from "./scrolled";
 
 /** Run `run` (untracked) each time `shown()` turns from false to true; never on the first. */
 export function onShownAgain(shown: () => boolean, run: () => void): void {
@@ -71,8 +71,18 @@ export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => b
       if (at === undefined) return;
       const scrolled: [Element, number, number][] = [];
       const main = at.closest(".tf-main");
-      if (main !== null) scrolled.push([main, main.scrollTop, main.scrollLeft]);
-      for (const el of scrolledWithin(at)) scrolled.push([el, el.scrollTop, el.scrollLeft]);
+      // As the move noted them before it changed the DOM (`noteScrolls`): no box is read after the next page is in.
+      const note = notedScrolls();
+      if (note !== null && (main === null || note.has(main))) {
+        if (main !== null) scrolled.push([main, ...note.get(main)!]);
+        const inside = [...note].filter(([el]) => el !== at && el !== main && at.contains(el));
+        // Document order, as `scrolledWithin` gives them.
+        inside.sort(([a], [b]) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        for (const [el, [top, left]] of inside) scrolled.push([el, top, left]);
+      } else {
+        if (main !== null) scrolled.push([main, main.scrollTop, main.scrollLeft]);
+        for (const el of scrolledWithin(at)) scrolled.push([el, el.scrollTop, el.scrollLeft]);
+      }
       saved = scrolled;
       leftAt = untrack(address);
     };

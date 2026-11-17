@@ -123,6 +123,7 @@
   import TfTopBar from "./TfTopBar.svelte";
   import TfZoomLevel from "./TfZoomLevel.svelte";
   import { installZoomInput, zoom as sharedZoom, zoomKey, type Zoom } from "./zoom.svelte";
+  import { noteScrolls } from "./scrolled";
   import "./tf.css";
 
   let {
@@ -850,7 +851,11 @@
   // So a section's first press shows a page already built (the ux13-overs pass, 2026-11-15).
   onMount(() => openAhead(() => lifecycle.ready, () => sectionOf(route), (section) => untrack(() => navHref(section))));
   onMount(() => {
-    const onhash = () => arrive();
+    // Each box's place first, while the last frame's layout is clean: a page the move hides takes it from there.
+    const onhash = () => {
+      noteScrolls();
+      arrive();
+    };
     window.addEventListener("hashchange", onhash);
     window.addEventListener("keydown", onkeydown);
     window.addEventListener("click", catchReenterPress, true);

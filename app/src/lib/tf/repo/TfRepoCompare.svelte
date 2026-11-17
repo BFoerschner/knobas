@@ -97,6 +97,7 @@
   import { waitPhase } from "../waiting";
   import { Windowed } from "../../shell/windowed.svelte";
   import { shortEnd } from "../diff/sha";
+  import { thousands } from "../counted";
   import {
     branchStanding,
     compareHash,
@@ -917,7 +918,7 @@
   {#if !same}
   <aside class="tf-side">
     <div class="tf-panel tf-headed tf-ccommits">
-      <header><h3>Commits</h3>{#if commits.length > 0}<span class="tf-ccount">{commits.length.toLocaleString("en-US")}</span>{/if}</header>
+      <header><h3>Commits</h3>{#if commits.length > 0}<span class="tf-ccount">{thousands(commits.length)}</span>{/if}</header>
       {#if commits.length > 0}
         <!-- One line a commit in a box of about ten that scrolls (the big-compare pass, 2026-11-16): hundreds of commits
              stood here two lines each and pushed the diff thousands of pixels down. -->

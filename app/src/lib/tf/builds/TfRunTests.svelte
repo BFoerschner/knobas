@@ -25,6 +25,7 @@
   import { jumpAcross } from "../opener";
   import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
   import { menuThing } from "../context/thing";
+  import { thousands } from "../counted";
 
   let {
     runId,
@@ -182,6 +183,6 @@
     {/each}
   </div>
   {#if read.truncated}
-    <p class="tf-dim tf-logfoot">The first {tests.length.toLocaleString("en-US")} tests, failed ones first. The run has more.</p>
+    <p class="tf-dim tf-logfoot">The first {thousands(tests.length)} tests, failed ones first. The run has more.</p>
   {/if}
 {/if}

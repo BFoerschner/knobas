@@ -29,6 +29,7 @@
   } from "../../ipc/app";
   import { EVENTS } from "../../ipc";
   import { listen as tauriListen } from "@tauri-apps/api/event";
+  import { thousands } from "../counted";
 
   /** What the pane reaches the backend through: the IPC, a fake in tests. */
   export interface FolderRenderPorts {
@@ -363,9 +364,9 @@
           <div class="tf-rendered"><TfMarkdown text={shown.text} base={folder} {fileLink} {render} /></div>
         {:else if drawn.kind.kind === "text" && shown.text !== undefined}
           <pre class="tf-code">{#each lines.slice(0, LINE_CAP) as text, i (i)}<div class="tf-l"><span>{i + 1}</span><span>{text || " "}</span></div>{/each}</pre>
-          {#if lines.length > LINE_CAP}<p class="tf-gonote tf-fpad">Showing the first {LINE_CAP.toLocaleString("en-US")} of {lines.length.toLocaleString("en-US")} lines.</p>{/if}
+          {#if lines.length > LINE_CAP}<p class="tf-gonote tf-fpad">Showing the first {thousands(LINE_CAP)} of {thousands(lines.length)} lines.</p>{/if}
         {:else}
-          <div class="tf-empty"><p>{renderer.name} made {drawn.size.toLocaleString("en-US")} bytes that are not an image, text or a page, so knobas cannot draw them.</p></div>
+          <div class="tf-empty"><p>{renderer.name} made {thousands(drawn.size)} bytes that are not an image, text or a page, so knobas cannot draw them.</p></div>
         {/if}
       </div>
     {:else if view === null}

@@ -9,6 +9,7 @@ import { ipcErrorMessage } from "../../ipc";
 import type { ArtifactEntry, DownloadTarget, LogLine, LogStep, RunLog, RunTest, TestOutcome } from "../../ipc/entity";
 import { push } from "../../shell/toasts.svelte";
 import { marks, matchesAll } from "../filter/filter";
+import { thousands } from "../counted";
 
 // -- the log (#854) -----------------------------------------------------------
 
@@ -89,7 +90,7 @@ export function stepState(log: RunLog, index: number, inFlight: boolean): StepSt
 export function stepSummary(step: LogStep, state: StepState): string {
   const lines = step.last - step.first + 1;
   const took = state === "run" ? "running" : step.seconds === null ? null : secondsLabel(step.seconds);
-  const count = `${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}`;
+  const count = `${thousands(lines)} line${lines === 1 ? "" : "s"}`;
   return took === null ? count : `${took}, ${count}`;
 }
 
@@ -260,9 +261,9 @@ export function stepMatch(current: number, step: 1 | -1, total: number): number 
 
 /** The line under the log: "The whole log, 412 lines." or, past the cap, the part shown. */
 export function logLine(log: RunLog): string {
-  const total = log.total.toLocaleString("en-US");
+  const total = thousands(log.total);
   if (log.lines.length >= log.total) return `The whole log, ${total} line${log.total === 1 ? "" : "s"}.`;
-  const shown = log.lines.length.toLocaleString("en-US");
+  const shown = thousands(log.lines.length);
   return `The last ${shown} of ${total} lines. Download log has all of them.`;
 }
 

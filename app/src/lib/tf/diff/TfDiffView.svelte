@@ -107,6 +107,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { menuThing } from "../context/thing";
+  import { thousands } from "../counted";
 
   let {
     files,
@@ -1136,7 +1137,7 @@
 </div>
 {#if cut}
   <p class="tf-dcut">
-    This diff is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines: it is drawn up to there, and the source's own page has the rest.
+    This diff is over knobas's ceiling of {thousands(DIFF_CEILING)} lines: it is drawn up to there, and the source's own page has the rest.
   </p>
 {/if}
 <div class:tf-dgrid={list} class:tf-rail-shut={list && !railOpen} {@attach sideWidth("diff-files")}>
