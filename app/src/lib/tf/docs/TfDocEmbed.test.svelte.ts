@@ -82,7 +82,6 @@ function ports(doc: DocPage): DocsPorts {
     getEntity: vi.fn(async (id: string) => Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null })),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
-    searchPause: 0,
   } as unknown as DocsPorts;
 }
 

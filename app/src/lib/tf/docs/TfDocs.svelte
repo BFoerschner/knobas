@@ -185,7 +185,6 @@
     matchLine,
     revealMatch,
     scopeName,
-    SEARCH_PAUSE_MS,
     sectionKind,
     sectionsOf,
     spaceHash,
@@ -243,8 +242,6 @@
     refusedWrites?: RefusedWritesPort;
     /** Hears `sync:state`, whose run ends read Docs again (#2072), and `item:refreshed` (#2102); the bridge's when omitted. */
     listen?: PipelinePorts["listen"];
-    /** The pause in typing the search waits for, in ms (#2200); `SEARCH_PAUSE_MS` when omitted, 0 asks on every keystroke. */
-    searchPause?: number;
   }
 
   type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "entityBriefs" | "createLink" | "unlink" | "search" | "launcherHome">;
@@ -654,8 +651,11 @@
   const searching = $derived(query.trim() !== "");
   const forYou = $derived(forYouIn(tree?.for_you ?? [], shownSpace));
 
-  // The search asks once typing pauses (#2200), for what was typed last; an
-  // answer to an older keystroke is dropped.
+  // The search asks at once, for the words it arrived with, and an answer to
+  // an older search is dropped. It used to wait 150 ms for a pause in typing
+  // (#2200), when Docs had a box of its own; the words come whole since #2425
+  // (the launcher's Enter, a chip), so the pause only delayed every answer
+  // (2026-11-17, the PC: `x` drew in 175 ms at 1x with a 14 ms read).
   let asked = 0;
   /** Bumped by *Try again* on a search that could not ask (F-439). */
   let searchAttempt = $state(0);
@@ -670,7 +670,8 @@
     }
     const mine = ++asked;
     const search = io.docsSearch;
-    const ask = () =>
+    // Untracked: what the read touches on its way out is not this effect's to rerun on.
+    untrack(() =>
       void search(text, scope).then(
         (answer) => {
           if (mine !== asked) return;
@@ -681,14 +682,8 @@
         (cause: unknown) => {
           if (mine === asked) searchError = ipcErrorMessage(cause);
         },
-      );
-    const pause = io.searchPause ?? SEARCH_PAUSE_MS;
-    if (pause <= 0) {
-      ask();
-      return;
-    }
-    const timer = setTimeout(ask, pause);
-    return () => clearTimeout(timer);
+      ),
+    );
   });
 
   // A search before any page is read: nothing has named the reader yet, and a hit would change from a name to *you* once opened.

@@ -17,7 +17,7 @@ import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
 import { drafts } from "../drafts.svelte";
-import { forgetReading, OUTLINE_ROOM, READER_DRAWER, READING_MIN, readingAt, SEARCH_PAUSE_MS } from "./docs";
+import { forgetReading, OUTLINE_ROOM, READER_DRAWER, READING_MIN, readingAt } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -147,8 +147,6 @@ function ports(over: Partial<DocsPorts> = {}): DocsPorts {
     getEntity: vi.fn(async (id: string) => Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null })),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
-    // Every keystroke searches at once here; the pause has its own test (#2200).
-    searchPause: 0,
     ...over,
   };
 }
@@ -1023,23 +1021,13 @@ test("the words in the address search every space and list the hits; the picker 
   expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", { source_id: "confluence", key: "OPS" });
 });
 
-test("the search waits for a pause in typing and asks once, for what was typed last (#2200)", async () => {
+test("a search's address asks at once, with no pause for typing: its words arrive whole (2026-11-17)", async () => {
   vi.useFakeTimers();
   try {
-    // The pause as it ships: these ports name none.
-    const { searchPause: _immediate, ...paused } = ports({ docsSearch: vi.fn(async () => HITS) });
-    const io = await draw(["confluence:2"], paused);
-    for (const typed of ["l", "le", "led", "ledg"]) {
-      search(typed);
-      await settle();
-      vi.advanceTimersByTime(SEARCH_PAUSE_MS - 10);
-    }
-    expect(io.docsSearch).not.toHaveBeenCalled();
-    search("ledger");
+    const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
+    search("r");
     await settle();
-    vi.advanceTimersByTime(SEARCH_PAUSE_MS);
-    await settle();
-    expect(vi.mocked(io.docsSearch).mock.calls).toEqual([["ledger", null]]);
+    expect(vi.mocked(io.docsSearch).mock.calls, "asked before any timer ran").toEqual([["r", null]]);
     expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
   } finally {
     vi.useRealTimers();
