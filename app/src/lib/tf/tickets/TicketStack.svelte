@@ -53,7 +53,6 @@
      */
     atMost?: number | null;
   } = $props();
-  const drawn = (shown: readonly MiniBoardCard[]) => (atMost !== null && win.start === 0 && shown.length > atMost ? shown.slice(0, atMost) : shown);
 
   const byKey = $derived(floor === null ? null : new Map(cards.map((one) => [one.entity_id, one])));
   const floorOf = (key: string) => {
@@ -75,6 +74,9 @@
     from: STACK_WINDOW_FROM,
   });
 
+  /** How many of the window's cards this frame draws: `atMost` while the window starts at the top, else every one. */
+  const firstMost = $derived(atMost !== null && win.start === 0 ? atMost : Number.POSITIVE_INFINITY);
+
   /** The page holds this window while the column's box is drawn. */
   const held = () => {
     onwin(win);
@@ -83,7 +85,7 @@
 </script>
 
 <div class="tf-cards" {@attach win.list} {@attach held}>
-  {#each drawn(win.slice(win.on ? cards : cut(cards))) as one (one.entity_id)}
+  {#each win.slice(win.on ? cards : cut(cards)).slice(0, firstMost) as one (one.entity_id)}
     {@render card(one, win.row(one.entity_id))}
   {:else}
     <span class="tf-dim tf-nothing">Nothing here</span>
