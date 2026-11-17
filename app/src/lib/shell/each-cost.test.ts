@@ -282,7 +282,6 @@ const SMALL: Record<string, string> = {
   "tf/tickets/SavedViewSourceLine.svelte  savedViewSource.unsynced": "a handful by what it is: the projects one view names that no source syncs",
   "tf/tickets/Signals.svelte  signals": "on one ticket, page or pull request: one ticket's signals",
   "tf/tickets/TicketCard.svelte  labels": "inside one drawn row: one card's labels, inside the windowed board",
-  "tf/tickets/TicketStack.svelte  drawn(win.slice(win.on ? cards : cut(cards)))": "windowed: the column's window (`win.slice`), its first frame cut to `atMost` cards by `drawn`",
   "tf/tickets/TicketsPage.svelte  columnsOf(lane)": "a handful by what it is: one lane's status columns",
   "tf/tickets/TicketsPage.svelte  group.views": "the profile's own settings, tens at most: the reader's saved views",
   "tf/tickets/TicketsPage.svelte  groups": "the profile's own settings, tens at most: the saved views' groups",
