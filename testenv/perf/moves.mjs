@@ -66,10 +66,10 @@ const PLACES = [
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },
-  { name: "repo-file", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
-  { name: "repo-commit", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
+  { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
+  { name: "repo-commit", optional: "real", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
-  { name: "app-add", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
+  { name: "app-add", optional: "real", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
   { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "Escape", tabs: true },
   { name: "builds", start: "#/time", nav: "builds", hash: "#/builds", away: "time", tabs: true },
   { name: "pipeline", start: "#/builds", press: `${shown} .tf-rail a[href^="#/builds/"], ${shown} a[href^="#/builds/"]`, hash: "#/builds/", away: "Escape" },
@@ -241,7 +241,10 @@ for (const e of results.places) {
   }
   if (e.error) {
     // A place this corpus may not hold (a monitor to create from, an asset) is a note; any other is a gap in the gate.
-    const optional = PLACES.find((p) => e.name === p.name || e.name.startsWith(`${p.name}-tab`))?.optional;
+    // `"real"`: optional on the saved scale database only, where a file and a commit need the live forge and *Add an
+    // application* a clone, which the fixture has.
+    const mark = PLACES.find((p) => e.name === p.name || e.name.startsWith(`${p.name}-tab`))?.optional;
+    const optional = mark === true || (mark === "real" && real);
     if (!optional) over++;
     console.log(`${optional ? "NOTE" : "ERROR"} ${e.throttle}x ${e.name}: ${e.error}`);
   }

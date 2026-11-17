@@ -766,3 +766,15 @@ test("a new rule opens on the first kind with something to choose (F-531)", asyn
   const value = target.querySelector<HTMLSelectElement>("select[aria-label='Applies to which']")!;
   expect([...value.options].length, kind.value).toBeGreaterThan(1);
 });
+
+test("the sub-task switch and the filter bar wait for the sets, so neither moves when the waiting rows give way (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const base = ports();
+  await draw([], { ...base, linkSets: async () => (await late, []) });
+  expect(target.querySelector(".tf-toggle"), "no switch over the waiting rows").toBeNull();
+  expect(target.querySelector(".tf-fbar, .tf-fsearch"), "no bar over them either").toBeNull();
+  answer();
+  await settle();
+  expect(target.querySelector(".tf-toggle"), "the switch under what was read").not.toBeNull();
+});

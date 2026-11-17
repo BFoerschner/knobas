@@ -11,7 +11,14 @@
   import { folderPageHash, OUTPUTS, takesLine } from "./folder-page";
   import { land, LAND_ADD, landKey, takeLanding } from "./landing";
 
-  let { folders = folderRenderers }: { folders?: FolderRenderers } = $props();
+  let {
+    folders = folderRenderers,
+    answered = false,
+  }: {
+    folders?: FolderRenderers;
+    /** Whether the page has read the list already: an empty one says so at once, not a frame after its own read (the nothing-moves pass). */
+    answered?: boolean;
+  } = $props();
 
   let failed = $state<string | null>(null);
   let read = $state(false);
@@ -38,7 +45,7 @@
   </p>
   {#if failed !== null}
     <p class="tf-stg-errt" role="status">Could not read the folder renderers: {failed}</p>
-  {:else if read && folders.list.length === 0}
+  {:else if (read || answered) && folders.list.length === 0}
     <p class="tf-dim">No folder renderers yet.</p>
   {:else if folders.list.length > 0}
     <table class="tf-tbl tf-rnd-own">

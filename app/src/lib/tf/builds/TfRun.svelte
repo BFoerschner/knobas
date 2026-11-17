@@ -180,6 +180,8 @@
   /**
    * The header draws once, whole (`held-head.svelte.ts`): *Re-run* is the view's and *Refresh* or *Sync now* the item's, which
    * landed after the header and pushed *Re-run* and *Open in TeamCity* 105 px left. The tabs under it wait with it: their counts are the view's.
+   * So does the rest of the page (`tf-holdsbelow`): *Refresh run* wraps the actions under the title at 1440 px, and the header
+   * growing a line while it was held pushed the panels 29 px down.
    */
   const drawnHead = heldHead(
     () => runId,
@@ -542,7 +544,7 @@
   <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
-  <header class="tf-fhead tf-bhead" class:tf-unread={!drawnHead.shown}>
+  <header class="tf-fhead tf-bhead tf-holdsbelow" class:tf-unread={!drawnHead.shown}>
     <div>
       <h1>
         {pipeline.name} #{run.number ?? ""}

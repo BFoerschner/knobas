@@ -179,7 +179,8 @@
       </div>
     {/if}
   </header>
-  {#if sets === null || sets.length > 0}
+  <!-- Drawn with the sets it filters, not over the waiting rows: on none it went, and what was under it moved up (the nothing-moves pass). -->
+  {#if sets !== null && sets.length > 0}
     <FilterBar {config} {filter} shown={sets === null ? null : rows.length} total={sets?.length ?? null} />
   {/if}
   <div class="tf-cbody tf-sets">
@@ -235,7 +236,8 @@
         <TfNoMatch noun="link sets" {filter} />
       {/if}
     {/if}
-    {#if inherit !== null}
+    <!-- Under the sets once they are read: drawn under the waiting rows, it moved 73 px up when they gave way (the nothing-moves pass). -->
+    {#if inherit !== null && (sets !== null || failed !== null)}
       <label class="tf-toggle">
         <input type="checkbox" checked={inherit} onchange={(event) => void switchInherit(event.currentTarget.checked)} />
         <span

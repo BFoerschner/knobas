@@ -336,6 +336,8 @@ test("the header draws once, whole: unseen in its room until the run's item has 
   await settle();
   const head = document.querySelector(".tf-bhead")!;
   expect(head.classList.contains("tf-unread")).toBe(true);
+  // What is under it waits with it: the actions wrapping under the title grew the held header a line.
+  expect(head.classList.contains("tf-holdsbelow")).toBe(true);
   answer();
   await settle();
   expect(head.classList.contains("tf-unread")).toBe(false);

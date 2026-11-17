@@ -163,6 +163,8 @@
 .tf-fhead.tf-unread, .tf-tabs.tf-unread { visibility: hidden; }
 /* Its subline keeps a line's room while held, empty or not, so the tabs under it stay where the header shows. */
 .tf-fhead.tf-unread .tf-sub { min-height: 1lh; }
+/* A header whose held actions can wrap holds what is under it too (a run's), so its growing a line moves nothing seen. */
+.tf-fhead.tf-unread.tf-holdsbelow ~ * { visibility: hidden; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */

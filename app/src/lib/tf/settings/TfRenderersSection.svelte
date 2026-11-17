@@ -343,7 +343,7 @@
     {#if refusal !== null && editing === null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
   </div>
 
-  <TfFolderRenderersTable {folders} />
+  <TfFolderRenderersTable {folders} answered={foldersRead} />
 
   {#if editing !== null}
     <TfDialog title={editing === "new" ? "Add a renderer" : `Edit ${saved[editing]?.name ?? ""}`} why={formWhy} onclose={() => (editing = null)}>
