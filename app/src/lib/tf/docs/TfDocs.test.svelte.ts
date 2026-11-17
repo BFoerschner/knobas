@@ -3093,6 +3093,18 @@ function pageDetail(over: Partial<EntityDetail> = {}): EntityDetail {
 const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-rd-head .tf-acts .tf-refresh");
 const docBanners = () => [...target.querySelectorAll(".tf-withdrawn, .tf-turnedoff, .tf-refresh-failed")].map(squash);
 
+test("a page's header actions draw once its row has answered, so Refresh can't take Sync now's place and move them (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), getEntity: vi.fn(async () => (await late, pageDetail())) }));
+  const acts = target.querySelector(".tf-rd-head .tf-acts")!;
+  expect(acts.classList.contains("tf-hidden"), "held while the row is read").toBe(true);
+  answer();
+  await settle();
+  expect(acts.classList.contains("tf-hidden")).toBe(false);
+  expect(refreshButton(), "with the page's own Refresh").not.toBeNull();
+});
+
 test("Refresh ends the header actions, reads the page from its source, then the tree, the page and its row again, keeping what the reader had open (#2136)", async () => {
   const r = refreshProbe();
   const getEntity = vi.fn(async () => pageDetail());

@@ -146,6 +146,7 @@
   import TfScroller from "../TfScroller.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
+  import { heldHead } from "../held-head.svelte";
   import TfKey from "../TfKey.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -513,6 +514,8 @@
   /** The open page's row (`get_entity`), `null` until read or when it cannot be. */
   let detail = $state<EntityDetail | null>(null);
   let detailAsked = 0;
+  /** Whether the open page's row read has answered, found or not: the header's actions wait for it. */
+  let detailRead = $state(false);
   /** The header's *Refresh* or *Sync now*. */
   const refresh = createDetailRefresh(untrack(() => io.refresh ?? DETAIL_REFRESH_BRIDGE));
 
@@ -521,10 +524,14 @@
     const mine = ++detailAsked;
     return io.getEntity(id).then(
       (answer) => {
-        if (mine === detailAsked) detail = answer;
+        if (mine !== detailAsked) return;
+        detail = answer;
+        detailRead = true;
       },
       () => {
-        if (mine === detailAsked && !quiet) detail = null;
+        if (mine !== detailAsked) return;
+        if (!quiet) detail = null;
+        detailRead = true;
       },
     );
   }
@@ -598,6 +605,7 @@
     if (!ready) return;
     pageError = null;
     detail = null;
+    detailRead = false;
     revealed = [];
     // No page to open: what was open goes, or the home would draw under its header.
     if (id === null) {
@@ -615,6 +623,15 @@
       ++detailAsked;
     };
   });
+
+  /**
+   * The header's actions draw once, whole (`held-head.svelte.ts`, the nothing-moves pass): the view's *Sync now* drew
+   * before the page's row was read, and *Refresh page* taking its place moved every action 23 px left.
+   */
+  const actsHeld = heldHead(
+    () => target,
+    () => detailRead,
+  );
 
   // A sync run's end (every run's, #2072) and a refresh naming one of Docs'
   // echoes (#2102) read the tree and the open page again, so what they brought
@@ -1893,7 +1910,7 @@
             <h1 class="tf-rd-title" tabindex="-1">
               <TfMarked text={p.title} {stems} />
             </h1>
-            <div class="tf-acts" bind:this={headActs}>
+            <div class="tf-acts" class:tf-hidden={!actsHeld.shown} bind:this={headActs}>
               {#if job !== null && linkPorts}
                 {@const key = job}
                 {@const ref = jobAt ?? job}
