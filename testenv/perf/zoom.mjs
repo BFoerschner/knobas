@@ -15,7 +15,11 @@
 // every swap there, which in a real zoom (or Chrome started at the product, `--force-device-scale-factor`) they do not.
 // A level's scroll is measured with Chrome started at the product: `--size 2327x1309@1.375 --levels 1` is 2560x1440 at
 // 125 % zoomed to 110 %. Per page, throttle and level, from 100 % and back, the median over `--repeat` steps of:
-//   step     ms from the key to the end of the first frame drawn at the new scale: what a person waits for
+//   step     ms from the key to the end of the first frame drawn at the new scale: what a person waits for, held to a
+//            page's line (100 / 200 / 300 ms at 1x / 4x / 6x; Fable's ruling, the ux18 pass, 2026-11-17: a step lays
+//            the whole page out again at its new width, as a window resized or a page shown again)
+//   plate    ms from the key to the end of the first frame that draws the plate's new level: the key's own answer,
+//            held to a key's line (100 / 100 / 200 ms), drawn from the press before the webview is told
 //   frame    that frame's main-thread work (probe.js's frameWork), and the longest frame in the 600 ms after it
 //   loaf     the longest long animation frame in that time, if any (over 50 ms)
 // and at 100 % (the scale Chrome was started at), the page's list scrolled by script at 3,000 px/s for 4 s as `run.mjs`
@@ -113,17 +117,22 @@ for (const page of PAGES) {
       // At 100 % there is no step: the scroll alone, the line the levels are read against.
       for (let r = 0; r < (level === 1 ? 0 : repeat); r++) {
         for (const [to, key] of [[level, level >= 1 ? "=" : "-"], [1, level >= 1 ? "-" : "="]]) {
-          await js(`window.__zr = null; addEventListener("resize", () => { window.__zr ??= performance.now(); }, { once: true }); __fr.start(); 1`);
+          await js(`window.__zr = null; addEventListener("resize", () => { window.__zr ??= performance.now(); }, { once: true });
+            window.__zp = null; { const plate = document.querySelector(".tf-zoomlevel"); if (plate) new MutationObserver((_, o) => { window.__zp ??= performance.now(); o.disconnect(); }).observe(plate, { childList: true, subtree: true, characterData: true }); }
+            __fr.start(); 1`);
           const t0 = await step(to, key);
           await sleep(700);
-          const got = await js(`(() => { const fs = __fr.frames.map((f) => ({ t0: f.t0, end: f.end })); const r = __fr.stop(0); return { fs, loaf: r.loaf, tr: window.__zr, dpr: devicePixelRatio }; })()`);
+          const got = await js(`(() => { const fs = __fr.frames.map((f) => ({ t0: f.t0, end: f.end })); const r = __fr.stop(0); return { fs, loaf: r.loaf, tr: window.__zr, tp: window.__zp, dpr: devicePixelRatio }; })()`);
           if (to !== level) continue;
           const frames = got.fs.filter((f) => f.end !== null);
           // The resize steps run in the frame that lays out the new size, before its frame callbacks.
           const first = got.tr === null ? null : frames.find((f) => f.t0 >= got.tr) ?? null;
           const round = (x) => Math.round(x * 10) / 10;
+          // The plate's new level is written in a task; the frame after it paints it.
+          const plated = got.tp === null ? null : frames.find((f) => f.t0 >= got.tp) ?? null;
           runs.push({
             step: first ? round(first.t0 + first.end - t0) : null,
+            plate: plated ? round(plated.t0 + plated.end - t0) : null,
             frame: first ? round(first.end) : null,
             after: round(Math.max(0, ...frames.filter((f) => f !== first && f.t0 > (got.tr ?? 0)).map((f) => f.end))),
             loaf: Math.max(0, ...got.loaf.map((l) => l.duration)),
@@ -135,7 +144,7 @@ for (const page of PAGES) {
       }
       const row = {
         page: page.name, size: size.name, throttle, level,
-        step: median(runs.map((x) => x.step)), frame: median(runs.map((x) => x.frame)), after: median(runs.map((x) => x.after)),
+        step: median(runs.map((x) => x.step)), plate: median(runs.map((x) => x.plate)), frame: median(runs.map((x) => x.frame)), after: median(runs.map((x) => x.after)),
         loaf: median(runs.map((x) => x.loaf)),
         dpr: runs[0]?.dpr ?? null, runs,
       };
@@ -167,7 +176,9 @@ for (const page of PAGES) {
       })()`);
       results.push(row);
       const sc = row.scroll;
-      console.log(`${row.page.padEnd(14)} ${row.size} ${throttle}x ${Math.round(level * 100)} %: step ${row.step} ms (frame ${row.frame}, then ≤ ${row.after}), loaf ${row.loaf}, dpr ${row.dpr}` +
+      const PAGE_LINE = { 1: 100, 4: 200, 6: 300 }, KEY_LINE = { 1: 100, 4: 100, 6: 200 };
+      const over = (ms, line) => (ms !== null && line !== undefined && ms > line ? ` OVER ${line}` : "");
+      console.log(`${row.page.padEnd(14)} ${row.size} ${throttle}x ${Math.round(level * 100)} %: step ${row.step} ms${over(row.step, PAGE_LINE[throttle])} (frame ${row.frame}, then ≤ ${row.after}), plate ${row.plate} ms${over(row.plate, KEY_LINE[throttle])}, loaf ${row.loaf}, dpr ${row.dpr}` +
         (level !== 1 ? "" : sc ? `; scroll ${sc.fps} fps, work ${sc.p50} / ${sc.p99} ms, dropped ${sc.dropped} %, rows moved ${sc.moved} of ${sc.kept} row-frames` : "; no scroller"));
       writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
     }
