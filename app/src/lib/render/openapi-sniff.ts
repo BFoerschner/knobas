@@ -52,7 +52,8 @@ function jsonKey(head: string): { key: "openapi" | "swagger"; version: string } 
     if (c === 34 /* " */) {
       const end = stringEnd(head, i);
       if (end < 0) return null;
-      if (depth === 1 && expectKey) {
+      // Only the outermost object's `{` and commas start a key, so a key read here is a top-level one.
+      if (expectKey) {
         const key = head.slice(i + 1, end);
         expectKey = false;
         if (key === "openapi" || key === "swagger") {

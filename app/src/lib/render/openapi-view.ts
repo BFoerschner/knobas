@@ -188,7 +188,8 @@ export const EXAMPLE_CAP = 20_000;
 export function exampleText(value: unknown): string {
   let text: string;
   try {
-    text = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value));
+    // `JSON.stringify(undefined)` is `undefined` whatever its type says; an example with no value draws empty.
+    text = typeof value === "string" ? value : value === undefined ? "" : JSON.stringify(value, null, 2);
   } catch {
     text = String(value);
   }

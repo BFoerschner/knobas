@@ -35,6 +35,8 @@
   let { node, base, st, k, trail = [], from, top = false }: Props = $props();
 
   const obj = $derived(isObj(node) ? node : null);
+  /** The most properties drawn of one schema; the rest are counted, and in Source. */
+  const FIELDS = 200;
   const fields = $derived(obj !== null && isObj(obj.properties) ? Object.entries(obj.properties) : []);
   const required = $derived(new Set(Array.isArray(obj?.required) ? (obj.required as unknown[]).map(String) : []));
   const comps = $derived(
@@ -146,7 +148,7 @@
 {:else}
   {#if fields.length > 0}
     <div class="tf-oas-props">
-      {#each fields as [name, schema] (name)}
+      {#each fields.slice(0, FIELDS) as [name, schema] (name)}
         {@const key = `${k}/${name}`}
         {@const dep = isObj(schema) && schema.deprecated === true}
         <div class="tf-oas-prop">
@@ -161,6 +163,7 @@
           {#if st.open.has(key)}{@render opened(schema, key)}{/if}
         </div>
       {/each}
+      {#if fields.length > FIELDS}<p class="tf-oas-note">And {fields.length - FIELDS} more properties, in Source.</p>{/if}
     </div>
   {/if}
   {#each comps as comp (comp.c)}

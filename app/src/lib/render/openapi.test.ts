@@ -30,6 +30,7 @@ test("a spec is recognised by its top-level openapi or swagger key, in YAML or J
 test("a file whose openapi key is not at its top, or that names no version knobas draws, is not a spec", () => {
   expect(isOpenApi(COMPOSE_YAML)).toBe(false);
   expect(isOpenApi(`{"name": "pkg", "config": {"openapi": "3.0.0"}}`)).toBe(false);
+  expect(isOpenApi(`{"name": "pkg", "config": {"x": 1, "openapi": "3.0.0"}}`)).toBe(false);
   expect(isOpenApi(`  openapi: 3.0.0\n`)).toBe(true);
   expect(isOpenApi(`info:\n  openapi: 3.0.0\n`)).toBe(false);
   expect(isOpenApi(`openapi: 4.0.0\n`)).toBe(false);

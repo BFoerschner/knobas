@@ -402,6 +402,7 @@ const TfFolderRenderersTable = (await import("../tf/settings/TfFolderRenderersTa
 const { createFolderRenderers } = await import("../render/folders.svelte");
 const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
+const TfOpenApi = (await import("../tf/render/TfOpenApi.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
@@ -1504,6 +1505,42 @@ const CASES: Case[] = [
       app: mount(TfDocEmbed, {
         target,
         props: { content: { kind: "html", html: "<p>x</p>" }, sourceName: "Confluence", webUrl: null, onopen: () => {} },
+      }),
+    }),
+  },
+  {
+    /** An OpenAPI spec (ux18): its parse answers late, the *Reading the spec…* clock armed meanwhile. */
+    name: "TfOpenApi",
+    source: "lib/tf/render/TfOpenApi.svelte",
+    open: (target) => ({
+      app: mount(TfOpenApi, {
+        target,
+        props: {
+          path: "openapi.yaml",
+          text: "openapi: 3.0.0\n",
+          engine: (_session: number, call: { kind: string }) =>
+            deferred(
+              call.kind === "open"
+                ? {
+                    ok: true,
+                    index: {
+                      key: "openapi",
+                      version: "3.0.0",
+                      title: "T",
+                      apiVersion: "1",
+                      description: "",
+                      servers: [],
+                      tags: [],
+                      ops: [{ i: 0, method: "get", path: "/a", summary: "", operationId: null, tags: [], deprecated: false, anchor: "get /a" }],
+                      pathRefs: [],
+                      schemas: [],
+                      schemaBase: "#/components/schemas/",
+                      problems: [],
+                    },
+                  }
+                : null,
+            ),
+        },
       }),
     }),
   },

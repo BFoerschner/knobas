@@ -420,18 +420,21 @@ const BINARY: Record<string, () => Uint8Array> = {
   "docs/scan.pdf": SCAN_PDF,
   "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
 };
-/** `?fake-openapi` (ux18): a spec of the pet store with a ref into another file, and one of 5,000 operations. */
-let specs: Record<string, string> | null = null;
-function openapiFiles(): Record<string, string> {
-  specs ??= {
-    "api/openapi.yaml": PETS_30_YAML,
-    "api/split.yaml": SPLIT_31_YAML,
-    "api/schemas/order.yaml": ORDER_YAML,
-    "api/paths/items.yaml": ITEMS_YAML,
-    "api/big.yaml": bigSpec(5000),
-  };
-  return specs;
-}
+/**
+ * `?fake-openapi` (ux18): a spec of the pet store, one with refs into other files, and one of 5,000 operations. Built
+ * once, when first asked: constants, so nothing here goes back to a seed.
+ */
+const openapiFiles: () => Record<string, string> = (() => {
+  let specs: Record<string, string> | null = null;
+  return () =>
+    (specs ??= {
+      "api/openapi.yaml": PETS_30_YAML,
+      "api/split.yaml": SPLIT_31_YAML,
+      "api/schemas/order.yaml": ORDER_YAML,
+      "api/paths/items.yaml": ITEMS_YAML,
+      "api/big.yaml": bigSpec(5000),
+    });
+})();
 
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
 
