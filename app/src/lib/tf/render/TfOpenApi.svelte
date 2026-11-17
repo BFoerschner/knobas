@@ -28,7 +28,7 @@
   import TfOasOperation from "./TfOasOperation.svelte";
   import TfOasSchema from "./TfOasSchema.svelte";
   import { OasState, innerRef } from "./oas.svelte";
-  import { refTarget, type Opened, type Operation, type OpRow, type PathRef } from "../../render/openapi";
+  import { refTarget, type Opened, type Operation, type OpRow, type PathRef, type SpecIndex } from "../../render/openapi";
   import { groupsOf, haystack, matches, rowsOf, terms, type Row } from "../../render/openapi-view";
   import { SpecSession, specEngine, type ReadFile, type SpecEngine } from "../../render/openapi-port";
 
@@ -105,10 +105,18 @@
 
   const index = $derived(opened !== null && opened.ok ? opened.index : null);
   const groups = $derived(index === null ? [] : groupsOf(index));
-  const hays = $derived(new Map<OpRow, string>(index === null ? [] : index.ops.map((op) => [op, haystack(op)])));
-
   let typed = $state("");
   const words = $derived(terms(typed));
+  /** Whether the filter holds words: what the haystacks wait for, so an open builds none of 5,000. */
+  const filtering = $derived(words.length > 0);
+  /** The haystacks, built at the filter's first word and kept for the spec, so a filter cleared and typed again reuses them. */
+  let built: { of: SpecIndex; hays: Map<OpRow, string> } | null = null;
+  const NO_HAYS = new Map<OpRow, string>();
+  const hays = $derived.by(() => {
+    if (index === null || !filtering) return NO_HAYS;
+    if (built?.of !== index) built = { of: index, hays: new Map(index.ops.map((op) => [op, haystack(op)])) };
+    return built.hays;
+  });
 
   /** Open operations by index, their detail once read; open external path items; open schemas. */
   const openOps = new SvelteSet<number>();
@@ -117,7 +125,11 @@
   const refOps = new SvelteMap<string, { ok: true; ops: Operation[] } | { ok: false; error: string }>();
   const openSchemas = new SvelteSet<string>();
 
-  const rows = $derived(index === null ? [] : rowsOf(groups, hays, index.schemas, words, { ops: openOps, refs: openRefs, schemas: openSchemas }));
+  // Plain copies of what is open, read once: `rowsOf` asks each of 5,000 rows, and a reactive set's every ask is a
+  // signal read (the PC's profile of the big open, ux18).
+  const rows = $derived(
+    index === null ? [] : rowsOf(groups, hays, index.schemas, words, { ops: new Set(openOps), refs: new Set(openRefs), schemas: new Set(openSchemas) }),
+  );
   const total = $derived(index === null ? 0 : index.ops.length + index.pathRefs.length);
   const kept = $derived(
     index === null || words.length === 0
