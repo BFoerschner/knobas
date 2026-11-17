@@ -10,11 +10,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CheckoutApplicationDraft, CheckoutSettings, EntityRow, OpenObject } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
 import { pageContext } from "../kept-pages.svelte";
+import { backStepContext } from "../page-name.svelte";
 import { PRESS_HOLD_MS } from "../press-hold.svelte";
 import { appPagePlace, LAST_TRIED_KEY } from "./app-page";
 import { createApps, type Apps } from "./apps.svelte";
 import { forgetAppDrafts } from "./app-drafts.svelte";
 import TfAppPage from "./TfAppPage.svelte";
+import { takeLanding } from "../settings/landing";
 import type { TryReads } from "./try-reads";
 
 const PAYOUT = "gitea:tidewater/payout-service";
@@ -429,4 +431,67 @@ test("while later batches of checkouts come in, the picked repository and what i
   }
   expect(target.querySelectorAll("#tf-app-repo option")).toHaveLength(2);
   expect(asked).toEqual({ files: 1, commits: 1, prs: 1 });
+});
+
+test("each way back to the list names the entry it lands on: Add the new one, Save the one edited, Remove the one that took its place, Cancel the one opened (2026-11-17)", async () => {
+  // Björn, ux17: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…".
+  takeLanding("checkouts");
+  await draw("#/settings/checkouts/add");
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer {path}");
+  button("Add application").click();
+  await settle();
+  expect(left).toBe(1);
+  expect(takeLanding("checkouts"), "Add lands on the new entry").toBe("mygitviewer");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/terminal");
+  type("command", "wt -d {path} --new");
+  button("Save").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Save lands on the entry edited").toBe("terminal");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/terminal");
+  button("Remove").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Remove lands on the entry that took its place").toBe("vscode");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/mygitviewer");
+  button("Remove").click();
+  await settle();
+  expect(takeLanding("checkouts"), "the last one removed lands on the one before it").toBe("vscode");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/vscode");
+  button("Cancel").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Cancel lands on the entry it was opened on").toBe("vscode");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/add");
+  button("Cancel").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Cancel on Add lands on Add an application").toBe("add");
+  app = null;
+});
+
+test("opened from a repository's Open in…, Save goes back to the repository and the list lands nowhere", async () => {
+  takeLanding("checkouts");
+  const steps: [string, boolean][] = [];
+  const at = appPagePlace(["checkouts", "add", PAYOUT])!;
+  const context = pageContext(() => shown);
+  app = mount(TfAppPage, {
+    target,
+    props: { at, apps, reads, back: { name: "payout-service", hash: "#/repo/gitea%3Atidewater%2Fpayout-service", opened: true } },
+    context: new Map([...context, ...backStepContext((to, opened) => void steps.push([to, opened]))]),
+  });
+  await settle();
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer {path}");
+  button("Add application").click();
+  await settle();
+  expect(steps).toEqual([["#/repo/gitea%3Atidewater%2Fpayout-service", true]]);
+  expect(takeLanding("checkouts")).toBeNull();
 });

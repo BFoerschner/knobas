@@ -10,6 +10,8 @@ import type { EntityRow } from "../../ipc/entity";
 import { createFolderRenderers } from "../../render/folders.svelte";
 import type { FolderRenderPorts } from "../render/TfFolderRender.svelte";
 import TfFolderRendererPage from "./TfFolderRendererPage.svelte";
+import TfFolderRenderersTable from "./TfFolderRenderersTable.svelte";
+import { landOn, takeLanding } from "./landing";
 
 let target: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
@@ -156,4 +158,56 @@ test("while later batches of checkouts come in, the picked repository stays and 
     expect(folders()).toEqual(first);
   }
   expect(asked).toBe(1);
+});
+
+test("each way back to the list names the entry it lands on, and the list focuses it (2026-11-17)", async () => {
+  const one = { id: "a", name: "A", command: "a {path}", holds: [], folders: [], output: "text", timeout_secs: 30 } as FolderRenderer;
+  const two = { ...one, id: "b", name: "B", command: "b {path}" } as FolderRenderer;
+  takeLanding("folder-renderers");
+  const mountPage = async (s: ReturnType<typeof store>, renderer: string | null) => {
+    app = mount(TfFolderRendererPage, { target, props: { at: { renderer, repo: null, folder: null }, folders: s.folders, reads, ports: ports().p, leave: () => {} } });
+    await settle();
+  };
+  const done = () => {
+    unmount(app!);
+    app = null;
+  };
+
+  let s = store([one]);
+  await mountPage(s, null);
+  type("Name", "Tree");
+  type("Command", "tree {path}");
+  button("Add folder renderer").click();
+  await settle();
+  expect(takeLanding("folder-renderers"), "Add lands on the new entry").toBe(s.list().at(-1)!.id);
+  done();
+
+  s = store([one, two]);
+  await mountPage(s, "a");
+  button("Save").click();
+  await settle();
+  expect(takeLanding("folder-renderers"), "Save lands on the entry edited").toBe("a");
+  done();
+
+  s = store([one, two]);
+  await mountPage(s, "a");
+  button("Remove").click();
+  await settle();
+  expect(takeLanding("folder-renderers"), "Remove lands on the entry that took its place").toBe("b");
+  done();
+
+  s = store([one]);
+  await mountPage(s, "a");
+  button("Cancel").click();
+  await settle();
+  expect(takeLanding("folder-renderers"), "Cancel lands on the entry it was opened on").toBe("a");
+  done();
+
+  // The list's end: it focuses what it was told, once it has read the list.
+  s = store([one, two]);
+  landOn("folder-renderers", "b");
+  app = mount(TfFolderRenderersTable, { target, props: { folders: s.folders } });
+  await settle();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit B");
+  expect(takeLanding("folder-renderers")).toBeNull();
 });

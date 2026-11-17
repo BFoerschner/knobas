@@ -25,6 +25,14 @@
 - Press trips (`--strict`): every press the page brought, twice by key, twice with the pointer still, and left during its toast; `app-page`, from *Open in…* to the page, tried on a picked repository, saved and back with it in the menu.
 - The windowless backend over a clone of the saved database, with a clones root under a path with a space: the page fills from it, *Try it* saves and reports what the program said, and *Save* returns to the repository.
 
+## 2026-11-17: back to the list, and no flicker while checkouts come in
+
+**Asked (Björn, on v3.2.9-ux17):** "After adding a new application for open in it opens another page instead of going back to the checkouts and open…", and "Clicking on edit for checkouts and open in on an application keeps spazzing around for the first few seconds running through the repositories".
+
+- **Back to the list.** The opener (`opener.ts`) took every `#/settings/…` address for one page, so an application's page kept the opener Settings itself had: *Save*, *Cancel*, *Remove* and `Esc` went to the page Settings was opened from (Code, a repository, Inbox). An application's page and a folder renderer's are now pages of their own: opened from their list, every way out steps back through history to it, so Back from the list doesn't come to the page again, and the list focuses the entry saved (a new one too), the one that took a removed one's place, or *Add* (`settings/landing.ts`). Opened from a repository's *Open in…*, it still goes back to the repository. File renderers are edited in a dialog on their section, which never leaves it.
+- **Try it on picks once.** The repositories with a checkout came in batches of 50 into deep state, so each batch made the picked repository a new object and its files, commits and pull requests were read again from *Reading…*: the pickers and every *It will run* line flickered once per batch. `TryRepos` (`openin/try-repos.svelte.ts`) holds the list as raw state and follows the picked id, for both pages; the rows a command needs are drawn before the first answer, and an answer only fills them in.
+- **Tested:** `try-repos.test.svelte.ts`, the batches in `TfAppPage.test.svelte.ts` and `TfFolderRendererPage.test.svelte.ts`, the landings in those and `TfCheckoutsSection.test.svelte.ts`, `Esc` from both pages in `TfShell.test.svelte.ts` (each failing before), and the press trips' `app-page-rows-still`, `app-add-rows-still`, `folder-page-rows-still`, `apps-list-return` and `folders-list-return`.
+
 ## Reversing it
 
 Put `TfAppDialog.svelte` and `TfAppsManage.svelte` back from before PR #2479's commit 488dd109 and have `TfOpenIn` open them; the page, its address and the table's links can stay. The dialog's lift in `TfDialog`, the Windows preview and the browser links are fixes that stand on their own.

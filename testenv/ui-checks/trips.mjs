@@ -136,6 +136,10 @@
 //                 must be at its address; name and command typed, the second repository picked, *It will run* must name that repository's
 //                 checkout; *Try it* must start it there, *Add application* must save and go back to `route`, whose *Open in…* then lists it.
 //
+//   list-return   2026-11-17 (Björn: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…").
+//                 From `route`, open `list`, then each of `steps` by real pointer: `open` (a `sel` on the row holding `row`'s words), `fill`, `press`. Fails unless
+//                 the address is `list` again with focus on the row holding `lands`, in view; and unless Back from the list goes to `route`, not to a page of it.
+//
 //   rows-still    The still-rows pass (PR #2479, 2026-11-11; Björn: "another repo just pops in where my cursor was"). Records the box of every
 //                 `rows` element in view, each frame, from the first draw (3 rows, or all there are) until the page has settled, and fails if
 //                 one of those rows moves or changes height, leaves, or a row comes in above one of them in its column. `query` holds `fake-late`, so each
@@ -299,6 +303,21 @@ const PAGES = [
   ] },
   { page: "A folder renderer's page", route: "settings/renderers/folder/folder-listing", trips: [
     { id: "folder-page-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "settings/renderers", ways: ["first", "return"], rows: ".tf-apppage .tf-stg-row, .tf-apppage h2", query: `${STILL_Q}&fake-folder-render`, tail: 1200 },
+  ] },
+  // An application's page and a folder renderer's hand back to their list (2026-11-17): every way out, by real pointer, from Code.
+  { page: "Settings, back to the list", route: "code", trips: [
+    { id: "apps-list-return", kind: "list-return", strict: true, finding: "apps-page", list: "settings/checkouts", steps: [
+      { name: "add", open: { sel: ".tf-stg-acts a", row: "Add an application" }, fill: [["#tf-app-name", "Trip App"], ["#tf-app-command", "trip-app {path}"]], press: "Add application", lands: "Trip App" },
+      { name: "save", open: { sel: ".tf-stg-apps a", row: "Fork" }, fill: [["#tf-app-command", "open -a Fork --new {path}"]], press: "Save", lands: "Fork" },
+      { name: "cancel", open: { sel: ".tf-stg-apps a", row: "Terminal" }, press: "Cancel", lands: "Terminal" },
+      { name: "cancel an add", open: { sel: ".tf-stg-acts a", row: "Add an application" }, press: "Cancel", lands: "Add an application" },
+      { name: "remove", open: { sel: ".tf-stg-apps a", row: "Fork" }, press: "Remove", lands: "IntelliJ IDEA" },
+    ] },
+    { id: "folders-list-return", kind: "list-return", strict: true, finding: "apps-page", query: "&fake-folder-render", list: "settings/renderers", steps: [
+      { name: "add", open: { sel: ".tf-stg-acts a", row: "Add a folder renderer" }, fill: [["#tf-frp-name", "Tree"], ["#tf-frp-cmd", "tree {path}"]], press: "Add folder renderer", lands: "Tree" },
+      { name: "save", open: { sel: ".tf-rnd-own a", row: "Folder listing" }, press: "Save", lands: "Folder listing" },
+      { name: "remove", open: { sel: ".tf-rnd-own a", row: "Tree" }, press: "Remove", lands: "Folder listing" },
+    ] },
   ] },
   { page: "A repository's Open in…", route: REPO, trips: [
     { id: "openin-browser-key", kind: "enter-twice", strict: true, finding: "open-on-gitea", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", starts: "Browser" }, returns: "Open in…" },
@@ -3065,6 +3084,64 @@ async function worker(queue, results) {
     return { reasons, note: `${from} → ${at}, tried on ${picked}, saved, back at ${back}, menu ${items.length} items` };
   }
 
+  // 2026-11-17 (Björn: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…").
+  async function listReturn(t) {
+    await open(t);
+    const reasons = [];
+    const notes = [];
+    const from = await evaluate("location.hash");
+    await go(t.list);
+    await sleep(400);
+    // A real press on the first `sel` whose row (or itself) holds `row`'s words.
+    const press = async (sel, row) => {
+      const at = JSON.parse(await evaluate(`JSON.stringify((() => {
+        const el = [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => e.getClientRects().length && (e.closest("tr") ?? e).textContent.includes(${JSON.stringify(row)}));
+        if (!el) return null;
+        el.scrollIntoView({ block: "nearest" });
+        const b = el.getBoundingClientRect();
+        return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+      })())`));
+      if (at === null) return false;
+      await mouseTo(at.x, at.y);
+      await sleep(60);
+      await pressAt(at.x, at.y);
+      return true;
+    };
+    for (const step of t.steps) {
+      if (!(await press(step.open.sel, step.open.row))) throw new Error(`${step.name}: no ${step.open.sel} on ${step.open.row}'s row`);
+      await opener.settleAfterChange();
+      await sleep(600);
+      const page = await evaluate("location.hash");
+      if (page === `#/${t.list}`) throw new Error(`${step.name}: the press opened no page`);
+      for (const [sel, text] of step.fill ?? []) if (!(await evaluate(`window.__trip.fill(${JSON.stringify(sel)}, ${JSON.stringify(text)})`))) throw new Error(`${step.name}: no ${sel}`);
+      await sleep(200);
+      if (!(await press(".tf-apppage button", step.press))) throw new Error(`${step.name}: no ${step.press} on ${page}`);
+      await opener.settleAfterChange();
+      await sleep(600);
+      const back = await evaluate("location.hash");
+      if (back !== `#/${t.list}`) {
+        reasons.push(`${step.name}: ${step.press} went to ${back}, not back to #/${t.list}`);
+        await go(t.list);
+        continue;
+      }
+      const focus = JSON.parse(await evaluate(`JSON.stringify((() => {
+        const a = document.activeElement;
+        const b = a?.getBoundingClientRect();
+        return { row: ((a?.closest("tr") ?? a)?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60), inView: !!b && b.height > 0 && b.top >= 0 && b.bottom <= innerHeight };
+      })())`));
+      if (!focus.row.includes(step.lands)) reasons.push(`${step.name}: focus is on "${focus.row}", not on ${step.lands}`);
+      else if (!focus.inView) reasons.push(`${step.name}: ${step.lands} has focus out of view`);
+      notes.push(`${step.name}: "${focus.row.slice(0, 24)}"`);
+    }
+    // Back from the list: the page Settings was opened from, never one of its pages again.
+    await evaluate("history.back(), 1");
+    await opener.settleAfterChange();
+    await sleep(300);
+    const after = await evaluate("location.hash");
+    if (after !== from) reasons.push(`Back from the list went to ${after}, not ${from}`);
+    return { reasons, note: `${notes.join("; ")}; Back to ${after}` };
+  }
+
   async function rightClick(t) {
     await open(t);
     const reasons = [];
@@ -3160,7 +3237,7 @@ async function worker(queue, results) {
     return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
   }
 
-  const KINDS = { "right-click": rightClick, "app-page": appPage, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };

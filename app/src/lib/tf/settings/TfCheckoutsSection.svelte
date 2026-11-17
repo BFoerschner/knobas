@@ -27,6 +27,7 @@
   import TfDialog from "./TfDialog.svelte";
   import TfCloneAll from "../openin/TfCloneAll.svelte";
   import { PressHold } from "../press-hold.svelte";
+  import { land, LAND_ADD, landKey, takeLanding } from "./landing";
 
   let {
     apps = sharedApps,
@@ -59,6 +60,13 @@
     rootError = null;
     editingRoot = true;
   }
+
+  // Back from an application's page: focus the entry it saved, the one that took a removed one's place, or *Add an application*.
+  $effect(() => {
+    if (settings === null) return;
+    const key = takeLanding("checkouts");
+    if (key !== null) land("checkouts", key);
+  });
 
   $effect(() => {
     void apps.reload();
@@ -188,14 +196,14 @@
                   <button class="tf-btn tf-sm tf-ghost" onclick={() => void makeDefault(app.id, app.name)}>Make default</button>
                 {/if}
                 <button class="tf-btn tf-sm tf-ghost" disabled={index === 0} title={index === 0 ? "It is first" : `Move ${app.name} up`} aria-label="Move {app.name} up" onclick={() => void moveUp(index)}>↑</button>
-                <a class="tf-btn tf-sm" href={appPageHash({ app: app.id })}>Edit</a>
+                <a class="tf-btn tf-sm" href={appPageHash({ app: app.id })} data-land={landKey("checkouts", app.id)}>Edit</a>
               </span>
             </td>
           </tr>
         {/each}
       </tbody>
     </table>
-    <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={appPageHash()}>Add an application</a></div>
+    <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={appPageHash()} data-land={landKey("checkouts", LAND_ADD)}>Add an application</a></div>
   </div>
   <div class="tf-stg-sec">
     <h2>Pull request worktrees</h2>

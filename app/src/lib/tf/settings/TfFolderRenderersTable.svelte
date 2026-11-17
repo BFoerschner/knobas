@@ -9,6 +9,7 @@
   import { folderRenderers, type FolderRenderers } from "../../render/folders.svelte";
   import { secondsLabel } from "../../time/format";
   import { folderPageHash, OUTPUTS, takesLine } from "./folder-page";
+  import { land, LAND_ADD, landKey, takeLanding } from "./landing";
 
   let { folders = folderRenderers }: { folders?: FolderRenderers } = $props();
 
@@ -19,6 +20,12 @@
       () => (read = true),
       (cause: unknown) => (failed = ipcErrorMessage(cause)),
     );
+  });
+  // Back from a folder renderer's page: focus the entry it saved, the one that took a removed one's place, or *Add a folder renderer*.
+  $effect(() => {
+    if (!read) return;
+    const key = takeLanding("folder-renderers");
+    if (key !== null) land("folder-renderers", key);
   });
   const outputOf = (value: string) => OUTPUTS.find((o) => o.value === value)?.label.replace(/ \(.*\)$/, "") ?? value;
 </script>
@@ -43,11 +50,11 @@
             <td class="tf-small"><span class="tf-mono">{r.command}</span></td>
             <td class="tf-small">{takesLine(r)}</td>
             <td class="tf-small">{outputOf(r.output)}, {secondsLabel(r.timeout_secs)}</td>
-            <td class="tf-right"><a class="tf-btn tf-sm tf-ghost" href={folderPageHash({ renderer: r.id })} aria-label="Edit {r.name}">Edit</a></td>
+            <td class="tf-right"><a class="tf-btn tf-sm tf-ghost" href={folderPageHash({ renderer: r.id })} aria-label="Edit {r.name}" data-land={landKey("folder-renderers", r.id)}>Edit</a></td>
           </tr>
         {/each}
       </tbody>
     </table>
   {/if}
-  <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={folderPageHash()}>Add a folder renderer</a></div>
+  <div class="tf-stg-acts tf-stg-gap"><a class="tf-btn tf-sm" href={folderPageHash()} data-land={landKey("folder-renderers", LAND_ADD)}>Add a folder renderer</a></div>
 </div>

@@ -438,6 +438,33 @@ test("a run opened from another run's link: Esc returns to that run, and a secon
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
+test("an application's page and a folder renderer's, opened from their list: Esc steps back to the list, not to the page Settings was opened from (2026-11-17)", async () => {
+  // Björn, ux17: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…".
+  // Settings was one page to the opener, so its pages kept the opener Settings had: Save, Cancel and Esc all went to Code.
+  start({ nav: windowNav });
+  await at("#/code");
+  for (const [list, page] of [
+    ["#/settings/checkouts", "#/settings/checkouts/app/vscode"],
+    ["#/settings/checkouts", "#/settings/checkouts/add"],
+    ["#/settings/renderers", "#/settings/renderers/folder/folder-listing"],
+  ] as const) {
+    await at(list);
+    const before = history.length;
+    await at(page);
+    expect(escHint(), page).not.toBe("Back to Code Esc");
+    press("Escape");
+    await settle();
+    await settle();
+    expect(location.hash, `Esc on ${page}`).toBe(list);
+    // Back through history, so the page is the entry ahead: Back from the list doesn't come to it again.
+    expect(history.length, page).toBe(before + 1);
+    press("Escape");
+    await settle();
+    await settle();
+    expect(location.hash, `Esc on ${list}`).toBe("#/code");
+  }
+});
+
 test("a launcher jump says where it came from, to a detail and to a top page, and ends a trip (F-047)", async () => {
   start({ nav: windowNav });
   await at("#/settings/keyboard");

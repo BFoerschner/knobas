@@ -7,6 +7,7 @@ import { reset, toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
 import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
+import { landOn, takeLanding } from "./landing";
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
@@ -246,4 +247,33 @@ test("the section's buttons are small, Add an application among them (#2343)", a
     .map((b) => b.textContent!.trim());
   expect([...target.querySelectorAll(".tf-btn")].map((b) => b.textContent!.trim())).toContain("Add an application");
   expect(atDefault).toEqual([]);
+});
+
+test("back from an application's page, the list focuses the entry it named, scrolled into view, once (2026-11-17)", async () => {
+  // Björn, ux17: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…".
+  const scrolled: string[] = [];
+  const was = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+    scrolled.push(this.getAttribute("href") ?? "");
+  };
+  try {
+    landOn("checkouts", "fork");
+    await draw();
+    expect(document.activeElement?.getAttribute("href")).toBe("#/settings/checkouts/app/fork");
+    expect(scrolled).toContain("#/settings/checkouts/app/fork");
+    expect(takeLanding("checkouts"), "taken once").toBeNull();
+    unmount(view!);
+    view = null;
+    landOn("checkouts", "add");
+    await draw();
+    expect(document.activeElement?.getAttribute("href")).toBe("#/settings/checkouts/add");
+    unmount(view!);
+    view = null;
+    // Drawn with nothing named, it takes no focus.
+    (document.activeElement as HTMLElement | null)?.blur();
+    await draw();
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    HTMLElement.prototype.scrollIntoView = was;
+  }
 });

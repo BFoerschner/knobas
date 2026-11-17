@@ -33,6 +33,7 @@
   import { lastTried, noteTried } from "../openin/app-page";
   import { realTryReads, type TryReads } from "../openin/try-reads";
   import { TryRepos } from "../openin/try-repos.svelte";
+  import { LAND_ADD, landOn } from "./landing";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
   import { fileHash } from "../repo/repo";
   import {
@@ -206,20 +207,29 @@
   }
 
   let done = false;
-  function goBack() {
+  /** The section's own address: the list this page hands back to when it was opened from it. */
+  const SECTION = "#/settings/renderers";
+
+  /**
+   * Back where the page was opened from: the list, focused on `landing` (an entry's id, or `LAND_ADD`). Opened from the
+   * list, the step is back through history (the page is a page of its own, `opener.ts`), so Back doesn't come here again.
+   */
+  function goBack(landing: string) {
     done = true;
     gone = true;
+    if (leave !== undefined || back?.hash === undefined || back.hash === SECTION || step === null) landOn("folder-renderers", landing);
     if (leave) leave();
     else if (back?.hash !== undefined && step !== null) step(back.hash, back.opened ?? false);
-    else location.hash = "#/settings/renderers";
+    else location.hash = SECTION;
   }
 
   async function save() {
     if (!ready) return;
     busy = true;
     error = null;
+    const own = tried?.id ?? at.renderer;
     try {
-      await store(withFolderDraft(folders.list, draft, tried?.id ?? at.renderer));
+      await store(withFolderDraft(folders.list, draft, own));
     } catch (cause) {
       error = ipcErrorMessage(cause);
       busy = false;
@@ -227,13 +237,17 @@
     }
     tried = null;
     push({ text: `${at.renderer !== null ? "Saved" : "Added"} ${draft.name.trim()}. The Code page draws the folders it takes.` });
-    goBack();
+    // A new entry is the list's last: its id is the one the save gave it.
+    goBack(own ?? folders.list.at(-1)?.id ?? LAND_ADD);
   }
 
   async function remove() {
     const removing = saved;
     if (removing === null) return;
     const had = folders.list.map((r) => ({ ...r }));
+    const place = had.findIndex((r) => r.id === removing.id);
+    /** The entry that takes its place in the list, else the one before it, else *Add a folder renderer*. */
+    const after = had[place + 1]?.id ?? had[place - 1]?.id ?? LAND_ADD;
     busy = true;
     try {
       await store(had.filter((r) => r.id !== removing.id));
@@ -252,12 +266,12 @@
         },
       },
     });
-    goBack();
+    goBack(after);
   }
 
   function cancel() {
     takeBack();
-    goBack();
+    goBack(at.renderer ?? LAND_ADD);
   }
 
   $effect(() => {

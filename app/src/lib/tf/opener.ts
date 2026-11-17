@@ -173,6 +173,16 @@ export function stamped(state: unknown, opened: Opened): object {
   return { ...(typeof state === "object" && state !== null ? state : {}), [KEY]: opened };
 }
 
+/** A page inside Settings that is a page of its own for `Esc` and its opener: an application's, a folder renderer's. */
+function settingsPage(route: Extract<TfRoute, { view: "full" }>): string | null {
+  if (route.head !== "settings") return null;
+  const [section, kind, id] = route.rest;
+  if (section === "checkouts" && kind === "add") return "settings/checkouts/add";
+  if (section === "checkouts" && kind === "app") return `settings/checkouts/app/${id ?? ""}`;
+  if (section === "renderers" && kind === "folder") return `settings/renderers/folder/${id ?? ""}`;
+  return null;
+}
+
 /**
  * Which page an address is, ignoring the page's own tabs: a job's sub-tab, a
  * pull request's or a run's tab, a repository's tabs and files, a doc page's
@@ -180,7 +190,9 @@ export function stamped(state: unknown, opened: Opened): object {
  * picked on Builds, a saved view on Tickets) are one page, and so are the asset
  * tree and an asset in it. A commit under its repository is a page of its own,
  * as `parentOf` has it, and so are a link set and a Docs space under their
- * section: each names itself, so *Back to* can name it.
+ * section: each names itself, so *Back to* can name it. In Settings, an
+ * application's page and a folder renderer's are pages of their own, so their list
+ * is what they step back to.
  */
 export function pageOf(route: TfRoute): string {
   switch (route.view) {
@@ -197,6 +209,10 @@ export function pageOf(route: TfRoute): string {
     case "full": {
       if (route.head === "sets" && route.rest[0]) return `sets/${route.rest[0]}`;
       if (route.head === "docs" && route.rest[0] === "space") return `docs/space/${route.rest[1] ?? ""}`;
+      // An application's page and a folder renderer's (2026-11-17) are pages of their own, opened from their section's list: Save,
+      // Cancel and Esc step back to the list, not to the page Settings was opened from. What follows (a repository to try it on) is the same page.
+      const own = settingsPage(route);
+      if (own !== null) return own;
       if (route.head === route.section && route.head !== "assets") return route.head;
       // The tree and an asset in it are one page: a walk through its columns keeps how the tree was opened.
       if (route.head === "assets" || route.head === "asset") return "assets";

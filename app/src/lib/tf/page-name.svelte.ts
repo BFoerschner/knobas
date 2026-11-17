@@ -76,6 +76,11 @@ export function provideBackStep(step: BackStep): void {
   setContext(BACK, step);
 }
 
+/** Tests: the context a component mounted on its own takes the shell's step from. */
+export function backStepContext(step: BackStep): Map<unknown, unknown> {
+  return new Map<unknown, unknown>([[BACK, step]]);
+}
+
 /** The hint's end: the shell's step, or `null` outside a shell (a test), where the link is a plain link. */
 export function backStep(): BackStep | null {
   return getContext<BackStep | undefined>(BACK) ?? null;

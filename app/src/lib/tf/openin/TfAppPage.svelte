@@ -55,6 +55,7 @@
   import { insertAt, PLACEHOLDERS, runPreview, warnings, worktreeOf } from "./openin";
   import { realTryReads, type TryCommit, type TryPr, type TryReads, type TryRepo } from "./try-reads";
   import { TryRepos } from "./try-repos.svelte";
+  import { LAND_ADD, landOn } from "../settings/landing";
 
   let {
     at,
@@ -333,19 +334,29 @@
   /** Saved, removed or cancelled: nothing typed is kept. */
   let done = false;
 
-  function goBack() {
+  /** The section's own address: the list this page hands back to when it was opened from it. */
+  const SECTION = "#/settings/checkouts";
+
+  /**
+   * Back where the page was opened from: the list, focused on `landing` (an entry's id, or `LAND_ADD`), or the repository
+   * whose *Open in…* opened it. Opened from the list, the step is back through history (the page is a page of its own,
+   * `opener.ts`), so the browser's Back doesn't come here again.
+   */
+  function goBack(landing: string) {
     done = true;
     gone = true;
+    if (leave !== undefined || back?.hash === undefined || back.hash === SECTION || step === null) landOn("checkouts", landing);
     if (leave) leave();
     else if (back?.hash !== undefined && step !== null) step(back.hash, back.opened ?? false);
-    else location.hash = "#/settings/checkouts";
+    else location.hash = SECTION;
   }
 
   async function save() {
     if (!ready) return;
     busy = true;
     error = null;
-    const list = withEntry(apps.settings?.applications ?? [], entryOf(draft, await entryId()));
+    const own = await entryId();
+    const list = withEntry(apps.settings?.applications ?? [], entryOf(draft, own));
     try {
       await store(list);
     } catch (cause) {
@@ -356,7 +367,8 @@
     tried = null;
     typedDrafts.delete(key);
     push({ text: `${at.app !== null ? "Saved" : "Added"} ${draft.name.trim()}. It is in every Open in… menu.` });
-    goBack();
+    // A new entry is the list's last: its id is the one the save gave it.
+    goBack(own !== "" ? own : (apps.settings?.applications.at(-1)?.id ?? LAND_ADD));
   }
 
   async function remove() {
@@ -364,6 +376,9 @@
     const removing = saved;
     if (removing === null) return;
     const had = [...(apps.settings?.applications ?? [])];
+    const place = had.findIndex((app) => app.id === removing.id);
+    /** The entry that takes its place in the list, else the one before it, else *Add an application*. */
+    const after = had[place + 1]?.id ?? had[place - 1]?.id ?? LAND_ADD;
     const wasDefault = apps.settings?.default_application ?? null;
     busy = true;
     try {
@@ -385,14 +400,14 @@
         },
       },
     });
-    goBack();
+    goBack(after);
   }
 
   function cancel() {
     typedDrafts.delete(key);
     draft = draftFrom(saved);
     takeBack();
-    goBack();
+    goBack(at.app ?? LAND_ADD);
   }
 
   /** Left without *Save*: the words stay for the session, the try goes. */
