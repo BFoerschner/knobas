@@ -24,6 +24,12 @@ export class TryRepos {
   readonly repo = $derived(this.list?.find((one) => one.entityId === this.picked) ?? null);
   /** The picked repository's id alone, for what follows the pick and nothing else. */
   readonly pickedId = $derived(this.repo?.entityId ?? null);
+  /**
+   * Every batch is in and none had a checkout here (or the list could not be read). A page keeps drawing the rows it drew
+   * while reading, saying so in them, so the answer moves nothing under them (2026-11-17, the saved scale database: no
+   * repository there is cloned, and the section gave way to one line, 175 px up).
+   */
+  readonly none = $derived(this.list !== null && this.list.length === 0 && !this.more);
 
   /**
    * Reads the list once. `preferred` comes first, in its order; `stop` ends the read between batches (the page was

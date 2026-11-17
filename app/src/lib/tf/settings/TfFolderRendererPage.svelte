@@ -33,6 +33,7 @@
   import { lastTried, noteTried } from "../openin/app-page";
   import { realTryReads, type TryReads } from "../openin/try-reads";
   import { TryRepos } from "../openin/try-repos.svelte";
+  import TfTryMore from "../openin/TfTryMore.svelte";
   import { LAND_ADD, landOn } from "./landing";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
   import { fileHash } from "../repo/repo";
@@ -367,31 +368,27 @@
 
     <div class="tf-stg-sec">
       <h2>Try it on</h2>
-      {#if tryOn.list !== null && tryOn.list.length === 0 && !tryOn.more}
-        <p class="tf-stg-p" role="status">
-          {#if tryOn.failed !== null}Could not read the repositories: {tryOn.failed}.{:else}No repository has a checkout on this disk yet. Open a repository and
-            press <b>Clone</b>, or <a href="#/code">Code</a>’s <b>Clone all…</b>; it is here once it is cloned.{/if}
-        </p>
-      {:else}
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-frp-repo">Repository<small>One with a checkout on this disk.</small></label>
-          <div class="tf-stg-c tf-stg-inl">
-            <select id="tf-frp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null}>
-              {#if tryOn.list === null}<option value={null}>Reading…</option>{/if}
-              {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
-            </select>
-            <small class="tf-dim tf-stg-more" role="status" class:tf-stg-done={!tryOn.more}>Finding more…</small>
-          </div>
+      <!-- The rows are drawn while the checkouts are read, and with no checkout anywhere they stay and say so: the answer moves nothing (2026-11-17). -->
+      <div class="tf-stg-row">
+        <label class="tf-stg-l" for="tf-frp-repo">Repository<small>One with a checkout on this disk.</small></label>
+        <div class="tf-stg-c tf-stg-inl">
+          <select id="tf-frp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none} title={tryOn.failed ?? undefined}>
+            {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}
+                >{tryOn.failed !== null ? `Could not read the repositories: ${tryOn.failed}` : "No repository is cloned on this computer"}</option
+              >{/if}
+            {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
+          </select>
+          <TfTryMore {tryOn} />
         </div>
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-frp-folder">Folder<small>A path from the top; empty for the top folder.</small></label>
-          <div class="tf-stg-c tf-stg-inl">
-            <input id="tf-frp-folder" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-frp-folders-list" placeholder="flows/orders" bind:value={folder} />
-            <datalist id="tf-frp-folders-list">{#each (folderList ?? []).slice(0, FOLDERS_SHOWN) as one (one)}<option value={one}></option>{/each}</datalist>
-            <button type="button" class="tf-btn tf-sm" disabled={!ready || repo === null} title={ready && repo !== null ? `Saves it, then runs it on ${folder.trim() || "the top folder"} of ${repo.title}` : (why ?? undefined)} onclick={() => void tryIt()}>Try it</button>
-          </div>
+      </div>
+      <div class="tf-stg-row">
+        <label class="tf-stg-l" for="tf-frp-folder">Folder<small>A path from the top; empty for the top folder.</small></label>
+        <div class="tf-stg-c tf-stg-inl">
+          <input id="tf-frp-folder" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-frp-folders-list" placeholder="flows/orders" bind:value={folder} />
+          <datalist id="tf-frp-folders-list">{#each (folderList ?? []).slice(0, FOLDERS_SHOWN) as one (one)}<option value={one}></option>{/each}</datalist>
+          <button type="button" class="tf-btn tf-sm" disabled={!ready || repo === null} title={ready && repo !== null ? `Saves it, then runs it on ${folder.trim() || "the top folder"} of ${repo.title}` : (why ?? undefined)} onclick={() => void tryIt()}>Try it</button>
         </div>
-      {/if}
+      </div>
       {#if trying !== null}
         {#key trying.press}
           <div class="tf-stg-gap">

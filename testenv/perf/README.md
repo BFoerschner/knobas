@@ -464,7 +464,7 @@ The movement gate (the nothing-moves pass, 2026-11-17, `docs/decisions/2026-11-1
 can open by the press a person makes: every nav page and its tabs, a repository and each of its tabs, a file, a commit,
 *Open in…* and *Add an application*, a pull request and its tabs, a pipeline, a run and its tabs, the Docs home, a space
 and a page, Monitors, a monitor, Sets, Time and its tabs, the Assets tree and an asset, every Settings section, a source's
-page and an application's page, the launcher, a ticket card's right-click menu and the dialogs (*Create monitor…*,
+page, an application's page (from Open in… and from Settings' list) and a folder renderer's, the launcher, a ticket card's right-click menu and the dialogs (*Create monitor…*,
 *Link something to it*, *Add a source…*). Each on its first open after the app started and on its return.
 
 `moves-probe.js`, in the page, tracks from the first frame the place is drawn (the DOM changed after the press, or after

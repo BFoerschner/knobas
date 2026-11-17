@@ -200,8 +200,11 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-apprun-box:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-apprun code { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-apppage .tf-phs { margin: 4px 0 6px; }
-/* *Try it on*'s *Finding more…* keeps its box once the reading is done, so a row it wrapped stays as tall. */
-.tf-stg-more.tf-stg-done { visibility: hidden; }
+/* *Try it on*'s *Finding more…* and *Clone one in Code* share one cell, each holding its room unseen while it doesn't apply, so a
+   row they wrapped stays as tall whichever shows, or neither (TfTryMore.svelte, 2026-11-17). */
+.tf-stg-more { display: inline-grid; }
+.tf-stg-more > * { grid-area: 1 / 1; }
+.tf-stg-more > .tf-stg-done { visibility: hidden; }
 .tf-appremove { margin-left: auto; }
 /* Where a list lands back from an entry's page (2026-11-17): the entry's row, outlined inside the table's edge. */
 .tf-land:focus { outline: 2px solid var(--focus); outline-offset: -2px; }

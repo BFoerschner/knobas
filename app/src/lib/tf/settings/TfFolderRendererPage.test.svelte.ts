@@ -160,6 +160,30 @@ test("while later batches of checkouts come in, the picked repository stays and 
   expect(asked).toBe(1);
 });
 
+test("with no checkout on this disk the rows drawn while reading stay and say so (2026-11-17)", async () => {
+  // The saved scale database, where no repository is cloned: the two rows gave way to a paragraph once the checkouts answered.
+  let answer: () => void = () => {};
+  const none = {
+    ...reads,
+    checkouts: (ids: readonly string[]) =>
+      new Promise<{ entityId: string; path: string | null; clonesRoot: string | null }[]>((resolve) => (answer = () => resolve(ids.map((entityId) => ({ entityId, path: null, clonesRoot: "/clones" }))))),
+  };
+  app = mount(TfFolderRendererPage, { target, props: { at: { renderer: null, repo: null, folder: null }, folders: store().folders, reads: none, ports: ports().p, leave: () => {} } });
+  await settle();
+  const rows = () => [...target.querySelectorAll(".tf-stg-row :is(input, select, button)")].map((el) => el.id || el.textContent?.trim());
+  const before = rows();
+  expect(before).toContain("tf-frp-repo");
+  expect(before).toContain("tf-frp-folder");
+  answer();
+  await settle();
+  expect(rows()).toEqual(before);
+  const pick = target.querySelector<HTMLSelectElement>("#tf-frp-repo")!;
+  expect(pick.disabled).toBe(true);
+  expect(pick.textContent?.trim()).toBe("No repository is cloned on this computer");
+  expect(target.querySelector(".tf-stg-more a[href='#/code']")!.parentElement!.classList.contains("tf-stg-done")).toBe(false);
+  expect(button("Try it").disabled).toBe(true);
+});
+
 test("each way back to the list names the entry it lands on, and the list focuses it (2026-11-17)", async () => {
   const one = { id: "a", name: "A", command: "a {path}", holds: [], folders: [], output: "text", timeout_secs: 30 } as FolderRenderer;
   const two = { ...one, id: "b", name: "B", command: "b {path}" } as FolderRenderer;

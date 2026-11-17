@@ -347,15 +347,46 @@ test("the repository is the one it came from, else the last one tried, else the 
   expect(target.querySelector<HTMLSelectElement>("#tf-app-repo")!.value).toBe(PAYOUT);
 });
 
-test("with no checkout on this disk it says so, and how to get one", async () => {
+test("with no checkout on this disk the rows drawn while reading stay and say so, and how to get one (2026-11-17)", async () => {
+  // The saved scale database, where no repository is cloned: Try it on's rows gave way to one line once the checkouts
+  // answered, and the Commands section rose 175 px.
   checkouts = {};
-  await draw("#/settings/checkouts/add");
-  expect(target.querySelector("#tf-app-repo")).toBeNull();
-  expect(text(target.querySelector(".tf-stg-sec [role='status']"))).toContain("No repository has a checkout on this disk yet");
-  expect(text(target.querySelector(".tf-stg-sec [role='status']"))).toContain("Clone");
+  stored = { ...stored, applications: [...stored.applications, { id: "tig", name: "Tig", command: "tig -C {path}", file_command: "tig -C {path} {file}", commit_command: "tig -C {path} show {sha}", pull_request_command: "tig -C {path} log {base}..{head}" }] };
+  const batches: (() => void)[] = [];
+  const late: TryReads = { ...reads, checkouts: (ids) => new Promise((resolve) => batches.push(() => resolve(ids.map((entityId) => ({ entityId, path: null, clonesRoot: ROOT }))))) };
+  const at = appPagePlace(["checkouts", "app", "tig"])!;
+  app = mount(TfAppPage, { target, props: { at, apps, reads: late, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
+  const rows = () => [...target.querySelectorAll(".tf-stg-row :is(input, select), .tf-apprun-box")].map((el) => el.id || el.getAttribute("aria-label"));
+  const link = () => target.querySelector<HTMLAnchorElement>(".tf-stg-more a[href='#/code']")!;
+  const before = rows();
+  expect(before.slice(0, 5)).toEqual(["tf-app-name", "tf-app-repo", "tf-app-tryfile", "tf-app-trycommit", "tf-app-trypr"]);
+  // The way to a checkout is in its room from the first frame, unseen until the answer says there is none.
+  expect(link().parentElement!.classList.contains("tf-stg-done")).toBe(true);
+  while (batches.length > 0) {
+    batches.shift()!();
+    await settle();
+  }
+  expect(rows()).toEqual(before);
+  const pick = target.querySelector<HTMLSelectElement>("#tf-app-repo")!;
+  expect(pick.disabled).toBe(true);
+  expect([...pick.options].map((option) => option.textContent)).toEqual(["No repository is cloned on this computer"]);
+  expect(link().parentElement!.classList.contains("tf-stg-done")).toBe(false);
+  expect(line("command")).toBe("No repository is cloned on this computer. Clone one (a repository’s Clone, or Code’s Clone all…) to try this on it.");
+  expect(line("commit")).toBe(line("command"));
+  expect(text(target.querySelector("#tf-app-trycommit"))).toBe("");
+});
+
+test("a list of repositories that can't be read says so in the same rows", async () => {
+  const failing: TryReads = { ...reads, repos: () => Promise.reject({ code: "io", message: "the database is locked" }) };
+  app = mount(TfAppPage, { target, props: { at: appPagePlace(["checkouts", "add"])!, apps, reads: failing, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
   type("name", "Tig");
   type("command", "tig -C {path}");
-  expect(line("command")).toBe("Pick a repository below to see it filled in.");
+  expect(text(target.querySelector("#tf-app-repo"))).toBe("Could not read the repositories");
+  expect(line("command")).toMatch(/^Could not read the repositories: .*locked/);
+  // The way to a clone isn't the fix for a list that can't be read.
+  expect(target.querySelector(".tf-stg-more a")!.parentElement!.classList.contains("tf-stg-done")).toBe(true);
 });
 
 test("a commit from Open in… is the one tried; a range is it and the one before; a pull request runs in its worktree", async () => {
