@@ -585,12 +585,13 @@
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => setAllFolds(!anyOpen)}>{anyOpen ? "Collapse all" : "Expand all"}</button>
           {/if}
           {#if kept.length > 0}
-            <!-- ux18: what the rail lists now, its filter applied. -->
-            <button
-              type="button"
-              class="tf-btn tf-sm tf-ghost tf-readall"
-              title={narrowed ? "Every failed run of the pipelines listed" : "Every failed run of every pipeline"}
-              onclick={markAllRead}>Mark all as read</button
+            <!-- ux18: what the rail lists now, its filter applied. An icon at the rail's width, so the tools stay one line
+                 and no row moves; its words are its name and its tip. -->
+            {@const said = narrowed ? "Mark all as read: every failed run of the pipelines listed" : "Mark all as read: every failed run of every pipeline"}
+            <button type="button" class="tf-iconbtn tf-sm tf-readall" aria-label="Mark all as read" title={said} onclick={markAllRead}
+              ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><path d="M1.5 8.5l3 3 6-7M7.5 11.5l1 0.5 6-7.5" /></svg
+              ></button
             >
           {/if}
         </div>

@@ -784,7 +784,7 @@ test("the rail's Mark all as read acts on the pipelines it lists: their unread f
   const asked = marks([]);
   draw(["teamcity:buildType:Payout_Lint"]);
   await settle();
-  const press = [...target.querySelectorAll<HTMLButtonElement>(".tf-pl-tools button")].find((b) => b.textContent?.trim() === "Mark all as read")!;
+  const press = target.querySelector<HTMLButtonElement>(".tf-pl-tools button[aria-label='Mark all as read']")!;
   press.click();
   flushSync();
   expect(nameOf("Payout_IntegrationTests").querySelector(".tf-pi-nm")!.classList.contains("tf-bad")).toBe(false);

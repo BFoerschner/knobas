@@ -182,7 +182,7 @@ try {
         }, { capture: true, once: true });
         return 1;
       })()`);
-      await click(".tf-kept:not([hidden]) .tf-pl-tools button", "Mark all as read");
+      await click(".tf-kept:not([hidden]) .tf-pl-tools button[aria-label='Mark all as read']");
       for (let k = 0; k < 200; k++) {
         if ((await c.js("window.__rrAll !== null && window.__rrSaid !== null")) === true) break;
         await sleep(50 * rate);
