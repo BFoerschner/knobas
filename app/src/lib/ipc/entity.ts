@@ -221,6 +221,7 @@ export type {
   LaneColumn,
   LaneField,
   BoardPage,
+  BoardPageMark,
   LineComment,
   LineComments,
   LineThread,

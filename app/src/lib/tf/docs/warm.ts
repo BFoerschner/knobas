@@ -52,7 +52,7 @@ export interface WarmClock {
   idle(go: () => void): () => void;
 }
 
-const charsOf = (node: Element) => node.textContent?.length ?? 0;
+const charsOf = (node: Element) => node.textContent.length;
 
 /** `page`'s body cut into pieces of about {@link PIECE_CHARS} characters, at most `budget` in all. */
 export function piecesOf(page: Element, budget: number): { pieces: Piece[]; chars: number } {
