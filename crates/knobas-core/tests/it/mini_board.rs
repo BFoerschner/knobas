@@ -1599,6 +1599,9 @@ async fn a_page_after_the_first_cards_is_the_next_of_them() {
     assert_eq!(next, ["PAY-4", "PAY-5", "PAY-3"], "the tie by id");
 }
 
+/// A status and the cards a column holds of it, by id and key.
+type Held = (Option<String>, Vec<(String, String)>);
+
 /// A view's column that gathers two statuses reads every card it does not
 /// hold, and none it does (the ux18 Windows pass, found by Fable). The
 /// board's first read holds the first cards of each status; the column's
@@ -1641,7 +1644,7 @@ async fn a_gathered_column_reads_every_card_it_does_not_hold() {
     // The column as the board's first read leaves it: each status's cards,
     // newest first, the first five of each.
     let first = read(5, None).await;
-    let mut held: Vec<(Option<String>, Vec<(String, String)>)> = first
+    let mut held: Vec<Held> = first
         .columns
         .iter()
         .map(|column| {
@@ -1655,9 +1658,7 @@ async fn a_gathered_column_reads_every_card_it_does_not_hold() {
             )
         })
         .collect();
-    let count = |held: &[(Option<String>, Vec<(String, String)>)]| -> usize {
-        held.iter().map(|(_, cards)| cards.len()).sum()
-    };
+    let count = |held: &[Held]| -> usize { held.iter().map(|(_, cards)| cards.len()).sum() };
     assert_eq!(count(&held), 10);
 
     // The old cursor: `after` the ten it holds, over both ranked as one.
