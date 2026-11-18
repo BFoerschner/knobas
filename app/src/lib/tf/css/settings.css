@@ -274,3 +274,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-spaces .tf-ck { min-width: 0; font-size: calc(var(--t-md) * var(--fs)); align-items: center; }
 .tf-stg-spn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-stg-spaces .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); font-variant-numeric: tabular-nums; }
+
+/* Settings › Renderers › Decompiler (ux19, `TfDecompilerSetting.svelte`). */
+/* The line holds a line's room while it is read, so the row never moves when it answers. */
+.tf-dec-line { margin: 0; min-height: 1.5em; font-size: calc(var(--t-sm) * var(--fs)); overflow-wrap: anywhere; }
+.tf-dec-why { margin: 2px 0 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--warn); }
+.tf-dec-path { margin-top: 8px; flex-wrap: wrap; }
+.tf-dec-path input { flex: 1 1 260px; min-width: 0; }

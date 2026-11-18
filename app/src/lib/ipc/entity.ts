@@ -11,6 +11,8 @@
 import { invoke } from "./invoke";
 import { viewDate } from "../time/format";
 import type {
+  ArchiveIndex,
+  ClassOutline,
   ActionItemTicket,
   CardRows,
   EntityBrief,
@@ -114,6 +116,11 @@ import type { QueuedWrite, WriteOpPayload } from "./sources";
 import type { DayWindow } from "./time";
 
 export type {
+  ArchiveIndex,
+  ClassOutline,
+  Lib,
+  Maven,
+  Member,
   CloneAllFailure,
   CardRows,
   EntityBrief,
@@ -2040,4 +2047,46 @@ export function linkSetHints(): Promise<LinkSetHint[]> {
 /** The link sets and the parent a ticket's job shows; an unknown id has neither. */
 export function jobLinkSets(entityId: string): Promise<JobLinkSets> {
   return invoke<JobLinkSets>("job_link_sets", { entityId });
+}
+
+/**
+ * The archive at `path` in `entityId`'s tree (a `.jar`, `.war`, `.ear`, `.aar`) listed for the JAR view —
+ * `knobas_app::commands::entity::archive_open` (ux19): its entries as columns, manifest, Maven coordinates and nested
+ * JARs, under a `handle` the other archive reads name it by. Read from the clone where it holds `commit`, else from
+ * the source, up to 1 GiB; at a whole sha a second open answers at once.
+ *
+ * Rejects with `invalid` for a file over the cap or one that is no archive (the message says why), `not_found` for no
+ * file there.
+ */
+export function archiveOpen(entityId: string, path: string, commit: string | null): Promise<ArchiveIndex> {
+  return invoke<ArchiveIndex>("archive_open", { entityId, path, commit });
+}
+
+/** A JAR inside an open archive (a fat JAR's library, a WAR's) listed — `archive_nested`. `not_found` once `handle` is no longer kept. */
+export function archiveNested(handle: string, entry: string): Promise<ArchiveIndex> {
+  return invoke<ArchiveIndex>("archive_nested", { handle, entry });
+}
+
+/** One entry's bytes, unpacked, up to 50 MiB — `archive_entry`; raw, as `entity_file_bytes` answers. */
+export async function archiveEntry(handle: string, entry: string): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("archive_entry", { handle, entry });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** A class's outline, as `javap` would give it, read without Java — `archive_class`. */
+export function archiveClass(handle: string, entry: string): Promise<ClassOutline> {
+  return invoke<ClassOutline>("archive_class", { handle, entry });
+}
+
+/**
+ * A class decompiled by the bundled Vineflower with the Java found here — `archive_decompile`; an inner class as its
+ * top-level one. Kept by the classes' hash. A newer call stops one still running (it rejects with `invalid`).
+ */
+export function archiveDecompile(handle: string, entry: string): Promise<string> {
+  return invoke<string>("archive_decompile", { handle, entry });
+}
+
+/** The archive (`entry` `null`) or one entry saved into Downloads under a free name — `archive_download`; answers its path. */
+export function archiveDownload(handle: string, entry: string | null): Promise<string> {
+  return invoke<string>("archive_download", { handle, entry });
 }

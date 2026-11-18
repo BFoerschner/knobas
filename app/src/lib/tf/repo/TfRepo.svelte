@@ -87,6 +87,7 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { WriteSource } from "../../shell/queued-toast";
   import type { OpenJobPorts } from "../job/open-jobs";
+  import type { ArchivePorts } from "../../render/jar-ports";
   import type { DetailRefreshPorts } from "../refresh.svelte";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
@@ -115,6 +116,8 @@
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
     /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+    /** The JAR view's reads (ux19): an archive listed, its entries, a class outlined or decompiled; no JAR view when left out. */
+    archive?: ArchivePorts;
     /** A file pipeline over a file's bytes (#2264); the viewer offers none when left out. */
     piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
     /** A diff between two ends, local-first (ADR-0036): Compare's; the source's compare alone when left out. */
@@ -215,6 +218,7 @@
 </script>
 
 <script lang="ts">
+  import { bridgeArchive } from "../../render/jar-ports";
   import { untrack } from "svelte";
   import { EVENTS, ipcErrorMessage, isIpcError } from "../../ipc";
   import {
@@ -335,6 +339,7 @@
       codeFacts: (entityIds) => codeFacts(entityIds),
       refusedWrites: (asks) => refusedWrites(asks),
       fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
+      archive: bridgeArchive(),
       piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
       rangeDiff: (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
       commitDiff: (entityId, commitId, sha, ignoreWhitespace) => entityCommitDiff(entityId, commitId, sha, ignoreWhitespace),

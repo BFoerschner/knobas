@@ -118,6 +118,7 @@
   } from "../../render/pipelines.svelte";
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import type { JarPorts } from "../render/TfJar.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { ago } from "../../shell/time";
   import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
@@ -187,7 +188,7 @@
     folderMarks = folderRenderMarks,
     folderPorts = ipcFolderRenderPorts,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped" | "localDir" | "localPaths" | "localFile">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "archive" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -1505,6 +1506,17 @@
     const [entityId, path, commit] = JSON.parse(bytesAt) as [string, string, string | null];
     return () => read(entityId, path, commit);
   });
+  /**
+   * The JAR view's reads for the archive shown (ux19), bound to where it was read: keyed by what they read, so a
+   * re-read of the same file hands the view the same reads and it reads nothing again.
+   */
+  const jarAt = $derived(file === null || drawAs !== "jar" ? null : JSON.stringify([at, file.path, file.commit ?? null]));
+  const jarPorts = $derived.by((): JarPorts | null => {
+    const reads = ports.archive;
+    if (jarAt === null || reads === undefined) return null;
+    const [entityId, path, commit] = JSON.parse(jarAt) as [string, string, string | null];
+    return { ...reads, open: () => reads.open(entityId, path, commit) };
+  });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
   /** A file of the repository at a place inside it (ux18): where an OpenAPI spec's ref into another file opens. */
@@ -1828,7 +1840,7 @@
       <TfNothingHere message="There is no folder renderer named “{folderRender.renderer}”." href={repoHash(repoId)} action="All files" />
     {/if}
   {:else}
-  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} bind:this={fileview}>
+  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
@@ -1966,6 +1978,11 @@
         <TfPdf read={bytesRead} size={file.size} {render} />
       {:else if drawn === file && file.binary && bytesRead !== null && drawAs === "image"}
         <TfBytesImage read={bytesRead} path={file.path} size={file.size} />
+      {:else if drawAs === "jar" && jarPorts !== null}
+        <!-- A Java archive (ux19): its view loads with the first archive opened, never at start-up. -->
+        {#await import("../render/TfJar.svelte") then { default: TfJar }}
+          <TfJar path={file.path} ports={jarPorts} {render} />
+        {/await}
       {:else if drawn === null || drawn.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}

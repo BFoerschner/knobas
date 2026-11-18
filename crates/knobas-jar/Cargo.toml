@@ -1,0 +1,23 @@
+[package]
+name = "knobas-jar"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# A Java archive read for the Code page's JAR view (ux19,
+# `docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md`): its zip
+# central directory, its manifest and Maven files, and its classes outlined as
+# `javap` would, in Rust, without Java. No new crate from outside the tree: the
+# zip reader and the class-file parser are knobas's own (about 2,000 lines),
+# over the inflater and CRC the tree already has.
+
+[dependencies]
+# Inflate (`DeflateDecoder`) for a deflated entry; already in the tree. MIT OR Apache-2.0.
+flate2 = "1"
+# An entry's CRC-32, checked as its bytes come; already in the tree (flate2's own). MIT OR Apache-2.0.
+crc32fast = "1"
+serde.workspace = true
+thiserror.workspace = true
+ts-rs.workspace = true
+
+[dev-dependencies]

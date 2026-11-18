@@ -17,6 +17,7 @@ import type {
   FolderRenderView,
   Ask,
   InstalledFont,
+  JavaRuntime,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,
@@ -45,6 +46,8 @@ export type {
   FolderRunState,
   ReadFrom,
   InstalledFont,
+  JavaRuntime,
+  FoundJava,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,
@@ -270,4 +273,17 @@ export function namedPipelines(): Promise<NamedPipeline[]> {
 /** Save the whole list of named pipelines; answers it as stored (ids made from new names). */
 export function setNamedPipelines(pipelines: NamedPipelineDraft[]): Promise<NamedPipeline[]> {
   return invoke<NamedPipeline[]>("set_named_pipelines", { pipelines });
+}
+
+/**
+ * What *Decompile* in the JAR view stands at — `knobas_app::commands::app::java_runtime` (ux19): the Java found here,
+ * the bundled decompiler, why not where it cannot run. Looked for once a run; `again` looks again.
+ */
+export function javaRuntime(again: boolean): Promise<JavaRuntime> {
+  return invoke<JavaRuntime>("java_runtime", { again });
+}
+
+/** Settings' Java for *Decompile* — `set_java_path`: an absolute path to a `java` or a Java home, `null` to look by itself. */
+export function setJavaPath(path: string | null): Promise<JavaRuntime> {
+  return invoke<JavaRuntime>("set_java_path", { path });
 }

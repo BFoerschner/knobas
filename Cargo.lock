@@ -4029,6 +4029,7 @@ dependencies = [
  "knobas-db",
  "knobas-git",
  "knobas-http",
+ "knobas-jar",
  "knobas-live-cleanup",
  "knobas-mockd",
  "knobas-search",
@@ -4145,6 +4146,17 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "knobas-jar"
+version = "3.2.8"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "serde",
+ "thiserror 2.0.20",
+ "ts-rs",
 ]
 
 [[package]]

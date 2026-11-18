@@ -106,6 +106,66 @@ actor: string, verb: string, entity_id: string | null,
 detail: unknown, };
 
 /**
+ * An archive's contents and what it says about itself: the JAR view's first read.
+ *
+ * The entries are columns, sorted by name, so 10,000 entries cross the bridge as one string and three arrays rather
+ * than 10,000 objects. Folders are not listed: the view makes them from the names.
+ */
+export type ArchiveIndex = { 
+/**
+ * What later reads of this archive name it by (`archive_entry`, `archive_class`, a nested JAR's index).
+ */
+handle: string, 
+/**
+ * `jar`, `war`, `ear`, `aar`, `boot-jar` (Spring Boot's fat JAR) or `boot-war`.
+ */
+kind: string, 
+/**
+ * The archive's own size, in bytes.
+ */
+size: number, 
+/**
+ * Every entry's unpacked and packed sizes, summed.
+ */
+total: number, packed: number, 
+/**
+ * The entries' names, one a line.
+ */
+names: string, sizes: Array<number>, packed_sizes: Array<number>, 
+/**
+ * [`flag`]s per entry.
+ */
+flags: Array<number>, 
+/**
+ * The manifest's main section, in its order.
+ */
+manifest: Array<[string, string]>, 
+/**
+ * Maven's coordinates found inside, the archive's own first where one matches its name.
+ */
+maven: Array<Maven>, 
+/**
+ * The Java release most of its classes are compiled for (`Java 17`), from a sample; `null` with no classes.
+ */
+release: string | null, 
+/**
+ * A multi-release JAR's versions (`META-INF/versions/<n>/`).
+ */
+releases: Array<number>, 
+/**
+ * The JARs inside it (`BOOT-INF/lib/`, `WEB-INF/lib/`, an EAR's modules): its dependency list.
+ */
+libs: Array<Lib>, 
+/**
+ * Bytes before the archive (a launch script).
+ */
+prefix: number, 
+/**
+ * What the reading passed over: unsafe names, encrypted entries, duplicates.
+ */
+warnings: Array<string>, };
+
+/**
  * One entry of a run's artifact folder (#856).
  */
 export type ArtifactEntry = { 
@@ -573,6 +633,59 @@ value: string,
  * What the reader sees (`"Squash"`).
  */
 label: string, };
+
+/**
+ * The outline of one class, interface, enum, record, annotation or module.
+ */
+export type ClassOutline = { 
+/**
+ * The class file's major version.
+ */
+major: number, minor: number, 
+/**
+ * The Java release the version is (`Java 17`, `Java 1.4`), with `preview` where the minor says so.
+ */
+release: string, 
+/**
+ * `class`, `interface`, `enum`, `record`, `@interface` or `module`.
+ */
+kind: string, 
+/**
+ * The modifiers before the kind (`public abstract sealed`).
+ */
+modifiers: string, 
+/**
+ * The binary name, dotted (`com.example.Foo$Bar`).
+ */
+name: string, 
+/**
+ * Type parameters as written (`<T extends Comparable<T>>`), or empty.
+ */
+type_params: string, 
+/**
+ * The superclass, `null` for `Object`, an interface, an enum's `Enum` and a record's `Record`.
+ */
+extends: string | null, 
+/**
+ * The interfaces implemented (an interface's: extended).
+ */
+implements: Array<string>, 
+/**
+ * What a `sealed` class permits.
+ */
+permits: Array<string>, annotations: Array<string>, 
+/**
+ * A record's components (`String name`).
+ */
+components: Array<string>, fields: Array<Member>, methods: Array<Member>, 
+/**
+ * Members the compiler made (bridges, lambdas' bodies, `access$000`), not listed.
+ */
+synthetic: number, source_file: string | null, deprecated: boolean, 
+/**
+ * A module's `requires`, `exports` and `opens`, one line each.
+ */
+module: Array<string>, };
 
 /**
  * One clone of a run that failed.
@@ -2452,6 +2565,19 @@ total: number, };
 export type LaneField = "epic" | "assignee" | "priority" | "issuetype" | "label";
 
 /**
+ * A JAR inside the archive.
+ */
+export type Lib = { 
+/**
+ * Its entry's name (`BOOT-INF/lib/spring-core-6.1.2.jar`).
+ */
+entry: string, 
+/**
+ * From its file name: `spring-core`, `6.1.2`.
+ */
+name: string, version: string | null, size: number, };
+
+/**
  * One comment of a [`LineThread`]. Source text, like every string of a view:
  * `body` is the source's Markdown, drawn by the shell's one Markdown
  * component, sanitized (ADR-0020 rule 5, #2261).
@@ -3028,6 +3154,52 @@ export type LoggedBy = {
  * username as the assignee is.
  */
 author: string, seconds: number, };
+
+/**
+ * One artifact's Maven coordinates, found inside the archive.
+ */
+export type Maven = { group: string, artifact: string, version: string, 
+/**
+ * `pom.xml`'s `<name>`, where it has one.
+ */
+name: string | null, description: string | null, packaging: string | null, 
+/**
+ * The folder it was found in (`META-INF/maven/org.x/y/`).
+ */
+path: string, };
+
+/**
+ * One field or method.
+ */
+export type Member = { annotations: Array<string>, 
+/**
+ * `public static final`, in the order the language writes them.
+ */
+modifiers: string, 
+/**
+ * A method's type parameters (`<T>`), or empty.
+ */
+type_params: string, 
+/**
+ * The field's type, the method's return type, empty for a constructor.
+ */
+ty: string, name: string, 
+/**
+ * A method's parameters as written (`String id, int limit`); `null` for a field.
+ */
+params: string | null, 
+/**
+ * What a method declares it throws.
+ */
+throws: Array<string>, 
+/**
+ * A constant's value as source would spell it (`42`, `"x"`).
+ */
+value: string | null, deprecated: boolean, 
+/**
+ * An enum's constant.
+ */
+constant: boolean, };
 
 /**
  * One room's tickets as the mini board draws them.

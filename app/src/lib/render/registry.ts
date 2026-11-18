@@ -149,6 +149,22 @@ export const OPENAPI: Renderer = {
   sniff: isOpenApi,
 };
 
+/**
+ * JAR (ux19, `docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md`): a Java archive drawn as what it holds,
+ * its manifest, its Maven coordinates, its classes outlined and its nested JARs (`tf/render/TfJar.svelte`). It reads
+ * no bytes here: the backend reads and lists the archive (`archive_open`) and hands the view one entry at a time. A
+ * binary file, so *Source* is not offered; the view offers *Save to Downloads*.
+ */
+export const JAR: Renderer = {
+  id: "jar",
+  name: "JAR",
+  patterns: ["*.jar", "*.war", "*.ear", "*.aar"],
+  fences: [],
+  input: "bytes",
+  output: "html",
+  diff: false,
+};
+
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
 export const BYTES_CAP = 50 * 1024 * 1024;
 
@@ -164,7 +180,7 @@ export const SOURCE: Renderer = {
 };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, SOURCE];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, SOURCE];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it

@@ -56,7 +56,10 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::file_pipeline::saved::CommandStepDraft::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
+    crate::archive::java::JavaRuntime::export_all(cfg)?;
     // entity.ts
+    knobas_jar::ArchiveIndex::export_all(cfg)?;
+    knobas_jar::ClassOutline::export_all(cfg)?;
     crate::file_pipeline::PipeFormat::export_all(cfg)?;
     crate::file_pipeline::PipeStep::export_all(cfg)?;
     crate::file_pipeline::PipeOutput::export_all(cfg)?;

@@ -403,6 +403,9 @@ const { createFolderRenderers } = await import("../render/folders.svelte");
 const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfOpenApi = (await import("../tf/render/TfOpenApi.svelte")).default;
+const TfJar = (await import("../tf/render/TfJar.svelte")).default;
+const TfJarCode = (await import("../tf/render/TfJarCode.svelte")).default;
+const TfDecompilerSetting = (await import("../tf/settings/TfDecompilerSetting.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
@@ -1540,6 +1543,60 @@ const CASES: Case[] = [
                   }
                 : null,
             ),
+        },
+      }),
+    }),
+  },
+  {
+    /** A Java archive (ux19): its listing and the Java it decompiles with answer late, the *Reading …* clock armed. */
+    name: "TfJar",
+    source: "lib/tf/render/TfJar.svelte",
+    open: (target) => ({
+      app: mount(TfJar, {
+        target,
+        props: {
+          path: "build/app.jar",
+          render: { highlight: () => ({ focus() {}, cancel() {} }) },
+          ports: {
+            open: () =>
+              deferred({
+                handle: "a1", kind: "jar", size: 10, total: 5, packed: 5, names: "a.txt", sizes: [5], packed_sizes: [5], flags: [0],
+                manifest: [], maven: [], release: null, releases: [], libs: [], prefix: 0, warnings: [],
+              }),
+            nested: () => deferred(null as never),
+            entry: () => deferred(new Uint8Array([104, 105])),
+            cls: () => deferred(null as never),
+            decompile: () => deferred(""),
+            download: () => deferred(""),
+            java: () => deferred({ java: null, decompiler: null, needs: null, can_decompile: false, reason: null, set_path: null }),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /** Text inside a JAR (ux19): its highlighting answers late, a job held meanwhile. */
+    name: "TfJarCode",
+    source: "lib/tf/render/TfJarCode.svelte",
+    open: (target) => ({
+      app: mount(TfJarCode, {
+        target,
+        props: { text: "a: 1\nb: 2\n", path: "app.yml", render: { highlight: () => ({ focus() {}, cancel() {} }) } },
+      }),
+    }),
+  },
+  {
+    /** Settings' decompiler line (ux19): what Java is here answers late. */
+    name: "TfDecompilerSetting",
+    source: "lib/tf/settings/TfDecompilerSetting.svelte",
+    open: (target) => ({
+      app: mount(TfDecompilerSetting, {
+        target,
+        props: {
+          ports: {
+            java: () => deferred({ java: null, decompiler: "Vineflower 1.12.0", needs: 17, can_decompile: false, reason: null, set_path: null }),
+            setPath: () => deferred({ java: null, decompiler: null, needs: null, can_decompile: false, reason: null, set_path: null }),
+          },
         },
       }),
     }),

@@ -45,6 +45,8 @@ knobas-db = { path = "../knobas-db" }
 # `docs/decisions/2026-11-16-a-clone-is-read-in-process.md`).
 knobas-git = { path = "../knobas-git" }
 knobas-http = { path = "../knobas-http" }
+# The JAR view's archive and class-file reader (ux19), knobas's own.
+knobas-jar = { path = "../knobas-jar" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
 # The credential store, behind its trait. The concrete `KeyringStore` is picked

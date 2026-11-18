@@ -43,7 +43,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "postgresql/": "postgresql/"
+      "postgresql/": "postgresql/",
+      "decompiler/": "decompiler/"
     },
     "windows": {
       "wix": {

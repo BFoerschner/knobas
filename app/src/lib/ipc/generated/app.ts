@@ -205,6 +205,16 @@ export type FolderRendererDraft = { id: string | null, name: string, command: st
  */
 export type FolderRunState = { "state": "queued" } | { "state": "copying", done: number, total: number, } | { "state": "running", elapsed_ms: number, };
 
+export type FoundJava = { path: string, 
+/**
+ * As `java -version` names it (`21.0.4`).
+ */
+version: string, 
+/**
+ * The release (`21`; `8` for `1.8.0_392`).
+ */
+release: number, };
+
 /**
  * One installed font family.
  */
@@ -238,6 +248,35 @@ narrows: boolean,
  * the bundled face's. `None` when the face does not say.
  */
 x_height: number | null, };
+
+/**
+ * What the JAR view and Settings know about decompiling here.
+ */
+export type JavaRuntime = { 
+/**
+ * The Java found: its path and version; `null` for none.
+ */
+java: FoundJava | null, 
+/**
+ * The decompiler bundled with this build (`Vineflower 1.12.0`); `null` in a build without it.
+ */
+decompiler: string | null, 
+/**
+ * The Java release the decompiler needs (17).
+ */
+needs: number | null, 
+/**
+ * A Java was found, and the decompiler runs on it.
+ */
+can_decompile: boolean, 
+/**
+ * Why not, where there is a Java: `Java 11 found; Decompile needs Java 17`.
+ */
+reason: string | null, 
+/**
+ * The Java the person set in Settings, if any.
+ */
+set_path: string | null, };
 
 /**
  * One named pipeline: steps a default per file pattern names by id.

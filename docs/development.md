@@ -292,6 +292,7 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-spi-types` | The types the adapter SPI shares with the core: payload declarations, entity references, tones and how a write is delivered. No database, no async runtime: it and `knobas-source` build for `wasm32-wasip2`, so an external adapter can depend on them. `knobas-core` re-exports it under the old paths (#1234). |
 | `knobas-git` | A clone read in knobas's own process (gitoxide): a commit, a tree, a file, a merge base, a log and a diff, each as the bytes the `git` command prints, or "ask git" (ADR-0043). Also the stamp that says nothing in a working tree changed. |
 | `knobas-http` | The HTTP stack the adapters share: one reqwest client, retry classes, rate limiting and the status to `SourceError` mapping. The write queue in `knobas-sync` also reads its local-quota mark (#1729). |
+| `knobas-jar` | A Java archive read for the Code page's JAR view, without Java: a zip listed from its central directory and read an entry at a time (zip bombs and names that leave the archive refused), the manifest and Maven files, nested JARs, and a class file outlined as `javap` would. |
 | `knobas-source-jira` | Jira Data Center adapter, with status, comment and create writes. |
 | `knobas-source-confluence` | Confluence Data Center adapter, with page writes. |
 | `knobas-source-gitea` | Gitea adapter: repositories, branches, pull requests, commits. |

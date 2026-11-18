@@ -532,6 +532,39 @@ pub async fn installed_fonts() -> Result<Vec<crate::code_font::InstalledFont>, I
     crate::code_font::installed().await
 }
 
+/// What *Decompile* in the JAR view stands at (ux19): the Java found here, the bundled decompiler, and why not where
+/// it cannot run. Looked for once a run; `again` looks again (Settings' *Look again*).
+///
+/// # Errors
+///
+/// None in practice: a Java not found is an answer.
+#[tauri::command]
+pub async fn java_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    again: bool,
+) -> Result<crate::archive::java::JavaRuntime, IpcError> {
+    let pool = app.state::<Lifecycle>().pool().ok();
+    let dirs = crate::archive::java::decompiler_dirs(app.path().resource_dir().ok());
+    Ok(crate::archive::java::runtime(pool.as_ref(), &dirs, again).await)
+}
+
+/// Settings' Java for *Decompile* (ux19): an absolute path to a `java` or a Java home, `null` to look by itself.
+/// Answers what decompiling stands at with it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a path that is not absolute,
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn set_java_path<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: Option<String>,
+) -> Result<crate::archive::java::JavaRuntime, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let dirs = crate::archive::java::decompiler_dirs(app.path().resource_dir().ok());
+    crate::archive::java::set_java_path(&pool, &dirs, path.as_deref()).await
+}
+
 /// The command renderers saved in Settings › Renderers (#2262), in order.
 ///
 /// # Errors

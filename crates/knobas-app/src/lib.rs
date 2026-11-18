@@ -28,6 +28,7 @@
 //! (Shiki, D2, Graphviz, pdf.js) run under no CSP at all and rely on it. A
 //! test below pins that and names the policy they would need (#2312).
 
+pub mod archive;
 pub mod assets;
 pub mod backup;
 pub mod bundle;
@@ -855,6 +856,15 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::mark_runs_read,
         commands::entity::mark_runs_unread,
         commands::entity::unread_failing_builds,
+        // The JAR view (PR #2479, ux19), appended at the foot (§10.8).
+        commands::entity::archive_open,
+        commands::entity::archive_nested,
+        commands::entity::archive_entry,
+        commands::entity::archive_class,
+        commands::entity::archive_decompile,
+        commands::entity::archive_download,
+        commands::app::java_runtime,
+        commands::app::set_java_path,
     ]
 }
 

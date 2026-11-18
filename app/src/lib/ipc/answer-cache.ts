@@ -135,6 +135,16 @@ export const QUIET: ReadonlySet<string> = new Set([
   "entity_local_paths",
   "entity_local_file",
   "entity_file_bytes",
+  // The JAR view (ux19): an archive read and kept by the backend for itself, its entries, a class decompiled; the
+  // Java it runs with. Nothing a kept read answers.
+  "archive_open",
+  "archive_nested",
+  "archive_entry",
+  "archive_class",
+  "archive_decompile",
+  "archive_download",
+  "java_runtime",
+  "set_java_path",
   "entity_checkout_diff",
   "entity_commit_diff",
   // A pipeline's older runs a page at a time as its list scrolls: a read of the mirror, never kept.

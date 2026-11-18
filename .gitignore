@@ -11,6 +11,9 @@ crates/knobas-app/gen/
 # `scripts/fetch-postgres.sh` (54 MB on Windows): a build input, pinned by
 # `crates/knobas-app/postgresql/archives.sha256`, never committed.
 crates/knobas-app/postgresql/*.tar.gz
+# The decompiler jar a build carries, staged by `scripts/fetch-vineflower.sh`
+# (1.6 MB): a build input, pinned by `crates/knobas-app/decompiler/vineflower.sha256`.
+crates/knobas-app/decompiler/*.jar
 
 # Local credentials for the live adapter suites (`just *-live`). Never
 # committed: a token in git history is a token to rotate, not a token to

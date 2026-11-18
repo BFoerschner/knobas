@@ -67,6 +67,7 @@
   import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
+  import TfDecompilerSetting, { realDecompilerPorts, type DecompilerPorts } from "./TfDecompilerSetting.svelte";
   import { diffPipelines, type DiffPipelinesSetting } from "../diff/diff-pipelines.svelte";
 
   let {
@@ -76,12 +77,15 @@
     stepCommands = commandSteps,
     piping = diffPipelines,
     folders = folderRenderers,
+    decompiler = realDecompilerPorts,
   }: {
     ports?: RendererPorts;
     defaults?: RendererDefaults;
     pipelines?: NamedPipelines;
     stepCommands?: CommandSteps;
     piping?: DiffPipelinesSetting;
+    /** *Decompiler*'s reads (ux19): the bridge's, a fake in tests. */
+    decompiler?: DecompilerPorts;
     /** The folder renderers' list: the app's unless a test hands its own. */
     folders?: FolderRenderers;
   } = $props();
@@ -309,6 +313,7 @@
     <button id="tf-rnd-pipes" type="button" class="tf-stg-sw" role="switch" aria-checked={piping.on} aria-label="Run pipelines on diffs" onclick={togglePiping}><i></i></button>
   </div>
 </div>
+<TfDecompilerSetting ports={decompiler} />
 {#if saved !== null && foldersRead}
   <div class="tf-stg-sec">
     <h2>Command renderers</h2>

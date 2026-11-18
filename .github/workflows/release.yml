@@ -248,6 +248,13 @@ jobs:
         shell: bash
         run: scripts/fetch-postgres.sh
 
+      # The decompiler the JAR view's *Decompile* runs with a Java the machine
+      # has (docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md):
+      # Vineflower's jar, checked against `crates/knobas-app/decompiler/vineflower.sha256`.
+      - name: Stage the decompiler
+        shell: bash
+        run: scripts/fetch-vineflower.sh
+
       # The Tauri CLI is a devDependency of `app/` and has to run from the crate
       # that owns `tauri.conf.json`. `just dev` bridges that by putting
       # `app/node_modules/.bin` on PATH; **do not copy that here.** This

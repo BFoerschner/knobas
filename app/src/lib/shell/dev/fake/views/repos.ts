@@ -15,6 +15,7 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
+import { JAR_FILES, jarSize } from "../jar";
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
 import { ago, agoStamp } from "../../../time";
@@ -455,6 +456,8 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
       ...(query.has("fake-openapi") ? openapiFiles() : {}),
+      // `?fake-jar` (ux19): a library JAR and a Spring Boot fat JAR; `fake/jar.ts` answers the archive reads.
+      ...(query.has("fake-jar") ? Object.fromEntries(Object.keys(JAR_FILES).map((path) => [path, ""])) : {}),
       // `?fake-render-page=<words>` (2026-11-17): a long page the saved *Cat* renderer draws as HTML, shaped by the words
       // as a folder renderer's `page` is (`fakePage`: `hidden`, `vh`, `wide`, `fixed`, `inner`).
       ...(query.has("fake-render-page") ? { "docs/report.cat.html": fakePage("docs/report.cat.html", `page ${query.get("fake-render-page") ?? ""}`) } : {}),
@@ -489,7 +492,7 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
     if (!path.startsWith(prefix)) continue;
     const rest = path.slice(prefix.length);
     if (rest.includes("/")) dirs.add(rest.slice(0, rest.indexOf("/")));
-    else entries.push({ name: rest, kind: "file", size: binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
+    else entries.push({ name: rest, kind: "file", size: jarSize(path) ?? binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
   }
   return [
     ...[...dirs].sort().map((name): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${prefix}${name}` })),
@@ -671,6 +674,11 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
       { type: "file", trail: [], path, text: "", language: null, size: wrapped.size, truncated: false, binary: true, url: null, sha: blobOf(wrapped.inner), commit: ref },
     ]);
   }
+  const jar = jarSize(path);
+  if (jar !== undefined)
+    return section(id, "Files", [
+      { type: "file", trail: [], path, text: "", language: null, size: jar, truncated: false, binary: true, url: null, sha: blobOf(path), commit: ref },
+    ]);
   const bytes = binaryOf(path)?.();
   if (bytes !== undefined)
     return section(id, "Files", [
