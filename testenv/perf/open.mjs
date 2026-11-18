@@ -33,7 +33,7 @@
 // frame, and every IPC call between the press and settled with its start and end.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, isStalled, launch, runCase, sizeFrom, unlessStalled, viewport, sleep } from "./cdp.mjs";
 import * as bigFolders from "./big-folders.mjs";
 import * as bigCompare from "./big-compare.mjs";
 import * as extremes from "./extremes.mjs";
@@ -252,7 +252,7 @@ async function fresh(hash) {
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: `${base}${hash}` });
   await loaded;
-  for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(() => false)) break; await sleep(50); }
+  for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
   await quiet(1500);
   await js("__open.wrap(), 1");
 }
@@ -321,72 +321,79 @@ const say = (r) => `useful ${r.usefulMs ?? "never"} ms, drawn ${r.drawnMs ?? "ne
 
 for (const rate of throttles) {
   for (const place of placesAt(rate).filter(picked)) {
-    const entry = { name: place.name, throttle: rate };
-    if (place.inner) {
+    // One place under the watchdog (cdp.mjs): a call that never answers is tried once more on a fresh page, then the
+    // place is failed-to-run and the probe goes on with the next.
+    let entry;
+    const ran = await runCase(c, { name: place.name, throttle: rate }, async () => {
+      entry = { name: place.name, throttle: rate };
+      if (place.inner) {
+        try {
+          await innerRounds(place, rate, entry);
+        } catch (e) {
+          if (isStalled(e)) throw e;
+          entry.error = String(e.message || e);
+          console.log(`${rate}x ${place.name}: ERROR ${entry.error}`);
+        }
+        return;
+      }
       try {
-        await innerRounds(place, rate, entry);
+        await cpu(1);
+        await fresh(place.start);
+        if (place.setup) { await press(place.setup); await quiet(1200); }
+        if (place.before) { await press(place.before); await quiet(1200); }
+        await sleep(firstAfter);
+        await quiet(600);
+        await cpu(rate);
+        const has = (round) => rounds.includes(round) && (!place.rounds || place.rounds.includes(round));
+        if (has("first") && !place.returnsOnly) {
+          entry.first = await measure(place);
+          console.log(`${rate}x ${place.name} first: ${say(entry.first)}`);
+          await quiet(1000);
+        }
+        if (has("return")) {
+          if (!rounds.includes("first") && !place.returnsOnly) { await measure(place); await quiet(1000); }
+          if (place.back) await leave(place.back);
+          else await leave(nav(place.away));
+          if (place.setup) await leave(place.setup);
+          entry.return = await measure(place);
+          console.log(`${rate}x ${place.name} return: ${say(entry.return)}`);
+          await quiet(1000);
+        }
+        for (const round of ["late", "synced"]) {
+          if (!has(round)) continue;
+          // Away: every other section in turn (`late`), or one (`synced`) and every source's run ending with news.
+          const own = place.parent ?? place.hash.slice(2);
+          const tour = round === "late" ? SECTIONS.filter((s) => s !== own) : [place.away ?? (own === "time" ? "docs" : "time")];
+          // A full page (a ticket, a pull request, a run) has no nav: back out of it first.
+          for (let i = 0; i < 3 && !(await js(NAV_SHOWN)); i++) await leave("Escape");
+          if (place.key) { await leave("Escape"); }
+          for (const section of tour) { await press(section === "settings" ? GEAR : nav(section)); await quiet(900); }
+          if (round === "synced") { await js(SYNCED); await quiet(1500); }
+          if (place.parent) {
+            await press(nav(place.parent));
+            await quiet(1200);
+            // From another section the entry comes back to where the section was left, which is this place's own page
+            // (2026-11-13); a second press, once the press's hold has let go, is the section's page the row is on.
+            if ((await js("location.hash")).startsWith(place.hash)) {
+              await sleep(2100);
+              await press(nav(place.parent));
+              await quiet(1200);
+            }
+          }
+          else if (!place.away && place.back) { /* a place pressed from anywhere */ }
+          if (place.setup) { await press(place.setup); await quiet(1200); }
+          entry[round] = await measure(place);
+          console.log(`${rate}x ${place.name} ${round}: ${say(entry[round])}`);
+          await quiet(1000);
+        }
       } catch (e) {
+        if (isStalled(e)) throw e;
         entry.error = String(e.message || e);
         console.log(`${rate}x ${place.name}: ERROR ${entry.error}`);
       }
-      results.places.push(entry);
-      save();
-      continue;
-    }
-    try {
-      await cpu(1);
-      await fresh(place.start);
-      if (place.setup) { await press(place.setup); await quiet(1200); }
-      if (place.before) { await press(place.before); await quiet(1200); }
-      await sleep(firstAfter);
-      await quiet(600);
-      await cpu(rate);
-      const has = (round) => rounds.includes(round) && (!place.rounds || place.rounds.includes(round));
-      if (has("first") && !place.returnsOnly) {
-        entry.first = await measure(place);
-        console.log(`${rate}x ${place.name} first: ${say(entry.first)}`);
-        await quiet(1000);
-      }
-      if (has("return")) {
-        if (!rounds.includes("first") && !place.returnsOnly) { await measure(place); await quiet(1000); }
-        if (place.back) await leave(place.back);
-        else await leave(nav(place.away));
-        if (place.setup) await leave(place.setup);
-        entry.return = await measure(place);
-        console.log(`${rate}x ${place.name} return: ${say(entry.return)}`);
-        await quiet(1000);
-      }
-      for (const round of ["late", "synced"]) {
-        if (!has(round)) continue;
-        // Away: every other section in turn (`late`), or one (`synced`) and every source's run ending with news.
-        const own = place.parent ?? place.hash.slice(2);
-        const tour = round === "late" ? SECTIONS.filter((s) => s !== own) : [place.away ?? (own === "time" ? "docs" : "time")];
-        // A full page (a ticket, a pull request, a run) has no nav: back out of it first.
-        for (let i = 0; i < 3 && !(await js(NAV_SHOWN)); i++) await leave("Escape");
-        if (place.key) { await leave("Escape"); }
-        for (const section of tour) { await press(section === "settings" ? GEAR : nav(section)); await quiet(900); }
-        if (round === "synced") { await js(SYNCED); await quiet(1500); }
-        if (place.parent) {
-          await press(nav(place.parent));
-          await quiet(1200);
-          // From another section the entry comes back to where the section was left, which is this place's own page
-          // (2026-11-13); a second press, once the press's hold has let go, is the section's page the row is on.
-          if ((await js("location.hash")).startsWith(place.hash)) {
-            await sleep(2100);
-            await press(nav(place.parent));
-            await quiet(1200);
-          }
-        }
-        else if (!place.away && place.back) { /* a place pressed from anywhere */ }
-        if (place.setup) { await press(place.setup); await quiet(1200); }
-        entry[round] = await measure(place);
-        console.log(`${rate}x ${place.name} ${round}: ${say(entry[round])}`);
-        await quiet(1000);
-      }
-    } catch (e) {
-      entry.error = String(e.message || e);
-      console.log(`${rate}x ${place.name}: ERROR ${entry.error}`);
-    }
+    
+    });
+    if (ran.failedToRun) { entry = { name: place.name, throttle: rate, failedToRun: ran.failedToRun }; console.log(failedLine(entry)); }
     results.places.push(entry);
     save();
   }
@@ -425,7 +432,7 @@ async function innerRounds(place, rate, entry) {
   }
 }
 
-await cpu(1);
+await cpu(1).catch(() => {});
 save();
 console.log("wrote", out);
 await downAll();
@@ -434,6 +441,8 @@ let failed = 0;
 if (check) {
   const budget = JSON.parse(readFileSync(check, "utf8"))[lines] ?? {};
   for (const e of results.places) {
+    // A place that failed to run measured nothing: it is never within its line.
+    if (e.failedToRun) { failed++; console.log(`OVER ${failedLine(e)}`); continue; }
     const line = budget[e.name]?.[String(e.throttle)];
     if (!line) continue;
     for (const round of ["first", "return", "late", "synced"]) {

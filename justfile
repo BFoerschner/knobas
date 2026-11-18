@@ -521,6 +521,7 @@ witness-unit:
     testenv/gitea-pr-state-test.sh
     testenv/live-lock-test.sh
     testenv/seed-teamcity-builds-test.sh
+    testenv/perf/watchdog-test.sh
 
 # The step before every `just check` (issue #736): the mechanical misses that
 # failed gates in the #701 wave, found in about a minute instead of a gate's.

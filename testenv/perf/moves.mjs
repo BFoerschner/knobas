@@ -17,7 +17,7 @@
 //
 // A place with `tabs` is followed by each of its tabs (the shown page's `.tf-tabs` links), opened by their press.
 import { writeFileSync, readFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, isStalled, launch, runCase, sizeFrom, unlessStalled, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const size = sizeFrom(args);
@@ -127,7 +127,7 @@ async function fresh(hash) {
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: `${base}${hash}` });
   await loaded;
-  for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(() => false)) break; await sleep(50); }
+  for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
   await quiet(1500);
 }
 async function find(selector, text = null, starts = false) {
@@ -186,40 +186,47 @@ const say = (r) => {
 const results = { app, at: new Date().toISOString(), size: size.name, throttles, sync, px, places: [] };
 const save = () => writeFileSync(out, JSON.stringify(results, null, 1));
 
+/** One place under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers. */
 async function measure(p, rate) {
-  const entry = { name: p.name, throttle: rate };
-  const tabs = [];
-  try {
-    await cpu(1);
-    await fresh(p.start);
-    if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
-    await sleep(firstAfter);
-    await cpu(rate);
-    if (rounds.includes("first")) {
-      entry.first = await record(p);
-      console.log(`${rate}x ${p.name} first (${entry.first.pressed}): ${say(entry.first)}`);
-      await quiet(800);
-    } else {
-      await act(p);
-      await quiet(1500);
+  let entry;
+  let tabs = [];
+  const ran = await runCase(c, { name: p.name, throttle: rate }, async () => {
+    entry = { name: p.name, throttle: rate };
+    tabs = [];
+    try {
+      await cpu(1);
+      await fresh(p.start);
+      if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
+      await sleep(firstAfter);
+      await cpu(rate);
+      if (rounds.includes("first")) {
+        entry.first = await record(p);
+        console.log(`${rate}x ${p.name} first (${entry.first.pressed}): ${say(entry.first)}`);
+        await quiet(800);
+      } else {
+        await act(p);
+        await quiet(1500);
+      }
+      if (p.tabs) {
+        const list = await js(`[...document.querySelectorAll(${JSON.stringify(`${shown} .tf-tabs a[href]`)})].filter((a) => a.getBoundingClientRect().width > 0).map((a) => a.getAttribute("href"))`);
+        const here = await js("location.hash");
+        for (const href of [...new Set(list)]) if (href !== here) tabs.push({ name: `${p.name}-tab${href.slice(href.lastIndexOf("/"))}`, start: here, press: `${shown} .tf-tabs a[href="${href}"]`, hash: href, away: here, fromTab: true });
+      }
+      if (rounds.includes("return")) {
+        await leave(p);
+        // A setup that opens the place's page is pressed once; one that opens a menu the return closed, again.
+        if (p.setup && !p.setupOnce) { await press(await find(p.setup)); await quiet(1200); }
+        entry.return = await record(p.returnBy ? { ...p, ...p.returnBy, press: undefined, text: undefined } : p);
+        console.log(`${rate}x ${p.name} return: ${say(entry.return)}`);
+        await quiet(800);
+      }
+    } catch (e) {
+      if (isStalled(e)) throw e;
+      entry.error = String(e.message || e).slice(0, 300);
+      console.log(`${rate}x ${p.name}: ERROR ${entry.error}`);
     }
-    if (p.tabs) {
-      const list = await js(`[...document.querySelectorAll(${JSON.stringify(`${shown} .tf-tabs a[href]`)})].filter((a) => a.getBoundingClientRect().width > 0).map((a) => a.getAttribute("href"))`);
-      const here = await js("location.hash");
-      for (const href of [...new Set(list)]) if (href !== here) tabs.push({ name: `${p.name}-tab${href.slice(href.lastIndexOf("/"))}`, start: here, press: `${shown} .tf-tabs a[href="${href}"]`, hash: href, away: here, fromTab: true });
-    }
-    if (rounds.includes("return")) {
-      await leave(p);
-      // A setup that opens the place's page is pressed once; one that opens a menu the return closed, again.
-      if (p.setup && !p.setupOnce) { await press(await find(p.setup)); await quiet(1200); }
-      entry.return = await record(p.returnBy ? { ...p, ...p.returnBy, press: undefined, text: undefined } : p);
-      console.log(`${rate}x ${p.name} return: ${say(entry.return)}`);
-      await quiet(800);
-    }
-  } catch (e) {
-    entry.error = String(e.message || e).slice(0, 300);
-    console.log(`${rate}x ${p.name}: ERROR ${entry.error}`);
-  }
+  });
+  if (ran.failedToRun) { entry = { name: p.name, throttle: rate, failedToRun: ran.failedToRun }; console.log(failedLine(entry)); }
   results.places.push(entry);
   save();
   return tabs;
@@ -235,10 +242,12 @@ for (const rate of throttles) {
     }
   }
 }
-await cpu(1);
+await cpu(1).catch(() => {});
 save();
 let over = 0;
 for (const e of results.places) {
+  // A place that failed to run showed nothing: a gap in the gate, never a pass.
+  if (e.failedToRun) { over++; console.log(failedLine(e)); continue; }
   for (const round of ["first", "return"]) {
     const m = movers(e[round]);
     if (m.length) { over++; console.log(`MOVED ${e.throttle}x ${e.name} ${round}: ${m.length} (${m.slice(0, 3).map((x) => `${x.what} ${x.dx},${x.dy}${x.dw || x.dh ? `/${x.dw},${x.dh}` : ""}`).join("; ")})`); }

@@ -4,7 +4,8 @@
 //   node testenv/perf/budget.mjs <run.json> [--lines fake|real] [--budget testenv/perf/budget.json] [--md <file.md>]
 //
 // Exit 0 when everything is within its line, 1 when something is over, 2 when a scenario the run tried has no measure
-// (a list that could not be scrolled fails, not skips: a page that stopped drawing must not pass). A scenario the run
+// (a list that could not be scrolled fails, not skips: a page that stopped drawing must not pass), and so does a scenario
+// the watchdog gave up on (`failedToRun`, cdp.mjs). A scenario the run
 // did not try (`--only`) is left out.
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -16,52 +17,52 @@ const budget = JSON.parse(readFileSync(opt("--budget") ?? new URL("./budget.json
 const rows = [];
 let over = 0;
 let missing = 0;
-const check = (what, rate, measure, got, line, worse) => {
+const check = (what, rate, measure, got, line, worse, r) => {
   if (line === undefined) return;
   const bad = got === undefined || got === null || (worse === "below" ? got < line : got > line);
   if (got === undefined || got === null) missing++;
   else if (bad) over++;
-  rows.push({ what, rate, measure, got: got ?? "missing", line: `${worse === "below" ? "≥" : "≤"} ${line}`, ok: !bad });
+  rows.push({ what, rate, measure, got: got ?? (r?.failedToRun ? "failed to run" : "missing"), line: `${worse === "below" ? "≥" : "≤"} ${line}`, ok: !bad });
 };
 
 for (const [name, lines] of Object.entries(budget.scroll ?? {})) {
   for (const [rate, line] of Object.entries(lines)) {
     const r = run.scroll.find((e) => e.name === name && e.throttle === Number(rate));
     if (!r) continue;
-    const ok = !r.error && !r.skipped;
-    check(name, rate, "rAF fps", ok ? r.raf.fps : null, line.fps, "below");
-    check(name, rate, "frame work p50 ms", ok ? r.raf.work.p50 : null, line.workP50, "above");
-    check(name, rate, "frame work p99 ms", ok ? r.raf.work.p99 : null, line.workP99, "above");
-    check(name, rate, "elements a style pass", ok ? r.style.elements.max : null, line.styleElements, "above");
-    check(name, rate, "longest task ms", ok ? r.longest.maxMs : null, line.longestTask, "above");
+    const ok = !r.error && !r.skipped && !r.failedToRun;
+    check(name, rate, "rAF fps", ok ? r.raf.fps : null, line.fps, "below", r);
+    check(name, rate, "frame work p50 ms", ok ? r.raf.work.p50 : null, line.workP50, "above", r);
+    check(name, rate, "frame work p99 ms", ok ? r.raf.work.p99 : null, line.workP99, "above", r);
+    check(name, rate, "elements a style pass", ok ? r.style.elements.max : null, line.styleElements, "above", r);
+    check(name, rate, "longest task ms", ok ? r.longest.maxMs : null, line.longestTask, "above", r);
   }
 }
 for (const [name, lines] of Object.entries(budget.wheel ?? {})) {
   for (const [rate, line] of Object.entries(lines)) {
     const r = run.wheel.find((e) => e.name === name && e.throttle === Number(rate));
     if (!r) continue;
-    const ok = !r.error && !r.skipped;
-    check(`${name} (wheel)`, rate, "longest main-thread task ms", ok ? r.longest.maxMs : null, line.longestTask, "above");
-    check(`${name} (wheel)`, rate, "moved fps", ok ? r.shown.movedFps : null, line.movedFps, "below");
+    const ok = !r.error && !r.skipped && !r.failedToRun;
+    check(`${name} (wheel)`, rate, "longest main-thread task ms", ok ? r.longest.maxMs : null, line.longestTask, "above", r);
+    check(`${name} (wheel)`, rate, "moved fps", ok ? r.shown.movedFps : null, line.movedFps, "below", r);
   }
 }
 for (const [name, lines] of Object.entries(budget.type ?? {})) {
   for (const [rate, line] of Object.entries(lines)) {
     const r = run.type.find((e) => e.name === name && e.throttle === Number(rate));
     if (!r) continue;
-    check(name, rate, "slowest key to paint ms", !r.error ? r.maxKeyMs : null, line.maxKeyMs, "above");
+    check(name, rate, "slowest key to paint ms", !r.error && !r.failedToRun ? r.maxKeyMs : null, line.maxKeyMs, "above", r);
   }
 }
 for (const [name, lines] of Object.entries(budget.drag ?? {})) {
   for (const [rate, line] of Object.entries(lines)) {
     const r = (run.drag ?? []).find((e) => e.name === name && e.throttle === Number(rate));
     if (!r) continue;
-    const ok = !r.error && !r.skipped;
+    const ok = !r.error && !r.skipped && !r.failedToRun;
     // A drag that tripped the ghost (`side-pace.ts`) is held from the trip on; the frame that lands the width on release
     // is the page's layout at the new width once, and is not the drag's (Fable's ruling, 2026-11-16).
-    check(`${name} (drag)`, rate, "drag fps", ok ? r.dragFps : null, line.fps, "below");
-    check(`${name} (drag)`, rate, "worst gap after the trip ms", ok ? (r.drag.afterTrip?.maxGap ?? r.drag.maxGapMs) : null, line.maxGapMs, "above");
-    check(`${name} (drag)`, rate, "tripped (0 or 1)", ok ? Number(r.drag.tripped) : null, line.trips, "above");
+    check(`${name} (drag)`, rate, "drag fps", ok ? r.dragFps : null, line.fps, "below", r);
+    check(`${name} (drag)`, rate, "worst gap after the trip ms", ok ? (r.drag.afterTrip?.maxGap ?? r.drag.maxGapMs) : null, line.maxGapMs, "above", r);
+    check(`${name} (drag)`, rate, "tripped (0 or 1)", ok ? Number(r.drag.tripped) : null, line.trips, "above", r);
   }
 }
 for (const [hash, lines] of Object.entries(budget.nav ?? {})) {
@@ -69,7 +70,7 @@ for (const [hash, lines] of Object.entries(budget.nav ?? {})) {
     for (const round of ["first", "return"]) {
       const r = run.nav.find((e) => e.hash === hash && e.round === round && e.throttle === Number(rate));
       if (!r) continue;
-      check(`${hash} (${round})`, rate, "switch ms", !r.error ? r.switchMs : null, line.switchMs, "above");
+      check(`${hash} (${round})`, rate, "switch ms", !r.error && !r.failedToRun ? r.switchMs : null, line.switchMs, "above", r);
     }
   }
 }

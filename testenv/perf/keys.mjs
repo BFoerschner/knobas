@@ -25,7 +25,7 @@
 //   reads    every IPC call the key caused, with when it was sent and answered
 // The median over `--repeat` presses is the case's number; each press is set up again.
 import { writeFileSync, readFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, isStalled, launch, runCase, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 /** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
@@ -304,24 +304,37 @@ const med = (xs) => { const s = xs.filter((x) => x !== null).sort((a, b) => a - 
 const results = { app, at: new Date().toISOString(), size: size.name, cases: [] };
 for (const rate of throttles) {
   for (const k of picked) {
-    const runs = [];
-    await cpu(1);
-    await fresh(!!k.everything);
-    for (let i = 0; i < Math.min(repeat, k.presses.length); i++) {
-      const [before, key] = k.presses[i];
-      try {
-        await cpu(1);
-        await js(`(async () => { ${k.setup(before)} })()`);
-        await cpu(rate);
-        await sleep(400);
-        if (!(await js(`__keys.arm(${JSON.stringify(key)}, ${JSON.stringify(k.root)}, ${JSON.stringify(k.reads)})`))) throw new Error("no root");
-        await press(key);
-        await sleep(settleMs);
-        const r = await js("__keys.result()");
-        await cpu(1);
-        runs.push({ key: before + key, ...r });
-      } catch (e) { runs.push({ error: String(e.message || e) }); await cpu(1); }
+    // One case under the watchdog (cdp.mjs): a call that never answers is tried once more on a fresh page, then the
+    // case is failed-to-run and the probe goes on with the next.
+    const ran = await runCase(c, { name: k.name, throttle: rate }, async () => {
+      const runs = [];
+      await cpu(1);
+      await fresh(!!k.everything);
+      for (let i = 0; i < Math.min(repeat, k.presses.length); i++) {
+        const [before, key] = k.presses[i];
+        try {
+          await cpu(1);
+          await js(`(async () => { ${k.setup(before)} })()`);
+          await cpu(rate);
+          await sleep(400);
+          if (!(await js(`__keys.arm(${JSON.stringify(key)}, ${JSON.stringify(k.root)}, ${JSON.stringify(k.reads)})`))) throw new Error("no root");
+          await press(key);
+          await sleep(settleMs);
+          const r = await js("__keys.result()");
+          await cpu(1);
+          runs.push({ key: before + key, ...r });
+        } catch (e) { if (isStalled(e)) throw e; runs.push({ error: String(e.message || e) }); await cpu(1); }
+      }
+      return runs;
+    });
+    if (ran.failedToRun) {
+      const entry = { name: k.name, throttle: rate, runs: [], rows: null, answered: null, settled: null, moved: 0, failed: 0, failedToRun: ran.failedToRun };
+      results.cases.push(entry);
+      console.log(failedLine(entry));
+      writeFileSync(out, JSON.stringify(results, null, 1));
+      continue;
     }
+    const runs = ran.value;
     const ok = runs.filter((r) => !r.error && r.rows !== null);
     const entry = {
       name: k.name, throttle: rate, runs,
@@ -339,6 +352,8 @@ if (check) {
   const budget = JSON.parse(readFileSync(check, "utf8"))[lines]?.keys ?? {};
   let over = 0;
   for (const e of results.cases) {
+    // A case that failed to run measured nothing: it is never within its line.
+    if (e.failedToRun) { over++; console.log(`OVER ${failedLine(e)}`); continue; }
     const line = budget[e.name]?.[String(e.throttle)];
     if (!line) continue;
     const bad = [];
