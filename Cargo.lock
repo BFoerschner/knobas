@@ -4012,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-app"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-core"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "chrono",
  "futures-util",
@@ -4101,7 +4101,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-db"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "chrono",
  "flate2",
@@ -4123,7 +4123,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-git"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "gix",
  "gix-imara-diff",
@@ -4132,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-http"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "bytes",
  "flate2",
@@ -4151,7 +4151,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-jar"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -4162,14 +4162,14 @@ dependencies = [
 
 [[package]]
 name = "knobas-live-cleanup"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "knobas-mockd"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "axum",
  "chrono",
@@ -4185,7 +4185,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-search"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "chrono",
  "criterion",
@@ -4209,7 +4209,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-secrets"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -4225,7 +4225,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4239,7 +4239,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-confluence"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4255,7 +4255,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-gitea"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4278,7 +4278,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-jira"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4297,7 +4297,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-kuma"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "knobas-core",
@@ -4313,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-mock"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4326,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-teamcity"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-spi-types"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "chrono",
  "serde",
@@ -4359,7 +4359,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-sync"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4382,7 +4382,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-wasm-fixture"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "chrono",
  "knobas-adapter-sdk",
@@ -4393,7 +4393,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-wasm-host"
-version = "3.2.8"
+version = "3.2.9-ux19"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
