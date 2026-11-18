@@ -32,6 +32,7 @@ const throttles = opt("--throttle", "1,4,6").split(",").map(Number);
 const to = Number(opt("--to", "120"));
 const only = opt("--only")?.split(",") ?? null;
 const attachPort = opt("--attach");
+const again = args.includes("--again");
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, Number(opt("--max-minutes", "60")) * 60000).unref();
 
 const browser = attachPort ? null : await launch({ size });
@@ -175,18 +176,19 @@ for (const page of PAGES) {
     const shown = await back(page);
     await sleep(600);
     const scrolled = await scroll(page);
+    const scrolledAgain = again ? await scroll(page) : null;
     const row = {
       page: page.name, role: page.role, size: size.name, throttle, to,
       key: median(keys.map((k) => k.ms)), keyFrame: median(keys.map((k) => k.frame)), keyLoaf: Math.max(0, ...keys.map((k) => k.loaf)), reached: keys.at(-1)?.now ?? null,
       back100: { ms: round(back100.ms), frame: round(back100.frame), moved: back100.moved },
       back: { ms: round(shown.ms), frame: round(shown.frame), moved: shown.moved, rows: shown.rows },
-      scroll100, scroll: scrolled, keys,
+      scroll100, scroll: scrolled, scrollAgain: scrolledAgain, keys,
     };
     results.push(row);
     const s = (x) => (x ? `${x.fps} fps, work ${x.p50} / ${x.p99} ms, loaf ${Math.round(x.longest)}, moved ${x.moved} of ${x.kept}` : "no scroller");
     console.log(`${row.page.padEnd(13)} ${row.size} ${throttle}x → ${row.reached} %: key ${row.key} ms${over(row.key, KEY_LINE[throttle])} (frame ${row.keyFrame}), ` +
       `back ${row.back.ms} ms${over(row.back.ms, PAGE_LINE[throttle])} (at 100 % ${row.back100.ms}), moved ${row.back.moved} of ${row.back.rows}; ` +
-      `scroll at 100 % ${s(scroll100)}; at ${row.reached} % ${s(scrolled)}`);
+      `scroll at 100 % ${s(scroll100)}; at ${row.reached} % ${s(scrolled)}` + (again ? `; again ${s(scrolledAgain)}` : ""));
     writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
   }
 }
