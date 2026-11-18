@@ -159,12 +159,63 @@ export function systemsWords(systems: readonly string[]): string {
  */
 export function viewColumns(board: MiniBoardColumn[], own: ViewColumn[]): MiniBoardColumn[] {
   if (own.length === 0) return board;
-  return own.map((column) => {
-    const held = board.filter((status) => status.status !== null && column.statuses.includes(status.status));
+  return own.map((column, at) => {
+    const held = viewColumnParts(board, own, at);
     const cards: MiniBoardCard[] = held.flatMap((status) => status.cards);
-    if (held.length > 1) cards.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+    if (held.length > 1) cards.sort(newerFirst);
     return { status: column.name, cards, total: held.reduce((all, status) => all + status.total, 0) };
   });
+}
+
+/** The board's columns (one a status) that the view's column at `at` gathers: the board's own column without columns of its own. */
+export function viewColumnParts(board: MiniBoardColumn[], own: ViewColumn[], at: number): MiniBoardColumn[] {
+  if (own.length === 0) return board[at] === undefined ? [] : [board[at]];
+  const column = own[at];
+  if (column === undefined) return [];
+  return board.filter((status) => status.status !== null && column.statuses.includes(status.status));
+}
+
+/** A card's time as {@link newerFirst} compares it: none sorts last. */
+function timeOf(card: Pick<MiniBoardCard, "updated_at">): number {
+  const at = card.updated_at === null ? Number.NaN : Date.parse(card.updated_at);
+  return Number.isNaN(at) ? Number.NEGATIVE_INFINITY : at;
+}
+
+/**
+ * The board's order across statuses, as the server ranks a column that gathers several (`at desc, entity_id`): newest
+ * first, then by id. By the time and not its text: the bridge writes a second's fraction only when it has one, so
+ * `…:00Z` sorted before `…:00.5Z` as text.
+ */
+export function newerFirst(a: Pick<MiniBoardCard, "updated_at" | "entity_id">, b: Pick<MiniBoardCard, "updated_at" | "entity_id">): number {
+  const ta = timeOf(a);
+  const tb = timeOf(b);
+  if (ta !== tb) return tb > ta ? 1 : -1;
+  return a.entity_id < b.entity_id ? -1 : a.entity_id > b.entity_id ? 1 : 0;
+}
+
+/**
+ * What a column of a view that shows every ticket draws of the cards it holds (the ux18 Windows pass): the run of
+ * them, in {@link newerFirst} order, that holds every card up to its last, so a page it reads next lands below every
+ * card drawn and nothing drawn moves. The board's first read holds the first fifty of each status; where a column
+ * gathers several, a status's fifty can run past another's next card, which it does not hold yet. So the run ends at
+ * the earliest last card held of a status that has more (`parts`, each status's cards in the board's order), or at
+ * `through`, the last card of the column's last full page, which holds everything before it, whichever is later.
+ * Cards held past that end draw once the pages reach them.
+ */
+export function readPrefix(merged: readonly MiniBoardCard[], parts: readonly MiniBoardColumn[], through: string | null = null): readonly MiniBoardCard[] {
+  let end = Number.POSITIVE_INFINITY;
+  let index: Map<string, number> | null = null;
+  const at = (id: string) => (index ??= new Map(merged.map((card, place) => [card.entity_id, place]))).get(id);
+  for (const part of parts) {
+    const last = part.cards.at(-1);
+    if (last === undefined || part.cards.length >= part.total) continue;
+    const place = at(last.entity_id);
+    if (place !== undefined) end = Math.min(end, place);
+  }
+  if (end === Number.POSITIVE_INFINITY) return merged;
+  const read = through === null ? undefined : at(through);
+  if (read !== undefined) end = Math.max(end, read);
+  return end + 1 >= merged.length ? merged : merged.slice(0, end + 1);
 }
 
 /**

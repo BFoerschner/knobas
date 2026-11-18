@@ -53,6 +53,10 @@ const SMALL: &[&str] = &[
     // user's views times the projects one view spans, never the members,
     // which are read once.
     "view_projects",
+    // The board's columns, one row a status of its scope, and a page's marks,
+    // one row a status its column gathers (ux18, the ux18 Windows pass).
+    "columns",
+    "marks",
 ];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
@@ -456,7 +460,6 @@ async fn assert_reads_plan_without_estimates(
                 .bind(Some(50_i64))
                 .bind(None::<String>)
                 .bind(None::<i64>)
-                .bind(None::<sqlx::types::Json<serde_json::Value>>)
         },
     )
     .await;
@@ -470,7 +473,6 @@ async fn assert_reads_plan_without_estimates(
             .bind(Some(8_i64))
             .bind(Some("epic".to_owned()))
             .bind(Some(10_i64))
-            .bind(None::<sqlx::types::Json<serde_json::Value>>)
     })
     .await;
     wrong.extend(shapes("mini_board in lanes", &plan));
@@ -501,7 +503,6 @@ async fn assert_reads_plan_without_estimates(
                 .bind(Some(per_column))
                 .bind(lane.clone())
                 .bind(first)
-                .bind(None::<sqlx::types::Json<serde_json::Value>>)
         })
         .await;
         wrong.extend(shapes(name, &plan));
@@ -527,7 +528,6 @@ async fn assert_reads_plan_without_estimates(
                 .bind(Some(8_i64))
                 .bind(None::<String>)
                 .bind(None::<i64>)
-                .bind(None::<sqlx::types::Json<serde_json::Value>>)
         },
     )
     .await;
@@ -537,6 +537,76 @@ async fn assert_reads_plan_without_estimates(
             .into_iter()
             .map(|f| format!("mini_board narrowed: {f}")),
     );
+    // Past a page (ux18, the ux18 Windows pass): a view's column that gathers
+    // two statuses, read past each one's mark, joined and off the cards,
+    // without lanes and in a lane; and a list's page sorted by key.
+    let some_ids: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.item where kind = 'ticket' order by entity_id limit 2",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let column_page = sqlx::types::Json(serde_json::json!({
+        "after": 0,
+        "statuses": ["To Do", "In Progress"],
+        "frontier": [
+            { "status": "To Do", "id": some_ids[0] },
+            { "status": "In Progress", "id": some_ids[1] },
+        ],
+    }));
+    let sorted_page = sqlx::types::Json(serde_json::json!({
+        "after": 200, "sort": "key", "direction": "ascending",
+    }));
+    for (name, statement, lane, first, page) in [
+        (
+            "mini_board, a column's page",
+            knobas_core::mini_board::planned_statement_unlaned_paged(),
+            None,
+            None,
+            &column_page,
+        ),
+        (
+            "mini_board, a list's sorted page",
+            knobas_core::mini_board::planned_statement_unlaned_paged(),
+            None,
+            None,
+            &sorted_page,
+        ),
+        (
+            "mini_board off the cards, a column's page",
+            knobas_core::mini_board::planned_statement_unlaned_carded_paged(),
+            None,
+            None,
+            &column_page,
+        ),
+        (
+            "mini_board off the cards in lanes, a column's page",
+            knobas_core::mini_board::planned_statement_carded_paged(),
+            Some("epic".to_owned()),
+            Some(1_000_000_i64),
+            &column_page,
+        ),
+        (
+            "mini_board in lanes, a column's page",
+            knobas_core::mini_board::planned_statement_paged(),
+            Some("epic".to_owned()),
+            Some(1_000_000_i64),
+            &column_page,
+        ),
+    ] {
+        let plan = explain(&pool, statement, |q| {
+            q.bind(None::<Vec<String>>)
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(200_i64))
+                .bind(lane.clone())
+                .bind(first)
+                .bind(page.clone())
+        })
+        .await;
+        wrong.extend(shapes(name, &plan));
+    }
     // The statuses the board offers (#1149): its sources' whole corpora,
     // live by the tombstones read once, never by a probe per ticket.
     let plan = explain(

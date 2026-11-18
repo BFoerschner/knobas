@@ -1277,7 +1277,7 @@ impl knobas_core::mini_board::CardsNarrowing for Narrowing {
                 members.iter().map(String::as_str).collect();
             ids.retain(|id| members.contains(id.as_str()));
         }
-        sqlx::query_as(statement.whole)
+        let query = sqlx::query_as(statement.whole)
             .persistent(false)
             .bind(&ids)
             .bind(binds.sources)
@@ -1285,10 +1285,13 @@ impl knobas_core::mini_board::CardsNarrowing for Narrowing {
             .bind(binds.declared)
             .bind(binds.per_column)
             .bind(binds.lanes)
-            .bind(binds.lanes_first)
-            .bind(binds.page)
-            .fetch_all(pool)
-            .await
+            .bind(binds.lanes_first);
+        // `$8` only where the statement reads a page (`CardsStatement::paged`).
+        if statement.paged {
+            query.bind(binds.page).fetch_all(pool).await
+        } else {
+            query.fetch_all(pool).await
+        }
     }
 }
 

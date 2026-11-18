@@ -14,7 +14,7 @@
  * role, whatever their adapter kind, so every count is the fillers' own and
  * nothing is narrowed here.
  */
-import type { BoardPage, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { BoardPage, BoardPageMark, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ViewColumn } from "../../ipc/search";
 import { TICKET_SYSTEM } from "../roles.svelte";
 import {
@@ -32,7 +32,7 @@ import {
   type LaneField,
   type ListSort,
 } from "./tickets";
-import { viewColumns } from "./views";
+import { newerFirst, readPrefix, viewColumnParts, viewColumns } from "./views";
 
 /** The reads the reader makes, injectable so a test needs no bridge. */
 export interface BoardReaderPorts {
@@ -305,6 +305,11 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   let rowsOut = false;
   /** The columns (by lane and name) with a page out. */
   const paging = new Set<string>();
+  /**
+   * A view that shows every ticket: each column's (by lane and name) last card of its last full page, which holds every
+   * card before it ({@link readPrefix}). Set before the page's board lands, so the bands drawn from it read it.
+   */
+  const readThrough = new Map<string, string>();
 
   const view = $derived(options.view());
   const own = $derived(sessions.views[state.scope.key]);
@@ -316,18 +321,26 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const typing = $derived(state.filter.words);
   const all = $derived(view.showAll === true);
   const bands = $derived(
-    boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
-      (lane) => ({
+    boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => columns).map((byStatus) => {
+      const lane: Lane = { ...byStatus, columns: viewColumns(byStatus.columns, view.columns) };
+      return {
         lane,
-        drawn: lane.columns.map((column) => {
+        drawn: lane.columns.map((column, at) => {
           const listed = (view.listed ?? view.columns).find((own) => own.name === column.status)?.statuses ?? [];
           const done = columnDone(column, listed);
-          // A view that shows every ticket draws every card read: the first read's fifty a column, then each page.
-          const cards = all ? column.cards : drawnCards(column, pagesOf(expandKey(lane, column)), typing, done);
+          // A view that shows every ticket draws every card read up to the first it does not hold: the first read's fifty
+          // a column, then each page below them (the ux18 Windows pass). A Jira view's columns come in its source's order,
+          // each paged in it, so they draw every card read.
+          const key = expandKey(lane, column);
+          const cards = !all
+            ? drawnCards(column, pagesOf(key), typing, done)
+            : state.scope.savedView !== null
+              ? column.cards
+              : (readPrefix(column.cards, viewColumnParts(byStatus.columns, view.columns, at), readThrough.get(key) ?? null) as MiniBoardCard[]);
           return { column, cards, done, listed };
         }),
-      }),
-    ),
+      };
+    }),
   );
 
   const here = () => viewSession(sessions, state.scope.key);
@@ -389,6 +402,19 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     const own = (view.listed ?? view.columns).flatMap((column) => column.statuses);
     if (own.length > 0) return own;
     return [...new Set((board?.columns ?? []).flatMap((column) => [column.status, ...column.cards.map((card) => card.status)]))];
+  }
+
+  /**
+   * Each of `statuses`' last card the board holds, in `lane` (its key, `null` without lanes), in the board's order: a
+   * page's marks ({@link BoardPage.frontier}), past which it reads.
+   */
+  function marksOf(lane: string | null, statuses: readonly (string | null)[]): BoardPageMark[] {
+    if (board === null) return [];
+    const cells =
+      lane === null
+        ? board.columns.map((column) => ({ status: column.status, last: column.cards.at(-1)?.entity_id }))
+        : (board.lanes.find((one) => one.key === lane)?.columns ?? []).map((cell) => ({ status: cell.status, last: cell.ids.at(-1) }));
+    return cells.flatMap(({ status, last }) => (last !== undefined && statuses.includes(status) ? [{ status, id: last }] : []));
   }
 
   /** The list's first page, sorted on the server (or as deep as it reads now, for a sync's re-read). */
@@ -545,6 +571,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       rows = null;
       rowsReading += 1;
       paging.clear();
+      readThrough.clear();
       if (scope.base === null) return;
       if (all) readAll();
       else read();
@@ -576,6 +603,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       const go = () => {
         if (all) {
           paging.clear();
+          readThrough.clear();
           return readAll();
         }
         read(quick);
@@ -623,12 +651,14 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       const key = expandKey(lane, column);
       if (!all || base === null || board === null || paging.has(key) || column.cards.length >= column.total) return;
       paging.add(key);
-      const page: BoardPage = {
-        after: column.cards.length,
-        // A Jira view's column is its source's: the server cuts it by its name. A view's own gathers its statuses.
-        statuses: savedView !== null || listed.length === 0 ? [column.status] : [...listed],
-        ...(lane.key !== null ? { lane: lane.key } : {}),
-      };
+      // A Jira view's column is its source's: the server cuts it by its name, in its order, past the cards it holds. A
+      // view's own column reads past each of its statuses' last card held, ranked as one: `after` the cards it held, over
+      // its statuses ranked as one, passed over cards a status's first fifty did not reach (the ux18 Windows pass).
+      const statuses = savedView !== null || listed.length === 0 ? [column.status] : [...listed];
+      const page: BoardPage =
+        savedView !== null
+          ? { after: column.cards.length, statuses, ...(lane.key !== null ? { lane: lane.key } : {}) }
+          : { after: 0, statuses, frontier: marksOf(laned ? lane.key : null, statuses), ...(lane.key !== null ? { lane: lane.key } : {}) };
       const at = reading;
       const query = state.filter.query;
       const inLanes: LanesAsked | null = laned && lanes !== "none" && lane.key !== null ? { by: lanes, first: EVERY_LANE } : null;
@@ -636,6 +666,11 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         .board(PAGE_CARDS, query === "" ? null : query, savedView, inLanes, TICKET_SYSTEM, page)
         .then((answer) => {
           if (at !== reading || board === null) return;
+          if (savedView === null) {
+            // A full page holds every card up to its last: the column draws that far, whatever a status's marks say.
+            const read = answer.columns.flatMap((one) => one.cards);
+            if (read.length >= PAGE_CARDS) readThrough.set(key, read.reduce((last, card) => (newerFirst(last, card) < 0 ? card : last)).entity_id);
+          }
           board = withPage(board, answer, laned ? lane.key : null);
         })
         .catch(() => {})
@@ -683,6 +718,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       // Each field is its own read of lanes (#939).
       if (!wasLaned && !laned) return;
       paging.clear();
+      readThrough.clear();
       read();
     },
     refresh: () => {

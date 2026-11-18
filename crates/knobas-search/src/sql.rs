@@ -108,7 +108,8 @@ pub(crate) enum Bind {
     MaybeText(Option<String>),
     MaybeTexts(Option<Vec<String>>),
     MaybeI64(Option<i64>),
-    /// A board's page (`$8`, ux18): a `jsonb`, null for the first cards.
+    /// A board's page (`$8`, ux18): a `jsonb`, bound only to a paged
+    /// statement.
     MaybeJson(Option<sqlx::types::Json<serde_json::Value>>),
 }
 
@@ -1443,10 +1444,14 @@ pub(crate) fn board_sql(
             Bind::MaybeI64(binds.per_column),
             text(binds.lanes),
             Bind::MaybeI64(binds.lanes_first),
-            Bind::MaybeJson(binds.page.cloned()),
         ],
         declarations: Some("$4".to_owned()),
     };
+    // The page is `$8` only where the statement reads one: a first read's
+    // statement is ux17's, and the narrowing's own binds follow from `$8`.
+    if statement.paged {
+        builder.binds.push(Bind::MaybeJson(binds.page.cloned()));
+    }
     let narrow = if statement.carded {
         narrow_carded(&mut builder, alternatives, filters)
     } else {

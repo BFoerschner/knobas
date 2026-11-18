@@ -218,6 +218,19 @@ after: number,
  */
 statuses?: Array<string | null>, 
 /**
+ * Where the column stands in each status (the ux18 Windows pass): the
+ * last card it holds of each, in the board's order. The page is then the
+ * cards past every mark of their own status, ranked as one, so a column
+ * that gathers several statuses, and holds the first cards of each from
+ * the board's first read, reads every card it does not hold and none it
+ * does. An `after` over the statuses ranked as one skipped cards: a
+ * column holding fifty of each of two statuses, the first three hundred
+ * cards of them all of one, never read numbers 51 to 100 of it. A mark
+ * is a card, not a count, so a sync that adds or takes a card above it
+ * moves no page. Every card of a status with no mark.
+ */
+frontier?: Array<BoardPageMark>, 
+/**
  * Only the lane of this key, on a board read in lanes.
  */
 lane?: string, 
@@ -240,6 +253,20 @@ status_order?: Array<string | null>,
  * them; one it does not name sorts after them.
  */
 priority_order?: Array<string>, };
+
+/**
+ * A status's mark in a page ([`Page::frontier`]): the last card a column
+ * holds of it.
+ */
+export type BoardPageMark = { 
+/**
+ * The status, `null` the column of no status.
+ */
+status: string | null, 
+/**
+ * The card's id.
+ */
+id: string, };
 
 /**
  * A branch of a repository as the mirror holds it, with the open pull

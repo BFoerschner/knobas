@@ -1545,3 +1545,203 @@ async fn a_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
     );
     assert!(mini_board::Page::default().refusal().is_none());
 }
+
+/// A column's first cards and then a page `after` them are the first cards
+/// twice as deep, none twice and none missed, two tickets on one timestamp
+/// standing either side of the cut (the ux18 Windows pass): the order breaks
+/// a tie by id on every read.
+#[tokio::test]
+async fn a_page_after_the_first_cards_is_the_next_of_them() {
+    let pool = scratch().await;
+    for n in 1..=8 {
+        let id = ticket(&pool, &format!("PAY-{n}"), Some("To Do"), None).await;
+        // PAY-4 and PAY-5 share their time: one falls either side of four.
+        let hour = match n {
+            5 => 4,
+            n => n,
+        };
+        touched(&pool, &id, &format!("2026-08-10T{hour:02}:00:00Z")).await;
+    }
+    let read = async |per_column: u32, page: Option<mini_board::Page>| {
+        mini_board::read_scoped(
+            &pool,
+            mini_board::Scope {
+                page: page.as_ref(),
+                ..mini_board::Scope::default()
+            },
+            &declarations(),
+            Some(per_column),
+        )
+        .await
+        .unwrap()
+    };
+    let keys = |board: &MiniBoard| -> Vec<String> {
+        board
+            .columns
+            .iter()
+            .flat_map(|column| column.cards.iter().map(|card| card.key.clone()))
+            .collect()
+    };
+    let first = keys(&read(3, None).await);
+    let next = keys(
+        &read(
+            3,
+            Some(mini_board::Page {
+                after: 3,
+                ..mini_board::Page::default()
+            }),
+        )
+        .await,
+    );
+    let whole = keys(&read(6, None).await);
+    assert_eq!([first.clone(), next.clone()].concat(), whole);
+    assert_eq!(first, ["PAY-8", "PAY-7", "PAY-6"]);
+    assert_eq!(next, ["PAY-4", "PAY-5", "PAY-3"], "the tie by id");
+}
+
+/// A view's column that gathers two statuses reads every card it does not
+/// hold, and none it does (the ux18 Windows pass, found by Fable). The
+/// board's first read holds the first cards of each status; the column's
+/// pages read past each status's mark, ranked as one. Paged `after` the
+/// cards it held over the statuses ranked as one, it skipped some: here the
+/// first read holds To Do 1 to 5 and In Review 1 to 5, and `after: 10`
+/// reads To Do 11 on, so To Do 6 to 10 were never read.
+#[tokio::test]
+async fn a_gathered_column_reads_every_card_it_does_not_hold() {
+    let pool = scratch().await;
+    let mut all = Vec::new();
+    // Thirty To Do, all newer than six In Review; two of them on one time.
+    for n in 1..=30 {
+        let key = format!("PAY-{n}");
+        let id = ticket(&pool, &key, Some("To Do"), None).await;
+        let minute = if n == 12 { 11 } else { n };
+        touched(&pool, &id, &format!("2026-08-20T10:{minute:02}:00Z")).await;
+        all.push(key);
+    }
+    for n in 31..=36 {
+        let key = format!("PAY-{n}");
+        let id = ticket(&pool, &key, Some("In Review"), None).await;
+        touched(&pool, &id, &format!("2026-08-10T10:{n:02}:00Z")).await;
+        all.push(key);
+    }
+    let statuses = Some(vec![Some("To Do".to_owned()), Some("In Review".to_owned())]);
+    let read = async |per_column: u32, page: Option<mini_board::Page>| {
+        mini_board::read_scoped(
+            &pool,
+            mini_board::Scope {
+                page: page.as_ref(),
+                ..mini_board::Scope::default()
+            },
+            &declarations(),
+            Some(per_column),
+        )
+        .await
+        .unwrap()
+    };
+    // The column as the board's first read leaves it: each status's cards,
+    // newest first, the first five of each.
+    let first = read(5, None).await;
+    let mut held: Vec<(Option<String>, Vec<(String, String)>)> = first
+        .columns
+        .iter()
+        .map(|column| {
+            (
+                column.status.clone(),
+                column
+                    .cards
+                    .iter()
+                    .map(|card| (card.entity_id.clone(), card.key.clone()))
+                    .collect(),
+            )
+        })
+        .collect();
+    let count = |held: &[(Option<String>, Vec<(String, String)>)]| -> usize {
+        held.iter().map(|(_, cards)| cards.len()).sum()
+    };
+    assert_eq!(count(&held), 10);
+
+    // The old cursor: `after` the ten it holds, over both ranked as one.
+    let skipped = read(
+        5,
+        Some(mini_board::Page {
+            after: 10,
+            statuses: statuses.clone(),
+            ..mini_board::Page::default()
+        }),
+    )
+    .await;
+    let skipped: Vec<String> = skipped
+        .columns
+        .iter()
+        .flat_map(|column| column.cards.iter().map(|card| card.key.clone()))
+        .collect();
+    assert_eq!(
+        skipped,
+        ["PAY-20", "PAY-19", "PAY-18", "PAY-17", "PAY-16"],
+        "the old cursor passed over PAY-25 to PAY-21"
+    );
+
+    // Each status's mark: every card read once, in pages of five.
+    let mut pages = 0;
+    loop {
+        let frontier: Vec<mini_board::PageMark> = held
+            .iter()
+            .filter_map(|(status, cards)| {
+                cards.last().map(|(id, _)| mini_board::PageMark {
+                    status: status.clone(),
+                    id: id.clone(),
+                })
+            })
+            .collect();
+        let page = read(
+            5,
+            Some(mini_board::Page {
+                statuses: statuses.clone(),
+                frontier: Some(frontier),
+                ..mini_board::Page::default()
+            }),
+        )
+        .await;
+        let got: Vec<(Option<String>, String, String)> = page
+            .columns
+            .iter()
+            .flat_map(|column| {
+                column.cards.iter().map(|card| {
+                    (
+                        column.status.clone(),
+                        card.entity_id.clone(),
+                        card.key.clone(),
+                    )
+                })
+            })
+            .collect();
+        if got.is_empty() {
+            break;
+        }
+        assert!(got.len() <= 5);
+        for (status, id, key) in got {
+            assert!(
+                !held
+                    .iter()
+                    .any(|(_, cards)| cards.iter().any(|(had, _)| *had == id)),
+                "{key} read twice"
+            );
+            match held.iter_mut().find(|(s, _)| *s == status) {
+                Some((_, cards)) => cards.push((id, key)),
+                None => held.push((status, vec![(id, key)])),
+            }
+        }
+        pages += 1;
+        assert!(pages < 20, "the pages end");
+    }
+    let mut read_keys: Vec<String> = held
+        .iter()
+        .flat_map(|(_, cards)| cards.iter().map(|(_, key)| key.clone()))
+        .collect();
+    read_keys.sort();
+    let mut expected = all.clone();
+    expected.sort();
+    assert_eq!(read_keys, expected, "every card, once");
+    // 26 more cards, five a page: six pages.
+    assert_eq!(pages, 6);
+}

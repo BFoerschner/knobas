@@ -501,7 +501,8 @@ test("on, a column's foot nearing reads its next 200 past those it holds, joined
   reader.more(reader.bands[0]!.lane, done!.column, done!.listed);
   expect(reads).toHaveLength(2);
   expect(reads[1]!.perColumn).toBe(PAGE_CARDS);
-  expect(reads[1]!.page).toEqual({ after: 50, statuses: ["To Do"] });
+  // Past the column's last card held (the ux18 Windows pass): a mark, not a count.
+  expect(reads[1]!.page).toEqual({ after: 0, statuses: ["To Do"], frontier: [{ status: "To Do", id: "jira:T-50" }] });
   reads[1]!.answer(board({ status: "To Do", cards: cards("To Do", 51, 200), total: 300 }));
   await flush();
   const drawn = reader.bands[0]!.drawn[0]!.cards;
@@ -510,21 +511,62 @@ test("on, a column's foot nearing reads its next 200 past those it holds, joined
   expect(drawn[50]!.key).toBe("T-51");
   // The next page goes past the 250 held.
   reader.more(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column, []);
-  expect(reads[2]!.page).toEqual({ after: 250, statuses: ["To Do"] });
+  expect(reads[2]!.page).toEqual({ after: 0, statuses: ["To Do"], frontier: [{ status: "To Do", id: "jira:T-250" }] });
 });
 
-test("on, a view's column that gathers statuses pages them as one, and a Jira view's column by its name", async () => {
+/** `count` cards of `status`, keyed from `from`, each a minute older than the last from `newest` (minutes after midnight). */
+function dated(status: string, letter: string, from: number, count: number, newest: number): MiniBoardCard[] {
+  return Array.from({ length: count }, (_, i) => {
+    const minute = newest - (from - 1 + i);
+    const at = new Date(Date.UTC(2026, 7, 20, 0, minute)).toISOString().replace(".000Z", "Z");
+    return { ...card(`${letter}-${from + i}`, null, status), updated_at: at };
+  });
+}
+
+test("on, a view's column that gathers statuses reads past each one's last card held and draws only what holds every card before it (the ux18 Windows pass)", async () => {
   const { reader, reads, view } = fakes();
   view.showAll = true;
   view.columns = [{ name: "Doing", statuses: ["In Progress", "In Review"], limit: null }];
   reader.open(ALL, NO_WORDS);
-  reads[0]!.answer(board({ status: "In Progress", cards: cards("In Progress", 1, 50), total: 120 }, { status: "In Review", cards: cards("In Review", 1, 50), total: 80 }));
+  // 300 In Progress, all newer than 60 In Review: the first read holds the first fifty of each.
+  const progress = (from: number, count: number) => dated("In Progress", "P", from, count, 1000);
+  const review = (from: number, count: number) => dated("In Review", "R", from, count, 600);
+  reads[0]!.answer(board({ status: "In Progress", cards: progress(1, 50), total: 300 }, { status: "In Review", cards: review(1, 50), total: 60 }));
   await flush();
-  const [doing] = reader.bands[0]!.drawn;
+  let [doing] = reader.bands[0]!.drawn;
   expect(doing!.column.status).toBe("Doing");
+  expect(doing!.column.total).toBe(360);
+  // In Review's fifty are older than In Progress's 51st, which is not read yet: they wait, undrawn, for the pages.
+  expect(doing!.cards.map((one) => one.key)).toEqual(progress(1, 50).map((one) => one.key));
   reader.more(reader.bands[0]!.lane, doing!.column, doing!.listed);
-  expect(reads[1]!.page).toEqual({ after: 100, statuses: ["In Progress", "In Review"] });
+  // `after: 100` over both ranked as one read In Progress 101 on: 51 to 100 were never read.
+  expect(reads[1]!.page).toEqual({
+    after: 0,
+    statuses: ["In Progress", "In Review"],
+    frontier: [
+      { status: "In Progress", id: "jira:P-50" },
+      { status: "In Review", id: "jira:R-50" },
+    ],
+  });
+  // The server's page: the 200 next past the marks, ranked as one.
+  reads[1]!.answer(board({ status: "In Progress", cards: progress(51, 200), total: 300 }));
+  await flush();
+  [doing] = reader.bands[0]!.drawn;
+  expect(doing!.cards.map((one) => one.key)).toEqual(progress(1, 250).map((one) => one.key));
+  reader.more(reader.bands[0]!.lane, doing!.column, doing!.listed);
+  expect(reads[2]!.page!.frontier).toEqual([
+    { status: "In Progress", id: "jira:P-250" },
+    { status: "In Review", id: "jira:R-50" },
+  ]);
+  reads[2]!.answer(board({ status: "In Progress", cards: progress(251, 50), total: 300 }, { status: "In Review", cards: review(51, 10), total: 60 }));
+  await flush();
+  [doing] = reader.bands[0]!.drawn;
+  // Every card once, newest first: In Progress's 300, then In Review's 60.
+  expect(doing!.cards.map((one) => one.key)).toEqual([...progress(1, 300), ...review(1, 60)].map((one) => one.key));
+  expect(doing!.cards.length).toBe(doing!.column.total);
+});
 
+test("on, a Jira view's column pages by its name, past the cards it holds in its source's order", async () => {
   const jira = fakes();
   jira.view.showAll = true;
   jira.view.columns = [{ name: "Doing", statuses: ["Doing"], limit: null }];
@@ -556,7 +598,7 @@ test("on, a laned board reads eight a lane's column and ten lanes, pages a lane'
   const band = reader.bands[0]!;
   reader.more(band.lane, band.drawn[0]!.column, []);
   expect(reads[1]!.lanes).toEqual({ by: "assignee", first: 1_000_000 });
-  expect(reads[1]!.page).toEqual({ after: 8, statuses: ["To Do"], lane: "mara" });
+  expect(reads[1]!.page).toEqual({ after: 0, statuses: ["To Do"], frontier: [{ status: "To Do", id: "jira:T-8" }], lane: "mara" });
   const next = cards("To Do", 9, 32);
   reads[1]!.answer({
     columns: [{ status: "To Do", cards: next, total: 40 }],

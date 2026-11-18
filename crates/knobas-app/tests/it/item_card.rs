@@ -683,11 +683,22 @@ async fn the_board_without_lanes_is_the_board_in_lanes_asked_for_none() {
         for only in [None, Some(&narrowed)] {
             for per_column in [None, Some(1_i64), Some(3)] {
                 let mut answers = Vec::new();
-                for statement in [
-                    knobas_core::mini_board::planned_statement(),
-                    knobas_core::mini_board::planned_statement_unlaned(),
+                // The first cards (seven binds, no page), and the paged
+                // statements asked `Page::default()`: the same rows (the ux18
+                // Windows pass).
+                for (statement, page) in [
+                    (knobas_core::mini_board::planned_statement(), None),
+                    (knobas_core::mini_board::planned_statement_unlaned(), None),
+                    (
+                        knobas_core::mini_board::planned_statement_paged(),
+                        Some(default_page()),
+                    ),
+                    (
+                        knobas_core::mini_board::planned_statement_unlaned_paged(),
+                        Some(default_page()),
+                    ),
                 ] {
-                    let rows: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    let query = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                         "select t::text from ({statement}) t"
                     )))
                     .bind(only)
@@ -696,20 +707,23 @@ async fn the_board_without_lanes_is_the_board_in_lanes_asked_for_none() {
                     .bind(&declared)
                     .bind(per_column)
                     .bind(None::<String>)
-                    .bind(None::<i64>)
-                    .bind(None::<sqlx::types::Json<serde_json::Value>>)
-                    .fetch_all(&mut *tx)
-                    .await
+                    .bind(None::<i64>);
+                    let rows: Vec<String> = match page {
+                        Some(page) => query.bind(page).fetch_all(&mut *tx).await,
+                        None => query.fetch_all(&mut *tx).await,
+                    }
                     .unwrap();
                     answers.push(rows);
                 }
                 assert!(!answers[0].is_empty(), "{when}: {only:?} {per_column:?}");
-                assert_eq!(
-                    answers[1],
-                    answers[0],
-                    "{when}: narrowed {} cut {per_column:?}",
-                    only.is_some()
-                );
+                for (at, answer) in answers.iter().enumerate().skip(1) {
+                    assert_eq!(
+                        *answer,
+                        answers[0],
+                        "{when}: statement {at}, narrowed {} cut {per_column:?}",
+                        only.is_some()
+                    );
+                }
             }
         }
     };
@@ -1173,8 +1187,9 @@ async fn the_board_off_the_cards_alone_is_the_board_joined() {
 
     // Each row as text, its laned board's column counts as a set: neither
     // statement orders them, and the board places its columns itself.
-    let read = async |statement: &str, binds: &Binds, tx: &mut sqlx::PgConnection| {
-        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+    // `paged`: the statement past a page, asked `Page::default()`.
+    let read = async |statement: &str, binds: &Binds, paged: bool, tx: &mut sqlx::PgConnection| {
+        let query = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
             "select (to_jsonb(t) - 'column_totals')::text || ' ' || coalesce((select string_agg(x::text, ',' order by x::text)
                        from jsonb_array_elements(t.column_totals) x), '')
                from ({statement}) t"
@@ -1185,10 +1200,12 @@ async fn the_board_off_the_cards_alone_is_the_board_joined() {
         .bind(&declared)
         .bind(binds.3)
         .bind(&binds.4)
-        .bind(binds.5)
-        .bind(None::<sqlx::types::Json<serde_json::Value>>)
-        .fetch_all(tx)
-        .await
+        .bind(binds.5);
+        if paged {
+            query.bind(default_page()).fetch_all(tx).await
+        } else {
+            query.fetch_all(tx).await
+        }
         .unwrap()
     };
     // `unwhole`: the sources not whole; a scope with one answers one row.
@@ -1199,8 +1216,21 @@ async fn the_board_off_the_cards_alone_is_the_board_joined() {
             .await
             .unwrap();
         for (joined, carded, binds) in &shapes {
-            let expected = read(joined, binds, &mut tx).await;
-            let got = read(carded, binds, &mut tx).await;
+            let expected = read(joined, binds, false, &mut tx).await;
+            let got = read(carded, binds, false, &mut tx).await;
+            // The paged statements asked `Page::default()` answer each the
+            // same rows as the first (the ux18 Windows pass): a read with no
+            // page sends ux17's statement and loses nothing by it.
+            assert_eq!(
+                read(paged_of(joined), binds, true, &mut tx).await,
+                expected,
+                "{when}: paged joined, {binds:?}"
+            );
+            assert_eq!(
+                read(paged_of(carded), binds, true, &mut tx).await,
+                got,
+                "{when}: paged off the cards, {binds:?}"
+            );
             let whole = unwhole.is_none_or(|source| {
                 !binds
                     .1
@@ -1399,4 +1429,33 @@ async fn a_fill_with_every_card_written_runs_no_batch() {
     );
     assert_eq!(cards().await, had + 1, "written again");
     assert_eq!(knobas_core::item_card::fill(&pool).await.unwrap(), 0);
+}
+
+/// `Page::default()` as the cards statement binds it (`$8`).
+fn default_page() -> sqlx::types::Json<serde_json::Value> {
+    sqlx::types::Json(serde_json::to_value(knobas_core::mini_board::Page::default()).unwrap())
+}
+
+/// The paged statement of a first-cards statement.
+fn paged_of(statement: &str) -> &'static str {
+    use knobas_core::mini_board as mb;
+    [
+        (mb::planned_statement(), mb::planned_statement_paged()),
+        (
+            mb::planned_statement_unlaned(),
+            mb::planned_statement_unlaned_paged(),
+        ),
+        (
+            mb::planned_statement_carded(),
+            mb::planned_statement_carded_paged(),
+        ),
+        (
+            mb::planned_statement_unlaned_carded(),
+            mb::planned_statement_unlaned_carded_paged(),
+        ),
+    ]
+    .into_iter()
+    .find(|(first, _)| *first == statement)
+    .map(|(_, paged)| paged)
+    .expect("a first-cards statement")
 }

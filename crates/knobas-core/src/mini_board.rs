@@ -340,12 +340,117 @@ macro_rules! priority_read {
 /// opens, [`cards_select!`], its select list, [`cards_from!`], its `from`,
 /// [`cards_filter!`], its `where`, and [`cards_cut!`], the rest. Joined with
 /// nothing between them they are the statement as it always read.
+///
+/// **Two statements, first and paged** (the ux18 Windows pass, Fable's
+/// ruling): every macro that reads the page `$8` takes `first` or `paged`.
+/// `first` is the board as ux17 read it, seven binds and no `$8`, which every
+/// read with no page sends: a key, an open, a sync's re-read. `paged` adds the
+/// page, which only a view that shows every ticket sends, as its columns and
+/// its list read on. The statement is unnamed and planned at each read, and
+/// the page's parts cost a first read even with `$8` null (six sort keys in
+/// the cut's window, a `case` in its partition and five joins a row): 53 ms
+/// a letter on the scale copy in PostgreSQL's own log, where ux17's text took
+/// 37 on the same data.
+///
 /// The page `$8` asks for (ux18, a view that shows every ticket; [`Page`]):
 /// how many of each column's cards to pass over before the cut keeps its
 /// `$5`, `0` without a page.
 macro_rules! page_after {
     () => {
         "coalesce(($8::jsonb->>'after')::bigint, 0)"
+    };
+}
+
+/// Which of a column's kept rows (alias `$r`, numbered `rn`) the cut keeps:
+/// the first `$5` of each, and on a page the `$5` past its `after`.
+macro_rules! kept_rows {
+    (first, $r:literal) => {
+        concat!("where $5::bigint is null or ", $r, ".rn <= $5")
+    };
+    (paged, $r:literal) => {
+        concat!(
+            "where ",
+            $r,
+            ".rn > ",
+            page_after!(),
+            " and ($5::bigint is null or ",
+            $r,
+            ".rn <= ",
+            page_after!(),
+            " + $5)"
+        )
+    };
+}
+
+/// The answer's order over rows aliased `$r`: newest first, then by id; a
+/// list sorted on the server ([`Page::sort`]) in its own rank first.
+macro_rules! rows_order {
+    (first, $r:literal) => {
+        concat!("order by ", $r, ".at desc, ", $r, ".entity_id")
+    };
+    (paged, $r:literal) => {
+        concat!(
+            "order by case when ($8::jsonb->>'sort') is not null then ",
+            $r,
+            ".rn end, ",
+            $r,
+            ".at desc, ",
+            $r,
+            ".entity_id"
+        )
+    };
+}
+
+/// A page's marks ([`Page::frontier`]): each status's last card the column
+/// holds (one a status, its status as `jsonb`), and that card's date, read
+/// off the ticket itself, so a mark whose
+/// card has since left the view or changed its status still marks where its
+/// status stood. A mark whose card is gone marks nothing, and its status is
+/// read from its top again: the column drops the cards it already holds.
+macro_rules! page_marks {
+    () => {
+        "marks as materialized (
+       select distinct on (m.mark->'status') m.mark->'status' as status,
+              m.mark->>'id' as entity_id, coalesce(t.item_updated_at, t.synced_at) as at
+         from jsonb_array_elements(coalesce($8::jsonb->'frontier', '[]'::jsonb)) m(mark)
+         join sync.item t on t.entity_id = m.mark->>'id'
+        order by m.mark->'status'
+     ),
+"
+    };
+}
+
+/// Each ticket `$s` beside its status's mark ([`page_marks!`]), `mk`: the
+/// status meets its mark as `jsonb`, `null` the column of no status, an
+/// equality the planner hashes. One mark a status, so no ticket is read
+/// twice. (As `not exists` the comparison was an anti-join's filter, every
+/// ticket of a status compared in its bucket; as `is not distinct from` the
+/// marks were rescanned once a ticket.)
+macro_rules! page_marks_join {
+    ($s:literal) => {
+        concat!(
+            "
+        left join marks mk on mk.status = coalesce(to_jsonb(",
+            $s,
+            ".status), 'null'::jsonb)"
+        )
+    };
+}
+
+/// Whether ticket `$s` stands past its status's mark (`mk`,
+/// [`page_marks_join!`]) in the board's order, newest first, then by id;
+/// every ticket of a status with no mark does.
+macro_rules! page_past_mark {
+    ($s:literal) => {
+        concat!(
+            "(mk.entity_id is null or ",
+            $s,
+            ".at < mk.at or (",
+            $s,
+            ".at = mk.at and ",
+            $s,
+            ".entity_id > mk.entity_id))"
+        )
     };
 }
 
@@ -439,14 +544,14 @@ macro_rules! page_sort_order {
 }
 
 macro_rules! cards {
-    ($($ranked:tt)+) => {
+    ($mode:ident) => {
         concat!(
             "with ",
             cards_ctes!(),
             cards_select!(),
             cards_from!(),
             cards_filter!(),
-            cards_cut!($($ranked)+)
+            cards_cut!($mode)
         )
     };
 }
@@ -514,8 +619,14 @@ macro_rules! cards_filter {
 }
 
 /// [`cards!`] past `scoped`: the cut (`$ranked`) and the kept cards' fields.
+/// `$mode` is the lanes and the page: `laned` or `unlaned`, then `first` or
+/// `paged`.
 macro_rules! cards_cut {
-    ($($ranked:tt)+) => {
+    (laned_first) => { cards_cut!(@ first, ranked_laned!(first)) };
+    (laned_paged) => { cards_cut!(@ paged, ranked_laned!(paged)) };
+    (unlaned_first) => { cards_cut!(@ first, ranked_unlaned!(first)) };
+    (unlaned_paged) => { cards_cut!(@ paged, ranked_unlaned!(paged)) };
+    (@ $page:ident, $($ranked:tt)+) => {
         concat!(
     "
      ),
@@ -578,12 +689,11 @@ macro_rules! cards_cut {
                           (select pn.kind, pn.name, i.source_id from ",
     crate::declared_parent_names!("$4"),
     " pn where i.entity_id is not null order by pn.pos desc, pn.name_ord limit 1)) par on true
-      where r.rn > ",
-    page_after!(),
-    " and ($5::bigint is null or r.rn <= ",
-    page_after!(),
-    " + $5)
-      order by case when ($8::jsonb->>'sort') is not null then r.rn end, r.at desc, r.entity_id"
+      ",
+    kept_rows!($page, "r"),
+    "
+      ",
+    rows_order!($page, "r")
         )
     };
 }
@@ -591,8 +701,7 @@ macro_rules! cards_cut {
 /// [`CARDS`]' `ranked`: the lanes ranked and each lane's columns cut and
 /// counted on their own.
 macro_rules! ranked_laned {
-    () => {
-        concat!(
+    (first) => {
     "     lanes as (
        select s.lane, count(*) as n,
               row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
@@ -602,6 +711,29 @@ macro_rules! ranked_laned {
      ranked as (
        select s.entity_id, s.source_id, s.at, s.status, s.lane,
               l.n as lane_count, l.place, l.lanes,
+              row_number() over (partition by l.place, array_position(
+                                   (select array_agg(distinct s2.status) from scoped s2), s.status)
+                                 order by s.at desc, s.entity_id) as rn,
+              count(*) over (partition by l.place, array_position(
+                               (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
+         from scoped s join lanes l on l.lane = s.lane
+        where $7::bigint is null or l.place <= $7
+     )
+"
+    };
+    (paged) => {
+        concat!(
+    "     lanes as (
+       select s.lane, count(*) as n,
+              row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
+              count(*) over () as lanes
+         from scoped s group by s.lane
+     ),
+     ",
+        page_marks!(),
+        "     ranked as (
+       select s.entity_id, s.source_id, s.at, s.status, s.lane,
+              l.n as lane_count, l.place, l.lanes,
               row_number() over (partition by l.place, ",
         page_partition!("array_position(
                                    (select array_agg(distinct s2.status) from scoped s2), s.status)"),
@@ -609,19 +741,25 @@ macro_rules! ranked_laned {
                                  order by s.at desc, s.entity_id) as rn,
               count(*) over (partition by l.place, array_position(
                                (select array_agg(distinct s2.status) from scoped s2), s.status)) as total
-         from scoped s join lanes l on l.lane = s.lane
+         from scoped s join lanes l on l.lane = s.lane",
+        page_marks_join!("s"),
+        "
         where ($7::bigint is null or l.place <= $7)
           and (($8::jsonb->>'lane') is null or s.lane = $8::jsonb->>'lane')
           and ",
         page_takes!("s.status"),
+        "
+          and ",
+        page_past_mark!("s"),
         "
      )
 "
         )
     };
 }
-/// The board's cards in lanes: [`cards!`] with [`ranked_laned!`].
-const CARDS: &str = cards!(ranked_laned!());
+/// The board's cards in lanes: [`cards!`] with [`ranked_laned!`], the
+/// first cards of each lane's columns.
+const CARDS: &str = cards!(laned_first);
 
 /// [`CARDS`] in the pieces a narrowing goes between.
 const CARDS_PIECES: CardsStatement = CardsStatement {
@@ -630,20 +768,55 @@ const CARDS_PIECES: CardsStatement = CardsStatement {
     select: cards_select!(),
     from: cards_from!(),
     filter: cards_filter!(),
-    cut: cards_cut!(ranked_laned!()),
+    cut: cards_cut!(laned_first),
     whole: CARDS,
     carded: false,
+    paged: false,
+};
+
+/// [`CARDS`] past a page (`$8`).
+const CARDS_PAGED: &str = cards!(laned_paged);
+
+/// [`CARDS_PAGED`] in the pieces a narrowing goes between.
+const CARDS_PAGED_PIECES: CardsStatement = CardsStatement {
+    cut: cards_cut!(laned_paged),
+    whole: CARDS_PAGED,
+    paged: true,
+    ..CARDS_PIECES
 };
 
 /// [`CARDS_UNLANED`]' `ranked`: the one lane spelled out.
 macro_rules! ranked_unlaned {
-    () => {
-        concat!(
+    (first) => {
         "     columns as materialized (
        select c.status, c.n, row_number() over () as pos
          from (select s.status, count(*) as n from scoped s group by s.status) c
      ),
      numbered as (
+       select s.entity_id, s.source_id, s.at, s.status, s.lane, p.pos,
+              row_number() over (partition by p.pos order by s.at desc, s.entity_id) as rn
+         from scoped s
+        cross join lateral (select array_position(
+                 (select array_agg(c.status order by c.pos) from columns c), s.status) as pos) p
+     ),
+     ranked as (
+       select n.entity_id, n.source_id, n.at, n.status, n.lane,
+              (select sum(c.n) from columns c)::bigint as lane_count,
+              1::bigint as place, 1::bigint as lanes, n.rn, c.n as total
+         from numbered n join columns c on c.pos = n.pos
+        where $5::bigint is null or n.rn <= $5
+     )
+"
+    };
+    (paged) => {
+        concat!(
+        "     columns as materialized (
+       select c.status, c.n, row_number() over () as pos
+         from (select s.status, count(*) as n from scoped s group by s.status) c
+     ),
+     ",
+        page_marks!(),
+        "     numbered as (
        select s.entity_id, s.source_id, s.at, s.status, s.lane, p.pos,
               row_number() over (partition by ",
         page_partition!("p.pos"),
@@ -654,9 +827,13 @@ macro_rules! ranked_unlaned {
         cross join lateral (select array_position(
                  (select array_agg(c.status order by c.pos) from columns c), s.status) as pos) p",
         page_sort_keys!(),
+        page_marks_join!("s"),
         "
         where ",
         page_takes!("s.status"),
+        "
+          and ",
+        page_past_mark!("s"),
         "
      ),
      ranked as (
@@ -664,11 +841,9 @@ macro_rules! ranked_unlaned {
               (select sum(c.n) from columns c)::bigint as lane_count,
               1::bigint as place, 1::bigint as lanes, n.rn, c.n as total
          from numbered n join columns c on c.pos = n.pos
-        where n.rn > ",
-        page_after!(),
-        " and ($5::bigint is null or n.rn <= ",
-        page_after!(),
-        " + $5)
+        ",
+        kept_rows!(paged, "n"),
+        "
      )
 "
         )
@@ -688,7 +863,7 @@ macro_rules! ranked_unlaned {
 /// sort of every ticket's to find eight: 9 ms of a broad key's 54, for the
 /// counts of the 300 rows kept. `ranked` reads them off `columns` for those
 /// rows alone.
-const CARDS_UNLANED: &str = cards!(ranked_unlaned!());
+const CARDS_UNLANED: &str = cards!(unlaned_first);
 
 /// [`CARDS_UNLANED`] in the pieces a narrowing goes between.
 const CARDS_UNLANED_PIECES: CardsStatement = CardsStatement {
@@ -697,9 +872,21 @@ const CARDS_UNLANED_PIECES: CardsStatement = CardsStatement {
     select: cards_select!(),
     from: cards_from!(),
     filter: cards_filter!(),
-    cut: cards_cut!(ranked_unlaned!()),
+    cut: cards_cut!(unlaned_first),
     whole: CARDS_UNLANED,
     carded: false,
+    paged: false,
+};
+
+/// [`CARDS_UNLANED`] past a page (`$8`).
+const CARDS_UNLANED_PAGED: &str = cards!(unlaned_paged);
+
+/// [`CARDS_UNLANED_PAGED`] in the pieces a narrowing goes between.
+const CARDS_UNLANED_PAGED_PIECES: CardsStatement = CardsStatement {
+    cut: cards_cut!(unlaned_paged),
+    whole: CARDS_UNLANED_PAGED,
+    paged: true,
+    ..CARDS_UNLANED_PIECES
 };
 
 /// [`cards_carded!`]' CTEs before `scoped`, and `scoped`'s opening: the key
@@ -788,7 +975,11 @@ macro_rules! cards_filter_carded {
 /// [`cards_cut!`] off the kept cards alone, and one row more where the scope
 /// is not whole ([`UNWHOLE`]), which then holds no card.
 macro_rules! cards_cut_carded {
-    ($($ranked:tt)+) => {
+    (laned_first) => { cards_cut_carded!(@ first, "", "", ranked_laned!(first)) };
+    (laned_paged) => { cards_cut_carded!(@ paged, ", r.rn", ", 0", ranked_laned!(paged)) };
+    (unlaned_first) => { cards_cut_carded!(@ first, "", "", ranked_unlaned!(first)) };
+    (unlaned_paged) => { cards_cut_carded!(@ paged, ", r.rn", ", 0", ranked_unlaned!(paged)) };
+    (@ $page:ident, $rn:literal, $no_rn:literal, $($ranked:tt)+) => {
         concat!(
     "
      ),
@@ -815,17 +1006,17 @@ macro_rules! cards_cut_carded {
                           else crd.parent_name in (select n.name from sync.item i cross join lateral ",
     crate::declared_names_as_parent!("$4"),
     " n where i.entity_id = pi.entity_id) end)) as parent_title,
-            crd.item_updated_at as updated_at, r.total, r.at, r.rn
+            crd.item_updated_at as updated_at, r.total, r.at",
+    $rn,
+    "
        from ranked r
        join lateral (select c.* from sync.item_card c
                       where c.entity_id = r.entity_id
                         and c.paths_key = (select k.k from card_keys k where k.source_id = r.source_id)
                      offset 0) crd on true
-      where r.rn > ",
-    page_after!(),
-    " and ($5::bigint is null or r.rn <= ",
-    page_after!(),
-    " + $5)
+      ",
+    kept_rows!($page, "r"),
+    "
      )
      select b.entity_id, b.source_id, b.title, b.status, b.lane, b.lane_count, b.place, b.lanes,
             b.column_totals, b.priority, b.issue_type, b.assignee, b.assignee_name, b.path,
@@ -833,9 +1024,12 @@ macro_rules! cards_cut_carded {
        from (select * from board
              union all
              select '', '', '', null, '', 0, 0, 0, null, null, null, null, null, null,
-                    '{}'::text[], null, null, null, 0, null, 0
+                    '{}'::text[], null, null, null, 0, null",
+    $no_rn,
+    "
                from whole w where not w.whole) b
-      order by case when ($8::jsonb->>'sort') is not null then b.rn end, b.at desc, b.entity_id"
+      ",
+    rows_order!($page, "b")
         )
     };
 }
@@ -862,14 +1056,14 @@ macro_rules! cards_cut_carded {
 /// is left out. `tests/it/item_card.rs` and `tests/it/board_narrowed.rs` hold
 /// the two statements to each other, every card stored, a third and none.
 macro_rules! cards_carded {
-    ($($ranked:tt)+) => {
+    ($mode:ident) => {
         concat!(
             "with ",
             cards_ctes_carded!(),
             cards_select_carded!(),
             cards_from_carded!(),
             cards_filter_carded!(),
-            cards_cut_carded!($($ranked)+)
+            cards_cut_carded!($mode)
         )
     };
 }
@@ -879,7 +1073,7 @@ macro_rules! cards_carded {
 pub const UNWHOLE: &str = "";
 
 /// [`CARDS`] off the cards alone ([`cards_carded!`]).
-const CARDS_CARDED: &str = cards_carded!(ranked_laned!());
+const CARDS_CARDED: &str = cards_carded!(laned_first);
 
 /// [`CARDS_CARDED`] in the pieces a narrowing goes between.
 const CARDS_CARDED_PIECES: CardsStatement = CardsStatement {
@@ -888,13 +1082,25 @@ const CARDS_CARDED_PIECES: CardsStatement = CardsStatement {
     select: cards_select_carded!(),
     from: cards_from_carded!(),
     filter: cards_filter_carded!(),
-    cut: cards_cut_carded!(ranked_laned!()),
+    cut: cards_cut_carded!(laned_first),
     whole: CARDS_CARDED,
     carded: true,
+    paged: false,
+};
+
+/// [`CARDS_CARDED`] past a page (`$8`).
+const CARDS_CARDED_PAGED: &str = cards_carded!(laned_paged);
+
+/// [`CARDS_CARDED_PAGED`] in the pieces a narrowing goes between.
+const CARDS_CARDED_PAGED_PIECES: CardsStatement = CardsStatement {
+    cut: cards_cut_carded!(laned_paged),
+    whole: CARDS_CARDED_PAGED,
+    paged: true,
+    ..CARDS_CARDED_PIECES
 };
 
 /// [`CARDS_UNLANED`] off the cards alone ([`cards_carded!`]).
-const CARDS_UNLANED_CARDED: &str = cards_carded!(ranked_unlaned!());
+const CARDS_UNLANED_CARDED: &str = cards_carded!(unlaned_first);
 
 /// [`CARDS_UNLANED_CARDED`] in the pieces a narrowing goes between.
 const CARDS_UNLANED_CARDED_PIECES: CardsStatement = CardsStatement {
@@ -903,9 +1109,21 @@ const CARDS_UNLANED_CARDED_PIECES: CardsStatement = CardsStatement {
     select: cards_select_carded!(),
     from: cards_from_carded!(),
     filter: cards_filter_carded!(),
-    cut: cards_cut_carded!(ranked_unlaned!()),
+    cut: cards_cut_carded!(unlaned_first),
     whole: CARDS_UNLANED_CARDED,
     carded: true,
+    paged: false,
+};
+
+/// [`CARDS_UNLANED_CARDED`] past a page (`$8`).
+const CARDS_UNLANED_CARDED_PAGED: &str = cards_carded!(unlaned_paged);
+
+/// [`CARDS_UNLANED_CARDED_PAGED`] in the pieces a narrowing goes between.
+const CARDS_UNLANED_CARDED_PAGED_PIECES: CardsStatement = CardsStatement {
+    cut: cards_cut_carded!(unlaned_paged),
+    whole: CARDS_UNLANED_CARDED_PAGED,
+    paged: true,
+    ..CARDS_UNLANED_CARDED_PIECES
 };
 
 /// The cards statement in the pieces a narrowing goes between (the
@@ -960,6 +1178,10 @@ pub struct CardsStatement {
     /// the card where it would walk. A statement whose scope is not whole
     /// answers one row, of the id [`UNWHOLE`].
     pub carded: bool,
+    /// Whether it reads a page (`$8`, [`CardsBinds::page`]): only then is
+    /// `$8` bound, and a narrowing's own binds start at `$9`; else they start
+    /// at `$8`, as before ux18.
+    pub paged: bool,
 }
 
 /// What the cards statement binds, `$1` to `$7` in this order.
@@ -979,8 +1201,9 @@ pub struct CardsBinds<'a> {
     pub lanes: Option<&'a str>,
     /// `$7`: only the first this many lanes.
     pub lanes_first: Option<i64>,
-    /// `$8`: the page asked for ([`Page`]) as `jsonb`, or `None` for the
-    /// first cards of every column.
+    /// `$8`: the page asked for ([`Page`]) as `jsonb`, bound only to a
+    /// [`CardsStatement::paged`] statement; `None` for the first cards of
+    /// every column, which a statement that is not paged reads.
     pub page: Option<&'a sqlx::types::Json<serde_json::Value>>,
 }
 
@@ -1016,7 +1239,7 @@ impl CardsNarrowing for Unnarrowed {
         // Planned for its parameters every time (#753): reused, the statement
         // went to PostgreSQL's generic plan on its sixth execution and an All
         // room of 15,000 tickets took 6 s where its own plan takes 0.1 s.
-        sqlx::query_as(statement.whole)
+        let query = sqlx::query_as(statement.whole)
             .persistent(false)
             .bind(binds.members)
             .bind(binds.sources)
@@ -1024,10 +1247,12 @@ impl CardsNarrowing for Unnarrowed {
             .bind(binds.declared)
             .bind(binds.per_column)
             .bind(binds.lanes)
-            .bind(binds.lanes_first)
-            .bind(binds.page)
-            .fetch_all(pool)
-            .await
+            .bind(binds.lanes_first);
+        if statement.paged {
+            query.bind(binds.page).fetch_all(pool).await
+        } else {
+            query.fetch_all(pool).await
+        }
     }
 }
 
@@ -1057,11 +1282,40 @@ pub fn planned_signals() -> &'static str {
 }
 
 /// The board's card statement, for `knobas-app`'s plan test
-/// (`tests/it/read_plans.rs`, #778). It binds what [`read_capped`] binds.
+/// (`tests/it/read_plans.rs`, #778). It binds what [`read_capped`] binds,
+/// `$1` to `$7`: the first cards, no page.
 #[doc(hidden)]
 #[must_use]
 pub fn planned_statement() -> &'static str {
     CARDS
+}
+
+/// [`planned_statement`] past a page: `$1` to `$8`.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_paged() -> &'static str {
+    CARDS_PAGED
+}
+
+/// [`planned_statement_unlaned`] past a page: `$1` to `$8`.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_unlaned_paged() -> &'static str {
+    CARDS_UNLANED_PAGED
+}
+
+/// [`planned_statement_carded`] past a page: `$1` to `$8`.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_carded_paged() -> &'static str {
+    CARDS_CARDED_PAGED
+}
+
+/// [`planned_statement_unlaned_carded`] past a page: `$1` to `$8`.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement_unlaned_carded_paged() -> &'static str {
+    CARDS_UNLANED_CARDED_PAGED
 }
 
 /// The board's card statement without lanes, for the same plan test: what
@@ -1259,6 +1513,19 @@ pub struct Page {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub statuses: Option<Vec<Option<String>>>,
+    /// Where the column stands in each status (the ux18 Windows pass): the
+    /// last card it holds of each, in the board's order. The page is then the
+    /// cards past every mark of their own status, ranked as one, so a column
+    /// that gathers several statuses, and holds the first cards of each from
+    /// the board's first read, reads every card it does not hold and none it
+    /// does. An `after` over the statuses ranked as one skipped cards: a
+    /// column holding fifty of each of two statuses, the first three hundred
+    /// cards of them all of one, never read numbers 51 to 100 of it. A mark
+    /// is a card, not a count, so a sync that adds or takes a card above it
+    /// moves no page. Every card of a status with no mark.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frontier: Option<Vec<PageMark>>,
     /// Only the lane of this key, on a board read in lanes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -1282,6 +1549,17 @@ pub struct Page {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub priority_order: Option<Vec<String>>,
+}
+
+/// A status's mark in a page ([`Page::frontier`]): the last card a column
+/// holds of it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "BoardPageMark")]
+pub struct PageMark {
+    /// The status, `null` the column of no status.
+    pub status: Option<String>,
+    /// The card's id.
+    pub id: String,
 }
 
 impl Page {
@@ -1721,10 +1999,16 @@ pub async fn read_scoped_narrowed<N: CardsNarrowing>(
         // ticket the fill has not reached, declarations the database did not
         // store. A mirror a sync made whole since the last mark is marked in
         // the background, so the next read takes the cards.
-        let (carded, joined) = if lanes.is_some() {
-            (CARDS_CARDED_PIECES, CARDS_PIECES)
-        } else {
-            (CARDS_UNLANED_CARDED_PIECES, CARDS_UNLANED_PIECES)
+        // The first cards with ux17's statement, a page with its own (Fable's
+        // ruling, the ux18 Windows pass): `$8` only where a page is asked.
+        let (carded, joined) = match (lanes.is_some(), page.is_some()) {
+            (true, false) => (CARDS_CARDED_PIECES, CARDS_PIECES),
+            (true, true) => (CARDS_CARDED_PAGED_PIECES, CARDS_PAGED_PIECES),
+            (false, false) => (CARDS_UNLANED_CARDED_PIECES, CARDS_UNLANED_PIECES),
+            (false, true) => (
+                CARDS_UNLANED_CARDED_PAGED_PIECES,
+                CARDS_UNLANED_PAGED_PIECES,
+            ),
         };
         let mut rows: Vec<CardRow> = narrowing.rows(pool, carded, binds).await?;
         if rows.first().is_some_and(|row| row.entity_id == UNWHOLE) {
@@ -2178,7 +2462,12 @@ mod tests {
     /// them they must be the statement the board runs unnarrowed.
     #[test]
     fn the_pieces_of_a_cards_statement_are_the_statement() {
-        for pieces in [CARDS_PIECES, CARDS_UNLANED_PIECES] {
+        for pieces in [
+            CARDS_PIECES,
+            CARDS_UNLANED_PIECES,
+            CARDS_PAGED_PIECES,
+            CARDS_UNLANED_PAGED_PIECES,
+        ] {
             assert_eq!(
                 [
                     pieces.with,
@@ -2213,7 +2502,60 @@ mod tests {
         }
         assert_eq!(CARDS_PIECES.whole, CARDS);
         assert_eq!(CARDS_UNLANED_PIECES.whole, CARDS_UNLANED);
+        assert_eq!(CARDS_PAGED_PIECES.whole, CARDS_PAGED);
+        assert_eq!(CARDS_UNLANED_PAGED_PIECES.whole, CARDS_UNLANED_PAGED);
         assert_ne!(CARDS, CARDS_UNLANED);
+    }
+
+    /// A read with no page sends a statement with no `$8` (the ux18 Windows
+    /// pass, Fable's ruling): ux17's, seven binds, which a narrowing's own
+    /// follow from `$8`. Only a paged statement reads the page.
+    #[test]
+    fn only_a_paged_statement_reads_a_page() {
+        let first = [
+            CARDS_PIECES,
+            CARDS_UNLANED_PIECES,
+            CARDS_CARDED_PIECES,
+            CARDS_UNLANED_CARDED_PIECES,
+        ];
+        let paged = [
+            CARDS_PAGED_PIECES,
+            CARDS_UNLANED_PAGED_PIECES,
+            CARDS_CARDED_PAGED_PIECES,
+            CARDS_UNLANED_CARDED_PAGED_PIECES,
+        ];
+        for pieces in first {
+            assert!(!pieces.paged);
+            assert!(!pieces.whole.contains("$8"), "{}", pieces.whole);
+            assert!(!pieces.whole.contains("marks"), "{}", pieces.whole);
+            assert!(pieces.whole.contains("$5::bigint"));
+        }
+        for pieces in paged {
+            assert!(pieces.paged);
+            assert!(pieces.whole.contains("$8::jsonb->>'after'"));
+            assert!(pieces.whole.contains("$8::jsonb->'frontier'"));
+        }
+        // The same scan either way: only the cut differs.
+        for (first, paged) in first.into_iter().zip(paged) {
+            assert_eq!(first.carded, paged.carded);
+            assert_eq!(
+                [
+                    first.with,
+                    first.ctes,
+                    first.select,
+                    first.from,
+                    first.filter
+                ],
+                [
+                    paged.with,
+                    paged.ctes,
+                    paged.select,
+                    paged.from,
+                    paged.filter
+                ]
+            );
+            assert_ne!(first.cut, paged.cut);
+        }
     }
 
     /// The cards-only statements in the same pieces, read off the card:
@@ -2221,7 +2563,12 @@ mod tests {
     /// joined by `from`, and no piece walks a payload.
     #[test]
     fn the_pieces_of_a_carded_statement_are_the_statement() {
-        for pieces in [CARDS_CARDED_PIECES, CARDS_UNLANED_CARDED_PIECES] {
+        for pieces in [
+            CARDS_CARDED_PIECES,
+            CARDS_UNLANED_CARDED_PIECES,
+            CARDS_CARDED_PAGED_PIECES,
+            CARDS_UNLANED_CARDED_PAGED_PIECES,
+        ] {
             assert!(pieces.carded);
             assert_eq!(
                 [
@@ -2254,7 +2601,12 @@ mod tests {
                 assert!(!piece.contains("payload"), "{piece}");
             }
         }
-        for pieces in [CARDS_PIECES, CARDS_UNLANED_PIECES] {
+        for pieces in [
+            CARDS_PIECES,
+            CARDS_UNLANED_PIECES,
+            CARDS_PAGED_PIECES,
+            CARDS_UNLANED_PAGED_PIECES,
+        ] {
             assert!(!pieces.carded);
         }
         assert_eq!(CARDS_CARDED_PIECES.whole, CARDS_CARDED);
