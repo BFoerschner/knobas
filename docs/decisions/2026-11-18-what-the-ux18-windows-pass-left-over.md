@@ -70,6 +70,15 @@ board 39 / 69 / 132 → 39 / 67 / 117 at 1440, 37 / 100 / 117 → 39 / 103 / 118
 92 / 134 / 186 → 127 / 139 / 202 at 1440 (its first open waits for its read, 75 ms before and 110 after at 1x, the
 tunnel), 100 / 133 / 211 → 123 / 133 / 218 at 5120. Nothing moved in any key or open.
 
+On the Mac (headless Chrome, no tunnel, one run each, the release gate's press trips running beside it, load 4 to
+12), the same keys sit within the Mac's spread: the letter 68 / 69 / 69 → 76 / 84 / 89 at 1440x868@1, 74 / 70 / 97 →
+81 / 78 / 82 at 2560x1440@1.25, 84 / 74 / 114 → 71 / 77 / 87 at 5120x1440@1; `-project:` 70 / 66 / 77 → 75 / 85 / 82,
+71 / 77 / 86 → 70 / 73 / 90, 65 / 73 / 75 → 75 / 83 / 87; the view that shows every ticket 79 / 77 / 74 → 70 / 80 / 77,
+69 / 75 / 85 → 78 / 74 / 76, 82 / 73 / 84 → 78 / 70 / 76. Every key within its line; nothing moved.
+
+Not measured: the count of cards in a key's answer frame and the next at 5120 in knobas's own WebView2 (Fable's 48 and
+69); the unit test pins the share, and the keys above draw the rows within their lines.
+
 ## 4. A show-every-ticket column that gathers statuses skipped cards
 
 **Why (found by Fable).** A view's column that gathers several statuses paged `after` the cards it held, over the
@@ -118,4 +127,14 @@ stays over there, as it was at 100 % before this pass.
 
 ## Gates
 
-On the head in a clean clone: listed in the PR comment for this pass.
+In a clean clone: `just check-front` ok (svelte-check 1,556 files, 0 errors, 0 warnings; vitest 372 files, 5,650 passed,
+1 skipped); `just check-scripts` ok; `cargo fmt --all --check` ok; `just clippy` and `just clippy-libs` on `knobas-core`,
+`knobas-search` and `knobas-app` clean; `just test` (two binaries at a time, two threads each: 63 binaries, 5,095 passed, 1 failed, 264 ignored; the failure
+`folder_render::runs::tests::a_drawing_outlives_a_restart_and_goes_with_its_source`, a renderer's script timed under
+the load, which this pass does not touch, passed three times alone and `knobas-app`'s lib again whole, 435 passed), and
+`app/src/lib/ipc/generated/` unchanged after it; the IPC mirror regenerated (`BoardPageMark`,
+`frontier`) and committed. Press trips `--strict`: 305 of 305 passing (304 in Chrome in WSL on the PC under its queue,
+and `monitors-row-room`, which reads no hover there, on the Mac). `testenv/desktop-witness-test.sh`: 305 checks ok.
+`just moves` on Tickets and Docs (`--only ticket,docs`, the fixture and the scale database, 1440x868@1,
+2560x1440@1.25 and 5120x1440@1, 1x and 4x, in Chrome in WSL): nothing moved. `pixel-same.py` not run: nothing drawn
+changed once settled (the share draws the same cards a frame later, the floor and the warm draw nothing).
