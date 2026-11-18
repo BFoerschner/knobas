@@ -105,12 +105,17 @@ fn java_in(home: &Path) -> PathBuf {
         .join(if cfg!(windows) { "java.exe" } else { "java" })
 }
 
+/// The `java` a path set in Settings names: the file itself, or a Java home's.
+fn set_candidate(set: &str) -> PathBuf {
+    let p = PathBuf::from(set);
+    if p.is_dir() { java_in(&p) } else { p }
+}
+
 /// Every place a `java` may be, the person's own first.
 fn candidates(set: Option<&str>) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(set) = set {
-        let p = PathBuf::from(set);
-        out.push(if p.is_dir() { java_in(&p) } else { p });
+        out.push(set_candidate(set));
     }
     if let Some(home) = std::env::var_os("JAVA_HOME") {
         out.push(java_in(Path::new(&home)));
@@ -133,6 +138,10 @@ fn candidates(set: Option<&str>) -> Vec<PathBuf> {
     }
     // A desktop app started from the Finder or the Start menu sees little of a shell's PATH: the usual installs.
     let mut roots: Vec<PathBuf> = Vec::new();
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    if let Some(home) = &home {
+        roots.extend(home_roots(Path::new(home)));
+    }
     if cfg!(windows) {
         for base in [
             std::env::var_os("ProgramFiles"),
@@ -156,21 +165,37 @@ fn candidates(set: Option<&str>) -> Vec<PathBuf> {
     } else {
         roots.push(PathBuf::from("/Library/Java/JavaVirtualMachines"));
         roots.push(PathBuf::from("/usr/lib/jvm"));
-        if let Some(home) = std::env::var_os("HOME") {
-            let home = PathBuf::from(home);
-            roots.push(home.join(".sdkman/candidates/java"));
-            roots.push(home.join(".local/share/mise/installs/java"));
-            roots.push(home.join("Library/Java/JavaVirtualMachines"));
-        }
         out.push(PathBuf::from("/opt/homebrew/opt/openjdk/bin/java"));
         out.push(PathBuf::from("/usr/local/opt/openjdk/bin/java"));
     }
+    out.extend(javas_under(&roots));
+    out.retain(|p| p.is_file());
+    out.dedup();
+    out
+}
+
+/// The folders under a person's home that tools fill with Javas, a Java home each: IntelliJ's downloads (`.jdks`, on
+/// every platform; where Björn's Temurins sat on his PC, the ux19 Windows pass), and elsewhere SDKMAN!'s, mise's and
+/// macOS's own per-user folder.
+fn home_roots(home: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![home.join(".jdks")];
+    if !cfg!(windows) {
+        roots.push(home.join(".sdkman/candidates/java"));
+        roots.push(home.join(".local/share/mise/installs/java"));
+        roots.push(home.join("Library/Java/JavaVirtualMachines"));
+    }
+    roots
+}
+
+/// The `java` each folder in `roots` holds a Java home for (or a macOS bundle's `Contents/Home`), the newest-looking
+/// name first in each; only those that are there.
+fn javas_under(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
     for root in roots {
-        let Ok(dirs) = std::fs::read_dir(&root) else {
+        let Ok(dirs) = std::fs::read_dir(root) else {
             continue;
         };
         let mut found: Vec<PathBuf> = dirs.filter_map(Result::ok).map(|d| d.path()).collect();
-        // The newest-looking name first.
         found.sort();
         found.reverse();
         for dir in found {
@@ -179,7 +204,6 @@ fn candidates(set: Option<&str>) -> Vec<PathBuf> {
         }
     }
     out.retain(|p| p.is_file());
-    out.dedup();
     out
 }
 
@@ -215,6 +239,22 @@ async fn probe(java: &Path) -> Option<FoundJava> {
         release: release_of(&version)?,
         version,
     })
+}
+
+/// The first of `places` that is a Java new enough to run the decompiler (`needs`), else the first Java at all, so the
+/// view can say which one it found and why it cannot decompile with it. A `java` 8 first in `PATH` no longer hides a
+/// Java 21 in an install folder.
+async fn first_java(places: Vec<PathBuf>, needs: Option<u16>) -> Option<FoundJava> {
+    let mut older = None;
+    for candidate in places {
+        if let Some(found) = probe(&candidate).await {
+            if needs.is_none_or(|n| found.release >= n) {
+                return Some(found);
+            }
+            older.get_or_insert(found);
+        }
+    }
+    older
 }
 
 /// The environment a Java is started with: knobas's own and the JVM's option variables left out.
@@ -317,14 +357,16 @@ pub async fn runtime(pool: Option<&PgPool>, dirs: &[PathBuf], again: bool) -> Ja
     let places = tokio::task::spawn_blocking(move || candidates(looked.as_deref()))
         .await
         .unwrap_or_default();
-    let mut java = None;
-    for candidate in places {
-        if let Some(found) = probe(&candidate).await {
-            java = Some(found);
-            break;
-        }
-    }
     let tool = decompiler(dirs);
+    // A Java the person set is the one used, too old or not (the view says why); otherwise the first new enough.
+    let own = match set.as_deref() {
+        Some(set) => probe(&set_candidate(set)).await,
+        None => None,
+    };
+    let java = match own {
+        Some(own) => Some(own),
+        None => first_java(places, tool.as_ref().map(|d| d.needs)).await,
+    };
     let (can, reason) = match (&java, &tool) {
         (None, _) => (false, None),
         (Some(_), None) => (false, Some("this build carries no decompiler".to_owned())),
@@ -684,6 +726,69 @@ mod tests {
         let kept = started.elapsed();
         eprintln!("decompiled cold in {cold:?}, from the cache in {kept:?}");
         assert!(kept < cold);
+    }
+
+    /// IntelliJ's downloads (`~/.jdks`) are looked in on every platform: on Björn's PC both his Javas were there
+    /// (Temurin 24 and 25), and none in `PATH`, `JAVA_HOME` or Program Files, so the JAR view offered no *Decompile*.
+    #[test]
+    fn a_java_intellij_downloaded_is_found_under_the_home() {
+        let home = tempfile::tempdir().unwrap();
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        for name in ["temurin-24.0.2", "temurin-25"] {
+            let bin = home.path().join(".jdks").join(name).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join(exe), b"").unwrap();
+        }
+        // A folder that is no Java home is passed over.
+        std::fs::create_dir_all(home.path().join(".jdks/notes")).unwrap();
+        let found = javas_under(&home_roots(home.path()));
+        assert_eq!(
+            found,
+            vec![
+                home.path().join(".jdks/temurin-25/bin").join(exe),
+                home.path().join(".jdks/temurin-24.0.2/bin").join(exe),
+            ],
+            "the newest-looking name first, only the Java homes"
+        );
+    }
+
+    /// A Java too old found first is passed over for a newer one further on; with none new enough, the first is named.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_first_java_new_enough_is_taken() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = |name: &str, version: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(
+                &path,
+                format!("#!/bin/sh\necho 'openjdk version \"{version}\" 2024-07-16' >&2\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let (old, new, newer) = (
+            fake("j11", "11.0.2"),
+            fake("j21", "21.0.4"),
+            fake("j25", "25"),
+        );
+        let found = first_java(vec![old.clone(), new.clone(), newer], Some(17))
+            .await
+            .unwrap();
+        assert_eq!((found.release, found.path), (21, new.display().to_string()));
+        let found = first_java(vec![old.clone()], Some(17)).await.unwrap();
+        assert_eq!(
+            found.release, 11,
+            "no Java new enough: the one found, to say why not"
+        );
+        assert_eq!(
+            first_java(vec![old, dir.path().join("none")], None)
+                .await
+                .unwrap()
+                .release,
+            11
+        );
     }
 
     #[test]
