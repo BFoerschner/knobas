@@ -118,15 +118,16 @@ list at 6x on 1440x868@1 scrolled at 49.8 and 47.3 fps on the base, 46.1 and 46.
 against 33.3 and 33.8, its frame work p50 7.9 to 8 ms against 8 to 9.7; at 2560x1440@1.25 Builds at 4x 41.4 against 41.4
 and 41.9, at 6x 30.7 against 32.6 and 34.9. Within the run-to-run spread.
 
-**Owed: Builds' scroll in the probe at 115 % and up.** After the probe's own sequence (a scroll at 100 %, Settings and
-back, the slider stepped, Builds shown again), Builds scrolls at 26.5 and 17.6 fps at 4x and 6x on 2560x1440@1.25 and 28
-at 6x on 1440x868@1, where 105 % holds 54. Every frame restyles the runs table's whole body (`.tf-headed > header + *`,
-an invalidation set the table has always carried) as rows swap on most frames. The same live change made as a person
-makes it does not do it: traced alone on the same box, Builds at 4x on 2560x1440@1.25 drew 217 to 220 frames in a 4 s
-scroll at 120 % against 222 at 100 %, with the change made at 1x or at 4x, after a far scroll at 100 %, after an extra
-round trip through Settings, with the probe's own recorder and its per-frame reads of every row, and with Time kept
-alive beside it. Letting every list drop its measured heights on a size change did not move the probe's number either,
-so it was not kept. What in the probe's sequence starts it is not found.
+**Builds' scroll at 115 % and up, before and after the list-scroll pass.** On 3f555b22, after the probe's sequence (a
+scroll at 100 %, Settings and back, the slider stepped, Builds shown again), Builds scrolled at 26.5 and 17.6 fps at 4x
+and 6x on 2560x1440@1.25 and 27.9 at 6x on 1440x868@1 (the tables above), where 105 % held 54. A trace named it: every
+row swap restyled the runs table's whole body through `.tf-headed > header + *`, a sibling rule whose subject names
+nothing, and slower frames swapped rows on more of them. The same live change traced alone did not show it, so its
+start in the probe's sequence was never pinned down; letting every list drop its measured heights on a size change did
+not move it and was not kept. The list-scroll pass's 01bba49f, which rewrites every such rule with a named subject,
+landed under this pass; rebased on it (3d17be53), the same probe gives Builds at 120 %: 57.2 fps at 4x and 38.6 at 6x on
+2560x1440@1.25 (50 and 37.7 at 100 %), and 60 and 57.8 at 4x and 6x on 1440x868@1 (60 and 41.1 at 100 %); Tickets' list
+59.8 and 53.3 (59.3 and 52 at 100 %). Keys 44.5 to 71.2 ms, nothing moved.
 
 ## The sweep
 
@@ -147,7 +148,7 @@ faces themselves draw, as the shots show.
 ## Gates
 
 On the code head 3f555b22, in a clean clone: `just check-front` ok (svelte-check 1,554 files, 0 errors, 0 warnings;
-vitest whole, 371 files, 5,638 passed, 1 skipped); `just check-scripts` ok; `cargo fmt --all --check` ok; `just clippy`
+vitest whole, 371 files, 5,638 passed, 1 skipped; again rebased on the list-scroll pass, 3d17be53: 5,640 passed); `just check-scripts` ok; `cargo fmt --all --check` ok; `just clippy`
 clean; `cargo test -p knobas-app` 435 and 1,246 passed; the IPC mirror regenerated with the new `InstalledFont` fields
 and committed. Thirty-four mutants, one for each family token, size, `--fs`, font size, narrowed rule, Markdown heading,
 inline and bare code's size, column, the job key's ellipsis, Archivo's spacing, kept value, ratio, range, even step,
