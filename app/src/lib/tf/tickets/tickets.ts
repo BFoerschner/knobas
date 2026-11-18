@@ -183,18 +183,35 @@ export function epicLine(card: Pick<MiniBoardCard, "path" | "parent_title">): st
 }
 
 /**
+ * A board column's width in CSS pixels at a window `windowWidth` wide, as `tickets.css` sets `.tf-cols`: 195 up to a
+ * window of 1500, then a seventh of the window less the views' 400, from 232 to 520 (`tickets.test.ts` holds the two
+ * together).
+ */
+export function columnWidth(windowWidth: number): number {
+  if (windowWidth <= 1500) return 195;
+  return Math.min(520, Math.max(232, (windowWidth - 400) / 7));
+}
+
+/**
  * The least a board card can stand, in pixels, before it is drawn (the ux14 pass, 2026-11-16): what a column's window
  * reckons an undrawn card at, so a key's first frame draws the cards that fill the screen and not a quarter of a screen
  * more. A card is its padding, its key line and its avatar's line, 66 px, and 18.2 px a line of summary (`tickets.css`,
- * measured on the scale estate at both column widths: 84.2 px for one line, 102.4 for two, 193.3 for seven). The
- * summary's lines are counted at 40 characters a line, more than the widest column holds (32 measured), and the epic,
+ * measured on the scale estate at both column widths: 84.2 px for one line, 102.4 for two, 193.3 for seven). The epic,
  * the source and the labels add nothing here, so a card is never reckoned taller than it draws: a short reckoning
  * draws a card more, a tall one would leave the column's foot empty for a frame.
+ *
+ * The summary's lines are counted by the column it stands in (the ux18 Windows pass): `column` px wide
+ * ({@link columnWidth}), less the stack's and the card's 30 px of padding and border, at 5.05 px a character, the
+ * narrowest Archivo's summaries ran (32 characters a line measured at 232 px, where this counts 40). Counted at 40 a
+ * line whatever the column, a 520 px column (97 a line here, about 70 measured) reckoned a title of 41 to 70
+ * characters a line taller than it draws. `size` is Interface's size over 100 % (Settings › Fonts): the summary, its
+ * lines and the key line follow it; the padding and the avatar hold.
  */
-export function cardFloor(card: Pick<MiniBoardCard, "title">, fields: readonly string[] | null): number {
+export function cardFloor(card: Pick<MiniBoardCard, "title">, fields: readonly string[] | null, column = 232, size = 1): number {
   const avatarLine = fields === null || fields.includes("assignee");
-  const lines = Math.max(1, Math.ceil(card.title.length / 40));
-  return (avatarLine ? 66 : 40) + 18 * lines;
+  const perLine = Math.max(1, Math.floor((column - 30) / (5.05 * size)));
+  const lines = Math.max(1, Math.ceil(card.title.length / perLine));
+  return (avatarLine ? 51 : 25) + 15 * size + 18 * size * lines;
 }
 
 /**

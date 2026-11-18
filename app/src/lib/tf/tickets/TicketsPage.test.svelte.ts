@@ -363,10 +363,23 @@ test("each key's new cards draw the screen's first and the overscan below them a
   await open(h);
   // No frame comes on its own, so the overscan below grows only when `growWindowsNow` says: on a loaded machine two of
   // jsdom's frames can pass inside `settle`.
-  const frames = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
-  onTestFinished(() => frames.mockRestore());
+  // The frames are the test's own, run one at a time: the board's whole draw waits one, the overscan two.
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  onTestFinished(() => (raf.mockRestore(), caf.mockRestore()));
+  const oneFrame = async () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(performance.now());
+    await settle();
+  };
   for (const char of "bulk") type(field(), char);
   await settle();
+  // The frame the answer lands: a column that showed eight draws eight (the ux18 Windows pass), the screen's the next.
+  expect(stacks()[0]!.cards).toBe(8);
+  await oneFrame();
   const onScreen = stacks()[0]!.cards;
   growWindowsNow();
   await settle();
@@ -377,15 +390,70 @@ test("each key's new cards draw the screen's first and the overscan below them a
   input.value = "";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
+  await oneFrame();
   expect(stacks()[0]!.cards).toBe(8);
   for (const char of "bulk") type(field(), char);
   await settle();
+  expect(stacks()[0]!.cards).toBe(8);
+  await oneFrame();
   expect(stacks()[0]!.cards).toBe(onScreen);
   const first = [...target.querySelectorAll(".tf-tcard")];
   growWindowsNow();
   await settle();
   expect(stacks()[0]!.cards).toBe(grown);
   expect(first.every((card) => card.isConnected)).toBe(true);
+});
+
+// The ux18 Windows pass (Fable's ruling): at 5120 px a key's answer drew about twelve cards in each of six 520 px
+// columns in the frame it landed, 69 cards, and that frame went from 32 to 45 ms at CPU 4x. A column that windows and
+// showed eight draws eight in that frame and the rest of its screen the frame after, below them; one that showed more
+// draws its screen at once, so no card drawn goes.
+test("a key's answer draws eight in a long column that showed eight, the rest the frame after below them; one that showed more draws at once", async () => {
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
+  await open(h);
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  onTestFinished(() => (raf.mockRestore(), caf.mockRestore()));
+  const oneFrame = async () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(performance.now());
+    await settle();
+  };
+  const keys = () => [...target.querySelectorAll<HTMLElement>(".tf-cards")].map((box) => [...box.querySelectorAll(".tf-tkey, .tf-k")].map((key) => key.textContent));
+  const rooms = () => stacks().map(({ room }) => room);
+  // Widening: eight a column to fifty.
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(stacks().map(({ cards }) => cards)).toEqual([8, 8]);
+  const firstEight = [...target.querySelectorAll(".tf-tcard")];
+  const shareKeys = keys();
+  const shareRooms = rooms();
+  await oneFrame();
+  const after = stacks().map(({ cards }) => cards);
+  expect(after[0]).toBeGreaterThanOrEqual(8);
+  // The eight stay where they drew, the rest join below them, and the room held for the rest only shrinks by them.
+  expect(firstEight.every((card) => card.isConnected)).toBe(true);
+  keys().forEach((column, at) => expect(column.slice(0, 8)).toEqual(shareKeys[at]));
+  rooms().forEach((room, at) => expect(Number.parseFloat(room || "0")).toBeLessThanOrEqual(Number.parseFloat(shareRooms[at] || "0")));
+  growWindowsNow();
+  await settle();
+  const grown = stacks()[0]!.cards;
+  expect(grown).toBeGreaterThan(8);
+  // Narrowing: a column that showed more than eight draws its screen in the answer's frame, so none of its cards goes.
+  const drawn = [...target.querySelectorAll(".tf-tcard")];
+  type(field(), " ");
+  type(field(), "1");
+  await settle();
+  const narrowed = stacks()[0]!.cards;
+  expect(narrowed).toBeGreaterThan(8);
+  const still = new Set([...target.querySelectorAll(".tf-tcard")]);
+  // Every card of the narrowed column that drew before still stands (Bulk 1, Bulk 10 to 19).
+  expect(drawn.filter((card) => still.has(card)).length).toBeGreaterThan(0);
+  await oneFrame();
+  expect(stacks()[0]!.cards).toBeGreaterThanOrEqual(narrowed);
 });
 
 const bulk = (status: string, n: number, word: string) =>

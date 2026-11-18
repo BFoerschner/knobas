@@ -113,6 +113,8 @@
   import { sideWidth } from "../side-width.svelte";
   import { clockLabel } from "../../time/format";
   import { flushSync, onMount, tick, untrack } from "svelte";
+  import { innerWidth } from "svelte/reactivity/window";
+  import { fonts } from "../fonts.svelte";
   import { stamped, stampOf } from "../opener";
   import { HeldOrder } from "../held-order.svelte";
   import { rowInView } from "../return-place";
@@ -153,9 +155,9 @@
   import { needles as readNeedles } from "./needles";
   import { nearEnd } from "./near-end";
   import TicketCard from "./TicketCard.svelte";
-  import TicketStack from "./TicketStack.svelte";
+  import TicketStack, { STACK_WINDOW_FROM } from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
-  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnWidth, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -631,13 +633,26 @@
    * Björn's PC against 105 with the setting off (ux18). That frame draws the eight a column any view draws, and the
    * rest of the screen's cards the frame after, below them: nothing drawn moves. The column keeps every card's room
    * meanwhile (`TicketStack`'s `atMost`), so it stands as tall and its near-end mark stays out of reach.
+   *
+   * A key does the same for a column that windows (the ux18 Windows pass, Fable's ruling): its first key takes each
+   * column from eight to fifty, and at 5120 px wide the screen shows about twelve cards of each of six 520 px columns,
+   * 69 cards, which took the frame the answer lands from 32 to 45 ms at CPU 4x. In that frame a column that showed eight
+   * or fewer draws eight, 48 cards, and the rest of its screen the frame after, below them. A column that showed more
+   * draws its screen at once, so no card drawn goes from under the pointer. Under 1500 px the screen shows eight a
+   * column or fewer, so nothing changes there.
    */
   function openShare(place: string, cards: MiniBoardCard[]): number | null {
-    if (!reader.all || !firstFrame || cards.length <= COLUMN_CAP || (drewWhole.get(place) ?? 0) > 0) return null;
-    return COLUMN_CAP;
+    if (!firstFrame || cards.length <= COLUMN_CAP) return null;
+    const drew = drewWhole.get(place) ?? 0;
+    if (reader.all && drew === 0) return COLUMN_CAP;
+    return cards.length >= STACK_WINDOW_FROM && drew <= COLUMN_CAP ? COLUMN_CAP : null;
   }
-  /** What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. */
-  const cardFloorOf = (card: MiniBoardCard) => cardFloor(card, view?.card_fields ?? null);
+  /**
+   * What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. Its
+   * summary's lines counted by the column's width, which goes by the window (`tickets.css`), and Interface's size.
+   */
+  const cardFloorOf = (card: MiniBoardCard) =>
+    cardFloor(card, view?.card_fields ?? null, columnWidth(innerWidth.current ?? 1440), fonts.size("ui") / 100);
   const listHold = new HeldOrder<{ card: MiniBoardCard }>(({ card }) => card.entity_id);
   const heldList = $derived(
     showing.layout === "list" && reader.board !== null ? listHold.place(rows, heldBasis) : { rows: [] as { card: MiniBoardCard }[], waiting: 0, stale: false },

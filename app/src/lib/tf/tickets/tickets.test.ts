@@ -1,9 +1,12 @@
 /** The Tickets view's rules (#810). */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
   cardFloor,
+  columnWidth,
   columnHead,
   sentenceCase,
   shortKey,
@@ -378,4 +381,38 @@ test("a card's floor is never above what it draws", () => {
   expect(cardFloor(titled(7 * 32), null)).toBeLessThanOrEqual(193.3);
   // With no avatar line, the meta row can be empty.
   expect(cardFloor(titled(10), ["type", "signals"])).toBe(58);
+});
+
+// The ux18 Windows pass: from about 2000 px a column is a seventh of the window less 400, up to 520 px, about 70
+// characters of summary a line. Counted at 40 a line there, a title of 41 to 70 characters was reckoned a line taller
+// than it draws, and the column's window drew fewer cards than the screen showed: its foot empty for a frame.
+test("a card's floor counts its summary's lines by the column it stands in", () => {
+  const titled = (n: number) => ({ title: "x".repeat(n) });
+  expect(columnWidth(1440)).toBe(195);
+  expect(columnWidth(1920)).toBeCloseTo(232, 0);
+  expect(columnWidth(2048)).toBeCloseTo(235.4, 1);
+  expect(columnWidth(5120)).toBe(520);
+  // At 520 px, a title of 41 to 70 characters is one line (about 70 fit), so 84 px, not 102.
+  expect(cardFloor(titled(70), null, columnWidth(5120))).toBe(84);
+  expect(cardFloor(titled(41), null, columnWidth(5120))).toBe(84);
+  // Two lines from 98 characters (97 a line at the narrowest characters), so never taller than it draws.
+  expect(cardFloor(titled(98), null, columnWidth(5120))).toBe(102);
+  // The 232 px column counts 40 a line, as before; the 195 px column 32 (26 measured), never fewer than fit.
+  expect(cardFloor(titled(41), null, 232)).toBe(102);
+  expect(cardFloor(titled(32), null, 195)).toBe(84);
+  expect(cardFloor(titled(33), null, 195)).toBe(102);
+  // Interface at 85 %: the lines and the key line shrink with it, and more characters fit a line.
+  expect(cardFloor(titled(20), null, 232, 0.85)).toBeCloseTo(51 + 15 * 0.85 + 18 * 0.85, 5);
+  expect(cardFloor(titled(47), null, 232, 0.85)).toBeCloseTo(51 + 15 * 0.85 + 18 * 0.85, 5);
+  // At 130 %, fewer: a title of 31 characters is two lines at 232 px.
+  expect(cardFloor(titled(31), null, 232, 1.3)).toBeCloseTo(51 + 15 * 1.3 + 2 * 18 * 1.3, 5);
+});
+
+test("the column width the floor counts by is the one tickets.css sets", () => {
+  const css = readFileSync(resolve("src/lib/tf/css/tickets.css"), "utf8");
+  expect(css).toContain(".tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: clamp(232px, calc((100vw - 400px) / 7), 520px);");
+  expect(css).toContain("@media (max-width: 1500px) { .tf-cols { grid-auto-columns: 195px; } }");
+  // The card's 30 px the floor takes off the column: the stack's 5 px padding and the card's 1 px border and 9 px padding.
+  expect(css).toContain(".tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px;");
+  expect(css).toMatch(/\.tf-tcard \{\s*display: block; width: 100%; text-align: left; background: var\(--sheet\); border: 1px solid var\(--rule\);\s*border-radius: 6px; padding: 8px 9px;/);
 });
