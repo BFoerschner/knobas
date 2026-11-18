@@ -50,13 +50,21 @@ function placesOf(line: DiffLine): string[] {
 
 /** Each drawn line's threads, in the order the file draws its lines, and the threads kept apart. */
 export interface PlacedThreads {
-  /** One list per line, hunk by hunk. */
+  /** One list per line, hunk by hunk; none at all for a file with no thread. */
   under: LineThread[][];
   apart: LineThread[];
 }
 
-/** Where each of `file`'s threads is drawn: under the first line it answers to, or apart. */
+/** What a file with no thread places: nothing, read by every card that mounts. */
+const NO_THREADS: PlacedThreads = Object.freeze({ under: [], apart: [] }) as unknown as PlacedThreads;
+
+/**
+ * Where each of `file`'s threads is drawn: under the first line it answers to, or apart. A file with none places
+ * nothing and reads none of its lines: a jump in *Files changed* mounts its big neighbours, and each made a list a
+ * line of its 1,500 (the ux19 overs pass).
+ */
 export function placeThreads(file: DiffFile): PlacedThreads {
+  if (file.threads.length === 0) return NO_THREADS;
   const lines = file.hunks.flatMap((hunk) => hunk.lines);
   const under: LineThread[][] = lines.map(() => []);
   const apart: LineThread[] = [];
