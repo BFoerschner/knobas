@@ -65,3 +65,5 @@ git -c protocol.allow=never -c protocol.https.allow=always -c protocol.ssh.allow
 
 - Four IPC commands, announced under *Frozen surface* in PR #2479: `entity_local_tree`, `entity_local_file`, `entity_source_range_diff`, and one event `checkout:fetched`; `RangeDiff` gains `predicted_at`; `Block::Tree` gains `commit` (`crates/knobas-source/src/view.rs`). `entity_file_bytes` reads a file at a sha the checkout holds there first.
 - Witnessed by Rust tests running the real `git` in temp repositories (`checkout::local`'s and `checkout::fetch`'s: the tree, a file at a commit and never the working tree's, a binary, what the checkout cannot answer, and the index, refs, status and `FETCH_HEAD` unchanged after a read and a fetch), and against the testenv Gitea through the request counter (`tests/slow_forge_live.rs`: the tree, the README and the compare at zero requests, the compare naming the commits the source's does).
+
+*Amended 2026-11-18:* the fetch's protocols are *Clone*'s as ADR-0023 now holds them: https and ssh, and http as well for a URL built from an address typed as http (`-c protocol.http.allow=always`, that URL only).

@@ -187,11 +187,7 @@ impl Fetches {
 /// The argument list of the one fetch (ADR-0041), pinned by the tests.
 #[must_use]
 pub fn args(checkout: &Path, url: &str, sha: &str, protocols: &[&str]) -> Vec<OsString> {
-    let mut args: Vec<OsString> = vec!["-c".into(), "protocol.allow=never".into()];
-    for protocol in protocols {
-        args.push("-c".into());
-        args.push(format!("protocol.{protocol}.allow=always").into());
-    }
+    let mut args = knobas_core::checkout::clone::protocol_args(url, protocols);
     args.extend(["-c", "submodule.recurse=false", "-C"].map(OsString::from));
     args.push(checkout.as_os_str().to_owned());
     args.extend(

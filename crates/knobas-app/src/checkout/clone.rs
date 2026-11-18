@@ -463,13 +463,39 @@ pub(super) async fn url_of(
     Ok((url, name))
 }
 
+/// The first of `addresses` [`clone::clone_url`] admits, an https or ssh one
+/// before any plain http one; else the first refusal, or none when there is
+/// no address.
+fn pick_clone_url(
+    addresses: &[String],
+    name: &clone::FullName,
+    protocols: &[&str],
+) -> Result<String, Option<clone::CloneRefusal>> {
+    let mut refusal = None;
+    let mut plain = None;
+    for address in addresses {
+        match clone::clone_url(address, name, protocols) {
+            Ok(url) if url.starts_with("http://") => {
+                plain.get_or_insert(url);
+            }
+            Ok(url) => return Ok(url),
+            Err(error) => {
+                refusal.get_or_insert(error);
+            }
+        }
+    }
+    plain.ok_or(refusal)
+}
+
 /// The URL git clones `name` from: the code-host read `clone_urls` (#1197).
 ///
 /// The adapter's template descriptor names which of the instance's typed
 /// addresses a repository is cloned from, so this builds no adapter and asks
 /// the keychain nothing: a clone needs no credential from knobas (ADR-0023).
-/// The first address [`clone::clone_url`] admits wins; when none does, the
-/// first address's refusal is the answer.
+/// The first address [`clone::clone_url`] admits wins, an https or ssh one
+/// before any plain http one whatever their order, so a source that names
+/// both never moves a clone over ssh to http (Fable's ruling, the ux19 overs
+/// pass); when none admits, the first address's refusal is the answer.
 fn resolve_clone_url(
     registry: &dyn AdapterRegistry,
     repo_id: &str,
@@ -490,15 +516,10 @@ fn resolve_clone_url(
             ))
         })?;
     let addresses = knobas_source::clone_urls::addresses(&template.clone_from, base_url, config);
-    let mut refusal = None;
-    for address in &addresses {
-        match clone::clone_url(address, name, protocols) {
-            Ok(url) => return Ok(url),
-            Err(error) => {
-                refusal.get_or_insert(error);
-            }
-        }
-    }
+    let refusal = match pick_clone_url(&addresses, name, protocols) {
+        Ok(url) => return Ok(url),
+        Err(refusal) => refusal,
+    };
     if let Some(error) = refusal {
         return Err(IpcError::invalid(error));
     }
@@ -774,4 +795,37 @@ async fn remove(target: &Path) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fable's ruling (the ux19 overs pass): a source that names an http address and an ssh or https one clones over
+    /// the latter whatever their order, and one with only http clones over it.
+    #[test]
+    fn an_https_or_ssh_address_is_taken_before_a_plain_http_one() {
+        let name = clone::FullName::parse("tidewater/payout-service").unwrap();
+        let pick = |addresses: &[&str]| {
+            let addresses: Vec<String> = addresses.iter().map(|a| (*a).to_owned()).collect();
+            pick_clone_url(&addresses, &name, &clone::PROTOCOLS)
+        };
+        assert_eq!(
+            pick(&["http://gitea.lan:3000", "ssh://git@gitea.lan:2222"]).unwrap(),
+            "ssh://git@gitea.lan:2222/tidewater/payout-service.git"
+        );
+        assert_eq!(
+            pick(&["http://gitea.lan:3000", "https://gitea.lan"]).unwrap(),
+            "https://gitea.lan/tidewater/payout-service.git"
+        );
+        assert_eq!(
+            pick(&["git://gitea.lan", "http://127.0.0.1:3000"]).unwrap(),
+            "http://127.0.0.1:3000/tidewater/payout-service.git"
+        );
+        assert!(matches!(
+            pick(&["git://gitea.lan"]),
+            Err(Some(clone::CloneRefusal::BadAddress(_)))
+        ));
+        assert!(matches!(pick(&[]), Err(None)));
+    }
 }

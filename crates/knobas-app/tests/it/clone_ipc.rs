@@ -391,8 +391,8 @@ async fn a_name_outside_the_pattern_is_refused_before_anything_is_made() {
     assert!(!root.exists(), "nothing was made");
 }
 
-/// The production entry point refuses an address that is not https or ssh,
-/// before git and before any folder.
+/// The production entry point refuses an address that is not https, ssh or
+/// http, before git and before any folder.
 #[tokio::test]
 async fn the_app_clones_over_https_and_ssh_only() {
     let pool = pool().await;
@@ -411,7 +411,11 @@ async fn the_app_clones_over_https_and_ssh_only() {
     .expect_err("a file:// source");
 
     assert_eq!(error.code, IpcErrorCode::Invalid);
-    assert!(error.message.contains("https or ssh"), "{}", error.message);
+    assert!(
+        error.message.contains("https, ssh or http"),
+        "{}",
+        error.message
+    );
     assert!(!root.exists());
 }
 

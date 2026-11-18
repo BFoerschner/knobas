@@ -16,8 +16,9 @@
 #
 # Gitea and Forgejo are registered at the https front (#2377: Gitea
 # https://127.0.0.1:3443, Forgejo :3445), not at the http address the seed
-# names: knobas clones and fetches over https or ssh only (ADR-0023,
-# ADR-0035). A front whose certificate this Mac does not trust yet is added
+# names: knobas clones and fetches over https or ssh (ADR-0023, ADR-0035), and
+# over http only from an address typed as http, which the front keeps these
+# sources off. A front whose certificate this Mac does not trust yet is added
 # all the same, with the one line that says to run `just live-trust-ca`.
 #
 # A bundle given runs the bundle's own binary; without it target/debug/knobas-app is
