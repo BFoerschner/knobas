@@ -450,6 +450,9 @@ async fn card_reads_answers_what_the_five_reads_answered() {
         section(&["page"], EntityOrder::TitleAsc, None),
         section(&[], EntityOrder::LatestPerParent, Some("ci")),
         section(&["monitor"], EntityOrder::UpdatedDesc, None),
+        // Read at once since ux19, each role's fillers read once: a role asked twice answers twice.
+        section(&[], EntityOrder::LatestPerParent, Some("ci")),
+        section(&["pr"], EntityOrder::UpdatedDesc, Some("code-host")),
     ];
     let registry = Registry::for_process();
     let answer = card_reads_inner(&pool, &registry, &ticket, &sections, 200)

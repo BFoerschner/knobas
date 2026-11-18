@@ -33,6 +33,8 @@ tauri-build = { version = "2", features = [] }
 async-trait.workspace = true
 # `EntityRow`'s two timestamps: `DateTime<Utc>` on the wire is RFC 3339.
 chrono.workspace = true
+# A ticket card's sections read at once (`card_reads`, ux19).
+futures-util.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
 # The hcloud importer's transport (#509). The stack every adapter shares --

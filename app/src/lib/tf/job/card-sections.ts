@@ -15,9 +15,10 @@
  * pull requests, so its count is both and its words name each; a branch or a
  * commit has no tab of its own, and counts only where nothing else is reached.
  *
- * The Tickets preview's *Around this ticket* is the same rows, in the same words
- * (F-109): the card reads them piece by piece as its page fills, the preview all at
- * once ({@link readCardReads}), and both draw through `TfCardRows.svelte`.
+ * The ticket page's card reads the reach and its four sections in one read
+ * (`card_reads`, ux19) sent with the press, beside the reads that find the ticket
+ * (`job-reader.svelte.ts`); {@link readCardReads} reads every row at once for a page
+ * that does not build the card. Both draw through `TfCardRows.svelte`.
  */
 import type { CardRows, CheckoutView, EntityFilter, EntityRow, MiniBoard, Reached } from "../../ipc/entity";
 import type { AssetDetail } from "../../ipc/assets";

@@ -196,40 +196,70 @@ pub async fn card_reads_inner(
     sections: &[knobas_core::entity_list::EntityFilter],
     limit: u32,
 ) -> Result<CardRows, IpcError> {
-    let reached = knobas_core::reach::reach(pool, entity_id).await?;
-    let ids: Vec<String> = reached.iter().map(|row| row.entity_id.clone()).collect();
-    let declarations = declared_paths(pool, registry).await?;
     let limit = limit.min(crate::commands::ROW_CEILING);
-    // One after another on one connection: four reads of a few milliseconds
-    // each, where four requests at once held four of the pool's five.
-    let mut rows = Vec::with_capacity(sections.len());
-    for section in sections {
+    let roles: Vec<&str> = sections.iter().filter_map(|s| s.role.as_deref()).collect();
+    // The walk, the declarations and the roles' fillers at once, then the
+    // sections at once (ux19): one after another, a card's read took twice as
+    // long as the five requests it stands for, and the ticket's page holds its
+    // sections until it answers. At most four connections, as the five
+    // requests held five.
+    let (reached, declarations, scopes) = tokio::try_join!(
+        async { Ok::<_, IpcError>(knobas_core::reach::reach(pool, entity_id).await?) },
+        declared_paths(pool, registry),
+        async {
+            Ok::<_, IpcError>(
+                crate::sources::crud::role_scopes(pool, registry, &roles)
+                    .await
+                    .map_err(|error| {
+                        tracing::warn!(?error, "a card's roles could not be read");
+                    })
+                    .ok(),
+            )
+        },
+    )?;
+    let ids: Vec<String> = reached.iter().map(|row| row.entity_id.clone()).collect();
+    let scopes = scopes.map(|scopes| {
+        roles
+            .iter()
+            .copied()
+            .zip(scopes)
+            .collect::<std::collections::HashMap<_, _>>()
+    });
+    let reads = sections.iter().map(|section| {
         let filter = knobas_core::entity_list::EntityFilter {
             reach: Some(entity_id.to_owned()),
             ..section.clone()
         };
-        let read = async {
-            let fillers = match filter.role.as_deref() {
-                Some(role) => Some(crate::sources::crud::role_scope(pool, registry, role).await?),
+        // A role whose fillers could not be read reads nothing, as its own read would have failed.
+        let fillers = filter
+            .role
+            .as_deref()
+            .map(|role| scopes.as_ref().and_then(|scopes| scopes.get(role).cloned()));
+        let (declarations, ids) = (&declarations, &ids);
+        async move {
+            let fillers = match fillers {
+                Some(None) => return Vec::new(),
+                Some(Some(scope)) => Some(scope),
                 None => None,
             };
-            let page = knobas_core::entity_list::read_reached(
+            knobas_core::entity_list::read_reached(
                 pool,
                 &filter,
                 limit,
                 0,
-                &declarations,
+                declarations,
                 fillers,
-                Some(&ids),
+                Some(ids),
             )
-            .await?;
-            Ok::<_, IpcError>(page.rows)
-        };
-        rows.push(read.await.unwrap_or_else(|error| {
-            tracing::warn!(?error, "a card section could not be read");
-            Vec::new()
-        }));
-    }
+            .await
+            .map(|page| page.rows)
+            .unwrap_or_else(|error| {
+                tracing::warn!(?error, "a card section could not be read");
+                Vec::new()
+            })
+        }
+    });
+    let rows = futures_util::future::join_all(reads).await;
     let sections = rows;
     Ok(CardRows { reached, sections })
 }

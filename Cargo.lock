@@ -4021,6 +4021,7 @@ dependencies = [
  "dirs",
  "flate2",
  "fontdb",
+ "futures-util",
  "jaq-core",
  "jaq-json",
  "jaq-std",

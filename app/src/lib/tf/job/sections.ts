@@ -4,8 +4,9 @@
  * same rows (`card-sections.ts`; #1030, story 31, F-109).
  *
  * Every read goes through the job-reach read (`job_reach`, and
- * `list_entities` scoped by `reach`), which takes the ticket's entity id and
- * needs no stored context: nothing here promotes one.
+ * `list_entities` scoped by `reach`; the ticket page asks both as one,
+ * `card_reads`, ux19), which takes the ticket's entity id and needs no stored
+ * context: nothing here promotes one.
  *
  * Each section is a role's (ADR-0029): it asks the mirror for its role, so
  * the read itself narrows to the role's fillers and its rows are drawn as

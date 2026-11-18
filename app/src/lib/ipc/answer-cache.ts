@@ -18,9 +18,10 @@
  * - any command that is not a read of {@link READS} or {@link QUIET}: a write,
  *   or a read this file does not know. Every answer, except that a visit
  *   (`visit_entity`) keeps the reads that never read visits ({@link VISIT_BLIND}),
- *   the timer's heartbeat drops only the time reads ({@link TIME_READS}), and
- *   the merge follower (`follow_merges`, asked every few seconds) drops
- *   everything only when it moved a ticket.
+ *   the timer's heartbeat drops only the time reads ({@link TIME_READS}), the
+ *   merge follower (`follow_merges`, asked every few seconds) drops
+ *   everything only when it moved a ticket, and a ticket page's promotion
+ *   (`promote_context`, asked on every open) only when it made the context.
  *
  * So a kept answer is what the backend would answer now, as a kept page's
  * drawing is: the kept pages hold what they drew until a run that changed
@@ -59,6 +60,8 @@ export const READS: ReadonlySet<string> = new Set([
   "code_facts",
   "entity_briefs",
   "card_reads",
+  // A reached asset, for a ticket's Assets row: its row, what holds it, its history (no visits) and its monitors.
+  "get_asset",
   "pipelines",
   "pipeline_runs",
   "repo_pipelines",
@@ -157,6 +160,12 @@ export const QUIET: ReadonlySet<string> = new Set([
 /** The reads a visit (`visit_entity`) cannot move: none of them reads the activity log. */
 export const VISIT_BLIND: ReadonlySet<string> = new Set([
   "list_entities",
+  // A detail's history leaves visits out (`knobas_core::activity::recent`), and a reach walks links (ux19): a ticket's
+  // page visits on every open, which dropped its own ticket, reach, sections and assets before a return could draw them.
+  "get_entity",
+  "get_asset",
+  "job_reach",
+  "card_reads",
   "docs_nodes",
   "docs_page",
   "code_facts",
@@ -269,7 +278,15 @@ const inner: Invoke = (cmd, args, options) =>
       ? tauriInvoke(cmd, args as InvokeArgs)
       : tauriInvoke(cmd);
 const kept = new Map<string, Kept>();
-const asking = new Map<string, { generation: number; answer: Promise<unknown> }>();
+const asking = new Map<string, Asking>();
+/** A read on its way: `stale` once a drop that lets it go has come between its send and its answer, which is then not kept. */
+interface Asking {
+  cmd: string;
+  args: unknown;
+  generation: number;
+  answer: Promise<unknown>;
+  stale: boolean;
+}
 /** Moves on every drop: an answer asked before a drop is not kept, since the mirror may have moved under it. */
 let generation = 0;
 /** The reads made, most recent last: what {@link warm} asks again. */
@@ -317,15 +334,28 @@ export function copy<T>(value: T): T {
 const drops: { why: string; at: number; left: number }[] = [];
 let why = "";
 
-/** Drop every kept answer `keep` does not hold on to. */
-function drop(keep: (entry: Kept) => boolean = () => false): void {
-  generation += 1;
+/**
+ * Drop every kept answer `keep` does not hold on to, and every read on its way that it would not hold on to: a read a
+ * visit cannot move, sent before it, is kept when it answers (ux19: a ticket's card, asked at the press, answered after
+ * the visit its page makes and was never kept).
+ */
+function drop(keep?: (entry: Kept) => boolean): void {
   queueMicrotask(() => {
     drops.push({ why, at: Math.round(performance.now()), left: kept.size });
     if (drops.length > 50) drops.shift();
   });
+  if (keep === undefined) {
+    generation += 1;
+    kept.clear();
+    asking.clear();
+    return;
+  }
   for (const [key, entry] of kept) if (!keep(entry)) kept.delete(key);
-  asking.clear();
+  for (const [key, entry] of asking) {
+    if (keep({ cmd: entry.cmd, args: entry.args, roles: rolesFor(entry.cmd, entry.args), value: undefined })) continue;
+    entry.stale = true;
+    asking.delete(key);
+  }
 }
 
 /** Drop the status reads `event` moves, and nothing else: no answer of the mirror's waited on them. */
@@ -387,6 +417,7 @@ function ask(cmd: string, args: unknown, options: unknown, warmed: boolean): Pro
         return moved;
       });
     }
+    if (cmd === "promote_context") return promoted(args, inner(cmd, args, options));
     if (cmd === "visit_entity") drop((entry) => VISIT_BLIND.has(entry.cmd));
     else if (cmd === "timer_heartbeat") drop((entry) => !TIME_READS.has(entry.cmd));
     else if (!QUIET.has(cmd) && !cmd.startsWith("plugin:")) drop();
@@ -402,9 +433,10 @@ function ask(cmd: string, args: unknown, options: unknown, warmed: boolean): Pro
   }
   const inFlight = asking.get(key);
   // A second asker of a read on its way shares it, with a copy of what was kept (the first may change its own).
-  if (inFlight !== undefined && inFlight.generation === generation) return inFlight.answer.then((value) => copy(kept.get(key)?.value ?? value));
+  if (inFlight !== undefined && inFlight.generation === generation && !inFlight.stale) return inFlight.answer.then((value) => copy(kept.get(key)?.value ?? value));
   const at = generation;
   const statusAt = statusMoves;
+  const mine: Asking = { cmd, args, generation: at, answer: Promise.resolve(), stale: false };
   const answer = inner(cmd, args, options).then((value) => {
     if (cmd === "list_sources" && Array.isArray(value)) {
       for (const row of value as { id?: unknown; roles?: { role?: unknown }[] }[]) {
@@ -412,18 +444,46 @@ function ask(cmd: string, args: unknown, options: unknown, warmed: boolean): Pro
       }
     }
     // Kept as a copy taken before the asker sees it, and only when nothing dropped answers meanwhile.
-    if (at === generation && (STATUS_READS[cmd] === undefined || statusAt === statusMoves)) {
+    if (at === generation && !mine.stale && (STATUS_READS[cmd] === undefined || statusAt === statusMoves)) {
       kept.set(key, { cmd, args, roles: rolesFor(cmd, args), value: warmed ? value : copy(value) });
       while (kept.size > KEPT_ANSWERS) kept.delete(kept.keys().next().value!);
     }
     return value;
   });
-  asking.set(key, { generation: at, answer });
+  mine.answer = answer;
+  asking.set(key, mine);
   const done = () => {
     if (asking.get(key)?.answer === answer) asking.delete(key);
   };
   void answer.then(done, done);
   return answer;
+}
+
+/** The anchors whose context a promotion has answered this session: promoting one again finds it, and changes nothing. */
+const promotedAnchors = new Set<string>();
+/** How recent a context's `created_at` must be, against the promotion's send, for the promotion to have made it. */
+export const MADE_WITHIN_MS = 60_000;
+
+/**
+ * A ticket page's promotion (`promote_context`, ux19): it finds the ticket's context, changing nothing, or makes one,
+ * which can change a reach (an epic's context reaches its sub-tasks). It dropped every answer on every open, the
+ * ticket's own sections among them, so a return read them all again. Now it drops them only when the context it
+ * answers may be one it made: an anchor not seen this session whose context is no older than {@link MADE_WITHIN_MS}.
+ * Reads still on their way when it drops are not kept, as with any drop.
+ */
+function promoted(args: unknown, answer: Promise<unknown>): Promise<unknown> {
+  const sent = Date.now();
+  const anchor = String((args as { entityId?: unknown } | undefined)?.entityId ?? "");
+  return answer.then((row) => {
+    const made = Date.parse(String((row as { created_at?: unknown } | null)?.created_at ?? ""));
+    const seen = promotedAnchors.has(anchor);
+    promotedAnchors.add(anchor);
+    if (!seen && (!Number.isFinite(made) || made >= sent - MADE_WITHIN_MS)) {
+      why = "a context made";
+      drop();
+    }
+    return row;
+  });
 }
 
 /** The events that move the mirror under kept answers, as the window hears them. */
@@ -488,6 +548,7 @@ export function disableAnswerCache(): void {
   drop();
   recent.clear();
   rolesOf.clear();
+  promotedAnchors.clear();
 }
 
 /** Whether the cache is on, for a test. */

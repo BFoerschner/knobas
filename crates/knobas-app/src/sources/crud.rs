@@ -1587,28 +1587,60 @@ pub async fn role_scope(
     registry: &dyn AdapterRegistry,
     role: &str,
 ) -> Result<RoleScope, sqlx::Error> {
-    let rows = config::list(pool).await?;
+    let mut scopes = role_scopes(pool, registry, &[role]).await?;
+    Ok(scopes.remove(0))
+}
+
+/// [`role_scope`] for each of `roles`, in order, with the sources and their
+/// misses read once, at once (ux19: a ticket card's four sections each read
+/// both again, one after another).
+///
+/// # Errors
+///
+/// The database's.
+pub async fn role_scopes(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    roles: &[&str],
+) -> Result<Vec<RoleScope>, sqlx::Error> {
     // The misses as the source list reads them, so the two cannot disagree.
-    let mut misses = knobas_sync::role_check::misses(pool).await?;
+    let (rows, misses) =
+        tokio::try_join!(config::list(pool), knobas_sync::role_check::misses(pool))?;
     let templates = registry.descriptors();
+    Ok(roles
+        .iter()
+        .map(|role| scope_of(&rows, &misses, &templates, role))
+        .collect())
+}
+
+/// One role's scope over the sources, their misses and the templates read.
+fn scope_of(
+    rows: &[config::SourceConfigRow],
+    misses: &std::collections::HashMap<String, Vec<knobas_source::role::data::RoleMiss>>,
+    templates: &[SourceDescriptor],
+    role: &str,
+) -> RoleScope {
     let filling: Vec<(String, &SourceDescriptor)> = rows
-        .into_iter()
+        .iter()
         .filter_map(|row| {
             let template = templates
                 .iter()
                 .find(|t| t.adapter_kind == row.adapter_kind)?;
             let claims = template.roles.iter().any(|claim| claim.role == role);
-            let missed = still_claimed(misses.remove(&row.id).unwrap_or_default(), &template.roles)
-                .iter()
-                .any(|miss| miss.role == role);
-            (claims && !missed).then_some((row.id, template))
+            let missed = still_claimed(
+                misses.get(&row.id).cloned().unwrap_or_default(),
+                &template.roles,
+            )
+            .iter()
+            .any(|miss| miss.role == role);
+            (claims && !missed).then_some((row.id.clone(), template))
         })
         .collect();
     let kinds = role_kinds(role, filling.iter().map(|(_, template)| *template));
-    Ok(RoleScope {
+    RoleScope {
         sources: filling.into_iter().map(|(id, _)| id).collect(),
         kinds,
-    })
+    }
 }
 
 /// The kinds of `role` among `fillers`, sorted: a built-in role's own (see

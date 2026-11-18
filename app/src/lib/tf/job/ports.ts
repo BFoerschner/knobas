@@ -8,6 +8,7 @@ import { getAsset, type AssetDetail } from "../../ipc/assets";
 import type { EchoListen } from "../queued.svelte";
 import type { DetailRefreshPorts } from "../refresh.svelte";
 import {
+  cardReads,
   createLink,
   entityBriefs,
   entityThread,
@@ -25,6 +26,7 @@ import {
   submitWrite,
   unlink,
   visitEntity,
+  type CardRows,
   type CheckoutView,
   type ContextRow,
   type EntityBrief,
@@ -68,6 +70,11 @@ export interface JobPorts {
   launcherHome: SessionPorts["launcherHome"];
   /** What the ticket reaches (#817). */
   jobReach: (entityId: string) => Promise<Reached[]>;
+  /**
+   * The reach and the card's four sections in one read over one walk (`card_reads`, ux19); where left out, the reach is
+   * `jobReach` and each section its own `listEntities`.
+   */
+  cardReads?: (entityId: string, sections: EntityFilter[], limit: number) => Promise<CardRows>;
   /** The link sets that apply and the parent (#867): the drawer's groups. */
   jobLinkSets: (entityId: string) => Promise<JobLinkSets>;
   /** *Hide here* and *Show again* (R-7.5); never edits the set. */
@@ -130,6 +137,7 @@ export const bridgePorts: JobPorts = {
   search: (query) => search(query),
   launcherHome: () => launcherHome(),
   jobReach: (entityId) => jobReach(entityId),
+  cardReads: (entityId, sections, limit) => cardReads(entityId, sections, limit),
   jobLinkSets: (entityId) => jobLinkSets(entityId),
   hideLinkSetMember: (ticketId, memberId, hidden) => hideLinkSetMember(ticketId, memberId, hidden),
   getAsset: (assetId) => getAsset(assetId),

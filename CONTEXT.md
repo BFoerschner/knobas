@@ -272,7 +272,7 @@ The app process's memory of [source views](#source-view) and of files' bytes (a 
 _Avoid_: mirror (the database's copy, written by sync), store, snapshot
 
 **Answer cache**:
-The window's memory of the [mirror](#mirror)'s answers to a page's reads (`app/src/lib/ipc/answer-cache.ts`, 2026-11-12): the last answer to each read that is a function of the mirror and the settings, so a page drawn again, or opened for the first time once its reads were asked in the background (**warmed**: at start, the reads the last session made, and after a run, the ones it dropped), draws in the frame after the press. An answer goes the moment the mirror may have moved under it: a run that changed something drops what a source of its roles could change, and a write or a refresh drops everything. Not the [read cache](#read-cache), which is the backend's memory of a source's views.
+The window's memory of the [mirror](#mirror)'s answers to a page's reads (`app/src/lib/ipc/answer-cache.ts`, 2026-11-12): the last answer to each read that is a function of the mirror and the settings, so a page drawn again, or opened for the first time once its reads were asked in the background (**warmed**: at start, the reads the last session made, and after a run, the ones it dropped), draws in the frame after the press. An answer goes the moment the mirror may have moved under it: a run that changed something drops what a source of its roles could change, and a write or a refresh drops everything (a ticket page's promotion only when it made the context; a visit keeps every read that never reads visits). Not the [read cache](#read-cache), which is the backend's memory of a source's views.
 _Avoid_: read cache (the backend's, of source views), store, prefetch
 
 **Held ahead**:

@@ -132,6 +132,56 @@ describe("the answer cache", () => {
     expect([asked("docs_outline"), asked("list_entities")]).toEqual([2, 1]);
   });
 
+  it("keeps a ticket's own reads over the visit its page makes on every open", async () => {
+    // ux19: the visit dropped the ticket, its reach, its card's sections and its assets, so a return read them again.
+    const reads: [string, Record<string, unknown>][] = [
+      ["get_entity", { entityId: "jira:B" }],
+      ["job_reach", { entityId: "jira:B" }],
+      ["card_reads", { entityId: "jira:B", sections: [], limit: 200 }],
+      ["get_asset", { assetId: "asset:1" }],
+    ];
+    for (const [cmd, args] of reads) await ask(cmd, args);
+    await ask("visit_entity", { entityId: "jira:B" });
+    for (const [cmd, args] of reads) await ask(cmd, args);
+    expect(reads.map(([cmd]) => asked(cmd))).toEqual([1, 1, 1, 1]);
+  });
+
+  it("drops on a ticket's promotion only when it made the context", async () => {
+    // ux19: every open of a ticket promotes it, which dropped every kept answer, the ticket's own sections among them.
+    const now = () => new Date().toISOString();
+    let created = "2026-01-01T00:00:00Z";
+    answers["promote_context"] = () => ({ id: "ctx:1", kind: "ticket", anchor_id: "jira:B", created_at: created });
+    await ask("docs_outline");
+    await ask("promote_context", { entityId: "jira:B" });
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(1);
+
+    // One made now drops everything, as a write does; promoted again it is found, and drops nothing.
+    created = now();
+    answers["promote_context"] = () => ({ id: "ctx:2", kind: "epic", anchor_id: "jira:E", created_at: created });
+    await ask("promote_context", { entityId: "jira:E" });
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(2);
+    await ask("promote_context", { entityId: "jira:E" });
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(2);
+  });
+
+  it("keeps no read answered while a promotion that made its context was out", async () => {
+    let answer = (_: unknown) => {};
+    bridge.invoke = vi.fn((cmd: string, args?: unknown) => {
+      calls.push({ cmd, args });
+      if (cmd === "promote_context") return new Promise((resolve) => (answer = resolve));
+      return Promise.resolve(answers[cmd]?.() ?? null);
+    });
+    const promoting = ask("promote_context", { entityId: "jira:E" });
+    await ask("job_reach", { entityId: "jira:E" });
+    answer({ id: "ctx:3", kind: "epic", anchor_id: "jira:E", created_at: new Date().toISOString() });
+    await promoting;
+    await ask("job_reach", { entityId: "jira:E" });
+    expect(asked("job_reach")).toBe(2);
+  });
+
   it("drops on the merge follower only when it moved a ticket, and on a heartbeat only the time reads", async () => {
     let moved = 0;
     answers["follow_merges"] = () => moved;
