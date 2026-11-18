@@ -2,7 +2,7 @@
 // change costs, and what the longest lists cost to show again and to scroll at the new size.
 //
 //   node testenv/perf/fonts.mjs --app <url> --out <file.json> [--size 1440x868@1] [--throttle 1,4,6] [--to 120]
-//                               [--only tickets,builds,docs,code]
+//                               [--only tickets,builds,docs,code] [--key-gap 500] [--back-after 300]
 //
 // Per page and throttle, from a fresh load with every size at 100 %:
 //   scroll100  the page's list scrolled by script at 3,000 px/s for 4 s, as `zoom.mjs` scrolls it: frames a second,
@@ -17,6 +17,9 @@
 //              page out again at its new text size, as a page shown after a window's resize does
 //   moved      the page's rows that moved in the 600 ms after that first frame (the windowed lists re-measured)
 //   scroll     the list scrolled again at the new size, as scroll100
+// `--key-gap` is the time from one slider key to the next (350 lands each key in the warm the last one started, the
+// ux18 Windows pass: `docs/warm.ts`), and `keyMax` the slowest of them; `--back-after` how long after the last key the
+// page is shown again (2500 after the warm has ended, 100 before it starts).
 // The role each page's slider steps is the one its rows are drawn in: Tickets' list, Builds and Code's tree the
 // interface's, a Docs page Reading's.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -33,6 +36,8 @@ const to = Number(opt("--to", "120"));
 const only = opt("--only")?.split(",") ?? null;
 const attachPort = opt("--attach");
 const again = args.includes("--again");
+const keyGap = Number(opt("--key-gap", "500"));
+const backAfter = Number(opt("--back-after", "300"));
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, Number(opt("--max-minutes", "60")) * 60000).unref();
 
 const browser = attachPort ? null : await launch({ size });
@@ -149,7 +154,7 @@ async function key(role) {
   const t0 = await js("performance.now()");
   await c.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
-  await sleep(500);
+  await sleep(keyGap);
   const got = await js(`(() => { const fs = __fr.frames.filter((f) => f.end !== null).map((f) => ({ t0: f.t0, end: f.end })); const r = __fr.stop(0); return { fs, at: window.__fk, loaf: r.loaf[0]?.duration ?? 0, now: document.querySelector('[aria-label=${JSON.stringify(`${role} size`)}]').getAttribute("aria-valuenow") }; })()`);
   const first = got.at === null ? null : got.fs.find((f) => f.t0 >= got.at) ?? null;
   return { ms: first ? round(first.t0 + first.end - t0) : null, frame: first ? round(first.end) : null, loaf: got.loaf, now: Number(got.now) };
@@ -172,21 +177,21 @@ for (const page of PAGES) {
     await js(`(async () => { await __s.go("#/settings/fonts", 1500); return 1; })()`);
     const keys = [];
     for (let at = 100; at < to; at += 5) keys.push(await key(page.role));
-    await sleep(300);
+    await sleep(backAfter);
     const shown = await back(page);
     await sleep(600);
     const scrolled = await scroll(page);
     const scrolledAgain = again ? await scroll(page) : null;
     const row = {
       page: page.name, role: page.role, size: size.name, throttle, to,
-      key: median(keys.map((k) => k.ms)), keyFrame: median(keys.map((k) => k.frame)), keyLoaf: Math.max(0, ...keys.map((k) => k.loaf)), reached: keys.at(-1)?.now ?? null,
+      key: median(keys.map((k) => k.ms)), keyMax: Math.max(...keys.map((k) => k.ms ?? 0)), keyFrame: median(keys.map((k) => k.frame)), keyLoaf: Math.max(0, ...keys.map((k) => k.loaf)), reached: keys.at(-1)?.now ?? null,
       back100: { ms: round(back100.ms), frame: round(back100.frame), moved: back100.moved },
       back: { ms: round(shown.ms), frame: round(shown.frame), moved: shown.moved, rows: shown.rows },
       scroll100, scroll: scrolled, scrollAgain: scrolledAgain, keys,
     };
     results.push(row);
     const s = (x) => (x ? `${x.fps} fps, work ${x.p50} / ${x.p99} ms, loaf ${Math.round(x.longest)}, moved ${x.moved} of ${x.kept}` : "no scroller");
-    console.log(`${row.page.padEnd(13)} ${row.size} ${throttle}x → ${row.reached} %: key ${row.key} ms${over(row.key, KEY_LINE[throttle])} (frame ${row.keyFrame}), ` +
+    console.log(`${row.page.padEnd(13)} ${row.size} ${throttle}x → ${row.reached} %: key ${row.key} ms${over(row.key, KEY_LINE[throttle])} (slowest ${row.keyMax}${over(row.keyMax, KEY_LINE[throttle])}, frame ${row.keyFrame}, longest task ${row.keyLoaf}), ` +
       `back ${row.back.ms} ms${over(row.back.ms, PAGE_LINE[throttle])} (at 100 % ${row.back100.ms}), moved ${row.back.moved} of ${row.back.rows}; ` +
       `scroll at 100 % ${s(scroll100)}; at ${row.reached} % ${s(scrolled)}` + (again ? `; again ${s(scrolledAgain)}` : ""));
     writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
