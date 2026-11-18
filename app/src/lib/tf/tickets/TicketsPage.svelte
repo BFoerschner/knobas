@@ -392,8 +392,11 @@
   /** The filter bar's id: its state is kept per view. */
   const filterId = $derived(viewId === null ? "tickets-all" : `tickets-${viewId}`);
   const filter = $derived(sessionFilter(filterId));
-  /** What the server read from the typed text, marked on the cards (#1903). */
-  const needles = $derived(readNeedles(filter.text));
+  /**
+   * What the server read from the typed text, marked on the cards (#1903): the text the board drawn was read with, so a
+   * key marks nothing until its answer draws (the ux19 overs pass).
+   */
+  const needles = $derived(readNeedles(reader.drawnFilter.text ?? filter.text));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
   let cardPeople = $state.raw<ReadonlyMap<string, CardPerson>>(new Map());
 
@@ -430,7 +433,7 @@
 
   /** The filter bar as a read sends it. */
   function filterNow() {
-    return { query: toQuery(config, filter), words: filter.text.trim() !== "" };
+    return { query: toQuery(config, filter), words: filter.text.trim() !== "", text: filter.text };
   }
 
   function sortBy(column: SortColumn) {
@@ -554,8 +557,12 @@
         ),
   );
   // -- cards and rows stay where they first drew (the still-rows pass, 2026-11-11) --
-  /** What the person chose, and each read they caused: a change sorts the cards again. A sync's read holds them. */
-  const heldBasis = $derived(JSON.stringify([filterId, filter.text, filter.chips, filter.dropdowns, filter.scope, showing, reader.lanesShown, reader.asked]));
+  /**
+   * What the person chose, and each read they caused: a change sorts the cards again. A sync's read holds them. The
+   * filter is the one the board drawn answers, not the bar's: a key sorted the board it drew before its answer, which
+   * drew cards a sync had held back in place of others, 5 of 48 at 5120 px on Björn's PC (the ux19 overs pass).
+   */
+  const heldBasis = $derived(JSON.stringify([filterId, reader.drawnFilter.query, showing, reader.lanesShown, reader.asked]));
   type HeldCard = { tag: string; card: MiniBoardCard };
   /**
    * Every drawn card in reading order, each in the lane and column it drew in. The columns stand side by side, so a card

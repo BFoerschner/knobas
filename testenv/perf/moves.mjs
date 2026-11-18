@@ -56,12 +56,17 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * The places. `start`: the address a first open starts at; one of `nav` (a section's entry), `gear`, `press` (the first
  * visible match, `text` its words), `right` (a right press), `key` (a key, from anywhere), `go` (the address a link in the
  * page would set); `hash`: where it lands (a prefix, null for an overlay); `ready`: what says an overlay is drawn;
- * `away`: how a return leaves first (a section, `"Escape"`, or an address); `tabs`: follow each of its tabs.
+ * `away`: how a return leaves first (a section, `"Escape"`, an address, or `"clear"`: the field `type` typed into, emptied);
+ * `tabs`: follow each of its tabs. `type`: a key typed into a field (`into`), as real key input; with `still`, what the key
+ * must leave as it was until its answer draws, and `changes`, what says the answer drew (its words change), the place is
+ * drawn at the answer's frame, and anything of `still` on screen that changes before it is a move (the ux19 overs pass).
  */
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
   { name: "tickets-list", start: "#/tickets", press: `${shown} button, ${shown} [role=tab]`, text: "List", hash: "#/tickets", away: "time", returnBy: { nav: "tickets" } },
   // A card's press opens its ticket's page (Tickets has no preview since ux18).
+  // A letter on the board (the ux19 overs pass): nothing on screen changes until its answer draws, nothing moves after.
+  { name: "tickets-key", start: "#/tickets", type: { into: `${shown} input[placeholder="Filter tickets"]`, key: "e" }, still: `${shown} .tf-tcard`, changes: `${shown} .tf-col h3 .tf-count`, hash: "#/tickets", away: "clear" },
   { name: "ticket", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", away: "Escape", tabs: true },
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
@@ -146,6 +151,14 @@ async function key({ key, code, modifiers = 0, windowsVirtualKeyCode = 0 }) {
 }
 /** The press, key or address that opens `p`. Returns what was pressed. */
 async function act(p) {
+  if (p.type) {
+    await js(`(() => { const i = [...document.querySelectorAll(${JSON.stringify(p.type.into)})].find((e) => e.getClientRects().length > 0); i.focus(); return 1; })()`);
+    const { key: k } = p.type;
+    const code = `Key${k.toUpperCase()}`, windowsVirtualKeyCode = k.toUpperCase().charCodeAt(0);
+    await c.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k, unmodifiedText: k, code, windowsVirtualKeyCode });
+    await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode });
+    return `typed ${k}`;
+  }
   if (p.go) { await js(`__moves.go(${JSON.stringify(p.go)})`); return p.go; }
   if (p.key) { await key(p.key); return "key"; }
   const sel = p.nav ? nav(p.nav) : p.gear ? GEAR : p.right ?? p.press;
@@ -155,12 +168,17 @@ async function act(p) {
 }
 async function leave(p) {
   const away = p.away;
+  if (away === "clear") {
+    await js(`(() => { const i = [...document.querySelectorAll(${JSON.stringify(p.type.into)})].find((e) => e.getClientRects().length > 0); i.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ""); i.dispatchEvent(new InputEvent("input", { bubbles: true })); return 1; })()`);
+    await quiet(1500);
+    return;
+  }
   if (away === "Escape") { await key(ESC); await quiet(900); if (typeof p.hash === "string" && (await js("location.hash")).startsWith(p.hash)) { await key(ESC); await quiet(900); } }
   else if (away.startsWith("#/")) { await js(`location.hash = ${JSON.stringify(away)}, 1`); await quiet(1200); }
   else { await press(await find(away === "settings" ? GEAR : nav(away))); await quiet(1200); }
 }
 async function record(p) {
-  await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!p.key, trace })})`);
+  await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!(p.key || p.type), still: p.still ?? null, changes: p.changes ?? null, trace })})`);
   const pressed = await act(p);
   let ticker = null;
   if (sync) ticker = setInterval(() => { js(SYNCED).catch(() => {}); }, 1500);

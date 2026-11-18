@@ -516,11 +516,17 @@ ends; anything after the person's own input; a box held unseen (`visibility: hid
 narrows or widens with its words in place; and the press's own swap, a control the page left drawn while it read that takes
 the new item's words in the frame the pressed item lands, keeping one edge, with nothing else moving.
 
+A key is a place too (`tickets-key`, the ux19 overs pass, `docs/decisions/2026-11-18-a-tickets-key-changes-nothing-until-its-answer.md`):
+a letter typed into Tickets' filter as real key input. Its place is drawn when the columns' counts change, its answer's
+frame; until then the cards on screen before the key are held to their boxes, and one that comes in, goes, moves or
+resizes is a mover (*before its answer drew*). Its return clears the filter and types the letter again.
+
 ```sh
 just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25
 just moves --real 5411                       # and the saved scale database (*On a real database*)
 just moves --real 5411 --sync                # every source ends a run that changed something every 1.5 s while each records
 just moves --only repo,pull-request --sizes 1440x868@1 --throttle 4
+just moves --only tickets-key --sizes "1440x868@1 5120x1440@1"
 ```
 
 `--workers 3` (the default) runs three browsers, each a share of the places: a move is the order of frames, not their

@@ -1687,6 +1687,49 @@ test("a drawn card keeps whether it names its source until the person's next rea
   }
 });
 
+test("a key changes nothing drawn until its answer lands: no card a sync held back, no mark, no column grown (the ux19 overs pass)", async () => {
+  const corpus = [...CORPUS];
+  const revision = $state({ n: 0 });
+  const h = harness([], [], corpus);
+  const answer = h.ports.board;
+  /** While set, each board read waits here for the test to answer it. */
+  let held: (() => void)[] | null = null;
+  h.ports.board = (...args) => {
+    if (held === null) return answer(...args);
+    const waiting = held;
+    return new Promise((resolve) => waiting.push(() => resolve(answer(...args))));
+  };
+  page = mount(TicketsPage, {
+    target,
+    props: { ready: true, ports: h.ports, viewId: null, typingPause: 0, get syncRevision() { return revision.n; } },
+  });
+  await settle();
+  const drawn = () => [...target.querySelectorAll<HTMLElement>(".tf-tcard")].map((card) => card.dataset.entity);
+  // A sync brings a To Do ticket that sorts above the drawn eight: it waits behind *Show N new*.
+  corpus.unshift({ status: "To Do", card: card("PAY-99", "SEPA retries synced") });
+  revision.n += 1;
+  flushSync();
+  await settle();
+  const before = drawn();
+  expect(before).not.toContain("jira:PAY-99");
+  expect(before.filter((id) => /^jira:PAY-5\d$/.test(id!))).toHaveLength(3);
+  held = [];
+  type(field(), "sepa");
+  flushSync();
+  await nextFrame();
+  expect(held).toHaveLength(1);
+  // The key's own frames: the board it answered, in its order, unmarked, Done still three.
+  expect(drawn()).toEqual(before);
+  expect(target.querySelectorAll(".tf-tcard mark")).toHaveLength(0);
+  const release = held;
+  held = null;
+  release.forEach((go) => go());
+  await settle();
+  await nextFrame();
+  expect(drawn()).toContain("jira:PAY-99");
+  expect(target.querySelectorAll(".tf-tcard mark").length).toBeGreaterThan(0);
+});
+
 // ---- Make an editable copy (#880) ----
 
 const fromLine = () => dialog()!.querySelector(".tf-vw-from")!.textContent!.replace(/\s+/g, " ").trim();

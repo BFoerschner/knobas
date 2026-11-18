@@ -100,6 +100,12 @@
     if (r.press === null) return;
     if (r.hash !== null && ![].concat(r.hash).some((h) => location.hash.startsWith(h))) return;
     const list = sample(r);
+    if (r.drawn === null && r.changes !== null) {
+      // A key whose answer is what draws: until its words change, what it must leave as it was is held to its boxes.
+      const now = words(r.changes);
+      if (now === r.changedFrom) return held(r, t);
+      r.changedTo = now;
+    }
     if (r.drawn === null) {
       const gate = r.expectHash ? r.hashAt : r.press;
       if (gate === null || r.mutAt === null || r.mutAt < gate) return;
@@ -191,15 +197,41 @@
     }
   }
 
+  /** The words of every visible match of `selector` in the shown page, joined. */
+  const words = (selector) =>
+    [...shown().querySelectorAll(selector)].filter((e) => e.getClientRects().length > 0).map((e) => (e.textContent || "").trim()).join("|");
+  /** The visible matches of `selector` in view, with their boxes. */
+  const inView = (selector) =>
+    [...shown().querySelectorAll(selector)].flatMap((e) => {
+      const b = e.getBoundingClientRect();
+      return b.width >= 1 && b.height >= 1 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth ? [{ e, x: b.left, y: b.top, w: b.width, h: b.height }] : [];
+    });
+  /** A frame between a key and its answer: anything of `still` that came, went, moved or changed size is a move. */
+  function held(r, t) {
+    const now = inView(r.still);
+    const seen = new Set();
+    const at = (m) => ({ t: t - r.press, sinceDrawn: 0, focus: false, redrawn: false, inner: false, scrolled: false, cause: "before its answer drew", ...m });
+    for (const x of now) {
+      seen.add(x.e);
+      const was = r.stillBoxes.get(x.e);
+      if (!was) { r.moves.push(at({ what: `${describe(x.e)} came in`, dx: 0, dy: 0, dw: Math.round(x.w), dh: Math.round(x.h) })); r.stillBoxes.set(x.e, x); continue; }
+      const dx = x.x - was.x, dy = x.y - was.y, dw = x.w - was.w, dh = x.h - was.h;
+      if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dw), Math.abs(dh)) > r.px) { r.moves.push(at({ what: describe(x.e), dx: Math.round(dx), dy: Math.round(dy), dw: Math.round(dw), dh: Math.round(dh) })); r.stillBoxes.set(x.e, x); }
+    }
+    for (const [e, was] of r.stillBoxes) if (!seen.has(e) && !was.gone) { was.gone = true; r.moves.push(at({ what: `${describe(e)} went`, dx: 0, dy: 0, dw: -Math.round(was.w), dh: -Math.round(was.h) })); }
+    if (t - r.press > 15000) r.done = true;
+  }
+
   window.__moves = {
     /**
      * Arm for one open. `hash`: the address it lands on (a prefix); `ms`: how long past the first useful frame it records;
      * `px`: what counts as a move; `ready`: a selector that says the place is drawn (an overlay); `anywhere`: the whole
      * document, not the shown page and overlays.
      */
-    arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, trace = null } = {}) {
+    arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, still = null, changes = null, trace = null } = {}) {
       const expectHash = hash !== null && ![].concat(hash).some((h) => location.hash.startsWith(h));
-      run = { hash, ms, px, ready, anywhere, anyKey, trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
+      const stillBoxes = new Map(still === null ? [] : inView(still).map((x) => [x.e, x]));
+      run = { hash, ms, px, ready, anywhere, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
       requestAnimationFrame(frame);
       return 1;
     },
@@ -224,6 +256,7 @@
       return {
         hash: location.hash,
         drawnMs: r.drawn === null ? null : Math.round(r.drawn - p),
+        ...(r.changes !== null ? { changedFrom: r.changedFrom, changedTo: r.changedTo ?? null } : {}),
         usefulMs: r.useful === null ? null : Math.round(r.useful - p),
         frames: r.frames,
         animated: r.animated,

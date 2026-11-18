@@ -99,6 +99,8 @@ export interface BoardFilter {
   query: string;
   /** Whether words are typed: fifty a column then, not eight (R-3.4, #1024). */
   words: boolean;
+  /** The typed text, which the cards mark (#1903): read back by {@link BoardReader.drawnFilter}. */
+  text?: string;
 }
 
 /** What the view on screen says about drawing its board: read when drawn, not when opened. */
@@ -151,8 +153,13 @@ export interface BoardReader {
   readonly lanes: LaneField;
   /** Whether the board is split into lanes: read in lanes on the server (#939). */
   readonly laned: boolean;
-  /** Whether the filter has words. */
+  /**
+   * Whether the board drawn was read with words: the fifty a column it draws then, and the list's *Show N more* it
+   * hides. The board's, not the bar's, so a key changes nothing on screen until its answer draws (the ux19 overs pass).
+   */
   readonly typing: boolean;
+  /** The filter the board drawn was read with: what its cards mark and its held order sorts on (the ux19 overs pass). */
+  readonly drawnFilter: BoardFilter;
   /** Whether the view shows every ticket ({@link BoardView.showAll}): no column, lane or list offers more. */
   readonly all: boolean;
   /**
@@ -282,6 +289,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     lanesShown: LANES_AT_FIRST,
     scope: { key: "", base: null, savedView: null, without: null } as BoardScope,
     filter: { query: "", words: false } as BoardFilter,
+    /** The filter the board on screen answers: the bar's until its read lands. */
+    drawn: { query: "", words: false } as BoardFilter,
     asked: 0,
   });
   /** Bumped by every read and every key, so only the last read's answer lands. */
@@ -318,7 +327,10 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const layout = $derived(own?.layout ?? view.layout);
   const lanes = $derived(own?.lanes ?? view.lanes);
   const laned = $derived(layout === "board" && lanes !== "none");
+  /** Whether the bar has words: what a read asks for. */
   const typing = $derived(state.filter.words);
+  /** Whether the board drawn was read with words: what it draws. A key's own frame draws the board before it. */
+  const drawnTyping = $derived(state.drawn.words);
   const all = $derived(view.showAll === true);
   const bands = $derived(
     boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => columns).map((byStatus) => {
@@ -333,7 +345,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
           // each paged in it, so they draw every card read.
           const key = expandKey(lane, column);
           const cards = !all
-            ? drawnCards(column, pagesOf(key), typing, done)
+            ? drawnCards(column, pagesOf(key), drawnTyping, done)
             : state.scope.savedView !== null
               ? column.cards
               : (readPrefix(column.cards, viewColumnParts(byStatus.columns, view.columns, at), readThrough.get(key) ?? null) as MiniBoardCard[]);
@@ -430,7 +442,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       priority_order: [...PRIORITY_ORDER],
     };
     const depth = byPerson ? PAGE_CARDS : Math.max(PAGE_CARDS, rows?.length ?? 0);
-    const query = state.filter.query;
+    const sent = state.filter;
+    const query = sent.query;
     const mine = ++rowsReading;
     rowsOut = false;
     ports
@@ -438,6 +451,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       .then((answer) => {
         if (mine !== rowsReading) return;
         rows = inOrder(answer);
+        state.drawn = sent;
         if (byPerson) state.asked += 1;
       })
       .catch((error: unknown) => {
@@ -468,7 +482,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     const { base, savedView, without } = state.scope;
     if (base === null) return;
     const kept = (answer: MiniBoard) => (without ? withoutTicket(answer, without) : answer);
-    const query = state.filter.query;
+    const sent = state.filter;
+    const query = sent.query;
     const mine = ++reading;
     out += 1;
     sentAt = Date.now();
@@ -486,6 +501,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         if (mine !== reading) return;
         const drawn = kept(answer);
         board = drawn;
+        state.drawn = sent;
         // A quick answer that holds every card of every column is the whole read already: none follows it.
         if (quick && drawn.columns.every((column) => column.cards.length >= column.total)) clearTimeout(settling);
         state.failed = null;
@@ -541,7 +557,10 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       return laned;
     },
     get typing() {
-      return typing;
+      return drawnTyping;
+    },
+    get drawnFilter() {
+      return state.drawn;
     },
     get all() {
       return all;
@@ -568,6 +587,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       clearTimeout(settling);
       state.scope = { ...scope };
       state.filter = { ...filter };
+      state.drawn = state.filter;
       rows = null;
       rowsReading += 1;
       paging.clear();

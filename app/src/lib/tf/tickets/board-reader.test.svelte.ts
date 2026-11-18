@@ -662,3 +662,32 @@ test("on, a key reads fifty a column once and no whole read follows; a sync's re
   await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS * 2);
   expect(reads.slice(3).map(({ perColumn, query }) => [perColumn, query])).toEqual([[50, "pay"]]);
 });
+
+test("a key draws nothing new until its answer lands: the board drawn keeps the cards and the filter it was read with (the ux19 overs pass)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  const done = () => reader.bands[0]!.drawn.find(({ column }) => column.status === "Done")!.cards.length;
+  expect(done()).toBe(3);
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "d", words: true, text: "d" });
+  expect(reads).toHaveLength(2);
+  // The frame after the key: the Done column held eight and drew three, and took all five the moment the bar had words.
+  expect(done()).toBe(3);
+  expect(reader.typing).toBe(false);
+  expect(reader.drawnFilter.query).toBe("");
+  reads[1]!.answer(board(column("To Do", 2), column("Done", 5)));
+  await flush();
+  expect(done()).toBe(5);
+  expect(reader.typing).toBe(true);
+  expect(reader.drawnFilter).toMatchObject({ query: "d", text: "d" });
+  // Cleared, the fifty a column stay drawn until the board without words answers.
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "", words: false, text: "" });
+  expect(done()).toBe(5);
+  reads[2]!.answer(FIRST);
+  await flush();
+  expect(done()).toBe(3);
+  expect(reader.typing).toBe(false);
+});
