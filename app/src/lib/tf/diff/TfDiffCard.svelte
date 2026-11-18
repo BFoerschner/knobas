@@ -72,10 +72,10 @@
   import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { placeThreads, targetOf } from "../pr/files";
-  import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, waitingRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
+  import { changedWordsOf, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, waitingRows, type DrawnFile, type DrawnLine, type Expanded, type Gap, type ChangedWords } from "./diff";
   import type { DiffTalk } from "./talk";
   import { badgeOf, isGenerated, isLock, LOAD_OVER, needsLoad } from "./tree";
-  import { marked, type Range } from "./words";
+  import { marked } from "./words";
   import { firstLine } from "../openin/openin";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import TfWrittenAt from "./TfWrittenAt.svelte";
@@ -213,7 +213,9 @@
   const lineKey = (cell: DrawnLine | null) => (cell === null ? "-" : cell.extra ? `x${cell.line.new}` : `l${cell.at}`);
   const placed = $derived(placeThreads(file));
   const drawsLines = $derived(!closed && shows === "lines" && file.change !== "binary" && (loaded || !needsLoad(file)));
-  const marks = $derived(drawsLines ? changedWords(file) : new Map<number, Range[]>());
+  // Matched as each line is drawn: a jump to a screen of a long file matched every pair of it first.
+  const NO_MARKS: ChangedWords = { get: () => undefined };
+  const marks = $derived(drawsLines ? changedWordsOf(file) : NO_MARKS);
 
   /** Where each hunk starts among the items: its gap, else its first line. */
   let starts: number[] = [];
@@ -328,6 +330,42 @@
   const pageShown = pageVisible();
 
   const SIGN = { context: " ", add: "+", del: "−" } as const;
+
+  /**
+   * A line's sign and code, plain until its tokens arrive, its changed words marked: `− ` then each piece, a token in
+   * `.tf-hl-<kind>`, a changed word in `.tf-wd` around it. Built here as one effect, where a snippet of an `each` and two
+   * `if`s a piece made a line of a dozen pieces some twenty effects to build and as many to tear down: a jump builds a
+   * screen of lines and tears down the screen it left (the compare-jump-speed pass, 2026-11-18). Text nodes and
+   * elements, never markup: a line's text is the source's.
+   */
+  function code(cell: DrawnLine, side: "old" | "new"): Attachment<HTMLElement> {
+    return (node) => {
+      const toks = tokensOf(side, cell);
+      const words = cell.extra ? undefined : marks.get(cell.at);
+      const doc = node.ownerDocument;
+      const parts: Node[] = [doc.createTextNode(`${SIGN[cell.line.kind]} `)];
+      const pieces = words ? marked(cell.line.text, toks, words) : toks ? toks.map(([text, kind]) => ({ text, kind, mark: false })) : null;
+      if (pieces === null) parts.push(doc.createTextNode(cell.line.text));
+      else
+        for (const piece of pieces) {
+          let at: Node = doc.createTextNode(piece.text);
+          if (piece.kind !== "") {
+            const hl = doc.createElement("span");
+            hl.className = `tf-hl-${piece.kind}`;
+            hl.append(at);
+            at = hl;
+          }
+          if (piece.mark) {
+            const wd = doc.createElement("span");
+            wd.className = "tf-wd";
+            wd.append(at);
+            at = wd;
+          }
+          parts.push(at);
+        }
+      node.replaceChildren(...parts);
+    };
+  }
   const old = $derived(file.old_path && file.old_path !== file.path ? file.old_path : null);
   /** A local change's label says how it stands (*modified, not staged*): words, so not in the path's mono. */
   const shownHow = $derived(/ \(([^()]*(?:not staged|staged))\)$/.exec(keyOf(file))?.[1] ?? null);
@@ -350,15 +388,6 @@
   };
 </script>
 
-{#snippet piece(text: string, kind: string)}{#if kind !== ""}<span class="tf-hl-{kind}">{text}</span>{:else}{text}{/if}{/snippet}
-
-<!-- A line's code: plain until its tokens arrive, its changed words marked. -->
-{#snippet code(cell: DrawnLine, side: "old" | "new")}
-  {@const toks = tokensOf(side, cell)}
-  {@const words = cell.extra ? undefined : marks.get(cell.at)}
-  {#if words}{#each marked(cell.line.text, toks, words) as seg, k (k)}{#if seg.mark}<span class="tf-wd">{@render piece(seg.text, seg.kind)}</span
-        >{:else}{@render piece(seg.text, seg.kind)}{/if}{/each}{:else if toks}{#each toks as [part, kind], k (k)}{@render piece(part, kind)}{/each}{:else}{cell.line.text}{/if}
-{/snippet}
 
 {#snippet said(comments: readonly LineComment[])}
   {#each comments as c, k (k)}
@@ -440,7 +469,7 @@
   {:else}
     {@const line = cell.line}
     <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"}>
-      <span class="tf-no">{side === "old" ? line.old : line.new}</span><span>{SIGN[line.kind]} {@render code(cell, side)}</span>
+      <span class="tf-no">{side === "old" ? line.old : line.new}</span><span {@attach code(cell, side)}></span>
       {#if targetOf(line).side === side}{@render plus(cell)}{:else}<span></span>{/if}
     </div>
   {/if}
@@ -456,7 +485,7 @@
   {:else if it.kind === "line"}
     {@const line = it.cell.line}
     <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"} class:tf-extra={it.cell.extra} {@attach win.row(it.key)} {@attach keep(it.key)}>
-      <span class="tf-no">{line.old ?? ""}</span><span class="tf-no">{line.new ?? ""}</span><span>{SIGN[line.kind]} {@render code(it.cell, line.kind === "del" ? "old" : "new")}</span>
+      <span class="tf-no">{line.old ?? ""}</span><span class="tf-no">{line.new ?? ""}</span><span {@attach code(it.cell, line.kind === "del" ? "old" : "new")}></span>
       {@render plus(it.cell)}
     </div>
   {:else if it.kind === "pair"}

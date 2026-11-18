@@ -271,6 +271,44 @@ export function changedWords(file: DiffFile): Map<number, Range[]> {
   return marks;
 }
 
+/** A file's changed words by line (`at`), each pair's worked out as one of its lines is asked for. */
+export interface ChangedWords {
+  get(at: number): Range[] | undefined;
+}
+
+/**
+ * {@link changedWords}, asked line by line: the lines are paired at once, but a pair's words are matched only when one of
+ * its lines is drawn (the compare-jump-speed pass, 2026-11-18). A jump that draws a screen of a 400-line file matched
+ * every changed pair of it first, 6 ms of a quarter-speed main thread in the frame the reader waits on.
+ */
+export function changedWordsOf(file: DiffFile): ChangedWords {
+  let pairs: Map<number, readonly [DrawnLine, DrawnLine]> | null = null;
+  const done = new Map<number, Range[]>();
+  return {
+    get(at) {
+      if (pairs === null) {
+        pairs = new Map();
+        for (const row of splitRows(file)) {
+          if (row.kind !== "pair" || row.old === null || row.new === null || row.old === row.new) continue;
+          const pair = [row.old, row.new] as const;
+          pairs.set(row.old.at, pair);
+          pairs.set(row.new.at, pair);
+        }
+      }
+      let got = done.get(at);
+      if (got === undefined) {
+        const pair = pairs.get(at);
+        if (pair === undefined) return undefined;
+        const [old, nu] = wordMarks(pair[0].line.text, pair[1].line.text);
+        done.set(pair[0].at, old);
+        done.set(pair[1].at, nu);
+        got = done.get(at)!;
+      }
+      return got.length > 0 ? got : undefined;
+    },
+  };
+}
+
 /** One side's text to highlight, and the file name its language comes from. */
 export interface SideText {
   path: string;

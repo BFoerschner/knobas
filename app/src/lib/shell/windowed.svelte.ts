@@ -197,6 +197,17 @@ export class Windowed<K = string> {
   #lastDrawn: { start: number; keys: readonly K[] } = { start: 0, keys: [] };
   /** The last row drawn before the read: the read keeps those under the view that the overscan below would hold. */
   #early: { key: K } | null = null;
+  /**
+   * A jump's first frames (`land`): how many pixels at the view's top a band covers. Until two frames have drawn after
+   * it, the list draws the rows on screen below that band and nothing else; then its overscan both ways.
+   */
+  #landing = $state.raw<{ covered: number; key: K } | null>(null);
+  /**
+   * The jump this list was attached in, if one was landing (`jumping`): a file's lines, drawn for the first time as the
+   * jump brings its card. Until it has read where it sits it draws no row and holds their room; then the rows on screen
+   * alone, until the jump's frames have drawn and its overscan grows with the files'.
+   */
+  #bornIn: object | null = null;
 
   readonly #span = $derived.by((): Span & { on: boolean } => {
     const keys = this.#keys;
@@ -215,6 +226,28 @@ export class Windowed<K = string> {
     // Read before the held rows may answer, so the overscan below is drawn when it may be.
     const grown = this.#grownFor === this.#set;
     this.#sync(keys);
+    // A list a jump brought: no row before its read, the rows on screen after it, the overscan once the jump's frames
+    // have drawn. Drawn before the read, its overscan's rows from its top were the wrong ones for a card whose foot is
+    // what shows, and the read then drew a screen and the overscan above it besides (the compare-jump-speed pass).
+    if (this.#bornIn !== null && this.#bornIn === jumping) {
+      this.#held = null;
+      // The view is read before the list is placed too: its read is what draws its rows.
+      const [top, height] = [this.#viewTop, this.#viewHeight];
+      const span = this.#placed ? this.#heights.span(top, height, 0, 0) : this.#heights.around(0, 0);
+      if (this.#options.onScreen) this.#lastDrawn = { start: span.start, keys: keys.slice(span.start, span.end) };
+      return { ...span, on: true };
+    }
+    // A jump's first frames: the rows on screen under the band alone (`land`), the overscan once they have drawn.
+    const landing = this.#landing;
+    if (landing !== null) {
+      this.#held = null;
+      let span = this.#heights.span(this.#viewTop + landing.covered, Math.max(0, this.#viewHeight - landing.covered), 0, 0);
+      // The row landed on stays drawn whatever the view reads: the caller holds the page by it.
+      const at = keys.indexOf(landing.key);
+      if (at >= 0 && (at < span.start || at >= span.end)) span = this.#heights.around(Math.min(at, span.start), Math.max(at + 1, span.end));
+      if (this.#options.onScreen) this.#lastDrawn = { start: span.start, keys: keys.slice(span.start, span.end) };
+      return { ...span, on: true };
+    }
     const { overscan, margin } = this.#options;
     const held = this.#held;
     if (held !== null && held.keys === keys && this.#heights.covers(held.start, held.end, this.#viewTop, this.#viewHeight, margin))
@@ -284,6 +317,7 @@ export class Windowed<K = string> {
   /** On the element that holds the rows. */
   list = (node: HTMLElement) => {
     const own = this.#options.scrolls;
+    this.#bornIn = jumping;
     // The ancestors that clip the list, and its own padding (row 0 sits under it, and the room is inside it): read
     // with every other list attached in this flush (`placeSoon`), then the viewport.
     let clips: HTMLElement[] = [];
@@ -378,8 +412,11 @@ export class Windowed<K = string> {
       // list made to hold a row, nor on a resize: those arrive after a redraw
       // may have moved the rows, and pinning them there would keep the move
       // (#2211: a summary 5 px under its estimate shifted the list 5 px).
-      if (event?.type === "scroll" && !this.#selfScroll(event))
+      if (event?.type === "scroll" && !this.#selfScroll(event)) {
+        // The reader moved on from a jump before its overscan came: the overscan comes now.
+        this.#landing = null;
         this.#pin(top, bottom, event);
+      }
     };
     // Reading where a list sits lays the page out. A page that opens with several windowed lists (Builds' rail, its
     // days and each day's runs) read each as it was attached, after the one before had drawn its rows: a layout of
@@ -540,6 +577,41 @@ export class Windowed<K = string> {
     this.#viewTop = top;
   }
 
+  /**
+   * A jump to row `index` (a diff's file picked in its list, the compare-jump-speed pass, 2026-11-18): the view moves
+   * straight to where the row's top stands `covered` pixels below its top (under a band that sticks there), and until two
+   * frames have drawn after it the list draws only the rows on screen under that band; the overscan above and below
+   * comes in a task of its own after (`growSoon`), held still by the row the caller lands on (`landOn`). `reveal` first
+   * brought the row in at the view's foot and drew the overscan around that place, then the landing moved the view a
+   * screen down and drew the rows there too: a jump built two screens of files and their lines and threw one away.
+   * False where the list draws every row (too short to window), or has no row `index`.
+   */
+  land(index: number, covered = 0): boolean {
+    placeWindowsNow();
+    if (!this.on || index < 0 || index >= this.#keys.length) return false;
+    this.#sync(this.#keys);
+    // The reader moved on purpose: nothing on screen is held where it was.
+    shared.anchor = null;
+    const box = this.#scroller();
+    const want = this.#heights.offsetOf(index) - covered - this.#viewTop;
+    if (box === null) this.#viewTop += want;
+    else if (Math.abs(want) >= 0.5) {
+      const was = box.scrollTop;
+      this.#scrollBy(want);
+      // As far as the scroll went: the end of the page stops a row near the list's end lower.
+      this.#viewTop += box.scrollTop - was;
+    }
+    const landing = { covered, key: this.#keys[index]! };
+    this.#landing = landing;
+    const jump = {};
+    jumping = jump;
+    growSoon(() => {
+      if (jumping === jump) jumping = null;
+      if (this.#landing === landing) this.#landing = null;
+    });
+    return true;
+  }
+
   /** Row `index`'s top on screen (client pixels), drawn or not: where a line to an undrawn row points. */
   topOf(index: number): number {
     placeWindowsNow();
@@ -695,6 +767,12 @@ function freezeCols(
     table.style.tableLayout = "";
   };
 }
+
+/**
+ * The jump landing now (`land`), until its frames have drawn: the lists attached in it draw the rows on screen alone
+ * until then (`#bornIn`).
+ */
+let jumping: object | null = null;
 
 /** A list's place is read in two steps: every list's room is written, then where each sits is read. */
 type Phase = "room" | "read";

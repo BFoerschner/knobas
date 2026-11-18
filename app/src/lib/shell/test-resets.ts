@@ -25,6 +25,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // wait for those frames let go, so the next test's lists wait for frames of their own.
   "shell/windowed.svelte.ts#ungrown": async () => (await import("./windowed.svelte")).growWindowsNow(),
   "shell/windowed.svelte.ts#growWait": async () => (await import("./windowed.svelte")).growWindowsNow(),
+  // The jump landing now (the compare-jump-speed pass, 2026-11-18): it ends with the grow, so the next test's lists are
+  // born in none.
+  "shell/windowed.svelte.ts#jumping": async () => (await import("./windowed.svelte")).growWindowsNow(),
   // Each attached list's read of the view, for a landing (the compare-jump pass, 2026-11-17): a list leaves it as it is
   // torn down; one a test left attached is let go, so the next test's landing reads none of it.
   "shell/windowed.svelte.ts#viewReads": async () => (await import("./windowed.svelte")).forgetViewReads(),

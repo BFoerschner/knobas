@@ -730,15 +730,20 @@
    * leaves its binding null, not undefined (the compare-jump pass, 2026-11-17: a pick of a file drawn earlier near the
    * view, then scrolled away from, did nothing at all), so it is the card's box that says whether it is drawn.
    */
-  function cardFor(key: string): Card | undefined {
+  function cardFor(key: string, landing = false): Card | undefined {
     if (cards[key] == null || cardOf(key) === null) {
       const at = drawn.findIndex((file) => keyOf(file) === key);
       if (at < 0) return undefined;
-      fileWin.reveal(at);
+      // A file chosen (`go`) lands at the band's foot at once, with the files on screen alone in its frame and the rest
+      // after it (`land`, the compare-jump-speed pass, 2026-11-18); `n`, `p` and `c` bring the card near as before.
+      if (!landing || scroller === null || !fileWin.land(at, bandCover())) fileWin.reveal(at);
       flushSync();
     }
     return cards[key] ?? undefined;
   }
+
+  /** How much of the scroller's top the band covers: none where the band does not stick (no file list). */
+  const bandCover = () => (list && band !== null ? band.getBoundingClientRect().height : 0);
 
   /** The line whose comment box is open: its file and its place. */
   let open = $state<{ path: string; side: "old" | "new"; line: number } | null>(null);
@@ -888,11 +893,11 @@
    */
   function go(key: string) {
     current = key;
-    const card = cardFor(key);
+    const card = cardFor(key, true);
     const el = cardOf(key);
     landed = null;
     if (card !== undefined && el !== null && scroller !== null) {
-      landOn(el, scroller, el.getBoundingClientRect().top - topOfFiles(scroller));
+      landOn(el, scroller, reach(scroller, el.getBoundingClientRect().top - topOfFiles(scroller)));
       landed = key;
     } else card?.scrollTo();
     hold();
@@ -919,13 +924,22 @@
     if (el === null) return false;
     const off = el.getBoundingClientRect().top - topOfFiles(box);
     if (Math.abs(off) < 1) return false;
-    landOn(el, box, off);
+    // A file near the list's end, where the scroll's end stops it below the band: it is where it lands, and asking for
+    // the scroll the end refuses had every list read the view again on each of the page's scrolls.
+    const go = reach(box, off);
+    if (Math.abs(go) >= 1) landOn(el, box, go);
     return true;
+  }
+
+  /** `px` of scroll, as far as `box` can go that way: not past its start or its end. */
+  function reach(box: Element, px: number): number {
+    const top = box.scrollTop;
+    return Math.max(-top, Math.min(px, box.scrollHeight - box.clientHeight - top));
   }
 
   /** Where the files' view starts on screen: the scroller's top, or the band's foot where the band sticks over it. */
   function topOfFiles(box: Element): number {
-    return box.getBoundingClientRect().top + box.clientTop + (list && band !== null ? band.getBoundingClientRect().height : 0);
+    return box.getBoundingClientRect().top + box.clientTop + bandCover();
   }
 
   /** A file picked in the list: it opens if it was collapsed, and the list folds again, before the page moves to it. */

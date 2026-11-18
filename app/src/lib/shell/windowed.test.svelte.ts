@@ -429,6 +429,91 @@ test("the drawn rows hold still while the view moves inside them, and move to it
   stop();
 });
 
+test("a jump lands its row under the band at once and draws the rows on screen alone, the overscan once its frames have drawn (the compare-jump-speed pass)", () => {
+  // Björn's ux18 report: a file picked in a big compare took 89 to 171 ms at 4x. `reveal` brought the row in at the view's
+  // foot and drew the overscan around that place, then the landing scrolled a screen on and drew the rows there as well.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  document.body.innerHTML = '<ol style="overflow-y: auto"><li class="before"></li><li class="after"></li></ol>';
+  const list = document.querySelector("ol")!;
+  let scrolled = 0;
+  const scrolls: number[] = [];
+  Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => scrolls.push((scrolled = px)) });
+  Object.defineProperty(list, "clientHeight", { value: 300 });
+  Object.defineProperty(list, "scrollHeight", { value: 20_000 });
+  // Rows of 20 px, 200 px of overscan each side; a band covers the view's top 40 px.
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 200, scrolls: true });
+  const stop = $effect.root(() => {
+    win.list(list);
+    win.room("before")(list.querySelector<HTMLElement>(".before")!);
+    win.room("after")(list.querySelector<HTMLElement>(".after")!);
+  });
+  placed();
+  expect(win.land(500, 40)).toBe(true);
+  flushSync();
+  // One scroll, straight to row 500's top under the band: 10,000 px less the band's 40.
+  expect(scrolls).toEqual([9_960]);
+  // The rows from the band's foot to the view's foot (10,000 to 10,260 px), and none of the overscan.
+  expect([win.start, win.end]).toEqual([500, 513]);
+  // Two frames on, the overscan both ways.
+  growWindowsNow();
+  flushSync();
+  expect(win.start).toBeLessThan(490);
+  expect(win.end).toBeGreaterThan(520);
+  // Near the list's end the scroll's end stops it: the rows on screen are the ones the scroll reached.
+  scrolled = 19_700;
+  list.dispatchEvent(new Event("scroll"));
+  flushSync();
+  expect(win.land(999, 40)).toBe(true);
+  flushSync();
+  expect(win.end).toBe(1000);
+  expect(win.start).toBeLessThanOrEqual(999);
+  stop();
+});
+
+test("a list a jump brings draws no row until it reads where it sits, then the rows on screen alone until the jump's frames have drawn (the compare-jump-speed pass)", () => {
+  // A big file's lines, drawn for the first time as the jump brings its card, drew their first screen from the top before
+  // their read (the wrong rows for a card whose foot shows), then a screen and the overscan above it.
+  document.body.innerHTML = '<div class="main" style="overflow-y: auto"><ol class="files"></ol><div class="lines"></div></div>';
+  const main = document.querySelector<HTMLElement>(".main")!;
+  const lines = document.querySelector<HTMLElement>(".lines")!;
+  let scrolled = 0;
+  Object.defineProperty(main, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(main, "clientHeight", { value: 300 });
+  Object.defineProperty(main, "scrollHeight", { value: 50_000 });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const at = (top: number, height: number) => ({ width: 200, height, top, bottom: top + height, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    if (this === main) return at(0, 300);
+    // The file's lines start 1,000 px up the view: what shows is rows 50 to 64.
+    if (this === lines) return at(-1_000, 2_000);
+    return at(-scrolled, 20_000);
+  });
+  const files = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const stopFiles = $effect.root(() => files.list(document.querySelector<HTMLElement>(".files")!));
+  placed();
+  files.land(300, 0);
+  // The card's lines are attached in the jump.
+  const rows = new Windowed({ count: () => 100, key: (i) => i, estimate: 20, overscan: 200, from: 80 });
+  const stopRows = $effect.root(() => rows.list(lines));
+  flushSync();
+  expect([rows.start, rows.end]).toEqual([0, 0]);
+  placeWindowsNow();
+  flushSync();
+  expect([rows.start, rows.end]).toEqual([50, 65]);
+  growWindowsNow();
+  flushSync();
+  expect(rows.start).toBeLessThan(45);
+  // A list attached after the jump's frames draws as any list does.
+  const later = new Windowed({ count: () => 100, key: (i) => i, estimate: 20, overscan: 200, from: 80 });
+  const stopLater = $effect.root(() => later.list(document.createElement("div")));
+  flushSync();
+  expect(later.end).toBeGreaterThan(0);
+  stopLater();
+  stopRows();
+  stopFiles();
+});
+
 test("a row the window takes out while it holds focus leaves focus on the list, and gets it back when drawn again (the extremes pass)", async () => {
   document.body.innerHTML = '<div class="list"><div class="row"><a href="#a">a</a><button type="button">b</button></div></div>';
   const list = document.querySelector<HTMLElement>(".list")!;

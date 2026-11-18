@@ -595,6 +595,9 @@ test("a file drawn once and taken out by the window since is drawn again and lan
   try {
     page.pick(page.paths[40]!);
     expect(page.headOf(page.paths[40]!)).toBe(44);
+    // The files around it come once the jump's frames have drawn (`land`).
+    growWindowsNow();
+    flushSync();
     expect(page.headOf(page.paths[41]!)).not.toBeNull();
     // The reader wheels back to the top: the files near 40 leave the window.
     page.page.dispatchEvent(new Event("wheel"));
