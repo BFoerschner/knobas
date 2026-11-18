@@ -110,6 +110,19 @@ describe("the answer cache", () => {
     expect(asked("docs_outline")).toBe(1);
   });
 
+  it("drops nothing on a clone's reads or a pipeline's older runs, and shares a read they came between", async () => {
+    // The ux18 Windows pass (2026-11-18): Files reading a clone's folder as a repository opened dropped every kept answer
+    // and the press's reads on their way, so the page asked its row and the rest a second time.
+    await ask("docs_outline");
+    const first = ask("list_entities", { filter: {} });
+    for (const cmd of ["entity_local_tree", "entity_local_dir", "entity_local_paths", "entity_local_file", "entity_file_bytes", "entity_checkout_diff", "entity_commit_diff", "older_pipeline_runs"]) await ask(cmd, { entityId: "r" });
+    const second = ask("list_entities", { filter: {} });
+    await Promise.all([first, second]);
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(1);
+    expect(asked("list_entities")).toBe(1);
+  });
+
   it("keeps on a visit only what never reads visits", async () => {
     await ask("docs_outline");
     await ask("list_entities", { filter: { kinds: ["pr"] } });

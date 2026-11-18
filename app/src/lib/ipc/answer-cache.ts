@@ -127,6 +127,18 @@ export const QUIET: ReadonlySet<string> = new Set([
   "cancel_read",
   // A compare's names at the clone (the stored-compare pass, 2026-11-14): git, never the mirror.
   "entity_range_names",
+  // A clone's tree, folders, files, bytes and diffs (the ux18 Windows pass, 2026-11-18): git, never the mirror; a fetch
+  // they start drops every answer by its own event (`checkout:fetched`). Unknown here, each dropped every kept answer
+  // and every read on its way: a repository's first open asked its row, facts, branches and pipelines twice.
+  "entity_local_tree",
+  "entity_local_dir",
+  "entity_local_paths",
+  "entity_local_file",
+  "entity_file_bytes",
+  "entity_checkout_diff",
+  "entity_commit_diff",
+  // A pipeline's older runs a page at a time as its list scrolls: a read of the mirror, never kept.
+  "older_pipeline_runs",
   "docs_search",
   "search",
   "launcher_home",
