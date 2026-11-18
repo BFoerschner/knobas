@@ -119,10 +119,10 @@ test("the list holds the machine's families, monospace first under their heading
 });
 
 test.each([
-  ["ui", ["Sans serif", "Other fonts"], ["Arial", "Avenir Next Condensed", "Fira Code", "Menlo", "Georgia"]],
-  ["head", ["Draws narrow", "Normal width only"], ["Avenir Next Condensed", "Fira Code", "Menlo", "Arial", "Georgia"]],
-  ["read", ["Serif", "Other fonts"], ["Georgia", "Fira Code", "Menlo", "Arial", "Avenir Next Condensed"]],
-] as const)("%s lists its own kind first", async (role, wantHeads, wantOptions) => {
+  ["ui", ["Sans serif", "Other fonts"], ["Arial", "Avenir Next Condensed", "Fira Code", "Georgia", "Menlo"]],
+  ["head", ["Draws narrow", "Normal width only"], ["Avenir Next Condensed", "Arial", "Fira Code", "Georgia", "Menlo"]],
+  ["read", ["Serif", "Other fonts"], ["Georgia", "Arial", "Avenir Next Condensed", "Fira Code", "Menlo"]],
+] as const)("%s lists its own kind first, each group by name whatever order the machine gave", async (role, wantHeads, wantOptions) => {
   await draw(role);
   open();
   expect(heads()).toEqual(wantHeads);

@@ -95,8 +95,11 @@
     const query = typed ? text.trim().toLowerCase() : "";
     const shown = (installed ?? []).filter((font) => query === "" || font.family.toLowerCase().includes(query));
     const { first, heads } = KIND[role];
-    const mine = shown.filter(first);
-    const other = shown.filter((font) => !first(font));
+    // Each group by name: the backend lists monospace faces first (the code font's order), which put Courier New and
+    // the MingLiU faces at the head of Reading's serifs and Lucida Console at the head of Headings' narrow faces.
+    const byName = (a: InstalledFont, b: InstalledFont) => a.family.localeCompare(b.family, "en", { sensitivity: "base" });
+    const mine = shown.filter(first).sort(byName);
+    const other = shown.filter((font) => !first(font)).sort(byName);
     return [
       ...(mine.length > 0 ? [{ kind: "head", label: heads[0] } as Row] : []),
       ...mine.map((font): Row => ({ kind: "font", font })),
