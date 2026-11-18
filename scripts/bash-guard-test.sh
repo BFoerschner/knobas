@@ -224,6 +224,23 @@ check pass 'echo "$(date)"'
 check pass "echo \"'\$(date)'\""
 check pass "echo '\$HOME (x)' '\$ (x)'"
 
+# a `$$(`, `$${` or `$$[`, or a `$` before a backslash-newline, anywhere: Claude Code's parser
+# gives up on the whole command and its rm check prompts, quoted heredoc bodies too (2026-11-03)
+dd_rule='A `$$(`, `$${` or `$$[`'
+says "$dd_rule" $'set -o pipefail; python3 - <<\'EOF\'\nb = \'ok($$(".tf-crumbs > *").length, "crumbs");\'\nEOF\nnode /tmp/smoke.cjs 2>&1 | grep -c \'^ok\''
+says "$dd_rule" $'cat > /tmp/fix.py <<\'EOF\'\nsub(\'const notes = $$("[data-note]", stage);\', "")\nEOF\npython3 -I /tmp/fix.py'
+says "$dd_rule" 'print("| $$( ${ $$[ :")'
+says "$dd_rule" "echo 'price: \$\${n}'"
+says "$dd_rule" 'echo "$$[1]"'
+says "$dd_rule" $'echo a$\\\nb'
+# the PID alone, a `$` before a backslash that ends no line, and a plain line continuation
+check pass 'echo $$'
+check pass 'kill -0 $$ && echo up'
+check pass 'echo "pid $$ (x)"'
+check pass $'printf "%s\\n" "a$\\b"'
+check pass $'echo a \\\nb'
+check pass $'cat <<\'EOF\'\nconst rows = $("tr", table);\nEOF'
+
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'
 check refuse 'cp /tmp/zshrc ~/.zshrc'

@@ -23,12 +23,17 @@ The shapes, each one a prompt or a rule of CLAUDE.md's *Machine* section:
   runs nothing there, but Claude Code prompts on it. A backquote there does not prompt,
   nor does a heredoc body, so the allowed form is a quoted heredoc (`<<'EOF'`) or a file.
   It counts in an `eval` or `sh -c` string too, never in a script read from a heredoc.
+* A `$$(`, `$${` or `$$[`, or a `$` before a backslash-newline, anywhere in the command text,
+  quotes and quoted heredoc bodies included (a JS `$$("...")` helper in a `python3 - <<'EOF'` script,
+  2026-11-03). Claude Code's own parser gives up on the whole command (its root node is an ERROR)
+  and its rm check prompts: "the shell may read this command differently than it was parsed".
+  A heredoc does not help, so the allowed form is a file written with Write and run.
 
 A redirection is no command name, wherever it stands: `>/dev/null cd x && y` and
 `2>&1 sed -i ... ~/.zshrc` are read as the cd and the sed they are (#1981).
 
 Only the command line is read, the way the shell reads it: quotes first. Quoted
-text and heredoc bodies are data, never commands (a single-quoted `$(` aside,
+text and heredoc bodies are data, never commands (a single-quoted `$(` and a `$$(` aside,
 above), so a commit message or a script written through a heredoc that mentions
 `cd` passes; only an unquoted
 `<<` that is not `<<<` opens a heredoc, and a `((...))` is arithmetic, whose `<<`
@@ -41,7 +46,9 @@ pattern's `)` closes no substitution.
 
 Known gaps, none seen in a transcript (#1981): a script piped into a shell
 (`echo 'cd x && y' | bash`, since what a pipe's left side prints is unknown), and
-a shell's script file (`bash x.sh`), which is never read.
+a shell's script file (`bash x.sh`), which is never read. Claude Code's parser also gives up
+on some zsh-only readings that depend on where text stands (`[[(`, a backquote or `{` inside
+`${...}`), which this script does not mirror.
 
 Test: scripts/bash-guard-test.sh, run by `just witness-unit`.
 """
@@ -67,6 +74,9 @@ ARITHMETIC_LEADS = RESERVED | {"for", "time", "-p", "coproc"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 MAX_DEPTH = 8  # eval, `sh -c`, shell stdin and `find -exec` scripts nested deeper than this are not read
 SHELL_CONFIG = (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin")
+# Text on which Claude Code's parser (2.1.317) gives up wherever it stands, matched on the raw command
+# as it does: `qe=/\$\$[({[]/` (dollarOperandDiff) and `e.includes("$\\\n")` (zshBraceDiff).
+UNPARSED = re.compile(r"\$\$[({\[]|\$\\\n")
 
 
 def find_or_end(s, ch, i):
@@ -579,6 +589,12 @@ def protected(path):
 
 def verdict(command):
     """None when the command may run, else the message that refuses it."""
+    unparsed = UNPARSED.search(command)
+    if unparsed:
+        return ("A `$$(`, `$${` or `$$[`, or a `$` before a backslash-newline, anywhere in a command "
+                f"(`{unparsed.group().replace(chr(10), '<newline>')}`), stops the run for a permission prompt, "
+                "quoted heredoc bodies and quotes included: Claude Code's parser gives up on the whole command. "
+                "Write the script with Write and run the file (`python3 -I /tmp/x.py`, `node /tmp/x.cjs`).")
     simples = simple_commands(commands_of(command))
     total = sum(cmd.counts for cmd in simples)
     for cmd in simples:
