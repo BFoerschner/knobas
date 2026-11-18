@@ -509,7 +509,7 @@
   }
 
   .hint {
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--ink-2);
   }
 
@@ -519,7 +519,7 @@
 
   .ask {
     margin: 0;
-    font-size: var(--t-md);
+    font-size: calc(var(--t-md) * var(--fs));
   }
 
   .prow {
@@ -534,7 +534,7 @@
     align-items: center;
     gap: 8px;
     margin: 0 0 6px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .crumbline {
@@ -572,7 +572,7 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .opt:hover {
@@ -593,7 +593,7 @@
 
   .opt .mg {
     flex: none;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
     font-weight: 500;
     color: var(--faint);
   }
@@ -605,7 +605,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     color: var(--muted);
   }
 </style>

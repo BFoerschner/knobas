@@ -3,7 +3,7 @@
   display: flex; align-items: center; gap: 6px; padding: 8px 14px;
   background: var(--sheet); border-bottom: 1px solid var(--rule); min-width: 0;
 }
-.tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
+.tf-brand { font-family: var(--brand); --fs: 1; font-weight: 800; font-variation-settings: "wdth" 70; font-stretch: 70%; font-size: calc(var(--t-2xl) * var(--fs)); margin-right: 10px; }
 /* The nav keeps its width while the search can give some up, so no entry slides out of view above 1240px. */
 .tf-nav {
   display: flex; gap: 2px; flex: none; min-width: 0; overflow-x: auto; scrollbar-width: none;
@@ -22,7 +22,7 @@
 .tf-nav a:hover { background: var(--sheet-2); color: var(--ink); }
 .tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
 .tf-count {
-  display: inline-block; font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
+  display: inline-block; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; padding: 0 6px; border-radius: 9px;
   /* `--rule` shows on paper, sheet and card in both themes, and `--ink-2` on it passes 4.5:1. */
   background: var(--rule); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
@@ -39,7 +39,7 @@
 .tf-search:hover { border-color: var(--ink-2); }
 .tf-search kbd { margin-left: auto; }
 .tf kbd {
-  font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
+  --fs: var(--size-code); font: 600 calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
   border-radius: 3px; background: var(--sheet); color: var(--ink-2);
 }
 .tf-timer {
@@ -50,10 +50,10 @@
 .tf-timer.tf-off { background: var(--sheet); border: 1px solid var(--rule); color: var(--ink); font-weight: 500; }
 .tf-timer.tf-off:hover { border-color: var(--ink-2); }
 /* The target is capped, the chip's title carries the full text; a ticket key is a code value (mono), a label is not. */
-.tf-timer-key { font-size: var(--t-xs); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-timer-key.tf-mono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-timer-key { font-size: calc(var(--t-xs) * var(--fs)); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-timer-key.tf-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* A duration is Archivo with tabular figures, not mono (design system, Type). */
-.tf-timer-t { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.tf-timer-t { font-size: calc(var(--t-sm) * var(--fs)); font-variant-numeric: tabular-nums; }
 .tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
 .tf-timer.tf-off .tf-timer-stop { background: none; }
 .tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
@@ -78,7 +78,7 @@
 :is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc, .tf-picks, .tf-picklist, .tf-tbl) :focus-visible { outline-offset: -2px; }
 
 .tf-status {
-  display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: var(--t-xs); color: var(--ink-2);
+  display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2);
   background: var(--sheet); border-top: 1px solid var(--rule); overflow: hidden; white-space: nowrap;
 }
 /* Each reading starts with its state's dot, so the bar reads at a glance and the red is the dot and the fix, not a whole line of it. */
@@ -144,7 +144,7 @@
 .tf-full { display: flex; flex-direction: column; min-height: 100%; }
 .tf-crumbs {
   display: flex; align-items: center; gap: 8px; padding: 9px 22px; background: var(--sheet);
-  border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); flex-wrap: wrap;
+  border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); flex-wrap: wrap;
 }
 .tf-crumbs a { text-decoration: none; }
 .tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
@@ -168,12 +168,12 @@
 /* A header whose held actions can wrap holds what is under it too (a run's), so its growing a line moves nothing seen. */
 .tf-fhead.tf-unread.tf-holdsbelow ~ * { visibility: hidden; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
-.tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
+.tf-fhead h1 { font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
-.tf .tf-fhead h1.tf-mono { font-size: var(--t-2xl); }
+.tf .tf-fhead h1.tf-mono { font-size: calc(var(--t-2xl) * var(--fs)); }
 /* A chip beside the title stays a chip, not a block the title's line height. */
 .tf-fhead h1 .tf-chip { line-height: 1.45; }
-.tf-fhead .tf-sub { color: var(--ink-2); font-size: var(--t-sm); }
+.tf-fhead .tf-sub { color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
 /* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */
 .tf-syncnow { align-self: flex-start; }
 
@@ -191,13 +191,13 @@
 /* An empty state: centred, says what would fill it, offers the action. */
 .tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 /* What knobas last read, drawn while the source is read behind it (ADR-0042): the note above it. */
-.tf-heldnote { margin: 0 0 8px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-heldnote { margin: 0 0 8px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-empty p { max-width: 60ch; }
 /* The one "nothing here" state (`TfNothingHere.svelte`): the same block, held down the page so it reads as the page's answer. */
 .tf-nohere { padding-top: 72px; }
 
 /* The job key: Archivo at width 62, weight 800, 64px. The identity of the app. */
-.tf-jobkey { font-weight: 800; font-variation-settings: "wdth" 62; font-size: var(--t-d3); line-height: 1; letter-spacing: -.01em; }
+.tf-jobkey { font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d3) * var(--fs)); line-height: 1; letter-spacing: -.01em; }
 
 /* ---------- buttons: the design system's Controls section (#2238, #2280), drawn on `#/controls` ----------
    Three sizes, each a fixed height from its token and horizontal padding only, so a row of buttons is one
@@ -214,7 +214,7 @@
 /* An empty state's words are `--ink-2`, and its one action should not inherit that and read as disabled. */
 .tf-empty .tf-btn { color: var(--ink); }
 /* The view's *Sync now* is a header's button, and under an empty state's sentence it is a page body's: small (F-425). */
-.tf-empty .tf-btn.tf-syncnow { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
+.tf-empty .tf-btn.tf-syncnow { height: var(--control-h-sm); padding: 0 8px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-btn.tf-primary { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
 /* After `.tf-btn:hover` at equal weight, so the primary needs a hover of its own. A disabled one does not answer. */
 .tf-btn.tf-primary:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
@@ -233,8 +233,8 @@
 .tf-btn.tf-primary[disabled]:hover, .tf-btn.tf-primary[aria-disabled="true"]:hover { border-color: var(--rule); background: var(--sheet-2); }
 .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }
 .tf-iconbtn[disabled]:hover { background: none; }
-.tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
-.tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: var(--t-md); }
+.tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: calc(var(--t-md) * var(--fs)); }
 
 /* Danger, one pair: red text starts a destructive action, filled red confirms it. */
 .tf-btn.tf-danger { color: var(--err); }
@@ -302,7 +302,7 @@
    buttons sit inside its 1px border, so the whole switch is `--control-h-sm` tall, as a small button is. */
 .tf-seg { display: inline-flex; width: fit-content; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
 .tf-seg button {
-  height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: var(--t-sm);
+  height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: calc(var(--t-sm) * var(--fs));
   border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-seg button:not([aria-pressed="true"]):hover { background: var(--sheet-2); color: var(--ink); }
@@ -311,7 +311,7 @@
 .tf-seg button[aria-disabled="true"], .tf-seg button[aria-disabled="true"]:not([aria-pressed="true"]):hover { background: var(--sheet); color: var(--muted); cursor: not-allowed; }
 .tf-fchips { display: inline-flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-fchips button {
-  height: var(--control-h-sm); padding: 0 10px; font-size: var(--t-sm); border-radius: 12px;
+  height: var(--control-h-sm); padding: 0 10px; font-size: calc(var(--t-sm) * var(--fs)); border-radius: 12px;
   border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-fchips button:hover { border-color: var(--ink-2); }
@@ -321,7 +321,7 @@
 
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {
-  display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px;
+  display: inline-flex; align-items: center; gap: 5px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; padding: 1px 7px;
   border-radius: 3px; white-space: nowrap; background: var(--muted-bg); color: var(--muted);
 }
 /* A code value (`TfKey.svelte`): 400 in a sentence, 600 where it leads a row, a card or a pane. On a chip it holds the
@@ -330,7 +330,7 @@
 .tf .tf-key-lead { font-weight: 600; }
 /* A key in a button is part of its label, so it takes the label's weight. */
 .tf .tf-btn .tf-key { font-weight: inherit; }
-.tf .tf-chip.tf-key { font-size: var(--t-xs); font-weight: 600; }
+.tf .tf-chip.tf-key { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; }
 .tf-chip.tf-ok { background: var(--ok-bg); color: var(--ok); } .tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }
 /* A button that is part of a chip's text, drawn as that text (design system, Controls: chip buttons). */
@@ -342,7 +342,7 @@
 .tf-clonesign { position: relative; display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; }
 .tf-signbtn {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 18px; padding: 0 6px;
-  border: 1px solid var(--rule); border-radius: 3px; background: none; color: var(--ink-2); font-size: var(--t-xs);
+  border: 1px solid var(--rule); border-radius: 3px; background: none; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs));
   line-height: 16px; white-space: nowrap; cursor: pointer;
 }
 .tf-signbtn:hover, .tf-signbtn[aria-expanded="true"] { border-color: var(--ink-2); }
@@ -354,12 +354,12 @@
 .tf-signbubble:not(.tf-sr) {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 35; display: grid; gap: 6px; width: max-content;
   max-width: min(36rem, calc(100vw - 16px)); padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px;
-  background: var(--sheet); box-shadow: var(--shadow); color: var(--ink); font-size: var(--t-sm); white-space: normal;
+  background: var(--sheet); box-shadow: var(--shadow); color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); white-space: normal;
 }
-.tf-signbubble-what { color: var(--ink-2); font-size: var(--t-xs); }
+.tf-signbubble-what { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-signbubble-drawn { line-height: 1.45; }
 .tf-signbubble-drawn b { font-weight: 600; }
-.tf-signbubble-state { color: var(--ink-2); font-size: var(--t-xs); }
+.tf-signbubble-state { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-signbubble-acts { display: flex; flex-wrap: wrap; gap: var(--control-gap); margin-top: 2px; }
 /* A path on one line (`TfPath`, design system, Paths): its start gives way, all of it if need be, and its end does not
    until it alone is wider than the box, so the folder it names stays in view; the whole path is its title. The end
@@ -371,11 +371,11 @@
    one-line rule (`tokens.css`). */
 .tf-wrapall, .tf-wrapall .tf-mono { overflow-wrap: anywhere; }
 .tf-wrapall.tf-mono, .tf-wrapall .tf-mono { white-space: normal; }
-.tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
-.tf .tf-small { font-size: var(--t-sm); }
+.tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf .tf-small { font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-linkish {
   border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink-2);
-  text-decoration: underline; text-underline-offset: 2px; font-size: var(--t-sm);
+  text-decoration: underline; text-underline-offset: 2px; font-size: calc(var(--t-sm) * var(--fs));
 }
 .tf-run-start { display: flex; align-items: center; gap: 12px; }
 .tf-run-start select { flex: 1; min-width: 0; }

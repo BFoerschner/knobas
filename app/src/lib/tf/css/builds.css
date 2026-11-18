@@ -21,18 +21,18 @@
 .tf-bar.tf-run-q, .tf-bar.tf-run-muted { fill: var(--rule); }
 .tf-bars a:hover .tf-bar, .tf-bars a:focus-visible .tf-bar { opacity: 1; stroke: var(--ink); stroke-width: 2px; }
 .tf-bars a:focus-visible { outline: none; }
-.tf-axis { display: flex; justify-content: space-between; font-size: var(--t-2xs); color: var(--ink-2); margin-top: 3px; font-variant-numeric: tabular-nums; }
-.tf-legend { display: flex; gap: 10px; font-size: var(--t-2xs); color: var(--ink-2); margin-top: 4px; }
+.tf-axis { display: flex; justify-content: space-between; font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tf-legend { display: flex; gap: 10px; font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); margin-top: 4px; }
 .tf-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; background: var(--ok); }
 .tf-legend i.tf-run-err { background: var(--err); }
 .tf-legend i.tf-run-run { background: var(--info); }
-.tf-facts2 { display: flex; gap: 22px; font-size: var(--t-sm); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
-.tf-facts2 b { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+.tf-facts2 { display: flex; gap: 22px; font-size: calc(var(--t-sm) * var(--fs)); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.tf-facts2 b { display: block; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
 .tf-runbar .tf-fsearch { flex-basis: 240px; }
 .tf-runbar .tf-fsel select { max-width: 120px; }
 .tf-runs { margin-top: 2px; }
 /* A day's heading belongs to the rows under it: the larger space is above. */
-.tf .tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 18px 0 6px; }
+.tf .tf-dayh { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--ink-2); margin: 18px 0 6px; }
 /* A day is one windowed row (TfPipeline), so its heading's margin stays inside the box it measures; the first day's
    heading keeps the 14 px it had. */
 .tf-runs .tf-day { display: flow-root; }
@@ -55,7 +55,7 @@
 .tf-newruns { position: sticky; top: 55px; z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
 .tf-newruns button {
   pointer-events: auto; margin-top: 8px; height: var(--control-h-sm); padding: 0 14px; border: 0; border-radius: 13px;
-  background: var(--ink); color: var(--sheet); font: 600 var(--t-sm)/1 var(--sans); box-shadow: var(--shadow); cursor: pointer;
+  background: var(--ink); color: var(--sheet); --fs: var(--size-ui); font: 600 calc(var(--t-sm) * var(--fs))/1 var(--sans); box-shadow: var(--shadow); cursor: pointer;
 }
 .tf-newruns button:hover { background: var(--ink-2); }
 .tf-newruns button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -68,71 +68,71 @@
 .tf-runs .tf-run-no { position: relative; padding-left: 18px; }
 .tf-runtbl .tf-unread { position: absolute; left: 7px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--err); }
 .tf-runs.tf-bsettings { padding-top: 16px; }
-.tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
+.tf-bsettings > p { font-size: calc(var(--t-sm) * var(--fs)); margin: 0 0 8px; }
 .tf-bsettings > .tf-tbl + p { margin: 12px 0 0; }
-.tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 
 /* ---------- Builds, the Run… dialog (#852): prototype-6's .combo, .prm and .runsum ---------- */
 .tf-dialog.tf-run-dialog { width: min(680px, calc(100vw - 32px)); }
 .tf-combo { position: relative; }
-.tf-combo input { width: 100%; font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-combo input { width: 100%; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-combo .tf-opts {
   position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--sheet);
   border: 1px solid var(--rule); border-radius: 4px; box-shadow: var(--shadow); max-height: 220px; overflow: auto; z-index: 5;
 }
-.tf-combo .tf-opts [role="option"] { display: flex; gap: 8px; padding: 6px 10px; cursor: pointer; font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-combo .tf-opts [role="option"] { display: flex; gap: 8px; padding: 6px 10px; cursor: pointer; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-combo .tf-opts [role="option"]:hover, .tf-combo .tf-opts .tf-act { background: var(--sheet-2); }
-.tf-combo .tf-opts .tf-dim { margin-left: auto; font-family: var(--sans); font-size: var(--t-2xs); }
+.tf-combo .tf-opts .tf-dim { margin-left: auto; --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-2xs) * var(--fs)); }
 /* A parameter's name is long, so the Run dialog's label column is wider, and its other fields share it. */
 .tf-run-dialog { --tf-label: 180px; }
 .tf-run-add { align-self: flex-start; }
 .tf-run-opts > summary::-webkit-details-marker { display: none; }
-.tf-run-opts > summary { list-style: none; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-run-opts > summary { list-style: none; cursor: pointer; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-run-opts > div { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .tf-run-save input[type="text"] { width: 160px; padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
-.tf-runsum { font-size: var(--t-xs); color: var(--ink-2); margin-right: auto; align-self: center; }
+.tf-runsum { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); margin-right: auto; align-self: center; }
 
 /* ---------- Builds, the run page (#853): prototype-6's .bhead chip, .problem and the Run panel ---------- */
-.tf-bhead h1 .tf-run-chip { font-size: var(--t-sm); vertical-align: 4px; }
+.tf-bhead h1 .tf-run-chip { font-size: calc(var(--t-sm) * var(--fs)); vertical-align: 4px; }
 .tf-runbody { padding: 16px 22px 24px; }
 /* The run page's steps bar (#1003, R-9.10): prototype-6's `.steps2`, one SVG so widths are attributes. */
 /* A passing step is quiet (its tint with ink words), so a failed or running step is the only loud thing on the bar. */
 .tf-stepsbar { margin: 0 22px 14px; height: 30px; border-radius: 5px; overflow: hidden; }
 .tf-stepsbar > svg { display: block; }
 /* Its room while the log is read, and where the log has no steps: a quiet outline, its words muted (the nothing-moves pass). */
-.tf-stepsbar.tf-sbnone { box-sizing: border-box; border: 1px solid var(--rule); display: flex; align-items: center; padding: 0 10px; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-stepsbar.tf-sbnone { box-sizing: border-box; border: 1px solid var(--rule); display: flex; align-items: center; padding: 0 10px; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-sbseg { fill: var(--ok-bg); }
 .tf-sbgap { fill: var(--sheet); }
 .tf-sbseg.tf-err { fill: var(--err); }
 .tf-sbseg.tf-run { fill: var(--info); }
 .tf-sbseg.tf-wait { fill: var(--rule); }
-.tf-stepsbar text { fill: var(--ink); font-size: var(--t-xs); pointer-events: none; }
+.tf-stepsbar text { fill: var(--ink); font-size: calc(var(--t-xs) * var(--fs)); pointer-events: none; }
 /* A command is code, a size down so its wider face holds the bar's line. `nameWidth` in `TfRun.svelte` measures both. */
-.tf-stepsbar text.tf-sbcmd { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-2xs); }
+.tf-stepsbar text.tf-sbcmd { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-2xs) * var(--fs)); }
 .tf-sbseg:is(.tf-err, .tf-run) ~ text { fill: var(--sheet); }
 .tf-sbseg.tf-wait ~ text { fill: var(--ink-2); }
 .tf-stepsbar a { cursor: pointer; }
 .tf-stepsbar a:hover .tf-sbseg, .tf-stepsbar a:focus-visible .tf-sbseg { opacity: .85; }
 .tf-stepsbar a:focus-visible { outline: none; }
 .tf-stepsbar a:focus-visible .tf-sbseg { stroke: var(--ink); stroke-width: 4px; }
-.tf-runbody > .tf-dim { font-size: var(--t-sm); margin: 0 0 10px; }
+.tf-runbody > .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); margin: 0 0 10px; }
 .tf-runov { display: flex; flex-direction: column; gap: 14px; }
 .tf-problem {
   border: 1px solid var(--err); background: var(--err-bg); border-radius: 6px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 6px;
 }
-.tf-problem h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--err); overflow-wrap: anywhere; }
-.tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-problem h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--err); overflow-wrap: anywhere; }
+.tf-problem pre { margin: 0; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-problem .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
-.tf-problem .tf-dim { font-size: var(--t-sm); }
+.tf-problem .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); }
 /* The box is the list's own: the heading stands above it, so its padding is the same on all four sides. */
 .tf-runfacts { padding: 12px; }
 /* A link made of words: underlined, and its word ends on the box's edge below it. */
 .tf-runov .tf-panel > header a.tf-open { text-decoration: underline; text-underline-offset: 2px; margin-right: -7px; }
-.tf-runfacts .tf-mono { font-size: var(--t-xs); }
-.tf-runbody .tf-r .tf-mono { font-size: var(--t-xs); }
-.tf-runbody .tf-r .tf-dim { font-size: var(--t-xs); }
+.tf-runfacts .tf-mono { font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-runbody .tf-r .tf-mono { font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-runbody .tf-r .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-runagain { margin-top: 10px; }
 /* Log find's arrows rest with nothing to step through. */
 .tf-nav2 button:disabled { opacity: .45; cursor: default; }
@@ -145,8 +145,8 @@
 .tf-pl-top .tf-fsearch { max-width: none; flex: none; }
 .tf-pl-list { overflow: auto; background: var(--sheet); flex: 1; padding: 4px 8px 16px; }
 /* Padding, not margin: a windowed row is measured by its box, which a margin is outside of (#2211). */
-.tf-pl h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 0; padding: 12px 8px 4px; }
-.tf-pl-note { font-size: var(--t-sm); color: var(--ink-2); padding: 12px 8px; }
+.tf-pl h3 { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); margin: 0; padding: 12px 8px 4px; }
+.tf-pl-note { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); padding: 12px 8px; }
 /* The rail is a tree of one-line rows (the rail-tree pass, 2026-11-13): a pipeline (`.tf-pi`) or a fold's summary
    (`.tf-tfold`), 26 px each, so the windowed list's estimate is exact. A 12 px glyph column leads; a guide line runs
    down each ancestor's glyph column; the depth is a number the classes set (no inline styles), 14 px a level. */
@@ -154,7 +154,7 @@
 .tf-pl .tf-d4 { --d: 4; } .tf-pl .tf-d5 { --d: 5; } .tf-pl .tf-d6 { --d: 6; } .tf-pl .tf-d7 { --d: 7; } .tf-pl .tf-d8 { --d: 8; }
 .tf-pl .tf-tr {
   position: relative; isolation: isolate; display: flex; align-items: center; gap: 6px; height: var(--control-h-sm);
-  padding: 0 8px 0 calc(8px + var(--d, 0) * 14px); font-size: var(--t-sm); color: var(--ink); text-decoration: none;
+  padding: 0 8px 0 calc(8px + var(--d, 0) * 14px); font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink); text-decoration: none;
   white-space: nowrap; cursor: pointer;
   background: repeating-linear-gradient(90deg, var(--rule-2) 0 1px, transparent 1px 14px) 14px 0 / calc(var(--d, 0) * 14px) 100% no-repeat;
 }
@@ -197,11 +197,11 @@
 .tf-pi-pre { color: var(--ink-2); font-weight: 400; }
 .tf-pi-nm.tf-bad .tf-pi-pre, .tf-pi[aria-current="true"] .tf-pi-pre, .tf-pi[aria-current="true"] .tf-pi-nm.tf-bad { color: inherit; }
 /* *This job*'s reason has only the room the name leaves, so it gives way first. */
-.tf-pi-why { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pi-why { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* The time (only where it says something, `railTime`), or a fold's counts, on the right edge. */
 .tf-pi-when, .tf-fold-at {
   flex: none; margin-left: auto; padding-left: 6px; display: inline-flex; gap: 4px; align-items: center;
-  font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums;
+  font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
 .tf-pi-when.tf-err { color: var(--err); }
 .tf-pi-when.tf-info { color: var(--info); }
@@ -212,12 +212,12 @@
 .tf-pl-fold > summary::-webkit-details-marker { display: none; }
 .tf-pl-fold > summary.tf-tfold::before { margin: 0 3px 1px 3px; }
 .tf-fold-nm { font-weight: 600; color: var(--ink-2); }
-.tf-fold-at .tf-count { font-size: var(--t-2xs); }
+.tf-fold-at .tf-count { font-size: calc(var(--t-2xs) * var(--fs)); }
 .tf-fold-n { min-width: 2ch; text-align: right; }
 /* The tools: the chips, and *Collapse all* / *Expand all* as the line's trailing group (`.tf-trail`). */
 .tf-pl-tools { display: flex; align-items: center; gap: var(--control-gap); }
 .tf-pl-pin { padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--rule-2); }
-.tf-scope-note { font-size: var(--t-sm); color: var(--ink-2); padding: 8px 8px 0; margin: 0; }
+.tf-scope-note { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); padding: 8px 8px 0; margin: 0; }
 /* Its own width decides when a long header label gives up its end, not the window's. */
 .tf-shost:has(> .tf-bmain) { container-name: bmain; }
 /* *Open in <source>* is its whole name or, where the header has no room, its glyph; never words that read as a menu. */
@@ -271,7 +271,7 @@
 .tf-runs .tf-runtbl > tbody > tr { display: table; width: 100%; table-layout: fixed; }
 .tf-runs .tf-runtbl > tbody > tr > td { box-sizing: border-box; }
 /* A branch keeps one line and gives up its end; its title has the whole of it. The job's chip beside it never gives way (F-357). */
-.tf-runs .tf-run-br { font-size: var(--t-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-runs .tf-run-br { font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-run-brin { display: flex; align-items: center; gap: 1ch; min-width: 0; }
 .tf-run-brname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-run-brin > .tf-chip { flex: none; }
@@ -279,8 +279,8 @@
    takes no more of the line than the words, so a row keeps its height when it arrives (the answer cache drew the runs
    before the branches, and every row with the chip grew under the pointer). */
 .tf-runs .tf-run-brin > .tf-chip { margin-block: -2px; }
-.tf-runs .tf-run-trig { width: 170px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
+.tf-runs .tf-run-trig { width: 170px; font-size: calc(var(--t-sm) * var(--fs)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-runs .tf-run-tests { width: 140px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
 @media (max-width: 1240px) { .tf-bv { grid-template-columns: var(--side-builds, 240px) minmax(0, 1fr); } }
 /* The run table sheds by its own width, not the window's: the duration drops its bar, then a column goes at a time. */
@@ -316,16 +316,16 @@
 /* Its head stays put and its rows scroll in `.tf-pl-list` (#2091's rule: bounded by the window, its last row reachable). */
 .tf-rbv > .tf-rbrail { border: 1px solid var(--rule); border-radius: 6px; display: flex; overflow: hidden; position: sticky; top: 0; max-height: calc(100vh - 250px); }
 .tf-rbrail .tf-pl-top .tf-fsearch { max-width: none; }
-.tf-rb-count { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; margin-left: auto; }
+.tf-rb-count { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; margin-left: auto; }
 /* A branch name is code; its namespace (`feature/`, `renovate/`) is drawn in the second ink, as a shared prefix is. */
-.tf-rbr .tf-pi-nm { font: var(--t-xs) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-rbr .tf-pi-nm { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* The branch's page, capped so a run stays near its pipeline's name on a wide window. */
 .tf-rbp { max-width: 1040px; min-width: 0; }
 .tf-rbp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tf-rbp-h h2 { font: 600 var(--t-xl) var(--mono); font-variant-ligatures: var(--mono-ligatures); min-width: 0; overflow-wrap: anywhere; }
-.tf-rbp-sub { color: var(--ink-2); font-size: var(--t-sm); margin: 4px 0 14px; }
+.tf-rbp-h h2 { --fs: var(--size-code); font: 600 calc(var(--t-xl) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); min-width: 0; overflow-wrap: anywhere; }
+.tf-rbp-sub { color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); margin: 4px 0 14px; }
 .tf-rbp .tf-problem { margin-bottom: 10px; }
-.tf-rbp-ok { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+.tf-rbp-ok { display: flex; align-items: center; gap: 8px; font-size: calc(var(--t-md) * var(--fs)); margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
 /* What ran here beside what ran on the default branch, and in a word what that means; failures lead. */
 .tf-rbp .tf-rbt { table-layout: fixed; width: 100%; margin-top: 4px; }
 .tf-rbt col.tf-rbt-run { width: 170px; }
@@ -336,38 +336,38 @@
 /* A run is a link to it on Builds, and its cell is the link: the cell answers the pointer and focus, its number underlines. */
 .tf-rbt td.tf-rbt-runc { padding: 0; }
 .tf-rbt td.tf-rbt-runc > .tf-rb-none { display: block; padding: 7px 10px; }
-.tf-cbody .tf-rbt a.tf-rbt-cell { display: flex; align-items: center; gap: 6px; padding: 7px 10px; min-width: 0; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-cbody .tf-rbt a.tf-rbt-cell { display: flex; align-items: center; gap: 6px; padding: 7px 10px; min-width: 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-rbt a.tf-rbt-cell .tf-rbt-num { font-weight: 600; color: var(--ink); white-space: nowrap; }
 .tf-rbt a.tf-rbt-cell .tf-rbt-at { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-cbody .tf-rbt a.tf-rbt-cell.tf-err, .tf-rbt a.tf-rbt-cell.tf-err .tf-rbt-num { color: var(--err); }
 .tf-cbody .tf-rbt a.tf-rbt-cell.tf-info, .tf-rbt a.tf-rbt-cell.tf-info .tf-rbt-num { color: var(--info); }
 .tf-rbt td.tf-rbt-runc:hover, .tf-rbt td.tf-rbt-runc:focus-within { background: var(--sheet-2); }
 .tf-cbody .tf-rbt a.tf-rbt-cell:hover .tf-rbt-num { text-decoration: underline; text-underline-offset: 2px; }
-.tf-rbt td.tf-rbt-v { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-rbt td.tf-rbt-v { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-rbt td.tf-rbt-v.tf-err { color: var(--err); font-weight: 600; }
 .tf-rbt td.tf-rbt-v.tf-ok { color: var(--ok); }
 .tf-rbt td.tf-rbt-v.tf-info { color: var(--info); }
-.tf-rb-none { color: var(--muted); font-size: var(--t-xs); }
-.tf-rb-notrun { font-size: var(--t-sm); color: var(--ink-2); margin: 12px 0 0; }
+.tf-rb-none { color: var(--muted); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-rb-notrun { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 12px 0 0; }
 .tf-cbody .tf-rb-notrun a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 /* A pipeline inside the tab: where it was opened from, its name (a title, not code), which runs, then its runs. */
-.tf-rb-back { font-size: var(--t-sm); margin: 0 0 6px; }
+.tf-rb-back { font-size: calc(var(--t-sm) * var(--fs)); margin: 0 0 6px; }
 .tf-cbody .tf-rb-back a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
-.tf-rbp-h h2.tf-rbp-pl { font: 600 var(--t-xl) var(--sans); }
+.tf-rbp-h h2.tf-rbp-pl { --fs: var(--size-ui); font: 600 calc(var(--t-xl) * var(--fs)) var(--sans); }
 .tf-rbp > .tf-seg { margin: 0 0 12px; }
 .tf-rbt col.tf-rbt-no { width: 170px; }
 .tf-rbt col.tf-rbt-dur { width: 110px; }
-.tf-rbt td.tf-rbt-br { font-size: var(--t-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-rbt td.tf-rbt-br { font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-cbody .tf-rbruns td a { color: inherit; margin-right: 6px; }
 /* A run's row is its link (TfPipeline's run rows): a row whose number has focus shows it as the pointer's hover does. */
 .tf-rbruns tr.tf-row:focus-within td { background: var(--sheet-2); }
 /* The Branches tab's *Builds* cell: the worst glyph and the words, loud only where something failed. */
-.tf-cbody .tf-rbranches td.tf-rbr-builds a { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-cbody .tf-rbranches td.tf-rbr-builds a { display: inline-flex; align-items: center; gap: 6px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-cbody .tf-rbranches td.tf-rbr-builds a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .tf-cbody .tf-rbranches td.tf-rbr-builds a.tf-err { color: var(--err); font-weight: 600; }
 .tf-cbody .tf-rbranches td.tf-rbr-builds a.tf-info { color: var(--info); }
 /* *By repository* on the Builds list: where a repository is built by two sources, the fewer's rows say which. */
-.tf-pi-src { flex: none; font-size: var(--t-2xs); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.tf-pi-src { flex: none; font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; }
 .tf-pi[aria-current="true"] .tf-pi-src { color: inherit; border-color: currentColor; }
 .tf-pl-top .tf-pl-group { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 @media (max-width: 900px) {

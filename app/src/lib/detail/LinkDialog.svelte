@@ -303,7 +303,7 @@
   }
 
   .fld .l {
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     color: var(--ink-2);
   }
 
@@ -321,7 +321,7 @@
     border: 1px solid var(--hair2);
     border-radius: 2px;
     background: var(--bg);
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .picked > :is(.t, .k) {
@@ -353,12 +353,12 @@
   .hint {
     margin-top: 6px;
     color: var(--muted);
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .fail {
     color: var(--fail);
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     line-height: 1.5;
   }
 </style>

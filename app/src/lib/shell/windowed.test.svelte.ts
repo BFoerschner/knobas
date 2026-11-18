@@ -681,3 +681,65 @@ test("a zoom step (a new device scale) observes each drawn row afresh and writes
   expect(observed.length).toBe(gone);
   vi.unstubAllGlobals();
 });
+
+test("a list of text lines takes its held heights and estimate by the text's size, reads its rows again, once (Settings › Fonts, 2026-11-18)", () => {
+  vi.stubGlobal("devicePixelRatio", 1);
+  const observed: Element[] = [];
+  const unobserved: Element[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(el: Element) {
+        observed.push(el);
+      }
+      unobserve(el: Element) {
+        unobserved.push(el);
+      }
+      disconnect() {}
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  document.body.innerHTML = '<ol style="overflow-y: auto"><li class="before"></li><li class="row"></li><li class="after"></li></ol>';
+  const list = document.querySelector("ol")!;
+  let scrolled = 0;
+  Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(list, "clientHeight", { value: 300 });
+  let heard: ((ratio: number) => void) | null = null;
+  let stopped = 0;
+  const textSize = (on: (ratio: number) => void) => {
+    heard = on;
+    return () => void stopped++;
+  };
+  // A run log's lines: 12 px at 1.55.
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 18.6, overscan: 200, scrolls: true, textSize });
+  const row = list.querySelector<HTMLElement>(".row")!;
+  const detached: (() => void)[] = [];
+  const stop = $effect.root(() => {
+    detached.push(win.list(list));
+    win.room("before")(list.querySelector<HTMLElement>(".before")!);
+    win.room("after")(list.querySelector<HTMLElement>(".after")!);
+    win.row(0)(row);
+  });
+  placed();
+  scrolled = 10_000;
+  list.dispatchEvent(new Event("scroll"));
+  flushSync();
+  // The whole list's height: the room each side and the drawn rows, which the stand-in observer never measured.
+  const whole = (line: number) => win.before + win.after + (win.end - win.start) * line;
+  expect(whole(18.6)).toBeCloseTo(1000 * 18.6, 0);
+  const seen = observed.filter((el) => el === row).length;
+
+  // Code at 120 %: every line a fifth taller, the room with them.
+  heard!(1.2);
+  flushSync();
+  expect(whole(18.6 * 1.2)).toBeCloseTo(1000 * 18.6 * 1.2, 0);
+  expect(unobserved.filter((el) => el === row).length).toBe(1);
+  expect(observed.filter((el) => el === row).length).toBe(seen + 1);
+
+  for (const detach of detached) detach();
+  stop();
+  expect(stopped).toBe(1);
+  vi.unstubAllGlobals();
+});

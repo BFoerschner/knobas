@@ -68,6 +68,8 @@ export class Heights<K = string> {
   readonly #estimateOf: ((key: K) => number) | null;
   readonly #gap: number;
   readonly #measured = new Map<K, number>();
+  /** What the estimates are multiplied by: the ratio of every text size heard since the list began (`rescale`). */
+  #scale = 1;
   #keys: readonly K[] = [];
   /** `offsets[i]` is row i's top; `offsets[n]` is the end of the last slot (its gap included). */
   #offsets = new Float64Array(1);
@@ -100,9 +102,19 @@ export class Heights<K = string> {
     this.#stale = true;
   }
 
+  /**
+   * The rows' text grew or shrank by `ratio` (a role's size, Settings › Fonts): every measured height times it, through
+   * `to` (onto the device's grid), and the estimates times it too. Exact for a list whose rows are line boxes.
+   */
+  rescale(ratio: number, to: (px: number) => number) {
+    for (const [key, px] of this.#measured) this.#measured.set(key, to(px * ratio));
+    this.#scale *= ratio;
+    this.#stale = true;
+  }
+
   /** A row's measured height, else its estimate. */
   heightOf(key: K): number {
-    return this.#measured.get(key) ?? this.#estimateOf?.(key) ?? this.#estimate;
+    return this.#measured.get(key) ?? (this.#estimateOf?.(key) ?? this.#estimate) * this.#scale;
   }
 
   /** Row `index`'s top. */

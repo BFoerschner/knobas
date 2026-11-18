@@ -110,6 +110,14 @@ export interface WindowedOptions<K> {
    * sight: a tall reckoning would leave the view's foot empty for a frame.
    */
   onScreen?: boolean;
+  /**
+   * For a list whose rows are lines of text (a run's log, a file's source, a diff's lines): hears that text's size
+   * change (Settings › Fonts, `fonts.svelte.ts`'s `onCodeSize`), with the new size over the old. The list then takes
+   * every height it holds and its estimate times that ratio, onto the device's grid, and reads its drawn rows again, as
+   * for a zoom step: a row is a line box, so the ratio is exact, and the scrollbar and a jump land where they will.
+   * Other lists keep what they hold: their single-line rows did not change, and a wrapped row is put right when drawn.
+   */
+  textSize?: ((heard: (ratio: number) => void) => () => void) | null;
 }
 
 const ALL: Span = { start: 0, end: 0, before: 0, after: 0 };
@@ -249,6 +257,7 @@ export class Windowed<K = string> {
       scrolls: false,
       estimateOf: null,
       onScreen: false,
+      textSize: null,
       margin: overscan / 2,
       ...options,
       overscan,
@@ -454,8 +463,10 @@ export class Windowed<K = string> {
     const reread = () => read();
     viewReads.add(reread);
     const unscale = onScaleChange(() => this.#rescale());
+    const unsize = this.#options.textSize?.((ratio) => this.#resize(ratio)) ?? null;
     return () => {
       unscale();
+      unsize?.();
       if (queued) unplaced.delete(place);
       node.removeEventListener("focusin", focusIn);
       node.removeEventListener("focusout", focusOut);
@@ -597,6 +608,17 @@ export class Windowed<K = string> {
    */
   #rescale() {
     this.#heights.regrid((px) => onGrid(px));
+    for (const row of this.#drawn) {
+      this.#sizes?.unobserve(row);
+      this.#sizes?.observe(row);
+    }
+    this.#grid++;
+    this.#remeasured++;
+  }
+
+  /** The rows' text size changed by `ratio` (`textSize`): every height held follows it, and the drawn rows are read again. */
+  #resize(ratio: number) {
+    this.#heights.rescale(ratio, (px) => onGrid(px));
     for (const row of this.#drawn) {
       this.#sizes?.unobserve(row);
       this.#sizes?.observe(row);

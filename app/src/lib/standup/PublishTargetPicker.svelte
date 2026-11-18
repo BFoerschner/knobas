@@ -228,7 +228,7 @@
   .fld {
     display: grid;
     gap: 4px;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--muted);
   }
 
@@ -264,6 +264,6 @@
 
   .sub {
     color: var(--muted);
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 </style>

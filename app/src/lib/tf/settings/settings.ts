@@ -28,6 +28,7 @@ export type SettingsSection =
   | "notes"
   | "backup"
   | "appearance"
+  | "fonts"
   | "performance"
   | "renderers"
   | "keyboard"
@@ -45,6 +46,7 @@ export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] 
   ["notes", "Notes and capture"],
   ["backup", "Backup and export"],
   ["appearance", "Appearance"],
+  ["fonts", "Fonts"],
   ["performance", "Performance"],
   ["renderers", "Renderers"],
   ["keyboard", "Keyboard"],

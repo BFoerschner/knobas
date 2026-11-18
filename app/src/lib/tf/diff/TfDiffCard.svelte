@@ -68,6 +68,7 @@
   import type { DiffMode, RenderedPlan, Side, SideGot } from "./rendered";
   import TfDiffRendered from "./TfDiffRendered.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { onCodeSize } from "../fonts.svelte";
   import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { placeThreads, targetOf } from "../pr/files";
@@ -265,7 +266,7 @@
 
   // A card's lines window from 80 (the big-compare pass, 2026-11-16): a card of a few hundred lines below the fold drew them
   // all as the tab opened.
-  const win = new Windowed<string>({ count: () => items.length, key: (i) => items[i]!.key, estimate: 21, from: 80 });
+  const win = new Windowed<string>({ count: () => items.length, key: (i) => items[i]!.key, estimate: 21, from: 80, textSize: onCodeSize });
   const nodes = new Map<string, HTMLElement>();
   const keep = (key: string) => (node: HTMLElement) => {
     nodes.set(key, node);

@@ -15,7 +15,7 @@
 .tf-launch > .tf-body { flex: 1; min-height: 0; padding: 0; gap: 0; overflow: hidden; }
 .tf-launch > footer {
   justify-content: flex-start; align-items: center; gap: 14px; padding: 7px 18px; min-height: calc(var(--control-h-sm) + 15px);
-  font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden;
+  font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden;
 }
 /* Apart from the key hints, at the far end: it is an action, and the hints do not move when it joins them. */
 .tf-launch > footer .tf-ln-save { margin-left: auto; }
@@ -28,7 +28,7 @@
 .tf-ln-boxrow > .tf-ln-q { flex: 1; min-width: 0; border-bottom: 0; }
 /* A mode's name and a section's chip stand in one place, so a mode pushes the box's words and never the list. */
 .tf-ln-mode {
-  flex: none; margin-left: 15px; padding: 2px 8px; border-radius: 3px; font-size: var(--t-sm); font-weight: 600;
+  flex: none; margin-left: 15px; padding: 2px 8px; border-radius: 3px; font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600;
   background: var(--sheet-2); color: var(--ink); white-space: nowrap; user-select: none;
 }
 /* A section's filter (#2425): the bar's chip, in front of the box, with its own way off. */
@@ -38,7 +38,7 @@
 .tf-ln-seedx svg { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
 :is(.tf-ln-seed, .tf-ln-mode) + .tf-ln-q input { padding-left: 10px; }
 .tf .tf-ln-q input {
-  flex: 1; min-width: 120px; padding: 16px 0 16px 18px; font-size: var(--t-xl); color: var(--ink); background: none;
+  flex: 1; min-width: 120px; padding: 16px 0 16px 18px; font-size: calc(var(--t-xl) * var(--fs)); color: var(--ink); background: none;
   border: 0; outline: none;
 }
 /* No ring on the box (#1422, prototype-6's `outline:none`): it holds focus for as long as the dialog is
@@ -62,20 +62,20 @@
 .tf-ln-split > .tf-ln-list { min-width: 0; }
 .tf-ln-split.tf-ln-two > .tf-ln-list { flex: 0 0 46%; border-right: 1px solid var(--rule); }
 .tf-ln-preview { flex: 1; min-width: 0; overflow: auto; background: var(--sheet); padding: 8px 0 12px; }
-.tf-ln-pv-h { padding: 8px 18px 6px; font-size: var(--t-md); font-weight: 600; color: var(--ink); }
+.tf-ln-pv-h { padding: 8px 18px 6px; font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; color: var(--ink); }
 .tf-ln-ex {
   display: block; width: 100%; text-align: left; padding: 7px 18px; border-bottom: 1px solid var(--rule-2);
-  font-size: var(--t-sm); line-height: 1.5; color: var(--ink); background: none;
+  font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; color: var(--ink); background: none;
 }
 .tf-ln-ex:hover { background: var(--sheet-2); }
-.tf-ln-ex-at { display: block; margin-bottom: 2px; font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-ln-ex-at { display: block; margin-bottom: 2px; font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); }
 .tf-ln-ex-t { white-space: normal; overflow-wrap: anywhere; }
 .tf-ln-ex mark { background: var(--mark); color: var(--ink); border-radius: 3px; padding: 0 1px; }
 
 /* A group heading: sticky over its rows, a label and nothing else (#2421). */
 .tf-ln-h {
   display: flex; align-items: center; gap: 8px; padding: 8px 18px 4px; position: sticky; top: 0; z-index: 1;
-  background: var(--sheet); font-size: var(--t-xs); color: var(--ink-2);
+  background: var(--sheet); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2);
 }
 .tf-ln-lab { font-weight: 600; }
 
@@ -87,13 +87,13 @@
 /* A line with a name and what it does: the palette, the board's Retry, a suggestion, a sheet's action. */
 .tf .tf-ln-opt {
   display: grid; grid-template-columns: minmax(var(--ln-name), max-content) minmax(0, 1fr); gap: var(--ln-gap); align-items: baseline; width: 100%; text-align: left;
-  padding: 7px 18px; font-size: var(--t-sm); color: var(--ink-2);
+  padding: 7px 18px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2);
 }
 .tf-ln-opt .tf-ln-nm { color: var(--ink); }
 /* Among results, what a *Go to* or *Search everything* row says starts where a title does, however long its name (F-625): a long name takes a second line. */
 .tf .tf-ln-opt.tf-ln-go { grid-template-columns: var(--ln-name) minmax(0, 1fr); }
 .tf-ln-go .tf-ln-nm { overflow-wrap: anywhere; }
-.tf-ln-none { padding: 14px 18px; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5; }
+.tf-ln-none { padding: 14px 18px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; }
 .tf-ln-none.tf-ln-err { color: var(--err); }
 /* The paste that missed: a sentence, the link as typed, and the one thing left to do with it. */
 .tf-ln-miss .tf-ln-raw { padding-top: 0; word-break: break-all; }
@@ -111,31 +111,31 @@
 /* A bound chord (#2429), at the end of its action or list row: the footer's keycap, quiet. */
 .tf-ln-chord {
   justify-self: end; padding: 0 6px; border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet-2);
-  font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap;
+  font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap;
 }
 .tf .tf-ln-opt:has(> .tf-ln-chord) { grid-template-columns: minmax(var(--ln-name), max-content) minmax(0, 1fr) auto; }
 .tf .tf-ln-res:has(> .tf-ln-chord), .tf .tf-ln-res:has(> .tf-ln-src) { grid-template-columns: var(--ln-tag) var(--ln-key) minmax(0, 1fr) auto; }
 /* The source's name on a row whose key another row has (#1476, F-636): quiet, at the row's end, and never pushing the title out. */
-.tf-ln-res > .tf-ln-src { max-width: 170px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-ln-res > .tf-ln-src { max-width: 170px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 
 /* The key panel (#2429): what the keys bind, the keys large as they are pressed, the buttons, the hint. */
 .tf-ln-bind { display: grid; gap: 14px; justify-items: center; padding: 22px 18px 18px; text-align: center; }
-.tf-ln-bind-what { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-ln-bind-what { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-ln-bind-what strong { color: var(--ink); font-weight: 600; }
 .tf-ln-bind-keys { display: flex; gap: 8px; align-items: center; justify-content: center; min-height: 64px; }
 .tf-ln-bigkey {
   display: inline-flex; align-items: center; justify-content: center; min-width: 56px; height: 56px; padding: 0 12px;
   border: 1px solid var(--rule); border-bottom-width: 3px; border-radius: 6px; background: var(--sheet-2);
-  font-size: var(--t-xl); font-weight: 600; color: var(--ink);
+  font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; color: var(--ink);
 }
 .tf-ln-bigkey.tf-ln-held { color: var(--ink-2); border-style: dashed; border-bottom-width: 1px; }
-.tf-ln-bind-hint { font-size: var(--t-xs); color: var(--ink-2); }
-.tf-ln-bind-refused { font-size: var(--t-sm); color: var(--err); }
+.tf-ln-bind-hint { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-ln-bind-refused { font-size: calc(var(--t-sm) * var(--fs)); color: var(--err); }
 .tf-ln-bind-btns { display: flex; gap: var(--control-gap); }
 
 /* The chips: what the backend read the query as. */
 .tf-ln-fbar { display: flex; flex-wrap: wrap; gap: 5px 4px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--rule); flex: none; }
-.tf-ln-fchip { flex: none; white-space: nowrap; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px; border-radius: 3px; border: 1px solid transparent; }
+.tf-ln-fchip { flex: none; white-space: nowrap; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; padding: 1px 7px; border-radius: 3px; border: 1px solid transparent; }
 .tf-ln-fchip.tf-ln-set { background: var(--muted-bg); color: var(--ink); }
 .tf-ln-fchip.tf-ln-set.tf-ln-fail { background: var(--err-bg); color: var(--err); }
 /* Greyed and dashed: a filter that did nothing reads as present but inert. */
@@ -144,12 +144,12 @@
 /* A result or recent row (#2421): three cells like a table, the monogram, the key cell and the title. */
 .tf .tf-ln-res {
   display: grid; grid-template-columns: var(--ln-tag) var(--ln-key) minmax(0, 1fr); gap: var(--ln-gap); align-items: center; width: 100%;
-  text-align: left; min-height: 38px; padding: 6px 18px; font-size: var(--t-md); color: var(--ink);
+  text-align: left; min-height: 38px; padding: 6px 18px; font-size: calc(var(--t-md) * var(--fs)); color: var(--ink);
 }
 .tf-ln-res > :is(.tf-ln-mg, .tf-ln-k, .tf-ln-t, .tf-ln-chord, .tf-ln-src) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-ln-mg {
   display: inline-flex; align-items: center; justify-content: center; height: 20px; border: 1px solid var(--rule);
-  border-radius: 3px; font-size: var(--t-2xs); font-weight: 600; letter-spacing: .04em; color: var(--ink-2); flex: none;
+  border-radius: 3px; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; letter-spacing: .04em; color: var(--ink-2); flex: none;
 }
 .tf-ln-res .tf-ln-mg { width: 28px; }
 /* The state is the monogram's colour, in the chips' own tones (`.tf-chip.tf-ok` and its siblings). */
@@ -158,13 +158,13 @@
 .tf-ln-mg[data-tone="err"] { color: var(--err); background: var(--err-bg); border-color: transparent; }
 .tf-ln-mg[data-tone="info"] { color: var(--info); background: var(--info-bg); border-color: transparent; }
 .tf-ln-mg[data-tone="muted"] { color: var(--muted); background: var(--muted-bg); border-color: transparent; }
-.tf-ln-k { font-size: var(--t-sm); color: var(--ink-2); }
-.tf-ln-k.tf-ln-mono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-weight: 600; color: var(--ink); }
+.tf-ln-k { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-ln-k.tf-ln-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-weight: 600; color: var(--ink); }
 
 /* An author or under: search a source cannot answer (#141): a fact about the corpus, not a fault. */
 .tf-ln-gap {
   padding: 10px 18px; border-bottom: 1px solid var(--rule); box-shadow: inset 3px 0 0 var(--warn); background: var(--sheet-2);
-  font-size: var(--t-sm); line-height: 1.5; color: var(--ink-2);
+  font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; color: var(--ink-2);
 }
 .tf-ln-gap-h, .tf-ln-gap-s { color: var(--ink); }
 .tf-ln-gap ul { margin: 2px 0 0; padding: 0; list-style: none; }
@@ -174,11 +174,11 @@
 .tf .tf-ln-opt.tf-ln-syn { grid-template-columns: 74px 1fr; padding: 4px 18px; }
 .tf-ln-tok { font-weight: 600; color: var(--ink); text-align: center; border: 1px solid var(--rule); border-radius: 3px; padding: 0 2px; }
 /* The keys the box answers, at the bottom of the ⌘? overlay. */
-.tf-ln-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-top: 1px solid var(--rule); font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ln-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-top: 1px solid var(--rule); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* A token the parser reports rather than honours, drawn as the chip bar draws one. */
 .tf-ln-greyed .tf-ln-tok { color: var(--ink-2); border-style: dashed; }
 /* The colour legend at the card's foot (#2421): per kind, each tone's monogram and the words that give it. */
-.tf-ln-legend { display: grid; gap: 4px; padding: 4px 18px 12px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ln-legend { display: grid; gap: 4px; padding: 4px 18px 12px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-ln-lg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .tf-ln-lgk { width: 118px; flex: none; color: var(--ink); font-weight: 600; }
 .tf-ln-lgt { display: inline-flex; align-items: center; gap: 6px; }

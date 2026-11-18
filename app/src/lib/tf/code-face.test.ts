@@ -1,6 +1,7 @@
 /**
  * Code is drawn in code's face everywhere (2026-11-16, Björn: "use monospace fonts for all code blocks, anywhere in
- * pages/docs/code etc."), and that face and its ligatures are one setting (`code-face.svelte.ts`).
+ * pages/docs/code etc."), and that face and its ligatures are one setting; since Settings › Fonts (2026-11-18) every
+ * role is: Interface, Headings, Reading and Code each a family and a size (`fonts.svelte.ts`).
  *
  * Read off disk, every stylesheet and every component's `<style>` under `app/src/`, as the style gate does. It fails
  * when
@@ -14,7 +15,17 @@
  *   markup puts on one, or one of the code views' classes) to anything but `--mono`, outside `EXCEPTIONS`;
  * - (d) a rule that sets `--mono` does not set `font-variant-ligatures: var(--mono-ligatures)` after it (a `font`
  *   shorthand resets ligatures), or a rule turns ligatures off by hand, which the setting could not turn on;
- * - (e) a monospace family is named anywhere but `--mono`'s definition: a rule naming one would not follow the setting.
+ * - (e) a monospace family is named anywhere but `--mono`'s definition: a rule naming one would not follow the setting;
+ * - (f) a role's family token does not start with the chosen family and fall back to the bundled face, or a size is not
+ *   1 until set;
+ * - (g) a rule that sets a role's family does not set `--fs` to that role's size, so its text would take another role's;
+ * - (h) a font size is not multiplied by `--fs` (or, relative to the words around it, by code's size over theirs), so it
+ *   would not follow its role's size;
+ * - (i) a rule narrows with `"wdth"` and is not drawn in `--head` (the brand alone in `--brand`) with `font-stretch` at
+ *   the same width, so a chosen Headings face would not narrow, or not be used;
+ * - (j) a surface is not drawn in its role: Markdown's text in the interface's, its headings in Headings', Docs pages
+ *   in Reading's;
+ * - (k) a bundled proportional family is named anywhere but its token: a rule naming one would not follow the setting.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -172,14 +183,19 @@ test("(a) --mono is the chosen family, then the bundled face, its stand-ins and 
   }
 });
 
-test("(b) pre, code, kbd, samp and tt take --mono and the ligature switch at no specificity", () => {
-  const base = sheets
-    .find(({ file }) => file === TOKENS)!
-    .rules.find(({ selectors }) => selectors.length === 1 && selectors[0] === ":where(pre, code, kbd, samp, tt)");
+test("(b) pre, code, kbd, samp and tt take --mono, code's size and the ligature switch at no specificity", () => {
+  const tokens = sheets.find(({ file }) => file === TOKENS)!.rules;
+  const base = tokens.find(({ selectors }) => selectors.length === 1 && selectors[0] === ":where(pre, code, kbd, samp, tt)");
   expect(base?.decls).toEqual([
+    ["--fs", "var(--size-code)"],
     ["font-family", "var(--mono)"],
     ["font-variant-ligatures", "var(--mono-ligatures)"],
+    // Code's size over the interface's: a bare `pre` in a sentence is as big as code's size makes it.
+    ["font-size", "calc(1em * var(--size-code) / var(--size-ui))"],
   ]);
+  // Code inside code takes the size once.
+  const nested = tokens.find(({ selectors }) => selectors.length === 1 && selectors[0] === ":where(pre, code, kbd, samp, tt) :where(pre, code, kbd, samp, tt)");
+  expect(nested?.decls).toEqual([["font-size", "inherit"]]);
 });
 
 test("(c) no rule draws a code element in a face other than --mono", () => {
@@ -239,4 +255,177 @@ test("(e) no stylesheet, component or module names a monospace family but --mono
   const custom = rules(readFileSync(join(ROOT, TOKENS), "utf8")).flatMap(({ decls }) => decls.filter(([prop, value]) => prop.startsWith("--") && prop !== "--mono" && MONO_FAMILY.test(value)));
   expect(named).toEqual([]);
   expect(custom).toEqual([]);
+});
+
+/** Each role's family token, its chosen family's property, its size and its bundled face. */
+const ROLE_TOKENS = [
+  { token: "--sans", role: "ui", chosen: "--ui-chosen", bundled: '"Archivo Variable"', rest: "system-ui, sans-serif" },
+  { token: "--head", role: "head", chosen: "--head-chosen", bundled: '"Archivo Variable"', rest: "system-ui, sans-serif" },
+  { token: "--serif", role: "read", chosen: "--read-chosen", bundled: '"Source Serif 4 Variable"', rest: "Georgia, serif" },
+] as const;
+const ROLE_OF: Record<string, string> = { sans: "ui", head: "head", serif: "read", mono: "code" };
+
+/** The role a family value draws in: the last of the role tokens it names; `null` for none. */
+function roleOf(value: string): string | null {
+  const named = [...value.matchAll(/var\(--(sans|head|serif|mono)\)/g)];
+  return named.length === 0 ? null : ROLE_OF[named.at(-1)![1]!]!;
+}
+
+/** The size part of a `font` shorthand: what stands before its `/line-height` or family. */
+function shorthandSize(value: string): string | null {
+  const parts = splitTop(value.trim(), /\s/).filter((part) => part !== "");
+  for (const part of parts) {
+    const size = splitTop(part, /\//)[0]!;
+    if (/^(?:calc|round|var)\(|^[\d.]+(?:px|em|rem|%)$/.test(size)) return size;
+  }
+  return null;
+}
+
+/** A font size that follows its role: times `--fs`, or em-relative times code's size over the role around it. */
+const FOLLOWS = [
+  /^calc\((?:var\(--t-[\w-]+(?:, [\d.]+px)?\)|[\d.]+px) \* var\(--fs\)\)$/,
+  /^(?:round\()?calc\([\d.]+em \* var\(--size-code\) \/ var\(--size-(?:ui|read)\)\)(?:, 1px\))?$/,
+];
+/** Font sizes that follow nothing on purpose: `<file> <selector>` and why. */
+const FIXED_SIZES: Record<string, string> = {
+  "lib/tf/css/tokens.css :where(pre, code, kbd, samp, tt) :where(pre, code, kbd, samp, tt)": "code inside code: the outer one took code's size",
+  "lib/tf/css/code.css .tf-pdf-text > span": "a PDF's text layer: sized by pdf.js to the page under it",
+};
+
+test("(f) each role's token is the chosen family, then the bundled face; every size is 1 until set", () => {
+  const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
+  for (const { token, chosen, bundled, rest } of ROLE_TOKENS) {
+    expect(tokens).toContain(`${token}: var(${chosen}, ${bundled}), ${bundled}, ${rest};`);
+  }
+  expect(tokens).toContain("--size-ui: 1; --size-head: 1; --size-read: 1; --size-code: 1;");
+  expect(tokens).toContain("--fs: var(--size-ui);");
+  // The form's label column holds one line of interface text, so it follows the interface's size.
+  expect(tokens).toContain("--tf-label: calc(132px * var(--size-ui));");
+  // Archivo's word space, which a chosen interface face does without.
+  expect(tokens).toMatch(/body \{[^}]*letter-spacing: var\(--ui-letter\); word-spacing: var\(--ui-word\);/);
+});
+
+test("(g) every rule that sets a role's family sets --fs to that role's size", () => {
+  const wrong: string[] = [];
+  let roles = 0;
+  for (const { file, rules: found } of sheets) {
+    if (file === "unported.css") continue;
+    for (const { selectors, decls } of found) {
+      const set = family(decls) ?? decls.find(([prop]) => prop === "font-family")?.[1] ?? null;
+      const role = set === null ? null : roleOf(set);
+      if (role === null) continue;
+      roles++;
+      const fs = decls.filter(([prop]) => prop === "--fs").at(-1)?.[1];
+      if (fs !== `var(--size-${role})`) wrong.push(`${file} ${selectors.join(", ")}: ${role}, --fs ${fs ?? "unset"}`);
+    }
+  }
+  expect(roles).toBeGreaterThan(150);
+  expect(wrong).toEqual([]);
+});
+
+test("(h) every font size follows its role's size", () => {
+  const wrong: string[] = [];
+  const used = new Set<string>();
+  let sizes = 0;
+  for (const { file, rules: found } of sheets) {
+    if (file === "unported.css") continue;
+    for (const { selectors, decls } of found) {
+      for (const [prop, value] of decls) {
+        const size = prop === "font-size" ? value : prop === "font" && value !== "inherit" && !/^var\(--[\w-]+\)$/.test(value) ? shorthandSize(value) : null;
+        if (size === null) continue;
+        sizes++;
+        if (FOLLOWS.some((form) => form.test(size))) continue;
+        const key = `${file} ${selectors.join(", ")}`;
+        if (key in FIXED_SIZES) used.add(key);
+        else wrong.push(`${key}: ${size}`);
+      }
+    }
+  }
+  expect(sizes).toBeGreaterThan(650);
+  expect(wrong).toEqual([]);
+  expect([...used].sort()).toEqual(Object.keys(FIXED_SIZES).sort());
+});
+
+test("(i) every rule that narrows is drawn in --head at Headings' size, with font-stretch at the same width", () => {
+  const wrong: string[] = [];
+  let narrowed = 0;
+  for (const { file, rules: found } of sheets) {
+    if (file === "unported.css") continue;
+    for (const { selectors, decls } of found) {
+      const wdth = decls.find(([prop, value]) => prop === "font-variation-settings" && /"wdth"/.test(value));
+      if (!wdth) continue;
+      narrowed++;
+      const n = /"wdth"\s*([\d.]+)/.exec(wdth[1])![1];
+      const set = family(decls) ?? decls.find(([prop]) => prop === "font-family")?.[1] ?? "";
+      const stretch = decls.find(([prop]) => prop === "font-stretch")?.[1];
+      const brand = set === "var(--brand)";
+      const fs = decls.find(([prop]) => prop === "--fs")?.[1];
+      if (stretch !== `${n}%` || !(brand ? fs === "1" : set.includes("var(--head)") && fs === "var(--size-head)"))
+        wrong.push(`${file} ${selectors.join(", ")}: ${set || "no family"}, stretch ${stretch ?? "none"}, --fs ${fs ?? "unset"}`);
+    }
+  }
+  expect(narrowed).toBeGreaterThan(30);
+  expect(wrong).toEqual([]);
+});
+
+test("(j) Markdown's text is the interface's, its headings Headings', and a Docs page Reading's", () => {
+  const roleAt = (file: string, selector: string): string | null => {
+    // The last rule for the selector that sets a family: `html, body` sets none before `body` does.
+    const rule = sheets
+      .find((sheet) => sheet.file === file)!
+      .rules.filter(({ selectors, decls }) => selectors.includes(selector) && decls.some(([prop]) => prop === "font" || prop === "font-family"))
+      .at(-1);
+    if (!rule) return `no rule ${selector}`;
+    const set = family(rule.decls) ?? rule.decls.find(([prop]) => prop === "font-family")?.[1] ?? null;
+    return set === null ? null : roleOf(set);
+  };
+  const want: [string, string, string][] = [
+    ["lib/tf/css/markdown.css", ".tf-md", "ui"],
+    ...["h1", "h2", "h3", "h4"].map((h): [string, string, string] => ["lib/tf/css/markdown.css", `.tf-md ${h}`, "head"]),
+    ["lib/tf/css/markdown.css", ".tf-md code", "code"],
+    ["lib/tf/css/markdown.css", ".tf-md .tf-fence pre", "code"],
+    ["lib/tf/css/docs.css", ".tf-doc", "read"],
+    ["lib/tf/css/docs.css", ".tf-doc h2", "read"],
+    ["lib/tf/css/docs.css", ".tf-doc code", "code"],
+    ["lib/tf/css/chrome.css", ".tf-jobkey", "head"],
+    ["lib/tf/css/settings.css", ".tf-stg-h h1", "head"],
+    ["lib/tf/css/tokens.css", ".tf .tf-mono", "code"],
+  ];
+  for (const [file, selector, role] of want) expect(roleAt(file, selector), `${file} ${selector}`).toBe(role);
+  // The interface's own root and the document's body draw in it.
+  expect(roleAt("lib/tf/css/tokens.css", "body")).toBe("ui");
+});
+
+test("(k) no stylesheet or component names a bundled proportional family but its token", () => {
+  const named: string[] = [];
+  for (const { file, rules: found } of sheets) {
+    if (file === TOKENS) continue;
+    for (const { selectors, decls } of found) {
+      const set = family(decls);
+      if (set !== null && /Archivo|Source Serif/.test(set)) named.push(`${file} ${selectors.join(", ")}: ${set}`);
+    }
+  }
+  expect(named).toEqual([]);
+});
+
+test("(l) a column of one line of text follows its role's size, and the job key never pushes its card wider", () => {
+  // The first rule for the selector: the ones after it are narrow windows' (a media or container query).
+  const decl = (file: string, selector: string, prop: string) =>
+    sheets
+      .find((sheet) => sheet.file === file)!
+      .rules.filter(({ selectors }) => selectors.includes(selector))
+      .flatMap(({ decls }) => decls.filter(([p]) => p === prop).map(([, value]) => value))
+      .at(0);
+  const want: [string, string, string, RegExp][] = [
+    ["lib/tf/css/code.css", ".tf-code .tf-l", "grid-template-columns", /^calc\(48px \* var\(--size-code\)\) 1fr$/],
+    ["lib/tf/css/code.css", ".tf-diff .tf-ln", "grid-template-columns", /^calc\(46px \* var\(--size-code\)\) calc\(46px \* var\(--size-code\)\)/],
+    ["lib/tf/css/chains.css", ".tf-ll", "grid-template-columns", /^calc\(52px \* var\(--size-code\)\) calc\(70px \* var\(--size-code\)\)/],
+    ["lib/tf/css/tickets.css", ".tf-list .tf-c-key", "width", /^calc\(116px \* var\(--size-code\)\)$/],
+    ["lib/tf/css/tickets.css", ".tf-list .tf-c-status", "width", /^calc\(92px \* var\(--size-ui\)\)$/],
+    ["lib/tf/css/inbox.css", ".tf-ib", "grid-template-columns", /^calc\(96px \* var\(--size-ui\)\)/],
+    ["lib/tf/css/time.css", ".tf-tm-row", "grid-template-columns", /^calc\(150px \* var\(--size-ui\)\)/],
+    ["lib/tf/css/job.css", ".tf-ticketcard .tf-facts", "grid-template-columns", /^calc\(68px \* var\(--size-ui\)\)/],
+    ["lib/tf/css/job.css", ".tf-jobcard .tf-jobkey", "text-overflow", /^ellipsis$/],
+  ];
+  for (const [file, selector, prop, value] of want) expect(decl(file, selector, prop), `${file} ${selector} ${prop}`).toMatch(value);
 });

@@ -1,16 +1,16 @@
 /* ---------- the drawer's set groups (#867, R-6.2); the *Also on this job* bar went with #2399 ---------- */
-.tf-dbody h3 .tf-dedit { margin-left: auto; font-weight: 400; font-size: var(--t-xs); }
+.tf-dbody h3 .tf-dedit { margin-left: auto; font-weight: 400; font-size: calc(var(--t-xs) * var(--fs)); }
 
 /* An item's page (#1201): the block view of an item no surface draws. */
 .tf-item-body { padding: 0 22px 22px; display: flex; flex-direction: column; gap: 12px; max-width: 90ch; }
-.tf-item-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: var(--t-sm); }
+.tf-item-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-item-facts dt { color: var(--ink-2); }
 .tf-item-facts dd { overflow-wrap: anywhere; }
 .tf-item-facts dd.tf-ok { color: var(--ok); } .tf-item-facts dd.tf-warn { color: var(--warn); } .tf-item-facts dd.tf-err { color: var(--err); }
-.tf-item-rows { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
+.tf-item-rows { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-item-rows li { display: flex; gap: 8px; align-items: baseline; }
 .tf-item-textp { padding: 12px 14px; }
-.tf-item-text { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
-.tf-item-meta { color: var(--ink-2); font-size: var(--t-sm); }
+.tf-item-text { white-space: pre-line; overflow-wrap: anywhere; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-item-meta { color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-item-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
-.tf-item-log { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }
+.tf-item-log { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }

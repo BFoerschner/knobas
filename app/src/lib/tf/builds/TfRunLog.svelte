@@ -26,6 +26,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { LogLine, RunLog } from "../../ipc/entity";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { onCodeSize } from "../fonts.svelte";
   import { marks } from "../filter/filter";
   import type { RunPorts } from "./pipeline-ports";
   import { isCommand } from "./run-reads";
@@ -149,7 +150,7 @@
   /** What is drawn, flattened: the windowed list's rows. */
   const rows = $derived(logRows(blocks, isOpen, (line) => lineShown(line, typed, errorsOnly)));
   // A line is 12 px at 1.55; a summary and a loose run's edges are measured once drawn.
-  const win = new Windowed<number>({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 18.6 });
+  const win = new Windowed<number>({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 18.6, textSize: onCodeSize });
 
   function ontoggle(index: number, event: Event) {
     const open = (event.currentTarget as HTMLDetailsElement).open;

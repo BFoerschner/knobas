@@ -10,7 +10,7 @@
   .tf-timer-key { max-width: 12ch; }
   .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
 
-  .tf-jobkey { font-size: var(--t-d2); }
+  .tf-jobkey { font-size: calc(var(--t-d2) * var(--fs)); }
   .tf-ws { grid-template-columns: minmax(0, 1fr); height: auto; }
   .tf-jobcard, .tf-work { overflow: visible; }
   .tf-jobcard { border-right: 0; }

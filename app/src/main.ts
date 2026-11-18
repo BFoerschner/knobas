@@ -3,8 +3,8 @@ import "./lib/shell/own-frame-guard";
 import { mount } from "svelte";
 
 import App from "./App.svelte";
-// Code's face as chosen in Settings › Appearance, on <html> before anything draws (`code-face.svelte.ts`).
-import "./lib/tf/code-face.svelte";
+// Each role's face and size as chosen in Settings › Fonts, on <html> before anything draws (`fonts.svelte.ts`).
+import "./lib/tf/fonts.svelte";
 import "./lib/tf/tf.css";
 import { zoom } from "./lib/tf/zoom.svelte";
 import "./unported.css";

@@ -54,6 +54,7 @@
   import { dayFigures, dayRows, fitLabel, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
   import { weekView } from "./week-view";
   import { readDay, type DayRecord } from "./day-read";
+  import { fonts } from "../fonts.svelte";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
   interface DayPorts {
@@ -239,7 +240,7 @@
   let ink: CanvasRenderingContext2D | null | undefined;
   /**
    * How wide a string draws in the face `time.css` gives a strip label: 600
-   * at `--t-2xs`, mono for an entity's key and sans for a label. The face is
+   * at `--t-2xs` times the role's size, mono for an entity's key and sans for a label. The face is
    * read once per label, not once per character tried. With no canvas nothing
    * can be measured, and an unmeasured label is not drawn.
    */
@@ -249,8 +250,12 @@
     ink ??= document.createElement("canvas").getContext("2d");
     const pen = ink;
     if (pen === null) return () => Infinity;
+    // The role's size and face (Settings › Fonts): read here, so a label drawn in the markup is fitted again when they change.
+    const role = plain ? "ui" : "code";
+    const scale = fonts.size(role) / 100;
+    void fonts.family(role);
     const style = getComputedStyle(stripEl);
-    const font = `600 ${style.getPropertyValue("--t-2xs").trim()} ${style.getPropertyValue(plain ? "--sans" : "--mono").trim()}`;
+    const font = `600 ${Number.parseFloat(style.getPropertyValue("--t-2xs")) * scale}px ${style.getPropertyValue(plain ? "--sans" : "--mono").trim()}`;
     return (text) => {
       pen.font = font;
       return pen.measureText(text).width;

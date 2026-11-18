@@ -21,8 +21,9 @@
  * - (g) an actions container other than the page header's (`.tf-fhead`, `.tf-stg-h`) is pushed to the
  *   end and laid out as a flex row by hand (`margin-left: auto` with `display: flex`): a strip's or a
  *   row's trailing group is `.tf-trail`;
- * - (h) a `font-size` (or a `font` shorthand's size) is not a `--t-*` token, apart from the reading face and code, which
- *   keep their own sizes (a rule that sets `--serif` or `--mono`, the `.tf-rd-title`, and the PDF's text layer);
+ * - (h) a `font-size` (or a `font` shorthand's size) is not a `--t-*` token (times its role's `--fs` since Settings ›
+ *   Fonts, 2026-11-18), apart from the reading face and code, which keep their own sizes (a rule that sets `--serif` or
+ *   `--mono`, the `.tf-rd-title`, and the PDF's text layer);
  * - (i) a pill toggle is drawn outside `.tf-fchips`: a class round enough to be a pill (`border-radius` of 9 px or more)
  *   that also answers `aria-pressed`;
  * - (j) a grid's label column is a literal `132px`: it is `var(--tf-label)`;
@@ -107,7 +108,7 @@ function offScale(selector: string, decls: [string, string][]): string | null {
   const face = decls.some(([prop, value]) => /^font(?:-family)?$/.test(prop) && /var\(--(?:serif|mono)\)/.test(value));
   if (face || OWN_TYPE.test(selector)) return null;
   for (const [prop, value] of decls) {
-    if (prop === "font-size" && !/^(?:var\(--t-|inherit$)/.test(value)) return `font-size: ${value}`;
+    if (prop === "font-size" && !/^(?:(?:calc\()?var\(--t-|inherit$)/.test(value)) return `font-size: ${value}`;
     if (prop === "font" && !/var\(--t-|^inherit$/.test(value) && /\d/.test(value)) return `font: ${value}`;
   }
   return null;

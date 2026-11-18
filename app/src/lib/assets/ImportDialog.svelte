@@ -713,13 +713,13 @@
   }
 
   .fld .l {
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     color: var(--ink-2);
   }
 
   .grp .l {
     display: block;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     font-weight: 600;
     color: var(--ink-2);
     margin: 0 0 6px;
@@ -727,14 +727,14 @@
 
   .lead {
     margin: 0;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--muted);
     line-height: 1.5;
   }
 
   .none {
     margin: 0;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--faint);
   }
 
@@ -744,7 +744,7 @@
     padding: 0;
     display: grid;
     gap: 4px;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .lst > li {
@@ -759,7 +759,7 @@
 
   .lst .id {
     margin-left: auto;
-    font: 400 var(--t-2xs) var(--mono);
+    --fs: var(--size-code); font: 400 calc(var(--t-2xs) * var(--fs)) var(--mono);
     font-variant-ligatures: var(--mono-ligatures);
     color: var(--faint);
   }
@@ -781,7 +781,7 @@
     display: flex;
     gap: 8px;
     align-items: baseline;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
   }
 
   .props .k {
@@ -801,7 +801,7 @@
 
   .hint {
     margin: 4px 0 0;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
     color: var(--faint);
     line-height: 1.5;
   }
@@ -812,7 +812,7 @@
     align-items: baseline;
     flex-wrap: wrap;
     margin: 6px 0;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .crumbed,

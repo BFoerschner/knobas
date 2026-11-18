@@ -165,7 +165,7 @@
   .hint {
     grid-column: 2;
     margin-top: -2px;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--ink-2);
   }
 </style>

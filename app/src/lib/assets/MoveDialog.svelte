@@ -241,7 +241,7 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .opt:hover:not(:disabled) {
@@ -255,7 +255,7 @@
 
   .opt .faint {
     flex: none;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .opt .nm {
@@ -268,7 +268,7 @@
 
   .opt .mg {
     flex: none;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
     font-weight: 500;
     color: var(--faint);
   }
@@ -280,7 +280,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     color: var(--muted);
   }
 </style>

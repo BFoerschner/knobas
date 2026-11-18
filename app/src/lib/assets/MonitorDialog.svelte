@@ -201,13 +201,13 @@
   .hint {
     grid-column: 2;
     margin-top: -2px;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--ink-2);
   }
 
   .in {
     margin: 0;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     color: var(--muted);
   }
 

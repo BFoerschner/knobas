@@ -51,7 +51,7 @@
     align-items: baseline;
     gap: 4px;
     margin: 0;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     color: var(--muted);
   }
 

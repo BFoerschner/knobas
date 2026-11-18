@@ -149,9 +149,19 @@ test("every text token clears 4.5:1 on paper, sheet and sheet-2, light and dark"
   expect(failing).toEqual([]);
 });
 
-test("width comes from font-variation-settings only, never font-stretch", () => {
-  expect(code).not.toMatch(/font-stretch/);
-  expect(block(code, ".tf-jobkey")).toMatch(/font-variation-settings: "wdth" 62/);
+/*
+ * Width is `font-variation-settings: "wdth" N` for Archivo, with `font-stretch: N%` beside it since Settings › Fonts
+ * (2026-11-18): a chosen Headings face narrows through its own width axis or condensed members, which only
+ * `font-stretch` reaches. Archivo's `@font-face` declares `font-stretch: 62% 125%`, so it draws the same either way.
+ * Every `font-stretch` is a `"wdth"`'s twin, at the same width (`code-face.test.ts` holds that every narrowed rule has one).
+ */
+test("width comes from font-variation-settings, and font-stretch only as its twin at the same width", () => {
+  expect(block(code, ".tf-jobkey")).toMatch(/font-variation-settings: "wdth" 62; font-stretch: 62%/);
+  const stretches = [...code.matchAll(/font-stretch:\s*([^;}]+)/g)].map((m) => m[1]!.trim());
+  const widths = [...code.matchAll(/font-variation-settings:\s*"wdth"\s*([\d.]+)\s*;\s*font-stretch:\s*([\d.]+)%/g)];
+  expect(stretches.length).toBeGreaterThan(20);
+  expect(widths).toHaveLength(stretches.length);
+  for (const [, wdth, stretch] of widths) expect(stretch).toBe(wdth);
 });
 
 test("focus is 2px --focus, and --card-ink on a card surface", () => {
@@ -290,7 +300,7 @@ test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 1
   expect(selected).toMatch(/background:\s*var\(--sheet-2\)/);
   expect(selected).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--ink\)/);
   const box = launcherRules.find(([selector]) => selector === ".tf .tf-ln-q input")?.[1] ?? "";
-  expect(box).toMatch(/font-size:\s*var\(--t-xl\)/);
+  expect(box).toMatch(/font-size:\s*calc\(var\(--t-xl\) \* var\(--fs\)\)/);
   expect(box).toMatch(/border:\s*0/);
   expect(launcherRules.find(([selector]) => selector === ".tf-ln-q")?.[1]).toMatch(/border-bottom:\s*1px solid var\(--rule\)/);
   expect(launcherCode).not.toMatch(/text-transform/);

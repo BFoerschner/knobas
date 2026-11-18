@@ -91,6 +91,7 @@
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { onCodeSize } from "../fonts.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { allRenderers, BYTES_CAP, type Renderer } from "../../render/registry";
   import { defaultPipeline, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
@@ -1108,7 +1109,7 @@
    */
   const WHOLE_UP_TO = 300;
   // A line is 13 px at 1.6.
-  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
+  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1, textSize: onCodeSize });
   let code = $state<HTMLElement | null>(null);
   /** A rendered file's words (a README, a diagram, a command's output), for ⌘F's find bar: a person reading it means words, not *Go to file*'s names (Round 17). */
   let rendered = $state<HTMLElement | null>(null);

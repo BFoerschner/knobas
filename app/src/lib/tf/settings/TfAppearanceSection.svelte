@@ -2,13 +2,12 @@
   Settings › Appearance (#831, R-13a.8): prototype-6's `STGV.appearance`. The
   same setting as the top bar's toggle (`theme.svelte.ts`). Below it, *State
   colours* (#2466), which reads the database and so waits for it: Theme
-  draws before the database is up. Between them, *Zoom* (`TfZoomSetting.svelte`), *Code font* and *Ligatures in
-  code* (`TfCodeFont.svelte`), which need no database either.
+  draws before the database is up. Between them, *Zoom* (`TfZoomSetting.svelte`), which needs no database either.
+  The faces and their sizes, *Code font* and *Ligatures in code* among them, are Settings › Fonts since 2026-11-18
+  (`TfFontsSection.svelte`).
 -->
 <script lang="ts">
-  import type { InstalledFont } from "../../ipc/app";
   import type { Theme, ThemeChoice } from "../theme.svelte";
-  import TfCodeFont from "./TfCodeFont.svelte";
   import TfStateColours, { type StateColourPorts } from "./TfStateColours.svelte";
   import TfZoomSetting from "./TfZoomSetting.svelte";
 
@@ -16,7 +15,7 @@
     theme,
     ready = true,
     ports,
-  }: { theme: Theme; ready?: boolean; ports: StateColourPorts & { installedFonts?: () => Promise<InstalledFont[]> } } = $props();
+  }: { theme: Theme; ready?: boolean; ports: StateColourPorts } = $props();
 
   const CHOICES: readonly (readonly [ThemeChoice, string])[] = [
     ["system", "Like the system"],
@@ -37,7 +36,6 @@
   </div>
 </div>
 <TfZoomSetting />
-<TfCodeFont {...ports.installedFonts ? { installedFonts: ports.installedFonts } : {}} />
 {#if ready}
   <TfStateColours {ports} />
 {/if}

@@ -82,16 +82,16 @@
 
   /* The page title step. */
   .boot-b h1 {
-    font-size: var(--t-3xl);
+    font-size: calc(var(--t-3xl) * var(--fs));
     line-height: 1.15;
     font-weight: 700;
-    font-variation-settings: "wdth" 85;
+    --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%;
   }
 
   /* Archivo, the row step, secondary ink: these are sentences, not code. */
   .boot-b p {
     margin-top: 10px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     line-height: 1.45;
     color: var(--ink-2);
     /*
@@ -104,8 +104,8 @@
 
   /* The one code value here: whatever PostgreSQL or the OS said. */
   .boot-mono {
-    font-family: var(--mono);
-    font-size: var(--t-xs);
+    --fs: var(--size-code); font-family: var(--mono);
+    font-size: calc(var(--t-xs) * var(--fs));
     font-variant-ligatures: var(--mono-ligatures);
   }
 

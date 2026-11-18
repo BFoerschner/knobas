@@ -218,11 +218,24 @@ function rowValue(label: string): string {
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
 
-test("Appearance draws Zoom, Code font and its ligatures, then State colours, below Theme, one section per kind with a state (#2466)", async () => {
+test("Appearance draws Zoom, then State colours, below Theme, one section per kind with a state (#2466)", async () => {
   await open("appearance");
   // A row's label without its hint.
   const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.firstChild?.textContent?.trim());
-  expect(heads).toEqual(["Theme", "Zoom", "Code font", "Ligatures in code", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+  expect(heads).toEqual(["Theme", "Zoom", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+});
+
+test("Fonts draws the four roles and code's ligatures before the database is up (2026-11-18)", async () => {
+  view = mount(TfSettings, {
+    target,
+    context: hiddenable,
+    props: { rest: ["fonts"], job: null, ready: false, ports: sourcePorts, sectionPorts: sectionPorts(), layers: createLayers(), now: () => NOW, theme: createTheme() },
+  });
+  await settle();
+  // A row's label without its hint.
+  const heads = [...body().querySelectorAll(".tf-stg-l")].map((el) => el.firstChild?.textContent?.trim());
+  expect(heads).toEqual(["Interface", "Headings", "Reading", "Code", "Ligatures in code"]);
+  expect(target.querySelector('.tf-stg-nav a[aria-current="page"]')?.textContent?.trim()).toBe("Fonts");
 });
 
 test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
@@ -235,8 +248,8 @@ test("Appearance's State colours waits for the database; Theme does not (#2466)"
   });
   await settle();
   expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
-  // Code font is the webview's own setting: it needs no database either.
-  expect(target.querySelector('[aria-label="Ligatures in code"]')).not.toBeNull();
+  // Zoom is the webview's own setting: it needs no database either.
+  expect(target.querySelector('[aria-label="Zoom"]')).not.toBeNull();
   expect(target.querySelector(".tf-sc")).toBeNull();
   expect(read).not.toHaveBeenCalled();
 });
@@ -966,7 +979,7 @@ test("a number Monitoring did not take marks its field and says why, under it (F
   expect(target.querySelector("#tf-mon-keep-why")?.textContent).toContain("Not saved");
 });
 
-test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "checkouts"])(
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "fonts", "performance", "renderers", "keyboard", "logs", "checkouts"])(
   "Settings › %s draws no action row of its own under the title (#2284)",
   async (section) => {
     await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
@@ -986,7 +999,7 @@ const bodyButtonsAtDefault = () =>
     .map((b) => b.textContent!.trim());
 
 // Renderers and Checkouts draw their bodies in their own files' fixtures, and are checked there.
-test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "keyboard", "logs", "notes"])(
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "fonts", "performance", "keyboard", "logs", "notes"])(
   "Settings › %s draws its body buttons small (#2343)",
   async (section) => {
     await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});

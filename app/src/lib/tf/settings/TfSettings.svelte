@@ -42,6 +42,7 @@
   import TfSources from "./TfSources.svelte";
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
+  import TfFontsSection from "./TfFontsSection.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
   import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
   import { appPagePlace } from "../openin/app-page";
@@ -299,6 +300,8 @@
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
         <TfAppearanceSection {theme} {ready} ports={sectionPorts} />
+      {:else if place.section === "fonts"}
+        <TfFontsSection {...sectionPorts.installedFonts ? { installedFonts: sectionPorts.installedFonts } : {}} />
       {:else if place.section === "performance"}
         <TfPerformanceSection ports={sectionPorts} />
       {:else if place.section === "renderers" && folderAt !== null}

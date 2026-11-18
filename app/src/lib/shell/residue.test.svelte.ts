@@ -2467,8 +2467,8 @@ const CASES: Case[] = [
   sectionCase("TfRenderersSection", "renderers"),
   // Appearance's State colours (#2466): its read lands late.
   sectionCase("TfStateColours", "appearance"),
-  // Appearance's Code font (2026-11-16): the installed fonts' read lands late.
-  sectionCase("TfCodeFont", "appearance"),
+  // Settings › Fonts (2026-11-18; Appearance's Code font from 2026-11-16): the installed fonts' read lands late.
+  sectionCase("TfFontRole", "fonts"),
   {
     /** The zoom's level as it changes (2026-11-16): a step shows it, and its timer to hide it goes with the plate. */
     name: "TfZoomLevel",

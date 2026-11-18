@@ -294,6 +294,8 @@ mod tests {
         let found = families(
             [
                 ("Source Serif 4", false, serif),
+                // A family narrows when any face of it does: its condensed member, read after the regular one.
+                ("Archivo", false, Traits::default()),
                 ("Archivo", false, narrow),
                 ("source serif 4", false, Traits::default()),
             ]

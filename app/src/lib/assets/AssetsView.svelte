@@ -3032,7 +3032,7 @@
     flex: none;
     margin: 0;
     padding: 6px 22px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     border-bottom: 1px solid var(--rule);
   }
 
@@ -3176,7 +3176,7 @@
     padding: 0 4px 0 14px;
     background: var(--sheet);
     border-bottom: 1px solid var(--rule);
-    font: 600 var(--t-xs)/1.2 var(--sans);
+    --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs))/1.2 var(--sans);
     color: var(--ink-2);
   }
 
@@ -3236,7 +3236,7 @@
     align-items: center;
     gap: 8px;
     min-height: 22px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   /* The state as a dot, not a word: `down` and `warn` are two colours the
@@ -3284,7 +3284,7 @@
   .alerts .nm,
   .alerts .ak,
   .alerts .wh {
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3339,7 +3339,7 @@
     padding: 5px 8px;
     border-radius: 4px;
     text-align: left;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .find .hit.on,
@@ -3348,7 +3348,7 @@
   }
 
   .find .hit .pth {
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3357,7 +3357,7 @@
   .find .none {
     padding: 6px 8px;
     color: var(--ink-2);
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     display: block;
   }
 
@@ -3406,7 +3406,7 @@
 
   .col.spine .smg {
     flex: none;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
     line-height: 1;
     font-weight: 500;
     color: var(--ink-2);
@@ -3420,7 +3420,7 @@
     margin: 7px 0;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    font: 500 var(--t-xs)/1 var(--sans);
+    --fs: var(--size-ui); font: 500 calc(var(--t-xs) * var(--fs))/1 var(--sans);
     color: var(--ink-2);
     white-space: nowrap;
     overflow: hidden;
@@ -3457,7 +3457,7 @@
     border-radius: 4px;
     text-align: left;
     color: var(--ink);
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .row:hover {
@@ -3544,7 +3544,7 @@
     min-width: 18px;
     padding: 0 5px;
     border-radius: 9px;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
     font-weight: 600;
     line-height: 16px;
     text-align: center;
@@ -3602,7 +3602,7 @@
   }
 
   .pane-h h2 {
-    font-size: var(--t-xl);
+    font-size: calc(var(--t-xl) * var(--fs));
     font-weight: 600;
     line-height: 1.25;
     min-width: 0;
@@ -3663,7 +3663,7 @@
 
   .grp .empty {
     padding: 0;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   /* A link made of words is underlined (design system, Layout). */
@@ -3739,13 +3739,13 @@
     flex: 0 0 auto;
     max-width: 100%;
     overflow-wrap: anywhere;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     font-variant-ligatures: var(--mono-ligatures);
   }
 
   .breaks .lst li .path {
     grid-column: 1 / -1;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .props {
@@ -3759,14 +3759,14 @@
     grid-template-columns: 112px minmax(0, 1fr);
     column-gap: 8px;
     align-items: baseline;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   /* A custom key is marked, so the reader can tell the schema from their own
      additions without the pane keeping a copy of the type table. */
   .legend {
     margin: 0 0 6px;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .prop.own dt::after {
@@ -3806,7 +3806,7 @@
   */
   .prop .src {
     max-width: 100%;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     text-align: left;
     overflow-wrap: anywhere;
   }
@@ -3897,13 +3897,13 @@
   }
 
   .prop.wide dd .val code {
-    font: var(--t-xs) var(--mono);
+    --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono);
     font-variant-ligatures: var(--mono-ligatures);
   }
 
   .prop dd .val.code {
-    font-family: var(--mono);
-    font-size: var(--t-xs);
+    --fs: var(--size-code); font-family: var(--mono);
+    font-size: calc(var(--t-xs) * var(--fs));
     font-variant-ligatures: var(--mono-ligatures);
     letter-spacing: normal;
     word-spacing: normal;
@@ -3932,7 +3932,7 @@
 
   .wf {
     margin: -6px 0 12px;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .add {
@@ -3958,7 +3958,7 @@
 
   .ask {
     margin: 0;
-    font-size: var(--t-md);
+    font-size: calc(var(--t-md) * var(--fs));
   }
 
   /* One route per row: what it is called, where it answers, and where it
@@ -3993,7 +3993,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     font-variant-ligatures: var(--mono-ligatures);
     color: var(--ink-2);
     text-align: left;
@@ -4011,7 +4011,7 @@
   }
 
   .routes .rprop code {
-    font: var(--t-xs) var(--mono);
+    --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono);
     font-variant-ligatures: var(--mono-ligatures);
   }
 
@@ -4024,7 +4024,7 @@
 
   .routes .rto,
   .routes .rprop {
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     /* A real route property can be a command line (until #634 the estate's
        tunnel routes carried a whole `ssh -N -L ...`), which wraps at no space
        there is: without this the pane scrolls
@@ -4040,7 +4040,7 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
   }
 
   .lst li,
@@ -4051,7 +4051,7 @@
   }
 
   .lst li .faint {
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
   }
 
   .hist .hw {
@@ -4062,7 +4062,7 @@
 
   .hist .ha {
     flex: none;
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     font-variant-numeric: tabular-nums;
   }
 

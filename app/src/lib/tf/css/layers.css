@@ -18,14 +18,14 @@
 
 /* The right-click menu (`context/TfContextMenu.svelte`, 2026-11-16): `TfMenu` at the pointer, a row per action, a copy
    showing on its right what it will copy, in the code face, and *Open in… ▸* opening its applications beside it. */
-.tf-menu.tf-ctx-m { min-width: 220px; max-width: 340px; font-size: var(--t-sm); }
+.tf-menu.tf-ctx-m { min-width: 220px; max-width: 340px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-ctx-m-inner { display: contents; }
 .tf-menu .tf-ctx-i { display: flex; align-items: center; gap: 16px; width: 100%; color: var(--ink); font: inherit; }
 .tf-menu .tf-ctx-i:focus-visible, .tf-menu .tf-ctx-i[aria-expanded="true"] { background: var(--sheet-2); }
 .tf-menu .tf-ctx-i[aria-disabled="true"] { color: var(--muted); cursor: default; }
 .tf-menu .tf-ctx-i[aria-disabled="true"]:hover { background: none; }
 .tf-ctx-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-ctx-h { flex: none; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ctx-h { flex: none; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-ctx-sub { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; color: var(--ink-2); }
 /* The row the menu is on keeps its hover look while the menu stands. */
 .tf [data-ctx-on], .tf tr:has([data-ctx-on]) > td { background: var(--sheet-2); }

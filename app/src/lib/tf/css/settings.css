@@ -12,16 +12,16 @@
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
-  font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
+  font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
 }
-.tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: var(--t-md); max-width: 70ch; }
+.tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: calc(var(--t-md) * var(--fs)); max-width: 70ch; }
 /* A Settings page whose header carries actions: the title block on the left, `.tf-acts` on the right of its
    title line (#2284), laid out by the canonical header's rule in dialogs.css. */
 .tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
 .tf-stg-sec { margin-top: 26px; }
-.tf-stg-sec h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0 0 8px; }
-.tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
+.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
+.tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
 .tf-stg-gap { margin-top: 14px; }
 /* A control sits at the top of its row, its text on one line with its label's first, however long the description runs.
    A switch and a textarea have no line of text to share, so they start at the top instead. */
@@ -38,12 +38,12 @@
   .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 .tf-stg-l { font-weight: 500; }
-.tf-stg-l small { display: block; font-weight: 400; font-size: var(--t-sm); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
+.tf-stg-l small { display: block; font-weight: 400; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
 .tf-stg-c { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tf-stg-inl { flex-wrap: wrap; }
 .tf-stg-in {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
-  font-size: var(--t-md); width: min(420px, 100%);
+  font-size: calc(var(--t-md) * var(--fs)); width: min(420px, 100%);
 }
 /* A select's words start where a field's do. */
 select.tf-stg-in { padding-inline-start: 4px; }
@@ -77,17 +77,17 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-sn b { font-weight: 500; }
 /* A count reads down its column. */
 .tf-stg-src > span:nth-of-type(3) { text-align: right; padding-right: 12px; }
-.tf-stg-sn .tf-dim { font-size: var(--t-sm); }
-.tf-stg-si { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-stg-sn .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-stg-si { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf .tf-stg-errt { color: var(--err); }
 .tf .tf-stg-warnt { color: var(--warn); }
 /* the credential expiry countdown (#1499): beside the credential on its page, under the state on its row */
-.tf-stg-exp { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-stg-exp { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-stg-si .tf-stg-exp { display: block; }
 .tf-stg-go { color: var(--ink-2); }
 .tf-stg-alert {
   display: flex; gap: 10px; align-items: center; padding: 10px 14px; border: 1px solid var(--rule);
-  border-left: 3px solid var(--err); border-radius: 4px; background: var(--sheet); font-size: var(--t-md);
+  border-left: 3px solid var(--err); border-radius: 4px; background: var(--sheet); font-size: calc(var(--t-md) * var(--fs));
 }
 .tf-stg-alert .tf-btn { margin-left: auto; }
 /* the run in flight on a source's page (#1384): the wizard's bar and reading */
@@ -95,15 +95,15 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-run progress { width: 100%; height: 4px; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
 .tf-stg-run progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
 .tf-stg-run progress::-webkit-progress-value { background: var(--info); border-radius: 2px; }
-.tf-stg-run p { font: 400 var(--t-sm)/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+.tf-stg-run p { --fs: var(--size-code); font: 400 calc(var(--t-sm) * var(--fs))/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
 /* Why a number typed here was not what got stored (F-613), on its own line under the field. */
-.tf-stg-why { flex-basis: 100%; font-size: var(--t-xs); color: var(--err); }
+.tf-stg-why { flex-basis: 100%; font-size: calc(var(--t-xs) * var(--fs)); color: var(--err); }
 .tf-stg-c [aria-invalid="true"], .tf-formgrid #tf-add-id[aria-invalid="true"] { border-color: var(--err); }
-.tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
+.tf-stg-note { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 10px; }
 /* What is typed and not saved, beside its Save until saved (#1404, F-635): the warn tone a running-out credential has. */
-.tf-stg-pend { align-self: center; font-size: var(--t-sm); color: var(--warn); }
+.tf-stg-pend { align-self: center; font-size: calc(var(--t-sm) * var(--fs)); color: var(--warn); }
 /* A typed value's answer, for about two seconds (`saved-field.svelte.ts`). */
-.tf-stg-saved { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-stg-saved { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 /* a sync run's result (#1478): wraps anywhere, as the boot screen's error does, so a
    request URL cannot widen the table; an unreachable run's transport error sits behind Details */
 .tf-stg-res { overflow-wrap: anywhere; }
@@ -111,22 +111,22 @@ select.tf-stg-in { padding-inline-start: 4px; }
    Started and Took: those two keep their line */
 .tf-stg-runs td:not(.tf-stg-res) { white-space: nowrap; }
 .tf-stg-det { margin-top: 4px; color: var(--ink-2); }
-.tf-stg-det summary { cursor: pointer; font-size: var(--t-xs); }
-.tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-stg-det summary { cursor: pointer; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-stg-det code { display: block; margin-top: 4px; --fs: var(--size-code); font: 400 calc(var(--t-xs) * var(--fs))/1.45 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
 .tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
 /* A label shares its field's first line, however much help runs under the field; named at this weight because `.tf-formgrid` centres. */
 .tf-formgrid.tf-sf-grid { align-items: start; }
 .tf-sf-grid > label { padding-top: 7px; }
 .tf-sf-area { resize: vertical; min-height: 54px; line-height: 1.45; font: inherit; }
-.tf .tf-sf-mono { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-sm); }
-.tf-sf-help { font-size: var(--t-xs); color: var(--ink-2); line-height: 1.4; }
+.tf .tf-sf-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-sf-help { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); line-height: 1.4; }
 /* the other sections (#831): prototype-6's inline widths, .stg-checks and .stg-keys */
 .tf-stg-in.tf-stg-n70 { width: 70px; }
 .tf-stg-in.tf-stg-n90 { width: 90px; }
 .tf-stg-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 4px; }
-.tf-stg-checks .tf-ck { font-size: var(--t-md); }
-.tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: var(--t-md); }
+.tf-stg-checks .tf-ck { font-size: calc(var(--t-md) * var(--fs)); }
+.tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: calc(var(--t-md) * var(--fs)); }
 /* Open in…: a press moves the *Default* tag and the button, and no column moves for it (F-639). */
 .tf-tbl.tf-stg-apps { table-layout: fixed; }
 .tf-stg-apps th:nth-child(1) { width: 200px; }
@@ -144,7 +144,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-pick { --link: var(--info); }
 .tf-stg-pick select, .tf-stg-pick input {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
-  font-size: var(--t-md); width: min(420px, 100%);
+  font-size: calc(var(--t-md) * var(--fs)); width: min(420px, 100%);
 }
 
 /* Renderers' dialogs: a timeout is a short field with its unit beside it, wherever it stands (Forms, F-026). */
@@ -154,10 +154,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 
 /* ---------- Appearance › State colours (#2466): six columns of state-word chips ---------- */
 .tf-sc { margin-top: 26px; }
-.tf-sc-title { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0 0 8px; }
+.tf-sc-title { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
 .tf-sc-kind { margin-top: 18px; }
 .tf-sc-kind .tf-ext-h { margin-bottom: 8px; }
-.tf-sc-kind h3 { font-size: var(--t-xs); margin: 0; font-weight: 600; color: var(--ink-2); }
+.tf-sc-kind h3 { font-size: calc(var(--t-xs) * var(--fs)); margin: 0; font-weight: 600; color: var(--ink-2); }
 /* Six columns share the section's width, on its one right edge, or three where six would split a word. */
 .tf-sc-board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 @container (max-width: 720px) { .tf-sc-board { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -167,7 +167,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
   display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-height: 72px; padding: 6px;
   border: 1px dashed var(--rule); border-radius: 4px; background: var(--sheet);
 }
-.tf-sc-colh { display: flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
+.tf-sc-colh { display: flex; align-items: center; gap: 5px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
 .tf-sc-col:last-child .tf-sc-colh::before {
   content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--ink-2); box-sizing: border-box;
 }
@@ -181,7 +181,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-sc-chip { touch-action: none; user-select: none; }
 .tf-sc-chip.tf-lifted { position: relative; z-index: 3; cursor: grabbing; box-shadow: var(--shadow); }
 .tf-sc-col.tf-sc-over { border-style: solid; border-color: var(--ink-2); background: var(--sheet-2); }
-.tf-menu.tf-sc-m { min-width: 180px; font-size: var(--t-sm); }
+.tf-menu.tf-sc-m { min-width: 180px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-menu.tf-sc-m > button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border: 0; border-radius: 4px; background: none; color: var(--ink); font: inherit; }
 .tf-menu.tf-sc-m > button:is(:hover, :focus-visible), .tf-menu.tf-sc-m > button.tf-on { background: var(--sheet-2); }
 .tf-sc-mnone { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--ink-2); box-sizing: border-box; background: none; }
@@ -192,7 +192,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* *It will run*: one box two lines high in every state, waiting or filled, so the repository answering moves nothing under it, and a
    command typed or a repository picked doesn't either (2026-11-17). Two lines hold the usual command whole; a longer one scrolls in
    its box. A scrollbar coming may wrap the words again inside it, which moves nothing outside (no page keeps a gutter, tf-css.test). */
-.tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-sm); }
+.tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-apprun-box {
   flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: 44px; line-height: 19px; padding: 3px 8px;
   overflow-y: auto; background: var(--sheet-2); border-radius: 4px;
@@ -211,23 +211,66 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 /* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
 .tf-stg-l small.tf-req { display: inline; margin-left: 4px; }
-/* Appearance › Code font (2026-11-16): the field is a font's name, so it is drawn in code's face; the list's names are
-   the interface's, since drawing each in its own would load every font on the machine. The specimen spans the row
-   under the label and the field, framed as the Source view frames a file, so what it shows is what a file will be. */
+/* A font's field (Settings › Fonts; Appearance › Code font until 2026-11-18): the list's names are the interface's,
+   since drawing each in its own would load every font on the machine. The specimen spans the row under the label and
+   the field, framed as the Source view frames a file, so what it shows is what the app will be. */
 .tf-cf-combo { width: min(420px, 100%); }
 .tf .tf-combo.tf-cf-combo .tf-opts { max-height: 280px; }
-.tf .tf-combo.tf-cf-combo .tf-opts [role="option"] { font: var(--t-sm) var(--sans); padding: 5px 10px; }
+.tf .tf-combo.tf-cf-combo .tf-opts [role="option"] { --fs: var(--size-ui); font: calc(var(--t-sm) * var(--fs)) var(--sans); padding: 5px 10px; }
 .tf .tf-combo.tf-cf-combo .tf-opts [aria-selected="true"] { font-weight: 600; }
-.tf-cf-mh { padding: 8px 10px 3px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+.tf-cf-mh { padding: 8px 10px 3px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
 .tf-cf-spec {
   grid-column: 1 / -1; margin: 0; background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule);
   border-radius: 6px; overflow: hidden;
 }
 .tf-cf-spec > pre { padding: 8px 0; }
-.tf-cf-spec figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); }
+.tf-cf-spec figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+
+/* Settings › Fonts (2026-11-18, `TfFontsSection.svelte`, `TfFontRole.svelte`). The proof: a word in each role's face at
+   the display step (34 px) times the role's size, on one baseline, and two rules across them: the baseline, and the
+   bundled Archivo's x-height (.526 em) at 34 px, which a face evened out meets with its lower case. The guide is an empty flex item, so its
+   synthesized baseline is its foot and it stands on the shared baseline, as tall as that x-height. */
+.tf-fr-proof { margin: 0 0 6px; background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.tf-fr-proofline { position: relative; display: flex; align-items: baseline; gap: 28px; padding: 16px 20px 12px; white-space: nowrap; overflow: hidden; }
+.tf-fr-guide { position: relative; flex: none; width: 0; height: calc(var(--t-d1) * .526); margin-right: -28px; }
+.tf-fr-guide::before, .tf-fr-guide::after { content: ""; position: absolute; left: -40px; width: 4000px; border-top: 1px solid var(--rule); }
+.tf-fr-guide::before { top: 0; border-top: 1px dashed var(--focus); }
+.tf-fr-guide::after { bottom: 0; }
+.tf-fr-pw { position: relative; font-size: calc(var(--t-d1) * var(--fs)); line-height: 1.25; color: var(--ink); }
+.tf-fr-pw-ui { --fs: var(--size-ui); font-family: var(--sans); }
+.tf-fr-pw-head { --fs: var(--size-head); font-family: var(--head); font-weight: 700; font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-fr-pw-read { --fs: var(--size-read); font-family: var(--serif); }
+.tf-fr-pw-code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-fr-proof figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+/* A role's row: the field and its *Use* on one line, the size under it, the specimen across the row. */
+.tf-stg-c.tf-fr-c { flex-direction: column; align-items: stretch; gap: 8px; }
+.tf-fr-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* A font's name is typed in the interface's face, and in code's for Code, as the field always was. */
+.tf .tf-combo.tf-fr-combo input { --fs: var(--size-ui); font-family: var(--sans); }
+.tf .tf-fr-code .tf-combo.tf-fr-combo input { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+/* The size: ten notches on a line, 100 % taller, the chosen one a filled bar, the one that evens the face out ringed. */
+.tf-fr-scale { display: inline-flex; align-items: stretch; height: var(--control-h-sm); padding: 0 4px; border-radius: 4px; box-shadow: inset 0 -1px var(--rule-2); flex: none; cursor: pointer; }
+.tf-fr-notch { position: relative; width: 20px; display: grid; place-items: end center; padding: 0 0 4px; cursor: pointer; }
+.tf-fr-notch i { display: block; width: 2px; height: 7px; border-radius: 1px; background: var(--rule); }
+.tf-fr-notch.tf-fr-home i { height: 13px; background: var(--ink-2); }
+.tf-fr-notch:hover i { background: var(--ink); }
+.tf-fr-notch.tf-fr-on i { width: 6px; height: 15px; border-radius: 2px; background: var(--ink); }
+.tf-fr-notch.tf-fr-even::before { content: ""; position: absolute; top: 1px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border: 1.5px solid var(--focus); border-radius: 50%; }
+.tf-fr-fig { min-width: 48px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tf-fr-hint { margin: 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+/* Each specimen is drawn by the rules the app draws its role with, the role's size included. */
+.tf-fr-sample { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; min-width: 0; }
+.tf-fr-sample-ui { --fs: var(--size-ui); font-family: var(--sans); }
+.tf-fr-sample-ui b { font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; }
+.tf-fr-sample-ui > span { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-fr-sample-ui .tf-fr-chips { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--ink); }
+.tf-fr-sample-head { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+.tf-fr-key { --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; letter-spacing: -.01em; }
+.tf-fr-h { --fs: var(--size-head); font-family: var(--head); font-weight: 700; font-variation-settings: "wdth" 88; font-stretch: 88%; font-size: calc(var(--t-lg) * var(--fs)); }
+.tf-fr-sample-read p { --fs: var(--size-read); font-family: var(--serif); font-size: calc(17.5px * var(--fs)); line-height: 1.65; max-width: 62ch; }
 
 /* Settings › Docs' spaces (PR #2479, 2026-11-17): a box per space, in columns as wide as a name, so many spaces read as a list. */
 .tf-stg-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 16px; margin-top: 4px; }
-.tf-stg-spaces .tf-ck { min-width: 0; font-size: var(--t-md); align-items: center; }
+.tf-stg-spaces .tf-ck { min-width: 0; font-size: calc(var(--t-md) * var(--fs)); align-items: center; }
 .tf-stg-spn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-stg-spaces .tf-dim { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.tf-stg-spaces .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); font-variant-numeric: tabular-nums; }

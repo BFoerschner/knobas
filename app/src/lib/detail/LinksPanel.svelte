@@ -145,7 +145,7 @@
 
   .none {
     margin: 0;
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     color: var(--ink-2);
   }
 
@@ -166,7 +166,7 @@
     margin-top: 6px;
     background: none;
     color: var(--ink-2);
-    font: var(--t-xs) var(--sans);
+    --fs: var(--size-ui); font: calc(var(--t-xs) * var(--fs)) var(--sans);
   }
 
   .links .row.hd span:empty {
@@ -193,7 +193,7 @@
     text-align: left;
     width: 100%;
     color: var(--ink);
-    font-size: var(--t-sm);
+    font-size: calc(var(--t-sm) * var(--fs));
     text-decoration: underline;
     text-underline-offset: 2px;
     white-space: normal;
@@ -205,13 +205,13 @@
     grid-row: 2;
     text-align: left;
     color: var(--ink-2);
-    font: var(--t-xs) var(--sans);
+    --fs: var(--size-ui); font: calc(var(--t-xs) * var(--fs)) var(--sans);
   }
 
   .wd {
     display: inline-block;
     margin-left: 6px;
-    font-size: var(--t-2xs);
+    font-size: calc(var(--t-2xs) * var(--fs));
     font-weight: 600;
     color: var(--amber);
   }
@@ -228,7 +228,7 @@
   .lnote {
     padding: 0 0 6px 32px;
     color: var(--muted);
-    font-size: var(--t-xs);
+    font-size: calc(var(--t-xs) * var(--fs));
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;

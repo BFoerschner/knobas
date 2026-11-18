@@ -94,6 +94,7 @@
   import TfRunTests from "./TfRunTests.svelte";
   import TfRunTicket from "./TfRunTicket.svelte";
   import { downloadAndSay, fitSteps, isCommand, stepSegments } from "./run-reads";
+  import { fonts } from "../fonts.svelte";
   import {
     RUN_TABS,
     noSuchRunTab,
@@ -459,12 +460,18 @@
     seen.observe(bar);
     return () => seen.disconnect();
   }
-  /** A name's width as `.tf-stepsbar text` draws it: 12 px, or 11 px of code; 0 with no canvas to measure on. */
+  /**
+   * A name's width as `.tf-stepsbar text` draws it: 12 px, or 11 px of code, times the role's size (Settings › Fonts,
+   * read here so the bar is fitted again when a size or a face changes); 0 with no canvas to measure on.
+   */
   function nameWidth(name: string, text = name): number {
+    const role = isCommand(name) ? "code" : "ui";
+    const px = ((isCommand(name) ? 11 : 12) * fonts.size(role)) / 100;
+    void fonts.family(role);
     pen ??= document.createElement("canvas").getContext("2d");
     if (pen === null) return 0;
     const face = isCommand(name) ? "--mono" : "--sans";
-    pen.font = `400 ${isCommand(name) ? 11 : 12}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
+    pen.font = `400 ${px}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
     return pen.measureText(text).width;
   }
   /** What a label's inset takes from its segment: 10 px before it, 8 px after. */

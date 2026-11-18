@@ -191,6 +191,23 @@ describe("the device's layout grid (#2508)", () => {
     for (let start = 8; start < 200; start += 8) expect(room(start) - room(start - 8)).toBe(8 * row);
   });
 
+  it("takes measured heights and estimates by a text size's ratio, onto the grid (Settings › Fonts, 2026-11-18)", () => {
+    const h = new Heights<number>(18.6, 0, (key) => (key === 7 ? 40 : 18.6));
+    const keys = Array.from({ length: 10 }, (_, i) => i);
+    h.keys(keys);
+    h.set(0, 18.75);
+    h.set(1, 37.5);
+    h.rescale(1.2, (px) => onGrid(px, 1.25));
+    expect(h.heightOf(0)).toBeCloseTo(onGrid(22.5, 1.25), 9);
+    expect(h.heightOf(1)).toBeCloseTo(onGrid(45, 1.25), 9);
+    expect(h.heightOf(2)).toBeCloseTo(18.6 * 1.2, 9);
+    expect(h.heightOf(7)).toBeCloseTo(48, 9);
+    expect(h.total()).toBeCloseTo(onGrid(22.5, 1.25) + onGrid(45, 1.25) + 7 * 18.6 * 1.2 + 48, 9);
+    // Back to 100 %: the estimates where they began.
+    h.rescale(1 / 1.2, (px) => px);
+    expect(h.heightOf(2)).toBeCloseTo(18.6, 9);
+  });
+
   it("writes whole and power-of-two scales' room as the plain length", () => {
     expect(gridLength(1234, 1)).toBe("1234px");
     expect(gridLength(100.5, 2)).toBe("100.5px");

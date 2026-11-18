@@ -10,12 +10,12 @@
 .tf-msg.tf-queued .tf-msg-body p { color: var(--muted); }
 .tf-msg-body { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; }
 .tf-msg-body p { white-space: pre-line; overflow-wrap: anywhere; }
-.tf-who { font-size: var(--t-sm); color: var(--ink-2); margin-bottom: 2px; display: flex; gap: 8px; align-items: center; }
+.tf-who { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-bottom: 2px; display: flex; gap: 8px; align-items: center; }
 .tf-who b { color: var(--ink); font-weight: 600; }
 .tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
 .tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--mark); }
 /* Yellow is the ticket you are on, on its page, its card and its row, and nothing else: a chip that names the job is neutral. A mention is a highlight, which is `--mark`. */
-.tf-chip.tf-chip-job { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-chip.tf-chip-job { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-chip.tf-chip-mention { background: var(--mark); color: var(--ink); }
 .tf-at { font-weight: 600; color: var(--info); }
 .tf-fold {
@@ -23,7 +23,7 @@
   padding: 5px 12px; cursor: pointer; color: var(--ink-2);
 }
 .tf-fold:hover { border-color: var(--ink-2); color: var(--ink); }
-.tf-newline { display: flex; align-items: center; gap: 10px; color: var(--info); font-size: var(--t-xs); font-weight: 600; margin-left: 38px; }
+.tf-newline { display: flex; align-items: center; gap: 10px; color: var(--info); font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; margin-left: 38px; }
 .tf-newline::after { content: ""; flex: 1; border-top: 1px solid var(--info); }
 /* With no comment above it there is no avatar's gutter to keep: the box starts on the column's edge. */
 :is(.tf-convo, .tf-cmts):not(:has(.tf-msg)) .tf-compose { margin-left: 0; }
@@ -49,12 +49,12 @@
 @keyframes tf-slide { from { transform: translateX(100%); } }
 /* The title line is a dialog's (`dialogs.css`, `.tf-dhead`), its × in the same place. */
 .tf-drawer header { padding: 14px 16px 10px; }
-.tf-drawer header h2 { font-size: var(--t-xl); }
+.tf-drawer header h2 { font-size: calc(var(--t-xl) * var(--fs)); }
 .tf-dfilter { padding: 0 16px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
 .tf-dfilter .tf-fsearch { flex: none; max-width: none; }
 .tf-dacts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-dbody { overflow: auto; background: var(--sheet); padding: 4px 0 20px; flex: 1; }
-.tf-dbody h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 16px 4px; display: flex; gap: 6px; scroll-margin-top: 12px; }
+.tf-dbody h3 { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); margin: 12px 16px 4px; display: flex; gap: 6px; scroll-margin-top: 12px; }
 /* A row is the shape of the ticket card's (`.tf-tktable`): one link holding its words and a chevron. Its action shows on
    hover and focus, in a place its words keep clear, so no word is under it. */
 .tf-lk { position: relative; border-top: 1px solid var(--rule-2); }
@@ -63,26 +63,26 @@
 .tf-lk.tf-lk-held:hover { background: none; }
 /* A held row says what just left, in `--muted`, not by opacity, so no tone moves; it has nothing to press. */
 .tf-lk-held :is(.tf-lk-name, .tf-how) { color: var(--muted); }
-.tf-lk-go { display: grid; grid-template-columns: minmax(0, 1fr) auto 8px; gap: 10px; align-items: center; padding: 7px 16px; font-size: var(--t-sm); color: inherit; text-decoration: none; }
+.tf-lk-go { display: grid; grid-template-columns: minmax(0, 1fr) auto 8px; gap: 10px; align-items: center; padding: 7px 16px; font-size: calc(var(--t-sm) * var(--fs)); color: inherit; text-decoration: none; }
 a.tf-lk-go:hover .tf-lk-name { text-decoration: underline; }
-.tf-lk-go .tf-chev { color: var(--ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
+.tf-lk-go .tf-chev { color: var(--ink-2); font-size: calc(var(--t-lg) * var(--fs)); line-height: 1; text-align: right; }
 .tf-lk-t { min-width: 0; overflow-wrap: anywhere; }
 /* The state's column is as wide as the widest action, which takes its place on hover and focus: nothing moves. */
-.tf-lk-st { min-width: 72px; font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; }
+.tf-lk-st { min-width: 72px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; }
 .tf-lk-st.tf-asks { color: var(--ink); }
 .tf-lk-st .tf-dot { margin-right: 5px; }
 .tf-lk:has(> .tf-x):is(:hover, :has(> .tf-x:is(:focus-visible, .tf-shown))) .tf-lk-st { visibility: hidden; }
-.tf-how { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-how { display: block; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-lk > .tf-x { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity .1s; }
 .tf-lk:hover > .tf-x, .tf-lk > .tf-x:focus-visible, .tf-lk > .tf-x.tf-shown { opacity: 1; }
-.tf-dnone { padding: 0 16px; font-size: var(--t-sm); color: var(--ink-2); }
-.tf-dnote { font-size: var(--t-xs); color: var(--ink-2); padding: 0 16px; }
+.tf-dnone { padding: 0 16px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-dnote { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); padding: 0 16px; }
 
 /* *Link to…* (#820): the picker inside the dialog. */
 .tf-dialog .tf-body > input[type="text"], .tf-field select {
   border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink);
 }
-.tf-field { display: flex; gap: 8px; align-items: center; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-field { display: flex; gap: 8px; align-items: center; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-picklist { display: flex; flex-direction: column; max-height: 240px; overflow: auto; background: var(--under); border: 0 solid var(--rule); border-radius: 4px; }
 .tf-picklist button {
   display: flex; gap: 8px; justify-content: space-between; border: 0; border-top: 1px solid var(--rule-2);
@@ -97,9 +97,9 @@ a.tf-lk-go:hover .tf-lk-name { text-decoration: underline; }
 .tf-pane-h:has(+ .tf-picklist) { margin-bottom: -6px; }
 
 /* ---------- the *This job* choice's key in a segmented control ---------- */
-.tf-seg .tf-jobk { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: var(--t-xs); }
+.tf-seg .tf-jobk { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); }
 
 /* ---------- the large decision row: the Controls specimen's (`TfControls.svelte`) ---------- */
 .tf-decide { display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; }
 .tf-decide .tf-yes kbd { background: transparent; color: inherit; border-color: currentColor; }
-.tf-decide .tf-hint { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-decide .tf-hint { margin-left: auto; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }

@@ -24,7 +24,7 @@
 .tf-rbranches .tf-racts { text-align: right; }
 /* The last value: *Delete…* stands in its place on hover, so it is at least as wide. */
 .tf-rbranches td .tf-rowval { display: inline-block; min-width: 76px; }
-.tf-rbranches td:first-child .tf-mono { font-size: var(--t-sm); }
+.tf-rbranches td:first-child .tf-mono { font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-rbranches-note { margin: 8px 0 0; }
 /* A banner inside a dialog's body: a rounded block, not a strip across a panel. */
 .tf-dialog .tf-dbanner { border: 0; border-radius: 4px; }
@@ -32,17 +32,17 @@
 .tf-compare > .tf-sedge { --tf-sedge-gap: 22px; }
 .tf-compare .tf-cform { padding: 14px; }
 /* A branch's name is a code value, in the select as anywhere. */
-.tf-compare select.tf-cbranch { font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-.tf-compare .tf-cexists { font-size: var(--t-sm); }
+.tf-compare select.tf-cbranch { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-compare .tf-cexists { font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-compare .tf-cnone { padding-top: 10px; }
 .tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .tf-compare .tf-cdiff { grid-column: 1 / -1; min-width: 0; }
 .tf-compare .tf-side { display: flex; flex-direction: column; gap: 14px; }
 /* *Commits* beside the form (the big-compare pass, 2026-11-16): one line a commit, its whole title on hover, its count in
    the heading, in a box of about ten rows that scrolls on the sheet it sits on. */
-.tf-ccommits .tf-ccount { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-ccommits .tf-ccount { margin-left: auto; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-ccommits .tf-crows { max-height: 352px; overflow-y: auto; overscroll-behavior: contain; background: var(--sheet); }
-.tf-editor { display: grid; grid-template-columns: 48px 1fr; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-editor { display: grid; grid-template-columns: 48px 1fr; --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-editor .tf-nums {
   color: var(--ink-2); text-align: right; padding: 8px 12px 8px 0; white-space: pre; user-select: none; background: var(--sheet-2);
 }
