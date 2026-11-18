@@ -9,7 +9,7 @@
 // line a thing and throttle (median and worst of `reps`), and exits 1 when a median is over its line: 100 ms at 1x and
 // 4x, 200 ms at 6x (Björn's lines for a click), halved on the Mac as the other budgets halve them.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
@@ -34,60 +34,69 @@ const c = await attach(chrome.port);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await viewport(c, size);
-await c.send("Page.navigate", { url: `${app}#/time` });
-await sleep(6000);
+/** The app on Time: at the start, and on a fresh page after a stall. */
+const home = async () => { await c.send("Page.navigate", { url: `${app}#/time` }); await sleep(6000); };
+await home();
 
 const results = { app, size: size.name, at: new Date().toISOString(), throttles, rows: [] };
 let over = 0;
 for (const thing of THINGS) {
-  await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-  await c.js(`location.hash = ${JSON.stringify(thing.route)}, 1`);
-  await sleep(4000);
-  const at = await c.js(`(() => {
-    const e = [...document.querySelectorAll(${JSON.stringify(thing.sel)})].find((x) => x.getClientRects().length && !x.closest("[hidden]"));
-    if (!e) return null;
-    e.scrollIntoView({ block: "center" });
-    const r = e.getBoundingClientRect();
-    return { x: Math.round(r.left + Math.min(40, r.width / 2)), y: Math.round(r.top + r.height / 2) };
-  })()`);
-  if (!at) { console.log(`${thing.name}: nothing to press at ${thing.route}`); results.rows.push({ thing: thing.name, missing: true }); continue; }
-  await c.js(`(() => {
-    window.__rc = [];
-    // Once a document: the things are pages of one document, and a second listener would count each press twice.
-    if (window.__rcOn) return 1;
-    window.__rcOn = true;
-    window.addEventListener("contextmenu", (e) => {
-      const from = e.timeStamp;
-      const seen = () => {
-        if (!document.querySelector(".tf-ctx-m")) return requestAnimationFrame(seen);
-        requestAnimationFrame(() => setTimeout(() => window.__rc.push(performance.now() - from), 0));
-      };
-      requestAnimationFrame(seen);
-    }, true);
-    return 1;
-  })()`);
-  for (const rate of throttles) {
-    await c.send("Emulation.setCPUThrottlingRate", { rate });
-    await c.js(`(window.__rc = [], 1)`);
-    for (let i = 0; i < reps; i++) {
-      await c.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
-      await c.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "right", buttons: 2, clickCount: 1 });
-      await c.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "right", buttons: 0, clickCount: 1 });
-      await sleep(400 * rate);
-      await c.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await sleep(200 * rate);
+  // One thing at every throttle under the watchdog (cdp.mjs): tried once more on a fresh page when a call never
+  // answers, then failed-to-run (over), and the probe goes on.
+  const mark = results.rows.length, overBefore = over;
+  const ran = await runCase(c, { name: thing.name, prepare: home }, async () => {
+    results.rows.splice(mark);
+    over = overBefore;
+    await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await c.js(`location.hash = ${JSON.stringify(thing.route)}, 1`);
+    await sleep(4000);
+    const at = await c.js(`(() => {
+      const e = [...document.querySelectorAll(${JSON.stringify(thing.sel)})].find((x) => x.getClientRects().length && !x.closest("[hidden]"));
+      if (!e) return null;
+      e.scrollIntoView({ block: "center" });
+      const r = e.getBoundingClientRect();
+      return { x: Math.round(r.left + Math.min(40, r.width / 2)), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    if (!at) { console.log(`${thing.name}: nothing to press at ${thing.route}`); results.rows.push({ thing: thing.name, missing: true }); return; }
+    await c.js(`(() => {
+      window.__rc = [];
+      // Once a document: the things are pages of one document, and a second listener would count each press twice.
+      if (window.__rcOn) return 1;
+      window.__rcOn = true;
+      window.addEventListener("contextmenu", (e) => {
+        const from = e.timeStamp;
+        const seen = () => {
+          if (!document.querySelector(".tf-ctx-m")) return requestAnimationFrame(seen);
+          requestAnimationFrame(() => setTimeout(() => window.__rc.push(performance.now() - from), 0));
+        };
+        requestAnimationFrame(seen);
+      }, true);
+      return 1;
+    })()`);
+    for (const rate of throttles) {
+      await c.send("Emulation.setCPUThrottlingRate", { rate });
+      await c.js(`(window.__rc = [], 1)`);
+      for (let i = 0; i < reps; i++) {
+        await c.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
+        await c.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "right", buttons: 2, clickCount: 1 });
+        await c.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "right", buttons: 0, clickCount: 1 });
+        await sleep(400 * rate);
+        await c.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        await sleep(200 * rate);
+      }
+      const times = (await c.js(`window.__rc.slice()`)).sort((a, b) => a - b);
+      const median = times.length ? times[Math.floor(times.length / 2)] : null;
+      const line = mac ? LINE[rate] / 2 : LINE[rate];
+      const bad = median === null || times.length < reps || median > line;
+      if (bad) over++;
+      results.rows.push({ thing: thing.name, rate, times, median, line });
+      console.log(`${bad ? "OVER" : "ok  "} ${thing.name.padEnd(16)} ${rate}x  median ${median?.toFixed(1)} ms, worst ${times.at(-1)?.toFixed(1)} ms of ${times.length} (line ${line} ms)`);
     }
-    const times = (await c.js(`window.__rc.slice()`)).sort((a, b) => a - b);
-    const median = times.length ? times[Math.floor(times.length / 2)] : null;
-    const line = mac ? LINE[rate] / 2 : LINE[rate];
-    const bad = median === null || times.length < reps || median > line;
-    if (bad) over++;
-    results.rows.push({ thing: thing.name, rate, times, median, line });
-    console.log(`${bad ? "OVER" : "ok  "} ${thing.name.padEnd(16)} ${rate}x  median ${median?.toFixed(1)} ms, worst ${times.at(-1)?.toFixed(1)} ms of ${times.length} (line ${line} ms)`);
-  }
+  });
+  if (ran.failedToRun) { over = overBefore + 1; results.rows.splice(mark, Infinity, { thing: thing.name, failedToRun: ran.failedToRun }); console.log(failedLine({ name: thing.name, failedToRun: ran.failedToRun })); }
 }
-await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
 if (opt("--out")) writeFileSync(opt("--out"), JSON.stringify(results, null, 1));
 chrome.stop();
 process.exit(over ? 1 : 0);

@@ -294,12 +294,14 @@ export async function attach(port, match = (t) => t.type === "page") {
  * past its deadline, a dead socket, the case past its limit) the session moves to a fresh page (`renew`), `prepare()`
  * runs when given (what the probe did once before its cases: open the app, put its page script in), and the case runs
  * once more. Returns `{ value }`, or `{ failedToRun }` with the stalls' message after a second one, the session again on
- * a fresh page for the next case. A probe's own errors are thrown as before.
+ * a fresh page for the next case. A probe's own errors are thrown as before. `retry: false` gives up at the first stall,
+ * for a case that a fresh page would not measure (a soak's lap, which reads what the session has grown).
  */
-export async function runCase(c, { name, throttle = null, limit = LIMITS.case, prepare = null }, fn) {
+export async function runCase(c, { name, throttle = null, limit = LIMITS.case, prepare = null, retry = true }, fn) {
   watch({ case: name, throttle });
   let first = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  const tries = retry ? 2 : 1;
+  for (let attempt = 1; attempt <= tries; attempt++) {
     const a = { case: name, stalled: null, gaveUp: false };
     let timer;
     try {
@@ -314,14 +316,14 @@ export async function runCase(c, { name, throttle = null, limit = LIMITS.case, p
     } catch (e) {
       if (!isStalled(e)) throw e;
       a.gaveUp = true;
-      console.error(`watchdog: ${e.message}; ${attempt === 1 ? "trying the case once more on a fresh page" : "the case failed to run"}`);
+      console.error(`watchdog: ${e.message}; ${attempt < tries ? "trying the case once more on a fresh page" : "the case failed to run"}`);
       const said = first === null ? e.what : first === e.what ? `${first}, twice` : `${first}, then on a fresh page ${e.what}`;
       try { await c.renew(); } catch (r) {
         if (!isStalled(r)) throw r;
         console.error(`watchdog: ${r.message}`);
         return { failedToRun: `${said}, then ${r.what}` };
       }
-      if (attempt === 2) return { failedToRun: said };
+      if (attempt === tries) return { failedToRun: said };
       first = e.what;
     } finally {
       clearTimeout(timer);

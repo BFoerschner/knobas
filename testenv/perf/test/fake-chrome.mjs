@@ -84,6 +84,7 @@ server.on("upgrade", (req, socket) => {
     if (msg.method === "Runtime.evaluate") result = { result: { type: typeof value, value } };
     if (msg.method === "Page.navigate") result = { frameId: "F", loaderId: "L" };
     if (msg.method === "Page.captureScreenshot") result = { data: "" };
+    if (msg.method === "Performance.getMetrics") result = { metrics: [] };
     say({ id: msg.id, result });
     if (msg.method === "Page.navigate" || msg.method === "Page.reload") setTimeout(() => event("Page.loadEventFired", { timestamp: Date.now() / 1000 }), 5);
     if (msg.method === "Tracing.end") setTimeout(() => event("Tracing.tracingComplete", {}), 5);

@@ -96,7 +96,8 @@ an SSH tunnel.
 | `profile.mjs` | a CPU profile of one moment (`--setup`, then `--act`), by function, for a slow key or page switch the frame probe names only by its task |
 | `moment.mjs` | the same moment under a Chrome trace (the inner-6x pass, 2026-11-15): each long task after `--act` split into script, style, layout and paint, and each style or layout pass in it with its elements or objects and, where script forced it, the frame that did. A profile's "(program)" is this |
 | `serve.mjs` | serves a built app on 127.0.0.1 where there is no Python (Windows) |
-| `cdp.mjs` | the DevTools-protocol client: `launch()` a headless Chrome of its own, or `attach(port)` to one listening |
+| `cdp.mjs` | the DevTools-protocol client: `launch()` a headless Chrome of its own, or `attach(port)` to one listening; every wait has a deadline and each case runs under `runCase()` (*No probe waits for good*, below) |
+| `test/fake-chrome.mjs`, `test/watchdog.test.mjs`, `watchdog-test.sh` | a stand-in Chrome that leaves a chosen call unanswered, dies or never opens its socket, and the tests that every probe with cases ends, retries and reports against it (`just witness-unit`) |
 | `frame-budget.sh` | what `just frame-budget` runs |
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
@@ -113,6 +114,34 @@ an SSH tunnel.
 | `runs-read.mjs` | *Mark as read* on a failed run's row and back, and the rail's *Mark all as read* (drawn, then said by its toast after the backend's write) and its *Undo*, as real presses at each throttle against the windowless backend (`docs/decisions/2026-11-17-mark-builds-as-read.md`); the marks are put back as found |
 | `wk/` | WKWebView, which has no DevTools protocol: below |
 | `win/` | the guard and display helpers for a run on a person's Windows PC |
+
+## No probe waits for good (the probe-watchdog pass, 2026-11-18)
+
+`keys.mjs` hung for 27 minutes in the ux18 gate at 1920x1080@2: the page drawn and idle, a DevTools call that never
+answered, and no deadline on it. Now every wait in `cdp.mjs` has one, at `LIMITS` (each far past the slowest healthy
+run, 6x at 5120x1440@2 on the scale database):
+
+| Wait | Limit | Why that long |
+|---|---|---|
+| a DevTools command | 30 s | answered in milliseconds; a throttled renderer acks input within a second or two |
+| a trace's end, a screenshot, a heap collection, a profile's stop, a synthesized scroll | 120 s | they do the work before they answer |
+| an awaited evaluate (`js()`) | its own `timeout` (180 s by default) + 15 s | the probes' in-page waits give up after 20 s; an expanded board's setup takes up to a minute |
+| an event (`once`, a page's load) | 60 s | the app loads in under 10 s at 6x |
+| the debug port's page list and the socket's opening | 15 s | a local socket opens in milliseconds |
+| a launched Chrome's debug port | 30 s | Chrome writes it within a second |
+| a probe's `fetch` (the backend's `/invoke`) | 120 s | a cold scale-database read takes seconds; `sync_now` only starts a sync |
+| a case, setup and every press (`runCase`) | 10 min (a soak's lap 20) | the longest case, an open with every section toured at 6x, takes about two |
+
+A socket that closes fails every call still waiting at once, and a stall's error names the probe, the size, the
+throttle, the case and the call (`keys.mjs 1920x1080@2 4x tickets-letter: Page.loadEventFired did not come in 60000
+ms`). A stalled case is tried once more on a fresh page, the old one closed (in a fresh Chrome when the one the probe
+launched died), with the calls that set the page up made again (domains, emulation, scripts for every document); a
+second stall makes it failed-to-run: `FAILED TO RUN ...` in the log, `failedToRun` in the JSON, over its line in every
+check, and the probe goes on with the next case. Calls from the attempt that was given up fail from then on, so it
+cannot act on the fresh page, and so does every later call of an attempt that stalled, so a probe that catches the
+error and goes on cannot wait out each deadline in turn. A soak's lap is not tried again (a fresh page would not read
+what the session grew): the soak ends failed-to-run. `compare.mjs` keeps its own way, a fresh Chrome for the next step.
+`KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit; `watchdog-test.sh` runs the tests at 0.01 in about 12 s.
 
 ## What the numbers mean
 

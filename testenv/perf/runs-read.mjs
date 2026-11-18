@@ -17,7 +17,7 @@
 // `mark-all-said` waits on the backend's write and is reported against the page's line. Exits 1 when a median is over
 // its line. The marks are put back as found at the end.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
@@ -136,11 +136,24 @@ function report(name, rate, times, line) {
   console.log(`${bad ? "OVER" : "ok  "} ${name.padEnd(13)} ${rate}x  median ${median?.toFixed(1)} ms, worst ${times.at(-1)?.toFixed(1)} ms of ${times.length} (line ${held} ms)`);
 }
 
-try {
+/** The pipeline's page with its unread run drawn: at the start, and on a fresh page after a stall. */
+async function open() {
   await load(`#/builds/${encodeURIComponent(target.p.entity_id)}`);
   for (let i = 0; i < 100 && !(await c.js(`!!${dot}`)); i++) await sleep(100);
   if (!(await c.js(`!!${dot}`))) throw new Error(`no unread dot on ${runId}`);
-  for (const rate of throttles) {
+}
+/** One measure at `rate` under the watchdog (cdp.mjs): tried once more on a fresh page, then failed-to-run (over). */
+async function guarded(name, rate, fn) {
+  const ran = await runCase(c, { name, throttle: rate, prepare: open }, fn);
+  if (!ran.failedToRun) return;
+  over++;
+  results.rows.push({ name, rate, failedToRun: ran.failedToRun });
+  console.log(failedLine({ name, throttle: rate, failedToRun: ran.failedToRun }));
+}
+
+try {
+  await open();
+  for (const rate of throttles) await guarded("mark-one", rate, async () => {
     const one = [];
     const back = [];
     for (let i = 0; i < reps; i++) {
@@ -159,9 +172,9 @@ try {
     }
     report("mark-one", rate, one, CLICK[rate]);
     report("unmark-one", rate, back, CLICK[rate]);
-  }
+  });
 
-  for (const rate of throttles) {
+  for (const rate of throttles) await guarded("mark-all", rate, async () => {
     const all = [];
     const allSaid = [];
     const undo = [];
@@ -202,7 +215,7 @@ try {
     report("mark-all", rate, all, CLICK[rate]);
     report("mark-all-said", rate, allSaid, PAGE[rate]);
     report("undo-all", rate, undo, CLICK[rate]);
-  }
+  });
 } finally {
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
   // The marks as found: everything unread again, then what was read before.

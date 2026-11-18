@@ -28,7 +28,7 @@
 // `--attach <port>` drives a Chrome already listening (headless Chrome on the WSL box through a tunnel) instead of one
 // of its own; the size is still set by override.
 import { readFileSync, writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const size = sizeFrom(args);
@@ -107,82 +107,92 @@ const results = [];
 for (const page of PAGES) {
   if (only && !only.some((word) => page.name.includes(word))) continue;
   for (const throttle of throttles) {
-    await cpu(1);
-    await fresh();
-    await js(`(async () => { ${page.setup} return 1; })()`);
-    await cpu(throttle);
-    await sleep(500);
-    for (const level of levels) {
-      const runs = [];
-      // At 100 % there is no step: the scroll alone, the line the levels are read against.
-      for (let r = 0; r < (level === 1 ? 0 : repeat); r++) {
-        for (const [to, key] of [[level, level >= 1 ? "=" : "-"], [1, level >= 1 ? "-" : "="]]) {
-          await js(`window.__zr = null; addEventListener("resize", () => { window.__zr ??= performance.now(); }, { once: true });
-            window.__zp = null; { const plate = document.querySelector(".tf-zoomlevel"); if (plate) new MutationObserver((_, o) => { window.__zp ??= performance.now(); o.disconnect(); }).observe(plate, { childList: true, subtree: true, characterData: true }); }
-            __fr.start(); 1`);
-          const t0 = await step(to, key);
-          await sleep(700);
-          const got = await js(`(() => { const fs = __fr.frames.map((f) => ({ t0: f.t0, end: f.end })); const r = __fr.stop(0); return { fs, loaf: r.loaf, tr: window.__zr, tp: window.__zp, dpr: devicePixelRatio }; })()`);
-          if (to !== level) continue;
-          const frames = got.fs.filter((f) => f.end !== null);
-          // The resize steps run in the frame that lays out the new size, before its frame callbacks.
-          const first = got.tr === null ? null : frames.find((f) => f.t0 >= got.tr) ?? null;
-          const round = (x) => Math.round(x * 10) / 10;
-          // The plate's new level is written in a task; the frame after it paints it.
-          const plated = got.tp === null ? null : frames.find((f) => f.t0 >= got.tp) ?? null;
-          runs.push({
-            step: first ? round(first.t0 + first.end - t0) : null,
-            plate: plated ? round(plated.t0 + plated.end - t0) : null,
-            frame: first ? round(first.end) : null,
-            after: round(Math.max(0, ...frames.filter((f) => f !== first && f.t0 > (got.tr ?? 0)).map((f) => f.end))),
-            loaf: Math.max(0, ...got.loaf.map((l) => l.duration)),
-            // The longest animation frame's make-up: its render (style, layout, paint) and the scripts in it.
-            loafTop: got.loaf[0] ?? null,
-            dpr: got.dpr,
-          });
-        }
-      }
-      const row = {
-        page: page.name, size: size.name, throttle, level,
-        step: median(runs.map((x) => x.step)), plate: median(runs.map((x) => x.plate)), frame: median(runs.map((x) => x.frame)), after: median(runs.map((x) => x.after)),
-        loaf: median(runs.map((x) => x.loaf)),
-        dpr: runs[0]?.dpr ?? null, runs,
-      };
-      // The list scrolled, as run.mjs scrolls it: only at the scale Chrome was started at (above).
-      if (level === 1) row.scroll = await js(`(async () => {
-        const el = ${JSON.stringify(page.box ?? null)} ? __fr.pick(${JSON.stringify(page.box ?? null)}) : __fr.scrollers()[0]?.el;
-        if (!el) return null;
-        el.scrollTop = 0;
-        await __fr.sleep(300);
-        __fr.start();
-        const t0 = performance.now();
-        // Each frame, before the scroll moves on (layout is clean then): where each drawn row sits in the list's own
-        // coordinates. A row still drawn that sits elsewhere moved, and a moved row is painted again.
-        const was = new WeakMap();
-        let moved = 0, kept = 0;
-        const note = () => {
-          const top = el.getBoundingClientRect().top - el.scrollTop;
-          for (const row of el.querySelectorAll("[data-entity], tr, [role=treeitem], .tf-pl-row")) {
-            const at = row.getBoundingClientRect().top - top;
-            const before = was.get(row);
-            if (before !== undefined) { kept++; if (Math.abs(at - before) > 0.01) moved++; }
-            was.set(row, at);
+    // A page at a throttle under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers.
+    const mark = results.length;
+    const ran = await runCase(c, { name: page.name, throttle }, async () => {
+      results.splice(mark);
+      await cpu(1);
+      await fresh();
+      await js(`(async () => { ${page.setup} return 1; })()`);
+      await cpu(throttle);
+      await sleep(500);
+      for (const level of levels) {
+        const runs = [];
+        // At 100 % there is no step: the scroll alone, the line the levels are read against.
+        for (let r = 0; r < (level === 1 ? 0 : repeat); r++) {
+          for (const [to, key] of [[level, level >= 1 ? "=" : "-"], [1, level >= 1 ? "-" : "="]]) {
+            await js(`window.__zr = null; addEventListener("resize", () => { window.__zr ??= performance.now(); }, { once: true });
+              window.__zp = null; { const plate = document.querySelector(".tf-zoomlevel"); if (plate) new MutationObserver((_, o) => { window.__zp ??= performance.now(); o.disconnect(); }).observe(plate, { childList: true, subtree: true, characterData: true }); }
+              __fr.start(); 1`);
+            const t0 = await step(to, key);
+            await sleep(700);
+            const got = await js(`(() => { const fs = __fr.frames.map((f) => ({ t0: f.t0, end: f.end })); const r = __fr.stop(0); return { fs, loaf: r.loaf, tr: window.__zr, tp: window.__zp, dpr: devicePixelRatio }; })()`);
+            if (to !== level) continue;
+            const frames = got.fs.filter((f) => f.end !== null);
+            // The resize steps run in the frame that lays out the new size, before its frame callbacks.
+            const first = got.tr === null ? null : frames.find((f) => f.t0 >= got.tr) ?? null;
+            const round = (x) => Math.round(x * 10) / 10;
+            // The plate's new level is written in a task; the frame after it paints it.
+            const plated = got.tp === null ? null : frames.find((f) => f.t0 >= got.tp) ?? null;
+            runs.push({
+              step: first ? round(first.t0 + first.end - t0) : null,
+              plate: plated ? round(plated.t0 + plated.end - t0) : null,
+              frame: first ? round(first.end) : null,
+              after: round(Math.max(0, ...frames.filter((f) => f !== first && f.t0 > (got.tr ?? 0)).map((f) => f.end))),
+              loaf: Math.max(0, ...got.loaf.map((l) => l.duration)),
+              // The longest animation frame's make-up: its render (style, layout, paint) and the scripts in it.
+              loafTop: got.loaf[0] ?? null,
+              dpr: got.dpr,
+            });
           }
+        }
+        const row = {
+          page: page.name, size: size.name, throttle, level,
+          step: median(runs.map((x) => x.step)), plate: median(runs.map((x) => x.plate)), frame: median(runs.map((x) => x.frame)), after: median(runs.map((x) => x.after)),
+          loaf: median(runs.map((x) => x.loaf)),
+          dpr: runs[0]?.dpr ?? null, runs,
         };
-        await new Promise((done) => { const go = () => { note(); const t = performance.now() - t0; el.scrollTop = t * 3; if (t < 4000 && el.scrollTop < el.scrollHeight - el.clientHeight) requestAnimationFrame(go); else done(); }; requestAnimationFrame(go); });
-        const r = __fr.stop();
-        await __fr.sleep(300);
-        return { fps: r.fps, p50: r.frameWork.p50, p99: r.frameWork.p99, dropped: r.droppedPct, longest: r.loaf[0]?.duration ?? 0, moved, kept, range: el.scrollHeight - el.clientHeight };
-      })()`);
-      results.push(row);
-      const sc = row.scroll;
-      const PAGE_LINE = { 1: 100, 4: 200, 6: 300 }, KEY_LINE = { 1: 100, 4: 100, 6: 200 };
-      const over = (ms, line) => (ms !== null && line !== undefined && ms > line ? ` OVER ${line}` : "");
-      console.log(`${row.page.padEnd(14)} ${row.size} ${throttle}x ${Math.round(level * 100)} %: step ${row.step} ms${over(row.step, PAGE_LINE[throttle])} (frame ${row.frame}, then ≤ ${row.after}), plate ${row.plate} ms${over(row.plate, KEY_LINE[throttle])}, loaf ${row.loaf}, dpr ${row.dpr}` +
-        (level !== 1 ? "" : sc ? `; scroll ${sc.fps} fps, work ${sc.p50} / ${sc.p99} ms, dropped ${sc.dropped} %, rows moved ${sc.moved} of ${sc.kept} row-frames` : "; no scroller"));
+        // The list scrolled, as run.mjs scrolls it: only at the scale Chrome was started at (above).
+        if (level === 1) row.scroll = await js(`(async () => {
+          const el = ${JSON.stringify(page.box ?? null)} ? __fr.pick(${JSON.stringify(page.box ?? null)}) : __fr.scrollers()[0]?.el;
+          if (!el) return null;
+          el.scrollTop = 0;
+          await __fr.sleep(300);
+          __fr.start();
+          const t0 = performance.now();
+          // Each frame, before the scroll moves on (layout is clean then): where each drawn row sits in the list's own
+          // coordinates. A row still drawn that sits elsewhere moved, and a moved row is painted again.
+          const was = new WeakMap();
+          let moved = 0, kept = 0;
+          const note = () => {
+            const top = el.getBoundingClientRect().top - el.scrollTop;
+            for (const row of el.querySelectorAll("[data-entity], tr, [role=treeitem], .tf-pl-row")) {
+              const at = row.getBoundingClientRect().top - top;
+              const before = was.get(row);
+              if (before !== undefined) { kept++; if (Math.abs(at - before) > 0.01) moved++; }
+              was.set(row, at);
+            }
+          };
+          await new Promise((done) => { const go = () => { note(); const t = performance.now() - t0; el.scrollTop = t * 3; if (t < 4000 && el.scrollTop < el.scrollHeight - el.clientHeight) requestAnimationFrame(go); else done(); }; requestAnimationFrame(go); });
+          const r = __fr.stop();
+          await __fr.sleep(300);
+          return { fps: r.fps, p50: r.frameWork.p50, p99: r.frameWork.p99, dropped: r.droppedPct, longest: r.loaf[0]?.duration ?? 0, moved, kept, range: el.scrollHeight - el.clientHeight };
+        })()`);
+        results.push(row);
+        const sc = row.scroll;
+        const PAGE_LINE = { 1: 100, 4: 200, 6: 300 }, KEY_LINE = { 1: 100, 4: 100, 6: 200 };
+        const over = (ms, line) => (ms !== null && line !== undefined && ms > line ? ` OVER ${line}` : "");
+        console.log(`${row.page.padEnd(14)} ${row.size} ${throttle}x ${Math.round(level * 100)} %: step ${row.step} ms${over(row.step, PAGE_LINE[throttle])} (frame ${row.frame}, then ≤ ${row.after}), plate ${row.plate} ms${over(row.plate, KEY_LINE[throttle])}, loaf ${row.loaf}, dpr ${row.dpr}` +
+          (level !== 1 ? "" : sc ? `; scroll ${sc.fps} fps, work ${sc.p50} / ${sc.p99} ms, dropped ${sc.dropped} %, rows moved ${sc.moved} of ${sc.kept} row-frames` : "; no scroller"));
+        writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
+      }
+    });
+    if (ran.failedToRun) {
+      results.splice(mark, Infinity, { page: page.name, size: size.name, throttle, failedToRun: ran.failedToRun });
+      console.log(failedLine({ name: page.name, throttle, failedToRun: ran.failedToRun }));
       writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
     }
   }
 }
 browser?.stop();
-process.exit(0);
+process.exit(results.some((r) => r.failedToRun) ? 1 : 0);

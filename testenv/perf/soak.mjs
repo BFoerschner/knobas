@@ -43,7 +43,7 @@
 // the `soak-tour` lines. The nodes and the heap kept are printed and not held: what the tour presses is kept by
 // design (a hundred more cards a lap, a diff's context), so they grow until there is no more to press.
 import { readFileSync, writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, scaled, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 import { stylePasses } from "./frames.mjs";
 
 const args = process.argv.slice(2);
@@ -297,6 +297,16 @@ const takeCalls = () => js(`(() => { const s = window.__soak; const out = s.call
 const byCmd = (calls) => { const m = {}; for (const [cmd] of calls) m[cmd] = (m[cmd] ?? 0) + 1; return m; };
 
 const touring = args.includes("--tour");
+/** A lap's limit: the longest healthy lap (a tour of every page at 6x) takes about five minutes. */
+const LAP_MS = scaled(20 * 60000);
+/** A lap that stalled: the soak so far written with what stalled, and the soak failed (exit 1). */
+function stalled(entry, written) {
+  console.log(failedLine(entry));
+  writeFileSync(out, JSON.stringify({ ...written, failedToRun: `${entry.name}: ${entry.failedToRun}` }, null, 1));
+  browser?.stop();
+  process.exit(1);
+}
+
 if (touring) {
   // The page in front, whatever tabs of hidden pages stand unhidden inside them.
   const front = ".tf-kept:not([hidden]):not([hidden] *)";
@@ -321,26 +331,31 @@ if (touring) {
   const tourStart = Date.now();
   const lapsWanted = opt("--laps") === null ? (minutes === null ? 6 : Infinity) : Number(opt("--laps"));
   for (let lap = 1; lap <= lapsWanted && (minutes === null || Date.now() - tourStart < minutes * 60000); lap++) {
-    const row = { lap, atMin: 0, pages: {} };
-    for (const hash of pages) {
-      await go(hash);
-      const pressed = await more();
-      if (pressed > 0) await settle(4000);
-      await wheelFile(500);
-      await wheelFile(-500);
-      const rows = await rowsOf();
-      const got = await during(rows.length > 0 ? rows : [{ x: Math.round(size.width * 0.5), y: Math.round(size.height * 0.5) }], endRuns);
-      await settle(6000);
-      const elements = await js(`document.querySelector("${front}")?.getElementsByTagName("*").length ?? 0`);
-      row.pages[hash] = { pressed, rows: rows.length, elements, ...got };
-    }
-    await park();
-    const kept = await collected();
-    Object.assign(row, { atMin: r1((Date.now() - tourStart) / 60000), heapMB: r1(kept.JSHeapUsedSize / 1e6), nodesKept: kept.Nodes, listenersKept: kept.JSEventListeners, documents: kept.Documents, tauriListeners: await js("window.__soak.listens - window.__soak.unlistens") });
-    laps.push(row);
-    const worst = Object.entries(row.pages).sort((a, b) => b[1].feltMax - a[1].feltMax)[0];
-    console.log(`tour lap ${lap} (${row.atMin} min): ${row.nodesKept} nodes, ${row.listenersKept} listeners, ${row.tauriListeners} tauri, heap ${row.heapMB} MB; a run's end at ${slowest}x: ${Object.values(row.pages).reduce((a, p) => a + p.calls, 0)} calls and ${Object.values(row.pages).reduce((a, p) => a + p.mainMs, 0)} ms over ${pages.length} pages; slowest hover ${worst[1].feltMax} ms on ${worst[0]}`);
-    writeFileSync(out, JSON.stringify({ app, repo, size: size.name, throttle: slowest, pages, laps }, null, 1));
+    // A lap under the watchdog (cdp.mjs): a stall ends the soak, failed-to-run (a fresh page would not read what the
+    // session grew).
+    const ran = await runCase(c, { name: `tour lap ${lap}`, throttle: slowest, retry: false, limit: LAP_MS }, async () => {
+      const row = { lap, atMin: 0, pages: {} };
+      for (const hash of pages) {
+        await go(hash);
+        const pressed = await more();
+        if (pressed > 0) await settle(4000);
+        await wheelFile(500);
+        await wheelFile(-500);
+        const rows = await rowsOf();
+        const got = await during(rows.length > 0 ? rows : [{ x: Math.round(size.width * 0.5), y: Math.round(size.height * 0.5) }], endRuns);
+        await settle(6000);
+        const elements = await js(`document.querySelector("${front}")?.getElementsByTagName("*").length ?? 0`);
+        row.pages[hash] = { pressed, rows: rows.length, elements, ...got };
+      }
+      await park();
+      const kept = await collected();
+      Object.assign(row, { atMin: r1((Date.now() - tourStart) / 60000), heapMB: r1(kept.JSHeapUsedSize / 1e6), nodesKept: kept.Nodes, listenersKept: kept.JSEventListeners, documents: kept.Documents, tauriListeners: await js("window.__soak.listens - window.__soak.unlistens") });
+      laps.push(row);
+      const worst = Object.entries(row.pages).sort((a, b) => b[1].feltMax - a[1].feltMax)[0];
+      console.log(`tour lap ${lap} (${row.atMin} min): ${row.nodesKept} nodes, ${row.listenersKept} listeners, ${row.tauriListeners} tauri, heap ${row.heapMB} MB; a run's end at ${slowest}x: ${Object.values(row.pages).reduce((a, p) => a + p.calls, 0)} calls and ${Object.values(row.pages).reduce((a, p) => a + p.mainMs, 0)} ms over ${pages.length} pages; slowest hover ${worst[1].feltMax} ms on ${worst[0]}`);
+      writeFileSync(out, JSON.stringify({ app, repo, size: size.name, throttle: slowest, pages, laps }, null, 1));
+    });
+    if (ran.failedToRun) stalled({ name: `tour lap ${lap}`, throttle: slowest, failedToRun: ran.failedToRun }, { app, repo, size: size.name, throttle: slowest, pages, laps });
   }
   // A page's second and third visits are its steady state (the first reads what the session never read; Branches reads
   // its branches' standings over two): the larger of the two is what the last is held against.
@@ -383,104 +398,109 @@ let lastSync = Date.now();
 await go(R);
 await settle();
 for (let lap = 1; lap <= laps && (minutes === null || Date.now() - started < minutes * 60000); lap++) {
-  const lapStart = Date.now();
-  const before = await metrics();
-  await takeCalls();
-  await js("window.__soak.long.splice(0)");
-  // ---- the lap: a person on the page ----
-  const did = [];
-  if (!(await js(`location.hash.startsWith(${JSON.stringify(R)})`))) await go(R);
-  for (let i = 0; i < 2 + (lap % 2); i++) did.push((await openFolder()) ? "folder" : "no-folder");
-  for (let i = 0; i < 2; i++) { did.push((await openFile()) ? "file" : "no-file"); await wheelFile(900); }
-  if (lap % 3 === 0) did.push((await foldFolder()) ? "fold" : "no-fold");
-  if (lap % 4 === 1) await wheelTree(rnd() < 0.5 ? 500 : -700);
-  const here = await js("location.hash");
-  if (lap % 3 === 1) {
-    did.push("commits");
-    await press(`${shown} .tf-tabs a[href="${R}/commits"]`);
-    if (await press(`${shown} a[href^="${R}/commits/"]`)) did.push("commit");
-    await go(here);
-  }
-  if (lap % 4 === 2) {
-    did.push("compare");
-    if (!(await press(`${shown} .tf-repohead a.tf-primary`))) await press(`${shown} .tf-tabs a[href="${R}/compare"]`);
-    await wheelFile(700);
-    await go(here);
-  }
-  if (lap % 5 === 3) {
-    did.push("prs");
-    await press(`${shown} .tf-tabs a[href="${R}/prs"]`);
-    const pr = await js(`document.querySelector("${shown} a[href^='#/pr/']")?.getAttribute("href") ?? null`);
-    if (pr !== null) {
-      did.push("pr");
-      await go(pr);
-      await press(`${shown} .tf-tabs a[href="${pr}/diff"]`);
-      await wheelFile(900);
+  // A lap under the watchdog (cdp.mjs): a stall ends the soak, failed-to-run (a fresh page would not read what the
+  // session grew).
+  const ran = await runCase(c, { name: `lap ${lap}`, throttle: Math.max(...throttles), retry: false, limit: LAP_MS }, async () => {
+    const lapStart = Date.now();
+    const before = await metrics();
+    await takeCalls();
+    await js("window.__soak.long.splice(0)");
+    // ---- the lap: a person on the page ----
+    const did = [];
+    if (!(await js(`location.hash.startsWith(${JSON.stringify(R)})`))) await go(R);
+    for (let i = 0; i < 2 + (lap % 2); i++) did.push((await openFolder()) ? "folder" : "no-folder");
+    for (let i = 0; i < 2; i++) { did.push((await openFile()) ? "file" : "no-file"); await wheelFile(900); }
+    if (lap % 3 === 0) did.push((await foldFolder()) ? "fold" : "no-fold");
+    if (lap % 4 === 1) await wheelTree(rnd() < 0.5 ? 500 : -700);
+    const here = await js("location.hash");
+    if (lap % 3 === 1) {
+      did.push("commits");
+      await press(`${shown} .tf-tabs a[href="${R}/commits"]`);
+      if (await press(`${shown} a[href^="${R}/commits/"]`)) did.push("commit");
+      await go(here);
     }
-    await go(here);
-  }
-  let returned = null;
-  if (lap % 2 === 0) {
-    const section = ["#/inbox", "#/tickets", "#/builds", "#/docs", "#/monitors", "#/code"][(lap / 2) % 6];
-    did.push(section);
-    const rows = (await treeRows()).slice(0, 14);
-    await go(section);
-    await wheelFile(600);
-    // The return, the pointer where the tree is: what the page's reads on being shown again cost a hover.
-    returned = await during(rows, () => js(`(location.hash = ${JSON.stringify(here)}, 0)`));
-    await settle();
-  }
-  await park();
-  await settle(3000);
-  const lapCalls = await takeCalls();
-  const worked = await metrics();
-  const lapMs = Date.now() - lapStart;
+    if (lap % 4 === 2) {
+      did.push("compare");
+      if (!(await press(`${shown} .tf-repohead a.tf-primary`))) await press(`${shown} .tf-tabs a[href="${R}/compare"]`);
+      await wheelFile(700);
+      await go(here);
+    }
+    if (lap % 5 === 3) {
+      did.push("prs");
+      await press(`${shown} .tf-tabs a[href="${R}/prs"]`);
+      const pr = await js(`document.querySelector("${shown} a[href^='#/pr/']")?.getAttribute("href") ?? null`);
+      if (pr !== null) {
+        did.push("pr");
+        await go(pr);
+        await press(`${shown} .tf-tabs a[href="${pr}/diff"]`);
+        await wheelFile(900);
+      }
+      await go(here);
+    }
+    let returned = null;
+    if (lap % 2 === 0) {
+      const section = ["#/inbox", "#/tickets", "#/builds", "#/docs", "#/monitors", "#/code"][(lap / 2) % 6];
+      did.push(section);
+      const rows = (await treeRows()).slice(0, 14);
+      await go(section);
+      await wheelFile(600);
+      // The return, the pointer where the tree is: what the page's reads on being shown again cost a hover.
+      returned = await during(rows, () => js(`(location.hash = ${JSON.stringify(here)}, 0)`));
+      await settle();
+    }
+    await park();
+    await settle(3000);
+    const lapCalls = await takeCalls();
+    const worked = await metrics();
+    const lapMs = Date.now() - lapStart;
 
-  // ---- the page at rest ----
-  const row = { lap, atMin: r1((Date.now() - started) / 60000), did: did.join(" "), lapMs, lapTaskMs: Math.round((worked.TaskDuration - before.TaskDuration) * 1000), lapLongest: Math.round(Math.max(0, ...(await js("window.__soak.long.splice(0)")))), lapCalls: lapCalls.out.length, lapMaxInflight: lapCalls.max };
-  if (returned !== null) row.afterReturn = returned;
-  // Nothing pressed for two seconds: what the page works by itself.
-  {
-    const a = await metrics();
-    await sleep(2000);
-    const b = await metrics();
-    row.idleMsPerMin = Math.round((b.TaskDuration - a.TaskDuration) * 1000 * 30);
-    row.idleCalls = (await takeCalls()).out.length;
-  }
-  // A run's end: its work and its reads, and a hover in the second after it.
-  if (Date.now() - lastSync >= syncEvery || lap === 1) {
-    lastSync = Date.now();
-    row.afterSync = await during((await treeRows()).slice(0, 14), endRuns);
-    await settle(8000);
-  }
-  const m = await metrics();
-  Object.assign(row, { nodes: m.Nodes, listeners: m.JSEventListeners, documents: m.Documents, layouts: m.LayoutCount, styles: m.RecalcStyleCount });
-  Object.assign(row, await js(`(() => { const s = window.__soak; const tree = document.querySelector("${shown} .tf-ftree");
-    return { tauriListeners: s.listens - s.unlistens, treeRowsDom: tree ? tree.querySelectorAll("[data-path]").length : 0, treeHeight: tree ? tree.scrollHeight : 0,
-      kept: document.querySelectorAll(".tf-kept").length, elements: document.getElementsByTagName("*").length, shownElements: document.querySelector("${shown}")?.getElementsByTagName("*").length ?? 0 }; })()`));
-  row.foldersOpened = opened.size;
-  if (lap % 5 === 1) {
-    const kept = await collected();
-    row.heapMB = r1(kept.JSHeapUsedSize / 1e6);
-    row.nodesKept = kept.Nodes;
-    row.listenersKept = kept.JSEventListeners;
-  }
-  row.hover = {};
-  for (const rate of throttles) row.hover[`${rate}x`] = summary(await sweep(rate));
-  if (traceEvery > 0 && (lap === 1 || lap % traceEvery === 0)) {
-    await trace.start(["devtools.timeline", "disabled-by-default-devtools.timeline", "blink", "blink.user_timing"]);
-    await sweep(1);
-    const events = await trace.stop();
-    const ts = events.map((e) => e.ts).filter((t) => t > 0);
-    const passes = stylePasses(events, Math.min(...ts), Math.max(...ts));
-    row.hoverStyle = { passes: passes.n, elements: passes.elements, ms: passes.ms };
-  }
-  await js("window.__soak.long.splice(0)");
-  await takeCalls();
-  samples.push(row);
-  const h = (rate) => row.hover[`${rate}x`] ? `${row.hover[`${rate}x`].feltP95}/${row.hover[`${rate}x`].costP95}` : "-";
-  console.log(`lap ${lap} (${row.atMin} min, ${row.foldersOpened} folders): hover felt/cost p95 ${throttles.map((t) => `${t}x ${h(t)}`).join(", ")} ms; ${row.nodes} nodes, ${row.listeners} listeners, ${row.tauriListeners} tauri, tree ${row.treeRowsDom} in DOM${row.heapMB ? `, heap ${row.heapMB} MB` : ""}; idle ${row.idleMsPerMin} ms/min${row.afterSync ? `; a run's end at ${slowest}x: ${row.afterSync.mainMs} ms, ${row.afterSync.calls} calls, hover p95 ${row.afterSync.feltP95} max ${row.afterSync.feltMax}` : ""}${returned ? `; a return at ${slowest}x: ${returned.mainMs} ms, hover p95 ${returned.feltP95} max ${returned.feltMax}` : ""}${row.hoverStyle ? `; style ${JSON.stringify(row.hoverStyle.elements)}` : ""}`);
-  writeFileSync(out, JSON.stringify({ app, repo, size: size.name, throttles, syncEvery, samples }, null, 1));
+    // ---- the page at rest ----
+    const row = { lap, atMin: r1((Date.now() - started) / 60000), did: did.join(" "), lapMs, lapTaskMs: Math.round((worked.TaskDuration - before.TaskDuration) * 1000), lapLongest: Math.round(Math.max(0, ...(await js("window.__soak.long.splice(0)")))), lapCalls: lapCalls.out.length, lapMaxInflight: lapCalls.max };
+    if (returned !== null) row.afterReturn = returned;
+    // Nothing pressed for two seconds: what the page works by itself.
+    {
+      const a = await metrics();
+      await sleep(2000);
+      const b = await metrics();
+      row.idleMsPerMin = Math.round((b.TaskDuration - a.TaskDuration) * 1000 * 30);
+      row.idleCalls = (await takeCalls()).out.length;
+    }
+    // A run's end: its work and its reads, and a hover in the second after it.
+    if (Date.now() - lastSync >= syncEvery || lap === 1) {
+      lastSync = Date.now();
+      row.afterSync = await during((await treeRows()).slice(0, 14), endRuns);
+      await settle(8000);
+    }
+    const m = await metrics();
+    Object.assign(row, { nodes: m.Nodes, listeners: m.JSEventListeners, documents: m.Documents, layouts: m.LayoutCount, styles: m.RecalcStyleCount });
+    Object.assign(row, await js(`(() => { const s = window.__soak; const tree = document.querySelector("${shown} .tf-ftree");
+      return { tauriListeners: s.listens - s.unlistens, treeRowsDom: tree ? tree.querySelectorAll("[data-path]").length : 0, treeHeight: tree ? tree.scrollHeight : 0,
+        kept: document.querySelectorAll(".tf-kept").length, elements: document.getElementsByTagName("*").length, shownElements: document.querySelector("${shown}")?.getElementsByTagName("*").length ?? 0 }; })()`));
+    row.foldersOpened = opened.size;
+    if (lap % 5 === 1) {
+      const kept = await collected();
+      row.heapMB = r1(kept.JSHeapUsedSize / 1e6);
+      row.nodesKept = kept.Nodes;
+      row.listenersKept = kept.JSEventListeners;
+    }
+    row.hover = {};
+    for (const rate of throttles) row.hover[`${rate}x`] = summary(await sweep(rate));
+    if (traceEvery > 0 && (lap === 1 || lap % traceEvery === 0)) {
+      await trace.start(["devtools.timeline", "disabled-by-default-devtools.timeline", "blink", "blink.user_timing"]);
+      await sweep(1);
+      const events = await trace.stop();
+      const ts = events.map((e) => e.ts).filter((t) => t > 0);
+      const passes = stylePasses(events, Math.min(...ts), Math.max(...ts));
+      row.hoverStyle = { passes: passes.n, elements: passes.elements, ms: passes.ms };
+    }
+    await js("window.__soak.long.splice(0)");
+    await takeCalls();
+    samples.push(row);
+    const h = (rate) => row.hover[`${rate}x`] ? `${row.hover[`${rate}x`].feltP95}/${row.hover[`${rate}x`].costP95}` : "-";
+    console.log(`lap ${lap} (${row.atMin} min, ${row.foldersOpened} folders): hover felt/cost p95 ${throttles.map((t) => `${t}x ${h(t)}`).join(", ")} ms; ${row.nodes} nodes, ${row.listeners} listeners, ${row.tauriListeners} tauri, tree ${row.treeRowsDom} in DOM${row.heapMB ? `, heap ${row.heapMB} MB` : ""}; idle ${row.idleMsPerMin} ms/min${row.afterSync ? `; a run's end at ${slowest}x: ${row.afterSync.mainMs} ms, ${row.afterSync.calls} calls, hover p95 ${row.afterSync.feltP95} max ${row.afterSync.feltMax}` : ""}${returned ? `; a return at ${slowest}x: ${returned.mainMs} ms, hover p95 ${returned.feltP95} max ${returned.feltMax}` : ""}${row.hoverStyle ? `; style ${JSON.stringify(row.hoverStyle.elements)}` : ""}`);
+    writeFileSync(out, JSON.stringify({ app, repo, size: size.name, throttles, syncEvery, samples }, null, 1));
+  });
+  if (ran.failedToRun) stalled({ name: `lap ${lap}`, failedToRun: ran.failedToRun }, { app, repo, size: size.name, throttles, syncEvery, samples });
 }
 
 // ---- what the run says ----

@@ -29,7 +29,7 @@
 // - **pr-jump**: in the pull request's *Files changed*, file 1,900 picked in its list (the whole diff stops at its ceiling
 //   of 50,000 lines, which since the compare-jump pass's mix falls short of the middle file).
 import { readFileSync, writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
 import { MIX_LAST, MIX_SMALL } from "./big-compare.mjs";
 
 const args = process.argv.slice(2);
@@ -218,6 +218,8 @@ let browser;
 let c;
 const js = (code, timeout = 120000) =>
   Promise.race([c.js(code, { timeout }), new Promise((_, no) => setTimeout(() => no(new Error(`frozen: no answer in ${Math.round(timeout / 1000)} s`)), timeout + 2000))]);
+/** For `runCase`: each try of a throttle's moves starts a Chrome of its own (`start`), so there is no page to renew. */
+const OWN_CHROME = { renew: async () => {} };
 async function start() {
   if (browser) { try { c.close(); } catch {} browser.stop(); }
   browser = await launch({ size });
@@ -285,97 +287,106 @@ const record = (r) => {
 };
 
 for (const rate of throttles) {
-  const t = twins.includes(rate) ? "-b" : "";
-  const branch = `many-commits${t}`;
-  const compare = `${R}/compare/${enc(branch)}`;
-  const listed = `.tf-cdiff .tf-flist button[title="A-${branch}.md"]`;
-  await start();
-  await cpu(1);
-  await fresh(compare, listed);
-  await sleep(1500);
-  await quiet(800);
-  const settle = async () => { await cpu(1); await quiet(1000); await cpu(rate); };
-  await cpu(rate);
-  for (const [name, path] of [["jump-mid", MID], ["jump-last", LAST]]) {
-    if (!wants(name)) continue;
+  // A throttle's moves under the watchdog (cdp.mjs): a call that never answers tries them once more in a fresh Chrome
+  // (each try starts its own), then they are failed-to-run.
+  const mark = results.moves.length;
+  const ran = await runCase(OWN_CHROME, { name: "moves", throttle: rate }, async () => {
+    results.moves.splice(mark);
+    const t = twins.includes(rate) ? "-b" : "";
+    const branch = `many-commits${t}`;
+    const compare = `${R}/compare/${enc(branch)}`;
+    const listed = `.tf-cdiff .tf-flist button[title="A-${branch}.md"]`;
+    await start();
     await cpu(1);
-    await js(`__mv.scrollToEl(".tf-cdiff .tf-dview")`);
+    await fresh(compare, listed);
+    await sleep(1500);
     await quiet(800);
-    await js(`__mv.railTo(${JSON.stringify(path)})`);
-    await quiet(800);
+    const settle = async () => { await cpu(1); await quiet(1000); await cpu(rate); };
     await cpu(rate);
-    const [land, lines] = path === LAST ? [inView(path), inViewLines(path)] : [atTop(path), withLines(path)];
-    record(await move(rate, name, [land, lines], () => js(`__mv.press(${JSON.stringify(`.tf-cdiff .tf-flist button[title="${path}"]`)})`), card(path)));
-    await settle();
-  }
-  if (wants("jump-small"))
-    for (const { path, kind } of MIX_SMALL) {
+    for (const [name, path] of [["jump-mid", MID], ["jump-last", LAST]]) {
+      if (!wants(name)) continue;
       await cpu(1);
       await js(`__mv.scrollToEl(".tf-cdiff .tf-dview")`);
       await quiet(800);
       await js(`__mv.railTo(${JSON.stringify(path)})`);
       await quiet(800);
       await cpu(rate);
-      const r = await move(rate, "jump-small", [smallLanded(path), smallLines(path, kind)], () => js(`__mv.press(${JSON.stringify(`.tf-cdiff .tf-flist button[title="${path}"]`)})`), card(path));
-      record({ ...r, file: path, kind, drift: r.drift === null ? null : Math.abs(r.drift) });
+      const [land, lines] = path === LAST ? [inView(path), inViewLines(path)] : [atTop(path), withLines(path)];
+      record(await move(rate, name, [land, lines], () => js(`__mv.press(${JSON.stringify(`.tf-cdiff .tf-flist button[title="${path}"]`)})`), card(path)));
       await settle();
     }
-  if (wants("top")) {
-    // From deep in the diff: the band's *Back to top*, where there is one.
-    const top = `onScreen(q("#tf-cmp-from"))`;
-    record(await move(rate, "top", [top, top], () => js(`__mv.press(".tf-cdiff .tf-dtop")`)));
-    await settle();
-  }
-  if (wants("swap")) {
-    await js(`(${"() => { const s = document.querySelector('" + shown + "')?.closest('.tf-main'); if (s) { s.dispatchEvent(new WheelEvent('wheel')); s.scrollTop = 0; } return 1; }"})()`);
-    await quiet(600);
-    // `swap-back` returns to a pair drawn before (the one the moves started on); the other three are pairs never drawn.
-    const swaps = [
-      ["swap-from", "tf-cmp-from", `files-3000${t}`, "main", `files-3000${t}`],
-      ["swap-into", "tf-cmp-into", "base-b", "base-b", `files-3000${t}`],
-      ["swap-from-2", "tf-cmp-from", branch, "base-b", branch],
-      ["swap-back", "tf-cmp-into", "main", "main", branch],
-    ];
-    for (const [name, id, value, into, from] of swaps) {
-      // Drawn, not on screen: before the big-compare pass the commits beside the form pushed the list 13,000 px down.
-      const shows = `!!q(${JSON.stringify(`.tf-cdiff .tf-flist button[title="A-${from}.md"]`)}) && (q(".tf-cfiles")?.textContent ?? "").includes(${JSON.stringify(`against ${into}`)})`;
-      record(await move(rate, name, [shows, `${shows} && !q(".tf-cdiff [aria-busy=true]")`], () => js(`__mv.pick(${JSON.stringify(id)}, ${JSON.stringify(value)})`)));
+    if (wants("jump-small"))
+      for (const { path, kind } of MIX_SMALL) {
+        await cpu(1);
+        await js(`__mv.scrollToEl(".tf-cdiff .tf-dview")`);
+        await quiet(800);
+        await js(`__mv.railTo(${JSON.stringify(path)})`);
+        await quiet(800);
+        await cpu(rate);
+        const r = await move(rate, "jump-small", [smallLanded(path), smallLines(path, kind)], () => js(`__mv.press(${JSON.stringify(`.tf-cdiff .tf-flist button[title="${path}"]`)})`), card(path));
+        record({ ...r, file: path, kind, drift: r.drift === null ? null : Math.abs(r.drift) });
+        await settle();
+      }
+    if (wants("top")) {
+      // From deep in the diff: the band's *Back to top*, where there is one.
+      const top = `onScreen(q("#tf-cmp-from"))`;
+      record(await move(rate, "top", [top, top], () => js(`__mv.press(".tf-cdiff .tf-dtop")`)));
       await settle();
     }
-  }
-  if (wants("diff")) {
-    const listedHere = `onScreen(document.querySelector(${JSON.stringify(`${shown}.tf-keptpage .tf-diffpage .tf-flist button[title="A-${branch}.md"], ${shown} .tf-diffpage .tf-flist button[title="A-${branch}.md"]`)}))`;
-    const firstLines = `${listedHere} && !!document.querySelector(${JSON.stringify(`${shown} .tf-diffpage .tf-diff .tf-ln`)})`;
-    record(await move(rate, "open-diff", [listedHere, firstLines], () => js(`__mv.press(".tf-cdiff .tf-trail a.tf-btn")`)));
-    await settle();
-  }
-  if (wants("pr") && pr) {
-    const id = t === "" ? pr : prTwin;
-    await cpu(1);
-    await fresh(`#/pr/${enc(id)}/diff`, `.tf-diff`);
-    await js(`__mv.scrollToEl(".tf-dview")`);
-    await quiet(800);
-    // A file before the middle: a pull request's whole diff stops at knobas's ceiling of 50,000 lines. Then
-    // a file of one line and the pure rename among the big files before it (`pr-jump-small`, the compare-jump pass).
-    const smalls = MIX_SMALL.filter(({ kind }) => kind === "one" || kind === "renamed").slice(0, 2);
-    for (const { path, kind, name } of [{ path: PR_MID, kind: "mid", name: "pr-jump" }, ...smalls.map((one) => ({ ...one, name: "pr-jump-small" }))]) {
+    if (wants("swap")) {
+      await js(`(${"() => { const s = document.querySelector('" + shown + "')?.closest('.tf-main'); if (s) { s.dispatchEvent(new WheelEvent('wheel')); s.scrollTop = 0; } return 1; }"})()`);
+      await quiet(600);
+      // `swap-back` returns to a pair drawn before (the one the moves started on); the other three are pairs never drawn.
+      const swaps = [
+        ["swap-from", "tf-cmp-from", `files-3000${t}`, "main", `files-3000${t}`],
+        ["swap-into", "tf-cmp-into", "base-b", "base-b", `files-3000${t}`],
+        ["swap-from-2", "tf-cmp-from", branch, "base-b", branch],
+        ["swap-back", "tf-cmp-into", "main", "main", branch],
+      ];
+      for (const [name, id, value, into, from] of swaps) {
+        // Drawn, not on screen: before the big-compare pass the commits beside the form pushed the list 13,000 px down.
+        const shows = `!!q(${JSON.stringify(`.tf-cdiff .tf-flist button[title="A-${from}.md"]`)}) && (q(".tf-cfiles")?.textContent ?? "").includes(${JSON.stringify(`against ${into}`)})`;
+        record(await move(rate, name, [shows, `${shows} && !q(".tf-cdiff [aria-busy=true]")`], () => js(`__mv.pick(${JSON.stringify(id)}, ${JSON.stringify(value)})`)));
+        await settle();
+      }
+    }
+    if (wants("diff")) {
+      const listedHere = `onScreen(document.querySelector(${JSON.stringify(`${shown}.tf-keptpage .tf-diffpage .tf-flist button[title="A-${branch}.md"], ${shown} .tf-diffpage .tf-flist button[title="A-${branch}.md"]`)}))`;
+      const firstLines = `${listedHere} && !!document.querySelector(${JSON.stringify(`${shown} .tf-diffpage .tf-diff .tf-ln`)})`;
+      record(await move(rate, "open-diff", [listedHere, firstLines], () => js(`__mv.press(".tf-cdiff .tf-trail a.tf-btn")`)));
+      await settle();
+    }
+    if (wants("pr") && pr) {
+      const id = t === "" ? pr : prTwin;
       await cpu(1);
+      await fresh(`#/pr/${enc(id)}/diff`, `.tf-diff`);
       await js(`__mv.scrollToEl(".tf-dview")`);
       await quiet(800);
-      await js(`__mv.railTo(${JSON.stringify(path)})`);
-      await quiet(800);
-      await cpu(rate);
-      const r = await move(rate, name, [atTop(path), kind === "renamed" ? atTop(path) : withLines(path)], () => js(`__mv.press(${JSON.stringify(`.tf-flist button[title="${path}"]`)})`), card(path));
-      record(name === "pr-jump" ? r : { ...r, file: path, kind, drift: r.drift === null ? null : Math.abs(r.drift) });
-      await settle();
+      // A file before the middle: a pull request's whole diff stops at knobas's ceiling of 50,000 lines. Then
+      // a file of one line and the pure rename among the big files before it (`pr-jump-small`, the compare-jump pass).
+      const smalls = MIX_SMALL.filter(({ kind }) => kind === "one" || kind === "renamed").slice(0, 2);
+      for (const { path, kind, name } of [{ path: PR_MID, kind: "mid", name: "pr-jump" }, ...smalls.map((one) => ({ ...one, name: "pr-jump-small" }))]) {
+        await cpu(1);
+        await js(`__mv.scrollToEl(".tf-dview")`);
+        await quiet(800);
+        await js(`__mv.railTo(${JSON.stringify(path)})`);
+        await quiet(800);
+        await cpu(rate);
+        const r = await move(rate, name, [atTop(path), kind === "renamed" ? atTop(path) : withLines(path)], () => js(`__mv.press(${JSON.stringify(`.tf-flist button[title="${path}"]`)})`), card(path));
+        record(name === "pr-jump" ? r : { ...r, file: path, kind, drift: r.drift === null ? null : Math.abs(r.drift) });
+        await settle();
+      }
     }
-  }
+  });
+  if (ran.failedToRun) record({ throttle: rate, size: size.name, move: "moves", failedToRun: ran.failedToRun, error: `failed to run: ${ran.failedToRun}` });
+
 }
 writeFileSync(out, JSON.stringify(results, null, 1));
 console.log("wrote", out);
 let over = 0;
 if (budget) {
   for (const m of results.moves) {
+    if (m.failedToRun) { over++; console.log(`OVER ${failedLine({ name: m.move, throttle: m.throttle, failedToRun: m.failedToRun })}`); continue; }
     const line = budget[m.move]?.[String(m.throttle)];
     if (!line) continue;
     for (const [field, most] of Object.entries(line)) {

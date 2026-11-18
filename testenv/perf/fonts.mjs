@@ -23,7 +23,7 @@
 // The role each page's slider steps is the one its rows are drawn in: Tickets' list, Builds and Code's tree the
 // interface's, a Docs page Reading's.
 import { readFileSync, writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, viewport, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const size = sizeFrom(args);
@@ -166,36 +166,46 @@ const results = [];
 for (const page of PAGES) {
   if (only && !only.some((word) => page.name.includes(word))) continue;
   for (const throttle of throttles) {
-    await cpu(1);
-    await fresh();
-    await js(`(async () => { ${page.setup} return 1; })()`);
-    await cpu(throttle);
-    await sleep(500);
-    const scroll100 = await scroll(page);
-    await js(`(async () => { await __s.go("#/settings/fonts", 1500); return 1; })()`);
-    const back100 = await back(page);
-    await js(`(async () => { await __s.go("#/settings/fonts", 1500); return 1; })()`);
-    const keys = [];
-    for (let at = 100; at < to; at += 5) keys.push(await key(page.role));
-    await sleep(backAfter);
-    const shown = await back(page);
-    await sleep(600);
-    const scrolled = await scroll(page);
-    const scrolledAgain = again ? await scroll(page) : null;
-    const row = {
-      page: page.name, role: page.role, size: size.name, throttle, to,
-      key: median(keys.map((k) => k.ms)), keyMax: Math.max(...keys.map((k) => k.ms ?? 0)), keyFrame: median(keys.map((k) => k.frame)), keyLoaf: Math.max(0, ...keys.map((k) => k.loaf)), reached: keys.at(-1)?.now ?? null,
-      back100: { ms: round(back100.ms), frame: round(back100.frame), moved: back100.moved },
-      back: { ms: round(shown.ms), frame: round(shown.frame), moved: shown.moved, rows: shown.rows },
-      scroll100, scroll: scrolled, scrollAgain: scrolledAgain, keys,
-    };
-    results.push(row);
-    const s = (x) => (x ? `${x.fps} fps, work ${x.p50} / ${x.p99} ms, loaf ${Math.round(x.longest)}, moved ${x.moved} of ${x.kept}` : "no scroller");
-    console.log(`${row.page.padEnd(13)} ${row.size} ${throttle}x → ${row.reached} %: key ${row.key} ms${over(row.key, KEY_LINE[throttle])} (slowest ${row.keyMax}${over(row.keyMax, KEY_LINE[throttle])}, frame ${row.keyFrame}, longest task ${row.keyLoaf}), ` +
-      `back ${row.back.ms} ms${over(row.back.ms, PAGE_LINE[throttle])} (at 100 % ${row.back100.ms}), moved ${row.back.moved} of ${row.back.rows}; ` +
-      `scroll at 100 % ${s(scroll100)}; at ${row.reached} % ${s(scrolled)}` + (again ? `; again ${s(scrolledAgain)}` : ""));
-    writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
+    // A page at a throttle under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers.
+    const mark = results.length;
+    const ran = await runCase(c, { name: page.name, throttle }, async () => {
+      results.splice(mark);
+      await cpu(1);
+      await fresh();
+      await js(`(async () => { ${page.setup} return 1; })()`);
+      await cpu(throttle);
+      await sleep(500);
+      const scroll100 = await scroll(page);
+      await js(`(async () => { await __s.go("#/settings/fonts", 1500); return 1; })()`);
+      const back100 = await back(page);
+      await js(`(async () => { await __s.go("#/settings/fonts", 1500); return 1; })()`);
+      const keys = [];
+      for (let at = 100; at < to; at += 5) keys.push(await key(page.role));
+      await sleep(backAfter);
+      const shown = await back(page);
+      await sleep(600);
+      const scrolled = await scroll(page);
+      const scrolledAgain = again ? await scroll(page) : null;
+      const row = {
+        page: page.name, role: page.role, size: size.name, throttle, to,
+        key: median(keys.map((k) => k.ms)), keyMax: Math.max(...keys.map((k) => k.ms ?? 0)), keyFrame: median(keys.map((k) => k.frame)), keyLoaf: Math.max(0, ...keys.map((k) => k.loaf)), reached: keys.at(-1)?.now ?? null,
+        back100: { ms: round(back100.ms), frame: round(back100.frame), moved: back100.moved },
+        back: { ms: round(shown.ms), frame: round(shown.frame), moved: shown.moved, rows: shown.rows },
+        scroll100, scroll: scrolled, scrollAgain: scrolledAgain, keys,
+      };
+      results.push(row);
+      const s = (x) => (x ? `${x.fps} fps, work ${x.p50} / ${x.p99} ms, loaf ${Math.round(x.longest)}, moved ${x.moved} of ${x.kept}` : "no scroller");
+      console.log(`${row.page.padEnd(13)} ${row.size} ${throttle}x → ${row.reached} %: key ${row.key} ms${over(row.key, KEY_LINE[throttle])} (slowest ${row.keyMax}${over(row.keyMax, KEY_LINE[throttle])}, frame ${row.keyFrame}, longest task ${row.keyLoaf}), ` +
+        `back ${row.back.ms} ms${over(row.back.ms, PAGE_LINE[throttle])} (at 100 % ${row.back100.ms}), moved ${row.back.moved} of ${row.back.rows}; ` +
+        `scroll at 100 % ${s(scroll100)}; at ${row.reached} % ${s(scrolled)}` + (again ? `; again ${s(scrolledAgain)}` : ""));
+      writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
+    });
+    if (ran.failedToRun) {
+      results.splice(mark, Infinity, { page: page.name, size: size.name, throttle, failedToRun: ran.failedToRun });
+      console.log(failedLine({ name: page.name, throttle, failedToRun: ran.failedToRun }));
+      writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 2));
+    }
   }
 }
 browser?.stop();
-process.exit(0);
+process.exit(results.some((r) => r.failedToRun) ? 1 : 0);

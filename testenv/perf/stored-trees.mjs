@@ -14,7 +14,7 @@
 // rows, the folder's rows, the file among Go to file's rows with no "Reading every path" left; and the IPC calls
 // between, with each one's span.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 /** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
@@ -120,50 +120,57 @@ const note = (step, rate, r) => {
 };
 
 for (const rate of throttles) {
-  await cpu(1);
-  // The tab's first open: the repository's page from Code, to the frame that shows its tree's rows.
-  await load("#/code");
-  await sleep(1500);
-  await cpu(rate);
-  await js(`__st.arm(${JSON.stringify(`document.querySelectorAll('${shown} .tf-ftree [data-path]').length >= 3`)})`);
-  await js(`location.hash = ${JSON.stringify(R)}, 1`);
-  note("open", rate, await js("__st.result()"));
-  await cpu(1);
-  await quiet(1500);
+  // One case under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers, then
+  // failed-to-run, and the probe goes on.
+  const mark = results.steps.length;
+  const ran = await runCase(c, { name: "stored trees", throttle: rate }, async () => {
+    results.steps.splice(mark);
+    await cpu(1);
+    // The tab's first open: the repository's page from Code, to the frame that shows its tree's rows.
+    await load("#/code");
+    await sleep(1500);
+    await cpu(rate);
+    await js(`__st.arm(${JSON.stringify(`document.querySelectorAll('${shown} .tf-ftree [data-path]').length >= 3`)})`);
+    await js(`location.hash = ${JSON.stringify(R)}, 1`);
+    note("open", rate, await js("__st.result()"));
+    await cpu(1);
+    await quiet(1500);
 
-  // A deep folder: the folders above it opened, unmeasured; its own first press measured.
-  const parts = deep.split("/");
-  for (let i = 1; i < parts.length; i++) {
-    const up = parts.slice(0, i).join("/");
-    await waitRow(up);
-    if (await js(`!!document.querySelector(${JSON.stringify(`${row(up)}[aria-expanded="false"]`)})`)) {
-      const go = await press(up);
-      await go();
-      await waitRow(`${up}/${parts[i]}`);
-      await quiet(800);
+    // A deep folder: the folders above it opened, unmeasured; its own first press measured.
+    const parts = deep.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      const up = parts.slice(0, i).join("/");
+      await waitRow(up);
+      if (await js(`!!document.querySelector(${JSON.stringify(`${row(up)}[aria-expanded="false"]`)})`)) {
+        const go = await press(up);
+        await go();
+        await waitRow(`${up}/${parts[i]}`);
+        await quiet(800);
+      }
     }
-  }
-  await waitRow(deep);
-  const go = await press(deep);
-  await cpu(rate);
-  await js(`__st.arm(${JSON.stringify(`[...document.querySelectorAll('${shown} .tf-ftree [data-path^="${deep}/"]')].length >= 1`)})`);
-  await go();
-  note("deep", rate, await js("__st.result()"));
-  await cpu(1);
-  await quiet(1200);
+    await waitRow(deep);
+    const go = await press(deep);
+    await cpu(rate);
+    await js(`__st.arm(${JSON.stringify(`[...document.querySelectorAll('${shown} .tf-ftree [data-path^="${deep}/"]')].length >= 1`)})`);
+    await go();
+    note("deep", rate, await js("__st.result()"));
+    await cpu(1);
+    await quiet(1200);
 
-  // Go to file's first use: from the field's focus (which starts its read) with the name typed at once, to the frame
-  // that lists the file with nothing left reading.
-  await cpu(rate);
-  await js(`__st.arm(${JSON.stringify(`[...document.querySelectorAll('${shown} .tf-gotof')].some((a) => a.textContent.includes(${JSON.stringify(find)})) && ![...document.querySelectorAll('${shown} .tf-gonote')].some((p) => p.textContent.startsWith('Reading every path'))`)})`);
-  await js(`document.querySelector('${shown} .tf-gotofile input').focus(), 1`);
-  await c.send("Input.insertText", { text: find });
-  note("goto", rate, await js("__st.result()"));
-  await cpu(1);
-  writeFileSync(out, JSON.stringify(results, null, 1));
+    // Go to file's first use: from the field's focus (which starts its read) with the name typed at once, to the frame
+    // that lists the file with nothing left reading.
+    await cpu(rate);
+    await js(`__st.arm(${JSON.stringify(`[...document.querySelectorAll('${shown} .tf-gotof')].some((a) => a.textContent.includes(${JSON.stringify(find)})) && ![...document.querySelectorAll('${shown} .tf-gonote')].some((p) => p.textContent.startsWith('Reading every path'))`)})`);
+    await js(`document.querySelector('${shown} .tf-gotofile input').focus(), 1`);
+    await c.send("Input.insertText", { text: find });
+    note("goto", rate, await js("__st.result()"));
+    await cpu(1);
+    writeFileSync(out, JSON.stringify(results, null, 1));
+  });
+  if (ran.failedToRun) { results.steps.splice(mark, Infinity, { step: "all", throttle: rate, failedToRun: ran.failedToRun }); console.log(failedLine({ name: "stored trees", throttle: rate, failedToRun: ran.failedToRun })); }
 }
 writeFileSync(out, JSON.stringify(results, null, 1));
 console.log("wrote", out);
 c.close();
 browser.stop();
-process.exit(0);
+process.exit(results.steps.some((r) => r.failedToRun) ? 1 : 0);

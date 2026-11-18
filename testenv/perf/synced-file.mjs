@@ -19,7 +19,7 @@
 // reads behind of its own. Timed from the step to the frame that shows the new commit's text, with the IPC calls between.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
@@ -111,32 +111,39 @@ async function timed(step, { text, sha }, loads = false) {
 
 const results = [];
 for (const rate of rates) {
-  await cpu(1);
-  await load(fileHash);
-  await js(WAIT("line 399")).catch(() => {});
-  await sleep(1500);
-  await cpu(rate);
-  // The return: away to Time, a sync, back to the file.
-  await js(`location.hash = "#/time", 1`);
-  await sleep(1200);
-  const text = sync();
-  const back = await timed(() => js(`location.hash = ${JSON.stringify(fileHash)}, 1`), text);
-  console.log(`${rate}x return: ${back.ms ?? back.error} ms  ${back.calls.join(", ")}`);
-  results.push({ rate, round: "return", ...back });
-  // The reads behind the return's (the page's own, and the one its `view:fresh` starts) land before the next sync, as
-  // they would in the app between two syncs minutes apart: one still out across the sync would be kept as read after it.
-  await sleep(8000);
-  // A page opened afresh after the next sync.
-  await cpu(1);
-  const next = sync();
-  await cpu(rate);
-  const reopen = await timed(() => load(fileHash), next, true);
-  console.log(`${rate}x reopen: ${reopen.ms ?? reopen.error} ms  ${reopen.calls.join(", ")}`);
-  results.push({ rate, round: "reopen", ...reopen });
-  await sleep(1500);
+  // One case under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers, then
+  // failed-to-run, and the probe goes on.
+  const mark = results.length;
+  const ran = await runCase(c, { name: "synced file", throttle: rate }, async () => {
+    results.splice(mark);
+    await cpu(1);
+    await load(fileHash);
+    await js(WAIT("line 399")).catch(() => {});
+    await sleep(1500);
+    await cpu(rate);
+    // The return: away to Time, a sync, back to the file.
+    await js(`location.hash = "#/time", 1`);
+    await sleep(1200);
+    const text = sync();
+    const back = await timed(() => js(`location.hash = ${JSON.stringify(fileHash)}, 1`), text);
+    console.log(`${rate}x return: ${back.ms ?? back.error} ms  ${back.calls.join(", ")}`);
+    results.push({ rate, round: "return", ...back });
+    // The reads behind the return's (the page's own, and the one its `view:fresh` starts) land before the next sync, as
+    // they would in the app between two syncs minutes apart: one still out across the sync would be kept as read after it.
+    await sleep(8000);
+    // A page opened afresh after the next sync.
+    await cpu(1);
+    const next = sync();
+    await cpu(rate);
+    const reopen = await timed(() => load(fileHash), next, true);
+    console.log(`${rate}x reopen: ${reopen.ms ?? reopen.error} ms  ${reopen.calls.join(", ")}`);
+    results.push({ rate, round: "reopen", ...reopen });
+    await sleep(1500);
+  });
+  if (ran.failedToRun) { results.splice(mark, Infinity, { rate, failedToRun: ran.failedToRun }); console.log(failedLine({ name: "synced file", throttle: rate, failedToRun: ran.failedToRun })); }
 }
-await cpu(1);
+await cpu(1).catch(() => {});
 if (out) writeFileSync(out, JSON.stringify(results, null, 1));
 c.close();
 browser.stop();
-process.exit(0);
+process.exit(results.some((r) => r.failedToRun) ? 1 : 0);

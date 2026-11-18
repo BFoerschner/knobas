@@ -246,3 +246,25 @@ describe("the gate probes report instead of hanging", { concurrency: true }, () 
     assert.match(budget.out, /failed to run/);
   });
 });
+
+// The other probes with cases, the same way: each ends, says what stalled, and fails instead of hanging.
+const A = "http://127.0.0.1:9/";
+describe("the other probes report instead of hanging", { concurrency: true }, () => {
+  for (const [file, args, env, expect] of [
+    ["zoom.mjs", ["--app", A, "--out", "$STATE/o.json", "--throttle", "1", "--only", "tickets"], {}, /FAILED TO RUN zoom\.mjs 1440x868@1 1x tickets-list: .*, twice/],
+    ["fonts.mjs", ["--app", A, "--out", "$STATE/o.json", "--throttle", "1", "--only", "tickets"], {}, /FAILED TO RUN fonts\.mjs 1440x868@1 1x tickets-list: .*, twice/],
+    ["folders.mjs", ["--app", A, "--repo", "x", "--folders", "a/b", "--out", "$STATE/o.json", "--throttle", "1"], {}, /FAILED TO RUN folders\.mjs 1440x868@1 1x folders: .*, twice/],
+    ["stored-trees.mjs", ["--app", A, "--repo", "x", "--deep", "a/b", "--find", "c", "--out", "$STATE/o.json", "--throttle", "1"], {}, /FAILED TO RUN stored-trees\.mjs .*, twice/],
+    ["git-starts.mjs", ["--app", A, "--out", "$STATE/o.json", "--throttle", "1", "--shim-log", "/dev/null", "--only", "code"], {}, /FAILED TO RUN git-starts\.mjs 1440x868@1 1x code: .*, twice/],
+    ["compare-moves.mjs", ["--app", A, "--repo", "x", "--out", "$STATE/o.json", "--throttle", "1", "--budget"], {}, /OVER FAILED TO RUN compare-moves\.mjs 1440x868@1 1x moves: .*, twice/],
+    // A soak's lap gives up at the first stall: a fresh page would not read what the session grew.
+    ["soak.mjs", ["--app", A, "--repo", "x", "--out", "$STATE/o.json", "--laps", "2"], { FAKE_CDP_HANG: "", FAKE_CDP_HANG_MATCH: "__soak.long.splice", FAKE_CDP_VALUE: "true" }, /FAILED TO RUN soak\.mjs 1440x868@1 lap 1: Runtime\.evaluate got no answer/],
+  ]) {
+    test(file, async () => {
+      const r = await probe(file, args, { ...HANG, FAKE_CDP_VALUE: "null", ...env });
+      assert.match(r.out, expect, r.out + r.err);
+      assert.notEqual(r.code, 0, r.out + r.err);
+      assert.match(JSON.stringify(r.json("o.json")), /"failedToRun"/);
+    });
+  }
+});

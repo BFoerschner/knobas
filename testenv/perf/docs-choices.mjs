@@ -23,7 +23,7 @@
 // Lines: a click 100 / 100 / 200 ms, halved on the Mac as `right-click.mjs` halves them; a page 100 / 200 / 300 ms at
 // 1x / 4x / 6x, Björn's, as `budget-open.json`'s real lines hold a page on the Mac too. Exits 1 when a median is over its line. The choices are put back as found at the end.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
@@ -136,11 +136,20 @@ function report(name, rate, times, line, halved = true) {
   console.log(`${bad ? "OVER" : "ok  "} ${name.padEnd(12)} ${rate}x  median ${median?.toFixed(1)} ms, worst ${times.at(-1)?.toFixed(1)} ms of ${times.length} (line ${held} ms)`);
 }
 
+/** One measure at `rate` under the watchdog (cdp.mjs): tried once more on a fresh page, then failed-to-run (over). */
+async function guarded(name, rate, prepare, fn) {
+  const ran = await runCase(c, { name, throttle: rate, prepare }, fn);
+  if (!ran.failedToRun) return;
+  over++;
+  results.rows.push({ name, rate, failedToRun: ran.failedToRun });
+  console.log(failedLine({ name, throttle: rate, failedToRun: ran.failedToRun }));
+}
+
 try {
   // Hide and unhide, with every space shown and no home.
-  await choose({ hidden: [], homeId: null });
-  await load("#/docs");
-  for (const rate of throttles) {
+  const shownAll = async () => { await choose({ hidden: [], homeId: null }); await load("#/docs"); };
+  await shownAll();
+  for (const rate of throttles) await guarded("hide", rate, shownAll, async () => {
     const hide = [];
     const unhide = [];
     for (let i = 0; i < reps; i++) {
@@ -163,7 +172,7 @@ try {
     }
     report("hide", rate, hide, CLICK[rate]);
     report("unhide", rate, unhide, CLICK[rate]);
-  }
+  });
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
 
   // Docs' first open and its return, with all but three spaces hidden, then with Docs' home a space.
@@ -172,7 +181,7 @@ try {
     ...(real ? [["home", { hidden: [], homeId: home ? `${home.source_id}/${home.key}` : null }, spaceHome]] : []),
   ]) {
     await choose(choice);
-    for (const rate of throttles) {
+    for (const rate of throttles) await guarded(`open-${name}`, rate, null, async () => {
       const first = [];
       const back = [];
       for (let i = 0; i < reps; i++) {
@@ -193,7 +202,7 @@ try {
       }
       report(`open-${name}`, rate, first, PAGE[rate], false);
       report(`back-${name}`, rate, back, PAGE[rate], false);
-    }
+    });
   }
 } finally {
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});

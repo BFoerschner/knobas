@@ -14,7 +14,7 @@
 // Each timed from the press or the load to the frame that lists the branch's files with nothing over them waiting
 // (`list`), and to the frame that draws the first file's lines (`lines`).
 import { writeFileSync, readFileSync } from "node:fs";
-import { attach, launch, sleep } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sleep } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
@@ -76,35 +76,42 @@ async function press(selector) {
 const results = [];
 const say = (seen, t0) => ({ list: seen.list === null ? null : Math.round(seen.list - t0), lines: seen.lines === null ? null : Math.round(seen.lines - t0) });
 for (const rate of rates) {
-  const item = items[String(rate)];
-  const R = `#/repo/${encodeURIComponent(item.repo)}`;
-  if (rounds.includes("press")) {
-    await cpu(1);
-    await load(R);
-    const primary = `${SHOWN} .tf-repohead a.tf-primary`;
-    for (let i = 0; i < 200; i++) { if (await js(`document.querySelector(${JSON.stringify(primary)})?.textContent === "New pull request"`).catch(() => false)) break; await sleep(50); }
-    await sleep(dwell);
-    await cpu(rate);
-    const t0 = await press(primary);
-    const seen = await js(WAIT);
-    const timed = say(seen, t0);
-    console.log(`${rate}x press: list ${timed.list} ms, lines ${timed.lines} ms`);
-    results.push({ rate, round: "press", ...timed });
-    await sleep(1000);
-  }
-  if (rounds.includes("address")) {
-    await cpu(rate);
-    const t0 = Date.now();
-    await load(`${R}/compare/${encodeURIComponent(item.branch)}`);
-    const seen = await js(WAIT);
-    const timed = say(seen, t0);
-    console.log(`${rate}x address: list ${timed.list} ms, lines ${timed.lines} ms`);
-    results.push({ rate, round: "address", ...timed });
-    await sleep(1000);
-  }
+  // One case under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers, then
+  // failed-to-run, and the probe goes on.
+  const mark = results.length;
+  const ran = await runCase(c, { name: `compare ${rate}x`, throttle: rate }, async () => {
+    results.splice(mark);
+    const item = items[String(rate)];
+    const R = `#/repo/${encodeURIComponent(item.repo)}`;
+    if (rounds.includes("press")) {
+      await cpu(1);
+      await load(R);
+      const primary = `${SHOWN} .tf-repohead a.tf-primary`;
+      for (let i = 0; i < 200; i++) { if (await js(`document.querySelector(${JSON.stringify(primary)})?.textContent === "New pull request"`).catch(() => false)) break; await sleep(50); }
+      await sleep(dwell);
+      await cpu(rate);
+      const t0 = await press(primary);
+      const seen = await js(WAIT);
+      const timed = say(seen, t0);
+      console.log(`${rate}x press: list ${timed.list} ms, lines ${timed.lines} ms`);
+      results.push({ rate, round: "press", ...timed });
+      await sleep(1000);
+    }
+    if (rounds.includes("address")) {
+      await cpu(rate);
+      const t0 = Date.now();
+      await load(`${R}/compare/${encodeURIComponent(item.branch)}`);
+      const seen = await js(WAIT);
+      const timed = say(seen, t0);
+      console.log(`${rate}x address: list ${timed.list} ms, lines ${timed.lines} ms`);
+      results.push({ rate, round: "address", ...timed });
+      await sleep(1000);
+    }
+  });
+  if (ran.failedToRun) { results.splice(mark, Infinity, { rate, failedToRun: ran.failedToRun }); console.log(failedLine({ name: `compare ${rate}x`, throttle: rate, failedToRun: ran.failedToRun })); }
 }
-await cpu(1);
+await cpu(1).catch(() => {});
 if (out) writeFileSync(out, JSON.stringify(results, null, 1));
 c.close();
 browser.stop();
-process.exit(0);
+process.exit(results.some((r) => r.failedToRun) ? 1 : 0);

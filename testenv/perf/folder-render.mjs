@@ -7,7 +7,7 @@
 //
 // Prints one line a case and throttle, and exits 1 when a median is over its line for the machine (`--machine pc` for
 // the PC's whole lines; the Mac's half-lines by default).
-import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -28,8 +28,13 @@ const c = await attach(debug);
 await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
-await c.send("Page.navigate", { url: `http://127.0.0.1:${port}/?fake-ipc&fake-folder-render#/inbox` });
-await sleep(2500);
+/** The app on the fixture, a first drawing made (so the kept-drawing case has one): at the start, and on a fresh page. */
+async function home() {
+  await c.send("Page.navigate", { url: `http://127.0.0.1:${port}/?fake-ipc&fake-folder-render#/inbox` });
+  await sleep(2500);
+  await c.js(`(${go(`${REPO}/render/folder-listing/src`)})()`);
+  await sleep(2500);
+}
 
 // In the page: run `act`, then wait for `selector` (and its text, where given) in a painted frame; the ms between.
 const timed = (act, selector, text = null) =>
@@ -58,22 +63,26 @@ const CASES = [
   { name: "a folder renderer's page", kind: "page", before: go("#/settings/renderers"), act: go("#/settings/renderers/folder/folder-listing"), sel: "#tf-frp-cmd" },
 ];
 
-// A first drawing, so the kept-drawing case has one.
-await c.js(`(${go(`${REPO}/render/folder-listing/src`)})()`);
-await sleep(2500);
+await home();
 
 let over = 0;
 for (const t of throttles) {
-  await c.send("Emulation.setCPUThrottlingRate", { rate: t });
   for (const k of CASES) {
-    const times = [];
-    for (let i = 0; i < RUNS; i++) {
-      await c.js(`(${k.before})()`);
-      await settle();
-      // A press waits for the run before it to end, so each press starts one.
-      if (k.kind === "press") await sleep(2000);
-      times.push(await timed(k.act, k.sel, k.text ?? null));
-    }
+    // One case under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers.
+    const ran = await runCase(c, { name: k.name, throttle: t, prepare: home }, async () => {
+      await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+      const times = [];
+      for (let i = 0; i < RUNS; i++) {
+        await c.js(`(${k.before})()`);
+        await settle();
+        // A press waits for the run before it to end, so each press starts one.
+        if (k.kind === "press") await sleep(2000);
+        times.push(await timed(k.act, k.sel, k.text ?? null));
+      }
+      return times;
+    });
+    if (ran.failedToRun) { over += 1; console.log(failedLine({ name: k.name, throttle: t, failedToRun: ran.failedToRun })); continue; }
+    const times = ran.value;
     times.sort((a, b) => a - b);
     const median = times[Math.floor(times.length / 2)];
     const limit = line(k.kind, t);

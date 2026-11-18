@@ -23,7 +23,7 @@
 // drawn, the main thread's time by kind in that span from the trace, its longest task, and `moved`: whether a row on
 // screen at drawn moved or went in the 700 ms after.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, tracer, viewport } from "./cdp.mjs";
 import { longestTasks, mainThreadBreakdown } from "./frames.mjs";
 
 const args = process.argv.slice(2);
@@ -175,61 +175,68 @@ const say = (r) => {
 
 const results = { app, repo, at: new Date().toISOString(), presses: [] };
 for (const rate of throttles) {
-  await cpu(1);
-  if (opening) {
-    // The tab from Code: the address set, as a link sets it, to the frame after the one that found the tree's rows.
-    await fresh("#/code");
-    await sleep(2000);
-    await cpu(rate);
-    await js(`(() => { const r = window.__openTab = { t0: performance.now(), found: null, drawn: null }; const tick = (t) => { if (r.found !== null && r.drawn === null) { r.drawn = t; return; } if (r.found === null && document.querySelectorAll('${shown} .tf-ftree [data-path]').length >= 2) r.found = t; requestAnimationFrame(tick); }; requestAnimationFrame(tick); location.hash = ${JSON.stringify(R)}; return 1; })()`);
-    const tab = await js(`new Promise((res) => { const t0 = performance.now(); const wait = () => (window.__openTab.drawn !== null || performance.now() - t0 > 30000 ? res({ drawnMs: Math.round((window.__openTab.drawn ?? NaN) - window.__openTab.t0) }) : setTimeout(wait, 50)); wait(); })`, 45000);
-    results.presses.push({ throttle: rate, folder: "(the tab)", round: "open", ...tab });
-    console.log(`${rate}x the tab open: tree drawn ${tab.drawnMs} ms`);
+  // One case under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers, then
+  // failed-to-run, and the probe goes on.
+  const mark = results.presses.length;
+  const ran = await runCase(c, { name: "folders", throttle: rate }, async () => {
+    results.presses.splice(mark);
     await cpu(1);
-    await quiet(1200);
-  }
-  await fresh(R);
-  await sleep(2000);
-  if (fetched !== null) {
-    await sleep(Number(fetched));
-    // The app's read behind its kept answer of the top, then the fetch: both as the app tells them.
-    await js(`window.__fake.emit("view:fresh", { entity_id: ${JSON.stringify(repo)}, section: "files", failed: false }), 1`);
-    await quiet(800);
-    await js(`window.__fake.emit("checkout:fetched", { entity_id: ${JSON.stringify(repo)} }), 1`);
-    await quiet(800);
-  }
-  await cpu(rate);
-  for (const folder of folders) {
-    // The folders above it open first, unmeasured.
-    const parts = folder.split("/");
-    for (let i = 1; i < parts.length; i++) {
-      const up = parts.slice(0, i).join("/");
-      if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path="${up}"][aria-expanded="false"]')`)) { await cpu(1); await pressRow(up); await quiet(800); await cpu(rate); }
-    }
-    for (const [round, unfolding] of [["open", true], ["fold", false], ["reopen", true]]) {
-      try {
-        const r = await measure(folder, unfolding);
-        results.presses.push({ throttle: rate, folder, round, ...r });
-        console.log(`${rate}x ${folder} ${round}: ${say(r)}`);
-      } catch (e) {
-        results.presses.push({ throttle: rate, folder, round, error: String(e.message || e) });
-        console.log(`${rate}x ${folder} ${round}: ERROR ${e.message || e}`);
-      }
-      await cpu(1);
-      await quiet(800);
+    if (opening) {
+      // The tab from Code: the address set, as a link sets it, to the frame after the one that found the tree's rows.
+      await fresh("#/code");
+      await sleep(2000);
       await cpu(rate);
+      await js(`(() => { const r = window.__openTab = { t0: performance.now(), found: null, drawn: null }; const tick = (t) => { if (r.found !== null && r.drawn === null) { r.drawn = t; return; } if (r.found === null && document.querySelectorAll('${shown} .tf-ftree [data-path]').length >= 2) r.found = t; requestAnimationFrame(tick); }; requestAnimationFrame(tick); location.hash = ${JSON.stringify(R)}; return 1; })()`);
+      const tab = await js(`new Promise((res) => { const t0 = performance.now(); const wait = () => (window.__openTab.drawn !== null || performance.now() - t0 > 30000 ? res({ drawnMs: Math.round((window.__openTab.drawn ?? NaN) - window.__openTab.t0) }) : setTimeout(wait, 50)); wait(); })`, 45000);
+      results.presses.push({ throttle: rate, folder: "(the tab)", round: "open", ...tab });
+      console.log(`${rate}x the tab open: tree drawn ${tab.drawnMs} ms`);
+      await cpu(1);
+      await quiet(1200);
     }
-    // Folded again, with every folder opened above it, so the next folder's press starts from the same tree.
-    for (let i = parts.length; i >= 1; i--) {
-      const up = parts.slice(0, i).join("/");
-      if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path="${up}"][aria-expanded="true"]')`)) { await cpu(1); await pressRow(up); await quiet(800); await cpu(rate); }
+    await fresh(R);
+    await sleep(2000);
+    if (fetched !== null) {
+      await sleep(Number(fetched));
+      // The app's read behind its kept answer of the top, then the fetch: both as the app tells them.
+      await js(`window.__fake.emit("view:fresh", { entity_id: ${JSON.stringify(repo)}, section: "files", failed: false }), 1`);
+      await quiet(800);
+      await js(`window.__fake.emit("checkout:fetched", { entity_id: ${JSON.stringify(repo)} }), 1`);
+      await quiet(800);
     }
-  }
-  writeFileSync(out, JSON.stringify(results, null, 1));
+    await cpu(rate);
+    for (const folder of folders) {
+      // The folders above it open first, unmeasured.
+      const parts = folder.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const up = parts.slice(0, i).join("/");
+        if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path="${up}"][aria-expanded="false"]')`)) { await cpu(1); await pressRow(up); await quiet(800); await cpu(rate); }
+      }
+      for (const [round, unfolding] of [["open", true], ["fold", false], ["reopen", true]]) {
+        try {
+          const r = await measure(folder, unfolding);
+          results.presses.push({ throttle: rate, folder, round, ...r });
+          console.log(`${rate}x ${folder} ${round}: ${say(r)}`);
+        } catch (e) {
+          results.presses.push({ throttle: rate, folder, round, error: String(e.message || e) });
+          console.log(`${rate}x ${folder} ${round}: ERROR ${e.message || e}`);
+        }
+        await cpu(1);
+        await quiet(800);
+        await cpu(rate);
+      }
+      // Folded again, with every folder opened above it, so the next folder's press starts from the same tree.
+      for (let i = parts.length; i >= 1; i--) {
+        const up = parts.slice(0, i).join("/");
+        if (await js(`!!document.querySelector('${shown} .tf-ftree [data-path="${up}"][aria-expanded="true"]')`)) { await cpu(1); await pressRow(up); await quiet(800); await cpu(rate); }
+      }
+    }
+    writeFileSync(out, JSON.stringify(results, null, 1));
+  });
+  if (ran.failedToRun) { results.presses.splice(mark, Infinity, { throttle: rate, failedToRun: ran.failedToRun }); console.log(failedLine({ name: "folders", throttle: rate, failedToRun: ran.failedToRun })); }
 }
-await cpu(1);
+await cpu(1).catch(() => {});
 writeFileSync(out, JSON.stringify(results, null, 1));
 console.log("wrote", out);
 c.close();
 browser.stop();
-process.exit(0);
+process.exit(results.presses.some((r) => r.failedToRun) ? 1 : 0);

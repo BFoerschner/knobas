@@ -21,7 +21,7 @@
 // times as `open.mjs` measures them. One item set a throttle (`inner-items.json`), so each throttle's first press is a
 // read the backend never made.
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
+import { attach, failedLine, isStalled, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const size = sizeFrom(args);
@@ -196,33 +196,42 @@ let failed = 0;
 for (const rate of throttles) {
   const i = items[String(rate)] ?? items["1"];
   for (const a of actions(i).filter(picked)) {
-    const entry = { name: a.name, throttle: rate };
-    try {
-      await cpu(1);
-      await fresh(a.start);
-      await sleep(Number(opt("--first-after", "3000")));
-      await quiet(600);
-      await cpu(rate);
-      entry.first = await act(a);
-      console.log(`${rate}x ${a.name} first: ${say(entry.first)}`);
-      await quiet(1000);
-      if (!a.synced) await leave(a, i);
-      entry.again = await act(a);
-      console.log(`${rate}x ${a.name} again: ${say(entry.again)}`);
-      for (const round of ["first", "again"]) {
-        const wrong = check ? over(a.name, round, entry[round]) : null;
-        if (wrong) { failed++; console.log(`STARTS ${rate}x ${a.name} ${round}: ${wrong}`); }
+    // One action under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers.
+    let entry;
+    let wrongs = 0;
+    const ran = await runCase(c, { name: a.name, throttle: rate }, async () => {
+      entry = { name: a.name, throttle: rate };
+      wrongs = 0;
+      try {
+        await cpu(1);
+        await fresh(a.start);
+        await sleep(Number(opt("--first-after", "3000")));
+        await quiet(600);
+        await cpu(rate);
+        entry.first = await act(a);
+        console.log(`${rate}x ${a.name} first: ${say(entry.first)}`);
+        await quiet(1000);
+        if (!a.synced) await leave(a, i);
+        entry.again = await act(a);
+        console.log(`${rate}x ${a.name} again: ${say(entry.again)}`);
+        for (const round of ["first", "again"]) {
+          const wrong = check ? over(a.name, round, entry[round]) : null;
+          if (wrong) { wrongs++; console.log(`STARTS ${rate}x ${a.name} ${round}: ${wrong}`); }
+        }
+      } catch (e) {
+        if (isStalled(e)) throw e;
+        entry.error = String(e.message || e);
+        console.log(`${rate}x ${a.name}: ERROR ${entry.error}`);
+        if (check) wrongs++;
       }
-    } catch (e) {
-      entry.error = String(e.message || e);
-      console.log(`${rate}x ${a.name}: ERROR ${entry.error}`);
-      if (check) failed++;
-    }
+    });
+    failed += wrongs;
+    if (ran.failedToRun) { entry = { name: a.name, throttle: rate, failedToRun: ran.failedToRun }; failed++; console.log(failedLine(entry)); }
     results.actions.push(entry);
     writeFileSync(out, JSON.stringify(results, null, 1));
   }
 }
-await cpu(1);
+await cpu(1).catch(() => {});
 console.log("wrote", out);
 if (check) console.log(failed ? `git starts: ${failed} presses started git` : "git starts: no press started git but Local changes' first open, at once");
 c.close();

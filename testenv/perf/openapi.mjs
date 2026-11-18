@@ -9,7 +9,7 @@
 //
 // `--only readme,source` runs the other files' opens alone, for a build without the view (the before of a before and
 // after). Prints one line a case and throttle, and exits 1 when a median is over its line for the machine.
-import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -37,8 +37,9 @@ const c = await attach(debug);
 await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
-await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-openapi#/inbox` });
-await sleep(2500);
+/** The app on the fixture's OpenAPI files: at the start, and on a fresh page after a stall. */
+const home = async () => { await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-openapi#/inbox` }); await sleep(2500); };
+await home();
 
 // In the page: run `act`, then wait for `selector` (and its text, where given) in a painted frame; the ms between, and
 // whether the rows of `watch` it drew then stood elsewhere 600 ms later.
@@ -114,21 +115,27 @@ const scroll = () =>
 let over = 0;
 const out = [];
 for (const t of throttles) {
-  await c.send("Emulation.setCPUThrottlingRate", { rate: t });
   for (const k of CASES) {
-    const times = [];
-    let moved = false;
-    for (let i = 0; i < RUNS; i++) {
-      await c.js(`(${k.before})()`);
-      await settle();
-      if (k.prep) {
-        await c.js(`(${k.prep})()`);
+    // One case under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers.
+    const ran = await runCase(c, { name: k.label, throttle: t, prepare: home }, async () => {
+      await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+      const times = [];
+      let moved = false;
+      for (let i = 0; i < RUNS; i++) {
+        await c.js(`(${k.before})()`);
         await settle();
+        if (k.prep) {
+          await c.js(`(${k.prep})()`);
+          await settle();
+        }
+        const r = await timed(k.act, k.sel, k.text ?? null, k.watch ?? null);
+        times.push(r.ms);
+        moved ||= r.moved;
       }
-      const r = await timed(k.act, k.sel, k.text ?? null, k.watch ?? null);
-      times.push(r.ms);
-      moved ||= r.moved;
-    }
+      return { times, moved };
+    });
+    if (ran.failedToRun) { over++; const row = failedLine({ name: k.label, throttle: t, failedToRun: ran.failedToRun }); out.push(row); console.log(row); continue; }
+    const { times, moved } = ran.value;
     times.sort((a, b) => a - b);
     const median = times[Math.floor(times.length / 2)];
     const limit = line(k.kind, t);
@@ -139,9 +146,14 @@ for (const t of throttles) {
     console.log(row);
   }
   if (only === null || only.includes("scroll")) {
-    await c.js(`(${go(file(BIG))})()`);
-    await sleep(2500);
-    const s = await scroll();
+    const ran = await runCase(c, { name: "scroll of 5,000 operations", throttle: t, prepare: home }, async () => {
+      await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+      await c.js(`(${go(file(BIG))})()`);
+      await sleep(2500);
+      return scroll();
+    });
+    if (ran.failedToRun) { over++; const row = failedLine({ name: "scroll of 5,000 operations", throttle: t, failedToRun: ran.failedToRun }); out.push(row); console.log(row); continue; }
+    const s = ran.value;
     const ok = s.fps >= 55 && s.long <= 60;
     if (!ok) over++;
     const row = `${t}x ${size.name} scroll of 5,000 operations: ${s.fps.toFixed(1)} fps, worst gap ${s.worst.toFixed(1)} ms, longest task ${s.long.toFixed(0)} ms, ${s.rows} rows drawn ${ok ? "ok" : "OVER"}`;
@@ -149,6 +161,6 @@ for (const t of throttles) {
     console.log(row);
   }
 }
-await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
 stop();
 process.exit(over > 0 ? 1 : 0);

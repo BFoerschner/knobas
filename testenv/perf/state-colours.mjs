@@ -19,7 +19,7 @@
 // 100 / 200 / 300 ms, a click 100 / 100 / 200 ms at 1x / 4x / 6x; halved on the Mac as the other budgets halve them), a
 // chip moved after it was drawn, or the colour did not reach the launcher.
 import { writeFileSync } from "node:fs";
-import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
+import { attach, failedLine, launch, runCase, sizeFrom, sleep, viewport } from "./cdp.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
@@ -41,45 +41,49 @@ const c = await attach(chrome.port);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await viewport(c, size);
-await c.send("Page.navigate", { url: `${app}#/settings/keyboard` });
-await sleep(6000);
+/** The app on Settings, the page half put in: at the start, and on a fresh page after a stall. */
+async function toSettings() {
+  await c.send("Page.navigate", { url: `${app}#/settings/keyboard` });
+  await sleep(6000);
 
-// In the page: where a word stands, and a waiter for the frame that draws it in a column.
-await c.js(`(() => {
-  const chip = (w) => [...document.querySelectorAll('section[data-kind="ticket"] .tf-sc-word')].find((b) => b.dataset.word === w);
-  window.__sc = {
-    chip,
-    // A board from before the fix names no column on its box: its place among the six then.
-    column: (w) => {
-      const col = chip(w)?.closest(".tf-sc-col");
-      if (!col) return null;
-      return col.dataset.column ?? ["ok", "warn", "err", "info", "muted", "none"][[...col.parentElement.children].indexOf(col)] ?? null;
-    },
-    at: (sel) => { const e = typeof sel === "string" ? document.querySelector(sel) : sel; if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; },
-    pos: (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; },
-    colAt: (column) => window.__sc.pos(document.querySelector('section[data-kind="ticket"] .tf-sc-col[data-column="' + column + '"] .tf-sc-colh')),
-    wait: (test) => new Promise((done) => {
-      const from = performance.now();
-      const seen = () => { if (!test()) return requestAnimationFrame(seen); requestAnimationFrame(() => setTimeout(() => done(performance.now() - from), 0)); };
+  // In the page: where a word stands, and a waiter for the frame that draws it in a column.
+  await c.js(`(() => {
+    const chip = (w) => [...document.querySelectorAll('section[data-kind="ticket"] .tf-sc-word')].find((b) => b.dataset.word === w);
+    window.__sc = {
+      chip,
+      // A board from before the fix names no column on its box: its place among the six then.
+      column: (w) => {
+        const col = chip(w)?.closest(".tf-sc-col");
+        if (!col) return null;
+        return col.dataset.column ?? ["ok", "warn", "err", "info", "muted", "none"][[...col.parentElement.children].indexOf(col)] ?? null;
+      },
+      at: (sel) => { const e = typeof sel === "string" ? document.querySelector(sel) : sel; if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; },
+      pos: (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; },
+      colAt: (column) => window.__sc.pos(document.querySelector('section[data-kind="ticket"] .tf-sc-col[data-column="' + column + '"] .tf-sc-colh')),
+      wait: (test) => new Promise((done) => {
+        const from = performance.now();
+        const seen = () => { if (!test()) return requestAnimationFrame(seen); requestAnimationFrame(() => setTimeout(() => done(performance.now() - from), 0)); };
+        seen();
+      }),
+      // Times from the input's own event: one listener a type for the page's life notes the timestamp of the first event
+      // after \`expect\` and waits from there for the frame that draws \`test\`; \`took\` reads the result.
+      expect: (type, w, column) => { window.__scWant = { type, w, column, from: null, took: null }; return 1; },
+      took: () => window.__scWant?.took ?? null,
+    };
+    for (const type of ["pointerup", "keydown"]) addEventListener(type, (e) => {
+      const want = window.__scWant;
+      if (!want || want.type !== type || want.from !== null) return;
+      want.from = e.timeStamp;
+      const seen = () => { if (window.__sc.column(want.w) !== want.column) return requestAnimationFrame(seen); requestAnimationFrame(() => setTimeout(() => (want.took = performance.now() - want.from), 0)); };
       seen();
-    }),
-    // Times from the input's own event: one listener a type for the page's life notes the timestamp of the first event
-    // after \`expect\` and waits from there for the frame that draws \`test\`; \`took\` reads the result.
-    expect: (type, w, column) => { window.__scWant = { type, w, column, from: null, took: null }; return 1; },
-    took: () => window.__scWant?.took ?? null,
-  };
-  for (const type of ["pointerup", "keydown"]) addEventListener(type, (e) => {
-    const want = window.__scWant;
-    if (!want || want.type !== type || want.from !== null) return;
-    want.from = e.timeStamp;
-    const seen = () => { if (window.__sc.column(want.w) !== want.column) return requestAnimationFrame(seen); requestAnimationFrame(() => setTimeout(() => (want.took = performance.now() - want.from), 0)); };
-    seen();
-  }, true);
-  Object.assign(window.__sc, {
-    boxes: () => [...document.querySelectorAll(".tf-sc-chip")].map((e) => { const r = e.getBoundingClientRect(); return e.getAttribute("aria-label") + "@" + Math.round(r.left) + "," + Math.round(r.top); }).join("|"),
-  });
-  return 1;
-})()`);
+    }, true);
+    Object.assign(window.__sc, {
+      boxes: () => [...document.querySelectorAll(".tf-sc-chip")].map((e) => { const r = e.getBoundingClientRect(); return e.getAttribute("aria-label") + "@" + Math.round(r.left) + "," + Math.round(r.top); }).join("|"),
+    });
+    return 1;
+  })()`);
+}
+await toSettings();
 
 const mouse = async (type, p, extra = {}) => c.send("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...extra });
 const click = async (p) => {
@@ -145,13 +149,24 @@ const report = (name, rate, raw, line, extra = "") => {
   console.log(`${bad ? "OVER" : "ok  "} ${name.padEnd(14)} ${rate}x  median ${m?.toFixed(1)} ms, worst ${Math.max(...times).toFixed(1)} ms of ${times.length} (line ${line} ms)${extra}`);
 };
 
+/**
+ * One measure at `rate` under the watchdog (cdp.mjs): tried once more on a fresh page when a call never answers, then
+ * failed-to-run, which is over its line.
+ */
+async function guarded(name, rate, fn) {
+  const ran = await runCase(c, { name, throttle: rate, prepare: toSettings }, async () => { await c.send("Emulation.setCPUThrottlingRate", { rate }); return fn(); });
+  if (!ran.failedToRun) return;
+  over++;
+  results.rows.push({ case: name, rate, failedToRun: ran.failedToRun });
+  console.log(failedLine({ name, throttle: rate, failedToRun: ran.failedToRun }));
+}
+
 for (const rate of throttles) {
-  await c.send("Emulation.setCPUThrottlingRate", { rate });
   const pageLine = mac ? PAGE[rate] / 2 : PAGE[rate];
   const clickLine = mac ? CLICK[rate] / 2 : CLICK[rate];
 
   // Open: Keyboard, then Appearance by address.
-  if (cases.has("open")) {
+  if (cases.has("open")) await guarded("open", rate, async () => {
   const opens = [];
   let moved = 0;
   for (let i = 0; i < reps; i++) {
@@ -165,13 +180,14 @@ for (const rate of throttles) {
   }
   if (moved) over++;
   report("open", rate, opens, pageLine, moved ? `, chips moved after drawing in ${moved}` : ", nothing moved after");
-  } else {
+  }); else {
+    await c.send("Emulation.setCPUThrottlingRate", { rate });
     await c.js(`(location.hash = "#/settings/appearance", 1)`);
     await c.js(`window.__sc.wait(() => window.__sc.chip(${JSON.stringify(word)}))`);
   }
 
   // A change by the menu: press the word, then the column's row; timed from the row's press.
-  if (cases.has("menu")) {
+  if (cases.has("menu")) await guarded("menu pick", rate, async () => {
   const menu = [];
   for (let i = 0; i < reps; i++) {
     const to = i % 2 ? "warn" : "err";
@@ -185,10 +201,10 @@ for (const rate of throttles) {
     await sleep(400 * rate);
   }
   report("menu pick", rate, menu, clickLine);
-  }
+  });
 
   // A drag by pointer onto another column; timed from the release.
-  if (cases.has("drag")) {
+  if (cases.has("drag")) await guarded("drag", rate, async () => {
   const drags = [];
   for (let i = 0; i < reps; i++) {
     const to = i % 2 ? "warn" : "muted";
@@ -208,10 +224,10 @@ for (const rate of throttles) {
     await sleep(400 * rate);
   }
   report("drag", rate, drags, clickLine);
-  }
+  });
 
   // → on the focused word; timed from the key.
-  if (cases.has("key")) {
+  if (cases.has("key")) await guarded("arrow key", rate, async () => {
   const keys = [];
   for (let i = 0; i < reps; i++) {
     // One step from wherever the word stands: right, or left from *No colour*.
@@ -226,10 +242,10 @@ for (const rate of throttles) {
     await sleep(400 * rate);
   }
   report("arrow key", rate, keys, clickLine);
-  }
+  });
 
   // Reset: back to the adapter's column (*Active* for In Review, `--home` for another word); timed from the press.
-  if (cases.has("reset")) {
+  if (cases.has("reset")) await guarded("reset", rate, async () => {
   const resets = [];
   for (let i = 0; i < reps; i++) {
     await put(word, "err");
@@ -240,12 +256,12 @@ for (const rate of throttles) {
     await sleep(400 * rate);
   }
   report("reset", rate, resets, clickLine);
-  }
+  });
 }
-await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
 
 // Applied: the launcher on Tickets draws the ticket's row at its default, then Error once the menu sets it.
-if (cases.has("applied")) {
+if (cases.has("applied")) await guarded("applied", 1, async () => {
   /** The tones the launcher's row for `ticketKey` draws, opened over Tickets. */
   const launcherTone = async () => {
     await c.js(`(location.hash = "#/tickets", 1)`);
@@ -280,7 +296,7 @@ if (cases.has("applied")) {
   results.applied = { word, key: ticketKey, before, after };
   console.log(`${applied ? "ok  " : "FAIL"} applied        ${ticketKey}'s row in the launcher on Tickets draws ${before} at ${word}'s default, ${after} once ${word} is set to Error`);
   await resetWord(word);
-}
+});
 
 if (opt("--out")) writeFileSync(opt("--out"), JSON.stringify(results, null, 1));
 chrome.stop();
