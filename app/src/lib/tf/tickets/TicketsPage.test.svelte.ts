@@ -472,6 +472,11 @@ test("a typed filter reads fifty a column under its total, a long column draws t
   await open(h);
   for (const char of "bulk") type(field(), char);
   await settle();
+  // The words' read waits out the typing pause: on a loaded machine `settle` ended first, and both looks below saw the
+  // board before the answer, eight a column (the ux21 overs pass). Short turns, so the look comes before the frames
+  // that grow the overscan.
+  for (let turn = 0; turn < 500 && count() !== "115 of 133 tickets"; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
   // The cards on screen, then the overscan below them once the frame that shows them has drawn (the sizes pass,
   // 2026-11-15).
   const onScreen = stacks()[0]!.cards;
