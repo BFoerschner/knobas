@@ -353,6 +353,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_search::FilterSuggestions::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;
     crate::ticket_views::TicketView::export_all(cfg)?;
+    crate::commands::search::FuzzyRanked::export_all(cfg)?;
     crate::ticket_views::TicketViewRow::export_all(cfg)?;
     crate::ticket_views::TicketViewDraft::export_all(cfg)?;
     // time.ts

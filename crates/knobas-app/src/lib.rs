@@ -865,6 +865,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::archive_download,
         commands::app::java_runtime,
         commands::app::set_java_path,
+        // The page filters' ranking (the fuzzy-search pass, 2026-11-19),
+        // appended at the foot: the list is append-only (§10.8).
+        commands::search::fuzzy_rank,
     ]
 }
 

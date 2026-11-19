@@ -8,10 +8,38 @@
 <script lang="ts">
   import { markNeedles, marks } from "./filter";
 
-  /** `typed` is split on whitespace; `needles`, where given, are marked as they are (a phrase whole). */
-  let { text, typed = "", needles }: { text: string; typed?: string; needles?: readonly string[] } = $props();
+  /**
+   * `typed` is split on whitespace; `needles`, where given, are marked as they are (a phrase whole); `pairs`, where
+   * given, are the letters a ranking matched (`fuzzy_rank`, the fuzzy-search pass): start and end in UTF-16 code units
+   * of a longer text this one starts `from` units into.
+   */
+  let {
+    text,
+    typed = "",
+    needles,
+    pairs,
+    from = 0,
+  }: { text: string; typed?: string; needles?: readonly string[]; pairs?: readonly number[]; from?: number } = $props();
 
-  const runs = $derived(needles ? markNeedles(text, needles) : marks(text, typed));
+  /** `text` cut at `pairs`, moved back by `from` and kept to the text. */
+  function paired(text: string, pairs: readonly number[], from: number) {
+    const runs: { text: string; hit: boolean }[] = [];
+    let at = 0;
+    for (let i = 0; i + 1 < pairs.length; i += 2) {
+      const start = Math.max(at, pairs[i]! - from);
+      const end = Math.min(text.length, pairs[i + 1]! - from);
+      if (end <= start) continue;
+      if (start > at) runs.push({ text: text.slice(at, start), hit: false });
+      runs.push({ text: text.slice(start, end), hit: true });
+      at = end;
+    }
+    if (at < text.length || runs.length === 0) runs.push({ text: text.slice(at), hit: false });
+    return runs;
+  }
+
+  const runs = $derived(
+    pairs && pairs.length > 0 ? paired(text, pairs, from) : needles ? markNeedles(text, needles) : marks(text, typed),
+  );
   const plain = $derived(runs.length === 1 && !runs[0]!.hit);
 </script>
 

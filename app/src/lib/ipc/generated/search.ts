@@ -175,6 +175,14 @@ parents: Array<ParentSuggestion>,
 fields: Array<FieldSuggestion>, };
 
 /**
+ * One row of a list a page holds, as [`fuzzy_rank`] ranks it: its index in
+ * the list sent, whether it is held by its letters in order rather than in
+ * one piece, and its matched letters as pairs of start and end in UTF-16
+ * code units of the text sent.
+ */
+export type FuzzyRanked = { index: number, loose: boolean, marks: Array<number>, };
+
+/**
  * Every key bound: the lists' by chord, the actions' by kind then chord.
  */
 export type Keys = { lists: Array<ListKey>, actions: Array<ActionKey>, };

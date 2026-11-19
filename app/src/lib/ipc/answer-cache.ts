@@ -99,6 +99,8 @@ export const READS: ReadonlySet<string> = new Set([
  */
 export const QUIET: ReadonlySet<string> = new Set([
   "app_status",
+  // A list a page holds, ranked (the fuzzy-search pass): reads nothing, changes nothing.
+  "fuzzy_rank",
   "write_queue_counts",
   "pending_writes",
   "current_timer",

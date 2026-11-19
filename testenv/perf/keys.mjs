@@ -268,14 +268,14 @@ const CASES = [
   { name: "everything-four-letters", presses: [["pay", "o"], ["ret", "r"], ["con", "f"], ["dep", "l"], ["led", "g"], ["bat", "c"], ["sta", "g"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-five-letters", presses: [["retr", "y"], ["conf", "i"], ["batc", "h"], ["sche", "d"], ["chec", "k"], ["part", "n"], ["time", "o"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   // Docs' spaces filter (PR #2479, 2026-11-17): a letter into the empty box, and a second into one holding a letter, over
-  // the scale database's spaces, each second letter one that changes which spaces match. It reads nothing: its rows are
-  // the first frame after the key.
+  // the scale database's spaces, each second letter one that changes which spaces match. Since the fuzzy-search pass
+  // (2026-11-19) it asks `fuzzy_rank` to rank the spaces it holds, and its rows are the frame after that answer.
   // A letter into Monitors' empty filter, and a Backspace taking back the only letter, one no monitor of the scale
   // database's holds (q, x, z), so every row is drawn again.
   { name: "monitors-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
   { name: "monitors-erase", presses: [["q", "Backspace"], ["x", "Backspace"], ["z", "Backspace"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
-  { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
-  { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
+  { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
+  { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   // The fuzzy-search pass (2026-11-19, `docs/decisions/2026-11-19-names-are-found-as-a-picker-finds-them.md`): the names
   // read in memory beside PostgreSQL's words. The last letter of a part of a name (`DesignSystem`, `SeededChain`,

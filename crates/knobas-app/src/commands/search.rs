@@ -793,3 +793,63 @@ mod tests {
         );
     }
 }
+
+/// One row of a list a page holds, as [`fuzzy_rank`] ranks it: its index in
+/// the list sent, whether it is held by its letters in order rather than in
+/// one piece, and its matched letters as pairs of start and end in UTF-16
+/// code units of the text sent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FuzzyRanked {
+    pub index: u32,
+    pub loose: bool,
+    pub marks: Vec<u32>,
+}
+
+/// Most texts one [`fuzzy_rank`] reads: more repositories or spaces than an
+/// installation holds, and about 30 kB a key at a thousand.
+const MOST_RANKED: usize = 20_000;
+
+/// A list a page holds, ranked by what was typed (the fuzzy-search
+/// decisions, 2026-11-19, D12): the launcher's rules for names
+/// (`knobas_search::picker::rank`), best first, with one difference: one to
+/// three typed letters keep a row that holds them anywhere, as the page
+/// filters always have. Code's repository filter and Docs' spaces filter
+/// send the texts they hold and draw the rows in this order. Nothing for a
+/// text the picker reads as nothing (`or`, left-out words only), and nothing
+/// past [`MOST_RANKED`] texts or the launcher's length of typed text.
+#[tauri::command]
+#[must_use]
+pub fn fuzzy_rank(text: String, haystacks: Vec<String>) -> Vec<FuzzyRanked> {
+    if haystacks.len() > MOST_RANKED || text.chars().count() > 512 {
+        return Vec::new();
+    }
+    knobas_search::picker::rank(&text, &haystacks)
+        .into_iter()
+        .map(|ranked| FuzzyRanked {
+            index: ranked.index,
+            loose: ranked.loose,
+            marks: ranked.marks,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod fuzzy_rank_tests {
+    use super::fuzzy_rank;
+
+    #[test]
+    fn a_list_is_ranked_by_the_pickers_rules() {
+        let list = vec![
+            "acme/auth-proxy".to_owned(),
+            "acme/ADProxy".to_owned(),
+            "acme/routing".to_owned(),
+        ];
+        let ranked = fuzzy_rank("proxy".to_owned(), list.clone());
+        assert_eq!(ranked.iter().map(|r| r.index).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(ranked[1].marks, [7, 12]);
+        // One letter, anywhere, as the page filters had it.
+        assert_eq!(fuzzy_rank("u".to_owned(), list.clone()).len(), 2);
+        assert!(fuzzy_rank("or".to_owned(), list).is_empty());
+    }
+}

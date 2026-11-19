@@ -324,6 +324,14 @@ test("a mirror of more than 1000 repositories is read on to its total, not cut a
 
 const drawn = (table: Element) => table.querySelectorAll("tbody tr:not(.tf-wgap)").length;
 
+/** Until the repository filter's `fuzzy_rank` has answered and its rows are drawn. */
+async function answered(): Promise<void> {
+  for (let n = 0; n < 3; n++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  }
+}
+
 test("a long Repositories tab draws the repositories near the viewport, spacer rows standing for the rest (#2210)", async () => {
   const many = Array.from({ length: 2000 }, (_, n) => repo(`bulk-${n}`, "2026-08-01T10:00:00Z"));
   await draw(["repos"], null, ports({ listEntities: async (filter) => page(filter.kinds.includes("repo") ? many : []) }));
@@ -336,6 +344,8 @@ test("a long Repositories tab draws the repositories near the viewport, spacer r
   field.value = "bulk-1999";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  // The text is ranked by `fuzzy_rank` (the fuzzy-search pass): the rows are its answer's.
+  await answered();
   expect([...target.querySelectorAll(".tf-tbl tbody tr")].map((tr) => cells(tr)[0])).toEqual(["tidewater/bulk-1999"]);
 });
 
@@ -390,15 +400,16 @@ test("2,500 repositories with the later pages held back: the first 1,000 draw at
   expect(text(target.querySelector(".tf-sub"))).toContain("2500 repositories");
 
   const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
-  const find = (typed: string) => {
+  const find = async (typed: string) => {
     field.value = typed;
     field.dispatchEvent(new Event("input", { bubbles: true }));
     flushSync();
+    await answered();
     return [...target.querySelectorAll(".tf-tbl tbody tr")].map((tr) => cells(tr)[0]);
   };
-  expect(find("bulk-0999")).toEqual(["tidewater/bulk-0999"]);
-  expect(find("bulk-2499")).toEqual([]);
-  find("");
+  expect(await find("bulk-0999")).toEqual(["tidewater/bulk-0999"]);
+  expect(await find("bulk-2499")).toEqual([]);
+  await find("");
   const before = target.querySelector(".tf-tbl tbody tr:not(.tf-wgap)");
 
   release();
@@ -407,8 +418,8 @@ test("2,500 repositories with the later pages held back: the first 1,000 draw at
   flushSync();
   // Appended behind what was drawn: the same row node, not a list drawn anew.
   expect(target.querySelector(".tf-tbl tbody tr:not(.tf-wgap)")).toBe(before);
-  expect(find("bulk-2499")).toEqual(["tidewater/bulk-2499"]);
-  expect(find("bulk-0999")).toEqual(["tidewater/bulk-0999"]);
+  expect(await find("bulk-2499")).toEqual(["tidewater/bulk-2499"]);
+  expect(await find("bulk-0999")).toEqual(["tidewater/bulk-0999"]);
 });
 
 test("Code draws skeleton rows until its first page answers (#2246)", async () => {

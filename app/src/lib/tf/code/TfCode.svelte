@@ -68,6 +68,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { isFiltering, type FilterConfig, type FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { FuzzyOrder } from "../filter/ranked.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfCloneAll from "../openin/TfCloneAll.svelte";
@@ -519,7 +520,11 @@
   /** The source a twin row names, by its name; its id until the sources are read. */
   const sourceName = (sourceId: string) => sources.find((source) => source.id === sourceId)?.display_name || sourceId;
 
-  const shownRepos = $derived(
+  /**
+   * The repositories every filter but the text keeps, in the page's order; the text ranks them through
+   * `fuzzy_rank` (the fuzzy-search pass, 2026-11-19): best first, by their names' parts and letters in order.
+   */
+  const repoCandidates = $derived(
     repos === null
       ? []
       : visibleRepos(repos.rows, openLines ?? [], checkouts, known, {
@@ -528,9 +533,17 @@
           flags: repoFilter.chips["flag"] ?? [],
           team: repoFilter.dropdowns["team"] ?? "",
           language: repoFilter.dropdowns["lang"] ?? "",
-          text: repoFilter.text,
+          text: "",
         }),
   );
+  /** What a repository's row is matched against: the text `visibleRepos` joined for its word filter. */
+  const repoHaystack = (row: EntityRow) => {
+    const fact = known.get(row.entity_id);
+    return `${row.title} ${fact?.teams.join(" ") ?? ""} ${fact?.language ?? ""}`;
+  };
+  const repoOrder = new FuzzyOrder<EntityRow>();
+  $effect(() => repoOrder.ask(repoFilter.text, repoCandidates, repoHaystack));
+  const shownRepos = $derived(repoOrder.rows(repoFilter.text, repoCandidates, repoHaystack) as EntityRow[]);
   const shownPrs = $derived(
     lines === null
       ? []
@@ -555,7 +568,9 @@
   const reposOrdered = $derived(repos !== null && attentionRead && sourcesRead);
   const prsOrdered = $derived(lines !== null && attentionRead && sourcesRead);
   /** What the person chose: a change sorts the list again (`HeldOrder`). */
-  const basisOf = (chosen: typeof repoFilter) => JSON.stringify([chosen.scope, chosen.text, chosen.chips, chosen.dropdowns, job]);
+  // The ranking's answer is part of the filter: its rows are placed when it lands, as a key's are.
+  const basisOf = (chosen: typeof repoFilter) =>
+    JSON.stringify([chosen.scope, chosen.text, chosen.chips, chosen.dropdowns, job, repoOrder.settled(chosen.text, repoCandidates)]);
   const repoHold = new HeldOrder<EntityRow>((row) => row.entity_id);
   const prHold = new HeldOrder<PrLine>((line) => line.row.entity_id, (line) => line.group ?? "open");
   const none = <T,>(): Placed<T> => ({ rows: [], waiting: 0, stale: false });
@@ -673,8 +688,8 @@
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach repoWin.row(row.entity_id)}>
               <td
                 ><a class="tf-mono" href={itemHash(row)}
-                  ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></span
-                  ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></a
+                  ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} /></span
+                  ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} from={row.title.lastIndexOf("/") + 1} /></a
                 >{#if twinRepos.has(row.entity_id)}{" "}<span class="tf-dim">on {sourceName(row.source_id)}</span>{/if}{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</td
               >
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>

@@ -163,6 +163,7 @@
   import TfKeyed from "../TfKeyed.svelte";
   import { counted } from "../counted";
   import TfMarked from "./TfMarked.svelte";
+  import { FuzzyOrder } from "../filter/ranked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
     copyLinkText,
@@ -680,8 +681,17 @@
   const spaceFilter = sessionFilter("docs-spaces");
   const SPACE_FILTER: FilterConfig = { id: "docs-spaces", placeholder: "Filter spaces", noun: "spaces", one: "space", findKey: false };
   const filteringSpaces = $derived(spaceFilter.text.trim() !== "");
-  /** The rail's spaces: the shown ones, then the hidden ones for the fold at their end, both kept to the filter's words. */
-  const rail = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, spaceFilter.text));
+  /**
+   * The spaces the filter keeps, ranked by `fuzzy_rank` (the fuzzy-search pass, 2026-11-19): best first, by their
+   * names' and keys' parts and letters in order, what was drawn kept until the answer lands.
+   */
+  const spaceOrder = new FuzzyOrder<DocsTree["spaces"][number]>();
+  const spaceHaystack = (space: DocsTree["spaces"][number]) => `${spaceTitle(space, tree?.spaces ?? [])} ${space.key}`;
+  $effect(() => spaceOrder.ask(spaceFilter.text, tree?.spaces ?? [], spaceHaystack));
+  /** The rail's spaces: the shown ones, then the hidden ones for the fold at their end, both kept to the filter's ranking. */
+  const rail = $derived(
+    tree === null ? { shown: [], hidden: [] } : railSpaces(spaceOrder.rows(spaceFilter.text, tree.spaces, spaceHaystack), docsChoices.hidden, ""),
+  );
   /** Every space Docs shows, for the Space picker; the hidden ones follow under their own heading. */
   const pickable = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, ""));
   /** The rail draws one space that is hidden: a page of it is open, or it was picked. */

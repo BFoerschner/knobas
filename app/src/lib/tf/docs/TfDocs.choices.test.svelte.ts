@@ -229,11 +229,14 @@ test("search still finds a hidden space's pages, and its hit says it is in a hid
 test("the filter narrows the rail's spaces by name and by key as it is typed, and counts what it keeps", async () => {
   await draw([]);
   type("eng");
+  await settle();
   expect(railSpaces()).toEqual(["Engineering"]);
   expect(rail().querySelector(".tf-fcount")?.textContent).toBe("1 of 3 spaces");
   type("ops");
+  await settle();
   expect(railSpaces(), "OPS is Operations' key").toEqual(["Operations"]);
   type("zzz");
+  await settle();
   expect(railSpaces()).toEqual([]);
   expect(rail().querySelector(".tf-dl-note")?.textContent).toContain("No space's name or key holds zzz.");
 });
@@ -241,6 +244,7 @@ test("the filter narrows the rail's spaces by name and by key as it is typed, an
 test("Esc in the filter clears it and the whole list is back", async () => {
   await draw([]);
   type("eng");
+  await settle();
   const input = rail().querySelector<HTMLInputElement>("input[aria-label='Filter spaces']")!;
   input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   flushSync();
@@ -252,20 +256,24 @@ test("the filter applies in the hidden fold, which opens by itself when only hid
   docsChoices.hold({ home: null, hidden: ["confluence/ARC"] });
   await draw([]);
   type("a");
+  await settle();
   expect(railSpaces()).toEqual(["Operations"]);
   expect(foldRows(rail())).toEqual(["Archive 2019"]);
   expect(fold(rail())!.open, "a shown space matches too").toBe(false);
   type("archive");
+  await settle();
   expect(railSpaces()).toEqual([]);
   expect(fold(rail())!.open).toBe(true);
   expect(rail().querySelector(".tf-dl-note"), "the fold answers, so nothing says no match").toBeNull();
   type("eng");
+  await settle();
   expect(fold(rail())).toBeNull();
 });
 
 test("the filter's words are kept on a return, as Code's are", async () => {
   await draw([]);
   type("arch");
+  await settle();
   unmount(view!);
   view = null;
   await draw([]);

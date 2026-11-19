@@ -737,3 +737,88 @@ async fn a_loose_row_at_the_cap_stays_loose_and_marked() {
     assert!(hit.rank < 0.0, "{hit:?}");
     assert!(!hit.marks.is_empty(), "{hit:?}");
 }
+
+/// **The Docs search reads as the launcher does** (D12 step 3): a page
+/// whose name holds the typed words in parts is found, a ticket of the same
+/// name is not (pages only), and a word nobody wrote finds the page that says
+/// the nearest one. Without a picker it answers as before.
+#[tokio::test]
+async fn the_docs_search_finds_pages_by_their_names_parts() {
+    let pool = pool().await;
+    let s = source("docs");
+    let tag = format!("zd{}", &s[s.len() - 8..]);
+    let page = row(
+        &pool,
+        &s,
+        "page",
+        "1",
+        &format!("{tag} ADProxy runbook"),
+        "",
+        None,
+        at(0),
+    )
+    .await;
+    let ticket = row(
+        &pool,
+        &s,
+        "ticket",
+        "2",
+        &format!("{tag} ADProxy upgrade"),
+        "",
+        None,
+        at(0),
+    )
+    .await;
+    let body = row(
+        &pool,
+        &s,
+        "page",
+        "3",
+        &format!("{tag} Notes"),
+        "the pagination tokens expire",
+        None,
+        at(0),
+    )
+    .await;
+    let picker = picker(&pool).await;
+    let typed = format!("proxy {tag}");
+    let before = Searcher::new(pool.clone())
+        .page_search(&typed, None, 20)
+        .await
+        .unwrap()
+        .expect("words");
+    assert!(
+        !before.hits.iter().any(|hit| hit.row.entity_id == page),
+        "the miss"
+    );
+    let searcher = Searcher::new(pool.clone()).with_picker(picker.clone());
+    let found = searcher
+        .page_search(&typed, None, 20)
+        .await
+        .unwrap()
+        .expect("words");
+    let ids: Vec<&str> = found
+        .hits
+        .iter()
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert!(ids.contains(&page.as_str()), "{ids:?}");
+    assert!(!ids.contains(&ticket.as_str()), "{ids:?}");
+    let corrected = searcher
+        .page_search(&format!("{tag} pagintion"), None, 20)
+        .await
+        .unwrap()
+        .expect("words");
+    assert!(
+        corrected.hits.iter().any(|hit| hit.row.entity_id == body),
+        "{corrected:?}"
+    );
+    assert!(
+        corrected
+            .needles
+            .iter()
+            .any(|needle| needle == "pagination"),
+        "{:?}",
+        corrected.needles
+    );
+}

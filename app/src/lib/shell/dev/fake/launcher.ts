@@ -16,6 +16,7 @@ import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { fuzzyRank } from "../../../tf/filter/fuzzy";
 import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
 
 /**
@@ -408,8 +409,27 @@ function manyProjects(): { key: string; value: string; detail: string }[] {
   });
 }
 
+/**
+ * `fuzzy_rank` (the fuzzy-search pass, 2026-11-19): the view editor's letters-in-order ranking
+ * (`tf/filter/fuzzy.ts`) over the texts sent, its marks as UTF-16 pairs. **Fixture-only**: the
+ * backend's rules are `knobas_search::picker::rank`'s, witnessed in its tests.
+ */
+export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { index: number; loose: boolean; marks: number[] }[] {
+  const indexed = haystacks.map((haystack, index) => ({ haystack, index }));
+  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => {
+    const marks: number[] = [];
+    let at = 0;
+    for (const run of runs) {
+      if (run.hit) marks.push(at, at + run.text.length);
+      at += run.text.length;
+    }
+    return { index: option.index, loose: false, marks };
+  });
+}
+
 export function handlers(): Handlers {
   return {
+    fuzzy_rank: (args) => fakeFuzzyRank(String(args["text"] ?? ""), (args["haystacks"] as string[] | undefined) ?? []),
     // The launcher board (#504): the recent items alone since #2421 and
     // #2423. **Fixture-only**; the rules are witnessed at the IPC seam over a
     // real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.

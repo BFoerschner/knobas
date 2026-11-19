@@ -10,7 +10,11 @@ Decided by Fable under his delegation on 2026-11-19, built by Opus from the deci
 **What is built so far.** The launcher's names (points 1 to 8 below): `knobas_search::picker`, the statement that
 reads the chosen rows, the merge, the marks, the reload after a sync, the fixtures, the help card. Then the word list
 and its reading in the launcher (point 9): migration `0100` (`sync.word`, its two triggers and its fill), the
-picker's load of it, `Picker::reading`. The Docs search and the page filters (point 10) follow.
+picker's load of it, `Picker::reading`. Then point 10: the Docs search reads the same way (the words' reading, then
+the pages' names, kept to pages and the space asked for, merged as the launcher merges), and Code's repositories and
+Docs' spaces are ranked through one command, `fuzzy_rank`, which the page sends the texts it holds. The page keeps
+what it drew until the answer lands, takes the latest answer only, and falls back to the whole-word filter it had if
+the command does not answer. Knobas' own corpora in the picker (D12 step 5) are left: see below.
 
 ## Why the two missed
 
@@ -102,8 +106,11 @@ the saved scale home cloned, `dev-secrets.json` moved out, release builds of thi
   (`__text` 3.3 MB more than the head before): its hot loops are built for each SIMD width, each typo count and each
   haystack type, where its README counts one. Every single-name call passes a `&str`, which took it from 3.76 MB.
 - **The contract.** `SearchHit.marks` (optional, left out when empty); migration `0100` (`sync.word`,
-  `sync.word_whole`, `sync.word_filled_to`, two triggers on `sync.item`, the fill's two functions). The command
-  `fuzzy_rank` comes with point 10.
+  `sync.word_whole`, `sync.word_filled_to`, two triggers on `sync.item`, the fill's two functions); the command
+  `fuzzy_rank` (`FuzzyRanked`), appended to the handler list.
+- **The page filters.** A key in Code's repository filter or Docs' spaces filter is now a round trip where it read
+  nothing; the probes' `docs-spaces-letter` and `docs-spaces-two-letters` wait for `fuzzy_rank`. The answer cache
+  counts the command quiet: as an unknown command it would have dropped every kept read on every key.
 - **The words.** 798 on the scale home by the rule (the list counted 831 on its copy). The first start's fill: 266
   batches, 9.5 s of the database's time on the loaded Mac where the list estimated 3.8, behind the app; until it has
   run no word is corrected.
@@ -183,6 +190,9 @@ a quiet Mac against their lines.
 
 ## Left, with what it would take
 
+- Knobas' own corpora in the picker (notes, assets, routes, views, sets, lists; D12 step 5): `Matching::Picked` over
+  their corpora, each read beside the mirror's names. Not built in this pass; their names are found by PostgreSQL's
+  words as before.
 - Favourites first among equal fits: the picker would hold the favourite ids.
 - A key by its letters: a second list, the keys.
 - Accents: a folded copy of each name. ADR-0030 stands.

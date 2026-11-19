@@ -203,7 +203,14 @@ pub async fn docs_search(
     space: Option<crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
     let pool = lifecycle.pool()?;
-    docs_search_inner(&pool, lifecycle.registry(), &query, space.as_ref()).await
+    docs_search_picked(
+        &pool,
+        lifecycle.registry(),
+        Some(lifecycle.picker()),
+        &query,
+        space.as_ref(),
+    )
+    .await
 }
 
 /// [`docs_search`] with the pool and the registry handed in, for a test.
@@ -217,7 +224,27 @@ pub async fn docs_search_inner(
     query: &str,
     space: Option<&crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
-    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    docs_search_picked(pool, registry, None, query, space).await
+}
+
+/// [`docs_search_inner`] with the pages' names `picker` holds joining the
+/// answer (the fuzzy-search decisions, 2026-11-19): what the `docs_search`
+/// command answers. No picker is the Docs search as it was.
+///
+/// # Errors
+///
+/// As [`docs_search`].
+pub async fn docs_search_picked(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    picker: Option<&knobas_search::picker::Picker>,
+    query: &str,
+    space: Option<&crate::docs::DocsScope>,
+) -> Result<Option<crate::docs::DocsHits>, IpcError> {
+    let mut searcher = crate::commands::search::searcher(pool, registry).await?;
+    if let Some(picker) = picker {
+        searcher = searcher.with_picker(picker.clone());
+    }
     // The wiki's search, so it narrows itself to the role's fillers (#1296).
     let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
     crate::docs::search(

@@ -1020,17 +1020,101 @@ impl Searcher {
             }
             _ => Vec::new(),
         };
-        let rows = if named.is_empty() {
+        let mut rows = if named.is_empty() {
             self.rows_of(whole(), text).await?
         } else {
             named
         };
+        // The pages' names by the picker and the mirror's words, as the
+        // launcher reads them (the fuzzy-search decisions, D12 step 3): a
+        // word nobody wrote asked again where the text found nothing, the
+        // longer words a written one is part of beside it, and the pages
+        // whose names hold what was typed, kept to pages and the space asked
+        // for. A searcher with no picker answers as before.
+        let mut needles = query::needles(&parsed.query.text);
+        if let (Some(picker), Some(typed)) = (&self.picker, text) {
+            let reading = if picker.holds_words() {
+                picker.reading(typed, parsed.prefix_last_term)
+            } else {
+                picker::WordReading::default()
+            };
+            let mut needles_of = |asked: &str| {
+                for needle in query::needles(asked) {
+                    if !needles.contains(&needle) {
+                        needles.push(needle);
+                    }
+                }
+            };
+            if rows.is_empty()
+                && let Some(corrected) = reading.corrected.as_deref()
+            {
+                let built = sql::search_sql(
+                    &[stored.mirror],
+                    Some(corrected),
+                    parsed.prefix_last_term,
+                    &filters,
+                    query.limit,
+                    query.limit,
+                );
+                rows = self.rows_of(built, Some(corrected)).await?;
+                needles_of(corrected);
+            }
+            let reads = picker::Typed::read(typed).filter(|read| read.letters() >= 2);
+            let names = async {
+                if reads.is_none() || !picker.holds_names() {
+                    return Ok::<Vec<RawHit>, SearchError>(Vec::new());
+                }
+                self.picked_rows(typed, &filters, query.limit).await
+            };
+            let parts = async {
+                match reading.parts.as_deref() {
+                    Some(parts) => {
+                        let built = sql::search_sql(
+                            &[stored.mirror],
+                            Some(parts),
+                            false,
+                            &filters,
+                            query.limit,
+                            query.limit,
+                        );
+                        Ok::<Vec<RawHit>, SearchError>(self.rows_of(built, Some(parts)).await?)
+                    }
+                    None => Ok(Vec::new()),
+                }
+            };
+            let (picked, parted) = tokio::join!(names, parts);
+            if let Some(read) = &reads {
+                rows = group::with_names(
+                    rows,
+                    picked?,
+                    &|title| read.names(title),
+                    query.limit,
+                    query.limit,
+                );
+            }
+            let parted = parted?;
+            if !parted.is_empty() {
+                if let Some(asked) = reading.parts.as_deref() {
+                    needles_of(asked);
+                }
+                rows = group::filled(rows, parted, query.limit, query.limit);
+            }
+            if let Some(read) = &reads {
+                group::mark(&mut rows, read);
+            }
+        }
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
             .find(|g| g.kind == PAGE);
         Ok(Some(match group {
-            Some(group) => answer(group.hits, group.total),
-            None => answer(Vec::new(), 0),
+            Some(group) => PageSearch {
+                needles,
+                ..answer(group.hits, group.total)
+            },
+            None => PageSearch {
+                needles,
+                ..answer(Vec::new(), 0)
+            },
         }))
     }
 

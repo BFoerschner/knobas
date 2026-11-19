@@ -11,6 +11,7 @@ import type { EntityRow } from "./generated/entity";
 import type {
   FavouriteTarget,
   FilterSuggestions,
+  FuzzyRanked,
   Keys,
   LauncherHome,
   QueryTranslation,
@@ -25,6 +26,7 @@ import type {
 
 export type {
   ActionKey,
+  FuzzyRanked,
   CardField,
   FavouriteTarget,
   FieldSuggestion,
@@ -188,4 +190,16 @@ export function saveTicketView(view: TicketViewDraft): Promise<TicketView> {
 /** Delete a ticket view; *Undo* saves it back. */
 export function deleteTicketView(id: string): Promise<void> {
   return invoke<void>("delete_ticket_view", { id });
+}
+
+// ---- the page filters' ranking (the fuzzy-search pass, 2026-11-19) -------------
+
+/**
+ * A list a page holds, ranked by what was typed with the launcher's rules for
+ * names, best first: each row's index in `haystacks`, whether it is held by its
+ * letters in order, and its matched letters as pairs of start and end in UTF-16
+ * code units. Code's repositories and Docs' spaces draw their rows in this order.
+ */
+export function fuzzyRank(text: string, haystacks: readonly string[]): Promise<FuzzyRanked[]> {
+  return invoke<FuzzyRanked[]>("fuzzy_rank", { text, haystacks });
 }
