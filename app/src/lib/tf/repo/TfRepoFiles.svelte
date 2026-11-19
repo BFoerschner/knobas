@@ -173,6 +173,7 @@
     job = null,
     checkoutBranch = null,
     checkout = undefined,
+    checkoutRead = true,
     title = "",
     refreshed = 0,
     refusal = null,
@@ -212,6 +213,11 @@
     checkoutBranch?: string | null;
     /** The repository's checkout, for *Open in…*; `undefined` while it is read. */
     checkout?: CheckoutView | undefined;
+    /**
+     * Whether the checkout's read has answered, or failed: until then the file's actions wait unseen in their room, so
+     * *Clone* or *Open in…* landing beside *Render as* and *Pipeline* pushes neither (the ux21 pass: 59 px at 4x).
+     */
+    checkoutRead?: boolean;
     /** The repository's `owner/name`. */
     title?: string;
     /** The page's refreshes (#2135): each reads the open directories and the file again over what the tab drew. */
@@ -1879,7 +1885,7 @@
         {:else}
           <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
         {/if}
-        <span class="tf-trail">
+        <span class="tf-trail" class:tf-heldbelow={!checkoutRead}>
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}
             <TfRendererSwitch

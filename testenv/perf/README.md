@@ -545,7 +545,9 @@ resizes is a mover (*before its answer drew*). Its return clears the filter and 
 A place may land reads of its own late on the fixture (`late`, in `fake-late`'s form, joined to the corpus's, and `fake`,
 more of the fixture's switches), for a read the real backend answers after the page draws and the fixture at once:
 `settings-renderers-java-late` opens Settings › Renderers with the Decompiler's Java read 900 ms late, past any hold,
-and a Java too old to say why (the ux19 gate, `docs/decisions/2026-11-19-the-decompiler-line-keeps-its-room.md`). Such
+and a Java too old to say why (the ux19 gate, `docs/decisions/2026-11-19-the-decompiler-line-keeps-its-room.md`);
+`repo-checkout-late` opens a repository not cloned with its views at once and its checkout 450 ms late, so *Clone*
+lands after the README drew (the ux21 pass, `docs/decisions/2026-11-19-what-the-ux21-moves-pass-held-still.md`). Such
 a place is the fixture's only; `--real` leaves it out.
 
 ```sh

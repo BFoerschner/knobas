@@ -74,6 +74,11 @@ const PLACES = [
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },
+  // The checkout read after the README drew (the ux21 pass): *Clone* landed beside *Render as* and *Pipeline* and pushed
+  // them 59 px on the live suite at 4x. The views at once and the checkout within the header's 500 ms hold, so the header
+  // draws with it as it does there. `ledger`: not cloned, and a README with no image (an image's first load moves the
+  // text under it, until its size is kept: `tf/markdown/image-sizes.ts`).
+  { name: "repo-checkout-late", fixture: true, late: "entity_view:0,entity_checkout:450", start: "#/code", go: "#/repo/mock%3Atidewater%2Fledger", hash: "#/repo/mock%3Atidewater%2Fledger", away: "Escape" },
   { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
   { name: "repo-commit", optional: "real", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },

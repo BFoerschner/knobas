@@ -8,7 +8,12 @@
   the app's read cache answers the two together.
 
   A skeleton while the first read is out; a re-read (another branch, a
-  refresh) keeps the commit drawn until it answers. The strip is an extra
+  refresh) keeps the commit drawn until it answers. The way to the history
+  keeps a room as wide as *8,888 commits* from its first frame: the mirror's
+  answer has its tip and no count, and the source's read behind it brings the
+  count, which widened the button and pushed the sha and the time 50 px (the
+  ux21 pass). A count read before for the same place is drawn with the
+  mirror's answer at once. The strip is an extra
   on the landing: a read that fails, or a repository with no commit, draws
   nothing rather than an error above the README.
 -->
@@ -21,6 +26,7 @@
   import { commitHash, repoHash, viewRows } from "./repo";
   import { authorOf, initials } from "./file-tree";
   import { thousands } from "../counted";
+  import { keptCount, keepCount } from "./last-commit-counts";
 
   let {
     ports,
@@ -50,7 +56,9 @@
       (view) => {
         if (!alive()) return;
         last = viewRows(view?.sections[0])[0] ?? null;
-        total = view?.sections[0]?.count == null ? null : Number(view.sections[0].count);
+        const count = view?.sections[0]?.count;
+        // A held answer (`held_at`: the mirror's, read behind) without a count draws the one this place was read with last.
+        total = count != null ? keepCount(where, Number(count)) : view !== null && "held_at" in view ? keptCount(where) : null;
         const id = last?.entity_id ?? null;
         if (id === null) {
           mine = false;
@@ -115,8 +123,8 @@
       <span class="tf-mono">{last.chip}</span>
     {/if}
     {#if by?.when}<span class="tf-dim tf-small">{by.when}</span>{/if}
-    <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}
-      >{total === null ? "History" : `${thousands(total)} ${total === 1 ? "commit" : "commits"}`}</a
+    <a class="tf-btn tf-sm tf-ghost tf-lastc-all" href={repoHash(repoId, "commits")}
+      ><span>{total === null ? "History" : `${thousands(total)} ${total === 1 ? "commit" : "commits"}`}</span></a
     >
   </div>
 {/if}

@@ -27,6 +27,7 @@ import type {
 import TfRepo, { forgetHeaderLooks, forgetHeaderSearches, type RepoPorts } from "./TfRepo.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { drawsReading } from "../../shell/test-witness";
+import { forgetCounts } from "./last-commit-counts";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -606,6 +607,31 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
   expect(target.querySelector(".tf-banner a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/local");
 });
 
+test("the open file's actions wait unseen in their room for the checkout, so Clone landing pushes no button (the ux21 pass)", async () => {
+  let answer!: (view: CheckoutView) => void;
+  let fail!: (why: unknown) => void;
+  const late = () => new Promise<CheckoutView>((resolve, reject) => ((answer = resolve), (fail = reject)));
+  await draw([REPO], ports({ entityCheckout: late }, false));
+  const trail = () => target.querySelector(".tf-fileview header .tf-trail")!;
+  expect(text(target.querySelector(".tf-fileview .tf-md")), "the README draws meanwhile").toBe("// README.md fn main() {}");
+  expect(trail().classList.contains("tf-heldbelow"), "held while the checkout is read").toBe(true);
+  expect(trail().querySelector(".tf-openin")).toBeNull();
+  answer(checkout(null));
+  await settle();
+  expect(trail().classList.contains("tf-heldbelow")).toBe(false);
+  expect(text(trail().querySelector(".tf-openin"))).toBe("Clone");
+  unmount(view!);
+  view = null;
+
+  // A read that fails shows the rest, with no *Clone* to wait for.
+  await draw([REPO, "files", "src", "lib.rs"], ports({ entityCheckout: late }, false));
+  expect(trail().classList.contains("tf-heldbelow")).toBe(true);
+  fail({ code: "internal", message: "no" });
+  await settle();
+  expect(trail().classList.contains("tf-heldbelow")).toBe(false);
+  expect(trail().querySelector(".tf-openin")).toBeNull();
+});
+
 test("the landing draws the branch's last commit above the README; a file opened does not (#2257)", async () => {
   await draw([REPO]);
   const strip = target.querySelector(".tf-lastc")!;
@@ -628,6 +654,42 @@ test("the landing draws the branch's last commit above the README; a file opened
 
   await draw([REPO, "files", "src", "lib.rs"]);
   expect(target.querySelector(".tf-lastc")).toBeNull();
+});
+
+test("the mirror's answer, with no count, draws the count read before, and the way to the history keeps its room (the ux21 pass)", async () => {
+  forgetCounts();
+  const base = ports();
+  const commits = (count: number | null, held: boolean) =>
+    ports({
+      entityView: async (id, sectionId) => {
+        const view = await base.entityView(id, sectionId);
+        if (sectionId !== "commits" || view === null) return view;
+        const counted = { ...view, sections: [{ ...view.sections[0]!, count }] } as SourceView;
+        return held ? { ...counted, held_at: "2026-11-19T13:33:26Z" } : counted;
+      },
+    });
+  const way = () => target.querySelector(".tf-lastc a.tf-btn")!;
+  // Never counted here: the mirror's answer says *History*, in a room the count will not outgrow.
+  await draw([REPO], commits(null, true));
+  expect(text(way())).toBe("History");
+  expect(way().classList.contains("tf-lastc-all"), "the room as wide as 8,888 commits").toBe(true);
+  unmount(view!);
+  view = null;
+
+  await draw([REPO], commits(438, false));
+  expect(text(way())).toBe("438 commits");
+  unmount(view!);
+  view = null;
+
+  // Back on the repository, the mirror answers first: the count read before draws at once.
+  await draw([REPO], commits(null, true));
+  expect(text(way())).toBe("438 commits");
+  unmount(view!);
+  view = null;
+
+  // A source that answers no count says *History*, whatever was read before.
+  await draw([REPO], commits(null, false));
+  expect(text(way())).toBe("History");
 });
 
 test("a last commit that does not read leaves the landing without its strip (#2257)", async () => {

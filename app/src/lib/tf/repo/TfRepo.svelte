@@ -1351,6 +1351,7 @@
                   {job}
                   checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
                   {checkout}
+                  checkoutRead={checkoutAnswered}
                   title={repo?.title ?? ""}
                   {source}
                   {refreshed}

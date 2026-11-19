@@ -111,6 +111,11 @@
 .tf-lastc > .tf-dim { white-space: nowrap; }
 .tf-lastc > .tf-av { font-size: calc(var(--t-2xs) * var(--fs)); margin: 0; background: var(--info-bg); color: var(--info); border-color: transparent; }
 .tf-lastc-by { font-weight: 600; white-space: nowrap; }
+/* The way to the history keeps a room as wide as *8,888 commits* (the ux21 pass): the count comes after the mirror's
+   answer drew *History*, and a button that widened pushed the sha and the time beside it. The label is centred in it. */
+.tf-lastc-all { display: inline-grid; justify-items: center; align-items: center; }
+.tf-lastc-all::after { content: "8,888 commits"; visibility: hidden; height: 0; overflow: hidden; }
+.tf-lastc-all > *, .tf-lastc-all::after { grid-area: 1 / 1; }
 .tf-lastc.tf-skel .tf-skel-bar:first-child { width: 80px; }
 .tf-lastc.tf-skel .tf-skel-bar:last-child { width: 45%; }
 .tf-fileview { background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; min-width: 0; }
