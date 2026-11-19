@@ -104,7 +104,7 @@
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
   import TfWrittenAt from "./TfWrittenAt.svelte";
-  import { Windowed, landOn, listScrolled } from "../../shell/windowed.svelte";
+  import { Windowed, landOn, listScrolled, placeWindowsNow } from "../../shell/windowed.svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { menuThing } from "../context/thing";
   import { thousands } from "../counted";
@@ -738,6 +738,10 @@
       // after it (`land`, the compare-jump-speed pass, 2026-11-18); `n`, `p` and `c` bring the card near as before.
       if (!landing || scroller === null || !fileWin.land(at, bandCover())) fileWin.reveal(at);
       flushSync();
+      // The lists the cards brought (their lines) hold their room before the card is measured, in one layout with the
+      // read of where they sit: unplaced, a big file's card was its first screen of lines tall, and a card measured
+      // under it stood a file's height from where it was put (the ux21 overs pass).
+      placeWindowsNow();
     }
     return cards[key] ?? undefined;
   }

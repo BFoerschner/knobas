@@ -588,6 +588,49 @@ function laidOutPage(n: number) {
   return { page, paths, scrolled, pick, headOf, top: () => top, restore: () => (HTMLElement.prototype.getBoundingClientRect = rect) };
 }
 
+test("a pick measures the card it lands on once the lines the jump brought hold their room (the ux21 overs pass)", () => {
+  // A big file's lines came in with the jump as a windowed list that had not yet read where it sat: its card was its
+  // first screen of lines tall, and the picked card under it, measured then, stood a file's height from where it was
+  // put, so the jump scrolled a file's height off and built a screen of that file before it came back.
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  page.style.overflowY = "auto";
+  target.appendChild(page);
+  let top = 0;
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => top, set: (px: number) => (top = Math.max(0, px)) });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 2_000_000 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 800 });
+  const big = (path: string) => file(path, { additions: 300, deletions: 0, hunks: [{ header: "@@ -0,0 +1,300 @@", lines: Array.from({ length: 300 }, (_, i) => add(i + 1, `line ${i}`)) }] });
+  const paths = Array.from({ length: 30 }, (_, i) => `src/f${String(i).padStart(2, "0")}.rs`);
+  const picked = paths[20]!;
+  const roomless: string[] = [];
+  let measured = 0;
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    // The pick's own measure of where the card stands (`go`).
+    if (this.getAttribute("data-file") === picked && /\bat go\b/.test(new Error().stack ?? "") && ++measured)
+      for (const body of target.querySelectorAll<HTMLElement>(".tf-dbody")) if (body.style.paddingBottom === "" && body.style.paddingTop === "") roomless.push(body.closest("[data-file]")?.getAttribute("data-file") ?? "?");
+    const [y, height] = this === page ? [0, 800] : this.classList.contains("tf-dband") ? [0, 44] : [0, 0];
+    return { top: y, bottom: y + height, left: 0, right: 0, width: 0, height, x: 0, y, toJSON: () => ({}) } as DOMRect;
+  };
+  try {
+    draw({ files: paths.map(big), layout: createDiffLayout(() => null) }, page);
+    placeWindowsNow();
+    flushSync();
+    growWindowsNow();
+    flushSync();
+    roomless.length = 0;
+    measured = 0;
+    target.querySelector<HTMLButtonElement>(`.tf-flist button[title='${picked}']`)!.click();
+    flushSync();
+    expect(target.querySelector(`[data-file="${picked}"] .tf-dbody`)).not.toBeNull();
+    expect(measured).toBeGreaterThan(0);
+    expect(roomless).toEqual([]);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = rect;
+  }
+});
+
 test("a file drawn once and taken out by the window since is drawn again and landed when picked (the compare-jump pass)", () => {
   // In Compare, a pick of a file drawn earlier near the view and scrolled away from did nothing: its card's binding
   // was null, not undefined, so the view took it for drawn and scrolled to nothing.

@@ -244,6 +244,12 @@ export class Windowed<K = string> {
       let span = this.#heights.span(this.#viewTop + landing.covered, Math.max(0, this.#viewHeight - landing.covered), 0, 0);
       // The row landed on stays drawn whatever the view reads: the caller holds the page by it.
       const at = keys.indexOf(landing.key);
+      // Nor is a row above it drawn while its top stands at the band's foot: those lie under the band. A scroll rounds
+      // to whole pixels, so the view's top fell a fraction of a pixel above a row's fractional top, and the row before it
+      // was drawn for that sliver: a big file, whose lines then laid out short, put the landed file a file's height up
+      // and the jump built a screen of that file before it came back (the ux21 overs pass, 300 to 600 ms at CPU 6x).
+      if (at > span.start && this.#heights.offsetOf(at) <= this.#viewTop + landing.covered + 1)
+        span = this.#heights.around(at, Math.max(at + 1, span.end));
       if (at >= 0 && (at < span.start || at >= span.end)) span = this.#heights.around(Math.min(at, span.start), Math.max(at + 1, span.end));
       if (this.#options.onScreen) this.#lastDrawn = { start: span.start, keys: keys.slice(span.start, span.end) };
       return { ...span, on: true };
@@ -356,6 +362,10 @@ export class Windowed<K = string> {
         const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
         // A table that declares its columns (a `colgroup`) has its widths already, and needs no layout read for them.
         if (heads.length === 0 && table.querySelector(":scope > colgroup")) return;
+        // Nor does a fixed table with a header row: its header's cells give its columns, whichever rows are drawn. Read,
+        // their widths laid the whole page out as the list began to window, in the task that opens it, and again once
+        // written (the ux21 overs pass: Tickets' show-every-ticket list, 105 ms at 1x on Björn's PC).
+        if (heads.length > 0 && getComputedStyle(table).tableLayout === "fixed") return;
         const width = table.getBoundingClientRect().width;
         if (width === 0) return;
         if (heads.length === 0) return freezeCols(table, body, width);
@@ -432,13 +442,17 @@ export class Windowed<K = string> {
     const place = (phase: Phase) => {
       queued = false;
       if (!node.isConnected) return;
-      if (phase === "room") {
+      if (phase === "style") {
         // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
         clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
         const style = getComputedStyle(node);
         base.top = parseFloat(style.paddingTop) || 0;
         base.bottom = parseFloat(style.paddingBottom) || 0;
         base.read = true;
+        return;
+      }
+      if (phase === "room") {
+        if (!base.read) return;
         // The undrawn rows' room first: a box that clips the list and holds only it (the Inbox's sheet) ends at the rows
         // drawn so far until the room is in, and read before it would take that for the view's bottom.
         if (!(node instanceof HTMLTableSectionElement) && !own) {
@@ -774,8 +788,13 @@ function freezeCols(
  */
 let jumping: object | null = null;
 
-/** A list's place is read in two steps: every list's room is written, then where each sits is read. */
-type Phase = "room" | "read";
+/**
+ * A list's place is read in three steps: every list's styles are read, then every list's room is written, then where
+ * each sits is read. A list that read its styles after another had written its room asked for a style pass of the page
+ * each, and with it a layout: the lines of a jump's cards, 39 ms of a sixth-speed main thread in `clipsOf`
+ * (the ux21 overs pass).
+ */
+type Phase = "style" | "room" | "read";
 /** The lists attached in this flush that have not read where they sit yet (`list`). */
 const unplaced = new Set<(phase: Phase) => void>();
 
@@ -829,6 +848,7 @@ export function placeWindowsNow() {
   // windowed list that, unplaced, holds no room for its rows past the overscan; read after another list's read laid the
   // page out, it had made the page 5,000 px shorter for that layout, and a page scrolled near its end was cut back to it
   // and stayed there, a file picked near the list's end landing far from where it was put.
+  for (const each of all) each("style");
   for (const each of all) each("room");
   for (const each of all) each("read");
 }

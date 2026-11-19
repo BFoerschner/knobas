@@ -63,6 +63,26 @@ test("a windowed table freezes its columns again when its header cells change (#
   stop();
 });
 
+test("a fixed table with a header row keeps the columns its header gives, and lays nothing out for them as it starts to window (the ux21 overs pass)", () => {
+  // Tickets' list is `table-layout: fixed` with widths on its header's cells: reading them laid the page out in the task
+  // that opened the list, and writing them back laid it out again.
+  const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  document.body.innerHTML =
+    '<table style="table-layout: fixed"><thead><tr><th>a</th><th>b</th></tr></thead><tbody></tbody></table>';
+  const table = document.querySelector("table")!;
+  const heads = [...table.tHead!.rows[0]!.cells];
+  const win = new Windowed({ count: () => 400, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    win.list(table.tBodies[0]!);
+  });
+  flushSync();
+  expect(win.on).toBe(true);
+  expect(rect.mock.contexts.filter((el) => el === table || heads.includes(el as HTMLTableCellElement))).toEqual([]);
+  expect(heads.map((cell) => cell.style.width)).toEqual(["", ""]);
+  expect(table.style.tableLayout).toBe("fixed");
+  stop();
+});
+
 test("a windowed table with no header row freezes its columns at its first drawn row's cells, and lets go when it stops windowing (#2210)", () => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: HTMLElement) {
@@ -388,6 +408,31 @@ test("lists attached together each hold their rows' room before any of them read
   stop();
 });
 
+test("lists attached together read their styles before any of them writes its room (the ux21 overs pass)", () => {
+  // A jump's cards each bring a list of lines: each read its ancestors' and its own styles after the list before had
+  // written its room, a style pass and a layout of the page per list.
+  document.body.innerHTML = '<div class="main" style="overflow-y: auto"><div class="la"></div><div class="lb"></div><div class="lc"></div></div>';
+  const lists = [...document.querySelectorAll<HTMLElement>(".la, .lb, .lc")];
+  const padded = () => lists.some((el) => el.style.paddingBottom !== "");
+  const styleReads: boolean[] = [];
+  const real = window.getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
+    styleReads.push(padded());
+    return real(el, pseudo);
+  });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 800, top: 0, bottom: 800, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  const wins = lists.map(() => new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 }));
+  const stop = $effect.root(() => wins.forEach((win, i) => win.list(lists[i]!)));
+  flushSync();
+  placeWindowsNow();
+  expect(styleReads.length).toBeGreaterThan(lists.length);
+  expect(styleReads).not.toContain(true);
+  expect(padded()).toBe(true);
+  stop();
+});
+
 test("the drawn rows hold still while the view moves inside them, and move to it once it comes within the margin of their edge (PR #2479)", () => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
@@ -469,6 +514,33 @@ test("a jump lands its row under the band at once and draws the rows on screen a
   flushSync();
   expect(win.end).toBe(1000);
   expect(win.start).toBeLessThanOrEqual(999);
+  stop();
+});
+
+test("a jump draws no row above the one it lands on when the scroll rounds down a fraction of a pixel (the ux21 overs pass)", () => {
+  // Rows of a fractional height, as a diff's files measure on a device's grid; a scroller holds whole pixels, so the
+  // view's top stood 0.4 px above the row's top and the row before it, a big file, was drawn for that sliver.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  document.body.innerHTML = '<ol style="overflow-y: auto"><li class="before"></li><li class="after"></li></ol>';
+  const list = document.querySelector("ol")!;
+  let scrolled = 0;
+  Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = Math.floor(px)) });
+  Object.defineProperty(list, "clientHeight", { value: 300 });
+  Object.defineProperty(list, "scrollHeight", { value: 50_000 });
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20.601, overscan: 200, scrolls: true });
+  const stop = $effect.root(() => {
+    win.list(list);
+    win.room("before")(list.querySelector<HTMLElement>(".before")!);
+    win.room("after")(list.querySelector<HTMLElement>(".after")!);
+  });
+  placed();
+  expect(win.land(500, 40)).toBe(true);
+  flushSync();
+  // Row 500's top is 10,300.5 px; the scroll took 10,260 for the band's foot at 10,260.5.
+  expect(scrolled).toBe(10_260);
+  expect(win.start).toBe(500);
   stop();
 });
 
