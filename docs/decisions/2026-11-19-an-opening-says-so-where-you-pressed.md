@@ -33,7 +33,14 @@ Not asked of a Fable agent: menus close on their pick, so the choice between the
 by the pointer, a status line) was decided by that. A swap in the row would hold a menu open for a second, and a status
 line is far from where the eye is.
 
-**Measured.** See the PR comment for ux21 (shots before and after, long-paths, trips, moves).
+**Measured (Mac, headless Chrome, the fixture with `?fake-long-paths`).** Before: *Open in › VS Code* on a repository
+drew a toast 720x61 px at 1440x868 and 1,413x40 px at 5120x1440. After: a chip 147x24 px, *Opening in VS Code*, beside
+the menu; a failure's toast 680x40 px at both sizes, *Could not start VS Code: 'open -a "Visual Studio Code"
+{path}'…No such file or directory (os error 2)*; a clone's toast 680x40 px, *Cloned ledger into C:\Users\someone with a
+long name\source…ledger, on main* with *Open in VS Code*. `long-paths.mjs` (now reading toasts and the chip, with a
+clone's toast, its *Open in VS Code* and the chip as screens): 72 of 72 screens at four sizes. Press trips `--strict`:
+307 passing (`rc-folder` and *Try it*'s two now read the chip). `just moves --only repo,settings,launcher` at 1x and 4x,
+1440x868@1 and 2560x1440@1.25: 224 opens, nothing moved. Nothing drawn at rest changed, so `pixel-same.py` did not run.
 
 **Reversing it** is `said` in `tf/openin/apps.svelte.ts` pushing its toast again, and `.tf-toast-line` taken off: the
 toast then wraps as before.
