@@ -508,6 +508,7 @@ const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
 const TfAssetTree = (await import("../tf/asset-tree/TfAssetTree.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
+const LinkAssetDialog = (await import("../assets/LinkAssetDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
@@ -2864,6 +2865,28 @@ const CASES: Case[] = [
           move: () => Promise.reject(new Error("no write in this test")),
           onclose: () => {},
           onmoved: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * An open monitor's *Link an asset…* (2026-11-19): *Move to…*'s picker, one effect -- the level it is standing on --
+     * re-read on every step, so a walk unmounted mid-step is the case this covers too.
+     */
+    name: "LinkAssetDialog",
+    source: "lib/assets/LinkAssetDialog.svelte",
+    open: (target) => ({
+      app: mount(LinkAssetDialog, {
+        target,
+        props: {
+          monitor: { name: "jira" },
+          watched: new Set<string>(),
+          tree: () => deferred([]),
+          link: () => Promise.reject(new Error("no write in this test")),
+          onclose: () => {},
+          onlinked: () => {},
+          oncreate: () => {},
         },
       }),
     }),

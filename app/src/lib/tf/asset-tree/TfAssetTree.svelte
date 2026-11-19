@@ -1,8 +1,11 @@
 <!--
-  The *Asset tree* in the new shell (#871): today's Miller columns
-  (`assets/AssetsView.svelte`), unchanged, at `#/assets`, `#/asset/<id>` and
-  `#/route/<id>`. It has no top-bar entry (D13): a row, an alert or a search
-  opens it at an asset, and that page's breadcrumb leads to `#/assets`.
+  *Assets*, the asset tree in the new shell (#871): the Miller columns
+  (`assets/AssetsView.svelte`) at `#/assets`, `#/asset/<id>` and `#/route/<id>`.
+  Its top-bar entry follows Monitors (Björn, 2026-11-19, overriding the
+  2026-11-05 note's "no nav entry"); a row, an alert or a search opens it at an
+  asset too, and that page's breadcrumb leads to `#/assets`. The bar is drawn at
+  `#/assets` as well, though a section's own page has none elsewhere: drawn only
+  under an asset, it came with the first press in a column and moved the tree.
 
   The view takes the two things it reads off the shell's navigation, `route`
   and `go`. This page hands it the address the shell already parsed, with the
@@ -28,7 +31,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { goAcross, replaceAddress } from "../opener";
   import { parentPage } from "../page-name.svelte";
-  import { HEAD_NAME } from "../route";
+  import { HEAD_NAME, SECTION_NAME } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfKey from "../TfKey.svelte";
 
@@ -47,7 +50,7 @@
   let named = $state<string | null>(null);
   /** The asset holding it, where `Esc` steps up to; `null` at the estate's top, whose parent the address says. */
   let holder = $state<{ id: string; name: string } | null>(null);
-  parentPage(() => (head === "asset" ? (holder === null ? { hash: "#/assets", name: "Asset tree" } : { hash: `#/asset/${encodeURIComponent(holder.id)}`, name: holder.name }) : null));
+  parentPage(() => (head === "asset" ? (holder === null ? { hash: "#/assets", name: SECTION_NAME.assets } : { hash: `#/asset/${encodeURIComponent(holder.id)}`, name: holder.name }) : null));
 
   const address = $derived(`#/${[head, ...rest].map(encodeURIComponent).join("/")}`);
 
@@ -83,9 +86,9 @@
 <div class="tf-full">
   <!-- Always drawn, so the first click in a column does not move the tree under the pointer. -->
   {#if head === "assets"}
-    <TfCrumbs parts={[{ name: "Asset tree" }]} {back} />
+    <TfCrumbs parts={[{ name: SECTION_NAME.assets }]} {back} />
   {:else}
-    <TfCrumbs parts={[{ name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
+    <TfCrumbs parts={[{ name: SECTION_NAME.assets, href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
   {/if}
   {#if reached.marks !== undefined && reached.list.length > 0}
     <p class="tf-at-reach">

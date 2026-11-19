@@ -82,6 +82,9 @@
 .tf-mon-up { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink-2); }
 .tf-mon-ack { display: flex; justify-content: flex-end; }
 .tf-mon-row > .tf-mon-watch, .tf-mon-head > .tf-mon-watch { padding-left: 10px; }
+/* The open monitor floats over the rows' end; what a row watches gives way to it, cut at its edge with the names in the
+   cell's title, rather than running on under it (2026-11-19). The roster keeps its columns, so no row moves. */
+.tf-mon-paneled :is(.tf-mon-row, .tf-mon-head) > .tf-mon-watch { padding-right: calc(var(--side-monitor, 360px) + 22px - 12px); }
 /* A hidden monitor: after the roster, under its own line, every word in the second ink and no tone anywhere. */
 .tf-mon-row.tf-mon-hid { color: var(--ink-2); }
 .tf-mon-row.tf-mon-hid .tf-mon-name { font-weight: 400; }
@@ -131,6 +134,9 @@
 .tf-mon-facts a { text-decoration: underline; text-underline-offset: 2px; }
 .tf-mon-facts .tf-mono { font-size: calc(var(--t-xs) * var(--fs)); white-space: normal; overflow-wrap: anywhere; }
 .tf-mon-pacts { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
+/* *Watches* in the open monitor: what it watches, then its two ways to say so, on a line of their own (2026-11-19). */
+.tf-mon-pwatch { display: grid; gap: 6px; justify-items: start; }
+.tf-mon-pwacts { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
 .tf-mon-panel .tf-refresh-failed { margin: 0; }
 
 /* *Assets nothing watches*: a table, its heads under the filter bar. At 900 px and below `.tf-cbody` scrolls sideways. */

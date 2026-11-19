@@ -97,8 +97,12 @@ const PLACES = [
   { name: "monitor", start: "#/monitors", press: `${shown} .tf-mon-row .tf-mon-state`, hash: null, ready: ".tf-mon-panel h2", away: "Escape" },
   { name: "sets", start: "#/time", nav: "sets", hash: "#/sets", away: "time" },
   { name: "time", start: "#/docs", nav: "time", hash: "#/time", away: "docs", tabs: true },
-  { name: "assets", optional: true, start: "#/time", go: "#/assets", hash: "#/assets", anywhere: true, away: "#/time" },
-  { name: "asset", optional: true, start: "#/assets", press: `${shown} a[href^="#/asset/"], ${shown} [role=treeitem]`, hash: "#/asset", anywhere: true, away: "#/assets" },
+  // An estate of one root lands on that root, so the address can be an asset's; the tree's rows are buttons (2026-11-19:
+  // `asset` had found nothing to press since its rows stopped being links).
+  { name: "assets", optional: true, start: "#/time", go: "#/assets", hash: "#/asset", anywhere: true, away: "#/time" },
+  // By its nav entry (2026-11-19): an estate of one root lands on that root, so the address is an asset's.
+  { name: "assets-nav", optional: true, start: "#/time", nav: "assets", hash: "#/asset", anywhere: true, away: "time" },
+  { name: "asset", optional: true, start: "#/assets", press: `${shown} ol.col button.row:not(.on)`, hash: "#/asset/", anywhere: true, away: "#/assets" },
   { name: "settings", start: "#/time", gear: true, hash: "#/settings", away: "Escape" },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
   { name: "settings-source", start: "#/settings/sources", press: `${shown} a[href^="#/settings/source/"]`, hash: "#/settings/source/", away: "Escape" },

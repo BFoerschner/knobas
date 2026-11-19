@@ -27,14 +27,14 @@ afterEach(() => {
 test("the tree draws its crumb bar at both addresses; an asset's names the tree and the asset", () => {
   mounted = mount(TfAssetTree, { target: document.body, props: { head: "assets", rest: [] } });
   flushSync();
-  expect(document.querySelector(".tf-crumbs")?.textContent).toContain("Asset tree");
+  expect(document.querySelector(".tf-crumbs")?.textContent).toContain("Assets");
   void unmount(mounted);
-  mounted = mount(TfAssetTree, { target: document.body, props: { head: "asset", rest: ["gitea:acme/web"], back: { name: "Asset tree" } } });
+  mounted = mount(TfAssetTree, { target: document.body, props: { head: "asset", rest: ["gitea:acme/web"], back: { name: "Assets" } } });
   flushSync();
   const crumbs = document.querySelector(".tf-crumbs")!;
   expect([...crumbs.querySelectorAll("a.tf-crumb")].map((a) => a.getAttribute("href"))).toEqual(["#/assets"]);
   expect(crumbs.querySelector("strong")?.textContent).toBe("Asset");
-  expect(crumbs.textContent).toContain("Back to Asset tree");
+  expect(crumbs.textContent).toContain("Back to Assets");
 });
 
 test("the page reads its address with parseHash and go sets location.hash", () => {

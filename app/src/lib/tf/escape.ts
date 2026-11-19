@@ -173,12 +173,12 @@ export function escHolder(field: HTMLElement): HTMLElement | null {
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  * A section's top page does nothing, unless it was opened to be returned from
  * (`visiting`: a ticket card's row, spec #2401, *Manage link sets*, or the launcher): then it goes back.
- * Settings and the asset tree are the others: places with no nav entry, visited
- * from somewhere and returned from, Settings on every one of its sections alike,
- * and the tree on its bare root as on an asset in it.
+ * Settings is the other: a place with no nav entry, visited from somewhere and
+ * returned from, on every one of its sections alike. Assets has its entry again
+ * (2026-11-19), so its own page is a top page like Monitors'.
  */
 export function escTarget(route: TfRoute, opener: EscTarget | null, visiting = false, parent: EscTarget | null = null): EscTargetOf | null {
-  const visited = route.view === "full" && (route.section === "settings" || route.section === "assets");
+  const visited = route.view === "full" && route.section === "settings";
   if (isTopPage(route) && !(opener !== null && (visiting || visited))) return null;
   if (opener !== null) return { hash: opener.hash, name: opener.name, opened: true };
   if (parent !== null) return { ...parent, opened: false };

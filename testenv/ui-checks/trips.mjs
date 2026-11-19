@@ -479,6 +479,10 @@ const PAGES = [
     { id: "monitors-hide-inbox", kind: "leave-back", finding: "F-356", press: { sel: ".tf-mon-pacts button", text: "Hide" }, rows: MONITOR_ROWS, via: "inbox" },
     { id: "monitors-pause-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-340", press: { sel: ".tf-mon-pacts button", text: "Pause" } },
     { id: "monitors-hide-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-340", press: { sel: ".tf-mon-pacts button", text: "Hide" } },
+    // What it watches (2026-11-19, Assets back in the nav): the picker's *Link to …* and the new asset's *Create* close their
+    // dialog onto the button that opened it, and a second Enter opens nothing.
+    { id: "monitors-link-asset", kind: "enter-twice", strict: true, finding: "F-545", prep: [{ click: ".tf-mon-pwacts button", text: "Link an asset…" }, { wait: 700 }, { click: ".tf-dialog .opts button.opt" }, { wait: 400 }], press: { sel: ".tf-dialog footer .tf-primary", starts: "Link to" }, returns: "Link an asset…" },
+    { id: "monitors-new-asset", kind: "enter-twice", strict: true, finding: "F-545", prep: [{ click: ".tf-mon-pwacts button", text: "New asset for it…" }, { wait: 700 }], press: { sel: ".tf-dialog footer .tf-primary", text: "Create" }, returns: "New asset for it…" },
   ] },
   { page: "Builds, a run", route: RUN, trips: [
     { id: "builds-rerun", kind: "enter-twice", finding: "F-338", press: { sel: ".tf-bhead .tf-primary" } },
@@ -674,7 +678,7 @@ const PAGES = [
   // Coming back by the entry to a place deeper than the section's own page (2026-11-13).
   { page: "Way back, a Docs page", route: "page/confluence%3Asepa", trips: [
     { id: "nav-place-docs-page", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300 },
-    { id: "nav-place-docs-far", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300, how: ["pointer"], far: ["Tickets", "Code", "Builds", "Monitors", "Link sets", "Time"] },
+    { id: "nav-place-docs-far", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300, how: ["pointer"], far: ["Tickets", "Code", "Builds", "Monitors", "Assets", "Link sets", "Time"] },
     { id: "nav-place-docs-comment", kind: "nav-place", strict: true, finding: "docs-return", section: "Docs", top: "docs", scroller: ".tf-rd-main", at: 300, how: ["pointer"], toast: { prep: [{ fill: "textarea[aria-label='Comment on this page']", text: "Looks right to me." }, { wait: 150 }], press: { sel: ".tf-compose .tf-primary", text: "Comment" }, rows: ".tf-kept:not([hidden]) .tf-msg" } },
   ] },
   { page: "Way back, a Docs space", route: "docs/space/ENG", trips: [
@@ -695,6 +699,9 @@ const PAGES = [
   { page: "Way back, a marked monitor", route: "monitors/at/kuma%3A3", trips: [
     { id: "nav-place-monitor", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors" },
     { id: "nav-place-monitor-hide", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors", how: ["pointer"], toast: { press: { sel: ".tf-mon-pacts button", text: "Hide" }, rows: MONITOR_ROWS, hides: true } },
+  ] },
+  { page: "Way back, an asset", route: "asset/asset%3Aknobas-gitea", trips: [
+    { id: "nav-place-asset", kind: "nav-place", strict: true, finding: "docs-return", section: "Assets", top: "assets", scroller: "aside.pane", at: 200 },
   ] },
   { page: "Way back, a link set", route: "sets/payout-stack", trips: [
     { id: "nav-place-set", kind: "nav-place", strict: true, finding: "docs-return", section: "Link sets", top: "sets" },

@@ -60,6 +60,7 @@
     AssetDetail,
     AssetEdit,
     AssetRow,
+    AssetType,
     MonitorRow,
     OpenAlert,
     RouteDetail,
@@ -103,6 +104,12 @@
     badgesChanged?: () => void;
     /** How each source's last sync ended, for the band over the page; the bridge's when left out. */
     syncStatus?: () => Promise<SourceSyncStatus[]>;
+    /** The open monitor's *Link an asset…* and *New asset for it…* (2026-11-19): the estate's levels, its types, a new asset and the link. The bridge's when left out. */
+    assetTree?: (parentId: string | null) => Promise<AssetRow[]>;
+    assetTypes?: () => Promise<AssetType[]>;
+    createAsset?: (typeId: string, name: string, parentId?: string | null) => Promise<AssetRow>;
+    /** Draw the `monitored-by` link from the asset to the monitor. */
+    linkAsset?: (assetId: string, monitorId: string) => Promise<unknown>;
   }
 </script>
 
@@ -122,6 +129,9 @@
   import {
     ackAlert,
     unackAlert,
+    assetTree,
+    assetTypes,
+    createAsset,
     editAsset,
     editRoute,
     getAsset,
@@ -131,7 +141,9 @@
     setMonitorHidden,
     unmonitoredAssets,
   } from "../../ipc/assets";
-  import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
+  import { createLink, getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
+  import CreateDialog from "../../assets/CreateDialog.svelte";
+  import LinkAssetDialog from "../../assets/LinkAssetDialog.svelte";
   import { listSources, syncStatus } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
   import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
@@ -152,6 +164,7 @@
   import { staleLine, syncWith } from "../builds/pipeline";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
+    assetFor,
     stateChip,
     gaps,
     isRoute,
@@ -264,6 +277,12 @@
   let pressing = $state<Record<string, true>>({});
   let creating = $state<MonitorSubject | null>(null);
   let opening = $state<string | null>(null);
+  /** The monitor *Link an asset…* is open for. */
+  let linkingFor = $state<MonitorRow | null>(null);
+  /** The monitor *New asset for it…* is open for, with the estate's types read for the dialog. */
+  let newFor = $state<{ monitor: MonitorRow; types: AssetType[] } | null>(null);
+  /** Whether the estate holds no asset at all: *Assets nothing watches* then says so rather than "every … has a monitor". */
+  let estateEmpty = $state(false);
 
   /** Bumped to read everything again: a write of the page's, a create's echo moving. */
   let revision = $state(0);
@@ -359,6 +378,15 @@
         if (mine !== unwatchedReads) return;
         unwatched = gaps(rows);
         settleUnwatched(rows);
+        // Nothing unwatched is either every asset watched or no asset at all; the estate's top tells them apart.
+        if (rows.length > 0) estateEmpty = false;
+        else
+          void treeOf(null).then(
+            (roots) => {
+              if (mine === unwatchedReads) estateEmpty = roots.length === 0;
+            },
+            () => {},
+          );
       },
       (error: unknown) => {
         if (mine === unwatchedReads) failed = ipcErrorMessage(error);
@@ -539,6 +567,8 @@
   /** The roster's own size, for the count: a hidden monitor is counted apart. */
   const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
   /** What the summary says: how many of the monitors not hidden read each way. */
+  /** Whether any monitor watches an asset: the roster's *Watches* header names a column only when one holds something. */
+  const anyWatches = $derived((roster ?? []).some((row) => row.assets.length > 0));
   const counts = $derived.by(() => {
     const tally = Object.fromEntries(chipCounts((roster ?? []).filter((row) => !row.hidden)).map((chip) => [chip.state, chip.count]));
     return { down: tally["down"] ?? 0, slow: tally["warn"] ?? 0, up: tally["up"] ?? 0, paused: tally["paused"] ?? 0, other: (tally["pending"] ?? 0) + (tally["other"] ?? 0) };
@@ -609,13 +639,16 @@
   });
 
   const header = $derived.by(() => {
-    if (roster === null) return "Checks from your monitoring source, each watching an asset.";
+    if (roster === null) return "Checks from your monitoring source.";
     const names = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
     const newest = [...latest.values()].map((row) => row.checked_at).sort().at(-1) ?? null;
     const from = names.length > 0 ? ` from ${names.join(" and ")}` : "";
     // A check's own time is not a sync: where a source can't sync, the band says how old its data is.
     const synced = newest !== null && sources !== null && stale.length === 0 ? `, synced ${ago(newest, now)}` : "";
-    return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset.`;
+    // What they watch, as it is: an estate with no asset linked says nothing of it (2026-11-19).
+    const watching = roster.filter((row) => row.assets.length > 0).length;
+    const watches = watching === 0 ? "" : watching === roster.length ? " Each one watches an asset." : ` ${watching} of them watch an asset.`;
+    return `${counted(roster.length, "check", "checks")}${from}${synced}.${watches}`;
   });
 
   // -- a monitor's Refresh (#2138) -------------------------------------------
@@ -777,6 +810,43 @@
     }
   }
 
+  // -- what a monitor watches (2026-11-19: Assets has its nav entry again, and the panel's *Watches* offered nothing) --
+
+  const treeOf = (parentId?: string | null) => (ports.assetTree ?? assetTree)(parentId ?? null);
+  /** The `monitored-by` link, from the asset to the monitor, as an import and *Create monitor for this asset* draw it through a name. */
+  const linkTo = (assetId: string, monitorId: string) => (ports.linkAsset ?? ((from, to) => createLink(from, to, "monitored-by")))(assetId, monitorId);
+  /** The estate's types, read once for *New asset for it…*. */
+  let assetTypeList: AssetType[] | null = null;
+
+  function linked(monitor: MonitorRow, asset: AssetRow) {
+    linkingFor = null;
+    push({ text: `${monitor.name} watches ${asset.name}` });
+    revision += 1;
+  }
+
+  async function openNewAsset(monitor: MonitorRow) {
+    linkingFor = null;
+    try {
+      assetTypeList ??= await (ports.assetTypes ?? assetTypes)();
+      newFor = { monitor, types: assetTypeList };
+    } catch (error) {
+      push({ text: ipcErrorMessage(error), tone: "err" });
+    }
+  }
+
+  /** The asset *New asset for it…* made, linked to its monitor; it is in Assets either way, so a failed link says so. */
+  async function madeFor(monitor: MonitorRow, asset: AssetRow) {
+    newFor = null;
+    const open = { label: "Open", run: () => (location.hash = `#/asset/${encodeURIComponent(asset.id)}`) };
+    try {
+      await linkTo(asset.id, monitor.entity_id);
+      push({ text: `Added ${asset.name} to Assets, watched by ${monitor.name}`, action: open });
+    } catch (error) {
+      push({ text: `Added ${asset.name} to Assets, but could not link it: ${ipcErrorMessage(error)}`, tone: "err", action: open });
+    }
+    revision += 1;
+  }
+
   async function openCreate(asset: UnmonitoredAsset) {
     if (opening !== null) return;
     opening = asset.id;
@@ -905,7 +975,7 @@
           onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}>{row.entity_id in acked ? "Acked" : "Ack"}</button
         >{/if}</span
     >
-    <span class="tf-mon-watch"
+    <span class="tf-mon-watch" title={row.assets.length === 0 ? undefined : row.assets.map((asset) => asset.name).join(", ")}
       >{#each row.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{/each}</span
     >
   </div>
@@ -913,7 +983,8 @@
 
 <div class="tf-cbody tf-mon-body" {@attach sideWidth("monitor")}>
   {#if tab === "all" && panel !== null}<TfSideEdge side="monitor" />{/if}
-  <div class="tf-mon-main">
+  <!-- With a monitor open, what each row watches stops at the panel's edge, its names in its title (2026-11-19). -->
+  <div class="tf-mon-main" class:tf-mon-paneled={tab === "all" && panel !== null}>
     {#if failed !== null}
       <p class="tf-ifail">Could not read the monitors: {failed}</p>
     {/if}
@@ -946,6 +1017,10 @@
             {/each}
           </tbody>
         </table>
+      {:else if unwatched !== null && estateEmpty}
+        <div class="tf-empty">
+          <p>No assets yet, so nothing is left unwatched. Add what you run under <a href="#/assets">Assets</a>, or open a monitor and press <em>New asset for it</em>.</p>
+        </div>
       {:else if unwatched !== null}
         <div class="tf-empty">Every container, service, route, database and VM has a monitor.</div>
       {/if}
@@ -968,7 +1043,7 @@
         {#if rows.length + hiddenRows.length > 0}
           <div class="tf-mon-list" role="list" aria-label="Monitors">
             <div class="tf-mon-head" aria-hidden="true">
-              <span>Monitor</span><span>State</span><span class="tf-mbar-axis"><span>24 h ago</span><span>now</span></span><span class="tf-mon-up">30 days</span><span></span><span class="tf-mon-watch">Watches</span>
+              <span>Monitor</span><span>State</span><span class="tf-mbar-axis"><span>24 h ago</span><span>now</span></span><span class="tf-mon-up">30 days</span><span></span><span class="tf-mon-watch">{#if anyWatches}Watches{/if}</span>
             </div>
             {#each blocksOf(rows) as block, at (at)}<div class="tf-mon-block" {@attach blockRoom(block.length)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>{/each}
             {#if hiddenRows.length > 0}
@@ -1023,7 +1098,14 @@
           <dd>Expires in {counted(Math.floor(panel.cert_days_remaining), "day", "days")}</dd>
         {/if}
         <dt>Watches</dt>
-        <dd>{#each panel.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}">{asset.name}</a> <span class="tf-dim">{asset.type_label}</span>{:else}<span class="tf-dim">No asset. Link one from its asset's page.</span>{/each}</dd>
+        <dd class="tf-mon-pwatch">
+          <span>{#each panel.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}">{asset.name}</a> <span class="tf-dim">{asset.type_label}</span>{:else}<span class="tf-dim">Nothing yet.</span>{/each}</span>
+          <!-- Both always drawn, so a link that lands moves neither: a monitor may watch more than one asset. -->
+          <span class="tf-mon-pwacts"
+            ><button type="button" class="tf-btn tf-sm" onclick={() => (linkingFor = panel)}>Link an asset…</button
+            ><button type="button" class="tf-btn tf-sm" onclick={() => void openNewAsset(panel)}>New asset for it…</button></span
+          >
+        </dd>
         <dt>Read</dt>
         <dd>{ago(panel.checked_at, now)} from {sourceNames[panel.source_id] ?? panel.source_id}</dd>
       </dl>
@@ -1049,6 +1131,29 @@
     </aside>
   {/if}
 </div>
+{#if linkingFor !== null}
+  {@const monitor = linkingFor}
+  <LinkAssetDialog
+    {monitor}
+    watched={new Set(monitor.assets.map((asset) => asset.id))}
+    tree={treeOf}
+    link={(assetId) => linkTo(assetId, monitor.entity_id)}
+    onclose={() => (linkingFor = null)}
+    onlinked={(asset) => linked(monitor, asset)}
+    oncreate={() => void openNewAsset(monitor)}
+  />
+{/if}
+{#if newFor !== null}
+  {@const monitor = newFor.monitor}
+  <CreateDialog
+    at={{ id: null, parent: null }}
+    types={newFor.types}
+    create={(typeId, name, parentId) => (ports.createAsset ?? createAsset)(typeId, name, parentId)}
+    start={{ ...assetFor(monitor), note: `watched by ${monitor.name}` }}
+    onclose={() => (newFor = null)}
+    oncreated={(asset) => void madeFor(monitor, asset)}
+  />
+{/if}
 {#if creating !== null}
   <TfCreateMonitor
     subject={creating}

@@ -245,6 +245,18 @@ const monitorsFilter = (before) => `
   box.focus();
   box.setSelectionRange(box.value.length, box.value.length);
   return true;`;
+// The asset tree's *Find an asset* (2026-11-19, Assets back in the nav): a letter into the empty box, and a second into
+// one holding a letter; its offers hang over the columns, read from the search.
+const assetsFind = (before) => `
+  if (!location.hash.startsWith("#/asset")) location.hash = "#/assets";
+  ${until(vis(".tf-kept:not([hidden]) ol.col button.row"))}
+  const box = document.querySelector(".tf-kept:not([hidden]) .find input.q");
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  if (box.value !== ${JSON.stringify(before)}) { set.call(box, ${JSON.stringify(before)}); box.dispatchEvent(new InputEvent("input", { bubbles: true })); }
+  ${sleepIn(800)}
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  return true;`;
 const CASES = [
   { name: "tickets-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
@@ -274,6 +286,10 @@ const CASES = [
   // database's holds (q, x, z), so every row is drawn again.
   { name: "monitors-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
   { name: "monitors-erase", presses: [["q", "Backspace"], ["x", "Backspace"], ["z", "Backspace"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
+  { name: "assets-letter", presses: [["", "s"], ["", "v"], ["", "h"], ["", "p"], ["", "c"], ["", "e"], ["", "a"]], setup: assetsFind, root: ".tf-kept:not([hidden]) .find", reads: [["search"]] },
+  // Second letters that change the ten offers on the perf estate and the test estate (a second letter that keeps them
+  // draws nothing, which the probe cannot tell from no answer).
+  { name: "assets-two-letters", presses: [["s", "e"], ["v", "a"], ["h", "v"], ["p", "c"], ["p", "e"], ["c", "o"], ["e", "n"]], setup: assetsFind, root: ".tf-kept:not([hidden]) .find", reads: [["search"]] },
   { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
   { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },

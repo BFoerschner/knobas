@@ -748,8 +748,25 @@ test("selecting an asset that holds something opens the next column", async () =
 test("an empty estate is told apart from a read that has not landed", async () => {
   render("#/assets/tree", []);
 
-  await waitFor(() => expect(text()).toContain("Nothing in the estate yet."));
+  await waitFor(() => expect(text()).toContain("No assets yet."));
   expect(columns()).toEqual([]);
+});
+
+/**
+ * **An empty estate says what an asset is and offers every way in** (2026-11-19, Assets back in the nav): by hand, from
+ * an estate file, or from a monitor on Monitors, whose open panel makes the asset it watches.
+ */
+test("an empty estate says what an asset is and offers the three ways to start", async () => {
+  render("#/assets", []);
+  await waitFor(() => expect(text()).toContain("No assets yet."));
+  const empty = target.querySelector(".tf-empty.solo")!;
+  expect(empty.textContent).toContain("machines, VMs, containers, services and databases");
+  const words = [...empty.querySelectorAll("button")].map((button) => button.textContent?.trim());
+  expect(words).toEqual(["New asset…", "Import an estate file…"]);
+  expect(empty.querySelector('a[href="#/monitors"]')?.textContent).toBe("Monitors");
+  [...empty.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Import an estate file…")!.click();
+  flushSync();
+  expect(target.querySelector('input[type="file"]'), "the import opens from the empty estate").not.toBeNull();
 });
 
 /**
@@ -1266,9 +1283,11 @@ test("typing a name opens the path to the first match and selects it", async () 
 /**
  * **One keystroke is not one query**, and a box with nothing in it asks
  * nothing at all: the debounce is the launcher's own, so the two boxes in this
- * app wait the same amount of time.
+ * app wait the same amount of time. The first key after the box settled is
+ * asked at once, as the launcher's is (2026-11-19): only the keys typed close
+ * behind it wait for the typing to stop.
  */
-test("the box waits for the typing to stop, and an empty box asks nothing", async () => {
+test("the first key asks at once, the rest wait for the typing to stop, and an empty box asks nothing", async () => {
   // A fake clock, so "past the debounce" is a step and not a sleep (#2048).
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const { searched } = render("#/assets/tree");
@@ -1280,12 +1299,13 @@ test("the box waits for the typing to stop, and an empty box asks nothing", asyn
     input.dispatchEvent(new Event("input", { bubbles: true }));
     flushSync();
   }
+  expect(searched.map((query) => query.raw), "the first key, at once").toEqual(["g"]);
   vi.advanceTimersByTime(DEBOUNCE_MS);
-  expect(searched.map((query) => query.raw)).toEqual(["git"]);
+  expect(searched.map((query) => query.raw)).toEqual(["g", "git"]);
 
   await type(searched, "");
   vi.advanceTimersByTime(DEBOUNCE_MS);
-  expect(searched.map((query) => query.raw)).toEqual(["git"]);
+  expect(searched.map((query) => query.raw)).toEqual(["g", "git"]);
 });
 
 /**
@@ -1496,7 +1516,9 @@ test("clicking a route reached from elsewhere opens the asset exposing it", asyn
 function wires(): string[] {
   return [...target.querySelectorAll("svg.wires path.wire")].map((wire) => {
     const dashed = wire.classList.contains("dashed") ? " dashed" : "";
-    return `${wire.getAttribute("data-wire")} → ${wire.getAttribute("data-to")}${dashed}`;
+    // A column between the far end and the pane: its dot alone, no line over the labels (2026-11-19).
+    const across = wire.classList.contains("across") ? " across" : "";
+    return `${wire.getAttribute("data-wire")} → ${wire.getAttribute("data-to")}${dashed}${across}`;
   });
 }
 
@@ -1518,10 +1540,15 @@ test("a route to an asset in an open column draws a solid wire to its row", asyn
     expect(wires()).toEqual([
       // From *Exposes*: to the container the route lands on, one column right.
       "exposes:route:gitea → asset:gitea",
-      // From *Reachable via*: to the asset that exposes it, which is this one.
-      "via:route:gitea → asset:vm-app-02",
+      // From *Reachable via*: to the asset that exposes it, which is this one. Its column has the container's after
+      // it, so it is the far end's dot alone: a line to it would cross that column's labels (2026-11-19).
+      "via:route:gitea → asset:vm-app-02 across",
     ]),
   );
+  const across = target.querySelector('svg.wires path.wire.across')!;
+  expect(across.getAttribute("d"), "no line over the column between").toBe("");
+  expect(target.querySelectorAll("svg.wires path.halo"), "a halo only under a line drawn").toHaveLength(1);
+  expect(target.querySelectorAll("svg.wires circle.land"), "both far ends keep their dot").toHaveLength(2);
 });
 
 /**
@@ -1540,7 +1567,7 @@ test("a route to an asset in an open column draws a solid wire to its row", asyn
 test("a route whose exposer is drawn takes its wire to that row", async () => {
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
 
-  await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
+  await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed across"]));
 });
 
 /**
@@ -1554,7 +1581,7 @@ test("a route whose exposer is behind a spine draws a dashed wire to the spine",
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 470 });
 
   await waitFor(() => expect(spines()).toEqual(["hel1", "vm-app-02", "gitea"]));
-  expect(wires()).toEqual(["via:route:gitea → spine:1 dashed"]);
+  expect(wires()).toEqual(["via:route:gitea → spine:1 dashed across"]);
 });
 
 /**
@@ -1630,7 +1657,7 @@ test("a scroll on the pane brings a row scrolled into view its wire", async () =
   target.querySelector("aside.pane")?.dispatchEvent(new Event("scroll"));
   flushSync();
 
-  expect(wires()).toEqual(["exposes:route:gitea → asset:gitea", "via:route:gitea → asset:vm-app-02"]);
+  expect(wires()).toEqual(["exposes:route:gitea → asset:gitea", "via:route:gitea → asset:vm-app-02 across"]);
 });
 
 /**
@@ -1773,7 +1800,7 @@ const bulkUnderSite = (n: number) =>
 test("a long column draws the rows near the viewport, and a wire to a row it has not drawn still lands (#2210)", async () => {
   render("#/asset/asset:gitea-db", [...ESTATE, ...bulkUnderSite(2000)], { stripWidth: 780 });
 
-  await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
+  await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed across"]));
   const long = [...target.querySelectorAll("ol.col")].find((column) => column.querySelector('[data-asset="asset:bulk-0"]'))!;
   expect(long.querySelectorAll("button.row").length).toBeGreaterThan(5);
   expect(long.querySelectorAll("button.row").length).toBeLessThan(100);

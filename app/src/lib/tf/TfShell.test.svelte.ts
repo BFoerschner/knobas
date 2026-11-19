@@ -926,6 +926,7 @@ test.each([
   ["Code", "#/code/repos", "#/repo/gitea%3Aacme%2Fpay/branches", "#/code/repos"],
   ["Builds", "#/builds/pipe%3Aa", "#/build/pipe%3Aa/run-1/log", "#/builds/pipe%3Aa"],
   ["Monitors", "#/monitors", "#/monitors/at/kuma%3A7", "#/monitors"],
+  ["Assets", "#/assets", "#/asset/assets%3Asvc-1", "#/assets"],
   ["Link sets", "#/sets", "#/sets/set-1", "#/sets"],
   ["Time", "#/time", "#/time/week/2026-11-02", "#/time/week/2026-11-02"],
 ])("%s's entry from another section comes back to where you were in it, and pressed there goes to the section's page (after %s, at %s; 2026-11-13)", async (name, top, deep, again) => {
@@ -1140,10 +1141,10 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   let crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
   const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
-  expect(parent.textContent).toBe("Asset tree");
+  expect(parent.textContent).toBe("Assets");
   expect(parent.getAttribute("href")).toBe("#/assets");
-  expect(escHint()).toBe("Back to Asset tree Esc");
-  expect(target.querySelector(".tf-nav a[aria-current]"), "the asset tree has no nav entry, so nothing lights").toBeNull();
+  expect(escHint()).toBe("Back to Assets Esc");
+  expect(target.querySelector(".tf-nav a[aria-current]")?.firstChild?.textContent?.trim(), "an asset lights Assets (2026-11-19)").toBe("Assets");
 
   await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;
@@ -1267,6 +1268,7 @@ test("badges: inbox and failing builds in err tone; nothing drawn at zero", asyn
     Builds: "2 err",
     Docs: null,
     Monitors: null,
+    Assets: null,
     "Link sets": null,
     Time: null,
   });
@@ -1278,7 +1280,7 @@ test("the nav reads Tickets first and the rest in order, with no Job entry (spec
   start();
   await at("#/job");
   const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
-  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Monitors", "Link sets", "Time"]);
+  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Monitors", "Assets", "Link sets", "Time"]);
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 

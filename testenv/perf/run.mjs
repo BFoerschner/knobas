@@ -109,6 +109,9 @@ const SCROLL = [
   { name: "builds-pipeline-list", setup: `await __s.go("#/builds", 2000); return ".tf-pl-list";` },
   { name: "pipeline-history", setup: `await __s.go("#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", 2500); return ".tf-bmain";` },
   { name: "monitors", setup: `await __s.go("#/monitors", 2000); return null;` },
+  // A column of the asset tree with hundreds of rows (2026-11-19, Assets back in the nav; the perf estate's first VM holds
+  // 300 containers, `perf-estate.py` in the decision note), scrolled as any list; skipped where the estate has no such column.
+  { name: "assets-column", setup: `await __s.go("#/asset/asset%3Aperf-hv01-vm001", 2500); return 'ol.col[data-col="3"]';` },
 ];
 // The extremes (the extremes pass, 2026-11-13; testenv/README.md, *The extremes*): the worst shapes a real team's
 // data has, on a profile synced with them. The ids the products give (a Confluence page's, a TeamCity run's) come from
@@ -136,8 +139,10 @@ const TYPE = [
   { name: "tickets-list-filter", setup: `await __s.list(); return "input[placeholder='Filter tickets']";`, text: "payment" },
   { name: "code-filter", setup: `await __s.go("#/code/prs", 2000); return ${JSON.stringify(FILTER)};`, text: "retry" },
   { name: "monitors-filter", setup: `await __s.go("#/monitors", 2000); return ${JSON.stringify(FILTER)};`, text: "gitea" },
+  // The asset tree's *Find an asset* (2026-11-19, Assets back in the nav).
+  { name: "assets-filter", setup: `await __s.go("#/assets", 2500); return ".find input.q";`, text: "svc-01" },
 ];
-const NAV = ["#/tickets", "#/inbox", "#/code", "#/builds", "#/docs", "#/monitors", "#/time", "#/page/live-confluence%3A362334", "#/docs/space/SCLENG", "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", "#/settings"];
+const NAV = ["#/tickets", "#/inbox", "#/code", "#/builds", "#/docs", "#/monitors", "#/assets", "#/time", "#/page/live-confluence%3A362334", "#/docs/space/SCLENG", "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", "#/settings"];
 // The sidebars of the busiest pages (the sidebar-resize pass, PR #2479): `side` is the edge's `data-side`.
 const REPO = `#/repo/${xenc("live-gitea:scale-commerce/cart-service")}`;
 const DRAG = [

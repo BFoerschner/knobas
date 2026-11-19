@@ -1,6 +1,7 @@
 /**
- * The *Asset tree* (#871, R-11.24, D13): `#/assets`, `#/asset/<id>` and
- * `#/route/<id>` keep drawing the Miller columns, a section with no nav entry.
+ * *Assets*, the asset tree (#871, R-11.24, D13): `#/assets`, `#/asset/<id>` and
+ * `#/route/<id>` draw the Miller columns, a section with its own nav entry after
+ * Monitors (Björn, 2026-11-19).
  */
 import { definePage } from "../page-entry";
 import type { TfRoute } from "../route";

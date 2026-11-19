@@ -371,12 +371,26 @@ export function fakeBar(samples: readonly { taken_at: string; state: string | nu
   return { bar: worst.map((rank) => LETTERS[rank] ?? "-").join(""), down_since: since };
 }
 
+/**
+ * The `monitored-by` links this session made (an open monitor's *Link an asset…* and *New asset for it…*, 2026-11-19),
+ * by `create_link` in `entity.ts`: the roster reads them beside the names the estate file gave, as the real roster reads
+ * every confirmed link.
+ */
+export const FAKE_ATTACHED: { asset: string; monitor: string }[] = [];
+
+/** Whether `id` is one of the roster's monitors, so `create_link` takes it as a link's end. */
+export function isFakeMonitor(id: string): boolean {
+  return /^kuma:\d+$/.test(id) && Number(id.slice(5)) <= SEEDED_MONITORS.length;
+}
+
 export function fakeMonitorRoster(withSamples = true) {
   const now = Date.now();
-  const named = SEEDED_MONITORS.map(({ name, type }) => ({
+  const named = SEEDED_MONITORS.map(({ name, type }, index) => ({
     name,
     type,
-    watching: FIXTURE_ESTATE.filter((asset) => asset.monitors.includes(name)),
+    watching: FIXTURE_ESTATE.filter(
+      (asset) => asset.monitors.includes(name) || FAKE_ATTACHED.some((made) => made.asset === asset.id && made.monitor === `kuma:${index + 1}`),
+    ),
   }));
   return named.map((entry, index) => {
     const state = FORCED_DOWN.has(index) ? "down" : (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up");
@@ -489,4 +503,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN, FORCED_DOWN);
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN, FORCED_DOWN, FAKE_ATTACHED);

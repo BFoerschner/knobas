@@ -23,13 +23,14 @@ export interface LauncherAction {
 }
 
 /** What each section holds, in one line: the row's second line. */
-const SECTION_DETAIL: Record<Exclude<Section, "job" | "assets">, string> = {
+const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
   tickets: "Every ticket from every configured source",
   inbox: "What asks for you: mentions, reviews, failed builds",
   code: "Repositories, branches and pull requests",
   builds: "Pipelines and their runs",
   docs: "The wiki's spaces and pages",
   monitors: "Uptime checks and their current state",
+  assets: "The asset tree: your machines, VMs, containers and services, and what watches them",
   sets: "Groups of repos, pipelines and pages shown on tickets by rule",
   time: "Your day, your worklogs and your standup",
   settings: "Sources, checkouts, time, notifications and the rest",
@@ -91,13 +92,10 @@ export function navigationActions(): LauncherAction[] {
 
 /**
  * The app's places, as *Go to* offers them above a search's answer: the `>`
- * rows, and the asset tree, which has no nav entry and so is reached by name.
+ * rows. Assets is one of them since it has its nav entry again (2026-11-19).
  */
 export function placeActions(): LauncherAction[] {
-  return [
-    ...navigationActions(),
-    { id: "assets", label: SECTION_NAME.assets, detail: "The estate's assets, in columns", hash: sectionHash("assets") },
-  ];
+  return navigationActions();
 }
 
 /** Whether `words` start at the start of a word of `text`, both lower case. */
@@ -125,6 +123,9 @@ export function matchingPlaces(places: readonly LauncherAction[], typed: string,
 export function filterActions(actions: LauncherAction[], text: string): LauncherAction[] {
   const needle = text.trim().toLowerCase();
   if (!needle) return actions;
-  const named = actions.filter((action) => action.label.toLowerCase().includes(needle));
+  // A name the words start a word of goes first, then one that only holds them: `set` is Link sets and Settings before
+  // Assets (2026-11-19, when Assets came back as a row).
+  const leading = actions.filter((action) => startsAWord(action.label.toLowerCase(), needle));
+  const named = [...leading, ...actions.filter((action) => !leading.includes(action) && action.label.toLowerCase().includes(needle))];
   return [...named, ...actions.filter((action) => !named.includes(action) && action.detail.toLowerCase().includes(needle))];
 }

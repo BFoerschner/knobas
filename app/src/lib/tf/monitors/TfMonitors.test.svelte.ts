@@ -7,7 +7,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { AssetDetail, AssetEdit, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
+import type { AssetDetail, AssetEdit, AssetRow, AssetType, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
 import { EVENTS } from "../../ipc";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
@@ -234,7 +234,7 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   await draw([]);
   expect(text(target.querySelector("h1"))).toBe("Monitors");
   expect(text(target.querySelector(".tf-sub"))).toBe(
-    "4 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset.",
+    "4 checks from Uptime Kuma, synced 1 min ago. 2 of them watch an asset.",
   );
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Monitors 4", "Assets nothing watches 2"]);
@@ -1087,4 +1087,167 @@ test("a kept page's bars move with each roster read: a check that went down sinc
   } finally {
     vi.useRealTimers();
   }
+});
+
+// ---- what a monitor watches (2026-11-19: Assets has its nav entry again, and the open monitor's *Watches* offered nothing) ----
+
+const assetRow = (id: string, name: string, parent_id: string | null, over: Partial<AssetRow> = {}): AssetRow => ({
+  id,
+  parent_id,
+  type_id: "service",
+  type_label: "Service",
+  monogram: "Sv",
+  name,
+  status: "up",
+  environment: null,
+  owner: null,
+  has_children: false,
+  health: "up",
+  inside: "none",
+  problems_inside: 0,
+  linked_work: 0,
+  ...over,
+});
+const HOST = assetRow("asset:h", "hel1", null, { type_id: "vm", type_label: "VM", monogram: "Vm", has_children: true });
+const SVC = assetRow("asset:s", "payments-db", "asset:h");
+const TYPES: AssetType[] = [
+  { id: "vm", label: "VM", monogram: "Vm", properties: [], suggests: [] },
+  { id: "service", label: "Service", monogram: "Sv", properties: [], suggests: [] },
+  { id: "container", label: "Container", monogram: "Ct", properties: [], suggests: [] },
+];
+const dialog = () => target.querySelector<HTMLElement>(".tf-dialog");
+const dialogButton = (label: string) => [...(dialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => text(b) === label);
+
+/** Ports whose link lands: the next roster read has `kuma:4` watching what was linked. */
+function linking(estate: Record<string, AssetRow[]> = { "": [HOST], "asset:h": [SVC] }) {
+  const links: [string, string][] = [];
+  const created: [string, string, string | null | undefined][] = [];
+  const stand = ports({
+    monitorRoster: async () =>
+      ROSTER.map((row) => (row.entity_id === "kuma:4" && links.length > 0 ? { ...row, assets: links.map(([id]) => ({ id, name: id === SVC.id ? SVC.name : "pg-payments", path: null, type_label: "Service" })) } : row)),
+    assetTree: async (parent) => estate[parent ?? ""] ?? [],
+    assetTypes: async () => TYPES,
+    createAsset: async (typeId, name, parentId) => {
+      created.push([typeId, name, parentId]);
+      return assetRow("asset:new", name, null, { type_id: typeId });
+    },
+    linkAsset: async (assetId, monitorId) => {
+      links.push([assetId, monitorId]);
+    },
+  });
+  return { stand, links, created };
+}
+
+test("the open monitor's Watches offers Link an asset, which walks the estate and links where it stands", async () => {
+  const { stand, links } = linking();
+  await draw(["at", "kuma:4"], null, stand);
+  const watches = panel().querySelector(".tf-mon-pwatch")!;
+  expect(text(watches.querySelector("span"))).toBe("Nothing yet.");
+  button(watches, "Link an asset…")!.click();
+  await settle();
+  expect(text(dialog()!.querySelector("h2, .tf-dtitle, header"))).toContain("Link pg-payments to an asset");
+  // At the top of the estate there is nothing to link to yet: the primary says what it waits for.
+  expect(dialogButton("Link")?.disabled).toBe(true);
+  expect(text(dialog()!.querySelector(".tf-dwhy"))).toBe("Open the asset it watches.");
+  dialogButton("Vm hel1 ›")!.click();
+  await settle();
+  // Standing on a host links the host; walking on into it stands on what it holds.
+  expect(dialogButton("Link to hel1")?.disabled).toBe(false);
+  dialogButton("Sv payments-db")!.click();
+  await settle();
+  dialogButton("Link to payments-db")!.click();
+  await settle();
+  expect(links).toEqual([["asset:s", "kuma:4"]]);
+  expect(dialog()).toBeNull();
+  // The roster is read again, and the panel says what the monitor watches now.
+  expect(text(panel().querySelector(".tf-mon-pwatch a"))).toBe("payments-db");
+  expect(toasts.items.map((toast) => toast.text)).toContain("pg-payments watches payments-db");
+});
+
+test("an asset the monitor already watches is marked in the picker, and linking it again is not offered", async () => {
+  const watched = assetRow("asset:r", "payouts", null);
+  await draw(["at", "kuma:1"], null, linking({ "": [watched] }).stand);
+  button(panel(), "Link an asset…")!.click();
+  await settle();
+  const option = [...dialog()!.querySelectorAll<HTMLButtonElement>(".opt")].find((b) => text(b).includes("payouts"))!;
+  expect(text(option)).toContain("watched by it");
+  option.click();
+  await settle();
+  expect(dialogButton("Already linked")?.disabled).toBe(true);
+  expect(text(dialog()!.querySelector(".tf-dwhy"))).toBe("payouts /health already watches payouts.");
+});
+
+test("New asset for it makes an asset at the top of the estate, named and typed for the monitor, and links it", async () => {
+  const { stand, links, created } = linking({ "": [] });
+  await draw(["at", "kuma:4"], null, stand);
+  button(panel(), "New asset for it…")!.click();
+  await settle();
+  const name = dialog()!.querySelector<HTMLInputElement>("input[type=text]")!;
+  expect(name.value).toBe("pg-payments");
+  // A TCP check watches a service as far as its kind says.
+  expect(dialog()!.querySelector<HTMLSelectElement>("select")!.value).toBe("service");
+  expect(text(dialog()!.querySelector(".tf-dsub"))).toBe("At the top of the estate, watched by pg-payments");
+  dialogButton("Create")!.click();
+  await settle();
+  expect(created).toEqual([["service", "pg-payments", null]]);
+  expect(links).toEqual([["asset:new", "kuma:4"]]);
+  const toast = toasts.items.find((item) => item.text === "Added pg-payments to Assets, watched by pg-payments")!;
+  expect(toast.action?.label).toBe("Open");
+  toast.action!.run();
+  expect(location.hash).toBe("#/asset/asset%3Anew");
+});
+
+test("the picker of an empty estate says so and leads to New asset", async () => {
+  const { stand } = linking({ "": [] });
+  await draw(["at", "kuma:4"], null, stand);
+  button(panel(), "Link an asset…")!.click();
+  await settle();
+  expect(text(dialog()!.querySelector(".empty"))).toBe("No assets yet. Make the one it watches with New asset.");
+  dialogButton("New asset…")!.click();
+  await settle();
+  expect(dialog()!.querySelector<HTMLInputElement>("input[type=text]")!.value).toBe("pg-payments");
+});
+
+test("with no asset watched anywhere, the roster's Watches header names no column", async () => {
+  await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "a"), monitor("kuma:2", "b")] }));
+  expect(text(target.querySelector(".tf-mon-head .tf-mon-watch"))).toBe("");
+  unmount(view!);
+  view = null;
+  await draw([], null);
+  expect(text(target.querySelector(".tf-mon-head .tf-mon-watch"))).toBe("Watches");
+});
+
+test("Assets nothing watches with no asset at all says the estate is empty, not that every asset has a monitor", async () => {
+  let estate: AssetRow[] = [];
+  await draw(["unmonitored"], null, ports({ unmonitoredAssets: async () => [], assetTree: async () => estate }));
+  const empty = target.querySelector(".tf-empty")!;
+  expect(text(empty)).toBe("No assets yet, so nothing is left unwatched. Add what you run under Assets, or open a monitor and press New asset for it.");
+  expect(empty.querySelector('a[href="#/assets"]')).not.toBeNull();
+  unmount(view!);
+  view = null;
+  estate = [HOST];
+  await draw(["unmonitored"], null, ports({ unmonitoredAssets: async () => [], assetTree: async () => estate }));
+  expect(text(target.querySelector(".tf-empty"))).toBe("Every container, service, route, database and VM has a monitor.");
+});
+
+test("the header says what the monitors watch as it is: each, some, or nothing", async () => {
+  const sub = () => text(target.querySelector(".tf-sub"));
+  await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "a"), monitor("kuma:2", "b")] }));
+  expect(sub()).toBe("2 checks from Uptime Kuma, synced 1 min ago.");
+  unmount(view!);
+  view = null;
+  const watched = { assets: [{ id: "asset:r", name: "payouts", path: null, type_label: "Service" }] };
+  await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "a", watched), monitor("kuma:2", "b", watched)] }));
+  expect(sub()).toBe("2 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset.");
+});
+
+test("with a monitor open, what each row watches gives way to the panel and keeps its names in its title", async () => {
+  await draw([]);
+  const main = target.querySelector(".tf-mon-main")!;
+  expect(main.classList.contains("tf-mon-paneled")).toBe(false);
+  expect(row("payouts /health").querySelector(".tf-mon-watch")?.getAttribute("title")).toBe("payouts");
+  expect(row("pg-payments").querySelector(".tf-mon-watch")?.hasAttribute("title")).toBe(false);
+  row("payouts /health").querySelector<HTMLButtonElement>(".tf-mon-open")!.click();
+  flushSync();
+  expect(main.classList.contains("tf-mon-paneled")).toBe(true);
 });

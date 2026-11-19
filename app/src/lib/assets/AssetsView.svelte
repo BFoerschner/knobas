@@ -842,7 +842,7 @@
   function windowOf(index: number): Windowed {
     let win = columnWindows.get(index);
     if (win === undefined) {
-      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1, scrolls: true });
+      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1, scrolls: true, overscan: 1800 });
       columnWindows.set(index, win);
     }
     return win;
@@ -894,7 +894,12 @@
     to: string;
     /** Drawn dashed, arithmetic and measurement together. */
     dashed: boolean;
-    /** The curve. */
+    /**
+     * A column or a spine stands between the far end and the pane, so no line is drawn: a line across it ran over its
+     * labels (the asset-tree shots, 2026-11-19). The far end keeps its dot, and the pane's row names it with a link.
+     */
+    across: boolean;
+    /** The curve; empty where the wire is {@link across}. */
     d: string;
     /** The landing point, where the dot goes. */
     x: number;
@@ -975,8 +980,9 @@
       // The band the far end may be drawn in: the column's own scrolling list,
       // or the spine, which scrolls with nothing.
       const { box: toBox, band } = to;
+      // Just past the row's end, in the column's padding: on the row it sat on the chevron of an asset that holds more.
       const wanted = {
-        x: toBox.right - box.left - 2,
+        x: toBox.right - box.left + 3,
         y: toBox.top - box.top + toBox.height / 2,
       };
       // Held inside the band it may be drawn in: a row scrolled out of its own
@@ -1000,6 +1006,8 @@
       // the spine labels it passes over -- `E1-miller-columns.html:728`.
       const reach = Math.max(36, Math.min(130, (startX - held.x) / 2.2));
       const dive = Math.min(reach, 52);
+      // Anything drawn after the far end's column lies between it and the pane: the line would cross its labels.
+      const across = wire.column < shown.length - 1;
       next.push({
         key: wire.key,
         to: wire.rowId ?? `spine:${wire.column}`,
@@ -1007,10 +1015,12 @@
         // either -- the mockup's `exact && !clipped`
         // (`E1-miller-columns.html:711`).
         dashed: wire.dashed || clipped,
-        d:
-          `M ${round(startX)} ${round(startY)} ` +
-          `C ${round(startX - reach)} ${round(startY)}, ` +
-          `${round(held.x + dive)} ${round(held.y)}, ${round(held.x)} ${round(held.y)}`,
+        across,
+        d: across
+          ? ""
+          : `M ${round(startX)} ${round(startY)} ` +
+            `C ${round(startX - reach)} ${round(startY)}, ` +
+            `${round(held.x + dive)} ${round(held.y)}, ${round(held.x)} ${round(held.y)}`,
         x: round(held.x),
         y: round(held.y),
       });
@@ -1255,7 +1265,17 @@
   /** A pending keystroke must not outlive the view that scheduled it. */
   $effect(() => () => clearTimeout(typing));
 
-  /** A keystroke: remember it, and ask once the typing stops. */
+  /** When the last key was typed and the last search sent, and how many searches are out: the debounce's three facts. */
+  let keyAt = 0;
+  let sentAt = 0;
+  let out = 0;
+
+  /**
+   * A keystroke: remember it, and ask. The first key after the box settled is asked at once, as the launcher's is
+   * (`Session`, the broad-filters pass): waiting 90 ms for keys that were not coming took the tree's first letter to
+   * 145 ms where its line is 100 (2026-11-19, Assets back in the nav). A key typed within the debounce of the last one
+   * or of a search sent, or while one is out, waits for the typing to stop, so a word typed at speed is one search.
+   */
   function typed(raw: string): void {
     query = raw;
     clearTimeout(typing);
@@ -1266,23 +1286,32 @@
       searchFailure = null;
       return;
     }
-    typing = setTimeout(() => {
-      void searchRead(() => io.search(estateQuery(query)), {
-        ok: (response) => {
-          matches = matchesIn(response);
-          // The cursor goes back to the top on every answer: the row that was
-          // under it is not in the new list (`Session.run`'s rule).
-          active = 0;
-          answered = true;
-          searchFailure = null;
-        },
-        fail: (cause) => {
-          matches = [];
-          answered = true;
-          searchFailure = ipcErrorMessage(cause);
-        },
-      });
-    }, DEBOUNCE_MS);
+    const at = Date.now();
+    const settled = out === 0 && at - Math.max(sentAt, keyAt) >= DEBOUNCE_MS;
+    keyAt = at;
+    if (settled) ask();
+    else typing = setTimeout(ask, DEBOUNCE_MS);
+  }
+
+  /** Search the estate for what the box holds now. */
+  function ask(): void {
+    sentAt = Date.now();
+    out += 1;
+    void searchRead(() => io.search(estateQuery(query)).finally(() => (out -= 1)), {
+      ok: (response) => {
+        matches = matchesIn(response);
+        // The cursor goes back to the top on every answer: the row that was
+        // under it is not in the new list (`Session.run`'s rule).
+        active = 0;
+        answered = true;
+        searchFailure = null;
+      },
+      fail: (cause) => {
+        matches = [];
+        answered = true;
+        searchFailure = ipcErrorMessage(cause);
+      },
+    });
   }
 
   /** Empty the box without asking anything. */
@@ -1798,7 +1827,7 @@
   <header class="tf-fhead">
     <div>
       <!-- One line at both addresses, with no sentence that goes on the first click: the rows stay where they were. -->
-      <h1>{detail?.asset.name ?? "Asset tree"}</h1>
+      <h1>{detail?.asset.name ?? "Assets"}</h1>
     </div>
     <!--
       No tab strip (#1459): its *Monitors* tab named a roster that went with
@@ -1962,7 +1991,7 @@
     {#if !(failure || emptyEstate)}<TfSideEdge side="assets" />{/if}
     <div class="cols" bind:this={stripEl}>
       {#if failure === NOT_HELD}
-        <div class="none gone"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
+        <div class="none gone"><TfNothingHere message={NOT_HELD} href="#/assets" action="All assets" /></div>
       {:else if failure}
         <div class="none tf-empty solo">
           <p class="empty fail">{failure}</p>
@@ -1977,11 +2006,20 @@
           this state, because a column header with no rows under it is not
           somewhere a reader thinks to look.
         -->
+        <!--
+          Since Assets has its nav entry again (2026-11-19) this is the first thing a reader with no estate meets, so it
+          says what an asset is and offers the three ways in: by hand, an estate file, or from a monitor, whose panel on
+          Monitors makes the asset it watches and links them.
+        -->
         <div class="none tf-empty solo">
-          <p class="empty">Nothing in the estate yet. Import an estate file, or add the first asset by hand.</p>
-          <button class="tf-btn tf-primary" disabled={types.length === 0} onclick={() => openCreate(0)}>
-            New asset…
-          </button>
+          <p class="empty">No assets yet. Assets are what you run, each inside what holds it: machines, VMs, containers, services and databases. A monitor linked to one says what it watches.</p>
+          <div class="starts">
+            <button class="tf-btn tf-primary" disabled={types.length === 0} onclick={() => openCreate(0)}>
+              New asset…
+            </button>
+            <button class="tf-btn" onclick={() => (importing = true)}>Import an estate file…</button>
+          </div>
+          <p class="empty">Or start from a monitor: open one on <a href="#/monitors">Monitors</a> and press <em>New asset for it</em>.</p>
         </div>
       {:else}
         {#each shown as column, index (index)}
@@ -2111,12 +2149,13 @@
     -->
     <svg class="wires" aria-hidden="true">
       {#each drawnWires as wire (wire.key)}
-        <!-- A halo in the columns' own background under the wire, so a line
-             crossing three columns of text stays a line. -->
-        <path class="halo" d={wire.d} />
+        <!-- A halo in the columns' own background under the wire, so a line over the strip's blank end stays a line.
+             A wire with a column between its far end and the pane is its dot alone (`across`). -->
+        {#if !wire.across}<path class="halo" d={wire.d} />{/if}
         <path
           class="wire"
           class:dashed={wire.dashed}
+          class:across={wire.across}
           data-wire={wire.key}
           data-to={wire.to}
           d={wire.d}
@@ -3047,6 +3086,19 @@
     grid-template-columns: minmax(0, 1fr) var(--side-assets, 340px);
     min-height: 0;
     overflow: hidden;
+    /*
+      Room for eight columns beside the pane, and no more (the asset-tree shots, 2026-11-19): at 5120 px the strip was
+      3,000 px of blank between the columns and a pane at the window's far edge, and a wire crossed all of it. Eight is
+      the real estate's six levels and two to open into; past that the strip folds into spines as it does in any window.
+    */
+    max-width: calc(8 * 216px + var(--side-assets, 340px));
+  }
+
+  /* Where the cap holds, the tree stands as one object, its pane closed on the right too. */
+  @media (min-width: 2100px) {
+    .pane {
+      border-right: 1px solid var(--rule);
+    }
   }
 
   /*
@@ -3065,9 +3117,13 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    /* Clipped to the tree, and behind the rows, so a wire never runs through a label or under the status bar. */
+    /*
+      Clipped to the tree. Over the columns and under the pane (the same layer, between them in the markup): a wire is
+      drawn only where nothing stands between its far end and the pane (`across`), so it crosses no label, and the
+      columns can be opaque, which lets a long column scroll on the compositor (2026-11-19).
+    */
     overflow: hidden;
-    z-index: 0;
+    z-index: 1;
   }
 
   .wires path {
@@ -3135,6 +3191,8 @@
     overflow-y: hidden;
     position: relative;
     z-index: 1;
+    /* It scrolls sideways: the colour it sits on, for `.col`'s reason. The wires paint over it. */
+    background: var(--paper);
   }
 
   /* An address that names no asset, an estate with nothing in it and a failed read have nothing for the pane to say. */
@@ -3148,6 +3206,12 @@
 
   .none.solo {
     align-self: center;
+  }
+
+  /* The empty estate's ways in, side by side under its sentence. */
+  .starts {
+    display: flex;
+    gap: 8px;
   }
 
   /*
@@ -3369,7 +3433,9 @@
     flex: 1;
     margin: 0;
     padding: 6px;
-    background: none;
+    /* The colour it sits on: a scroller with no background scrolls on the main thread, repainted every frame (a column
+       of 300 dropped to 48 fps at CPU 6x; design system, *A box that scrolls paints the colour it sits on*). */
+    background: var(--paper);
     list-style: none;
     overflow-y: auto;
   }

@@ -32,6 +32,7 @@
     at,
     types,
     create,
+    start = null,
     onclose,
     oncreated,
   }: {
@@ -44,6 +45,11 @@
     /** The built-in table, read once by the view off `asset_types`. */
     types: AssetType[];
     create: typeof createAsset;
+    /**
+     * What the fields open on, where the dialog was opened for something that already has a name: an open monitor's
+     * *New asset for it* (2026-11-19). `note` says what the asset will be linked to, under the title.
+     */
+    start?: { name: string; typeId: string; note: string } | null;
     onclose: () => void;
     /** An asset was written. The Tree goes to its address; this dialog is done. */
     oncreated: (row: AssetRow) => void;
@@ -56,8 +62,9 @@
   // Read once, at init, and deliberately: this is what the dialog *opens* on.
   // Re-deriving it would overwrite the reader's own choice the next time the
   // table or the parent changed underneath.
-  let typeId = $state(defaultTypeId(choices) ?? "");
-  let name = $state("");
+  let typeId = $state((start !== null && types.some((type) => type.id === start.typeId) ? start.typeId : null) ?? defaultTypeId(choices) ?? "");
+  // svelte-ignore state_referenced_locally
+  let name = $state(start?.name ?? "");
   /** What the last attempt refused with, in the dialog rather than as a toast. */
   let failure = $state<string | null>(null);
   let writing = $state(false);
@@ -92,7 +99,7 @@
 <TfDialog why={name.trim() === "" ? (typeId === "" ? "Name it, and choose a type." : "Name it first.") : typeId === "" ? "Choose a type." : null}
   closeButton
   title="New asset"
-  subtitle={at.parent === null ? "At the top of the estate" : `In ${at.parent.name}`}
+  subtitle={`${at.parent === null ? "At the top of the estate" : `In ${at.parent.name}`}${start === null ? "" : `, ${start.note}`}`}
   {onclose}
 >
   {#snippet body()}

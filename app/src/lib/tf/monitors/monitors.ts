@@ -201,6 +201,26 @@ export function kindWord(type: string | null): string {
   return KIND_WORDS[type] ?? type;
 }
 
+/** The asset type a monitor's kind of check usually watches: a Docker check a container, a database check a database. */
+const WATCHED_TYPE: Record<string, string> = {
+  docker: "container",
+  postgres: "database",
+  mysql: "database",
+  mongodb: "database",
+  redis: "database",
+  sqlserver: "database",
+  ping: "vm",
+};
+
+/**
+ * What *New asset for it* on an open monitor starts from (2026-11-19, Assets back in the nav): the monitor's own name and
+ * the type its kind of check usually watches, a service where the kind says nothing more (an HTTP or TCP check). Both
+ * stay the reader's to change.
+ */
+export function assetFor(monitor: Pick<MonitorRow, "name" | "monitor_type">): { name: string; typeId: string } {
+  return { name: monitor.name, typeId: (monitor.monitor_type !== null && WATCHED_TYPE[monitor.monitor_type]) || "service" };
+}
+
 /**
  * The state pills of the filter bar: the words a row's chip says, so a pill keeps the rows that read as it does. *No
  * reading* has no pill, because it is not a state to look for: such a row shows while no pill is on.

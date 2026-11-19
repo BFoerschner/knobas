@@ -125,10 +125,13 @@ test("a hint names what Esc lands on: a section's deeper address by the name the
   expect(openerName(parseTfHash("#/build/p/4811"), "#4811")).toBe("Run #4811");
 });
 
-test("the asset tree's bare root goes back to what opened the tree; with nothing, it stays", () => {
+test("Assets' own page is a top page like Monitors': it goes back only to what a visit opened it from (2026-11-19)", () => {
   const root = parseTfHash("#/assets/tree");
-  expect(escTarget(root, TICKET)).toEqual({ ...TICKET, opened: true });
+  expect(escTarget(root, TICKET)).toBeNull();
+  expect(escTarget(root, TICKET, true)).toEqual({ ...TICKET, opened: true });
   expect(escTarget(root, null)).toBeNull();
+  // An asset in it still goes back to what opened it.
+  expect(escTarget(parseTfHash("#/asset/vm-pay-01"), TICKET)).toEqual({ ...TICKET, opened: true });
 });
 
 test("a marked monitor with no opener goes to Monitors, with one to what opened it", () => {

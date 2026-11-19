@@ -87,20 +87,26 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
     titles?: boolean;
     filters?: { kinds?: string[] };
   };
+  // The Tree's own search names its kind in the filters, not in the words: answered from the estate before the launcher's
+  // word search, which knows no asset and answered every word with nothing (the asset-tree shots, 2026-11-19).
+  const kinds = query.filters?.kinds ?? [];
+  const treeOnly = kinds.length > 0 && kinds.every((kind) => kind === "asset");
   // `#l` and `#i` (#2423): the saved lists, and the kind the launcher
   // answers from the shell's inbox store.
-  const listed = fakeListSearch(query.raw ?? "");
+  const listed = treeOnly ? null : fakeListSearch(query.raw ?? "");
   if (listed !== null) return listed;
-  const palette = actionPalette((query.raw ?? "").trim());
-  if (palette !== null) return palette;
-  const help = helpCard((query.raw ?? "").trim());
-  if (help !== null) return help;
-  const leftOut = leftOutAnswer((query.raw ?? "").trim());
-  if (leftOut !== null) return leftOut;
-  const byKey = ticketsByKey((query.raw ?? "").trim());
-  if (byKey !== null) return byKey;
-  const words = wordSearch(query.raw ?? "", query.titles !== false);
-  if (words !== null) return words;
+  if (!treeOnly) {
+    const palette = actionPalette((query.raw ?? "").trim());
+    if (palette !== null) return palette;
+    const help = helpCard((query.raw ?? "").trim());
+    if (help !== null) return help;
+    const leftOut = leftOutAnswer((query.raw ?? "").trim());
+    if (leftOut !== null) return leftOut;
+    const byKey = ticketsByKey((query.raw ?? "").trim());
+    if (byKey !== null) return byKey;
+    const words = wordSearch(query.raw ?? "", query.titles !== false);
+    if (words !== null) return words;
+  }
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
       code: "not_ready",

@@ -17,6 +17,7 @@ test("the palette lists every section the shell has an address for, in the top b
     "Builds",
     "Docs",
     "Monitors",
+    "Assets",
     "Link sets",
     "Time",
     "Settings",
@@ -58,6 +59,7 @@ test("every row's address parses back to the section it names", () => {
     ["Builds", "builds"],
     ["Docs", "docs"],
     ["Monitors", "monitors"],
+    ["Assets", "assets"],
     ["Link sets", "sets"],
     ["Time", "time"],
     ["Settings", "settings"],
@@ -105,6 +107,8 @@ test("typing after > narrows the menu", () => {
     ...navigationActions()
       .map((action) => action.label)
       .filter((label) => label.startsWith("Settings")),
+    // Only inside its name: after every name a word of which starts with it (2026-11-19).
+    "Assets",
   ]);
 });
 
@@ -121,8 +125,10 @@ const names = (typed: string, andDetails = false) => matchingPlaces(PLACES, type
 
 test("a place matches at the start of a word of its name, and a settings section by its own name (F-603)", () => {
   expect(names("sett")).toEqual(["Settings"]);
-  expect(names("asset tree")).toEqual(["Asset tree"]);
-  expect(names("tree")).toEqual(["Asset tree"]);
+  expect(names("asse")).toEqual(["Assets"]);
+  // The tree by what it is, where nothing else answered.
+  expect(names("tree")).toEqual([]);
+  expect(names("tree", true)).toEqual(["Assets"]);
   expect(names("appearance")).toEqual(["Settings › Appearance"]);
   expect(names("time")).toEqual(["Time", "Settings › Time"]);
   // Not fourteen rows for one word, and not the inside of a word.

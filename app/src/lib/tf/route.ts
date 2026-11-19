@@ -9,8 +9,8 @@
  * Prototype-6 has more first segments than nav entries: a pull request lives
  * under Code, a run under Builds, a page under Docs. {@link SECTION_OF} is that
  * mapping, copied from the prototype's `renderNav`, so the nav lights the place
- * a deep address belongs to. The asset tree is a section with no nav entry since
- * Dependencies went (`docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md`).
+ * a deep address belongs to. The asset tree is *Assets*, a section with its own entry after Monitors
+ * (Björn, 2026-11-19: `docs/decisions/2026-11-19-assets-has-a-nav-entry-again.md`).
  */
 import { repoHash } from "./repo/repo";
 
@@ -37,7 +37,7 @@ export const SECTION_NAME: Record<Section, string> = {
   builds: "Builds",
   docs: "Docs",
   monitors: "Monitors",
-  assets: "Asset tree",
+  assets: "Assets",
   sets: "Link sets",
   time: "Time",
   settings: "Settings",
@@ -54,7 +54,7 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
   build: "Run",
   pr: "Pull request",
   repo: "Repository",
-  assets: "Asset tree",
+  assets: "Assets",
   asset: "Asset",
   route: "Route",
   branch: "Branch",
@@ -65,15 +65,16 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
 /**
  * The main navigation, left to right (R-1.1). Settings is the cog, not a tab.
  * Job has no entry (spec #2396): the job is a ticket's page, under Tickets.
- * The asset tree has none either: a row, an alert or a search opens it at an asset.
+ * Assets, the asset tree, follows Monitors, whose monitors watch what it holds (2026-11-19).
  */
-export const NAV: readonly Exclude<Section, "job" | "assets">[] = [
+export const NAV: readonly Exclude<Section, "job">[] = [
   "tickets",
   "inbox",
   "code",
   "builds",
   "docs",
   "monitors",
+  "assets",
   "sets",
   "time",
 ];
@@ -291,7 +292,7 @@ export function isTopPage(route: TfRoute): boolean {
  * - a pull request or a repository, any tab of it → Code (a pull request's page says its repository, `parentPage`);
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → the asset tree's top page (an asset's page says its holder);
+ * - a doc page → Docs; an asset or a route → Assets' own page (an asset's page says its holder);
  * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the

@@ -9,6 +9,7 @@ import type { AssetDetail, AssetProperty, MonitorRow, RouteRow, UnmonitoredAsset
 import { jobIndex } from "../job/open-jobs";
 import { stateWord } from "../state-word";
 import {
+  assetFor,
   stripPaint,
   stateChip,
   gaps,
@@ -346,4 +347,12 @@ describe("a read of the roster again (the monitors-page pass, 2026-11-19)", () =
     expect(keepDrawn([a, b], [{ ...a, uptime: [{ window: "30d", ratio: 0.5 }] }])[0]).not.toBe(a);
     expect(keepDrawn(null, [a])).toEqual([a]);
   });
+});
+
+test("New asset for it starts from the monitor's name and the type its kind of check watches, else a service", () => {
+  expect(assetFor({ name: "gitea", monitor_type: "docker" })).toEqual({ name: "gitea", typeId: "container" });
+  expect(assetFor({ name: "pg", monitor_type: "postgres" })).toEqual({ name: "pg", typeId: "database" });
+  expect(assetFor({ name: "box", monitor_type: "ping" })).toEqual({ name: "box", typeId: "vm" });
+  expect(assetFor({ name: "web", monitor_type: "http" })).toEqual({ name: "web", typeId: "service" });
+  expect(assetFor({ name: "x", monitor_type: null })).toEqual({ name: "x", typeId: "service" });
 });

@@ -939,3 +939,52 @@ test("with fake-tone-override, the fixture starts with Blocked moved to warn, so
   expect(yours(demoHandlers() as Calls)).toEqual([]);
   expect(yours(demoHandlers(new URLSearchParams("fake-tone-override")) as Calls)).toEqual([["ticket", "Blocked", "warn"]]);
 });
+
+// ---- the asset tree agrees with itself (the asset-tree shots, 2026-11-19) ----
+
+type Hits = { groups: { hits: { entity_id: string; kind: string; title: string }[] }[] };
+const treeSearch = (h: Calls, raw: string) =>
+  (h["search"]!({ query: { raw, limit: 50, titles: false, filters: { sources: [], kinds: ["asset"], updated_within_days: null, mine: false, authors: [] } } }) as Hits).groups.flatMap((group) => group.hits);
+
+test("the Tree's search answers plain words from the estate, assets only", () => {
+  const h = demoHandlers() as Calls;
+  for (const words of ["kno", "dock", "forg", "uptime", "db"]) {
+    const hits = treeSearch(h, words);
+    expect(hits.length, words).toBeGreaterThan(0);
+    expect(hits.every((hit) => hit.kind === "asset" && hit.title.toLowerCase().includes(words)), words).toBe(true);
+  }
+});
+
+test("an asset's pane, its row and the Monitors roster are one statement about what watches it", () => {
+  const h = demoHandlers() as Calls;
+  type Roster = { entity_id: string; name: string; state: string | null; tombstoned: boolean; assets: { id: string }[] }[];
+  const roster = h["monitor_roster"]!({ withSamples: false }) as Roster;
+  const jira = roster.find((row) => row.name === "jira")!;
+  const asset = jira.assets[0]!.id;
+  const detail = h["get_asset"]!({ assetId: asset }) as { asset: { health: string }; monitors: string[]; monitoring: { entity_id: string; name: string; state: string | null }[] };
+  expect(detail.monitoring.map((watch) => watch.entity_id)).toEqual(roster.filter((row) => row.assets.some((a) => a.id === asset)).map((row) => row.entity_id));
+  expect(detail.monitoring.find((watch) => watch.name === "jira")?.state).toBe(jira.state);
+  // Its monitor's state is its health, and the column it sits in says so too.
+  const health = jira.state === "down" ? "down" : jira.state === "warn" ? "warn" : null;
+  if (health !== null) {
+    expect(detail.asset.health).toBe(health);
+    const parent = (h["get_asset"]!({ assetId: asset }) as { asset: { parent_id: string | null } }).asset.parent_id;
+    const row = (h["asset_tree"]!({ parentId: parent }) as { id: string; health: string }[]).find((candidate) => candidate.id === asset)!;
+    expect(row.health).toBe(health);
+  }
+});
+
+test("a monitored-by link made from an open monitor is read back by the roster and the asset's pane", () => {
+  const h = demoHandlers() as Calls;
+  type Roster = { entity_id: string; name: string; assets: { id: string }[] }[];
+  const canary = (h["monitor_roster"]!({ withSamples: false }) as Roster).find((row) => row.name === "canary")!;
+  expect(canary.assets).toEqual([]);
+  const asset = (h["asset_tree"]!({}) as { id: string }[])[0]!.id;
+  h["create_link"]!({ fromId: asset, toId: canary.entity_id, relation: "monitored-by", note: null });
+  const after = (h["monitor_roster"]!({ withSamples: false }) as Roster).find((row) => row.entity_id === canary.entity_id)!;
+  expect(after.assets.map((watched) => watched.id)).toEqual([asset]);
+  const detail = h["get_asset"]!({ assetId: asset }) as { monitoring: { entity_id: string }[] };
+  expect(detail.monitoring.map((watch) => watch.entity_id)).toContain(canary.entity_id);
+  // The same pair twice is refused, as the backend refuses a link it holds.
+  expect(() => h["create_link"]!({ fromId: asset, toId: canary.entity_id, relation: "monitored-by", note: null })).toThrow();
+});

@@ -2290,14 +2290,15 @@ test("> with nothing after it lists every section, then Settings and its section
   await settle();
   await search(">");
   const labels = paletteLabels();
-  expect(labels).toHaveLength(24);
-  expect(labels.slice(0, 9)).toEqual([
+  expect(labels).toHaveLength(25);
+  expect(labels.slice(0, 10)).toEqual([
     "Tickets",
     "Inbox",
     "Code",
     "Builds",
     "Docs",
     "Monitors",
+    "Assets",
     "Link sets",
     "Time",
     "Settings",
@@ -2636,8 +2637,8 @@ test("a filter that finds nothing offers the place the words name, over Search e
   await debounced();
   typeInBox("asset");
   await debounced();
-  expect(optionNames()).toEqual(["Asset tree", "Search everything"]);
-  expect(onRow()).toBe("Asset tree");
+  expect(optionNames()).toEqual(["Assets", "Search everything"]);
+  expect(onRow()).toBe("Assets");
   expect(target.querySelector(".tf-ln-none")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Nothing in Code matches asset.");
 });
 
@@ -2646,7 +2647,7 @@ test("a filter typed by hand that finds nothing makes no claim about everything 
   await settle();
   typeInBox("#b asset");
   await debounced();
-  expect(optionNames()).toEqual(["Asset tree", "Search everything"]);
+  expect(optionNames()).toEqual(["Assets", "Search everything"]);
   expect(target.querySelector(".tf-ln-none")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Nothing matches asset.");
 });
 

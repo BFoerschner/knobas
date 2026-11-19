@@ -109,6 +109,14 @@ const PLACES = [
   // its cell is a link to the run on Builds, and `Esc` is back on the tab. A repository three pipelines built.
   { name: "repo-builds-run", parent: "code", start: "#/repo/live-gitea%3Ascale-data%2Fbi-dashboards/builds", press: `${shown} .tf-rbt a.tf-rbt-cell`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   { name: "monitors", start: "#/time", press: nav("monitors"), hash: "#/monitors", useful: ".tf-mon-state", min: 5, away: "time" },
+  // Assets by its nav entry (2026-11-19, Björn: "can you enable assets again in ux21?"): the estate's first column drawn,
+  // and an asset pressed in it, usable once the level it holds is drawn beside it (the perf estate's root, its eight
+  // hypervisors under it, `perf-estate.py` in the decision note).
+  { name: "assets", start: "#/time", press: nav("assets"), hash: "#/asset", useful: "ol.col button.row", min: 1, away: "time" },
+  // A VM holding 300 containers (the perf estate's first): its column drawn whole, since a 300-row column that windowed
+  // dropped to 48 fps scrolling at CPU 6x.
+  { name: "asset-long", rounds: ["first", "return"], start: "#/asset/asset%3Aperf-hv01", press: `${shown} ol.col[data-col="2"] button.row[data-asset="asset:perf-hv01-vm001"]`, hash: "#/asset/asset:perf-hv01-vm001", useful: `ol.col[data-col="3"] button.row`, min: 5, back: "Escape" },
+  { name: "asset", parent: "assets", start: "#/assets", press: `${shown} ol.col[data-col="0"] button.row[data-asset="asset:perf-site"]`, hash: "#/asset/", useful: `ol.col[data-col="1"] button.row`, min: 5, back: "Escape" },
   { name: "standup", parent: "time", start: "#/time", press: `${shown} a[href="#/time/standup"]`, hash: "#/time/standup", useful: ".tf-su-h, .tf-su-body", min: 2, back: `${shown} a[href="#/time"]` },
   { name: "time", start: "#/docs", press: nav("time"), hash: "#/time", useful: ".tf-tm-wrap", min: 1, away: "docs" },
   { name: "settings", start: "#/time", press: GEAR, hash: "#/settings", useful: ".tf-stg-src", min: 3, back: "Escape" },
@@ -175,7 +183,7 @@ const placesAt = (rate) => (set === "extremes" ? extremes.places(extremeItems, s
 /** Whether the nav is drawn: a full page (a ticket, a run) keeps it in the document but shows none. */
 const NAV_SHOWN = `[...document.querySelectorAll(".tf-nav a")].some((a) => a.getBoundingClientRect().width > 0)`;
 /** Every section the nav and the cog reach, for the `late` round's tour. */
-const SECTIONS = ["tickets", "inbox", "code", "builds", "docs", "monitors", "time", "settings"];
+const SECTIONS = ["tickets", "inbox", "code", "builds", "docs", "monitors", "assets", "time", "settings"];
 /** Every source ends a run that changed something, as the backend tells the window (`sync:state`). */
 const SYNCED = `(async () => { const all = await window.__TAURI_INTERNALS__.invoke("sync_status", {}); for (const s of all) window.__fake.emit("sync:state", { ...s, running: false, run_id: (s.run_id ?? 0) + 100000 + Math.floor(Math.random() * 1000), last_outcome: "ok", last_changed: true, last_finished_at: new Date().toISOString() }); return all.length; })()`;
 /** `--only`: a place by its name or the start of it; a name ending in `$` is that place alone. */

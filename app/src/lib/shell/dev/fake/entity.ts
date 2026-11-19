@@ -9,6 +9,7 @@ import { keepSeed, onFakeReset } from "../fake-seed";
 import { CORPUS, bodyShown, fakeEpicEntry, fakePersonName, mirrorRow } from "./corpus";
 import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
+import { FAKE_ATTACHED, isFakeMonitor } from "./monitors";
 import { fakeStateOf } from "./link-sets";
 import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
@@ -611,6 +612,17 @@ export function handlers(): Handlers {
     create_link: (args) => {
       const from = String(args["fromId"]);
       const to = String(args["toId"]);
+      // An asset to a monitor (2026-11-19, the open monitor's *Link an asset…*): the roster's monitors are no mirror
+      // rows here, so the link is kept where the roster reads it, as the real roster reads every confirmed link.
+      const relation = String(args["relation"] ?? "related");
+      const pair = isFakeMonitor(to) ? { asset: from, monitor: to } : isFakeMonitor(from) ? { asset: to, monitor: from } : null;
+      if (relation === "monitored-by" && pair !== null && FIXTURE_ESTATE.some((asset) => asset.id === pair.asset)) {
+        if (FAKE_ATTACHED.some((made) => made.asset === pair.asset && made.monitor === pair.monitor)) {
+          throw { code: "conflict", message: "these two are already linked", source_id: null };
+        }
+        FAKE_ATTACHED.push(pair);
+        return linkRow(from, to, relation, "manual", null);
+      }
       for (const end of [from, to]) {
         if (linkEnd(end) === null) {
           throw { code: "not_found", message: `${end} is not in the mirror`, source_id: null };

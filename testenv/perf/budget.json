@@ -152,6 +152,19 @@
      "fps": 55,
      "longestTask": 60
     }
+   },
+   "assets-column": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
    }
   },
   "wheel": {
@@ -195,6 +208,14 @@
     }
    },
    "monitors-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "assets-filter": {
     "4": {
      "maxKeyMs": 100
     },
@@ -285,6 +306,14 @@
     }
    },
    "#/settings": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/assets": {
     "4": {
      "switchMs": 200
     },

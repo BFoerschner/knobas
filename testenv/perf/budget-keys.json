@@ -253,6 +253,34 @@
      "rowsMs": 130,
      "moved": 0
     }
+   },
+   "assets-letter": {
+    "1": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "6": {
+     "rowsMs": 200,
+     "moved": 0
+    }
+   },
+   "assets-two-letters": {
+    "1": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "6": {
+     "rowsMs": 200,
+     "moved": 0
+    }
    }
   },
   "monitors-letter": {

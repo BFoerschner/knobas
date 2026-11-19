@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { isTopPage, itemOf, jobHash, NAV, parentOf, parseTfHash, reopens, sectionOf, ticketHash } from "./route";
+import { isTopPage, itemOf, jobHash, NAV, parentOf, parseTfHash, reopens, SECTION_NAME, sectionOf, ticketHash } from "./route";
 
 test("the empty address is Tickets, as in prototype-6", () => {
   expect(parseTfHash("")).toEqual({ view: "tickets", rest: [] });
@@ -27,13 +27,14 @@ test("a space's address keeps its segment whole, with or without a source (#1455
   expect(parseTfHash("#/docs/space/wiki%3AENG")).toEqual({ ...docs, rest: ["space", "wiki:ENG"] });
 });
 
-test("the asset tree is a section of its own, with no nav entry, and an asset's parent is its top page (2026-11-05)", () => {
+test("Assets is a section of its own with its nav entry after Monitors, and an asset's parent is its top page (2026-11-19)", () => {
   for (const hash of ["#/assets", "#/assets/tree", "#/asset/vm-pay-01", "#/route/route:payouts"]) {
     expect(sectionOf(parseTfHash(hash)), hash).toBe("assets");
   }
   expect(parentOf(parseTfHash("#/asset/vm-pay-01"))).toBe("#/assets");
   expect(parentOf(parseTfHash("#/route/route:payouts"))).toBe("#/assets");
-  expect(NAV).not.toContain("assets");
+  expect(NAV.indexOf("assets")).toBe(NAV.indexOf("monitors") + 1);
+  expect(SECTION_NAME.assets).toBe("Assets");
 });
 
 test("every address of the tree with nothing selected is its top page, whatever tab name it still carries", () => {
@@ -54,7 +55,7 @@ test("Dependencies and Proposed links have no address and no nav entry (2026-11-
     expect(parseTfHash(hash), hash).toEqual({ view: "unknown", hash });
     expect(sectionOf(parseTfHash(hash)), hash).toBeNull();
   }
-  expect(NAV).toEqual(["tickets", "inbox", "code", "builds", "docs", "monitors", "sets", "time"]);
+  expect(NAV).toEqual(["tickets", "inbox", "code", "builds", "docs", "monitors", "assets", "sets", "time"]);
 });
 
 test("a rooms-UI address is unknown here, not Tickets", () => {
