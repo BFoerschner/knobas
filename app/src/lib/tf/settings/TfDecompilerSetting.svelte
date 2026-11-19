@@ -2,8 +2,13 @@
   Settings › Renderers › *Decompiler* (ux19, `docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md`, Fable's
   ruling): what the JAR view's *Decompile* runs with. One line says the Java found and the bundled decompiler, or why
   there is none; *Look again* looks again (a Java installed since); a Java of the person's own (a `java` or a Java
-  home, an absolute path) is used before any knobas finds, cleared to look by itself. The line holds its room while
-  it is read, so the row never moves.
+  home, an absolute path) is used before any knobas finds, cleared to look by itself.
+
+  Nothing moves once drawn (`docs/decisions/2026-11-17-nothing-moves-once-drawn.md`; the ux19 gate found the path row
+  142 px across and up to 28 px down on the real backend, whose answer lands after the page draws): the cell is a column,
+  the line above the path row, and the line and the reason share one room two lines high from the first frame. The line
+  takes both lines, or one with the reason on the second; each cut with an ellipsis says its whole in its title. The
+  path is a field in a row of controls, as *Default renderers*' pattern is (it drew with no field's box before).
 -->
 <script lang="ts" module>
   import { javaRuntime, setJavaPath, type JavaRuntime } from "../../ipc/app";
@@ -92,13 +97,15 @@
       nothing; with no Java, classes show as outlines.</small
     ></label
   >
-  <div class="tf-stg-c">
-    <p class="tf-dec-line" role="status">{line}</p>
-    {#if rt !== null && rt.reason !== null}<p class="tf-dec-why">{rt.reason}</p>{/if}
-    <div class="tf-stg-inl tf-dec-path">
+  <div class="tf-stg-c tf-dec-c">
+    <div class="tf-dec-st">
+      <p class="tf-dec-line" class:tf-dec-one={rt !== null && rt.reason !== null} role="status" title={line}>{line}</p>
+      {#if rt !== null && rt.reason !== null}<p class="tf-dec-why" title={rt.reason}>{rt.reason}</p>{/if}
+    </div>
+    <div class="tf-stg-c tf-stg-row1 tf-dec-path">
       <input
         id="tf-rnd-java"
-        class="tf-mono"
+        class="tf-stg-in tf-mono"
         aria-label="The Java to use"
         autocomplete="off"
         spellcheck="false"

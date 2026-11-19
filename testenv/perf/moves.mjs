@@ -60,6 +60,9 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * `tabs`: follow each of its tabs. `type`: a key typed into a field (`into`), as real key input; with `still`, what the key
  * must leave as it was until its answer draws, and `changes`, what says the answer drew (its words change), the place is
  * drawn at the answer's frame, and anything of `still` on screen that changes before it is a move (the ux19 overs pass).
+ * `late`: on the fixture only, reads of the place's own that land later than the corpus's (`fake-late`'s form, added to
+ * the address's), and `fake`, more of the fixture's switches (`fake-jar=oldjava`): a read the real backend answers
+ * after the page draws, which the fixture answers at once (the ux19 gate, 2026-11-19).
  */
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
@@ -95,6 +98,9 @@ const PLACES = [
   // From the list rather than Open in…, so it opens on every corpus: on the saved scale database no repository is cloned,
   // and Try it on's rows gave way to one line once the checkouts answered (2026-11-17).
   { name: "app-new", start: "#/settings/checkouts", press: `${shown} a`, text: "Add an application", hash: "#/settings/checkouts/add", away: "Escape" },
+  // The Decompiler's Java read, past the 500 ms hold, with a reason to say: the ux19 gate found its path row moving on
+  // the real backend, where the look for a Java answers after the page draws (2026-11-19).
+  { name: "settings-renderers-java-late", fixture: true, late: "java_runtime:900", fake: "fake-jar=oldjava", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
   { name: "folder-renderer-new", start: "#/settings/renderers", press: `${shown} a`, text: "Add a folder renderer", hash: "#/settings/renderers/folder/add", away: "Escape" },
   { name: "launcher", start: "#/tickets", key: CMD_K, hash: null, ready: "[role=dialog] [role=option]", anywhere: true, away: "Escape" },
   { name: "ticket-menu", start: "#/tickets", right: `${shown} .tf-tcard`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
@@ -102,7 +108,7 @@ const PLACES = [
   { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setupOnce: true, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },
   { name: "add-source", start: "#/settings/sources", press: `${shown} button, ${shown} a`, text: "Add a source", starts: true, hash: null, away: "Escape" },
 ];
-const picked = (p) => (!only || only.some((w) => p.name === w || p.name.startsWith(w))) && !skip.some((w) => p.name === w || p.name.startsWith(w));
+const picked = (p) => !(p.fixture && real) && (!only || only.some((w) => p.name === w || p.name.startsWith(w))) && !skip.some((w) => p.name === w || p.name.startsWith(w));
 
 /** Every source ends a run that changed something (`open.mjs`'s `SYNCED`); on the fixture, the corpus grows first. */
 const SYNCED = real
@@ -125,12 +131,21 @@ const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 async function quiet(q = 1200, limit = 20000) {
   await js(`new Promise((res) => { let last = performance.now(); const o = new MutationObserver(() => { last = performance.now(); }); o.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true }); const t0 = performance.now(); const tick = () => { if (performance.now() - last >= ${q} || performance.now() - t0 > ${limit}) { o.disconnect(); res(1); } else setTimeout(tick, 50); }; tick(); })`, limit + 5000);
 }
-async function fresh(hash) {
+/** The app's address for a place: its own late reads joined to the corpus's (a later entry for a read wins), its switches added. */
+function addressFor(p) {
+  if (!p?.late && !p?.fake) return base;
+  const url = new URL(base);
+  if (p.late) url.searchParams.set("fake-late", [url.searchParams.get("fake-late"), p.late].filter(Boolean).join(","));
+  for (const [k, v] of new URLSearchParams(p.fake ?? "")) url.searchParams.set(k, v);
+  // The fixture's switches are bare words (`?fake-ipc&fake-scale`), as `URLSearchParams` writes them with an `=`.
+  return url.toString().replace(/=(?=&|$)/g, "");
+}
+async function fresh(hash, p = null) {
   const blank = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: "about:blank" });
   await blank;
   const loaded = c.once("Page.loadEventFired");
-  await c.send("Page.navigate", { url: `${base}${hash}` });
+  await c.send("Page.navigate", { url: `${addressFor(p)}${hash}` });
   await loaded;
   for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
   await quiet(1500);
@@ -213,7 +228,7 @@ async function measure(p, rate) {
     tabs = [];
     try {
       await cpu(1);
-      await fresh(p.start);
+      await fresh(p.start, p);
       if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
       await sleep(firstAfter);
       await cpu(rate);

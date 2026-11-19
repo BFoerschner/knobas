@@ -521,6 +521,12 @@ a letter typed into Tickets' filter as real key input. Its place is drawn when t
 frame; until then the cards on screen before the key are held to their boxes, and one that comes in, goes, moves or
 resizes is a mover (*before its answer drew*). Its return clears the filter and types the letter again.
 
+A place may land reads of its own late on the fixture (`late`, in `fake-late`'s form, joined to the corpus's, and `fake`,
+more of the fixture's switches), for a read the real backend answers after the page draws and the fixture at once:
+`settings-renderers-java-late` opens Settings › Renderers with the Decompiler's Java read 900 ms late, past any hold,
+and a Java too old to say why (the ux19 gate, `docs/decisions/2026-11-19-the-decompiler-line-keeps-its-room.md`). Such
+a place is the fixture's only; `--real` leaves it out.
+
 ```sh
 just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25
 just moves --real 5411                       # and the saved scale database (*On a real database*)

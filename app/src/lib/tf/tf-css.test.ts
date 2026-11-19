@@ -59,6 +59,17 @@ test("a held header's subline keeps its line both held and shown, so an empty on
   expect(css).toMatch(/\.tf-fhead\.tf-unread \.tf-sub, \.tf-fhead\.tf-holds \.tf-sub \{ min-height: 1lh; \}/);
 });
 
+test("Settings › Renderers › Decompiler stacks its cell and holds two lines for the Java line and its reason, so a late answer moves nothing (ux19 gate, 2026-11-19)", () => {
+  expect(block(code, ".tf-stg-c.tf-dec-c")).toMatch(/flex-direction:\s*column/);
+  const room = block(code, ".tf-dec-st");
+  expect(room).toMatch(/line-height:\s*1\.5/);
+  expect(room).toMatch(/[^-]height:\s*3em/);
+  expect(room).toMatch(/overflow:\s*hidden/);
+  expect(block(code, ".tf-dec-line")).toMatch(/line-clamp:\s*2/);
+  expect(block(code, ".tf-dec-line.tf-dec-one")).toMatch(/line-clamp:\s*1/);
+  expect(block(code, ".tf-dec-why")).toMatch(/white-space:\s*nowrap/);
+});
+
 test("the spec's colour table was read, so the next two tests check something", () => {
   expect(COLOURS.length).toBeGreaterThanOrEqual(23);
 });

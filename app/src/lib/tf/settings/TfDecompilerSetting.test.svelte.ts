@@ -81,3 +81,25 @@ test("a Java of one's own is used, shown with why it cannot run; cleared, knobas
   expect(calls).toEqual(["java false", "set /opt/jdk11", "set null"]);
   expect(target.querySelector(".tf-dec-why")).toBeNull();
 });
+
+test("a late answer brings nothing above the path row: the line and the reason share one room drawn from the first frame (ux19 gate)", async () => {
+  // On the real backend the answer lands after the page draws; the reason came in above the path row and the line
+  // stood beside it, moving *The Java to use*, *Use this Java* and *Look again* (2026-11-19).
+  let answer!: (rt: JavaRuntime) => void;
+  const ports: DecompilerPorts = { java: () => new Promise((resolve) => (answer = resolve)), setPath: () => Promise.resolve(OLD) };
+  view = mount(TfDecompilerSetting, { target, props: { ports } });
+  flushSync();
+  const cell = target.querySelector(".tf-stg-c")!;
+  const above = () => [...cell.children].slice(0, [...cell.children].indexOf(target.querySelector(".tf-dec-path")!)).map((e) => e.className);
+  expect(cell.classList.contains("tf-dec-c")).toBe(true);
+  const before = above();
+  expect(before).toEqual(["tf-dec-st"]);
+  answer(OLD);
+  await settle();
+  expect(above()).toEqual(before);
+  const room = target.querySelector(".tf-dec-st")!;
+  expect(room.querySelector(".tf-dec-line")?.getAttribute("title")).toBe("Java 11.0.21 at /opt/jdk11/bin/java, with Vineflower 1.12.0 (bundled).");
+  expect(room.querySelector(".tf-dec-why")?.getAttribute("title")).toBe("Java 11 found; Decompile needs Java 17");
+  // With a reason on the second line, the Java's line takes one.
+  expect(room.querySelector(".tf-dec-line")?.classList.contains("tf-dec-one")).toBe(true);
+});
