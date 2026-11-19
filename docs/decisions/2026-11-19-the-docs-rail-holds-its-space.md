@@ -58,7 +58,9 @@ over its tree. A press no longer changes the view, so it never arrives or leaves
   always opening around the page, the launcher holding, no restore on a return, another section holding, nothing
   settled, the space fold opening for the page, no mark in a tree, no mark on a space, no stamp, and *Clear* holding.
 - Press trips `docs-tree-walk-home` and `docs-tree-walk-space` (`tree-walk`): by real pointer through the tree, from the home and
-  from a page, every row of the rail, the picker and the rail's scroll must stand where they stood.
+  from a page, every row of the rail, the picker and the rail's scroll must stand where they stood. On the head before
+  this change both fail: the first press from the home turned the picker from every space to Engineering, scrolled the
+  rail from 60 to 98 and took it from 48 rows to 24, and a press in Customs closed Payments.
 - `just moves`: the new `docs-tree` place, a press on a rail row from a space's page, beside `docs`, `docs-space` and
   `docs-page`.
 

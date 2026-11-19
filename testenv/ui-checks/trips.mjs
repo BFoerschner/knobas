@@ -2456,9 +2456,16 @@ async function worker(queue, results) {
     try {
       await open(t);
       await sleep(400);
+      let pressed = false;
+      // What a press made vanish is the rail moving under the walk: a failure once a press has been made, not a trip that can't run.
+      const gone = (what) => {
+        if (!pressed) throw new Error(`no ${what} in the rail`);
+        reasons.push(`after a press the rail no longer holds ${what}`);
+      };
       for (const step of t.steps) {
+        if (reasons.length > 0) break;
         if (step.fold) {
-          if (!(await evaluate(`!!${head(step.fold)}`))) throw new Error(`no fold "${step.fold}" in the rail`);
+          if (!(await evaluate(`!!${head(step.fold)}`))) { gone(`the fold "${step.fold}"`); break; }
           await evaluate(`(() => { const s = ${head(step.fold)}; if (!s.parentElement.open) s.click(); })()`);
           await sleep(250);
           continue;
@@ -2469,9 +2476,16 @@ async function worker(queue, results) {
           await sleep(150);
           continue;
         }
+        // Brought into view and under the pointer first, as a person would scroll to it: what the press moves is measured from there.
+        const row = { sel: `${RAIL} .tf-dl-body a[href^="#/page/"]`, starts: step.press };
+        if (!(await evaluate(`window.__trip.find(${JSON.stringify(row)}) !== null`))) { gone(`the row "${step.press}"`); break; }
+        const at = await stillAt(row);
+        await sleep(150);
         const before = await read();
         const was = await hashNow();
-        await press1({ sel: `${RAIL} .tf-dl-body a[href^="#/page/"]`, starts: step.press });
+        await pressAt(at.x, at.y);
+        pressed = true;
+        await opener.settleAfterChange();
         await sleep(600);
         const after = await read();
         const now = await hashNow();
