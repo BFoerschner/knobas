@@ -155,7 +155,10 @@ function innerPlaces(i) {
     { name: "repo-builds", start: R, press: tab("builds"), hash: `${R}/builds`, useful: [[`${shown} .tf-rbt tbody tr, ${shown} .tf-rbp-ok, ${shown} .tf-rbruns tbody tr, ${shown} .tf-rb-notrun, ${shown} .tf-kept:not([hidden]) .tf-nohere`, 1, false, "^Reading"]], away: files },
     { name: "repo-commit", start: `${R}/commits`, go: `${R}/commits/${enc(i.commit)}`, hash: `${R}/commits/`, useful: [diff], marks: { head: [[`${shown} h2.tf-cgroup-h .tf-mono`, 1]] }, awayGo: `${R}/commits` },
     { name: "repo-compare", start: R, press: tab("compare"), hash: `${R}/compare`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff, ${shown} .tf-cdiff .tf-empty`, 1]], away: files },
-    { name: "compare-large", start: R, go: `${R}/compare/${enc(i.branch)}`, hash: `${R}/compare/`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff`, 3]], awayGo: R },
+    // A branch of many files (8, 13 and 8 in the three sets): its list of files, every row counted wherever it stands, and
+    // the first file's lines on screen. Not three cards on screen: the form stands above the diff, so at 1440x868 one or
+    // two reach the window whatever the branch changes, and the place never counted as useful (the ux21 pass).
+    { name: "compare-large", start: R, go: `${R}/compare/${enc(i.branch)}`, hash: `${R}/compare/`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-flist button`, 3, true], [`${shown} .tf-cdiff .tf-diff .tf-dbody`, 1]], awayGo: R },
     { name: "new-pull-request", start: R, press: `${shown} .tf-repohead a.tf-primary`, hash: `${R}/compare/`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff, ${shown} .tf-cdiff .tf-empty`, 1]], awayGo: R },
     { name: "pr-overview", start: `${R}/prs`, go: PR, hash: PR, useful: [[`${shown} .tf-pr .tf-md, ${shown} .tf-pr .tf-cfail`, 1]], marks: { side: [[`${shown} .tf-pr .tf-side .tf-panel`, 2]], ready: [[`${shown} .tf-prready`, 1]] }, awayGo: `${R}/prs` },
     { name: "pr-conversation", start: PR, press: prTab(i.pr, "conversation"), hash: `${PR}/conversation`, useful: [[`${shown} .tf-convo article.tf-msg, ${shown} .tf-convo .tf-empty`, 1]], away: prOverview },
