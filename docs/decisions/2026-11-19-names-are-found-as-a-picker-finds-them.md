@@ -8,8 +8,9 @@ say whether it works on full text. His standing rule: directness, performance an
 Decided by Fable under his delegation on 2026-11-19, built by Opus from the decision list.
 
 **What is built so far.** The launcher's names (points 1 to 8 below): `knobas_search::picker`, the statement that
-reads the chosen rows, the merge, the marks, the reload after a sync, the fixtures, the help card. The word list and
-its reading (point 9), the Docs search and the page filters (point 10) follow, each in its own commit.
+reads the chosen rows, the merge, the marks, the reload after a sync, the fixtures, the help card. Then the word list
+and its reading in the launcher (point 9): migration `0100` (`sync.word`, its two triggers and its fill), the
+picker's load of it, `Picker::reading`. The Docs search and the page filters (point 10) follow.
 
 ## Why the two missed
 
@@ -100,8 +101,20 @@ the saved scale home cloned, `dev-secrets.json` moved out, release builds of thi
 - **A new crate.** frizbee 0.13.0, MIT, no dependency of its own with `std`. Its code in the backend is 2.99 MB
   (`__text` 3.3 MB more than the head before): its hot loops are built for each SIMD width, each typo count and each
   haystack type, where its README counts one. Every single-name call passes a `&str`, which took it from 3.76 MB.
-- **The contract.** `SearchHit.marks` (optional, left out when empty). The command `fuzzy_rank` and the migration
-  `sync.word` come with points 9 and 10.
+- **The contract.** `SearchHit.marks` (optional, left out when empty); migration `0100` (`sync.word`,
+  `sync.word_whole`, `sync.word_filled_to`, two triggers on `sync.item`, the fill's two functions). The command
+  `fuzzy_rank` comes with point 10.
+- **The words.** 798 on the scale home by the rule (the list counted 831 on its copy). The first start's fill: 266
+  batches, 9.5 s of the database's time on the loaded Mac where the list estimated 3.8, behind the app; until it has
+  run no word is corrected.
+- **The sync** (1,000 tickets, median of five, the two builds alternated, each in a transaction rolled back): a date
+  moved 1,219 ms before and 1,125 after, no trigger of the words firing; a new body 1,309 and 1,443, the words parsed
+  again, 0.13 ms a row.
+- **A key the words read** (`took_ms`, median of nine, alternated): a word nobody wrote, where the head before found
+  nothing in 2 to 3 ms, now asks again for the nearest written one and answers with its rows: `pagintion` 33,
+  `idempotncy keys` 23, `shceduler` 31, `dashbord` 41. A written word is as before: `payout` 18 and 19, `retry` 20 and
+  19. The scale home's bodies are built from 130 words, so almost no written word is part of a longer one there and
+  the second ask is rarely made on it; on a real team's words it will be made more often.
 
 ## Before and after
 
@@ -156,6 +169,14 @@ a quiet Mac against their lines.
   filter not applied).
 - A loose fit at the score's cap was first read as a solid row of rank zero (`paysched`, 136 over eight letters):
   drawn unmarked among the text's rows. A loose row's worth is now below zero always, and a test holds it.
+- The words: `picker.rs`' reading tests (D10's table, the length window, nearest before split, the last word still
+  being typed, parts not at a word's start and only for a written word, branches) and `tests/it/words.rs` (the list
+  after an insert, a new body, a stamp and a delete; D10's rows on bodies written for them under both scopes; `proxy`
+  finding the page that says `ADProxy` after the page that says `proxy`; an answer nothing is read for byte for byte
+  as before; a word the text answers never corrected; no reading before the mark, the fill stepping around a row a
+  sync holds, the mark refused while a row is unread). D10's six mutants (a correction where the answer was not
+  empty, the length window removed, the split before the nearest word, parts at a word's start, parts for a word the
+  list does not hold, the list read before it is whole) each fail a test. The no-worker test plans the words' load.
 - The front: `Row.test.svelte.ts` (the ranges painted, the same span and text node after a second answer, none
   where the webview has no Highlight API), `marks.test.ts`, the needle parity fixture with `!word`, and the
   launcher's first-frame test, all green.
@@ -169,4 +190,5 @@ a quiet Mac against their lines.
 
 ## Reversing it
 
-`commands::search` building its searcher without `with_picker` is the launcher as it was.
+`commands::search` building its searcher without `with_picker` is the launcher as it was. `sync.word` is then
+written and never read.

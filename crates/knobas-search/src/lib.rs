@@ -507,7 +507,7 @@ impl Searcher {
         // them answers with nothing, and the statement is not asked: to say
         // nothing, it reads the whole mirror twice, for the live items and
         // for the run logs (#2495).
-        let statements = async {
+        let ask = async |text: Option<&str>, prefix_last: bool| {
             if known_under.admits_nothing {
                 return Ok::<Vec<RawHit>, SearchError>(Vec::new());
             }
@@ -517,7 +517,7 @@ impl Searcher {
             let named = self
                 .rows_by_name(
                     text.filter(|_| by_name && stored.names),
-                    parsed.prefix_last_term,
+                    prefix_last,
                     &filters,
                     query.limit,
                 )
@@ -536,7 +536,7 @@ impl Searcher {
                         .rows_by_words(
                             &corpora,
                             text,
-                            parsed.prefix_last_term,
+                            prefix_last,
                             &filters,
                             query.limit,
                             by_name && stored.whole(),
@@ -560,8 +560,44 @@ impl Searcher {
                 .await
                 .map(Some)
         };
-        let (rows, picked) = tokio::join!(statements, names);
+        // What the mirror's words make of the text, under *Everything* (the
+        // fuzzy-search decisions, D10): the longer words a written word is
+        // part of, asked beside the text as typed, and the nearest written
+        // word for one nobody wrote, asked only where the text found nothing.
+        let reading = match (&self.picker, text) {
+            (Some(picker), Some(typed)) if !filters.titles && picker.holds_words() => {
+                picker.reading(typed, parsed.prefix_last_term)
+            }
+            _ => picker::WordReading::default(),
+        };
+        let parts = async {
+            match reading.parts.as_deref() {
+                Some(parts) if !known_under.admits_nothing => {
+                    ask(Some(parts), false).await.map(Some)
+                }
+                _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
+            }
+        };
+        let (rows, parted, picked) = tokio::join!(ask(text, parsed.prefix_last_term), parts, names);
         let mut rows = rows?;
+        let mut needles = query::needles(&parsed.query.text);
+        let mut needles_of = |asked: &str| {
+            for needle in query::needles(asked) {
+                if !needles.contains(&needle) {
+                    needles.push(needle);
+                }
+            }
+        };
+        if rows.is_empty()
+            && let Some(corrected) = reading.corrected.as_deref()
+        {
+            rows = ask(Some(corrected), parsed.prefix_last_term).await?;
+            needles_of(corrected);
+        }
+        // The picker's names join the text's own answer (D6), and the rows of
+        // the longer words follow in the room both leave (D10): a name the
+        // second ask also found stands where the merge put it, not after a
+        // single mention.
         if let (Some(picked), Some((_, typed))) = (picked?, &picking) {
             rows = group::with_names(
                 rows,
@@ -570,13 +606,21 @@ impl Searcher {
                 PER_GROUP,
                 query.limit,
             );
+        }
+        if let Some(parted) = parted?.filter(|parted| !parted.is_empty()) {
+            if let Some(asked) = reading.parts.as_deref() {
+                needles_of(asked);
+            }
+            rows = group::filled(rows, parted, PER_GROUP, query.limit);
+        }
+        if let Some((_, typed)) = &picking {
             group::mark(&mut rows, typed);
         }
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
         }
         let mut groups = if filters.excerpts {
-            group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
+            group::with_excerpts(rows, &vocab.kinds, &needles)
         } else {
             group::group(rows, &vocab.kinds)
         };

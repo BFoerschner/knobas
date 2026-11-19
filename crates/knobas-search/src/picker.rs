@@ -563,6 +563,169 @@ fn pick_over(
     out
 }
 
+/// What the mirror's words make of a typed text (D10): the asks the launcher
+/// and the Docs search make beside the text as typed, under *Everything*.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WordReading {
+    /// The text with each word nobody wrote read as the nearest word somebody
+    /// did, or as two written words side by side (`"auth proxy"`): asked only
+    /// where the text as typed found nothing. `None` where no word changed.
+    pub corrected: Option<String>,
+    /// The second ask: for each written word of four letters and more, the
+    /// longer words that hold it past their start, each in a branch of the
+    /// typed words with it in place of every typed word it holds, the
+    /// branches joined by `or`. `None` where there is none.
+    pub parts: Option<String>,
+}
+
+/// Longer words a written word brings, at most.
+pub const PARTS_A_WORD: usize = 3;
+/// Branches a second ask holds, at most.
+pub const PARTS_BRANCHES: usize = 4;
+
+fn holds_word(words: &[String], word: &str) -> bool {
+    words
+        .binary_search_by(|held| held.as_str().cmp(word))
+        .is_ok()
+}
+
+fn begins_a_word(words: &[String], start: &str) -> bool {
+    let at = words.partition_point(|held| held.as_str() < start);
+    words.get(at).is_some_and(|held| held.starts_with(start))
+}
+
+/// A token the word list reads: letters and digits only, no operator, not
+/// quoted, not left out, not a key, four letters and more.
+fn plain_word(token: &str) -> bool {
+    token.chars().count() >= LOOSE_FROM
+        && token.chars().all(char::is_alphanumeric)
+        && !key_shaped(token)
+}
+
+/// The nearest written word to `typed` (D10): frizbee's fuzzy match over the
+/// list with D5's typo budget, among words whose length is within that
+/// budget of the typed word's, best score first.
+fn nearest(words: &[String], typed: &str) -> Option<String> {
+    let letters = typed.chars().count();
+    let allowed = typos_of(letters);
+    if allowed == 0 {
+        return None;
+    }
+    let pattern = Pattern::new(
+        typed,
+        PatternConfig::default()
+            .matching(Some(Matching::Fuzzy))
+            .max_typos(Some(allowed)),
+    );
+    let mut matcher = Matcher::from_patterns(&[pattern], &Config::default());
+    matcher
+        .match_list(words)
+        .into_iter()
+        .map(|found| &words[found.index as usize])
+        .find(|word| word.chars().count().abs_diff(letters) <= usize::from(allowed))
+        .cloned()
+}
+
+/// `typed` split at the first place where both halves are written words of
+/// three letters and more, as a phrase.
+fn split(words: &[String], typed: &str) -> Option<String> {
+    let starts: Vec<usize> = typed.char_indices().map(|(at, _)| at).collect();
+    (3..starts.len().saturating_sub(2)).find_map(|cut| {
+        let (left, right) = typed.split_at(starts[cut]);
+        (holds_word(words, left) && holds_word(words, right)).then(|| format!("\"{left} {right}\""))
+    })
+}
+
+/// The longer words that hold `word` past their start, best first by
+/// frizbee's substring score, at most [`PARTS_A_WORD`].
+fn longer(words: &[String], word: &str) -> Vec<String> {
+    let pattern = Pattern::new(
+        word,
+        PatternConfig::default().matching(Some(Matching::Substring)),
+    );
+    let mut matcher = Matcher::from_patterns(&[pattern], &Config::default());
+    matcher
+        .match_list(words)
+        .into_iter()
+        .map(|found| &words[found.index as usize])
+        .filter(|held| !held.starts_with(word))
+        .take(PARTS_A_WORD)
+        .cloned()
+        .collect()
+}
+
+/// [`Picker::reading`] over a list handed in, for a test.
+#[must_use]
+pub fn read_words(words: &[String], text: &str, last_growing: bool) -> WordReading {
+    if words.is_empty() {
+        return WordReading::default();
+    }
+    let tokens = crate::query::tokenize(text);
+    if tokens.is_empty() || tokens.iter().any(|token| token.eq_ignore_ascii_case("or")) {
+        return WordReading::default();
+    }
+    let last = tokens.len() - 1;
+    let lowered: Vec<Option<String>> = tokens
+        .iter()
+        .map(|token| plain_word(token).then(|| token.to_lowercase()))
+        .collect();
+
+    // A word nobody wrote.
+    let mut changed = false;
+    let corrected: Vec<String> = tokens
+        .iter()
+        .zip(&lowered)
+        .enumerate()
+        .map(|(at, (token, word))| {
+            let Some(word) = word else {
+                return token.clone();
+            };
+            if holds_word(words, word) || (at == last && last_growing && begins_a_word(words, word))
+            {
+                return token.clone();
+            }
+            match nearest(words, word).or_else(|| split(words, word)) {
+                Some(read) => {
+                    changed = true;
+                    read
+                }
+                None => token.clone(),
+            }
+        })
+        .collect();
+
+    // A written word that is part of longer words.
+    let mut branches: Vec<String> = Vec::new();
+    'words: for word in lowered.iter().flatten() {
+        if !holds_word(words, word) {
+            continue;
+        }
+        for long in longer(words, word) {
+            let mut branch: Vec<String> = Vec::new();
+            for (token, typed) in tokens.iter().zip(&lowered) {
+                let put = match typed {
+                    Some(typed) if long.contains(typed.as_str()) => long.clone(),
+                    _ => token.clone(),
+                };
+                if !branch.contains(&put) {
+                    branch.push(put);
+                }
+            }
+            let branch = branch.join(" ");
+            if !branches.contains(&branch) {
+                branches.push(branch);
+            }
+            if branches.len() == PARTS_BRANCHES {
+                break 'words;
+            }
+        }
+    }
+    WordReading {
+        corrected: changed.then(|| corrected.join(" ")),
+        parts: (!branches.is_empty()).then(|| branches.join(" or ")),
+    }
+}
+
 /// One name the picker chose for the launcher: its entity and what it is
 /// worth to the merge (negative for a loose or typo row).
 #[derive(Clone, Debug, PartialEq)]
@@ -791,6 +954,22 @@ impl Picker {
         }
     }
 
+    /// What the mirror's words make of `text` (D10, [`read_words`]): the
+    /// nearest written word for one nobody wrote, and the longer words a
+    /// written one is part of. `last_growing` says the last word is still
+    /// being typed. Nothing until the word list is whole.
+    #[must_use]
+    pub fn reading(&self, text: &str, last_growing: bool) -> WordReading {
+        read_words(&self.held().words, text, last_growing)
+    }
+
+    /// Whether the mirror's words are held (the list was whole at the last
+    /// reload).
+    #[must_use]
+    pub fn holds_words(&self) -> bool {
+        !self.held().words.is_empty()
+    }
+
     /// [`Typed::marks`] of `text` on `title`, solid.
     #[must_use]
     pub fn marks(&self, text: &str, title: &str) -> Vec<u32> {
@@ -869,6 +1048,24 @@ macro_rules! names_sql {
 }
 use names_sql;
 
+/// The words' read (D10): every word of `sync.word` in its key's order, and
+/// none until `sync.word_whole` says every row's words were read.
+pub const WORDS_SQL: &str = words_sql!();
+
+macro_rules! words_sql {
+    () => {
+        "select w.word from sync.word w
+  where exists (select from sync.word_whole)
+  order by w.word"
+    };
+}
+use words_sql;
+
+/// [`WORDS_SQL`]'s plan, for the tests that hold it to the key's index and
+/// no worker.
+#[cfg(any(test, feature = "test-util"))]
+pub const WORDS_PLAN_SQL: &str = concat!("explain (costs off) ", words_sql!());
+
 /// [`NAMES_SQL`]'s plan, for the tests that hold it to an index-only scan
 /// and no worker.
 #[cfg(any(test, feature = "test-util"))]
@@ -890,7 +1087,9 @@ async fn load(pool: &sqlx::PgPool) -> Result<Held, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query(LOAD_PLANNING).execute(&mut *tx).await?;
     let mut rows: Vec<Row> = sqlx::query_as(NAMES_SQL).fetch_all(&mut *tx).await?;
-    let words: Vec<String> = Vec::new();
+    // The mirror's words (D10), once the list is whole: until then a word is
+    // corrected against nothing.
+    let words: Vec<String> = sqlx::query_scalar(WORDS_SQL).fetch_all(&mut *tx).await?;
     tx.commit().await?;
     rows.sort_by(|a, b| match (a.4, b.4) {
         (Some(x), Some(y)) => y.cmp(&x).then_with(|| a.0.cmp(&b.0)),
@@ -1276,6 +1475,99 @@ mod tests {
                 .is_empty()
         );
         assert!(typed("proxy").marks("routing", false).is_empty());
+    }
+
+    fn words() -> Vec<String> {
+        let mut words: Vec<String> = [
+            "abcmappingservice",
+            "adproxy",
+            "auth",
+            "bord",
+            "config",
+            "dash",
+            "dashboard",
+            "idempotency",
+            "mapping",
+            "microservice",
+            "pagination",
+            "payout",
+            "proxy",
+            "retrolaryngeal",
+            "retry",
+            "schedule",
+            "scheduler",
+            "service",
+        ]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .collect();
+        words.sort();
+        words
+    }
+
+    /// **D10: a word nobody wrote** is read as the nearest written word of
+    /// nearly its length, else as two written words; a written word, or a
+    /// last word still being typed that begins one, is left as typed.
+    #[test]
+    fn a_word_nobody_wrote_is_read_as_the_nearest_one() {
+        let words = words();
+        let corrected = |text: &str| read_words(&words, text, false).corrected;
+        for (typed, read) in [
+            ("shceduler", "scheduler"),
+            ("payuot", "payout"),
+            ("retrry", "retry"),
+            ("idempotncy", "idempotency"),
+            ("pagintion", "pagination"),
+            ("mappng", "mapping"),
+            ("dashbord", "dashboard"),
+            ("authproxy", "\"auth proxy\""),
+            ("payuot retry", "payout retry"),
+        ] {
+            assert_eq!(corrected(typed).as_deref(), Some(read), "{typed}");
+        }
+        // Written words, short words, keys, operators: as typed.
+        for typed in [
+            "retry",
+            "pay",
+            "PAY-231",
+            "'shceduler",
+            "-shceduler",
+            "\"shceduler\"",
+        ] {
+            assert_eq!(corrected(typed), None, "{typed}");
+        }
+        // The last word still being typed, where it begins a written word.
+        assert_eq!(read_words(&words, "sched", true).corrected, None);
+        // One that begins none is read, within its length window: `schedx`
+        // is two letters short of every near word, `schedulx` is not.
+        assert_eq!(read_words(&words, "schedx", true).corrected, None);
+        assert!(read_words(&words, "schedulx", true).corrected.is_some());
+        // An `or`, or no list: nothing.
+        assert_eq!(
+            read_words(&words, "shceduler or retry", false),
+            WordReading::default()
+        );
+        assert_eq!(read_words(&[], "shceduler", false), WordReading::default());
+    }
+
+    /// **D10: a written word that is part of longer words** asks for them
+    /// too, each branch the typed words with the long word in place of every
+    /// typed word it holds.
+    #[test]
+    fn a_written_word_asks_for_the_longer_words_it_is_part_of() {
+        let words = words();
+        let parts = |text: &str| read_words(&words, text, true).parts;
+        assert_eq!(parts("proxy").as_deref(), Some("adproxy"));
+        assert_eq!(parts("proxy config").as_deref(), Some("adproxy config"));
+        assert_eq!(
+            parts("mapping service").as_deref(),
+            Some("abcmappingservice or mapping microservice")
+        );
+        // Not at a word's start: `:*` already matches a prefix.
+        assert_eq!(parts("schedule"), None);
+        // A word the list does not hold whole gets none.
+        assert_eq!(parts("sched"), None);
+        assert_eq!(parts("roxy"), None);
     }
 
     /// **D12: a page's own list**, one to three letters anywhere.

@@ -950,10 +950,17 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
     .execute(&mut *tx)
     .await
     .unwrap();
-    let plan: Vec<(String,)> = sqlx::query_as(knobas_search::picker::NAMES_PLAN_SQL)
+    let mut plan: Vec<(String,)> = sqlx::query_as(knobas_search::picker::NAMES_PLAN_SQL)
         .fetch_all(&mut *tx)
         .await
         .unwrap();
+    // And the mirror's words, read beside them (D10).
+    plan.extend(
+        sqlx::query_as::<_, (String,)>(knobas_search::picker::WORDS_PLAN_SQL)
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap(),
+    );
     tx.commit().await.unwrap();
     let plan = plan
         .into_iter()

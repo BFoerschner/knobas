@@ -31,6 +31,7 @@ pub mod state_colours;
 pub mod suggest;
 pub mod viewed;
 pub mod web_url;
+pub mod word_list;
 pub mod write_queue;
 
 pub use error::CoreError;

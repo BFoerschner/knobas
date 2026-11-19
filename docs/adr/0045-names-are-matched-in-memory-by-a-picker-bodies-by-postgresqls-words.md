@@ -10,6 +10,10 @@ Björn, on PR #2479: "I have a repository called ADProxy and i looked up proxy, 
 - **The matcher is frizbee**, pinned at 0.13.0, the one LazyVim's completion (blink.cmp) is built on: Smith-Waterman in SIMD, smart case, several words in any order, `'word`, `^word`, `word$`, `!word`. Only `knobas_search::picker` names a frizbee type.
 - **Three tiers, by rules of knobas's own over frizbee's scores.** Solid: every typed word in one piece, at a part's start for two or three letters. Loose, from four letters: the letters in order as an abbreviation places them (every letter placed, the first at a part's start, each skip inside a word or from a word to the next, within 0.85 of the best fit). One typo only where nothing was solid and fewer than five loose rows were kept. A ticket's key is never read loosely.
 - **PostgreSQL's answer stands.** The names join it in Rust (`group::with_names`) without moving a row it returned: a solid name above the rows only the text found weakly, never above a named row or a body about the word; loose names last; ten a kind and the page dealt as before. The chosen rows are read by key in one statement under one plan a connection (`sql::picked_sql`).
+- **Bodies are read by PostgreSQL's words, and a typed word against the words the mirror holds.** `sync.word`
+  (migration `0100`), kept by triggers and read into the picker once whole: under *Everything* a word nobody wrote is
+  asked again as the nearest written word where the text found nothing, and a written word also asks for the longer
+  words it is part of. No frizbee over bodies.
 - **The matched letters are painted** over the title with the CSS Custom Highlight API, from pairs the backend sends (`SearchHit.marks`).
 
 ## Rejected

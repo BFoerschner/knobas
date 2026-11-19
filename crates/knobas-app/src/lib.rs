@@ -1097,6 +1097,7 @@ async fn bring_up_app<R: tauri::Runtime>(
         // same answer; a sync's own writes keep their tickets' cards.
         // After the declarations, which the cards are read under.
         let fill_pool = pool.clone();
+        let words_picker = lifecycle.picker().clone();
         tokio::spawn(async move {
             let started = std::time::Instant::now();
             match knobas_core::item_card::fill(&fill_pool).await {
@@ -1162,6 +1163,24 @@ async fn bring_up_app<R: tauri::Runtime>(
                 Err(error) => {
                     tracing::warn!(%error, "the names' first characters could not all be filled");
                 }
+            }
+            // Then the words the mirror holds (migration `0100`, the
+            // fuzzy-search pass), for the items mirrored before it: last,
+            // since the launcher corrects no word until the list is whole
+            // and nothing else waits on it. Then the picker reads them.
+            let started = std::time::Instant::now();
+            match knobas_core::word_list::fill(&fill_pool).await {
+                Ok(batches) => {
+                    tracing::info!(
+                        batches,
+                        ms = started.elapsed().as_millis(),
+                        "the mirror's words are filled"
+                    );
+                    if batches > 0 {
+                        sources::pick_on_sync::reload(words_picker, fill_pool.clone());
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "the mirror's words could not all be filled"),
             }
         });
         // Before `Ready`, and before `AppState` is installed: the sync

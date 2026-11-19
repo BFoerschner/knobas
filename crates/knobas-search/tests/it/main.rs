@@ -48,3 +48,4 @@ mod under_coverage;
 mod under_jira;
 mod under_teamcity;
 mod vocab;
+mod words;
