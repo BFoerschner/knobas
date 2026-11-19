@@ -9,6 +9,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { CheckoutSettings, CheckoutView, OpenObject } from "../../ipc/entity";
+import { acks } from "../../shell/ack.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps, type Apps } from "./apps.svelte";
@@ -61,6 +62,8 @@ const calls = {
 };
 /** The shas this test's checkout holds; the Diff tool is offered for two of them. */
 let local: string[];
+/** What `open_diff_tool` refuses with, or `null` when it starts. */
+let diffRefusal: unknown = null;
 
 beforeEach(() => {
   for (const list of Object.values(calls)) list.length = 0;
@@ -122,7 +125,7 @@ async function openMenu(object: OpenObject, ends?: () => Promise<{ base: string;
           Promise.resolve(local.includes(base.replace(/\^$/, "")) && local.includes(head) ? argvOf(base, head) : null),
         openDiffTool: (_entityId: string, base: string, head: string) => {
           calls.diffs.push([base, head]);
-          return Promise.resolve(argvOf(base, head));
+          return diffRefusal === null ? Promise.resolve(argvOf(base, head)) : Promise.reject(diffRefusal);
         },
       },
     },
@@ -154,15 +157,16 @@ test("an application runs on the object, and Browser opens the object's page", a
   items()[0]!.click();
   await settle();
   expect(calls.objects).toEqual([[REPO, "tig", COMMIT]]);
-  expect(toasts.items.map((toast) => toast.text)).toEqual([
-    "Started Tig: tig -C /Users/mara/code/payout-service show c90d11e4a7b2",
-  ]);
+  // A chip says it is opening, named by the commit's short sha; no toast, no command line (ux21).
+  expect(acks.item?.text).toBe("Opening c90d11e in Tig");
+  expect(toasts.items).toEqual([]);
 
   target.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")!.click();
   await settle();
   items().find((item) => text(item.querySelector("b")) === "Browser")!.click();
   await settle();
   expect(calls.opened).toEqual([`${WEB}/commit/c90d11e4a7b2`]);
+  expect(acks.item?.text).toBe("Opening in the browser");
 });
 
 test("a range offers what accepts ranges, the default first, and a file what accepts files", async () => {
@@ -217,7 +221,22 @@ test("a range whose two shas the checkout holds offers the Diff tool, and it run
   items()[1]!.click();
   await settle();
   expect(calls.diffs).toEqual([["7be0e4f15c60^", "c90d11e4a7b2"]]);
-  expect(toasts.items.map((toast) => toast.text)[0]).toMatch(/^Started the Diff tool: git -C/);
+  expect(acks.item?.text).toBe("Opening in the Diff tool");
+  expect(toasts.items).toEqual([]);
+});
+
+test("a Diff tool that doesn't start takes the chip away and says why in a toast", async () => {
+  local = ["7be0e4f15c60", "c90d11e4a7b2"];
+  diffRefusal = { code: "invalid", message: "git difftool could not be run: no diff tool is set", source_id: null };
+  try {
+    await openMenu({ kind: "range", base: "7be0e4f15c60^", head: "c90d11e4a7b2" });
+    items()[1]!.click();
+    await settle();
+    expect(acks.item).toBeNull();
+    expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([["Could not start the Diff tool: git difftool could not be run: no diff tool is set", "err"]]);
+  } finally {
+    diffRefusal = null;
+  }
 });
 
 test("a range with a sha the checkout lacks has no Diff tool", async () => {

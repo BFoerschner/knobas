@@ -15,6 +15,7 @@ import type {
   CloneEvent,
   OpenAt,
 } from "../../ipc/entity";
+import { acks } from "../../shell/ack.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps, type Apps } from "./apps.svelte";
@@ -205,15 +206,33 @@ test("the whole button opens the menu: the default first, marked and focused, th
   expect(layers.open).toHaveLength(0);
 });
 
-test("choosing an application runs it at the checkout and says what it started", async () => {
+test("choosing an application runs it at the checkout, and a chip says it is opening: no toast, no command line (ux21)", async () => {
   await draw(view("/Users/mara/code/payout-service"));
   target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   await settle();
   items()[0]!.click();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode", file: null, line: null }]]);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started VS Code: code /Users/mara/code/payout-service");
+  expect(acks.item?.text).toBe("Opening in VS Code");
+  expect(toasts.items).toEqual([]);
   expect(target.querySelector("[role='menu']")).toBeNull();
+});
+
+test("an application that doesn't start takes the chip away and says why in a toast", async () => {
+  apps = createApps({
+    checkoutSettings: () => Promise.resolve(stored),
+    setCheckoutApplications: () => Promise.resolve(stored),
+    openCheckout: () => Promise.reject({ code: "invalid", message: "'code {path}' could not be run: No such file or directory (os error 2)", source_id: null }),
+  });
+  await draw(view("/Users/mara/code/payout-service"));
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  items()[0]!.click();
+  await settle();
+  expect(acks.item).toBeNull();
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([
+    ["Could not start VS Code: 'code {path}' could not be run: No such file or directory (os error 2)", "err"],
+  ]);
 });
 
 test("at a file, the menu shows and runs the file command", async () => {
@@ -224,6 +243,7 @@ test("at a file, the menu shows and runs the file command", async () => {
   items()[0]!.click();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode", file: "src/sepa/retry.rs", line: null }]]);
+  expect(acks.item?.text).toBe("Opening retry.rs in VS Code");
 });
 
 test("at a file, an application with no file command opens the file's folder, and says so on its line (2026-11-16)", async () => {
@@ -235,7 +255,8 @@ test("at a file, an application with no file command opens the file's folder, an
   await settle();
   expect(calls.folder).toEqual([[REPO, "terminal", "src/sepa"]]);
   expect(calls.open).toEqual([]);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started Terminal: open -a Terminal /Users/mara/code/payout-service/src/sepa");
+  expect(acks.item?.text).toBe("Opening sepa in Terminal");
+  expect(toasts.items).toEqual([]);
 });
 
 test("at a file at the checkout's top, an application with no file command opens the checkout", async () => {
@@ -472,4 +493,16 @@ test("a browser that refuses says so in a toast", async () => {
   items().find((item) => text(item).startsWith("Browser"))!.click();
   await settle();
   expect(toasts.items.map((toast) => [toast.text, toast.tone])).toContainEqual(["Could not open the browser: refused: ftp: is not http or https", "err"]);
+  expect(acks.item).toBeNull();
+});
+
+test("Browser hands the page over, and a chip says so (ux21)", async () => {
+  await draw(view("/Users/mara/code/payout-service"));
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  items().find((item) => text(item).startsWith("Browser"))!.click();
+  await settle();
+  expect(browsed).toEqual([PAGE]);
+  expect(acks.item?.text).toBe("Opening in the browser");
+  expect(toasts.items).toEqual([]);
 });

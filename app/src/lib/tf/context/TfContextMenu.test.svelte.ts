@@ -6,6 +6,7 @@ import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { CheckoutSettings, CheckoutView, EntityDetail } from "../../ipc/entity";
+import { acks } from "../../shell/ack.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps, type Apps } from "../openin/apps.svelte";
@@ -329,7 +330,8 @@ test("a folder's Open in…: → opens the applications, each opens the folder a
   await settle();
   expect(calls["openFolder"]).toEqual([[REPO, "terminal", "src/sepa"]]);
   expect(menus()).toHaveLength(0);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started Terminal: open -a Terminal /x");
+  expect(acks.item?.text).toBe("Opening sepa in Terminal");
+  expect(toasts.items).toEqual([]);
 });
 
 test("a file opens with the file command; an application with none opens the file's folder", async () => {

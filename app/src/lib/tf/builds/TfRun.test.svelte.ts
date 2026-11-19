@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { DownloadTarget, LinkEntry, PipelineRow, Project, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
+import { acks } from "../../shell/ack.svelte";
 import { noteWithdrawn } from "../../shell/write-queue.svelte";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes, echoesOn } from "../queued.svelte";
@@ -454,6 +455,8 @@ test("Open in the source opens the run's own page", async () => {
   await settle();
   button("Open in TeamCity")!.click();
   expect(drawn.opened).toEqual(["http://ci.example/build/1187"]);
+  // A chip where the press was says the browser has it, at once (ux21).
+  expect(acks.item?.text).toBe("Opening in the browser");
 });
 
 test("a running run has Stop, disabled because it needs a new write, and says what it is doing", async () => {

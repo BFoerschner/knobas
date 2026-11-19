@@ -51,6 +51,7 @@
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
@@ -423,7 +424,8 @@
 
   function openInSource() {
     if (pipeline.web_url === null) return;
-    void ports.openExternal(pipeline.web_url).catch((cause: unknown) => {
+    const url = pipeline.web_url;
+    void acknowledged(openingWords("the browser"), () => ports.openExternal(url)).catch((cause: unknown) => {
       push({ text: `Could not open ${pipeline.source_name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }

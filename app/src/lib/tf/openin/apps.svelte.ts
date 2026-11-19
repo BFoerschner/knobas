@@ -16,8 +16,9 @@ import {
   type OpenAt,
   type OpenObject,
 } from "../../ipc/entity";
+import { acknowledge, lastName, openingWords } from "../../shell/ack.svelte";
 import { push } from "../../shell/toasts.svelte";
-import { argvText, defaultApp } from "./openin";
+import { defaultApp } from "./openin";
 
 export interface AppsPorts {
   checkoutSettings: () => Promise<CheckoutSettings>;
@@ -46,11 +47,14 @@ export interface Apps {
   reload(): Promise<void>;
   /** Save the list and the default; rejects with the backend's refusal. */
   save(applications: readonly CheckoutApplication[], defaultApplication: string | null): Promise<void>;
-  /** Run a saved application and say so in a toast. */
+  /**
+   * Run a saved application: a chip where the press was says it is opening (`shell/ack.svelte.ts`, ux21), and a toast
+   * says why when it didn't start.
+   */
   run(entityId: string, name: string, at: OpenAt): Promise<void>;
-  /** Run a saved application on a code object (#2274) and say so in a toast. */
+  /** Run a saved application on a code object (#2274), as {@link run} does. */
   runObject(entityId: string, name: string, application: string, object: OpenObject): Promise<void>;
-  /** Run a saved application on a folder of the checkout as on the checkout (2026-11-16) and say so in a toast. */
+  /** Run a saved application on a folder of the checkout as on the checkout (2026-11-16), as {@link run} does. */
   runFolder(entityId: string, name: string, application: string, folder: string): Promise<void>;
   /**
    * Run a saved application on a file (Fable's ruling of 2026-11-16): its file command; one with none opens the file's
@@ -86,12 +90,17 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
     }
   }
 
-  /** Start one, and say what started or why it did not. */
-  async function said(name: string, start: () => Promise<string[]>) {
+  /**
+   * Start one: the chip at once, named by the application and what it opens, never its command line or a path (Björn,
+   * ux21: "the long path also makes it huge"); a toast only for why it did not start.
+   */
+  async function said(name: string, item: string | null, start: () => Promise<string[]>) {
+    const ack = acknowledge(openingWords(name, item));
     try {
-      const argv = await start();
-      push({ text: `Started ${name}: ${argvText(argv)}` });
+      await start();
+      ack.settle();
     } catch (cause) {
+      ack.fail();
       push({ text: `Could not start ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
@@ -116,15 +125,15 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
       pending = null;
     },
     async run(entityId, name, at) {
-      await said(name, () => ports.openCheckout(entityId, at));
+      await said(name, at.file ? lastName(at.file) : null, () => ports.openCheckout(entityId, at));
     },
     async runObject(entityId, name, application, object) {
       const open = ports.openObject ?? realAppsPorts.openObject!;
-      await said(name, () => open(entityId, application, object));
+      await said(name, objectName(object), () => open(entityId, application, object));
     },
     async runFolder(entityId, name, application, folder) {
       const open = ports.openFolder ?? realAppsPorts.openFolder!;
-      await said(name, () => open(entityId, application, folder));
+      await said(name, lastName(folder), () => open(entityId, application, folder));
     },
     async runFile(entityId, app, file, line) {
       const folder = fileFolder(app, file);
@@ -133,6 +142,27 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
       return this.runFolder(entityId, app.name, app.id, folder);
     },
   };
+}
+
+/** What a code object is called on an opening's chip: a file's last name, a commit's short sha, a pull request's number. */
+export function objectName(object: OpenObject): string | null {
+  switch (object.kind) {
+    case "repository":
+      return null;
+    case "file":
+      return lastName(object.path);
+    case "commit":
+      return short(object.sha);
+    case "range":
+      return `${short(object.base)}…${short(object.head)}`;
+    case "pull_request":
+      return `#${object.number}`;
+  }
+}
+
+/** A sha as seven characters; a branch's name as it is. */
+function short(end: string): string {
+  return /^[0-9a-f]{8,40}$/.test(end) ? end.slice(0, 7) : end;
 }
 
 /** The window's one list. Tests build their own. */

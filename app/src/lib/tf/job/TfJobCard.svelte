@@ -42,6 +42,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { openExternal } from "../../shell/open-external";
   import type { CardTable } from "./card-sections";
@@ -163,7 +164,7 @@
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
-    open(url).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+    acknowledged(openingWords("the browser"), () => open(url)).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
   }
 </script>
 

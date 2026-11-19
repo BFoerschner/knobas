@@ -12,6 +12,8 @@
 //     path drawn by `TfPath` (`.tf-path-head`), which gives up its middle for the folder at its end, whole path on hover;
 //   - an ellipsis cuts a path, other than that start;
 //   - a box scrolls sideways with the long paths and did not with the fixture's short ones.
+// Toasts and an opening's chip are read too (ux21, 2026-11-19: a toast carrying a path grew to three lines and 1,400 px): a
+// toast's line gives up its middle (`.tf-toast-head`), as a path's start does.
 // A visually hidden run (the sign's description, which the witness and a screen reader read) is left out.
 //
 // Writes <out dir>/long-paths.json and exits 1 on any miss, or if a screen's step finds nothing.
@@ -35,7 +37,8 @@ const SIZES = [
   [1100, 600, 1],
 ];
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
-// `press`: the control to press first, by its words or a selector; `focus`: the control to focus (the sign's bubble opens on it).
+// `press`: the control to press first, by its words or a selector; `focus`: the control to focus (the sign's bubble opens on it);
+// `item`: then a menu's row to press, by a selector; `wait`: how long to wait after (a clone's toast comes when it ends).
 const SCREENS = [
   { id: "repo-files", route: REPO },
   { id: "repo-sign-focus", route: REPO, focus: ".tf-signbtn" },
@@ -52,12 +55,15 @@ const SCREENS = [
   { id: "settings-checkouts", route: "settings/checkouts" },
   { id: "settings-remove-worktree", route: "settings/checkouts", press: "Remove…" },
   { id: "job", route: "job/PAY-231" },
+  { id: "toast-cloned", route: "repo/mock%3Atidewater%2Fledger", press: "Clone", wait: 3800 },
+  { id: "toast-cloned-open", route: "repo/mock%3Atidewater%2Fledger", press: "Clone", wait: 3800, toast: "Open in VS Code" },
+  { id: "ack-open-in", route: REPO, press: "Open in…", item: ".tf-appmenu [role=menuitem]" },
 ];
 
 // Runs in the page: what of a path's text leaves its boxes, and which boxes scroll sideways.
 const CHECK = String.raw`(() => {
   const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src/;
-  const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats")].filter(Boolean);
+  const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks")].filter(Boolean);
   const name = (el) => el.tagName.toLowerCase() + [...el.classList].map((c) => "." + c).join("");
   const where = (el) => { const parts = []; for (let e = el; e && e !== document.body && parts.length < 4; e = e.parentElement) parts.unshift(name(e)); return parts.join(" > "); };
   const misses = [];
@@ -73,7 +79,7 @@ const CHECK = String.raw`(() => {
       for (let e = node.parentElement; e; e = e.parentElement) {
         const s = getComputedStyle(e);
         if (s.clipPath !== "none" || s.visibility === "hidden" || s.display === "none") hidden = true;
-        if (e.classList.contains("tf-path-head")) cutOnPurpose = true;
+        if (e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head")) cutOnPurpose = true;
       }
       if (hidden) continue;
       const left = Math.min(...rects.map((r) => r.left)), right = Math.max(...rects.map((r) => r.right));
@@ -105,7 +111,7 @@ const CHECK = String.raw`(() => {
     // Strict: an ellipsis shows for a shortfall under a pixel, which rounds away in a +1 margin.
     if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth || !MARK.test(e.textContent)) continue;
     const s = getComputedStyle(e);
-    if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.closest(".tf-sr")) continue;
+    if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head") || e.closest(".tf-sr")) continue;
     misses.push({ kind: "cut", at: where(e), text: e.textContent.trim().slice(-48), over: e.scrollWidth - e.clientWidth });
   }
   const scrolls = [];
@@ -153,6 +159,14 @@ for (const screen of SCREENS) {
         if (box) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x, y: box.y });
         await sleep(600);
       }
+      if (screen.item) {
+        await opener.settleAfterChange();
+        stepped = stepped && (await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(screen.item)}); if (!e) return false; e.click(); return true; })()`));
+      }
+      if (screen.wait) await sleep(screen.wait);
+      if (screen.toast) {
+        stepped = stepped && (await evaluate(`(() => { const e = [...document.querySelectorAll(".tf-toast button")].find((b) => b.textContent.trim() === ${JSON.stringify(screen.toast)}); if (!e) return false; e.click(); return true; })()`));
+      }
       if (screen.press || screen.focus) await opener.settleAfterChange();
       return { stepped, ...JSON.parse(await evaluate(CHECK)) };
     };
@@ -160,7 +174,7 @@ for (const screen of SCREENS) {
     const long = await read("&fake-long-paths");
     const scrolls = long.scrolls.filter((box) => !short.scrolls.includes(box));
     const misses = [
-      ...(long.stepped ? [] : [{ kind: "step", at: screen.press ?? screen.focus ?? screen.hover, text: "found nothing to press" }]),
+      ...(long.stepped ? [] : [{ kind: "step", at: screen.toast ?? screen.item ?? screen.press ?? screen.focus ?? screen.hover, text: "found nothing to press" }]),
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),

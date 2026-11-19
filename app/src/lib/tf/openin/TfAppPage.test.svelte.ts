@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CheckoutApplicationDraft, CheckoutSettings, EntityRow, OpenObject } from "../../ipc/entity";
+import { acks } from "../../shell/ack.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { pageContext } from "../kept-pages.svelte";
 import { backStepContext } from "../page-name.svelte";
@@ -226,7 +227,7 @@ test("Try it saves the draft and runs it by the id the save gave it; pressed twi
     [PAYOUT, "mygitviewer", { kind: "repository" }],
     [PAYOUT, "mygitviewer", { kind: "repository" }],
   ]);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started MyGitViewer: ran");
+  expect(acks.item?.text).toBe("Opening in MyGitViewer");
   expect(localStorage.getItem(LAST_TRIED_KEY)).toBe(PAYOUT);
 
   button("Add application").click();

@@ -125,6 +125,7 @@
   import { type Chord, isBoxChord, isHelpPress } from "./keys";
   import { type KeyStore, launcherKeys } from "./keys.svelte";
   import { push } from "../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../shell/ack.svelte";
 
   let {
     open = $bindable(false),
@@ -882,7 +883,7 @@
    */
   async function openTheMiss(url: string) {
     try {
-      await openExternal(url);
+      await acknowledged(openingWords("the browser"), () => openExternal(url));
       close();
     } catch (cause) {
       session.error = ipcErrorMessage(cause);

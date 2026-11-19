@@ -15,6 +15,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ActionKey, LauncherHome, ListKey, SearchHit, SearchQuery, SearchResponse } from "../ipc";
 import type { CheckoutSettings, ViewAction } from "../ipc/entity";
+import { acks } from "../shell/ack.svelte";
 import { reset as resetToasts, toasts } from "../shell/toasts.svelte";
 import Launcher from "./Launcher.svelte";
 import { createKeys } from "./keys.svelte";
@@ -309,7 +310,8 @@ test("an action's chord runs it on the selected row of its kind without opening 
   expect(chord("o", { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
   await settle();
   expect(calls.openCheckout).toHaveBeenCalledWith("gitea:acme/svc", { application: "code" });
-  expect(lastToast()).toBe("Started VS Code: code /src/svc");
+  expect(acks.item?.text).toBe("Opening in VS Code");
+  expect(lastToast()).toBeUndefined();
 });
 
 /**

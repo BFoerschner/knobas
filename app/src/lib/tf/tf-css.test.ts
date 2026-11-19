@@ -77,6 +77,28 @@ test("a held view's line stays one line, the room it keeps, so a narrow column's
   expect(line).toMatch(/text-overflow:\s*ellipsis/);
 });
 
+test("a toast is one line at most 680 px wide that gives up its middle, so no path or command line grows it (ux21, 2026-11-19)", () => {
+  expect(block(code, ".tf-toast")).toMatch(/max-width:\s*min\(680px, calc\(100vw - 32px\)\)/);
+  const line = block(code, ".tf-toast-line");
+  expect(line).toMatch(/white-space:\s*pre/);
+  expect(line).toMatch(/min-width:\s*0/);
+  const head = block(code, ".tf-toast-head");
+  expect(head).toMatch(/flex:\s*0 1 auto/);
+  expect(head).toMatch(/overflow:\s*hidden/);
+  expect(head).toMatch(/text-overflow:\s*ellipsis/);
+  expect(block(code, ".tf-toast-tail")).toMatch(/flex:\s*none/);
+});
+
+test("an opening's chip floats where the press was, one line, nothing to press, and stills under reduced motion (ux21, 2026-11-19)", () => {
+  const chip = block(code, ".tf-ack");
+  expect(chip).toMatch(/position:\s*fixed/);
+  expect(chip).toMatch(/max-width:\s*360px/);
+  expect(chip).toMatch(/white-space:\s*nowrap/);
+  expect(chip).toMatch(/pointer-events:\s*none/);
+  expect(block(code, ".tf-acks")).toMatch(/pointer-events:\s*none/);
+  expect(code).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.tf-ack \{ animation: none; transition: none; \}/);
+});
+
 test("the spec's colour table was read, so the next two tests check something", () => {
   expect(COLOURS.length).toBeGreaterThanOrEqual(23);
 });

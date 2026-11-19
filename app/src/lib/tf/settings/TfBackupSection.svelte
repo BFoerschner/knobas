@@ -31,6 +31,7 @@
   import { shareDefaults, type ArchiveFile, type BackupSchedule, type BackupStatus, type ShareParts } from "../../ipc/backup";
   import { latestRead } from "../../shell/latest-read";
   import { push } from "../../shell/toasts.svelte";
+  import { acknowledged } from "../../shell/ack.svelte";
   import { formatBytes } from "../../sources/diagnostics";
   import type { Layers } from "../layers.svelte";
   import type { SectionPorts } from "./ports";
@@ -126,7 +127,7 @@
 
   async function openFolder() {
     try {
-      await ports.openBackupFolder();
+      await acknowledged("Opening the backup folder", () => ports.openBackupFolder());
     } catch (cause) {
       push({ text: `Could not open the backup folder: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

@@ -26,6 +26,7 @@ import type { InboxItem, StateChip } from "../ipc/entity";
 import type { KindStateColours, StateWordColour } from "../ipc/sources";
 import { EVENTS } from "../ipc";
 import { toasts } from "../shell/toasts.svelte";
+import { acks } from "../shell/ack.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS, WAIT_SAID_MS } from "./session.svelte";
 import { createScope } from "./scope.svelte";
@@ -1311,6 +1312,8 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
   await settle();
 
   expect(opened).toEqual([`${PASTED}#comment-42`]);
+  // A chip where the press was says the browser has it (ux21).
+  expect(acks.item?.text).toBe("Opening in the browser");
 });
 
 /** The same, from the keyboard: a miss is not a state the box cannot leave. */

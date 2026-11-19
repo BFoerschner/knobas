@@ -4,10 +4,11 @@
   here, drawn as prototype-6 draws one: ink on the page, the words of the
   button that caused it, and at most its actions as underlined words.
 
-  Text only: a toast often carries a source's own error message (gotcha 7).
+  Text only: a toast often carries a source's own error message (gotcha 7). One line, at most 680 px wide (ux21): a
+  line that doesn't fit gives up its middle (`toastLine`), and its title is the whole line.
 -->
 <script lang="ts">
-  import { dismiss, hold, release, toasts, type ToastAction } from "../shell/toasts.svelte";
+  import { dismiss, hold, release, toastLine, toasts, type ToastAction } from "../shell/toasts.svelte";
   import TfKeyed from "./TfKeyed.svelte";
   import { modals } from "./modals.svelte";
 
@@ -38,6 +39,7 @@
   }}
 >
   {#each toasts.items as toast (toast.id)}
+    {@const line = toastLine(toast.text)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="tf-toast {toast.tone === 'err' ? 'tf-err' : ''}"
@@ -48,7 +50,10 @@
         if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) release(toast.id, "focus");
       }}
     >
-      <span><TfKeyed text={toast.text} /></span>
+      <span class="tf-toast-line" title={line.tail !== "" ? toast.text : undefined}
+        ><span class="tf-toast-head"><TfKeyed text={line.head} /></span
+        >{#if line.tail !== ""}<span class="tf-toast-tail"><TfKeyed text={line.tail} /></span>{/if}</span
+      >
       {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action, index (index)}
         <button onclick={() => press(toast.id, action)}>{action.label}</button>
       {/each}

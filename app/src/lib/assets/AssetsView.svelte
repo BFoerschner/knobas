@@ -142,6 +142,7 @@
   // what a create can honestly say now is that knobas asked, and a toast is
   // where this app says that.
   import { push, undoable } from "../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../shell/ack.svelte";
   import { holdStillPress } from "../tf/still-press";
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
@@ -1693,7 +1694,7 @@
    */
   async function openInBrowser(url: string) {
     try {
-      await io.openExternal(url);
+      await acknowledged(openingWords("the browser"), () => io.openExternal(url));
     } catch (rejection) {
       writeFailure = `Could not open the link: ${ipcErrorMessage(rejection)}`;
     }

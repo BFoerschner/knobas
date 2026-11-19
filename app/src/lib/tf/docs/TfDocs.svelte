@@ -122,6 +122,7 @@
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { dismiss, push, undoable } from "../../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import type { FilterConfig } from "../filter/filter";
@@ -1433,7 +1434,7 @@
 
   async function open(url: string): Promise<void> {
     try {
-      await io.openExternal(url);
+      await acknowledged(openingWords("the browser"), () => io.openExternal(url));
     } catch (cause) {
       push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

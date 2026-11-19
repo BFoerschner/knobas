@@ -9,16 +9,21 @@
 .tf-zoomlevel b { font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-3xl) * var(--fs)); line-height: 1; font-variant-numeric: tabular-nums; }
 .tf-zoomlevel span { font-size: calc(var(--t-xs) * var(--fs)); opacity: .8; }
 
-/* ---------- toasts: ink on the page, rising 20px into place ---------- */
+/* ---------- toasts: ink on the page, rising 20px into place, one line at most 680 px wide (ux21: a path or a command
+   line made one three lines and 1,400 px wide). The line gives up its middle (`TfToasts.svelte`, `toastLine`): its start
+   says what happened, its end why or which one; the whole line is its title. ---------- */
 .tf-toasts {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;
   display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none;
 }
 .tf-toast {
   background: var(--ink); color: var(--sheet); padding: 10px 14px; border-radius: 6px;
-  display: flex; gap: 12px; align-items: center; max-width: calc(100vw - 32px); pointer-events: auto;
+  display: flex; gap: 12px; align-items: center; max-width: min(680px, calc(100vw - 32px)); pointer-events: auto;
   animation: tf-rise .2s ease-out;
 }
+.tf-toast-line { display: flex; flex: 0 1 auto; min-width: 0; white-space: pre; }
+.tf-toast-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-toast-tail { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .tf-toast.tf-err { background: var(--err); }
 .tf-toast button { border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; white-space: nowrap; flex: none; }
 .tf-toast .tf-x { text-decoration: none; opacity: .7; }
@@ -30,3 +35,22 @@
 .tf-toasts.tf-over-modal { bottom: 6px; }
 .tf-toasts.tf-over-modal .tf-toast:not(:last-child) { display: none; }
 
+
+/* ---------- an opening's acknowledgement (`TfAck.svelte`, `shell/ack.svelte.ts`, ux21): a small ink chip where the
+   press was, about a second, nothing to press. Its place is set before it draws and it floats, so nothing moves for it;
+   it fades in over 90 ms and out over 160 ms, and with reduced motion it just comes and goes. ---------- */
+.tf-acks { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+.tf-ack {
+  position: fixed; display: flex; align-items: center; gap: 6px; max-width: 360px; box-sizing: border-box;
+  padding: 4px 10px 4px 8px; border-radius: 6px; background: var(--ink); color: var(--sheet); box-shadow: var(--shadow);
+  font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.35; white-space: nowrap; pointer-events: none;
+  animation: tf-ack-in 90ms ease-out; transition: opacity 160ms ease-in;
+}
+.tf-ack svg { flex: none; opacity: .75; }
+.tf-ack span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-ack.tf-ack-centre { left: 50%; transform: translateX(-50%); }
+.tf-ack.tf-ack-leaving { opacity: 0; }
+@keyframes tf-ack-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .tf-ack { animation: none; transition: none; }
+}

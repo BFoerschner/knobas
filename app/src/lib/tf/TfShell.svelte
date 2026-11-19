@@ -120,6 +120,7 @@
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
+  import TfAck from "./TfAck.svelte";
   import TfToasts from "./TfToasts.svelte";
   import TfContextMenu from "./context/TfContextMenu.svelte";
   import TfTopBar from "./TfTopBar.svelte";
@@ -924,6 +925,7 @@
     <TfSecretPromptHost sourceId={secretPrompt.source} {layers} ports={secretPorts} />
   {/if}
   <TfToasts />
+  <TfAck />
   <TfZoomLevel {zoom} />
   <div class="tf-floats"></div>
   <!-- The right-click menu (2026-11-16): one for the window, in the float host. -->

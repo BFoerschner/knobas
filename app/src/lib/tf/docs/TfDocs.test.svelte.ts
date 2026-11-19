@@ -9,6 +9,7 @@ import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, 
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { acks } from "../../shell/ack.svelte";
 import { installFindKey } from "../filter-keys";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import { pageContext } from "../kept-pages.svelte";
@@ -690,6 +691,7 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
   expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+  expect(acks.item?.text).toBe("Opening in the browser");
 });
 
 test("a table draws its spans, a header row and a header column, and blocks in its cells (spec #2432, #2436)", async () => {

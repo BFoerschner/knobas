@@ -79,6 +79,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "shell/toasts.svelte.ts#toasts": async () => (await import("./toasts.svelte")).reset(),
   "shell/toasts.svelte.ts#timers": async () => (await import("./toasts.svelte")).reset(),
   "shell/toasts.svelte.ts#endings": async () => (await import("./toasts.svelte")).reset(),
+  // An opening's chip, the last press and the chip's timers (ux21), in one reset.
+  "shell/ack.svelte.ts#acks": async () => (await import("./ack.svelte")).resetAcks(),
+  "shell/ack.svelte.ts#last": async () => (await import("./ack.svelte")).resetAcks(),
+  "shell/ack.svelte.ts#timers": async () => (await import("./ack.svelte")).resetAcks(),
   // The panel and the withdrawal subscribers, in one reset.
   "shell/write-queue.svelte.ts#writeQueuePanel": async () => (await import("./write-queue.svelte")).reset(),
   "shell/write-queue.svelte.ts#withdrawals": async () => (await import("./write-queue.svelte")).reset(),

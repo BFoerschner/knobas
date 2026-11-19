@@ -23,6 +23,7 @@
  * Docs' embeds and a renderer's frame. The decision note of 2026-11-13 says so.
  */
 import { ipcErrorMessage } from "../ipc";
+import { acknowledged, openingWords } from "./ack.svelte";
 import { openExternal } from "./open-external";
 import { push } from "./toasts.svelte";
 
@@ -46,9 +47,9 @@ export function externalUrl(href: string | null, origin: string): string | null 
   return url.origin === origin ? null : url.href;
 }
 
-/** Hand `url` to the browser, and say so in a toast when it refuses. */
+/** Hand `url` to the browser: a chip where the press was says so (ux21), and a toast says why when it refuses. */
 export function openInBrowser(url: string, open: (url: string) => Promise<void> = openExternal): void {
-  open(url).catch((cause: unknown) => {
+  acknowledged(openingWords("the browser"), () => open(url)).catch((cause: unknown) => {
     push({ text: `Could not open the browser: ${ipcErrorMessage(cause)}`, tone: "err" });
   });
 }

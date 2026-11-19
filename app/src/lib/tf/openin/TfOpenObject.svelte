@@ -55,6 +55,7 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
@@ -163,15 +164,15 @@
 
   function diff(at: DiffEnds) {
     open = false;
-    ports.openDiffTool(entityId, at.base, at.head).then(
-      (argv) => push({ text: `Started the Diff tool: ${argvText(argv)}` }),
-      (cause: unknown) => push({ text: `Could not start the Diff tool: ${ipcErrorMessage(cause)}`, tone: "err" }),
+    // The chip says it is opening (ux21); a toast only for why it did not start.
+    acknowledged(openingWords("the Diff tool"), () => ports.openDiffTool(entityId, at.base, at.head)).catch((cause: unknown) =>
+      push({ text: `Could not start the Diff tool: ${ipcErrorMessage(cause)}`, tone: "err" }),
     );
   }
 
   function browse(url: string) {
     open = false;
-    ports.openExternal(url).catch((cause: unknown) => {
+    acknowledged(openingWords("the browser"), () => ports.openExternal(url)).catch((cause: unknown) => {
       push({ text: `Could not open the browser: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }

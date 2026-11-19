@@ -368,6 +368,8 @@ const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
 const TfContextMenu = (await import("../tf/context/TfContextMenu.svelte")).default;
 const { realMenuPorts } = await import("../tf/context/ports");
 const TfZoomLevel = (await import("../tf/TfZoomLevel.svelte")).default;
+const TfAck = (await import("../tf/TfAck.svelte")).default;
+const { acknowledge } = await import("./ack.svelte");
 const { createZoom } = await import("../tf/zoom.svelte");
 /** A zoom of its own whose frames and layouts land at once: what is counted is the plate's, not the webview's. */
 const plateZoom = createZoom({ storage: () => null, apply: () => {}, frame: (draw) => draw(), settled: (done) => done() });
@@ -2526,6 +2528,17 @@ const CASES: Case[] = [
   sectionCase("TfStateColours", "appearance"),
   // Settings › Fonts (2026-11-18; Appearance's Code font from 2026-11-16): the installed fonts' read lands late.
   sectionCase("TfFontRole", "fonts"),
+  {
+    /** An opening's chip (ux21): the window's press listeners go with it; a chip shown and answered. */
+    name: "TfAck",
+    source: "lib/tf/TfAck.svelte",
+    open: (target) => ({ app: mount(TfAck, { target }) }),
+    exercise: () => {
+      window.dispatchEvent(new PointerEvent("pointerdown", { clientX: 200, clientY: 200 }));
+      acknowledge("Opening in VS Code").settle();
+      flushSync();
+    },
+  },
   {
     /** The zoom's level as it changes (2026-11-16): a step shows it, and its timer to hide it goes with the plate. */
     name: "TfZoomLevel",

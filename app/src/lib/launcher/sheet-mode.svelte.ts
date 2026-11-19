@@ -20,7 +20,8 @@ import type { QueuedWrite } from "../ipc/sources";
 import { toastQueued } from "../shell/queued-toast";
 import { push } from "../shell/toasts.svelte";
 import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
-import { argvText, menuOrder } from "../tf/openin/openin";
+import { menuOrder } from "../tf/openin/openin";
+import { acknowledge, openingWords } from "../shell/ack.svelte";
 import { KeyPanelMode, type KeyTarget } from "./key-panel.svelte";
 import { type Chord, chordOf, isBoxChord, isHelpPress, refusalOf } from "./keys";
 import type { KeyStore } from "./keys.svelte";
@@ -382,7 +383,7 @@ export class SheetMode {
     if (!at) return;
     const { subject, relation } = at;
     const { io, session, focus, close, navigate } = this.#host;
-    const settled = (work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string) => void this.#settled(work, said, undo, name);
+    const settled = (work: () => Promise<unknown>, said: () => string | null, undo?: () => Promise<unknown>, name?: string) => void this.#settled(work, said, undo, name);
     switch (does.kind) {
       case "go":
         close();
@@ -419,14 +420,22 @@ export class SheetMode {
       }
       case "open-in": {
         if (subject.kind !== "entity") return;
-        let argv: string[] = [];
+        // The chip where the press was says it is opening, and the launcher closes; a toast only for why not (ux21).
         return settled(
           async () => {
-            const where = subject.entityKind === "pr" ? await io.repoOf({ sourceId: subject.sourceId, path: subject.path }) : subject.entityId;
-            if (where === null) throw new Error(`The mirror holds no repository for ${subject.title}.`);
-            argv = await io.openCheckout(where, { application: does.application });
+            const ack = acknowledge(openingWords(does.name));
+            try {
+              const where = subject.entityKind === "pr" ? await io.repoOf({ sourceId: subject.sourceId, path: subject.path }) : subject.entityId;
+              if (where === null) throw new Error(`The mirror holds no repository for ${subject.title}.`);
+              await io.openCheckout(where, { application: does.application });
+              ack.settle();
+            } catch (cause) {
+              ack.fail();
+              // Said as every Open in… says it: which application, then why.
+              throw new Error(`Could not start ${does.name}: ${ipcErrorMessage(cause)}`);
+            }
           },
-          () => `Started ${does.name}: ${argvText(argv)}`,
+          () => null,
         );
       }
       case "clone":
@@ -509,13 +518,14 @@ export class SheetMode {
   /** A write or a read is out: a second press before it answers sends nothing (F-340's trip, by key). */
   #sending = false;
 
-  /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
-  async #settled(work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string): Promise<void> {
+  /** A write or a read that answers: said in a toast (unless `said` has nothing to say) and the launcher closed, or the reason said and the sheet kept. */
+  async #settled(work: () => Promise<unknown>, said: () => string | null, undo?: () => Promise<unknown>, name?: string): Promise<void> {
     if (this.#sending) return;
     this.#sending = true;
     try {
       await work();
-      push({ text: said(), ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo, name) } }) });
+      const text = said();
+      if (text !== null) push({ text, ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo, name) } }) });
       this.#host.close();
     } catch (cause) {
       push(this.#refusal(cause, name));

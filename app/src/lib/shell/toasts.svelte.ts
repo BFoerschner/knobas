@@ -41,6 +41,38 @@ export interface ToastItem extends Omit<ToastSpec, "onend"> {
   id: number;
 }
 
+/**
+ * A toast's one line, cut where it gives up its middle when it is wider than the toast (ux21: a path or a command line
+ * made one three lines and 1,400 px wide). The head says what happened and shrinks to an ellipsis; the tail stays: what
+ * follows the last `: ` (why it failed), else the last sentence, else a path's last name or the last few words (which
+ * one). Short lines are
+ * all head. Runs of white space are one space, so the line is one line.
+ */
+export function toastLine(text: string): { head: string; tail: string } {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (line.length <= TAIL_FROM) return { head: line, tail: "" };
+  const colon = line.lastIndexOf(": ");
+  if (colon > 0 && line.length - colon - 2 <= TAIL_MAX && line.length - colon - 2 > 0) return split(line, colon + 2);
+  const stop = line.lastIndexOf(". ", line.length - 3);
+  if (stop > 0 && line.length - stop - 2 <= TAIL_MAX) return split(line, stop + 2);
+  // A path's last name, else the last few words.
+  const from = line.length - TAIL_WORDS;
+  const slash = Math.max(line.lastIndexOf("/"), line.lastIndexOf("\\"));
+  if (slash >= from - 8 && slash < line.length - 8) return split(line, slash + 1);
+  const space = line.indexOf(" ", from);
+  return split(line, space > 0 && space < line.length - 8 ? space + 1 : from);
+}
+
+/** A line no longer than this is never cut, so its tail is nothing. */
+const TAIL_FROM = 48;
+/** The longest tail a toast keeps whole, and the few last characters it keeps when nothing else fits. */
+const TAIL_MAX = 56;
+const TAIL_WORDS = 24;
+
+function split(line: string, at: number) {
+  return { head: line.slice(0, at), tail: line.slice(at) };
+}
+
 /** Long enough to read a sentence, short enough not to stack up. */
 const DEFAULT_MS = 6500;
 const UNDO = "Undo";

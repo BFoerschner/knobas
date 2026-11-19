@@ -11,6 +11,7 @@ import type { InboxCategory, WriteAsk } from "../../ipc/entity";
 import type { KindStateColours, SourceSummary, ToneChoice } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { acks } from "../../shell/ack.svelte";
 import { keptPages } from "../kept-pages.svelte";
 import { createLayers } from "../layers.svelte";
 import { createTheme, type Theme } from "../theme.svelte";
@@ -766,6 +767,7 @@ test("Open the backup folder: beside Export… and Import…, and in both dialog
   await settle();
   expect(p.openBackupFolder).toHaveBeenCalledOnce();
   expect(p.openBackupFolder, "no path: the command opens the running profile's folder (#1704)").toHaveBeenLastCalledWith();
+  expect(acks.item?.text, "a chip where the press was (ux21)").toBe("Opening the backup folder");
 
   for (const [press, calls] of [["Restore from a file…", 2], ["Import…", 3]] as const) {
     button(press).click();
@@ -788,6 +790,7 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
   expect(toasts.items.slice(before).map((toast) => [toast.tone, toast.text])).toEqual([
     ["err", "Could not open the backup folder: not allowed by scope"],
   ]);
+  expect(acks.item).toBeNull();
 });
 
 test("Keyboard lists the fixed shortcuts", async () => {
@@ -830,6 +833,7 @@ test("Logs and database: size, items and version; the folder and the re-index", 
   button("Re-index search").click();
   await settle();
   expect(p.openLogs).toHaveBeenCalledOnce();
+  expect(acks.item?.text).toBe("Opening the log folder");
   expect(p.reindexFts).toHaveBeenCalledOnce();
 });
 

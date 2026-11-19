@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { amend, dismiss, heldWrite, hold, push, release, reset, toasts, undoable } from "./toasts.svelte";
+import { amend, dismiss, heldWrite, hold, push, release, reset, toastLine, toasts, undoable } from "./toasts.svelte";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -255,4 +255,22 @@ test("a replaced toast starts its time over", () => {
   expect(toasts.items.map((toast) => toast.text)).toEqual(["Two"]);
   vi.advanceTimersByTime(100);
   expect(toasts.items).toEqual([]);
+});
+
+test("a toast's line gives up its middle: the start says what happened, the end why or which one (ux21)", () => {
+  expect(toastLine("Copied")).toEqual({ head: "Copied", tail: "" });
+  // A failure keeps what follows its last `: `, the reason.
+  expect(toastLine("Could not start VS Code: 'open -a \"Visual Studio Code\" {path}' could not be run: No such file or directory (os error 2)")).toEqual({
+    head: "Could not start VS Code: 'open -a \"Visual Studio Code\" {path}' could not be run: ",
+    tail: "No such file or directory (os error 2)",
+  });
+  // A path keeps its last words, the folder at its end.
+  const cloned = toastLine("Cloned tidewater/payout-service into C:\\Users\\someone with a long name\\source\\repos\\payout-service, on main");
+  expect(cloned.head + cloned.tail).toBe("Cloned tidewater/payout-service into C:\\Users\\someone with a long name\\source\\repos\\payout-service, on main");
+  expect(cloned.tail).toBe("payout-service, on main");
+  expect(cloned.head.startsWith("Cloned tidewater/payout-service into ")).toBe(true);
+  // A second sentence stays whole.
+  expect(toastLine("Refreshed from Tidewater TeamCity. Its sign-in is still failing.").tail).toBe("Its sign-in is still failing.");
+  // One line: a newline in a source's message is a space.
+  expect(toastLine("Could not sync:\n  the sign-in failed")).toEqual({ head: "Could not sync: the sign-in failed", tail: "" });
 });

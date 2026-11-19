@@ -30,6 +30,7 @@
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { acks } from "../shell/ack.svelte";
 
 import type {
   AssetDetail,
@@ -1480,6 +1481,7 @@ test("a route's URL opens in the browser, and a scheme no browser takes is said 
 
   click("Open https://pg.hel1.example/");
   await waitFor(() => expect(store.opened).toEqual(["https://pg.hel1.example/"]));
+  expect(acks.item?.text, "a chip where the press was (ux21)").toBe("Opening in the browser");
   expect(text()).not.toContain("Could not open the link");
 
   // `shell/open-external`'s own sentence for a scheme it will not hand over.

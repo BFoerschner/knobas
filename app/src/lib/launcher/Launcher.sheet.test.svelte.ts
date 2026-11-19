@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LauncherHome, SearchHit, SearchQuery, SearchResponse } from "../ipc";
 import type { CheckoutSettings, InboxItem, LinkSetDraft, LinkSetRow, ViewAction } from "../ipc/entity";
+import { acks } from "../shell/ack.svelte";
 import { reset as resetToasts, toasts } from "../shell/toasts.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
@@ -459,7 +460,25 @@ test("Open in lists the applications in the settings' order, the default first, 
   press("Enter");
   await settle();
   expect(calls.openCheckout).toHaveBeenCalledWith("gitea:acme/svc", { application: "idea" });
-  expect(lastToast()).toBe("Started IntelliJ: code /src/svc");
+  // A chip says it is opening, and the launcher closes; no toast, no command line (ux21).
+  expect(acks.item?.text).toBe("Opening in IntelliJ");
+  expect(toasts.items).toEqual([]);
+});
+
+test("an Open in that doesn't start takes the chip away, says why in a toast and keeps the sheet", async () => {
+  const onclose = vi.fn();
+  const calls = mountIt({ onclose });
+  calls.openCheckout.mockImplementation(async () => {
+    throw { code: "invalid", message: "'idea {path}' could not be run: No such file or directory (os error 2)", source_id: null };
+  });
+  await settle();
+  await sheetOn("repo");
+  narrow("intellij");
+  press("Enter");
+  await settle();
+  expect(acks.item).toBeNull();
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([["Could not start IntelliJ: 'idea {path}' could not be run: No such file or directory (os error 2)", "err"]]);
+  expect(onclose).not.toHaveBeenCalled();
 });
 
 test("Open in on a pull request opens its repository's checkout", async () => {
