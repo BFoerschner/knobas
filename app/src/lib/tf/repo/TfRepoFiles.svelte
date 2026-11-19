@@ -1997,7 +1997,7 @@
         <!-- An OpenAPI spec (ux18): its view and its worker load with the first spec opened, never at start-up. -->
         {@const spec = drawn}
         {#snippet oasProse(words: string)}
-          <TfMarkdown text={words} base={parentOf(spec.path)} {fileLink} {render} image={imageRead} />
+          <TfMarkdown text={words} base={parentOf(spec.path)} {fileLink} {render} image={imageRead} imagesOf={at} />
         {/snippet}
         {#await import("../render/TfOpenApi.svelte") then { default: TfOpenApi }}
           <TfOpenApi
@@ -2012,7 +2012,7 @@
           />
         {/await}
       {:else if drawAs === "markdown"}
-        <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} /></div>
+        <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} imagesOf={at} /></div>
         <TfFindBar root={() => rendered} within="in this file" />
       {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
         <TfDiagram engine={drawAs} code={drawn.text} {render} />

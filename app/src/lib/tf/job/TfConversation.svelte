@@ -122,6 +122,17 @@
   /** Each row's room before it is drawn: a comment's by its length. */
   const estimates = $derived(new Map(rows.map((row) => [row.key, row.entry ? textHeight(row.entry.comment.body, { base: 46, line: 21, chars: 100 }) : 18])));
 
+  /**
+   * The comments holding what stands under them unseen while an image's size is read (`TfMarkdown`'s `onheld`): every
+   * row after the first of them, the queued comments and the box wait with it.
+   */
+  let heldKeys = $state<readonly string[]>([]);
+  const rowAt = $derived(new Map(rows.map((row, at) => [row.key, at])));
+  const heldAt = $derived(heldKeys.reduce((first, key) => Math.min(first, rowAt.get(key) ?? Infinity), Infinity));
+  const holdComment = (key: string) => (held: boolean) => {
+    heldKeys = held ? [...heldKeys.filter((k) => k !== key), key] : heldKeys.filter((k) => k !== key);
+  };
+
   let convo = $state<HTMLDivElement | null>(null);
   /** Whether this opening has been brought to its mention: once a thread, so a re-read does not scroll again. */
   let broughtTo = $state(false);
@@ -175,12 +186,12 @@
     <div class="tf-convo-rows" {@attach win.list}>
     {#each win.slice(rows) as row (row.key)}
       {#if row.entry === null}
-        <div class="tf-newline" {@attach win.row(row.key)}>New since your last visit, {since(lastVisit ?? "", now)}</div>
+        <div class="tf-newline" class:tf-heldbelow={(rowAt.get(row.key) ?? 0) > heldAt} {@attach win.row(row.key)}>New since your last visit, {since(lastVisit ?? "", now)}</div>
       {:else}
       {@const entry = row.entry}
       {@const comment = entry.comment}
       {@const markdown = proseMarkdown(comment.body, comment.markup, attachments)}
-      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me} {@attach win.row(row.key)}>
+      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me} class:tf-heldbelow={(rowAt.get(row.key) ?? 0) > heldAt} {@attach win.row(row.key)}>
         <span class="tf-av" class:tf-me={comment.mine} aria-hidden="true">{initials(comment.author)}</span>
         <div class="tf-msg-body">
           <div class="tf-who">
@@ -188,7 +199,7 @@
             {#if comment.mentions_me}<span class="tf-chip tf-chip-mention">mentions you</span>{/if}
           </div>
           {#if markdown !== null}
-            <TfMarkdown text={markdown} attachments={images} />
+            <TfMarkdown text={markdown} attachments={images} imagesOf={entityId} onheld={holdComment(row.key)} />
           {:else}
             <p>
               {#each mentionRuns(comment.body, thread.me) as run, at (at)}{#if run.at}<span class="tf-at">{run.text}</span>{:else}{run.text}{/if}{/each}
@@ -205,7 +216,7 @@
     {/if}
   {/if}
   {#each queued as echo, n (n)}
-    <article class="tf-msg tf-queued">
+    <article class="tf-msg tf-queued" class:tf-heldbelow={heldAt < Infinity}>
       <span class="tf-av tf-me" aria-hidden="true">{initials(myName)}</span>
       <div class="tf-msg-body">
         <div class="tf-who"><b>You</b><TfStateChip text={echo.state} tone="info" /></div>
@@ -213,7 +224,7 @@
       </div>
     </article>
   {/each}
-  <div class="tf-compose" tabindex="-1">
+  <div class="tf-compose" class:tf-heldbelow={heldAt < Infinity} tabindex="-1">
     <textarea bind:this={box} value={draft} oninput={(event) => drafts.put(commentKey, event.currentTarget.value)} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}" {@attach sendKey(() => void send())}></textarea>
     <div class="tf-acts">
       {#if refused !== null}<span class="tf-dim tf-small">{refused}</span>{/if}

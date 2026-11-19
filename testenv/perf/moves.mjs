@@ -62,7 +62,10 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * drawn at the answer's frame, and anything of `still` on screen that changes before it is a move (the ux19 overs pass).
  * `late`: on the fixture only, reads of the place's own that land later than the corpus's (`fake-late`'s form, added to
  * the address's), and `fake`, more of the fixture's switches (`fake-jar=oldjava`): a read the real backend answers
- * after the page draws, which the fixture answers at once (the ux19 gate, 2026-11-19).
+ * after the page draws, which the fixture answers at once (the ux19 gate, 2026-11-19). `forget`: `localStorage` keys
+ * removed before the first open (the image sizes kept from an earlier place or run), so it is the first ever.
+ * `noWorkers`: the page has no `Worker`, so the render port is its plain one and a diagram fence stays its source (a
+ * diagram drawn late moves what stands under it, a mover of its own the case leaves out).
  */
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
@@ -79,6 +82,11 @@ const PLACES = [
   // draws with it as it does there. `ledger`: not cloned, and a README with no image (an image's first load moves the
   // text under it, until its size is kept: `tf/markdown/image-sizes.ts`).
   { name: "repo-checkout-late", fixture: true, late: "entity_view:0,entity_checkout:450", start: "#/code", go: "#/repo/mock%3Atidewater%2Fledger", hash: "#/repo/mock%3Atidewater%2Fledger", away: "Escape" },
+  // A README whose images were never seen (the ux21 README-image pass, 2026-11-19): `payout-service`'s logo pushed the
+  // text under it 15 px down when its bytes loaded after the text. The bytes 150 ms after the views, and no size kept.
+  // Its Mermaid fences stay source (`noWorkers`): a drawing landing ~400 ms after the text moves the fences under it 53 px
+  // at 2560 and 5120 wide, base and head alike, a mover of its own (Fable, 2026-11-19; #2510).
+  { name: "repo-readme-image", fixture: true, late: "entity_view:0,entity_file_bytes:150", forget: ["knobas.image-sizes"], noWorkers: true, start: "#/code", go: "#/repo/mock%3Atidewater%2Fpayout-service", hash: "#/repo/mock%3Atidewater%2Fpayout-service", away: "Escape" },
   { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
   { name: "repo-commit", optional: "real", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
@@ -135,6 +143,8 @@ const js = (code, timeout = 60000) => c.js(code, { timeout });
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(new URL("./moves-probe.js", import.meta.url), "utf8") });
+// A place's `noWorkers`, by its address, so a reconnect's replay of this script reaches no other place.
+await c.send("Page.addScriptToEvaluateOnNewDocument", { source: `if (new URLSearchParams(location.search).has("probe-no-workers")) delete window.Worker;` });
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await c.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
 await viewport(c, size);
@@ -145,8 +155,9 @@ async function quiet(q = 1200, limit = 20000) {
 }
 /** The app's address for a place: its own late reads joined to the corpus's (a later entry for a read wins), its switches added. */
 function addressFor(p) {
-  if (!p?.late && !p?.fake) return base;
+  if (!p?.late && !p?.fake && !p?.noWorkers) return base;
   const url = new URL(base);
+  if (p.noWorkers) url.searchParams.set("probe-no-workers", "");
   if (p.late) url.searchParams.set("fake-late", [url.searchParams.get("fake-late"), p.late].filter(Boolean).join(","));
   for (const [k, v] of new URLSearchParams(p.fake ?? "")) url.searchParams.set(k, v);
   // The fixture's switches are bare words (`?fake-ipc&fake-scale`), as `URLSearchParams` writes them with an `=`.
@@ -160,6 +171,11 @@ async function fresh(hash, p = null) {
   await c.send("Page.navigate", { url: `${addressFor(p)}${hash}` });
   await loaded;
   for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
+  if (p?.forget?.length) {
+    // Removed, then the app loaded again, so nothing it read at start-up holds what was removed.
+    await js(`(${JSON.stringify(p.forget)}.forEach((k) => localStorage.removeItem(k)), 1)`);
+    return fresh(hash, { ...p, forget: null });
+  }
   await quiet(1500);
 }
 async function find(selector, text = null, starts = false) {

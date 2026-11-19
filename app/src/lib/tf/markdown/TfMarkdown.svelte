@@ -14,6 +14,14 @@
   - an attachment image (`attachment:<id>`, the Jira wiki's `!name!`, #2406)
     is drawn from the data URL `attachments` answers; one it refuses is the
     placeholder `attachments.missing` words, with its link to the opener;
+  - an image's room is known before its bytes where it can be: the sides its
+    text names, the size it was seen at before (`imagesOf` and its path or
+    attachment, kept between sessions), the head of a `data:` URL; one never
+    seen gets its size from the head of its bytes before its `src`, and what
+    stands from it down is held unseen until then, at most `IMAGE_HOLD_MS`
+    (`onheld` tells the page, which holds what stands under the text), so the
+    text under an image never moves when it loads (`image-sizes.ts`, the ux21
+    README-image pass, 2026-11-19);
   - where the surface previews files (`attachments.open`, #2415), an
     attachment link (the wiki's `[^name]`) and an attachment image are links
     that open the preview; elsewhere the link is its text;
@@ -40,9 +48,11 @@
     type MarkdownLinks,
     type Scope,
   } from "../../render/markdown";
+  import { untrack } from "svelte";
   import { whileNear } from "../../shell/near-view";
   import { imageBlob } from "../../render/image";
-  import { holdImageRoom } from "./image-sizes";
+  import { dataUrlSize, imageSize } from "../../render/image-size";
+  import { ATTACHMENT_MAX_H, IMAGE_HOLD_MS, holdDataImageRoom, holdImageRoom, showImage, sizeImageRoom } from "./image-sizes";
   import { renderPort, type RenderPort } from "../../render/port";
   import { ipcErrorMessage } from "../../ipc";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
@@ -57,6 +67,8 @@
     render = renderPort(),
     image = null,
     attachments = null,
+    imagesOf = "",
+    onheld,
   }: {
     /** The Markdown. */
     text: string;
@@ -77,6 +89,10 @@
     image?: ((path: string) => Promise<Uint8Array>) | null;
     /** The ticket's attachments, for `attachment:<id>` images (#2406); `null` where the surface has none, and such an image loads nothing. */
     attachments?: AttachmentImages | null;
+    /** Where the text's images come from (a repository, a ticket), so the sizes they were seen at are theirs alone. */
+    imagesOf?: string;
+    /** Told when something of the text starts or stops being held unseen for an image's size, so the page holds what stands under it. */
+    onheld?: (held: boolean) => void;
   } = $props();
 
   /** A text longer than this, in characters of Markdown, draws in pieces. */
@@ -89,11 +105,13 @@
 
   /** Draws the text; again whenever it, its base, its links or its image read change. */
   function paint(node: HTMLElement) {
-    const stops: (() => void)[] = [];
+    const hold = holder(node);
+    const stops: (() => void)[] = [hold.stop];
     const wire = (scope: Scope) => {
       stops.push(drawFences(scope, render));
-      if (image !== null) stops.push(drawImages(scope, image));
-      if (attachments !== null) stops.push(drawAttachments(scope, attachments));
+      holdDataImages(scope, hold);
+      if (image !== null) stops.push(drawImages(scope, image, hold));
+      if (attachments !== null) stops.push(drawAttachments(scope, attachments, hold));
     };
     const stop = () => stops.forEach((each) => each());
     if (text.length <= LONG) {
@@ -133,20 +151,91 @@
     };
   }
 
+  type Hold = ReturnType<typeof holder>;
+
+  /**
+   * What stands from the first image of unknown size down, held unseen in its room (`tf-heldbelow`) until that size is
+   * in: `wait` holds for an image, at most `IMAGE_HOLD_MS`, and answers how to say its size is in.
+   */
+  function holder(node: HTMLElement) {
+    const waiting = new Set<HTMLImageElement>();
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    let held: Element[] = [];
+    let told = false;
+    const refresh = () => {
+      for (const el of held) el.classList.remove("tf-heldbelow");
+      held = [];
+      let first: HTMLImageElement | null = null;
+      for (const img of waiting)
+        if (img.isConnected && (first === null || first.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_PRECEDING)) first = img;
+      let block: Element | null = first;
+      while (block !== null && block.parentElement !== node) block = block.parentElement;
+      for (let el = block; el !== null; el = el.nextElementSibling) {
+        el.classList.add("tf-heldbelow");
+        held.push(el);
+      }
+      if (held.length > 0) node.dataset["mdSizing"] = "";
+      else delete node.dataset["mdSizing"];
+      if (told !== held.length > 0) {
+        told = held.length > 0;
+        // Untracked: the page's answer to it, or a new callback, is no reason to draw the text again.
+        untrack(() => onheld?.(told));
+      }
+    };
+    return {
+      wait(img: HTMLImageElement): () => void {
+        let over = false;
+        const done = () => {
+          if (over) return;
+          over = true;
+          clearTimeout(late);
+          timers.delete(late);
+          waiting.delete(img);
+          refresh();
+        };
+        const late = setTimeout(done, IMAGE_HOLD_MS);
+        timers.add(late);
+        waiting.add(img);
+        refresh();
+        return done;
+      },
+      stop() {
+        for (const late of timers) clearTimeout(late);
+        timers.clear();
+        waiting.clear();
+        refresh();
+      },
+    };
+  }
+
+  /** `done` once `img` has loaded or failed to: its size is then known, or never will be. */
+  function onceLoaded(img: HTMLImageElement, done: () => void) {
+    img.addEventListener("load", done, { once: true });
+    img.addEventListener("error", done, { once: true });
+  }
+
+  /** An image the text carries whole (`data:`): its room from the head of its bytes, else held until it loads. */
+  function holdDataImages(node: Scope, hold: Hold) {
+    for (const img of node.querySelectorAll<HTMLImageElement>('img[src^="data:"]')) {
+      if (holdDataImageRoom(img) || (img.complete && img.naturalWidth > 0)) continue;
+      onceLoaded(img, hold.wait(img));
+    }
+  }
+
   /**
    * Fills each attachment image from the surface's read, which must answer a
    * `data:image/…` URL; anything else, or a refusal, makes the image the
    * placeholder the surface words. Returns how to stop: answers after it are dropped.
    */
-  function drawAttachments(node: Scope, read: AttachmentImages) {
+  function drawAttachments(node: Scope, read: AttachmentImages, hold: Hold) {
     let live = true;
     const watches: (() => void)[] = [];
     if (read.open) for (const link of node.querySelectorAll<HTMLAnchorElement>("a[data-md-attachment]")) link.setAttribute("href", "#");
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-attachment]")) {
       const id = img.dataset["mdAttachment"] ?? "";
-      holdImageRoom(img, `attachment|${id}`);
+      const done = holdImageRoom(img, `${imagesOf}|attachment|${id}`, ATTACHMENT_MAX_H) ? null : hold.wait(img);
       // Where the surface previews, the image is a link to the preview, named by the image's alt (#2415).
-      const holder = read.open && img.closest("a") === null ? previewLink(img, id) : img;
+      const link = read.open && img.closest("a") === null ? previewLink(img, id) : img;
       if (read.watch) watches.push(read.watch(img, id));
       const fail = (error: unknown) => {
         if (!live) return;
@@ -163,12 +252,18 @@
           link.textContent = said.link.label;
           missing.append(" ", link);
         }
-        holder.replaceWith(missing);
+        link.replaceWith(missing);
+        done?.();
       };
       read.load(id).then((url) => {
         if (!live) return;
-        if (/^data:image\//i.test(url)) img.src = url;
-        else fail(new Error("not an image"));
+        if (!/^data:image\//i.test(url)) return fail(new Error("not an image"));
+        const sized = sizeImageRoom(img, dataUrlSize(url));
+        showImage(img, url);
+        if (done !== null) {
+          if (sized) done();
+          else onceLoaded(img, done);
+        }
       }, fail);
     }
     return () => {
@@ -193,18 +288,23 @@
    * refuses becomes its alt text and the reason. Returns how to stop: answers
    * after it are dropped, and every URL made is revoked.
    */
-  function drawImages(node: Scope, read: (path: string) => Promise<Uint8Array>) {
+  function drawImages(node: Scope, read: (path: string) => Promise<Uint8Array>, hold: Hold) {
     let live = true;
     const urls: string[] = [];
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-path]")) {
       const path = img.dataset["mdPath"] ?? "";
-      holdImageRoom(img, `${base}|${path}`);
+      const done = holdImageRoom(img, `${imagesOf}|${path}`) ? null : hold.wait(img);
       read(path).then(
         (bytes) => {
           if (!live) return;
+          const sized = sizeImageRoom(img, imageSize(bytes));
           const url = URL.createObjectURL(imageBlob(bytes, path));
           urls.push(url);
-          img.src = url;
+          showImage(img, url);
+          if (done !== null) {
+            if (sized) done();
+            else onceLoaded(img, done);
+          }
         },
         (error: unknown) => {
           if (!live) return;
@@ -212,6 +312,7 @@
           missing.className = "tf-md-noimg";
           missing.textContent = img.alt === "" ? ipcErrorMessage(error) : `${img.alt}: ${ipcErrorMessage(error)}`;
           img.replaceWith(missing);
+          done?.();
         },
       );
     }

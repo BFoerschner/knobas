@@ -547,8 +547,11 @@ more of the fixture's switches), for a read the real backend answers after the p
 `settings-renderers-java-late` opens Settings › Renderers with the Decompiler's Java read 900 ms late, past any hold,
 and a Java too old to say why (the ux19 gate, `docs/decisions/2026-11-19-the-decompiler-line-keeps-its-room.md`);
 `repo-checkout-late` opens a repository not cloned with its views at once and its checkout 450 ms late, so *Clone*
-lands after the README drew (the ux21 pass, `docs/decisions/2026-11-19-what-the-ux21-moves-pass-held-still.md`). Such
-a place is the fixture's only; `--real` leaves it out.
+lands after the README drew (the ux21 pass, `docs/decisions/2026-11-19-what-the-ux21-moves-pass-held-still.md`);
+`repo-readme-image` opens `payout-service`, whose README's images were never seen, their bytes 150 ms after the views
+(`forget` removes the image sizes kept in `localStorage` first, and `noWorkers` keeps its Mermaid fences source, a mover
+of their own: `docs/decisions/2026-11-19-a-readme-image-keeps-its-room.md`). Such a place is the fixture's only;
+`--real` leaves it out.
 
 ```sh
 just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25

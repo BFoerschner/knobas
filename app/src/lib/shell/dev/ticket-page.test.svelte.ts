@@ -782,6 +782,73 @@ test("PAY-231's description draws its inline screenshot where the wiki put it, a
   ]);
 });
 
+// The ux21 README-image pass (2026-11-19): an image never seen drew from nothing and pushed what stood under it down.
+test("while PAY-231's inline screenshot is read, what stands from it down waits unseen, the conversation too; it draws at its size", async () => {
+  onTestFinished(seeEverything());
+  const { forgetImageSizes } = await import("../../tf/markdown/image-sizes");
+  forgetImageSizes();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const handlers = withTicketSearch(demoHandlers());
+  const bytes = handlers["attachment_bytes"]!;
+  installFakeTauri(recorded({ ...handlers, attachment_bytes: async (args) => (await gate, bytes(args)) }));
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  const desc = () => reading()?.querySelector(".tf-tkdesc .tf-md");
+  const talk = () => reading()?.querySelector('section[aria-labelledby="tf-tktalk"]');
+  await until(() => desc()?.querySelector("img.tf-md-att") != null && talk() != null, "the description never drew");
+  // Held unseen in its room: `tf-heldbelow` (`visibility: hidden`) on it or round it.
+  const unseen = (el: Element | null | undefined) => el?.closest(".tf-heldbelow") != null;
+  const blocks = [...desc()!.children];
+  expect(blocks.map((block) => unseen(block)), "the first paragraph reads; the image's and all under it wait").toEqual(blocks.map((_, at) => at >= 1));
+  expect(unseen(talk()), "the conversation under the description waits with it").toBe(true);
+  release();
+  await until(() => desc()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline image never drew");
+  const img = desc()!.querySelector("img.tf-md-att")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")], "the fake's 480x180 picture, sized before it loads").toEqual(["480", "180"]);
+  expect([...desc()!.children].some((block) => unseen(block))).toBe(false);
+  expect(unseen(talk())).toBe(false);
+});
+
+test("a comment's inline screenshot holds the comments after it and the box unseen while it is read, not the ones before", async () => {
+  onTestFinished(seeEverything());
+  const { forgetImageSizes } = await import("../../tf/markdown/image-sizes");
+  forgetImageSizes();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const handlers = withTicketSearch(demoHandlers());
+  const bytes = handlers["attachment_bytes"]!;
+  const threadOf = handlers["entity_thread"]!;
+  installFakeTauri(
+    recorded({
+      ...handlers,
+      // The description draws no image here, so only the comment's waits.
+      get_entity: async (args) => ({ ...((await handlers["get_entity"]!(args)) as object), description: "No picture here." }),
+      entity_thread: async (args) => {
+        const thread = (await threadOf(args)) as { comments: { body: string; markup: string }[] };
+        const at = Math.max(0, thread.comments.length - 2);
+        const shot = { ...thread.comments[at]!, body: "See the trace.\n\n!psp-409-trace.png!", markup: "jira_wiki" };
+        return { ...thread, comments: [...thread.comments.slice(0, at), shot, ...thread.comments.slice(at)] };
+      },
+      attachment_bytes: async (args) => (await gate, bytes(args)),
+    }),
+  );
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  const shot = () => comments().find((c) => c.querySelector("img.tf-md-att") != null);
+  await until(() => shot() != null, "the comment's screenshot never drew");
+  const unseen = (el: Element | null | undefined) => el?.closest(".tf-heldbelow") != null;
+  const all = comments();
+  const at = all.indexOf(shot()!);
+  expect(at).toBeGreaterThan(0);
+  expect(all.map((c) => unseen(c)), "the comments after the screenshot's wait").toEqual(all.map((_, n) => n > at));
+  expect(unseen(reading()!.querySelector(".tf-compose")), "and the box").toBe(true);
+  release();
+  await until(() => shot()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the screenshot never loaded");
+  expect(comments().some((c) => unseen(c))).toBe(false);
+  expect(unseen(reading()!.querySelector(".tf-compose"))).toBe(false);
+});
+
 test("with the fake's attachment read failing, PAY-231's inline screenshot is the placeholder with a link to the ticket in the source", async () => {
   onTestFinished(seeEverything());
   sent = [];

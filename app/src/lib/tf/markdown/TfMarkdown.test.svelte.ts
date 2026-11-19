@@ -14,7 +14,7 @@ import { registerFence } from "../../render/markdown";
 import { installCommands } from "../../render/command";
 import type { RenderContent } from "../../ipc/app";
 import TfMarkdown from "./TfMarkdown.svelte";
-import { forgetImageSizes } from "./image-sizes";
+import { IMAGE_HOLD_MS, blankImage, forgetImageSizes, keptImageSize, reloadImageSizes } from "./image-sizes";
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
@@ -653,4 +653,213 @@ test("an image drawn again holds the size it loaded at before, while its bytes a
   await settle();
   const again = target.querySelector<HTMLImageElement>("img")!;
   expect([again.getAttribute("width"), again.getAttribute("height")]).toEqual(["96", "32"]);
+});
+
+// The ux21 README-image pass (2026-11-19): a README's logo, never seen in the session, pushed the text under it 15 px
+// down when its bytes loaded. Its size is now read from the head of its bytes before its `src`, what stands from it down
+// waits unseen until then, and the size is kept between sessions.
+
+/** A PNG's head of `w` by `h`: all a size needs. */
+function pngOf(w: number, h: number): Uint8Array {
+  const b = new Uint8Array(33);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, w);
+  new DataView(b.buffer).setUint32(20, h);
+  return b;
+}
+
+/** A byte read whose answers the test hands out: `answer(path, bytes)` or `refuse(path)`. */
+function heldRead() {
+  const waiting = new Map<string, { resolve: (b: Uint8Array) => void; reject: (e: unknown) => void }>();
+  return {
+    read: (path: string) => new Promise<Uint8Array>((resolve, reject) => void waiting.set(path, { resolve, reject })),
+    answer: (path: string, bytes: Uint8Array) => waiting.get(path)!.resolve(bytes),
+    refuse: (path: string) => waiting.get(path)!.reject(new Error("gone")),
+  };
+}
+
+const unseen = (el: Element | null) => el?.classList.contains("tf-heldbelow") ?? false;
+const LOGO_README = "# payout-service\n\nIntro.\n\n![logo](img/logo.png)\n\nUnder it.\n\n## Next";
+
+test("an image never seen holds what stands from it down unseen until its bytes say its size, set before its src", async () => {
+  forgetImageSizes();
+  const urls = blobUrls();
+  const told: boolean[] = [];
+  try {
+    const bytes = heldRead();
+    draw(LOGO_README, { image: bytes.read, imagesOf: "repo-a", onheld: (held: boolean) => told.push(held) });
+    await settle();
+    const blocks = [...md().children];
+    const img = md().querySelector("img")!;
+    expect(blocks.map(unseen), "the heading and intro read at once; the image's paragraph and all under it wait").toEqual([false, false, true, true, true]);
+    expect(md().hasAttribute("data-md-sizing")).toBe(true);
+    expect(told).toEqual([true]);
+    let sizedAtSrc: string[] = [];
+    const set = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src")!.set!;
+    Object.defineProperty(img, "src", { set(url: string) { sizedAtSrc = [img.getAttribute("width")!, img.getAttribute("height")!]; set.call(img, url); }, configurable: true });
+    bytes.answer("docs/img/logo.png", pngOf(96, 32));
+    await settle();
+    expect(sizedAtSrc, "the room is set before the image loads").toEqual(["96", "32"]);
+    expect(img.getAttribute("src")).toBe("blob:test/0");
+    expect([...md().children].some(unseen), "nothing waits once the size is in").toBe(false);
+    expect(md().hasAttribute("data-md-sizing")).toBe(false);
+    expect(told).toEqual([true, false]);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("a hold for an image's size ends after IMAGE_HOLD_MS when the bytes are slower, and when the read is refused", async () => {
+  forgetImageSizes();
+  const bytes = heldRead();
+  draw("![slow](slow.png)\n\nUnder it.\n\n![gone](gone.png)", { image: bytes.read, imagesOf: "repo-a" });
+  await settle();
+  expect(unseen(md().children[0]!)).toBe(true);
+  bytes.refuse("docs/gone.png");
+  await settle();
+  expect(unseen(md().children[0]!), "the first still waits").toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, IMAGE_HOLD_MS + 20));
+  expect([...md().children].some(unseen)).toBe(false);
+});
+
+test("an image whose text names its size keeps it and holds nothing; one that names one side gets the other from its shape", async () => {
+  forgetImageSizes();
+  const bytes = heldRead();
+  draw('<img src="both.png" width="50" height="20">\n\n<img src="one.png" width="48">\n\nUnder.', { image: bytes.read, imagesOf: "repo-a" });
+  await settle();
+  const [both, one] = [...md().querySelectorAll("img")];
+  expect(unseen(both!.closest(".tf-md > *")), "both sides named: nothing to wait for").toBe(false);
+  expect(unseen(one!.closest(".tf-md > *")), "one side named: the other waits for the bytes").toBe(true);
+  bytes.answer("docs/both.png", pngOf(500, 500));
+  bytes.answer("docs/one.png", pngOf(96, 32));
+  await settle();
+  expect([both!.getAttribute("width"), both!.getAttribute("height")]).toEqual(["50", "20"]);
+  expect([one!.getAttribute("width"), one!.getAttribute("height")]).toEqual(["48", "16"]);
+});
+
+test("an image's size is kept between sessions, for its repository alone", async () => {
+  // This runner's jsdom has no storage (`test-no-storage.ts`): one of the test's own, as the webview's.
+  const items = new Map<string, string>();
+  const storage = { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => void items.set(k, v), removeItem: (k: string) => void items.delete(k) };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
+  try {
+    await keptBetweenSessions(items);
+  } finally {
+    Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
+  }
+});
+
+async function keptBetweenSessions(items: Map<string, string>) {
+  forgetImageSizes();
+  const bytes = heldRead();
+  draw(LOGO_README, { image: bytes.read, imagesOf: "repo-a" });
+  await settle();
+  bytes.answer("docs/img/logo.png", pngOf(96, 32));
+  await settle();
+  unmount(view!);
+  view = null;
+  // Written a moment after, once for a burst of images.
+  for (let waited = 0; !items.has("knobas.image-sizes") && waited < 3000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+  reloadImageSizes();
+  expect(JSON.parse(items.get("knobas.image-sizes")!), "written to the store").toEqual([["repo-a|docs/img/logo.png", 96, 32]]);
+  expect(keptImageSize("repo-a|docs/img/logo.png"), "read back from the store").toEqual({ w: 96, h: 32 });
+  draw(LOGO_README, { image: heldRead().read, imagesOf: "repo-a" });
+  flushSync();
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")], "drawn at its size from the first frame").toEqual(["96", "32"]);
+  expect([...md().children].some(unseen), "and nothing waits").toBe(false);
+  unmount(view!);
+  view = null;
+  draw(LOGO_README, { image: heldRead().read, imagesOf: "repo-b" });
+  flushSync();
+  expect(md().querySelector("img")!.hasAttribute("width"), "another repository's logo at the same path is another image").toBe(false);
+}
+
+test("a kept size the bytes contradict is set right before the image loads", async () => {
+  forgetImageSizes();
+  const first = heldRead();
+  draw("![logo](logo.png)", { image: first.read, imagesOf: "repo-a" });
+  await settle();
+  first.answer("docs/logo.png", pngOf(96, 32));
+  await settle();
+  unmount(view!);
+  view = null;
+  const again = heldRead();
+  draw("![logo](logo.png)", { image: again.read, imagesOf: "repo-a" });
+  await settle();
+  again.answer("docs/logo.png", pngOf(200, 50));
+  await settle();
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")]).toEqual(["200", "50"]);
+  expect(keptImageSize("repo-a|docs/logo.png")).toEqual({ w: 200, h: 50 });
+});
+
+test("an image the text carries whole has its size from the first frame, with nothing held", () => {
+  forgetImageSizes();
+  draw(`![dot](${DOT})\n\nUnder it.`);
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")]).toEqual(["1", "1"]);
+  expect([...md().children].some(unseen)).toBe(false);
+});
+
+test("an attachment image is sized from its data URL before its src, no taller than the figure draws it", async () => {
+  forgetImageSizes();
+  const tall = `data:image/png;base64,${btoa(String.fromCharCode(...pngOf(400, 800)))}`;
+  let answer: (url: string) => void = () => {};
+  const read = { ...attachmentRead({}), load: () => new Promise<string>((resolve) => (answer = resolve)) };
+  draw("![trace.png](attachment:50000)\n\nUnder it.", { attachments: read, imagesOf: "ticket-1" });
+  await settle();
+  expect([...md().children].map(unseen)).toEqual([true, true]);
+  answer(tall);
+  await settle();
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")], "fitted to the 280 px figure, its shape kept").toEqual(["140", "280"]);
+  expect(img.getAttribute("src")).toBe(tall);
+  expect([...md().children].some(unseen)).toBe(false);
+  expect(keptImageSize("ticket-1|attachment|50000")).toEqual({ w: 400, h: 800 });
+});
+
+test("an image whose room is known before its bytes stands as a blank of that size, not as its alt text, until they are in", async () => {
+  forgetImageSizes();
+  const urls = blobUrls();
+  try {
+    const first = heldRead();
+    draw("![logo](logo.png)", { image: first.read, imagesOf: "repo-a" });
+    await settle();
+    expect(md().querySelector("img")!.hasAttribute("src"), "never seen: no size, so no stand-in").toBe(false);
+    first.answer("docs/logo.png", pngOf(96, 32));
+    await settle();
+    unmount(view!);
+    view = null;
+    const again = heldRead();
+    draw('![logo](logo.png)\n\n<img src="own.png" width="20" height="10" alt="own">', { image: again.read, imagesOf: "repo-a" });
+    flushSync();
+    const [logo, own] = [...md().querySelectorAll("img")];
+    expect(logo!.getAttribute("src"), "the kept size").toBe(blankImage("96", "32"));
+    expect(own!.getAttribute("src"), "the sides its text names").toBe(blankImage("20", "10"));
+    // The stand-in's load says nothing of the image: nothing kept from it.
+    Object.defineProperty(logo!, "naturalWidth", { value: 1, configurable: true });
+    Object.defineProperty(logo!, "naturalHeight", { value: 1, configurable: true });
+    logo!.dispatchEvent(new Event("load"));
+    expect(keptImageSize("repo-a|docs/logo.png")).toEqual({ w: 96, h: 32 });
+    again.answer("docs/logo.png", pngOf(96, 32));
+    again.answer("docs/own.png", pngOf(500, 500));
+    await settle();
+    expect([logo!.getAttribute("src"), own!.getAttribute("src")]).toEqual(["blob:test/1", "blob:test/2"]);
+    expect(logo!.hasAttribute("data-md-standin")).toBe(false);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("a blank stand-in is an SVG an <img> loads: its namespace on its root, its sides as given", () => {
+  const url = blankImage("96", "32");
+  expect(url.startsWith("data:image/svg+xml,")).toBe(true);
+  const svg = new DOMParser().parseFromString(decodeURIComponent(url.slice("data:image/svg+xml,".length)), "image/svg+xml").documentElement;
+  // The SVG namespace, as the HTML parser gives an <svg>: without it the webview loads nothing and draws the alt text.
+  const parsed = document.createElement("div");
+  parsed.innerHTML = "<svg></svg>";
+  expect(svg.localName).toBe("svg");
+  expect(svg.namespaceURI).toBe(parsed.firstElementChild!.namespaceURI);
+  expect([svg.getAttribute("width"), svg.getAttribute("height")]).toEqual(["96", "32"]);
 });

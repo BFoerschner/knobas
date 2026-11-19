@@ -205,6 +205,8 @@
     void previews.attempt;
     return ticketImages(previews, detail.source.display_name, detail.web_url ?? null, (id) => (previewing = id));
   });
+  /** Whether the description holds what stands under it unseen while an image's size is read (`TfMarkdown`'s `onheld`). */
+  let descriptionHeld = $state(false);
   /** The ticket's *Refresh* or *Sync now* (#2134). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
@@ -669,16 +671,16 @@
             <div class="tf-panel tf-tkdesc">
               {#if detail.description !== null && detail.description.trim() !== ""}
                 {@const markdown = proseMarkdown(detail.description, detail.markup, detail.attachments)}
-                {#if markdown !== null}<TfMarkdown text={markdown} attachments={inlineImages} />{:else}<p class="tf-asks">{detail.description}</p>{/if}
+                {#if markdown !== null}<TfMarkdown text={markdown} attachments={inlineImages} imagesOf={detail.row.entity_id} onheld={(held) => (descriptionHeld = held)} />{:else}<p class="tf-asks">{detail.description}</p>{/if}
               {:else}
                 <p class="tf-dim">The ticket has no description.</p>
               {/if}
             </div>
           </section>
           {#if previews !== null && previews.files.length > 0}
-            <TfJobAttachments {previews} onopen={(id) => (previewing = id)} />
+            <TfJobAttachments {previews} onopen={(id) => (previewing = id)} held={descriptionHeld} />
           {/if}
-          <section aria-labelledby="tf-tktalk">
+          <section aria-labelledby="tf-tktalk" class:tf-heldbelow={descriptionHeld}>
             <header><h2 id="tf-tktalk">Conversation</h2></header>
             <TfConversation
               jobKey={key}
