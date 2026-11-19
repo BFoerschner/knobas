@@ -1008,6 +1008,25 @@ test("a link to a kept page is an opening, not a return: at another address it s
   expect(main.scrollTop).toBe(0);
 });
 
+test("a page drawn for the first time from one left at the top sets no scroll; from one left scrolled, it starts at the top (the ux21 overs pass)", async () => {
+  // Setting the scroll lays the new page out in the task that builds it: 17 ms of a quarter-speed main thread on a
+  // repository's first open, for a scroller already at 0.
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  let top = 0;
+  const writes: number[] = [];
+  Object.defineProperty(main, "scrollTop", { configurable: true, get: () => top, set: (px: number) => writes.push((top = px)) });
+  await at("#/inbox");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(writes).toEqual([]);
+  top = 200;
+  await at("#/docs");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(writes).toEqual([0]);
+  expect(main.scrollTop).toBe(0);
+});
+
 test("a wheel during a nav return's hold wins: the scroll is the reader's from there (F-370)", async () => {
   start({ nav: windowNav });
   await at("#/inbox");

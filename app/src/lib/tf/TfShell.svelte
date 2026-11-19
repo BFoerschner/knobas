@@ -291,8 +291,16 @@
       const place = returning ? (places.get(to) ?? openingPlace(from, to)) : nav ? places.get(to) : undefined;
       if (place !== undefined) endReturn = restorePlace(place, page, !nav);
       else if (opening && page === left) resetScrolls(mainEl, page);
-      else if (opening && first) mainEl.scrollTop = 0;
+      // Not where the page it came from was left at the top: setting the scroll laid out the new page in the task that
+      // builds it, 17 ms of a quarter-speed main thread on a repository's first open (the ux21 overs pass). `notePlace`
+      // read it as that page was left, laid out then.
+      else if (opening && first && leftAt(from) !== 0) mainEl.scrollTop = 0;
     });
+  }
+
+  /** Where the shell's scroller stood as `from` was left (`notePlace`), or `null` where that is not known. */
+  function leftAt(from: string): number | null {
+    return places.get(from)?.scrolls.find((one) => one.el === mainEl)?.top ?? null;
   }
 
   /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
