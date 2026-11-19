@@ -112,6 +112,12 @@ pub struct Lifecycle {
     /// state-colours bug, 2026-11-17): the *State colours* read, bring-up and
     /// the scheduler's events share it, so a source is counted once.
     seen_words: crate::sources::state_colours::SeenCounter,
+    /// Every name of the mirror in memory, read by the launcher's picker (the
+    /// fuzzy-search decisions, 2026-11-19, D2): loaded at bring-up, read
+    /// again after a sync that wrote (`sources::pick_on_sync`), and handed to
+    /// the launcher's and the Docs search's searchers. Holds nothing before
+    /// the first load, and a searcher given it answers as before then.
+    picker: knobas_search::picker::Picker,
 }
 
 impl Default for Lifecycle {
@@ -142,6 +148,7 @@ impl Lifecycle {
             suspended: Mutex::new(None),
             restart_gate: tokio::sync::Mutex::new(()),
             seen_words: crate::sources::state_colours::SeenCounter::new(Arc::clone(&registry)),
+            picker: knobas_search::picker::Picker::default(),
             registry,
         }
     }
@@ -156,6 +163,12 @@ impl Lifecycle {
     #[must_use]
     pub fn seen_words(&self) -> &crate::sources::state_colours::SeenCounter {
         &self.seen_words
+    }
+
+    /// The names the launcher's picker holds ([`knobas_search::picker::Picker`]).
+    #[must_use]
+    pub fn picker(&self) -> &knobas_search::picker::Picker {
+        &self.picker
     }
 
     /// Where bring-up has got to.

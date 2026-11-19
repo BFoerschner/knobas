@@ -25,6 +25,10 @@ Since migration `0094` the table holds the first two and three characters of eac
 
 From the fourth character, and for a finished word, the launcher counts the rows a query holds before it answers (`docs/decisions/2026-11-16-a-word-many-rows-hold.md`). Up to 2,000, every match is ranked under `english` as before. Past that the matching is the same and the ranking is not made: the rows the query names (`fts_a @@ q`, what *Titles* matches) come first, ranked among themselves, or the newest of them where it names more than 2,000 too, and under *Everything* each kind's newest rows whose text holds it (`fts @@ q`) follow where the names leave room. Both sides are `english` as before: what changed is which matches are ranked, not what matches. A stop word of four letters or more still answers nothing while it is typed (`down`, `over`, `with`).
 
+## The names' picker folds no accent either (2026-11-19)
+
+Since ADR-0045 the launcher's names are also matched in memory by frizbee (`knobas_search::picker`). It folds case by smart case and no accent: `größe` finds `Größe`, `grosse` and `andern` do not find `Größe` and `ändern`. What a fold would take there: a second, folded copy of each name, matched beside the first.
+
 ## The migration shape a later change would take
 
 One migration and one amendment here:

@@ -89,12 +89,14 @@ use crate::query::{EffectiveFilters, WordAlternative};
 /// Deliberately closed and deliberately small: every variant here is something
 /// the builder actually binds, so a variant nobody constructs is a variant
 /// nobody has to review.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Bind {
     /// The raw search text, and the `ts_headline` options.
     Text(String),
     /// A `text[]` for an `= any(...)` predicate.
     Texts(Vec<String>),
+    /// A `real[]`: the ranks the picker gave its names ([`picked_sql`]).
+    Reals(Vec<f32>),
     /// `make_interval(days => ...)`, which takes an `int4`.
     I32(i32),
     /// Row counts: `row_number()` yields `bigint`, and so does `limit`.
@@ -610,6 +612,40 @@ pub fn search_sql_windowed(
     )
 }
 
+/// The statement that reads **the rows the picker chose** (the fuzzy-search
+/// decisions, 2026-11-19, D8): each of `ids` by its key in `sync.item`, with
+/// its `ranks` beside it, live and within every filter the query asks
+/// ([`corpus_predicates`] over [`crate::corpus::LIVE_ITEM_PICKED`]), then the
+/// builder's own stages: each kind's best `per_group` by rank, the page dealt
+/// a row a kind at a time up to `limit`, and its titles, paths and states.
+///
+/// Over the mirror alone, with no `q`, no headline and no excerpt: the names
+/// are the match. The ids and ranks are two array binds, so the text is one
+/// text whatever was typed, and it runs under one plan a connection
+/// ([`fetch_kept`]). Each row is read by `item_pkey` and its liveness by two
+/// probes (`knobas_core::live_by_key!`), not through `sync.live_item`, whose
+/// view scanned all 39,770 entities for 300 rows (6.6 ms, against 1.1).
+#[must_use]
+pub fn picked_sql(
+    ids: &[String],
+    ranks: &[f32],
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+) -> SearchSql {
+    build_with(
+        &[&crate::corpus::LIVE_ITEM],
+        None,
+        false,
+        filters,
+        per_group,
+        limit,
+        KindCut::Limit,
+        Matching::Picked,
+        Some((ids, ranks)),
+    )
+}
+
 /// How a statement's words are matched and ranked.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Matching {
@@ -636,6 +672,9 @@ enum Matching {
     /// worked out row by row ([`letter_sql_unstored`]).
     #[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
     LetterUnstored,
+    /// The rows the picker chose, each by its key with the rank it gave
+    /// ([`picked_sql`]): no words, ranked by those ranks.
+    Picked,
 }
 
 /// How the statement keeps each kind's best `per_group` rows (`top`).
@@ -733,7 +772,44 @@ fn build_search_sql(
     cut: KindCut,
     matching: Matching,
 ) -> SearchSql {
+    build_with(
+        corpora,
+        text,
+        prefix_last,
+        filters,
+        per_group,
+        limit,
+        cut,
+        matching,
+        None,
+    )
+}
+
+/// [`build_search_sql`], reading `picks` (ids and ranks) where `matching` is
+/// [`Matching::Picked`].
+#[allow(clippy::too_many_arguments)]
+fn build_with(
+    corpora: &[&Corpus],
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+    cut: KindCut,
+    matching: Matching,
+    picks: Option<(&[String], &[f32])>,
+) -> SearchSql {
     let mut builder = Builder::default();
+    // The picker's rows, bound first: the `picks` stage is the statement's
+    // first to read anything.
+    let picks = picks
+        .filter(|_| matching == Matching::Picked)
+        .map(|(ids, ranks)| {
+            (
+                builder.param(Bind::Texts(ids.to_vec())),
+                builder.param(Bind::Reals(ranks.to_vec())),
+            )
+        });
     let by_letter = matches!(
         matching,
         Matching::Letter | Matching::Pages | Matching::LetterUnstored
@@ -774,6 +850,12 @@ fn build_search_sql(
     } else {
         "with\n"
     });
+    if let Some((ids, ranks)) = &picks {
+        let _ = writeln!(
+            sql,
+            "picks as (\n  select x.entity_id, x.rank from unnest({ids}::text[], {ranks}::real[]) x(entity_id, rank)\n),"
+        );
+    }
 
     // The word the typed characters lex to (`letter_sql`): the `english`
     // lexeme, as the words' statement reads them, and the `simple` one where
@@ -972,6 +1054,28 @@ fn build_search_sql(
             }
             continue;
         }
+        if picks.is_some() {
+            // The picker's rows, each read by its key: live, and within the
+            // query's filters, every one of which this corpus's own row
+            // answers.
+            if Some(index) == mirror {
+                let picked = &crate::corpus::LIVE_ITEM_PICKED;
+                let predicates = corpus_predicates(picked, None, &bound);
+                let _ = writeln!(
+                    sql,
+                    "  select {} as entity_id, {} as kind, x.rank as rank, false as named,\n         {} as item_updated_at, {} as corpus\n    from picks x\n    join {} on {} = x.entity_id{}\n   where {}",
+                    picked.entity_id,
+                    answered_kind(picked, &bound),
+                    picked.updated_at,
+                    drawn_by(index, corpus),
+                    picked.relation,
+                    picked.entity_id,
+                    walk_probe(picked, &bound),
+                    predicates.join("\n     and "),
+                );
+            }
+            continue;
+        }
         if off_the_names && Some(index) == mirror {
             // Each kind's first rows in the index's order, and no more: the
             // read stops at a kind's `per_group`th live row. A kind the query
@@ -1090,7 +1194,7 @@ fn build_search_sql(
     // One ordering, spelled three times with different qualifiers: within the
     // kind (window), across the page, and across the joined result. They must
     // agree, or the row a group header counts is not the row it shows.
-    let ranked = text.is_some();
+    let ranked = text.is_some() || picks.is_some();
     let ordering = order_by("", ranked, false);
 
     // One kind cannot flood the box (`top`), and the whole answer is bounded
@@ -2301,6 +2405,7 @@ where
         query = match bind {
             Bind::Text(value) => query.bind(value),
             Bind::Texts(value) => query.bind(value),
+            Bind::Reals(value) => query.bind(value),
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
             Bind::Json(value) => query.bind(value),
@@ -2947,6 +3052,7 @@ async fn explain_on(
         query = match bind {
             Bind::Text(value) => query.bind(value),
             Bind::Texts(value) => query.bind(value),
+            Bind::Reals(value) => query.bind(value),
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
             Bind::Json(value) => query.bind(value),
@@ -3799,6 +3905,57 @@ mod tests {
     #[test]
     fn a_rail_with_nothing_saved_sends_no_statement() {
         assert!(saved_summary_sql(&[&LIVE_ITEM], &[]).is_none());
+    }
+
+    /// **D8: the picker's statement holds the builder's two rules**: every
+    /// value a bind (the ids, the ranks, every filter) and the literals the
+    /// closed list, placeholders in order, and one text whatever was picked.
+    #[test]
+    fn the_picked_rows_statement_keeps_every_value_in_the_bind_list() {
+        let evil = "'; drop schema knobas cascade; --";
+        let asked = filters(&[evil], &[evil], Some(7), &[evil]);
+        let built = picked_sql(
+            &[evil.to_owned(), "gt:2".to_owned()],
+            &[0.9, -0.2],
+            &asked,
+            10,
+            80,
+        );
+        assert!(!built.sql.contains("drop schema"), "{}", built.sql);
+        for literal in literals(&built.sql) {
+            assert!(
+                ALLOWED_LITERALS.contains(&literal.as_str()),
+                "unexpected literal {literal:?} in\n{}",
+                built.sql
+            );
+        }
+        assert_eq!(
+            placeholders(&built.sql),
+            (1..=built.binds.len()).collect::<Vec<_>>(),
+            "{}",
+            built.sql
+        );
+        assert_eq!(
+            built.binds[0],
+            Bind::Texts(vec![evil.to_owned(), "gt:2".to_owned()])
+        );
+        assert_eq!(built.binds[1], Bind::Reals(vec![0.9, -0.2]));
+        // One text for any ids: a plan a connection.
+        let other = picked_sql(&["x:1".to_owned()], &[0.1], &asked, 10, 80);
+        assert_eq!(other.sql, built.sql);
+        // Ranked, read by key, live by the two probes, and no `q`.
+        assert!(built.sql.contains("rank desc"), "{}", built.sql);
+        assert!(
+            built
+                .sql
+                .contains("join sync.item i on i.entity_id = x.entity_id")
+        );
+        assert!(
+            built
+                .sql
+                .contains("knobas.entity e where e.id = i.entity_id")
+        );
+        assert!(!built.sql.contains("websearch_to_tsquery"));
     }
 
     #[test]

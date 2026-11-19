@@ -16,6 +16,7 @@ mod coverage_plans;
 mod declaring;
 mod everything;
 mod field_suggestions;
+mod fuzzy;
 mod help_card;
 mod home;
 mod item_parent;

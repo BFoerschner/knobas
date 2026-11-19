@@ -86,3 +86,65 @@ test("a forge's issue key is cut to its repository and number, as a card cuts it
   expect(place.target.querySelector(".tf-ln-k")!.textContent).toBe("tidewater/payout-service/issues/37");
   place.done();
 });
+
+/** A `Highlight` and `CSS.highlights` the test can read, which jsdom has neither of. */
+function stubHighlights() {
+  class FakeHighlight extends Set<Range> {}
+  const registry = new Map<string, FakeHighlight>();
+  vi.stubGlobal("Highlight", FakeHighlight);
+  vi.stubGlobal("CSS", { highlights: registry });
+  return {
+    ranges: () => [...(registry.get("tf-pick") ?? [])].map((range) => range.toString()),
+    restore: () => vi.unstubAllGlobals(),
+  };
+}
+
+test("the matched letters are painted over the title's one text node, and a new answer keeps the node", () => {
+  const paint = stubHighlights();
+  const target = document.createElement("div");
+  document.body.append(target);
+  const props = $state({
+    monogram: "RE",
+    kindName: "Repository",
+    cell: "acme",
+    title: "ADProxy",
+    marks: [2, 7] as number[],
+    id: "opt-0",
+    selected: false,
+    onopen: vi.fn(),
+    onhover: vi.fn(),
+  });
+  const app = mount(Row, { target, props });
+  flushSync();
+  const span = target.querySelector(".tf-ln-t")!;
+  const node = span.firstChild;
+  expect(paint.ranges()).toEqual(["Proxy"]);
+  expect(span.childNodes).toHaveLength(1);
+
+  // A second answer moves the marks, and the span and its text are the same nodes.
+  props.marks = [0, 2, 3, 4];
+  flushSync();
+  expect(paint.ranges()).toEqual(["AD", "r"]);
+  expect(target.querySelector(".tf-ln-t")).toBe(span);
+  expect(span.firstChild).toBe(node);
+
+  // No marks, none painted; and the row's going takes its ranges with it.
+  props.marks = [];
+  flushSync();
+  expect(paint.ranges()).toEqual([]);
+  props.marks = [2, 7];
+  flushSync();
+  unmount(app);
+  expect(paint.ranges()).toEqual([]);
+  target.remove();
+  paint.restore();
+});
+
+test("where the webview has no Highlight API the row draws without marks", () => {
+  vi.stubGlobal("Highlight", undefined);
+  const { target, done } = render({ title: "ADProxy", marks: [2, 7] });
+  expect(target.querySelector(".tf-ln-t")!.textContent).toBe("ADProxy");
+  expect(target.querySelectorAll("mark")).toHaveLength(0);
+  done();
+  vi.unstubAllGlobals();
+});

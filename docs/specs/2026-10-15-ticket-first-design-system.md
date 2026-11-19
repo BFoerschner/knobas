@@ -39,7 +39,7 @@ Tokens are the prototype's, unchanged, except `--field`, which it did not have. 
 | `--card-ink` | `#2A230B` | `#1D1806` | Text on the card |
 | `--card-ink-2` | `#5A4D1E` | `#3F3511` | Secondary text on the card |
 | `--focus` | `#2F55D4` | `#8AA6FF` | Focus ring |
-| `--mark` | `#F6E08F` | `#5C4E17` | Matched search text, and what mentions you |
+| `--mark` | `#F6E08F` | `#5C4E17` | Matched search text (a launcher row's matched letters too, painted as a `tf-pick` highlight over the title's text, never a node of its own, so nothing moves; 2026-11-19), and what mentions you |
 | `--fill` | `--ink` | `#A9B3BE` | Whatever is filled to say it is on: a primary, a pressed segment, a rail's selected row. In dark it sits below the yellow card's luminance (.44 against .50), so it never outshouts it. A tracked block on Time is this fill too |
 | `--ok` / `--ok-bg` | `#1F7444` / `#DDEFE4` | `#6FCF97` / `#1B3427` | Passed, merged, up |
 | `--warn` / `--warn-bg` | `#8A5600` / `#F6EBD3` | `#E5B04D` / `#3A2E14` | Needs attention, stale |

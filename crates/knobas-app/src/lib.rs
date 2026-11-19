@@ -1076,6 +1076,11 @@ async fn bring_up_app<R: tauri::Runtime>(
         if let Err(error) = commands::search::searcher(&pool, &registry).await {
             tracing::error!(?error, "the adapters' declarations could not be stored");
         }
+        // Every name of the mirror into the launcher's picker (the
+        // fuzzy-search decisions, 2026-11-19, D3), as a task of its own: it
+        // needs none of the fills below, and a search before it lands is
+        // answered as before.
+        sources::pick_on_sync::reload(lifecycle.picker().clone(), pool.clone());
         // The state words each source's items were seen holding (migration
         // `0096`), counted in the background for a source never counted or
         // counted under other declarations: once after `0096`, and after an

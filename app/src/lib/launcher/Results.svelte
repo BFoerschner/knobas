@@ -17,6 +17,7 @@
 
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
+  import { marksIn } from "./marks";
   import { clockLabel } from "../time/format";
   import { aimed } from "./aim";
   import Row from "./Row.svelte";
@@ -184,6 +185,7 @@
         cell={cells.cell}
         mono={cells.mono}
         title={cells.title}
+        marks={marksIn(hit.marks, hit.title, cells.title)}
         chord={chordOf(row)}
         source={sourceOf(row)}
         id={optionId(index)}

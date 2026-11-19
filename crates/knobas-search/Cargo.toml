@@ -22,6 +22,14 @@ knobas-core = { path = "../knobas-core" }
 # For `KindInfo`/`SourceDescriptor` only: the launcher labels a group from the
 # adapter's declared kind metadata (spec §3a), never from a hardcoded list.
 knobas-source = { path = "../knobas-source" }
+# The names' matcher (`picker.rs`, the fuzzy-search decisions of 2026-11-19):
+# the one blink.cmp, LazyVim's completion, is built on. Smith-Waterman a row at
+# a time in SIMD (NEON, AVX2), smart case, several words in any order, `'word`,
+# `^word`, `word$`, `!word`, the matched letters' places and typos. Licence:
+# MIT (Liam Dyer), no dependency of its own with the default `std` feature, a
+# 148 kB crate. Pinned exactly at the version blink.cmp ships, and its scores
+# are pinned by `picker::tests::frizbee_scores_and_places_as_pinned`.
+frizbee = "=0.13.0"
 serde.workspace = true
 # The declarations `under:` binds as one jsonb (#595).
 serde_json.workspace = true

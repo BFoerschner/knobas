@@ -74,8 +74,10 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// configuration, a daily protocol page and two monitors. `v5` is #2403: a
 /// ticket gained its reporter, its created date, its time spent and its
 /// worklog entries' seconds. `v6` is #2455: a comment's text sits under its
-/// author's line in `body_text`, as the real adapters write it.
-const CURSOR: &str = "tidewater-v6";
+/// author's line in `body_text`, as the real adapters write it. `v7` is the
+/// fuzzy-search pass (2026-11-19): two repositories named as Björn's real
+/// misses were, `ADProxy` and `abcMappingService`.
+const CURSOR: &str = "tidewater-v7";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building

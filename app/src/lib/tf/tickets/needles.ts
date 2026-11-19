@@ -94,11 +94,11 @@ export function wordAlternatives(text: string): WordAlternative[] {
   return out.filter((alternative) => alternative.holds.length + alternative.lacks.length > 0);
 }
 
-/** The words and phrases typed, lowercased, once each, in order; `-word`, `or` and keys left out. */
+/** The words and phrases typed, lowercased, once each, in order; `-word`, `!word`, `or` and keys left out. */
 export function needles(text: string): string[] {
   const out: string[] = [];
   for (const token of terms(text)) {
-    if (!token.startsWith("-") && token.toLowerCase() !== "or") push(out, token);
+    if (!token.startsWith("-") && !token.startsWith("!") && token.toLowerCase() !== "or") push(out, token);
   }
   return out;
 }

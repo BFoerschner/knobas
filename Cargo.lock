@@ -1912,6 +1912,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "frizbee"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19435f276a44d90570cb403d22fbe4b20c80eabc134f718d6ec0ae888eb47edc"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "fs-set-times"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4189,6 +4198,7 @@ version = "3.2.8"
 dependencies = [
  "chrono",
  "criterion",
+ "frizbee",
  "knobas-core",
  "knobas-db",
  "knobas-search",

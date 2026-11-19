@@ -131,6 +131,42 @@
     "expect": "recognised"
   },
   {
+    "token": "'word",
+    "insert": "'",
+    "summary": "names that hold the word in one piece, not its letters spread out",
+    "probe": "'proxy",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "^word",
+    "insert": "^",
+    "summary": "names that start with it — ^acme",
+    "probe": "^acme",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "word$",
+    "insert": "$",
+    "summary": "names that end with it — proxy$",
+    "probe": "proxy$",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "!word",
+    "insert": "!",
+    "summary": "leaves out names that hold it, the same as -word",
+    "probe": "acme !proxy",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
     "token": "kind:",
     "insert": "kind:",
     "summary": "one kind of item — kind:pr, kind:build",

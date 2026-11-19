@@ -59,6 +59,10 @@ const CODE_REPOS: [name: string, updated: string, team: string, language: string
   ["booking-api", "2026-08-22T12:15:00Z", "Booking", "Kotlin"],
   ["tracking-events", "2026-08-12T11:00:00Z", "Tracking", "Go"],
   ["auth-gateway", "2026-08-17T14:20:00Z", "Platform", "Go"],
+  // Named as Björn's two real misses were (the fuzzy-search pass,
+  // 2026-11-19): `proxy` and `mapping service` find them by their parts.
+  ["ADProxy", "2026-08-16T09:00:00Z", "Platform", "Go"],
+  ["abcMappingService", "2026-08-15T09:00:00Z", "Payments", "Kotlin"],
 ];
 
 /** Code's pull requests (#837): repository, number, title, state, author, updated, reviewers asked. */

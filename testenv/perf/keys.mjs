@@ -277,6 +277,17 @@ const CASES = [
   { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
   { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  // The fuzzy-search pass (2026-11-19, `docs/decisions/2026-11-19-names-are-found-as-a-picker-finds-them.md`): the names
+  // read in memory beside PostgreSQL's words. The last letter of a part of a name (`DesignSystem`, `SeededChain`,
+  // `observability-stack`, `data-quality`, `schema-registry`); letters in order that no word holds, an abbreviation,
+  // from four letters (`obsstac`, `paysc`, `authp`, `csvimpo`, `idemk`, `dnsauto`, `mapsvc`); a word with two letters
+  // swapped, which the one-typo pass answers; and a text typed to its twentieth character. Each press is the last key
+  // of its word that changes what the list draws, so the decision list's `["obsstac", "k"]` and its like, which name
+  // the rows the letter before already drew, are the key before them here.
+  { name: "everything-part", presses: [["syste", "m"], ["chai", "n"], ["seede", "d"], ["stac", "k"], ["qual", "i"], ["regis", "t"], ["compi", "l"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-loose", presses: [["obssta", "c"], ["pays", "c"], ["auth", "p"], ["csvimp", "o"], ["idem", "k"], ["dnsaut", "o"], ["mapsv", "c"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-typo", presses: [["shcedule", "r"], ["payuo", "t"], ["ldege", "r"], ["wbehoo", "k"], ["inovi", "c"], ["timoeu", "t"], ["parnte", "r"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-twenty", presses: [["payout scheduler re", "t"], ["idempotency keys au", "d"], ["auth proxy times ou", "t"], ["cache p99 latency d", "a"], ["investigate kafka c", "o"], ["backfill postgres p", "r"], ["harden the retry qu", "e"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));
 

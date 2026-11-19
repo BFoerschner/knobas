@@ -71,7 +71,7 @@ def projects():
     out = [(ROOT, "Scale test", "_Root", None)]
     # The repositories the Gitea scale seed makes at its default size.
     import gitea
-    repos = [(r.org, r.name) for r in gitea.plan(10000)]
+    repos = [(r.org, r.name) for r in gitea.plan(10000, with_misses=False)]
     k = 0
     for g, leaves in GROUPS:
         gid = f"{ROOT}_{g}"

@@ -1649,6 +1649,9 @@ fn only_the_listed_statements_set_the_worker_cap() {
     let listed: Vec<(String, String)> = [
         // `app_session_settings`: Windows' connections, none.
         ("knobas-db/src/embedded.rs", "0"),
+        // `picker::LOAD_PLANNING`: the names' load, which nobody waits on,
+        // none (the fuzzy-search pass, 2026-11-19, D14).
+        ("knobas-search/src/picker.rs", "0"),
         // `MATCHED_PLANNING` and `LETTER_PLANNING`, elsewhere; their Windows
         // twins; `KEPT_PLANNING` and `NAMED_PLANNING`, every platform.
         ("knobas-search/src/sql.rs", "0"),

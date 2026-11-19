@@ -902,6 +902,20 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
                 broad_sql(&corpora, "payout", true, &asked, 10, 40, names, 500).unwrap(),
             ));
         }
+        // The rows the picker chose, read by their keys (the fuzzy-search
+        // decisions, 2026-11-19, D8 and D14).
+        let ids: Vec<String> = sqlx::query_scalar(
+            "select entity_id from sync.item where source_id = $1 order by entity_id limit 60",
+        )
+        .bind(&s)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let ranks: Vec<f32> = ids.iter().map(|_| 0.5).collect();
+        kept.push((
+            "the picker's rows",
+            knobas_search::sql::picked_sql(&ids, &ranks, &asked, 10, 80),
+        ));
         for (what, built) in kept {
             for at_any_size in [false, true] {
                 let plan = explain_kept(&pool, built.clone(), at_any_size)
@@ -920,6 +934,36 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
             "a word's first characters, titles {titles}:\n{plan}"
         );
     }
+    // The picker's load, which nobody waits on, all the same: planned as it
+    // runs, with workers made to look free.
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query(knobas_search::picker::LOAD_PLANNING)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "select set_config('parallel_setup_cost', '0', true), \
+                set_config('parallel_tuple_cost', '0', true), \
+                set_config('min_parallel_table_scan_size', '0', true), \
+                set_config('min_parallel_index_scan_size', '0', true)",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let plan: Vec<(String,)> = sqlx::query_as(knobas_search::picker::NAMES_PLAN_SQL)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let plan = plan
+        .into_iter()
+        .map(|(line,)| line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !plan.contains("Gather") && !plan.contains("Workers"),
+        "the names' load:\n{plan}"
+    );
     // The instrument: the one-letter read of the whole table asks for three.
     let whole = search_sql(&corpora, Some("p"), true, &filters(&s), 10, 40);
     let plan = explain_by_a_letter_at_any_size(&pool, whole, false)

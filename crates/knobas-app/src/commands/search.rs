@@ -119,7 +119,13 @@ pub async fn search(
     lifecycle: State<'_, Lifecycle>,
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    search_inner(&lifecycle.pool()?, lifecycle.registry(), query).await
+    search_picked(
+        &lifecycle.pool()?,
+        lifecycle.registry(),
+        lifecycle.picker(),
+        query,
+    )
+    .await
 }
 
 /// What the launcher shows before anything is typed: the newest items, and
@@ -482,6 +488,26 @@ pub async fn search_inner(
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
     Ok(searcher(pool, registry).await?.search(query).await?)
+}
+
+/// [`search_inner`] with the names `picker` holds joining the answer (the
+/// fuzzy-search decisions, 2026-11-19): what the `search` command answers.
+/// Dropping the `with_picker` call here is the launcher as it was.
+///
+/// # Errors
+///
+/// See [`search`].
+pub async fn search_picked(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    picker: &knobas_search::picker::Picker,
+    query: knobas_search::SearchQuery,
+) -> Result<knobas_search::SearchResponse, IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .with_picker(picker.clone())
+        .search(query)
+        .await?)
 }
 
 /// [`launcher_home`], against a pool and a registry.

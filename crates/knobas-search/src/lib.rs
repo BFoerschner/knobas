@@ -43,6 +43,7 @@ pub mod frames;
 pub mod group;
 pub mod home;
 pub mod keys;
+pub mod picker;
 pub mod query;
 pub mod saved;
 pub mod snippet;
@@ -157,6 +158,11 @@ pub struct Searcher {
     /// but for a test or a probe that plans the Windows statements on another
     /// platform ([`Self::planned_as_windows`]).
     windows: bool,
+    /// Every name of the mirror, read by a picker (the fuzzy-search
+    /// decisions, 2026-11-19): its names join each answer
+    /// ([`Self::with_picker`]). `None`, and a picker that holds no name yet,
+    /// answer exactly as before it.
+    picker: Option<picker::Picker>,
 }
 
 impl Searcher {
@@ -174,7 +180,19 @@ impl Searcher {
             notes_shown: true,
             bounds: (sql::RANKED_WHOLE, sql::WALK),
             windows: cfg!(windows),
+            picker: None,
         }
+    }
+
+    /// The same searcher, the names `picker` holds joining each launcher
+    /// answer (the fuzzy-search decisions, 2026-11-19, D2 and D6): what
+    /// was typed is read against every name in memory, and the names it
+    /// finds join PostgreSQL's rows without moving one of them. A searcher
+    /// built without this call is the launcher as it was before.
+    #[must_use]
+    pub fn with_picker(mut self, picker: picker::Picker) -> Self {
+        self.picker = Some(picker);
+        self
     }
 
     /// The same searcher, its statements planned as on Windows where
@@ -225,6 +243,7 @@ impl Searcher {
             notes_shown: true,
             bounds: (sql::RANKED_WHOLE, sql::WALK),
             windows: cfg!(windows),
+            picker: None,
         }
     }
 
@@ -462,13 +481,36 @@ impl Searcher {
             return Ok(empty(interpreted, started));
         }
 
+        // The picker's names, read beside the statements (D6): only for a
+        // searcher that holds names, text of two letters and more, and a
+        // query whose `under:` admits something.
+        let picking = self
+            .picker
+            .as_ref()
+            .filter(|picker| picker.holds_names() && !known_under.admits_nothing)
+            .and(text)
+            .and_then(|typed| {
+                picker::Typed::read(typed)
+                    .filter(|read| read.letters() >= 2)
+                    .map(|read| (typed.to_owned(), read))
+            });
+        // A leading `!` on a word is the picker's sign for *not*, and
+        // `websearch_to_tsquery` would read it as the word itself: the
+        // statements are handed `-` in its place (D4 rule 9). The echo stays
+        // as typed.
+        let negated = picking
+            .as_ref()
+            .and_then(|(typed, _)| query::bangs_as_minus(typed));
+        let text = negated.as_deref().or(text);
+
         // An `under:` scoped to names with nothing admitted beneath any of
         // them answers with nothing, and the statement is not asked: to say
         // nothing, it reads the whole mirror twice, for the live items and
         // for the run logs (#2495).
-        let rows: Vec<RawHit> = if known_under.admits_nothing {
-            Vec::new()
-        } else {
+        let statements = async {
+            if known_under.admits_nothing {
+                return Ok::<Vec<RawHit>, SearchError>(Vec::new());
+            }
             // A word's first characters are read off the stored ones only
             // once every item has its own (`Stored::names`): until bring-up's
             // fill has passed, they are ranked as every query was before.
@@ -480,7 +522,7 @@ impl Searcher {
                     query.limit,
                 )
                 .await?;
-            match named {
+            Ok(match named {
                 Named::Rows(rows) => rows,
                 words => {
                     // The mirror's match stage off its search copies alone,
@@ -508,8 +550,28 @@ impl Searcher {
                         _ => rows,
                     }
                 }
-            }
+            })
         };
+        let names = async {
+            let Some((typed, _)) = &picking else {
+                return Ok::<Option<Vec<RawHit>>, SearchError>(None);
+            };
+            self.picked_rows(typed, &filters, query.limit)
+                .await
+                .map(Some)
+        };
+        let (rows, picked) = tokio::join!(statements, names);
+        let mut rows = rows?;
+        if let (Some(picked), Some((_, typed))) = (picked?, &picking) {
+            rows = group::with_names(
+                rows,
+                picked,
+                &|title| typed.names(title),
+                PER_GROUP,
+                query.limit,
+            );
+            group::mark(&mut rows, typed);
+        }
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
         }
@@ -534,6 +596,43 @@ impl Searcher {
             coverage,
             took_ms: took_ms(started),
         })
+    }
+
+    /// The rows the picker chooses for `typed` (D5), as the statement that
+    /// reads them by key gives them (D8, [`sql::picked_sql`]): live, within
+    /// every filter, each kind's best ten and twice the page at most. The
+    /// read itself runs on a blocking thread, one core, and the statement
+    /// on a pooled connection of its own, beside the words' statements.
+    async fn picked_rows(
+        &self,
+        typed: &str,
+        filters: &EffectiveFilters,
+        limit: u32,
+    ) -> Result<Vec<RawHit>, SearchError> {
+        let Some(picker) = self.picker.clone() else {
+            return Ok(Vec::new());
+        };
+        let limits = picker::Limits {
+            sources: filters.sources.clone(),
+        };
+        let typed = typed.to_owned();
+        let Ok(picked) = tokio::task::spawn_blocking(move || picker.pick(&typed, &limits)).await
+        else {
+            // A read that panicked answers as no names: the statements'
+            // rows stand alone.
+            return Ok(Vec::new());
+        };
+        if picked.is_empty() {
+            return Ok(Vec::new());
+        }
+        let built = sql::picked_sql(
+            &picked.ids(),
+            &picked.ranks(),
+            filters,
+            PER_GROUP,
+            limit.saturating_mul(2),
+        );
+        Ok(sql::fetch_kept(&self.pool, built).await?)
     }
 
     /// The rows **a word's first characters** are answered with: one typed

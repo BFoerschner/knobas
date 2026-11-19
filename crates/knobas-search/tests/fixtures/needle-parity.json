@@ -4,6 +4,7 @@
   { "typed": "\"sepa retry\" batch", "needles": ["sepa retry", "batch"], "alternatives": [{ "holds": ["sepa retry", "batch"], "lacks": [] }] },
   { "typed": "sepa -blocked -\"retry batch\"", "needles": ["sepa"], "alternatives": [{ "holds": ["sepa"], "lacks": ["blocked", "retry batch"] }] },
   { "typed": "-only", "needles": [], "alternatives": [{ "holds": [], "lacks": ["only"] }] },
+  { "typed": "sepa !blocked", "needles": ["sepa"], "alternatives": [{ "holds": ["sepa", "blocked"], "lacks": [] }] },
   { "typed": "Retry \"backoff policy\" -cron -\"dead letter\" OR sepa, retry", "needles": ["retry", "backoff policy", "sepa"], "alternatives": [{ "holds": ["retry", "backoff policy"], "lacks": ["cron", "dead letter"] }, { "holds": ["sepa", "retry"], "lacks": [] }] },
   { "typed": "or a or or -b or", "needles": ["a"], "alternatives": [{ "holds": ["a"], "lacks": [] }, { "holds": [], "lacks": ["b"] }] },
   { "typed": "error for the ledger or", "needles": ["error", "for", "the", "ledger"], "alternatives": [{ "holds": ["error", "for", "the", "ledger"], "lacks": [] }] },

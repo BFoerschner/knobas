@@ -785,6 +785,14 @@ just soak --real 5733 --repo live-gitea:scale-commerce/cart-service --minutes 40
   restyled elements whatever the page holds. A return's hover includes the return's own first frame, which
   `open-budget`'s `return` rounds hold.
 
+`everything-part`, `everything-loose`, `everything-typo` and `everything-twenty` (the fuzzy-search pass, 2026-11-19,
+`docs/decisions/2026-11-19-names-are-found-as-a-picker-finds-them.md`) press the last key that changes the list of a
+part of a name (`syste` to `system` for the `DesignSystem` pipelines), of an abbreviation no word holds (`obssta` to
+`obsstac`), of a word with two letters swapped, which the one-typo pass answers (`shcedule` to `shceduler`), and a
+text's twentieth character. The names are read in memory beside PostgreSQL's words, about 2.5 ms a key, and the rows
+they choose by key. Their lines are the letters', 70, 100 and 130 ms. A press that asks for the rows the letter before
+drew (`obsstac` to `obsstack`) gives the probe no frame to time, so each case's words were screened for it.
+
 ## On a real database
 
 **The saved home** is `~/Library/Caches/knobas-perf/scale-db/final-home`, Björn's scale (`testenv/README.md`,

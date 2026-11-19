@@ -363,6 +363,17 @@ pub struct SearchHit {
     /// (migration `0067`), a ticket's, pull request's or note's text.
     #[serde(default)]
     pub excerpts: Vec<Excerpt>,
+    /// The letters of [`EntityRow::title`] what was typed matched (the
+    /// fuzzy-search decisions, 2026-11-19, D9): pairs of start and end in
+    /// UTF-16 code units, ascending and never overlapping, which the launcher
+    /// paints over the title's text. Empty for a row only the words found,
+    /// and from a searcher with no picker.
+    ///
+    /// Added to a frozen type (§10.8): optional on the wire and left out when
+    /// empty, so a reader written before it decodes a hit as it did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<u32>>", optional)]
+    pub marks: Vec<u32>,
 }
 
 /// One place the words appear in a hit's text (#2431).

@@ -532,7 +532,18 @@ snippet: Array<Segment>,
  * linked page that holds the words, a pipeline's stored latest run log
  * (migration `0067`), a ticket's, pull request's or note's text.
  */
-excerpts: Array<Excerpt>, entity_id: string, kind: string, source_id: string, title: string, 
+excerpts: Array<Excerpt>, 
+/**
+ * The letters of [`EntityRow::title`] what was typed matched (the
+ * fuzzy-search decisions, 2026-11-19, D9): pairs of start and end in
+ * UTF-16 code units, ascending and never overlapping, which the launcher
+ * paints over the title's text. Empty for a row only the words found,
+ * and from a searcher with no picker.
+ *
+ * Added to a frozen type (§10.8): optional on the wire and left out when
+ * empty, so a reader written before it decodes a hit as it did.
+ */
+marks?: Array<number>, entity_id: string, kind: string, source_id: string, title: string, 
 /**
  * When the source says the item changed, an RFC 3339 timestamp; `None`
  * if the source never dated the item.

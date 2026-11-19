@@ -1287,6 +1287,18 @@ pub const LIVE_ITEM_WALKED: Corpus = Corpus {
     ..LIVE_ITEM_MATCH
 };
 
+/// A mirror row **the picker chose** (the fuzzy-search decisions,
+/// 2026-11-19, D8; `crate::sql::picked_sql`): `sync.item` read by its key,
+/// live by two probes a row (`knobas_core::live_by_key!`), every filter
+/// answered off the row itself as [`LIVE_ITEM`] answers it. No `fts`: the
+/// picker's names are the match.
+pub(crate) const LIVE_ITEM_PICKED: Corpus = Corpus {
+    relation: "sync.item i",
+    scope: Some(knobas_core::live_by_key!("i")),
+    matched: None,
+    ..LIVE_ITEM
+};
+
 /// [`LIVE_ITEM`] on a mirror whose every search copy holds its six columns
 /// (migration `0084`): the same rows, its match stage read off the copy alone
 /// ([`LIVE_ITEM_MATCH`]). What [`mirror`] hands out once the fill is done.

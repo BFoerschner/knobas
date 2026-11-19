@@ -81,6 +81,11 @@ pub struct RawHit {
     excerpt_text: Option<String>,
     /// The number of `excerpt_text`'s first line when it is a run log.
     excerpt_line: Option<i64>,
+    /// The matched letters of the title (D9 of the fuzzy-search decisions):
+    /// pairs of start and end in UTF-16 code units, set by [`mark`] after
+    /// the picker's names joined the page, never read from a statement.
+    #[sqlx(skip)]
+    marks: Vec<u32>,
 }
 
 /// Whether a names answer is **few**: it fills no kind (`per_group` rows of
@@ -203,6 +208,211 @@ impl RawHit {
     fn is_hit(&self) -> bool {
         self.entity_id.is_some() && self.synced_at.is_some()
     }
+
+    /// The header of a kind no row of which is on the page.
+    fn header(kind: &str, total: i64) -> Self {
+        Self {
+            group_kind: kind.to_owned(),
+            kind_total: total,
+            entity_id: None,
+            source_id: None,
+            title: None,
+            updated_at: None,
+            synced_at: None,
+            path: None,
+            state: None,
+            cell: None,
+            rank: None,
+            snippet: None,
+            excerpt_text: None,
+            excerpt_line: None,
+            marks: Vec::new(),
+        }
+    }
+
+    /// Whether the row is one the picker read loosely (D5): its rank is
+    /// below zero, which no statement's rank ever is.
+    fn picked_loosely(&self) -> bool {
+        self.rank.is_some_and(|rank| rank < 0.0)
+    }
+}
+
+/// The higher rank first, then the newer row, then the id: how a kind's
+/// rows are ordered and a round of the page dealt.
+fn best_first(a: &RawHit, b: &RawHit) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    b.rank
+        .partial_cmp(&a.rank)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| match (a.updated_at, b.updated_at) {
+            (Some(a), Some(b)) => b.cmp(&a),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        })
+        .then_with(|| a.entity_id.cmp(&b.entity_id))
+}
+
+/// The page with **the picker's names joined to PostgreSQL's answer** (the
+/// fuzzy-search decisions, 2026-11-19, D6). `text` is the statements' page
+/// as it came back; `picked` the rows the picker chose, as
+/// [`crate::sql::picked_sql`] read them, solid with a rank of zero and up,
+/// loose below zero; `named` says whether the solid patterns match a title.
+///
+/// For each kind:
+///
+/// * **No row of `text` moves** relative to another.
+/// * **A solid name goes in after the last row of `text` that is named or
+///   whose rank is at least its own**: in front of the trailing rows only
+///   the text found that rank below it, never in front of a named row or a
+///   stronger one. Solid names among themselves best first.
+/// * **Loose names go at the end**, best first.
+/// * **A row is on the page once**, **ten a kind** (`per_group`), and the
+///   kind's total is the statements' or the rows now held, whichever is
+///   more.
+///
+/// Then the page is dealt as the statements deal it: every kind's first row,
+/// then every kind's second, up to `limit`. A kind with a total and no row
+/// on the page is a header.
+#[must_use]
+pub(crate) fn with_names(
+    text: Vec<RawHit>,
+    picked: Vec<RawHit>,
+    named: &dyn Fn(&str) -> bool,
+    per_group: u32,
+    limit: u32,
+) -> Vec<RawHit> {
+    use std::collections::HashSet;
+
+    struct Kind {
+        name: String,
+        total: i64,
+        rows: Vec<RawHit>,
+        solid: Vec<RawHit>,
+        loose: Vec<RawHit>,
+    }
+    let per_group = usize::try_from(per_group).unwrap_or(usize::MAX);
+    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+    let mut kinds: Vec<Kind> = Vec::new();
+    let at = |kinds: &mut Vec<Kind>, name: &str| -> usize {
+        if let Some(index) = kinds.iter().position(|kind| kind.name == name) {
+            return index;
+        }
+        kinds.push(Kind {
+            name: name.to_owned(),
+            total: 0,
+            rows: Vec::new(),
+            solid: Vec::new(),
+            loose: Vec::new(),
+        });
+        kinds.len() - 1
+    };
+    let mut held: HashSet<String> = HashSet::new();
+    for row in text {
+        let index = at(&mut kinds, &row.group_kind);
+        let kind = &mut kinds[index];
+        kind.total = kind.total.max(row.kind_total);
+        if let Some(id) = row.entity_id.as_ref().filter(|_| row.is_hit()) {
+            held.insert(id.clone());
+            kind.rows.push(row);
+        }
+    }
+    for row in picked {
+        let Some(id) = row.entity_id.as_ref().filter(|_| row.is_hit()) else {
+            continue;
+        };
+        if !held.insert(id.clone()) {
+            continue;
+        }
+        let index = at(&mut kinds, &row.group_kind);
+        if row.picked_loosely() {
+            kinds[index].loose.push(row);
+        } else {
+            kinds[index].solid.push(row);
+        }
+    }
+
+    // Each kind's rows: the statements', the solid names placed among
+    // them, the loose ones after, `per_group` at most.
+    for kind in &mut kinds {
+        kind.solid.sort_by(best_first);
+        kind.loose.sort_by(best_first);
+        let rows = std::mem::take(&mut kind.rows);
+        let stands: Vec<(bool, Option<f32>)> = rows
+            .iter()
+            .map(|row| (row.title.as_deref().is_some_and(named), row.rank))
+            .collect();
+        let mut merged: Vec<RawHit> = Vec::with_capacity(rows.len() + kind.solid.len());
+        let mut rows = rows.into_iter();
+        let mut placed = 0_usize;
+        for name in std::mem::take(&mut kind.solid) {
+            // How many of the statements' rows stand above it.
+            let above = stands
+                .iter()
+                .rposition(|(is_named, rank)| {
+                    *is_named || rank.zip(name.rank).is_some_and(|(row, own)| row >= own)
+                })
+                .map_or(0, |last| last + 1);
+            while placed < above {
+                if let Some(row) = rows.next() {
+                    merged.push(row);
+                }
+                placed += 1;
+            }
+            merged.push(name);
+        }
+        merged.extend(rows);
+        merged.append(&mut kind.loose);
+        merged.truncate(per_group);
+        kind.total = kind
+            .total
+            .max(i64::try_from(merged.len()).unwrap_or(i64::MAX));
+        kind.rows = merged;
+    }
+
+    // Dealt a row a kind at a time, the best of a round first.
+    let mut dealt: Vec<(usize, usize, usize)> = Vec::new();
+    for (index, kind) in kinds.iter().enumerate() {
+        for nth in 0..kind.rows.len() {
+            dealt.push((nth, index, nth));
+        }
+    }
+    dealt.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| best_first(&kinds[a.1].rows[a.2], &kinds[b.1].rows[b.2]))
+    });
+    dealt.truncate(limit);
+    let mut kept: Vec<usize> = vec![0; kinds.len()];
+    for (nth, index, _) in &dealt {
+        kept[*index] = kept[*index].max(nth + 1);
+    }
+    let mut page: Vec<RawHit> = Vec::new();
+    for (index, kind) in kinds.into_iter().enumerate() {
+        let total = kind.total;
+        if kept[index] == 0 {
+            if total > 0 {
+                page.push(RawHit::header(&kind.name, total));
+            }
+            continue;
+        }
+        for mut row in kind.rows.into_iter().take(kept[index]) {
+            row.kind_total = total;
+            page.push(row);
+        }
+    }
+    page
+}
+
+/// Mark each hit's title with the letters `typed` matched (D9): a loose
+/// pick's as the loose rules placed them, any other row's where the solid
+/// patterns match it, none where only the text found it.
+pub(crate) fn mark(rows: &mut [RawHit], typed: &crate::picker::Typed) {
+    for row in rows.iter_mut().filter(|row| row.is_hit()) {
+        let loose = row.picked_loosely();
+        if let Some(title) = &row.title {
+            row.marks = typed.marks(title, loose);
+        }
+    }
 }
 
 /// Fold the flat rows into groups, ordered by [`GROUP_ORDER`].
@@ -287,6 +497,7 @@ fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
             .map(snippet::segments)
             .unwrap_or_default(),
         excerpts,
+        marks: row.marks,
     })
 }
 
@@ -318,6 +529,7 @@ mod tests {
             snippet: None,
             excerpt_text: None,
             excerpt_line: None,
+            marks: Vec::new(),
         }
     }
 
@@ -341,6 +553,7 @@ mod tests {
             )),
             excerpt_text: None,
             excerpt_line: None,
+            marks: Vec::new(),
         }
     }
 
@@ -667,6 +880,139 @@ mod tests {
         assert!(!few(&names, 10, 3));
         assert!(few(&[], 10, 40));
         assert!(few(&[header("pr", 4)], 1, 1));
+    }
+
+    /// A row whose title says `title`.
+    fn titled(mut row: RawHit, title: &str) -> RawHit {
+        row.title = Some(title.to_owned());
+        row
+    }
+
+    /// What `with_names` makes of `text` and `picked`, the solid patterns
+    /// naming a title that says `named`.
+    fn joined(
+        text: Vec<RawHit>,
+        picked: Vec<RawHit>,
+        per_group: u32,
+        limit: u32,
+    ) -> Vec<(String, i64, String)> {
+        page(&with_names(
+            text,
+            picked,
+            &|title| title.contains("named"),
+            per_group,
+            limit,
+        ))
+    }
+
+    /// **D6: a solid name goes in front of the trailing rows only the text
+    /// found that rank below it**, never in front of a named row or a
+    /// stronger one; loose names last; no row of the text moves.
+    #[test]
+    fn a_solid_name_goes_in_front_of_weak_text_rows() {
+        let text = || {
+            vec![
+                detail("ticket", 5, "ji:body", 1.6),
+                titled(detail("ticket", 5, "ji:named", 0.2), "named here"),
+                detail("ticket", 5, "ji:weak", 0.4),
+                detail("ticket", 5, "ji:weaker", 0.1),
+                header("pr", 3),
+            ]
+        };
+        let picked = || {
+            vec![
+                detail("ticket", 3, "ji:loose", -0.2),
+                detail("ticket", 3, "ji:solid", 0.9),
+                detail("ticket", 3, "ji:solid2", 0.3),
+            ]
+        };
+        assert_eq!(
+            joined(text(), picked(), 10, 40),
+            of(&[
+                ("ticket", 7, "ji:body"),
+                ("ticket", 7, "ji:named"),
+                ("ticket", 7, "ji:solid"),
+                ("ticket", 7, "ji:weak"),
+                ("ticket", 7, "ji:solid2"),
+                ("ticket", 7, "ji:weaker"),
+                ("ticket", 7, "ji:loose"),
+                ("pr", 3, ""),
+            ]),
+        );
+        // No picked row: the text as it was.
+        assert_eq!(
+            joined(text(), Vec::new(), 10, 40),
+            of(&[
+                ("ticket", 5, "ji:body"),
+                ("ticket", 5, "ji:named"),
+                ("ticket", 5, "ji:weak"),
+                ("ticket", 5, "ji:weaker"),
+                ("pr", 3, ""),
+            ]),
+        );
+    }
+
+    /// **A row once, ten a kind, the totals, and the page dealt.**
+    #[test]
+    fn names_join_once_ten_a_kind_and_the_page_is_dealt() {
+        // A row both found is the text's, where the text put it; the name
+        // the text did not find outranks both and leads.
+        let text = vec![
+            detail("repo", 2, "gt:a", 0.5),
+            detail("repo", 2, "gt:b", 0.1),
+        ];
+        let picked = vec![
+            detail("repo", 2, "gt:b", 0.9),
+            detail("repo", 2, "gt:c", 0.9),
+        ];
+        assert_eq!(
+            joined(text, picked, 10, 40),
+            of(&[
+                ("repo", 3, "gt:c"),
+                ("repo", 3, "gt:a"),
+                ("repo", 3, "gt:b")
+            ]),
+        );
+        // Ten a kind: the text's ten stand, a weaker name is cut.
+        let text: Vec<RawHit> = (0..10)
+            .map(|n| detail("repo", 30, &format!("gt:{n}"), 1.0))
+            .collect();
+        let picked = vec![detail("repo", 1, "gt:name", 0.9)];
+        let page_of = joined(text, picked, 10, 40);
+        assert_eq!(page_of.len(), 10);
+        assert!(
+            page_of
+                .iter()
+                .all(|(_, total, id)| *total == 30 && id != "gt:name")
+        );
+        // A kind only the picker found, and the page dealt a row a kind at a
+        // time up to the limit: the tickets' second row waits for the round.
+        let text = vec![
+            detail("ticket", 2, "ji:1", 0.9),
+            detail("ticket", 2, "ji:2", 0.8),
+        ];
+        let picked = vec![detail("repo", 1, "gt:x", 0.5)];
+        assert_eq!(
+            joined(text, picked, 10, 2),
+            of(&[("ticket", 2, "ji:1"), ("repo", 1, "gt:x")]),
+        );
+    }
+
+    /// **Loose picks are marked loosely**, others where the solid patterns
+    /// match, a row only the words found not at all.
+    #[test]
+    fn marks_follow_the_row() {
+        let typed = crate::picker::Typed::read("proxy").expect("a text");
+        let mut rows = vec![
+            titled(detail("repo", 1, "gt:1", 0.5), "acme/ADProxy"),
+            titled(detail("repo", 1, "gt:2", 0.5), "routing"),
+            titled(detail("repo", 1, "gt:3", -0.5), "acme/prxoy"),
+        ];
+        mark(&mut rows, &typed);
+        assert_eq!(rows[0].marks, [7, 12]);
+        assert!(rows[1].marks.is_empty());
+        let groups = group(rows, &KindCatalog::default());
+        assert_eq!(groups[0].hits[0].marks, [7, 12]);
     }
 
     /// A null snippet is browse mode (no text, so no headline), not an error.

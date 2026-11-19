@@ -617,7 +617,7 @@ fn leading_prefix(head: &str) -> Option<(&'static str, Prefix)> {
 /// Split on whitespace, but keep a double-quoted run together **with its
 /// quotes** -- `websearch_to_tsquery` reads those quotes as a phrase, so
 /// stripping them here would silently turn a phrase search into an AND.
-fn tokenize(input: &str) -> Vec<String> {
+pub(crate) fn tokenize(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
@@ -760,12 +760,37 @@ fn negates_what_cannot_be_negated(token: &str) -> bool {
 pub fn needles(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for token in tokenize(text) {
-        if token.starts_with('-') || token.eq_ignore_ascii_case("or") {
+        // `!word` leaves a word out as `-word` does (the fuzzy-search
+        // decisions, 2026-11-19, D4 rule 9).
+        if token.starts_with('-') || token.starts_with('!') || token.eq_ignore_ascii_case("or") {
             continue;
         }
         push_needle(&mut out, &token);
     }
     out
+}
+
+/// `text` with each token's leading `!` made a `-`, or `None` where no
+/// token starts with one (the fuzzy-search decisions, 2026-11-19, D4 rule
+/// 9): `!word` is the picker's sign for a word left out, and
+/// `websearch_to_tsquery` reads it as the word itself, so the statements are
+/// handed the grammar's own sign. A quoted phrase is one token.
+#[must_use]
+pub fn bangs_as_minus(text: &str) -> Option<String> {
+    let tokens = tokenize(text);
+    if !tokens.iter().any(|token| token.starts_with('!')) {
+        return None;
+    }
+    Some(
+        tokens
+            .into_iter()
+            .map(|token| match token.strip_prefix('!') {
+                Some(rest) => format!("-{rest}"),
+                None => token,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 /// One alternative of the Tickets view's word filter (#1889): a row it

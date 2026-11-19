@@ -217,7 +217,15 @@ def comment_md(r):
     return paragraph(r, 1, 4)
 
 
-def plan(total):
+# Two repositories named as Björn's real misses were (the fuzzy-search pass,
+# 2026-11-19): `proxy` did not find `ADProxy` and `mapping service` did not
+# find `abcMappingService`, each one word to PostgreSQL's parser. Added after
+# the estate's own draw, the smallest a repository gets, so every other
+# repository's name, share and items stay as they were.
+NAMED_MISSES = [("scale-platform", "ADProxy"), ("scale-commerce", "abcMappingService")]
+
+
+def plan(total, with_misses=True):
     repos = []
     names = [(org, name) for org, _, names in ORGS for name in names]
     n = max(3, min(len(names), round(total / 172)))
@@ -228,6 +236,9 @@ def plan(total):
     for idx, (k, w) in enumerate(zip(order, weights)):
         org, name = names[k]
         repos.append(Repo(org, name, idx, w / s, total))
+    if with_misses:
+        for org, name in NAMED_MISSES:
+            repos.append(Repo(org, name, len(repos), 0.0, total))
     return repos
 
 

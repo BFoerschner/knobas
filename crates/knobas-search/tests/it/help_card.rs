@@ -33,6 +33,10 @@ struct Entry {
     /// whose chip the launcher labels with this row's summary.
     #[serde(default)]
     kind: Option<String>,
+    /// An operator of the words (`'word`, `^word`, `word$`, `!word`; the
+    /// fuzzy-search decisions, 2026-11-19): search text by design.
+    #[serde(default)]
+    words: bool,
 }
 
 fn card() -> Vec<Entry> {
@@ -176,6 +180,20 @@ fn what_a_row_inserts_never_becomes_a_search_word() {
     let vocab = Vocabulary::fixture();
     for entry in card() {
         let inserted = entry.insert.trim();
+        if entry.words {
+            // An operator of the words (the fuzzy-search decisions,
+            // 2026-11-19, D4): search text by design, so the picker must be
+            // handed it as typed.
+            let probed = parse(&entry.probe, &vocab);
+            assert!(
+                probed.query.text.contains(inserted),
+                "`{}` is an operator of the words, and the parser took {:?} out of {:?}",
+                entry.token,
+                entry.insert,
+                entry.probe
+            );
+            continue;
+        }
         let parsed = parse(&entry.insert, &vocab);
         assert!(
             !parsed.query.text.contains(inserted),

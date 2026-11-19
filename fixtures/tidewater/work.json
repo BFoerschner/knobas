@@ -363,7 +363,9 @@
   "repos": [
     { "name": "payout-service", "lang": "Rust", "team": "Payments", "clone": "~/code/payout-service", "default_branch": "main", "commit_count": 312 },
     { "name": "ledger-api", "lang": "Kotlin", "team": "Payments", "clone": "~/code/ledger-api", "default_branch": null, "commit_count": null },
-    { "name": "ops-runbooks", "lang": "Markdown", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null }
+    { "name": "ops-runbooks", "lang": "Markdown", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null },
+    { "name": "ADProxy", "lang": "Go", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null },
+    { "name": "abcMappingService", "lang": "Kotlin", "team": "Payments", "clone": null, "default_branch": null, "commit_count": null }
   ],
   "monitors": [
     { "id": "payout-service-health", "name": "payout-service health", "type": "http", "state": "up", "response_time_ms": 38.0, "url": "https://payout.tidewater.example/health" },

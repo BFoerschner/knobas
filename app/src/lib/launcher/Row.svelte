@@ -20,6 +20,7 @@
   import { shortKey } from "../tf/tickets/tickets";
   import { menuThing, type Thing } from "../tf/context/thing";
   import type { Tone } from "../ipc/entity";
+  import { markTitle } from "./marks";
 
   let {
     monogram,
@@ -28,6 +29,7 @@
     cell,
     mono = false,
     title,
+    marks = [],
     chord = null,
     source = null,
     id,
@@ -46,6 +48,8 @@
     /** Whether the key cell is an identifier, drawn in the mono face. */
     mono?: boolean;
     title: string;
+    /** The title's matched letters, pairs of start and end in UTF-16 code units of `title` (`marks.ts`). */
+    marks?: readonly number[];
     /** The chord bound to the row (#2429): a saved list's, which opens it from anywhere. */
     chord?: string | null;
     /** The source's name, where another row in the list has this row's key (#1476): two tickets, not one drawn twice. */
@@ -74,7 +78,7 @@
   <!-- A forge's issue key is told apart by its repository and number, which the cell's ellipsis cut: ten Gitea issues
        read *tidewater/pay…* on the live run (2026-11-09). Shortened as a ticket card shortens it, the whole on hover. -->
   <span class="tf-ln-k" class:tf-ln-mono={mono} title={mono && shortKey(cell) !== cell ? cell : undefined}>{mono ? shortKey(cell) : cell}</span>
-  <span class="tf-ln-t">{title}</span>
+  <span class="tf-ln-t" {@attach markTitle(() => ({ title, marks }))}>{title}</span>
   {#if source}<span class="tf-ln-src" title={source}>{source}</span>{/if}
   {#if chord}<kbd class="tf-ln-chord" title="Its key">{chordLabel(chord)}</kbd>{/if}
 </button>
