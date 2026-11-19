@@ -309,7 +309,7 @@
       {#if switchTo !== null && others.length > 0}
         <label class="tf-frender-as">
           <span class="tf-dim tf-small">Render with</span>
-          <select class="tf-select" aria-label="Render with" value={renderer.id} onchange={(event) => (location.hash = switchTo(event.currentTarget.value))}>
+          <select class="tf-select" aria-label="Render with" title={renderer.name} value={renderer.id} onchange={(event) => (location.hash = switchTo(event.currentTarget.value))}>
             {#each renderers as one (one.id)}<option value={one.id}>{one.name}</option>{/each}
           </select>
         </label>

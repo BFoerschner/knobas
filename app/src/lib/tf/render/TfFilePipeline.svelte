@@ -21,8 +21,10 @@
   import { FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
   import { inlineEditor } from "../inline-editor";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import { programOf } from "../path";
   import { pointerDrag } from "../pointer-drag";
   import TfMenu from "../TfMenu.svelte";
+  import TfPath from "../TfPath.svelte";
 
   let {
     steps,
@@ -266,8 +268,8 @@
           <hr />
           <div class="tf-rsw-mh">Your commands</div>
           {#each commands as command (command.id)}
-            <button type="button" role="menuitem" onclick={() => add(() => ({ step: "command", id: command.id }))}
-              ><span>{command.name}</span><span class="tf-rsw-kb tf-pmono">{command.command}</span></button
+            <button type="button" role="menuitem" title={`${command.name}\n${command.command}`} onclick={() => add(() => ({ step: "command", id: command.id }))}
+              ><span class="tf-pmenu-nm">{command.name}</span><TfPath class="tf-rsw-kb" path={programOf(command.command)} title={command.command} /></button
             >
           {/each}
           {#if onaddcommand !== undefined}

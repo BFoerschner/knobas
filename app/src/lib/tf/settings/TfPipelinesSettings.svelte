@@ -166,7 +166,7 @@
         {#each stepCommands.list as s, at (s.id)}
           <tr>
             <td><b>{s.name}</b></td>
-            <td class="tf-small"><span class="tf-mono">{s.command}</span></td>
+            <td class="tf-small tf-wrapall"><span class="tf-mono">{s.command}</span></td>
             <td class="tf-small">{secondsLabel(s.timeout_secs)}</td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {s.name}…" onclick={() => editStep(at)}>Edit…</button>

@@ -330,7 +330,7 @@
           {#each saved as r, at (r.id)}
             <tr>
               <td><b>{r.name}</b></td>
-              <td class="tf-small"><span class="tf-mono">{r.command}</span></td>
+              <td class="tf-small tf-wrapall"><span class="tf-mono">{r.command}</span></td>
               <td class="tf-small tf-mono">{r.patterns.join(" ")}</td>
               <td class="tf-small tf-mono">{r.fences.join(" ")}</td>
               <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {secondsLabel(r.timeout_secs)}</td>

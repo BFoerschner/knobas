@@ -523,7 +523,7 @@
         onpointerenter={(event) => top && rest(entry, event.currentTarget)}
         onkeydown={(event) => onrowkey(event, entry)}
         onclick={(event) => pick(entry, event.currentTarget)}
-        ><span class="tf-ctx-l">{entry.label}</span>{#if entry.sub}<svg class="tf-ctx-sub" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>{:else if entry.hint}<span class="tf-ctx-h">{entry.hint}</span>{/if}</button
+        ><span class="tf-ctx-l" title={entry.label.length > 36 ? entry.label : undefined}>{entry.label}</span>{#if entry.sub}<svg class="tf-ctx-sub" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>{:else if entry.hint}<span class="tf-ctx-h">{entry.hint}</span>{/if}</button
       >
     {:else}
       <hr />

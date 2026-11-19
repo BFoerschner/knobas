@@ -54,7 +54,7 @@
         {#each folders.list as r (r.id)}
           <tr class="tf-land" tabindex="-1" data-land={landKey("folder-renderers", r.id)}>
             <td><b>{r.name}</b></td>
-            <td class="tf-small"><span class="tf-mono">{r.command}</span></td>
+            <td class="tf-small tf-wrapall"><span class="tf-mono">{r.command}</span></td>
             <td class="tf-small">{takesLine(r)}</td>
             <td class="tf-small">{outputOf(r.output)}, {secondsLabel(r.timeout_secs)}</td>
             <td class="tf-right"><a class="tf-btn tf-sm tf-ghost" href={folderPageHash({ renderer: r.id })} aria-label="Edit {r.name}">Edit</a></td>

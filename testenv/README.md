@@ -3005,10 +3005,14 @@ the window showed). `testenv/perf/README.md` has each tool, what its numbers mea
 
 **Long paths** (`long-paths.mjs`, PR #2479, 2026-11-16): every place the app draws a filesystem path, with
 `?fake-long-paths` making each one a long Windows path with spaces in it (the clones, the clones root, git, a pull
-request's worktree; `?fake-long-paths=<root>` names the root). It opens the repository page and its tabs, its sign's
-bubble by focus and by hover, the *Open in…* menus, Code, a pull request, Settings › Checkouts and the job, at 5120 x 1440,
+request's worktree; `?fake-long-paths=<root>` names the root), and adding renderers, a command step and folder renderers
+with long names whose programs are long Windows and Mac paths (2026-11-19). It opens the repository page and its tabs, its
+sign's bubble by focus and by hover, the *Open in…* menus, *Render as* open and with a long renderer picked, the pipeline's
+*Add step…*, a folder drawn and failed by a long folder renderer, a folder's right-click menu, Code, a pull request,
+Settings › Checkouts and › Renderers (its list, a renderer's dialog, a folder renderer's page) and the job, at 5120 x 1440,
 2560 x 1440 at 125 %, 1920 x 1080 at 200 % and the window's smallest, 1100 x 600. It fails when a path's text runs past
-the window or past any box that holds it (the start `TfPath` gives up on purpose excepted), or when a box scrolls
+the window or past any box that holds it (the start `TfPath` gives up on purpose excepted; a renderer's long name may end
+in an ellipsis), or when a box scrolls
 sideways with the long paths and not with the short ones. Run it as the trips run, under the machine's lock:
 
 ```sh

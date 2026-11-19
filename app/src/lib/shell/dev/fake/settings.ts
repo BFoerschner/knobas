@@ -91,6 +91,39 @@ function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
   });
 }
 
+/** `?fake-long-paths`' renderers: long names, and programs deep under folders with spaces, quoted as a person writes them. */
+export const LONG_RENDERERS: UserRenderer[] = [
+  {
+    id: "orchestra",
+    name: "Orchestra score renderer for the payments team's sequence diagrams",
+    command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json" --format svg`,
+    patterns: ["*.rs"],
+    fences: [],
+    input: "text",
+    output: "svg",
+    timeout_secs: 10,
+    diff: false,
+  },
+  {
+    id: "orchestra-mac",
+    name: "Orchestra on the Mac",
+    command: `"/Users/someone with a long name/Library/Application Support/Orchestra Renderer/2026/bin/orchestra-render" --theme "/Users/someone with a long name/Library/Application Support/Orchestra Renderer/themes/a long theme name.json"`,
+    patterns: ["*.rs"],
+    fences: [],
+    input: "text",
+    output: "svg",
+    timeout_secs: 10,
+    diff: false,
+  },
+];
+
+const LONG_STEP: CommandStep = {
+  id: "orchestra-decode",
+  name: "Orchestra decode",
+  command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-decode.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json"`,
+  timeout_secs: 10,
+};
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   let passive = true;
@@ -132,11 +165,17 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     { id: "cat", name: "Cat", command: "cat", patterns: ["*.cat.html"], fences: ["cat"], input: "text", output: "html", timeout_secs: 10, diff: false },
   ];
 
+  // `?fake-long-paths` (the render-as pass, 2026-11-19): two renderers of `*.rs` whose names and programs are long, one on
+  // Windows and one on a Mac, with spaces, so a layout check holds *Render as*, the file view and Settings › Renderers to
+  // their boxes. The fake runs neither, so each fails with its command line on stderr.
+  if (params.has("fake-long-paths")) renderers.push(...LONG_RENDERERS);
+
   // The default renderer per file pattern (#2263): none until one is made.
   let defaults: RendererDefault[] = [];
 
   // #2265: one command step, `tr a-z A-Z`, and no named pipeline until one is saved.
   let steps: CommandStep[] = [{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }];
+  if (params.has("fake-long-paths")) steps.push(LONG_STEP);
   let pipelines: NamedPipeline[] = [];
   // *Run pipelines on diffs* (#2270): on until set.
   let diffPipelinesOn = true;

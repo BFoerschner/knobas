@@ -443,6 +443,8 @@
 .tf-rframe.tf-zoomthrough { pointer-events: none; }
 .tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
 .tf-stepfail pre { margin: 0; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }
+/* What a failure says can hold a program's whole path: it wraps anywhere rather than run past the box (render-as pass). */
+.tf-stepfail, .tf-stepfail pre { overflow-wrap: anywhere; }
 
 /*
  * The code area's pick menus, one rule for all three (review of spec #2234, Standards 9): the renderer switcher
@@ -451,6 +453,9 @@
  */
 .tf-rsw-face, .tf-pick-face { gap: 6px; }
 .tf-rsw-face b, .tf-pick-face b { font-weight: 600; }
+/* A renderer's long name (the render-as pass, 2026-11-19): the face keeps to its width and ends in an ellipsis; its title
+   is the whole name. */
+.tf-rsw-face b { min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-menu:is(.tf-rsw-m, .tf-pick-m, .tf-pmenu-m) > :is(button, a) { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
 .tf-menu:is(.tf-rsw-m, .tf-pick-m, .tf-pmenu-m) > :is(button, a):is(:hover, :focus-visible), .tf-menu:is(.tf-rsw-m, .tf-pick-m, .tf-pmenu-m) > .tf-on { background: var(--sheet-2); }
 .tf-rsw-mh, .tf-pick-mh { padding: 6px 10px 2px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
@@ -458,10 +463,14 @@
 /* The renderer switcher (#2263; mockups/code-area/file.html, state "switcher"): *Render as <name> ▾*. */
 .tf-rsw { display: inline-flex; }
 .tf-rsw-lab { color: var(--ink-2); }
-.tf-menu.tf-rsw-m { width: 330px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-menu.tf-rsw-m { width: 330px; max-width: calc(100vw - 16px); font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-rsw-tick { width: 14px; flex: none; color: var(--ink); }
-.tf-rsw-name { min-width: 0; }
+/* An item: its name on one line, cut at its end, over what it is: *built in*, or its program alone, cut in the middle so the
+   program's file stays (`TfPath`); the whole command is the item's title. Never the command line, which wrapped the menu. */
+.tf-rsw-name { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
+.tf-rsw-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-rsw-sub { display: block; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-rsw-name > .tf-path { display: flex; }
 .tf-rsw-tag { margin-left: auto; font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .tf-rsw-kb { margin-left: auto; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 
@@ -514,6 +523,10 @@
 .tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
 .tf-pmenu { display: inline-flex; }
 .tf-menu.tf-pmenu-m { width: 320px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* A command step: its name, up to about half the row and cut at its end, and its program in the rest, cut in the middle;
+   the whole command is the item's title. */
+.tf-pmenu-m .tf-pmenu-nm { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-pmenu-m .tf-path { flex: 0 1 auto; margin-left: auto; }
 .tf-pmono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* #2265: the person's own command step (mockup `.step.user`), the save form, the suggestion chip (`.suggest`). */
 .tf-pstep.tf-puser .tf-pname::after { content: " cmd"; --fs: var(--size-ui); font: 600 calc(var(--t-2xs) * var(--fs)) var(--sans); color: var(--ink-2); }
@@ -544,7 +557,9 @@
 
 /* A folder drawn by a folder renderer (ADR-0044, tf/render/TfFolderRender.svelte): the file view's header and banners,
    the drawing under them. A drawing of an earlier commit stays undimmed under the header's held line (ADR-0042). */
-.tf-frender .tf-frender-as { display: flex; align-items: center; gap: 6px; }
+.tf-frender .tf-frender-as { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* A select is as wide as its longest option: a renderer's long name ends in an ellipsis instead, whole in its title. */
+.tf-frender .tf-frender-as .tf-select { min-width: 0; max-width: 18rem; text-overflow: ellipsis; }
 .tf-frender-clock { margin-left: auto; font-variant-numeric: tabular-nums; }
 .tf-frender-out { background: var(--sheet); }
 .tf-frender-zoom { padding: 6px 12px; gap: 8px; }

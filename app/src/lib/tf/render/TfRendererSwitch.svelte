@@ -14,14 +14,20 @@
   *Renderers and defaults…* goes to Settings › Renderers. Picking a renderer
   only changes this view (`onpick`); the default changes only through
   `onmakedefault`. `TfMenu` draws it.
+
+  A long name or program never runs out of the menu or the header (the render-as pass, 2026-11-19; design system,
+  *Paths*): the face cuts the name with an ellipsis, and an item is its name on one line, cut the same way, over its
+  program alone, cut in the middle so the program's file stays (`TfPath`). The whole name and command are the item's title.
 -->
 <script lang="ts">
   import { savedCommand } from "../../render/command";
   import type { Opened } from "../../render/defaults";
   import type { Renderer } from "../../render/registry";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import { programOf } from "../path";
   import { settingsHash } from "../settings/settings";
   import TfMenu from "../TfMenu.svelte";
+  import TfPath from "../TfPath.svelte";
 
   let {
     opened,
@@ -72,6 +78,7 @@
     class="tf-btn tf-sm tf-rsw-face"
     aria-haspopup="menu"
     aria-expanded={open}
+    title="Render as {shown.name}"
     onclick={() => (open = !open)}
     ><span class="tf-rsw-lab">Render as</span>{" "}<b>{shown.name}</b><svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
       ><path d="M4 6l4 4 4-4" /></svg
@@ -82,10 +89,17 @@
       {#each opened.offered as r (r.id)}
         {@const command = savedCommand(r)}
         {@const isDefault = r.id === opened.renderer?.id}
-        <button type="button" role="menuitemradio" aria-checked={r.id === shown.id} class:tf-on={r.id === shown.id} onclick={() => pick(r)}>
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={r.id === shown.id}
+          class:tf-on={r.id === shown.id}
+          title={command !== null ? `${r.name}\n${command.command}` : undefined}
+          onclick={() => pick(r)}
+        >
           <span class="tf-rsw-tick" aria-hidden="true">{r.id === shown.id ? "✓" : ""}</span>
           <span class="tf-rsw-name"
-            >{r.name}{" "}{#if command !== null}<span class="tf-rsw-sub tf-mono">{command.command}</span>{:else}<span class="tf-rsw-sub"
+            ><span class="tf-rsw-nm">{r.name}</span>{" "}{#if command !== null}<TfPath class="tf-rsw-sub" path={programOf(command.command)} title={command.command} />{:else}<span class="tf-rsw-sub"
                 >built in{BLURB[r.id] ? ` · ${BLURB[r.id]}` : ""}</span
               >{/if}</span
           >

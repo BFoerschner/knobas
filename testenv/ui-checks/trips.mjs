@@ -21,6 +21,8 @@
 //                 `leaves`: the first Enter is meant to change the address. The second must still write and open nothing, and stay there.
 //                 `returns`: the press closes a dialog or an editor and focus goes back to the control with these words, as the spec asks.
 //                 That landing is accepted; a second Enter that writes, reopens or moves still fails.
+//                 `fits`: a menu the prep opened (a selector), which must stand inside the window with no row of it wider than the
+//                 menu, before the first Enter (the render-as pass, 2026-11-19: a renderer's long program ran out of *Render as*).
 //                 `returnsCounting`: the control focus goes back to counts as it goes (*Cloning 3 of 9…*), so `returns` is its start.
 //                 `opens`: the first Enter is meant to open a dialog (*Clone all…*, PR #2479). The second must leave it open and send nothing. These trips press again after `gap`
 //                 ms (200 by default), inside the hold. --gap n presses after n ms instead, so --gap 1000 shows the trip can fail.
@@ -174,6 +176,19 @@ import { join } from "node:path";
 import { launch, screenOpener, sleep } from "./chrome.mjs";
 
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
+/** In the page: why the menu `sel` doesn't fit (out of the window, or a row of it wider than it), or null. */
+const FITS = (sel) => String.raw`(() => {
+  const menu = [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => e.getBoundingClientRect().width > 0);
+  if (!menu) return "no " + ${JSON.stringify(sel)} + " is open";
+  const b = menu.getBoundingClientRect();
+  if (b.left < -0.5 || b.top < -0.5 || b.right > innerWidth + 0.5 || b.bottom > innerHeight + 0.5) return "the menu runs out of the window: " + [b.left, b.top, b.right, b.bottom].map(Math.round).join(", ") + " in " + innerWidth + " x " + innerHeight;
+  if (menu.scrollWidth > menu.clientWidth + 1) return "the menu scrolls sideways by " + (menu.scrollWidth - menu.clientWidth) + " px";
+  for (const row of menu.querySelectorAll("*")) {
+    const r = row.getBoundingClientRect();
+    if (r.width > 0 && (r.right > b.right + 1 || r.left < b.left - 1)) return "'" + row.textContent.trim().slice(0, 60) + "' runs " + Math.round(Math.max(r.right - b.right, b.left - r.left)) + " px out of the menu";
+  }
+  return null;
+})()`;
 // A hidden monitor adds the fold's own row, so a Hide would otherwise leave the count alone.
 const MONITOR_ROWS = ".tf-mon tbody tr:not(.tf-mon-foldrow)";
 const RUN = "build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187";
@@ -347,6 +362,12 @@ const PAGES = [
       { name: "save", open: { sel: ".tf-rnd-own a", row: "Folder listing" }, press: "Save", lands: "Folder listing" },
       { name: "remove", open: { sel: ".tf-rnd-own a", row: "Tree" }, press: "Remove", lands: "Folder listing" },
     ] },
+  ] },
+  // *Render as* with a renderer whose name and program are long (the render-as pass, 2026-11-19; Björn: "the render as orchestra,
+  // when you click on it, and the path of the program is long it gets out of bounds"): the menu stays in the window, and picking
+  // the other long renderer by key (the first is the file's default) gives focus back to the face, which names it.
+  { page: "A file's Render as", route: `${REPO}/files/src/sepa/retry.rs`, trips: [
+    { id: "render-as-long-key", kind: "enter-twice", strict: true, finding: "render-as-path", query: "&fake-long-paths", prep: [{ wait: 600 }, { click: ".tf-rsw-face", starts: "Render as" }, { wait: 400 }], fits: ".tf-rsw-m", press: { sel: "[role=menuitemradio]", starts: "Orchestra on the Mac" }, returns: "Render as Orchestra on the Mac" },
   ] },
   { page: "A repository's Open in…", route: REPO, trips: [
     { id: "openin-browser-key", kind: "enter-twice", strict: true, finding: "open-on-gitea", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", starts: "Browser" }, returns: "Open in…" },
@@ -1110,6 +1131,7 @@ async function worker(queue, results) {
   async function enterTwice(t) {
     await open(t);
     const { words: pressed, row: pressedRow } = await focusPress(t);
+    const misfit = t.fits ? await evaluate(FITS(t.fits)) : null;
     const before = await snap(t.rows);
     await key("Enter");
     const held = t.leaves || t.returns;
@@ -1123,7 +1145,7 @@ async function worker(queue, results) {
     if (t.opens && first.dialogs <= before.dialogs) throw new Error(`the first Enter on "${pressed}" was meant to open a dialog and opened none`);
     const rowLeft = !!t.rows && first.rows.length < before.rows.length;
     const landed = (a) => a.control && !a.pressed && a.words !== pressed;
-    const reasons = [];
+    const reasons = misfit ? [misfit] : [];
     const back = (words) => (t.returnsCounting ? words.startsWith(t.returns) : words === t.returns);
     if (t.returns && !back(first.active.words)) reasons.push(`the first Enter on "${pressed}" should give focus back to "${t.returns}" and it is on "${first.active.words || first.active.tag}"`);
     else if (landed(first.active) && !t.returns && !t.opens) reasons.push(`the first Enter on "${pressed}" put focus on "${first.active.words}", so the second presses that`);

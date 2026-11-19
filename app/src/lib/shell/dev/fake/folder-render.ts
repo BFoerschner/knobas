@@ -86,8 +86,32 @@ export function seed(params: URLSearchParams): void {
   seeded = params.has("fake-folder-render")
     ? [{ id: "folder-listing", name: "Folder listing", command: `${words} {path}`, holds: [], folders: [], output: words.split(/\s+/).includes("page") ? "html" : "text", timeout_secs: 30 }]
     : [];
+  // `?fake-long-paths` (the render-as pass, 2026-11-19): a folder renderer with a long name and a long Windows program,
+  // which draws, and one on a Mac, which fails with its program on stderr.
+  if (params.has("fake-long-paths")) seeded = [...seeded, ...LONG_FOLDER_RENDERERS];
   saved = seeded.map((r) => ({ ...r }));
 }
+
+const LONG_FOLDER_RENDERERS: FolderRenderer[] = [
+  {
+    id: "orchestra-map",
+    name: "Orchestra folder map for the payments team's services",
+    command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-map.exe" --out {out} "{path}"`,
+    holds: [],
+    folders: [],
+    output: "text",
+    timeout_secs: 30,
+  },
+  {
+    id: "orchestra-map-mac",
+    name: "Orchestra map on the Mac",
+    command: `"/Users/someone with a long name/Library/Application Support/Orchestra Renderer/2026/bin/orchestra-map" --fail-on-empty "{path}"`,
+    holds: [],
+    folders: [],
+    output: "text",
+    timeout_secs: 30,
+  },
+];
 
 export function attach(installed: FakeBridge): void {
   bridge = installed;
@@ -118,7 +142,7 @@ export function handlers(): Handlers {
         setTimeout(() => {
           running.delete(slot);
           if (renderer.command.includes("fail")) {
-            failed.set(slot, { status: 2, stderr: `${renderer.command.split(" ")[0]}: no project file in ${at.folder || "the top folder"}\n` });
+            failed.set(slot, { status: 2, stderr: `${/^"([^"]*)"|^(\S+)/.exec(renderer.command)?.slice(1).find((w) => w !== undefined) ?? ""}: no project file in ${at.folder || "the top folder"}\n` });
           } else {
             const token = `fake-${++tokens}`;
             const png = renderer.command.includes("png");

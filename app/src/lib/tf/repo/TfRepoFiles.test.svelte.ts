@@ -570,6 +570,30 @@ test("a file a saved command renderer accepts is run by its id and drawn in the 
   }
 });
 
+test("Render as shows a command renderer by its name and program alone, the whole command in its title (render-as pass)", async () => {
+  const command = String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe" --profile "C:\Users\some one\AppData\Roaming\profiles\default.json" --format svg`;
+  const name = "Orchestra score renderer for the payments team's sequence diagrams";
+  installCommands([{ id: "orchestra", name, command, patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
+  const commands: CommandPort = { run: async () => ({ outcome: "failed", status: 127, stderr: "" }) };
+  try {
+    draw(openSource({ "docs/index.page": "<p>Hi</p>" }).entityView, "docs/index.page", null, undefined, commands);
+    await settle();
+
+    expect(target.querySelector(".tf-rsw-face")?.getAttribute("title")).toBe(`Render as ${name}`);
+    menuItems();
+    const item = [...target.querySelectorAll<HTMLElement>(".tf-rsw .tf-menu [role='menuitemradio']")].find((one) => text(one).includes("Orchestra"))!;
+    expect(text(item.querySelector(".tf-rsw-nm"))).toBe(name);
+    const program = item.querySelector(".tf-path")!;
+    expect(text(program)).toBe(String.raw`C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe`);
+    expect(text(program.querySelector(".tf-path-tail"))).toBe("orchestra-render.exe");
+    expect(text(item)).not.toContain("--profile");
+    expect(item.getAttribute("title")).toBe(`${name}\n${command}`);
+    expect(program.getAttribute("title")).toBe(command);
+  } finally {
+    installCommands([]);
+  }
+});
+
 // -- Markdown (#2255) -----------------------------------------------------------
 
 const MD_FILES: Files = {
