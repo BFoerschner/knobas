@@ -96,6 +96,18 @@ const MAX_LIMIT: u32 = 200;
 /// costs anything.
 pub(crate) const MAX_FILTER_VALUES: usize = 32;
 
+/// The most bytes the future of [`Searcher::search`] or
+/// [`Searcher::page_search`] may take (the ux21 Windows pass, 2026-11-19).
+///
+/// A Tauri command's future is built and moved by value several times on
+/// the thread that answers the webview before it is spawned, and on Windows
+/// that is the main thread, whose stack is 1 MB, and each of those frames
+/// holds several copies of it. ux20's search future was 10 kB and its largest
+/// such frame 146 kB; ux21's inline branches made the future 37 kB, the
+/// frames 444 kB, and the launcher's first letter overflowed the stack. A
+/// branch that grows the future past this goes on the heap.
+pub const FUTURE_MOST: usize = 16 * 1024;
+
 /// How many rows one kind may contribute to a page.
 ///
 /// So a flood of tickets cannot push every build off the launcher (§4 groups
@@ -591,8 +603,17 @@ impl Searcher {
                 _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
             }
         };
-        let (rows, parted, picked, corrected_rows) =
-            tokio::join!(ask(text, parsed.prefix_last_term), parts, names, corrected);
+        // Each branch on the heap (the ux21 Windows pass, 2026-11-19): three
+        // of them hold a whole `ask`, so inline they made this future 37 kB,
+        // and Windows copies a command's future several times on the main
+        // thread's 1 MB stack before it is spawned: the launcher's first
+        // letter overflowed it (`0xc00000fd`). [`FUTURE_MOST`] holds it.
+        let (rows, parted, picked, corrected_rows) = tokio::join!(
+            Box::pin(ask(text, parsed.prefix_last_term)),
+            Box::pin(parts),
+            Box::pin(names),
+            Box::pin(corrected)
+        );
         let mut rows = rows?;
         let corrected_rows = corrected_rows?;
         let mut needles = query::needles(&parsed.query.text);
@@ -1097,7 +1118,8 @@ impl Searcher {
                     None => Ok(Vec::new()),
                 }
             };
-            let (picked, parted) = tokio::join!(names, parts);
+            // On the heap, as in [`Self::search_as`] (the ux21 Windows pass).
+            let (picked, parted) = tokio::join!(Box::pin(names), Box::pin(parts));
             if let Some(read) = &reads {
                 rows = group::with_names(
                     rows,
