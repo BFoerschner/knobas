@@ -32,6 +32,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutApplication, OpenObject, OpenObjectKind } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { lastName } from "../../shell/ack.svelte";
   import type { EscTargetOf } from "../escape";
   import { pageVisible } from "../kept-pages.svelte";
   import { backStep } from "../page-name.svelte";
@@ -324,7 +325,8 @@
     busy = false;
     noteTried(picked.entityId);
     if (gone || id === null) return;
-    await apps.runObject(picked.entityId, entry.name, id, object);
+    // The chip names the repository it was tried on (ux21), as the toast's command line did.
+    await apps.runObject(picked.entityId, entry.name, id, object, object.kind === "repository" ? lastName(picked.title) : undefined);
   }
 
   /** Put the list back as it was before the first try. */

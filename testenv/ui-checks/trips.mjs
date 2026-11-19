@@ -26,7 +26,9 @@
 //                 ms (200 by default), inside the hold. --gap n presses after n ms instead, so --gap 1000 shows the trip can fail.
 //   leave-back    press by key, which raises a toast and hides a row. While the toast is up, go to `via` and back. Fails if the rows
 //                 differ from just after the press. Can't run if the press hides no row or the toast has gone by the return.
-//                 `rowsStay`: the press isn't meant to hide one (*Save link set*), so the rows are only compared. `reopen`: what to press on the
+//                 `rowsStay`: the press isn't meant to hide one (*Save link set*), so the rows are only compared. `ack`: the press hands
+//                 something to another program (*Try it*), which a chip says for a second (ux21), so a chip stands for the toast
+//                 and nothing has to span the leave. `reopen`: what to press on the
 //                 return, for rows in something a leave closes. `backTo`: where to come back to, for a press that itself leaves (*Create pull
 //                 request* lands on *Pull requests*); the route by default.
 //   esc-sweep     focus each field on the page, or those in `fields`, and press Esc. Fails if focus falls to the body. For each of `typed` (a value with no
@@ -129,8 +131,8 @@
 //                 if knobas's menu isn't up by the next frame (or is, with `none`), if its rows aren't `items` (their ids), if opening
 //                 it moved the address or sent a write, if a second right press there doesn't draw it again in place, or if Esc
 //                 doesn't close it with focus back where it was. `select` selects `on`'s words first. `pick` (and `sub`, a row of
-//                 *Open in… ▸*) is chosen by pointer, and then `toast` must start a toast, `hash` start the address, or `launcher`
-//                 be the launcher's box. The clipboard is the page's own stub: nothing reaches the machine's.
+//                 *Open in… ▸*) is chosen by pointer, and then `toast` must start a toast, `ack` an opening's chip (ux21), `hash`
+//                 start the address, or `launcher` be the launcher's box. The clipboard is the page's own stub: nothing reaches the machine's.
 //
 //   app-page      The application page (PR #2479, 2026-11-13). From `route` (a repository), *Open in… › Add an application*, the page
 //                 must be at its address; name and command typed, the second repository picked, *It will run* must name that repository's
@@ -205,7 +207,7 @@ const RIGHT_CLICK = [
     { id: "rc-repo-row", kind: "right-click", finding: "right-click", on: { sel: "tbody tr.tf-row td:last-child" }, items: ["open", "prs", "branches", "commits", "link", "open-default", "open-in", "web", "copy-name", "copy-full", "copy-link"], pick: "prs", hash: "#/repo/" },
   ] },
   { page: "Right-click, a repository's files", route: `${REPO}/files`, trips: [
-    { id: "rc-folder", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows .tf-fdir" }, items: ["open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "open-in", sub: "app-terminal", toast: "Started " },
+    { id: "rc-folder", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows .tf-fdir" }, items: ["open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "open-in", sub: "app-terminal", ack: "Opening " },
     { id: "rc-file", kind: "right-click", finding: "right-click", on: { sel: ".tf-ftrows a" }, items: ["open", "history", "open-default", "open-in", "forge", "copy-path", "copy-full", "copy-link"], pick: "copy-path", toast: "Copied " },
   ] },
   { page: "Right-click, a pull request's commits", route: "pr/mock%3Apayout-service%23142/commits", trips: [
@@ -302,7 +304,7 @@ const PAGES = [
   { page: "Settings, adding an application", route: "settings/checkouts/add/mock%3Atidewater%2Fpayout-service", trips: [
     { id: "app-try-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" } },
     { id: "app-try-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", once: true, prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" } },
-    { id: "app-try-leave", kind: "leave-back", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" }, rows: ".tf-apprun", rowsStay: true, via: "inbox" },
+    { id: "app-try-leave", kind: "leave-back", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apprun button", text: "Try it" }, rows: ".tf-apprun", rowsStay: true, ack: true, via: "inbox" },
     { id: "app-add-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Add application" }, leaves: true },
     { id: "app-add-pointer", kind: "pointer-twice", strict: true, finding: "apps-page", once: true, prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Add application" } },
     { id: "app-add-leave", kind: "leave-back", strict: true, finding: "apps-page", prep: APP_TYPED, press: { sel: ".tf-apppage button", text: "Add application" }, rows: ".tf-stg-apps tbody tr", rowsStay: true, via: "inbox", backTo: "settings/checkouts" },
@@ -938,6 +940,8 @@ const LIB = String.raw`(() => {
         dialog: say(open.at(-1)?.querySelector("h2, h3")?.textContent),
         writes: window.__writes ?? [],
         toasts: [...document.querySelectorAll(".tf-toast")].filter(seen).map((t) => say(t.textContent)),
+        // An opening's chip (ux21): what a press that hands something to another program says, in place of a toast.
+        acks: [...document.querySelectorAll(".tf-ack")].filter(seen).map((t) => say(t.textContent)),
         rows: rows ? [...document.querySelectorAll(rows)].filter(seen).map((r) => say(r.textContent)) : [],
         active: { body, pressed: !body && a === window.__pressed, control: !body && a.matches(CONTROL) && !off, words: body ? "" : words(a), row: body ? "" : rowOf(a), tag: body ? "body" : a.tagName.toLowerCase(), scroller: !body && (a.matches(".tf-scroller") || (a.tabIndex === -1 && a.tagName !== "TEXTAREA" && /auto|scroll/.test(getComputedStyle(a).overflowY))) ? String(a.className) : "" },
       });
@@ -1366,9 +1370,11 @@ async function worker(queue, results) {
     await key("Enter");
     await sleep(t.after ?? 500);
     const after = await snap(t.rows);
-    if (!after.toasts.length) throw new Error(`"${pressed}" raised no toast`);
+    // `ack`: the press hands something to another program, which a chip says for a second (ux21), so no toast spans the leave.
+    if (t.ack && !after.acks.length) throw new Error(`"${pressed}" raised no chip`);
+    if (!t.ack && !after.toasts.length) throw new Error(`"${pressed}" raised no toast`);
     if (!t.rowsStay && after.rows.length >= before.rows.length) throw new Error(`"${pressed}" hid no row (${before.rows.length} then ${after.rows.length})`);
-    const toast = after.toasts.at(-1);
+    const toast = t.ack ? after.acks.at(-1) : after.toasts.at(-1);
     await go(t.via);
     const away = await snap();
     await go(t.backTo ?? t.route);
@@ -1378,7 +1384,7 @@ async function worker(queue, results) {
       await sleep(700);
     }
     const back = await snap(t.rows);
-    if (!back.toasts.includes(toast)) throw new Error(`the toast "${toast}" had gone by the return, so nothing was proved`);
+    if (!t.ack && !back.toasts.includes(toast)) throw new Error(`the toast "${toast}" had gone by the return, so nothing was proved`);
     // Digits out: rows carry the clock (14:47), and a minute can turn mid-trip. These are counts, so a row that returns still raises one.
     const same = (r) => r.replace(/\d+/g, "#");
     const count = (list) => list.reduce((m, r) => m.set(same(r), (m.get(same(r)) ?? 0) + 1), new Map());
@@ -1389,7 +1395,7 @@ async function worker(queue, results) {
     const reasons = [];
     if (returned.length) reasons.push(`after "${pressed}", ${t.via} and back, ${[...new Set(returned)].map((r) => `"${r.slice(0, 70)}"`).join(", ")} is drawn again under the toast "${toast.slice(0, 60)}"`);
     if (lost.length) reasons.push(`after "${pressed}", ${t.via} and back, ${[...new Set(lost)].map((r) => `"${r.slice(0, 70)}"`).join(", ")} has gone`);
-    return { reasons, note: `"${pressed}": ${before.rows.length} rows, ${after.rows.length} after the press, ${back.rows.length} after ${t.via} (${away.hash}) and back, toast still up` };
+    return { reasons, note: `"${pressed}": ${before.rows.length} rows, ${after.rows.length} after the press, ${back.rows.length} after ${t.via} (${away.hash}) and back${t.ack ? "" : ", toast still up"}` };
   }
 
   async function typeOne(sel, type) {
@@ -2658,7 +2664,7 @@ async function worker(queue, results) {
       if (t.toast) {
         const back = await snap(t.toast.rows);
         const toast = pressed.toasts.at(-1);
-        if (!back.toasts.includes(toast)) throw new Error(`the toast "${toast}" had gone by the return, so nothing was proved`);
+        if (!t.ack && !back.toasts.includes(toast)) throw new Error(`the toast "${toast}" had gone by the return, so nothing was proved`);
         const same = (r) => r.replace(/\d+/g, "#");
         if (back.rows.map(same).join("\n") !== pressed.rows.map(same).join("\n")) reasons.push(`by ${how}, the rows came back as ${back.rows.length}, ${pressed.rows.length} after the press, under the toast "${toast.slice(0, 50)}"`);
       }
@@ -3173,8 +3179,9 @@ async function worker(queue, results) {
     if (!line.includes(`/${picked}`)) reasons.push(`It will run reads "${line}", not ${picked}'s checkout`);
     await click(".tf-apprun button", { text: "Try it" });
     await sleep(700);
-    const toasts = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('.tf-toast')].map((x) => x.textContent.trim()))`));
-    if (!toasts.some((x) => x.startsWith("Started Trip App:") && x.includes(`/${picked}`))) reasons.push(`Try it said ${JSON.stringify(toasts)}, not that it started at ${picked}`);
+    // The chip names the repository it was tried on (ux21); a toast would mean it did not start.
+    const said = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('.tf-ack, .tf-toast')].map((x) => x.textContent.trim()))`));
+    if (!said.includes(`Opening ${picked} in Trip App`)) reasons.push(`Try it said ${JSON.stringify(said)}, not that it is opening ${picked}`);
     await click(".tf-apppage button", { text: "Add application" });
     await opener.settleAfterChange();
     const back = await evaluate("location.hash");
@@ -3462,6 +3469,7 @@ async function worker(queue, results) {
     const after = await snap();
     if ((await menus()) > 0) reasons.push("the pick left the menu open");
     if (t.toast && !after.toasts.some((x) => x.startsWith(t.toast))) reasons.push(`no toast starting "${t.toast}": ${tidy(after.toasts)}`);
+    if (t.ack && !after.acks.some((x) => x.startsWith(t.ack))) reasons.push(`no chip starting "${t.ack}": ${tidy(after.acks)}`);
     if (t.hash && !after.hash.startsWith(t.hash)) reasons.push(`the pick went to ${after.hash}, not ${t.hash}…`);
     if (t.launcher) {
       const box = await evaluate(`document.querySelector('[role=dialog] input')?.value ?? null`);

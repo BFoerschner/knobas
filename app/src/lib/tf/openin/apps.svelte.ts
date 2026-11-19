@@ -52,8 +52,11 @@ export interface Apps {
    * says why when it didn't start.
    */
   run(entityId: string, name: string, at: OpenAt): Promise<void>;
-  /** Run a saved application on a code object (#2274), as {@link run} does. */
-  runObject(entityId: string, name: string, application: string, object: OpenObject): Promise<void>;
+  /**
+   * Run a saved application on a code object (#2274), as {@link run} does. `item` names it on the chip in place of the
+   * object's own name: *Try it* on a repository names the repository it was tried on.
+   */
+  runObject(entityId: string, name: string, application: string, object: OpenObject, item?: string | null): Promise<void>;
   /** Run a saved application on a folder of the checkout as on the checkout (2026-11-16), as {@link run} does. */
   runFolder(entityId: string, name: string, application: string, folder: string): Promise<void>;
   /**
@@ -127,9 +130,9 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
     async run(entityId, name, at) {
       await said(name, at.file ? lastName(at.file) : null, () => ports.openCheckout(entityId, at));
     },
-    async runObject(entityId, name, application, object) {
+    async runObject(entityId, name, application, object, item) {
       const open = ports.openObject ?? realAppsPorts.openObject!;
-      await said(name, objectName(object), () => open(entityId, application, object));
+      await said(name, item ?? objectName(object), () => open(entityId, application, object));
     },
     async runFolder(entityId, name, application, folder) {
       const open = ports.openFolder ?? realAppsPorts.openFolder!;

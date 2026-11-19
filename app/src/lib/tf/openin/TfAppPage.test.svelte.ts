@@ -227,7 +227,8 @@ test("Try it saves the draft and runs it by the id the save gave it; pressed twi
     [PAYOUT, "mygitviewer", { kind: "repository" }],
     [PAYOUT, "mygitviewer", { kind: "repository" }],
   ]);
-  expect(acks.item?.text).toBe("Opening in MyGitViewer");
+  // The chip names the repository it was tried on (ux21).
+  expect(acks.item?.text).toBe("Opening payout-service in MyGitViewer");
   expect(localStorage.getItem(LAST_TRIED_KEY)).toBe(PAYOUT);
 
   button("Add application").click();
