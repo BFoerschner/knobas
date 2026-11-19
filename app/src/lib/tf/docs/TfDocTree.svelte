@@ -17,6 +17,10 @@
   `tree-store.ts`): a page that says it has pages under it is a fold before
   they are read, and opening it asks for them (`need`).
 
+  **Folds open for the open page only while the rail follows it** (`follow`, 2026-11-19): after the launcher, another
+  section or a search brought the page. A press in Docs moves nothing in the tree, so a page opened from a link or a
+  row whose fold is closed opens no fold: the closed fold holding it is marked instead (`tf-holds`), which takes no room.
+
   **One `Tab` stop** (F-444, `tree-keys.ts`): the open page's row, else the first. ↑ and ↓ walk the rows shown, → opens a
   fold and then steps into it, ← closes it and then steps out, as the search hits above and the launcher walk.
 -->
@@ -37,8 +41,10 @@
     current,
     under,
     held,
+    path,
     opened,
     reveal = [],
+    follow = true,
     need,
   }: {
     space: DocSpace;
@@ -46,18 +52,23 @@
     current: string | null;
     /** The space's pages by parent, which the top call builds and the folds below share. */
     under?: Map<string | null, DocNode[]>;
-    /** The folds holding the open page, which start open. */
+    /** The folds that start open: those holding a queued page, and those holding the open page while the tree follows it. */
     held?: Set<string>;
+    /** The folds holding the open page, open or not: a closed one is marked. */
+    path?: Set<string>;
     /** The folds the reader opened, so they draw what is under them. */
     opened?: SvelteSet<string>;
     /** Pages a page was queued under: the folds holding them start open too, so its row, and the page once it lands, are in view (F-449). */
     reveal?: string[];
+    /** Whether the folds holding the open page start open: the rail follows the page (2026-11-19). */
+    follow?: boolean;
     /** A fold drawn open whose pages are not read yet: read them (`tree-store.ts`). */
     need?: ((id: string) => void) | undefined;
   } = $props();
 
   const index = $derived(under ?? childrenByParent(space));
-  const holding = $derived(held ?? new Set([current, ...reveal].flatMap((id) => [...foldsHolding(space, id)])));
+  const way = $derived(path ?? foldsHolding(space, current));
+  const holding = $derived(held ?? new Set([...(follow ? way : []), ...reveal.flatMap((id) => [...foldsHolding(space, id)])]));
   const own = new SvelteSet<string>();
   const open = $derived(opened ?? own);
   const nodes = $derived(index.get(parent) ?? []);
@@ -94,14 +105,14 @@
   {@const starts = queued.length > 0 || holding.has(node.entity_id)}
   {#if hasChildren(node, index) || queued.length > 0}
     <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)} {@attach win.row(node.entity_id)}>
-      <summary class:tf-cur={node.entity_id === current}
+      <summary class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !starts && !open.has(node.entity_id)}
         ><a class="tf-sl" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a
         ></summary
       >
       <div class="tf-fold-in">
         {#if starts || open.has(node.entity_id)}
-          <Self {space} parent={node.entity_id} {current} under={index} held={holding} opened={open} {need} />
+          <Self {space} parent={node.entity_id} {current} under={index} held={holding} path={way} opened={open} {need} />
         {/if}
         {#each queued as echo, n (n)}
           <span class="tf-dl-queued">{echo.text} <TfStateChip text={echo.state} tone="info" /></span>

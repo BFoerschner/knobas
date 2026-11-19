@@ -162,6 +162,31 @@ export function takeTold(hash: string): Told | null {
 /** The name {@link goAcross} gave the place it left, for the change {@link takeTold} just answered about. */
 export const leftName = (): string | undefined => toldLeft;
 
+/**
+ * How the shell's last address change came about, for a page that treats ways in apart: Docs' rail holds its space
+ * through a press in Docs, follows the page the launcher or another section opened, and is put back as it was on a
+ * step through history (2026-11-19, `docs/decisions/2026-11-19-the-docs-rail-holds-its-space.md`).
+ */
+export interface Arrival {
+  hash: string;
+  /** What it was told, or `null` for a plain press of a link and a step through history. */
+  how: Told | null;
+  /** A step to an entry history already held (`⌘[`, `⌘]`, `Esc`'s step back), as the shell counts a return. */
+  returning: boolean;
+}
+
+let arrival: Arrival | null = null;
+
+/** The shell's: the address it just arrived at, and how. */
+export function noteArrival(next: Arrival): void {
+  arrival = next;
+}
+
+/** How `hash` was arrived at, if it is the shell's last arrival; `null` for an address the shell did not see move. */
+export function arrivalAt(hash: string): Arrival | null {
+  return arrival !== null && arrival.hash === hash ? arrival : null;
+}
+
 /** The stamp in a history state, or `null` when the entry has none yet. */
 export function stampOf(state: unknown): Opened | null {
   if (typeof state !== "object" || state === null || !(KEY in state)) return null;

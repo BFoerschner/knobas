@@ -34,6 +34,8 @@
 .tf-rd-tree .tf-dl-queued { display: block; padding: 3px 8px; color: var(--muted); font-style: italic; }
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
+/* A closed fold holding the open page (2026-11-19): the open row's fill as an edge, which takes no room, since a press in Docs opens no fold. */
+.tf-rd-tree details > summary.tf-holds { box-shadow: inset 2px 0 0 var(--fill); color: var(--ink); }
 .tf-rd-sheet {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-docs-outline, 268px); column-gap: 56px; align-items: start;
   padding: 22px clamp(16px, 3vw, 48px) 90px;

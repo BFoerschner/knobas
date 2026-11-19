@@ -84,7 +84,7 @@
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
   import { runsRead } from "./builds/runs-read.svelte";
-  import { goBackTo, goWithoutOpener, leftName, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
+  import { goBackTo, goWithoutOpener, leftName, noteArrival, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { PAGES } from "./pages";
@@ -334,6 +334,7 @@
     // A stamped entry is one history stepped to, which is a return as `Esc` is. A tab switch is neither that nor a new place.
     const returning = how !== "replace" && (stepping || had !== null);
     const opening = how !== "replace" && !returning && !samePage(hash, now);
+    noteArrival({ hash: now, how, returning });
     stepping = false;
     if (how !== "replace" && had !== null) {
       here = had;

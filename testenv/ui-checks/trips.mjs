@@ -141,6 +141,12 @@
 //                 the address is `list` again with focus on the row holding `lands`, in view and not a control a second press would press; and unless Back
 //                 from the list goes to `route`, not to a page of it.
 //
+//   tree-walk     2026-11-19 (Björn: "not switch to the space when I'm just clicking through the tree"). At `route` (and `size`), each of `steps`
+//                 by real pointer: { fold } opens the fold whose head starts with those words, { scroll } scrolls the rail's body there, { press } presses
+//                 a row of the rail (`starts` its words), which must change the address. Around each press: the Space picker's value, the rail's
+//                 scroll and every row of the rail (fold heads, links, the filter) with where it stands. Fails if a press changes any of them by
+//                 more than 1 px: a press in the tree opens the page and moves nothing in the rail.
+//
 //   frame-scroll  2026-11-17 (Björn: "When I have an application render an html for code folders I can't scroll it even though it's longer than the page").
 //                 A renderer's long page in its sandboxed `frame` (a folder renderer's under `fake-folder-render=page <words>`, the *Cat* file renderer's
 //                 under `fake-render-page=<words>`). Fails if the frame's sandbox isn't "", if `header` or the frame's bottom is out of the pane at rest
@@ -253,6 +259,19 @@ const PAGES = [
   ] },
   { page: "Docs", route: "docs", trips: [
     { id: "docs-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "docs", rows: "a.tf-dh-row, [role=treeitem]", query: STILL_Q },
+  ] },
+  // A press in the tree moves nothing in the rail (2026-11-19): from the list of every space, and from a page's own space.
+  { page: "Docs, through the tree", route: "docs", trips: [
+    { id: "docs-tree-walk-home", kind: "tree-walk", strict: true, finding: "2026-11-19", size: [1440, 620], steps: [
+      { fold: "Engineering" }, { fold: "Payments" }, { scroll: 60 },
+      { press: "PSP error codes" }, { press: "Refund flows" },
+      { fold: "Operations" }, { press: "On-call handbook" }, { press: "SEPA payout retry design" },
+    ] },
+  ] },
+  { page: "Docs, through the tree", route: "page/confluence%3Asepa", trips: [
+    { id: "docs-tree-walk-space", kind: "tree-walk", strict: true, finding: "2026-11-19", size: [1440, 620], steps: [
+      { fold: "Customs" }, { scroll: 40 }, { press: "EDI message formats" }, { press: "Payout batch lifecycle" }, { press: "Customs" },
+    ] },
   ] },
   { page: "Docs, a space", route: "docs/space/ENG", trips: [
     { id: "space-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: "a.tf-dh-row, [role=treeitem]", query: STILL_Q },
@@ -2422,6 +2441,54 @@ async function worker(queue, results) {
     return { reasons, note: notes.join("; ") };
   }
 
+  async function treeWalk(t) {
+    const reasons = [];
+    const notes = [];
+    const RAIL = ".tf-kept:not([hidden]) .tf-rd-tree";
+    const read = async () => JSON.parse(await evaluate(`JSON.stringify((() => {
+      const rail = document.querySelector(${JSON.stringify(RAIL)});
+      const body = rail.querySelector(".tf-dl-body");
+      const rows = [...rail.querySelectorAll("summary, a, input, h4")].filter((e) => e.getClientRects().length);
+      return { picker: rail.querySelector("select[aria-label='Space']")?.value ?? null, top: body.scrollTop, rows: rows.map((e) => [e.textContent.trim().replace(/\\s+/g, " ").slice(0, 60), Math.round(e.getBoundingClientRect().top)]) };
+    })())`));
+    const head = (words) => `[...document.querySelectorAll(${JSON.stringify(`${RAIL} .tf-dl-body details > summary`)})].find((s) => s.textContent.trim().startsWith(${JSON.stringify(words)}))`;
+    if (t.size) await fit(...t.size);
+    try {
+      await open(t);
+      await sleep(400);
+      for (const step of t.steps) {
+        if (step.fold) {
+          if (!(await evaluate(`!!${head(step.fold)}`))) throw new Error(`no fold "${step.fold}" in the rail`);
+          await evaluate(`(() => { const s = ${head(step.fold)}; if (!s.parentElement.open) s.click(); })()`);
+          await sleep(250);
+          continue;
+        }
+        if (step.scroll !== undefined) {
+          const at = await evaluate(`(() => { const b = document.querySelector(${JSON.stringify(`${RAIL} .tf-dl-body`)}); b.scrollTop = ${step.scroll}; return b.scrollTop; })()`);
+          if (at < step.scroll - 1) throw new Error(`the rail has nowhere to scroll to ${step.scroll} (${at})`);
+          await sleep(150);
+          continue;
+        }
+        const before = await read();
+        const was = await hashNow();
+        await press1({ sel: `${RAIL} .tf-dl-body a[href^="#/page/"]`, starts: step.press });
+        await sleep(600);
+        const after = await read();
+        const now = await hashNow();
+        if (now === was) { reasons.push(`"${step.press}" changed no address, so it proves nothing`); continue; }
+        if (after.picker !== before.picker) reasons.push(`"${step.press}" turned the Space picker from ${before.picker} to ${after.picker}`);
+        if (Math.abs(after.top - before.top) > 1) reasons.push(`"${step.press}" scrolled the rail from ${before.top} to ${after.top}`);
+        const moved = before.rows.filter(([words, top], i) => after.rows[i]?.[0] !== words || Math.abs(after.rows[i][1] - top) > 1);
+        if (after.rows.length !== before.rows.length) reasons.push(`"${step.press}" took the rail from ${before.rows.length} rows to ${after.rows.length}`);
+        else if (moved.length > 0) reasons.push(`"${step.press}" moved ${moved.length} rows of the rail, the first "${moved[0][0]}"`);
+        notes.push(`${step.press}: ${after.rows.length} rows, picker ${after.picker}, scroll ${after.top}`);
+      }
+    } finally {
+      if (t.size) await fit(1440, 900);
+    }
+    return { reasons, note: notes.join("; ") };
+  }
+
   async function navDocs(t) {
     const reasons = [];
     const notes = [];
@@ -3389,7 +3456,7 @@ async function worker(queue, results) {
     return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
   }
 
-  const KINDS = { "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };

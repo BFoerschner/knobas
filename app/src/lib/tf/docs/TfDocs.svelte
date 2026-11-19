@@ -205,8 +205,9 @@
     provideEmbeds,
     keepDrawn,
     railSpaces,
+    foldsHolding,
   } from "./docs";
-  import { replaceAddress } from "../opener";
+  import { arrivalAt, replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { linkedOn } from "../job/connections";
@@ -328,7 +329,10 @@
   let me = $state<string[]>([]);
   /** The page could not be opened because no such page is held. */
   let pageMissing = $state(false);
-  /** The picked space (`spaceId`), `*` for all, or `null` to follow the page. */
+  /**
+   * What the rail shows: a space (`spaceId`), `*` for every space, or `null` to follow the address until it is settled,
+   * which it is as soon as the address says what it shows (`settleRail`). Settled, a press in Docs never changes it.
+   */
   let picked = $state<string | null>(null);
 
   /** The search's words (#860): the address's (#2425) or a label chip's. */
@@ -817,11 +821,12 @@
     });
   });
 
-  /** The search is over: the tree is back, and the highlighting and the search's *All spaces* gone. */
+  /** The search is over: the tree is back on the open page's space, and the highlighting and the search's *All spaces* gone. */
   function endSearch(): void {
     query = "";
     setFind("");
     picked = null;
+    followPage = true;
     fromChip = null;
   }
 
@@ -888,6 +893,113 @@
         },
       }),
     );
+  });
+
+  // ---- the rail holds its space (Björn, 2026-11-19: "not switch to the space when I'm just clicking through the tree") ----
+  // `docs/decisions/2026-11-19-the-docs-rail-holds-its-space.md`. A press in Docs (the tree, a link in a page, the home's
+  // own lists) opens the page and moves nothing in the rail: its space, its folds and its scroll stay. The space changes
+  // where the reader asks for one: the picker, a space's own page, a search; and where the page came from outside Docs
+  // (the launcher, another section, a notification), the rail follows it there. A step through history puts the rail
+  // back as it was on that entry.
+
+  /** Whether the tree opens the folds around the open page: after an arrival that follows it, until a press in Docs. */
+  let followPage = $state(true);
+  /** The place the rail last settled on (a section of one page is the same place), the page it had open, and whether Docs was shown then. */
+  let railAt: string | null = null;
+  let railPage: string | null = null;
+  let railShown = true;
+  /** Where an entry of history keeps what the rail showed on it, beside the shell's stamp. */
+  const RAIL_KEY = "knobasDocsRail";
+
+  const placeKey = (at: typeof place): string =>
+    at.kind === "page" ? `page:${at.id}` : at.kind === "space" ? `space:${at.source ?? ""}:${at.key}` : at.kind === "search" ? `search:${at.words}` : "home";
+
+  /** What the rail showed on the entry history stepped to, if it said. */
+  function railOfEntry(): string | null {
+    const state: unknown = history.state;
+    const kept = typeof state === "object" && state !== null ? (state as Record<string, unknown>)[RAIL_KEY] : undefined;
+    return typeof kept === "string" ? kept : null;
+  }
+
+  function stampRail(): void {
+    if (picked === null) return;
+    const state: unknown = history.state;
+    const base = typeof state === "object" && state !== null ? (state as Record<string, unknown>) : {};
+    if (base[RAIL_KEY] === picked) return;
+    history.replaceState({ ...base, [RAIL_KEY]: picked }, "");
+  }
+
+  /**
+   * The folds open around the page being left stay open: they were opened for it, and a press in Docs moves nothing.
+   * The tree stops opening folds for the open page from here on, so they are the reader's now.
+   */
+  function holdFolds(): void {
+    if (followPage && railPage !== null && tree !== null) {
+      const space = spaceOfPage(tree, railPage);
+      if (space !== undefined) {
+        const id = spaceId(space);
+        const folds = foldsOf(id);
+        for (const fold of foldsHolding(space, railPage)) folds.add(fold);
+        if (picked === "*") openSpaces.add(id);
+      }
+    }
+    followPage = false;
+  }
+
+  /** A page arrived at: hold the rail, follow the page, or put the rail back as the entry had it. */
+  function arriveRail(fromOutside: boolean): void {
+    // The home, a space's page and a search say what the rail shows themselves.
+    if (place.kind !== "page") return;
+    const came = arrivalAt(location.hash);
+    // The same entry with another address (a search's address once Clear ends it): what ended the search says.
+    if (came?.how === "replace") return;
+    if (came?.returning) {
+      const was = railOfEntry();
+      if (was !== null) {
+        holdFolds();
+        picked = was;
+        return;
+      }
+    } else if (!fromOutside && came?.how !== "launched" && came?.how !== "unopened") {
+      holdFolds();
+      return;
+    }
+    picked = null;
+    followPage = true;
+  }
+
+  $effect(() => {
+    const at = placeKey(place);
+    const visible = shown();
+    untrack(() => {
+      if (!visible) {
+        railShown = false;
+        return;
+      }
+      if (at !== railAt) arriveRail(railAt === null || !railShown);
+      railAt = at;
+      railPage = place.kind === "page" ? place.id : null;
+      railShown = true;
+      stampRail();
+    });
+  });
+
+  // Settled as soon as the address says what the rail shows: the home every space, a space's page its space, a page its
+  // own space once that is known, or every space where the tree does not hold it. A search keeps its own.
+  $effect(() => {
+    if (picked !== null || tree === null || searching || place.kind === "search") return;
+    const space = shownSpace;
+    if (space !== undefined) picked = spaceId(space);
+    else if (place.kind !== "page" || pageMissing || page?.entity_id === place.id) picked = "*";
+  });
+
+  // The entry says what the rail shows on it, for a step back to it.
+  $effect(() => {
+    void picked;
+    if (!shown()) return;
+    untrack(() => {
+      if (railAt === placeKey(place)) stampRail();
+    });
   });
 
   // ---- below 900px the tree is a drawer over the page (#2084) ----
@@ -1730,8 +1842,9 @@
           {/if}
         {/each}
       {:else}
-        <!-- The home lists *For you* itself. -->
-        {#if forYou.length > 0 && !home}
+        <!-- Over one space's tree only: the home lists *For you* itself, and the list of every space is browsing, where a
+             block arriving with a page would push it down (2026-11-19). -->
+        {#if forYou.length > 0 && shownSpace !== undefined}
           <div class="tf-dl-for">
             <h4>For you</h4>
             {#each forYou as item (item.entity_id)}
@@ -1758,17 +1871,19 @@
             <p class="tf-dl-note">No space's name or key holds {spaceFilter.text.trim()}. <button type="button" class="tf-linkish" onclick={() => (spaceFilter.text = "")}>Clear</button></p>
           {/if}
           {#each rail.shown as space (spaceId(space))}
-            {@const holds = space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}
+            {@const here = space.pages.some((p) => p.entity_id === current)}
+            {@const holds = (followPage && here) || space.pages.some((p) => revealed.includes(p.entity_id))}
             {@const from = spaceSource(space, tree.spaces)}
+            {@const open = holds || openSpaces.has(spaceId(space))}
             <details
-              open={holds || openSpaces.has(spaceId(space))}
+              {open}
               ontoggle={(event) => {
                 if (!event.currentTarget.open) openSpaces.delete(spaceId(space));
                 else if (!holds) openSpaces.add(spaceId(space));
               }}
             >
-              <summary class="tf-spc" {@attach menuThing(() => ({ kind: "space", id: spaceId(space), name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
-              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} need={lazy ? needFold : undefined} /></div>
+              <summary class="tf-spc" class:tf-holds={here && !open} {@attach menuThing(() => ({ kind: "space", id: spaceId(space), name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
+              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} follow={followPage} opened={foldsOf(spaceId(space))} need={lazy ? needFold : undefined} /></div>
             </details>
           {/each}
           <TfDocsHidden hidden={rail.hidden} spaces={tree.spaces} where="rail" only={filteringSpaces && rail.shown.length === 0} />
@@ -1779,7 +1894,7 @@
               {name} is hidden from Docs. <button type="button" class="tf-linkish" onclick={() => void docsChoices.setHidden(spaceId(shownSpace), name, false)}>Unhide</button>
             </p>
           {/if}
-          <TfDocTree space={shownSpace} {current} reveal={revealed} opened={foldsOf(spaceId(shownSpace))} need={lazy ? needFold : undefined} />
+          <TfDocTree space={shownSpace} {current} reveal={revealed} follow={followPage} opened={foldsOf(spaceId(shownSpace))} need={lazy ? needFold : undefined} />
         {/if}
       {/if}
     </div>
