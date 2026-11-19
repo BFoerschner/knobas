@@ -115,6 +115,10 @@ async function until(ready: () => boolean) {
   }
 }
 
+const pairOf = (ask: { base: string; head: string }) => `${ask.base}...${ask.head}`;
+/** The asks for names other than the pick's own (`own`, `base...head`): the ones read ahead. */
+const aheadOf = <T extends { base: string; head: string }>(asks: T[], own: string) => () => asks.filter((ask) => pairOf(ask) !== own);
+
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"));
 
@@ -149,15 +153,15 @@ test("the names of the next picks are read at the clone while the page is idle, 
   const { props, lists, named } = draw("feature/a");
   named.find((n) => n.head === "feature/a")!.answer(null);
   lists.find((l) => l.head === "feature/a")!.answer(counted("feature/a", [listed("pay.py")]));
-  await settle();
-  const asked = named.length;
-  await until(() => named.length > asked);
-  const ahead = named.slice(asked).map((n) => `${n.base}...${n.head}`);
+  // The asks read ahead are every one but the pick's own, whenever they come: counting the asks after a wait counted the
+  // first one read ahead with the pick's on a loaded machine, where the read-ahead's 100 ms timer came before the wait's.
+  const ahead = aheadOf(named, "main...feature/a");
+  await until(() => ahead().length > 0);
   // *From* the other branch (not the default one, which moves *Into*), then *Into* the other branches.
-  expect(ahead[0]).toBe("main...feature/b");
-  named.slice(asked)[0]!.answer(names("feature/b", ["ledger.py", "rails.py"]));
-  await until(() => named.length > asked + 1);
-  expect(named.slice(asked).map((n) => `${n.base}...${n.head}`)).toContain("feature/b...feature/a");
+  expect(ahead()[0] && pairOf(ahead()[0]!)).toBe("main...feature/b");
+  ahead()[0]!.answer(names("feature/b", ["ledger.py", "rails.py"]));
+  await until(() => ahead().length > 1);
+  expect(ahead().map(pairOf)).toContain("feature/b...feature/a");
 
   props.head = "feature/b";
   flushSync();
@@ -170,9 +174,8 @@ test("nothing is read ahead from a list the forge answered", async () => {
   named.find((n) => n.head === "feature/a")!.answer(null);
   lists.find((l) => l.head === "feature/a")!.answer(counted("feature/a", [listed("pay.py")], commitsOf(1, "a"), "source"));
   await settle();
-  const asked = named.length;
   await idle();
-  expect(named.length).toBe(asked);
+  expect(aheadOf(named, "main...feature/a")().map(pairOf)).toEqual([]);
 });
 
 test("Commits draws one line a commit with its count, and only the rows its box shows", async () => {
