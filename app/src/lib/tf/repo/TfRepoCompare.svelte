@@ -93,6 +93,7 @@
   import { onViewFresh } from "./view-fresh.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import TfHeldNote from "../TfHeldNote.svelte";
+  import { heldHead } from "../held-head.svelte";
   import { compareReads, drawnCompare, keepDrawnCompare, takeCompareEarly } from "./compare-early";
   import { waitPhase } from "../waiting";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -166,6 +167,18 @@
   const standingId = $derived(fromDefault ? null : listedId);
 
   let standing = $state<BranchStanding | null>(null);
+  /** The standing read for `standingId` has answered, or failed. */
+  let standingRead = $state(false);
+  /**
+   * The page waits unseen in its room for the branch's standing and shows once, whole (ADR of 2026-11-17, *Nothing moves
+   * once drawn*): the form is *New pull request* with Title and Description until it answers and *Compare* without them
+   * for a branch with a pull request open, so the diff under it drew 175 px low for a frame and jumped up (the ux20
+   * Windows pass, Compare shown again from a held answer at 5120 px). At most `HEAD_HOLD_MS`.
+   */
+  const drawnForm = heldHead(
+    () => standingId,
+    () => standingId === null || standingRead,
+  );
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
   // Raw: thousands of files, replaced whole on each read and never changed in place (the compare pass, 2026-11-13).
   let files = $state.raw<DiffFile[] | null>(null);
@@ -270,6 +283,7 @@
     const id = standingId;
     let live = true;
     standing = null;
+    standingRead = false;
     failed = null;
     if (id === null) return;
     readStanding(id, () => live);
@@ -359,9 +373,13 @@
     void again;
     return (ports.behindView ?? ports.entityView)(id, null).then(
       (answer) => {
-        if (alive()) standing = branchStanding(answer);
+        if (!alive()) return;
+        standing = branchStanding(answer);
+        standingRead = true;
       },
-      () => {},
+      () => {
+        if (alive()) standingRead = true;
+      },
     );
   }
 
@@ -791,9 +809,10 @@
     form.addEventListener("keydown", hold);
     return () => form.removeEventListener("keydown", hold);
   }
-  // On arriving at the form, and again if a ticket's words replace the proposal below.
+  // On arriving at the form, and again if a ticket's words replace the proposal below; once the page shows, since a
+  // field held unseen takes no focus.
   $effect(() => {
-    if (shown && titleField !== null) untrack(selectTitle);
+    if (shown && drawnForm.shown && titleField !== null) untrack(selectTitle);
   });
 
   async function create() {
@@ -844,7 +863,7 @@
     {/if}
   </div>
 {:else}
-<div class="tf-compare" {@attach sideWidth("compare")}>
+<div class="tf-compare" class:tf-heldbelow={!drawnForm.shown} {@attach sideWidth("compare")}>
   <TfSideEdge side="compare" />
   <div>
     <h2 class="tf-cgroup-h">{standing?.pr || sentFrom !== undefined ? "Compare" : "New pull request"}</h2>
