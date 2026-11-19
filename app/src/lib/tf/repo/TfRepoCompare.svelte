@@ -104,6 +104,7 @@
     compareHash,
     keyIn,
     MADE_PR,
+    mirrorStanding,
     proposal,
     REPO_PRS,
     repoHash,
@@ -112,6 +113,7 @@
     type BranchStanding,
     type ProposedFrom,
   } from "./repo";
+  import type { BranchPull } from "../../ipc/entity";
 
   let {
     ports,
@@ -126,6 +128,7 @@
     branchesReading = false,
     shown = true,
     guessed = null,
+    pulls = "failed",
     onNewBranch = () => {},
   }: {
     ports: Pick<RepoPorts, "entityView" | "behindView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "rangeFilePages" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
@@ -148,6 +151,11 @@
     shown?: boolean;
     /** The branch the header's *New pull request* chose for the reader, and why, which the page says above the form (F-063). */
     guessed?: { branch: string; why: string } | null;
+    /**
+     * The branches as the mirror holds them, each with the pull request open from it (`repo_branch_pulls`, read by the
+     * repository's page): the form's shape until the branch's own standing answers. `null` while that read is out.
+     */
+    pulls?: readonly BranchPull[] | "failed" | null;
     /** Opens *New branch…*, which is what a repository of one branch can do here. */
     onNewBranch?: () => void;
   } = $props();
@@ -170,14 +178,24 @@
   /** The standing read for `standingId` has answered, or failed. */
   let standingRead = $state(false);
   /**
-   * The page waits unseen in its room for the branch's standing and shows once, whole (ADR of 2026-11-17, *Nothing moves
-   * once drawn*): the form is *New pull request* with Title and Description until it answers and *Compare* without them
-   * for a branch with a pull request open, so the diff under it drew 175 px low for a frame and jumped up (the ux20
-   * Windows pass, Compare shown again from a held answer at 5120 px). At most `HEAD_HOLD_MS`.
+   * The pull request open from the branch: its standing's once that answers, until then the mirror's (`mirrorStanding`).
+   * The form is *New pull request* with Title and Description where none is, *Compare* without them where one is, so the
+   * diff under it stood 175 px lower for a branch with one until the standing said so (the ux20 Windows pass, 5120 px).
+   * The standing is a forge round trip (696 ms on a branch's first Compare in the ux21 overs pass); the mirror has it
+   * locally, read by the repository's page before Compare opens.
    */
+  const openPr = $derived(standing !== null ? standing.pr : Array.isArray(pulls) && head !== null ? (mirrorStanding(pulls, head)?.pr ?? null) : null);
+  /**
+   * The page waits unseen in its room only while the mirror's read is out, as on an address opened straight onto
+   * Compare, and at most `FORM_HOLD_MS`: then shows once, whole (ADR of 2026-11-17, *Nothing moves once drawn*). It
+   * waited for the standing itself, 500 ms at most on a first open, and the standing then came later than that and moved
+   * the diff anyway (Fable's ruling, the ux21 overs pass).
+   */
+  const FORM_HOLD_MS = 100;
   const drawnForm = heldHead(
     () => standingId,
-    () => standingId === null || standingRead,
+    () => standingId === null || standingRead || pulls !== null,
+    FORM_HOLD_MS,
   );
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
   // Raw: thousands of files, replaced whole on each read and never changed in place (the compare pass, 2026-11-13).
@@ -866,8 +884,8 @@
 <div class="tf-compare" class:tf-heldbelow={!drawnForm.shown} {@attach sideWidth("compare")}>
   <TfSideEdge side="compare" />
   <div>
-    <h2 class="tf-cgroup-h">{standing?.pr || sentFrom !== undefined ? "Compare" : "New pull request"}</h2>
-    {#if guessed !== null && guessed.branch === head && !standing?.pr && sentFrom === undefined}
+    <h2 class="tf-cgroup-h">{openPr || sentFrom !== undefined ? "Compare" : "New pull request"}</h2>
+    {#if guessed !== null && guessed.branch === head && !openPr && sentFrom === undefined}
       <p class="tf-cstart">Starting from <span class="tf-mono">{guessed.branch}</span>, {guessed.why}.</p>
     {/if}
     {#if fromDefault && intoMoved !== null && intoMoved.branch === base && sentFrom === undefined}
@@ -897,27 +915,30 @@
         >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
-        {#if !standing?.pr && sentFrom === undefined}
+        {#if !openPr && sentFrom === undefined}
           <label for="tf-cmp-title">Title</label>
           <input id="tf-cmp-title" type="text" autocomplete="off" bind:this={titleField} bind:value={title} {@attach escThroughUntouched} />
           <label for="tf-cmp-body">Description</label>
           <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
           {#if ticket !== null}
             <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to <TfKey value={ticket.key} /> in knobas</label>
+          {:else if head !== null && keyIn(head) !== null}
+            <!-- Its room while the branch's key is looked up, so the diff under the form stays where it drew. -->
+            <span class="tf-ck tf-cheld" aria-hidden="true"><input type="checkbox" tabindex="-1" disabled /> Link the PR to <TfKey value={keyIn(head) ?? ""} /> in knobas</span>
           {/if}
           <span class="tf-fwide tf-dim tf-small">Reviewers are asked on {sourceName(source)} after it opens.</span>
         {/if}
       </div>
       <div class="tf-cgo">
-        {#if same && standing?.pr}
+        {#if same && openPr}
           <p class="tf-dwhy" role="status">{needs}</p>
-        {:else if sentFrom !== undefined && !standing?.pr}
+        {:else if sentFrom !== undefined && !openPr}
           <span class="tf-cexists">A pull request from {fromDefault ? `${head} into ${base}` : "this branch"} is on its way: {sentFrom.text}.</span>
           <a class="tf-btn tf-sm" href={repoHash(repoId, "prs")}>Show in Pull requests</a>
-        {:else if standing?.pr}
-          <span class="tf-cexists">PR {standing.pr.number ?? ""} is already open from this branch.</span>
-          {#if standing.pr.entityId !== null}
-            <a class="tf-btn tf-sm" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
+        {:else if openPr}
+          <span class="tf-cexists">PR {openPr.number ?? ""} is already open from this branch.</span>
+          {#if openPr.entityId !== null}
+            <a class="tf-btn tf-sm" href={itemHash({ entity_id: openPr.entityId, kind: "pr" })}>Open PR {openPr.number ?? ""}</a>
           {/if}
         {:else}
           <button

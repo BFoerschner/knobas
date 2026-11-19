@@ -1376,6 +1376,7 @@
                   {branchRefused}
                   shown={one === slot}
                   {guessed}
+                  pulls={branchPulls}
                   onNewBranch={() => (newBranch = { from: null })}
                 />
               {:else if one === "commits"}
