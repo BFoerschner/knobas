@@ -232,6 +232,19 @@ const docsSpaces = (before) => `
 // one-letter pass (2026-11-15); they answer as any letter now (`t` alone is the time prefix), and the set is kept so
 // the lines compare with the passes before.
 const BOARD = [["mini_board", "\"perColumn\"", "under:"]];
+
+// Monitors' filter (the monitors-page pass, 2026-11-19): the roster is drawn whole, so a letter that narrows it takes rows
+// away and a Backspace that widens it again draws every monitor it had left out. It reads nothing.
+const monitorsFilter = (before) => `
+  if (location.hash !== "#/monitors") location.hash = "#/monitors";
+  ${until(vis(".tf-kept:not([hidden]) .tf-mon-row"))}
+  const box = document.querySelector(".tf-kept:not([hidden]) input[data-filter]");
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  if (box.value !== ${JSON.stringify(before)}) { set.call(box, ${JSON.stringify(before)}); box.dispatchEvent(new InputEvent("input", { bubbles: true })); }
+  ${sleepIn(800)}
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  return true;`;
 const CASES = [
   { name: "tickets-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
@@ -257,6 +270,10 @@ const CASES = [
   // Docs' spaces filter (PR #2479, 2026-11-17): a letter into the empty box, and a second into one holding a letter, over
   // the scale database's spaces, each second letter one that changes which spaces match. It reads nothing: its rows are
   // the first frame after the key.
+  // A letter into Monitors' empty filter, and a Backspace taking back the only letter, one no monitor of the scale
+  // database's holds (q, x, z), so every row is drawn again.
+  { name: "monitors-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
+  { name: "monitors-erase", presses: [["q", "Backspace"], ["x", "Backspace"], ["z", "Backspace"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
   { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
   { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
@@ -282,6 +299,12 @@ async function fresh(everything) {
 }
 
 async function press(key) {
+  // Backspace takes a letter back (`monitors-erase`): it types nothing.
+  if (key === "Backspace") {
+    await c.send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: 8 });
+    await c.send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: 8 });
+    return;
+  }
   const code = /^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : key;
   const vk = key.toUpperCase().charCodeAt(0);
   await c.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, text: key, unmodifiedText: key, windowsVirtualKeyCode: vk });

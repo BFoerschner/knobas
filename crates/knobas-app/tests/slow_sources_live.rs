@@ -615,7 +615,7 @@ impl Rig {
     async fn monitors(&self, pass: &Pass, _live: &LiveSources) {
         let (pool, registry) = (&self.state.pool, self.state.registry.as_ref());
         self.once(pass, "monitors: the list", {
-            knobas_app::assets::monitor_roster(pool, registry)
+            knobas_app::assets::monitor_roster(pool, registry, true)
         })
         .await;
         self.once(pass, "monitor: its page", {

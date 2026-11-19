@@ -401,7 +401,7 @@
 .tf-dl-filter .tf-ftail { flex: none; }
 /* With nothing typed there is no count: the field is as wide as the picker above it. */
 .tf-dl-filter .tf-ftail:not(:has(.tf-fcount-n:not(:empty))) { display: none; }
-/* The fold of hidden spaces: Monitors' fold's summary (`.tf-mon-fold`), at the end of the rail's spaces and of the home's tiles. */
+/* The fold of hidden spaces, in the look Monitors' fold of hidden monitors had, at the end of the rail's spaces and of the home's tiles. */
 .tf-dk-fold { margin-top: 8px; border-top: 1px solid var(--rule-2); }
 .tf .tf-dk-fold > summary {
   list-style: none; cursor: pointer; font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--ink-2);

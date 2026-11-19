@@ -73,7 +73,7 @@ const endRuns = () => js(`(${JSON.stringify(sources)}).forEach((id, i) => { cons
   window.__fake.emit("sync:state", payload); })`);
 
 const metrics = async () => Object.fromEntries((await c.send("Performance.getMetrics")).metrics.map((m) => [m.name, m.value]));
-const ROWS = `.tf-kept:not([hidden]) tbody tr:not(.tf-wgap)`;
+const ROWS = `.tf-kept:not([hidden]) :is(tbody tr:not(.tf-wgap), .tf-mon-row)`;
 const points = () => js(`[...document.querySelectorAll(${JSON.stringify(ROWS)})].map((r) => r.getBoundingClientRect())
   .filter((b) => b.height > 10 && b.top > 120 && b.bottom < innerHeight - 10).slice(0, 12).map((b) => [Math.round(b.left + b.width * 0.3), Math.round(b.top + b.height / 2)])`);
 // What a hover costs the main thread: its handlers, then the frame that draws it, from that frame's callback to the end of

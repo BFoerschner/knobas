@@ -408,7 +408,8 @@ export function setMonitoringSettings(
  * disagree with the list beside it.
  */
 export function monitorRoster(): Promise<MonitorRow[]> {
-  return invoke<MonitorRow[]>("monitor_roster");
+  // Each row's `bar` and `down_since` are what the tab draws; its day of samples was 1.4 MB a Kuma poll (PR #2479).
+  return invoke<MonitorRow[]>("monitor_roster", { withSamples: false });
 }
 
 /**

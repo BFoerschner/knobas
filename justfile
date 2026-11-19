@@ -1367,6 +1367,13 @@ moves *args:
 keys-budget *args:
     testenv/perf/keys-budget.sh {{args}}
 
+# The Monitors budget (the monitors-page pass of PR #2479, 2026-11-19, `testenv/perf/README.md`, *Monitors at 239 Hz*;
+# Björn: "it should be near 240 like everything else too"): Monitors' first open, a return, the page idle, a beat landing,
+# a scroll, a hover and a monitor opened, each under a Chrome trace at 1x, 4x and 6x at three window sizes, and fails
+# when a moment's main thread is over its line in `testenv/perf/budget-monitors.json`. `just monitors-budget --real <port>`.
+monitors-budget *args:
+    testenv/perf/monitors-budget.sh {{args}}
+
 # The soak (the hover-lag pass of PR #2479, 2026-11-16, `testenv/perf/README.md`): browses a repository's Code page in a
 # headless Chrome as a person does for ten minutes, opening folders and files, looking at its other tabs and at other
 # sections, while runs end, then visits every other page a few times, and fails when what a run's end or a return costs

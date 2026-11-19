@@ -88,7 +88,8 @@ const PLACES = [
   // A row of the rail's tree (2026-11-19): the page opens, and the rail it was pressed in holds its space.
   { name: "docs-tree", start: `#/docs/space/${SPACE}`, press: `${shown} .tf-rd-tree .tf-dl-tree a[href^="#/page/"]`, hash: "#/page/", away: "Escape" },
   { name: "monitors", start: "#/time", nav: "monitors", hash: "#/monitors", away: "time", tabs: true },
-  { name: "monitor", start: "#/monitors", press: `${shown} .tf-mon tbody tr:not(.tf-mon-foldrow) td:first-child`, hash: ["#/monitors/at/", "#/asset/"], away: "Escape" },
+  // A row opens its monitor beside the roster on the page, with no address of its own (the monitors-page pass, 2026-11-19).
+  { name: "monitor", start: "#/monitors", press: `${shown} .tf-mon-row .tf-mon-state`, hash: null, ready: ".tf-mon-panel h2", away: "Escape" },
   { name: "sets", start: "#/time", nav: "sets", hash: "#/sets", away: "time" },
   { name: "time", start: "#/docs", nav: "time", hash: "#/time", away: "docs", tabs: true },
   { name: "assets", optional: true, start: "#/time", go: "#/assets", hash: "#/assets", anywhere: true, away: "#/time" },

@@ -189,8 +189,8 @@ const FITS = (sel) => String.raw`(() => {
   }
   return null;
 })()`;
-// A hidden monitor adds the fold's own row, so a Hide would otherwise leave the count alone.
-const MONITOR_ROWS = ".tf-mon tbody tr:not(.tf-mon-foldrow)";
+// The roster's monitors not hidden: a hidden one is drawn after them (the monitors-page pass), so a Hide leaves this count.
+const MONITOR_ROWS = ".tf-mon-row:not(.tf-mon-hid)";
 const RUN = "build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187";
 
 // The application page's trips start with its name and command typed.
@@ -234,7 +234,7 @@ const RIGHT_CLICK = [
     { id: "rc-nothing", kind: "right-click", finding: "right-click", none: true, on: { sel: ".tf-main h1" } },
   ] },
   { page: "Right-click, Monitors", route: "monitors", trips: [
-    { id: "rc-monitor", kind: "right-click", finding: "right-click", on: { sel: ".tf-mon tbody tr:not(.tf-mon-foldrow) td:first-child" }, starts: ["open"] },
+    { id: "rc-monitor", kind: "right-click", finding: "right-click", on: { sel: ".tf-mon-row .tf-mon-state" }, starts: ["open"] },
   ] },
   { page: "Right-click, a run", route: RUN, trips: [
     { id: "rc-run-heading", kind: "right-click", finding: "right-click", on: { sel: ".tf-main h1" }, starts: ["log", "tests", "rerun"] },
@@ -272,7 +272,7 @@ const PAGES = [
   ] },
   // The seeded roster, not the scale's bulk one: `monitorDown` takes a seeded monitor down.
   { page: "Monitors", route: "monitors", trips: [
-    { id: "monitors-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "monitors", rows: ".tf-mon tbody tr", query: STILL_Q.replace("&fake-scale", ""), grow: "window.__fake.monitorDown(), 1", tail: 3000 },
+    { id: "monitors-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "monitors", rows: ".tf-mon-row", query: STILL_Q.replace("&fake-scale", ""), grow: "window.__fake.monitorDown(), 1", tail: 3000 },
   ] },
   { page: "Docs", route: "docs", trips: [
     { id: "docs-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "docs", rows: "a.tf-dh-row, [role=treeitem]", query: STILL_Q },
@@ -466,16 +466,19 @@ const PAGES = [
     { id: "inbox-ack-monitors", kind: "leave-back", finding: "F-356", press: { sel: ".tf-inbox .tf-ib button", text: "Ack" }, rows: ".tf-inbox .tf-ib", via: "monitors" },
   ] },
   { page: "Monitors", route: "monitors", trips: [
-    { id: "monitors-ack", kind: "enter-twice", finding: "F-351", press: { sel: ".tf-mon button.tf-mon-ack" }, rows: MONITOR_ROWS },
-    { id: "monitors-hide", kind: "enter-twice", finding: "F-340", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS },
-    { id: "monitors-pause", kind: "enter-twice", finding: "F-340", press: { sel: ".tf-mon tbody button", text: "Pause" }, rows: MONITOR_ROWS },
-    { id: "monitors-hide-fast", kind: "enter-fast", strict: true, finding: "F-156", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS },
-    { id: "monitors-hide-walks", kind: "enter-walks", strict: true, finding: "F-156", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS },
-    { id: "monitors-hide-inbox", kind: "leave-back", finding: "F-356", press: { sel: ".tf-mon tbody button", text: "Hide" }, rows: MONITOR_ROWS, via: "inbox" },
-    { id: "monitors-ack-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-351", press: { sel: ".tf-mon button.tf-mon-ack" } },
-    { id: "monitors-pause-pointer", kind: "pointer-twice", strict: true, once: true, reveal: true, finding: "F-340", press: { sel: ".tf-mon tbody button", text: "Pause" } },
-    // The README's picture: its query, and the widths the design works at.
-    { id: "monitors-row-room", kind: "row-room", strict: true, finding: "PR #2479", query: "&fake-sources-healthy&fake-timer", table: ".tf-mon", cell: ".tf-mon-acts", sizes: [[1100, 900], [1240, 900], [1440, 900], [1920, 900]] },
+    { id: "monitors-ack", kind: "enter-twice", finding: "F-351", press: { sel: ".tf-mon-ack button" }, rows: MONITOR_ROWS },
+    { id: "monitors-ack-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-351", press: { sel: ".tf-mon-ack button" } },
+  ] },
+  // The open monitor's actions (the monitors-page pass, 2026-11-19): beside the roster, on one monitor, so *Hide* turns into
+  // *Unhide* under the press and holds as *Acked* does. With no list of *Hide*s to walk, `enter-walks` has nothing to walk,
+  // and with no actions in a row, `row-room` has no row to fit them in.
+  { page: "Monitors, an open monitor", route: "monitors/at/kuma%3A1", trips: [
+    { id: "monitors-hide", kind: "enter-twice", finding: "F-340", press: { sel: ".tf-mon-pacts button", text: "Hide" }, rows: MONITOR_ROWS },
+    { id: "monitors-pause", kind: "enter-twice", finding: "F-340", press: { sel: ".tf-mon-pacts button", text: "Pause" }, rows: MONITOR_ROWS },
+    { id: "monitors-hide-fast", kind: "enter-fast", strict: true, finding: "F-156", press: { sel: ".tf-mon-pacts button", text: "Hide" }, rows: MONITOR_ROWS },
+    { id: "monitors-hide-inbox", kind: "leave-back", finding: "F-356", press: { sel: ".tf-mon-pacts button", text: "Hide" }, rows: MONITOR_ROWS, via: "inbox" },
+    { id: "monitors-pause-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-340", press: { sel: ".tf-mon-pacts button", text: "Pause" } },
+    { id: "monitors-hide-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-340", press: { sel: ".tf-mon-pacts button", text: "Hide" } },
   ] },
   { page: "Builds, a run", route: RUN, trips: [
     { id: "builds-rerun", kind: "enter-twice", finding: "F-338", press: { sel: ".tf-bhead .tf-primary" } },
@@ -691,7 +694,7 @@ const PAGES = [
   ] },
   { page: "Way back, a marked monitor", route: "monitors/at/kuma%3A3", trips: [
     { id: "nav-place-monitor", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors" },
-    { id: "nav-place-monitor-hide", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors", how: ["pointer"], toast: { press: { sel: ".tf-mon tbody tr:not(.tf-mon-at) button", text: "Hide" }, rows: MONITOR_ROWS, hides: true } },
+    { id: "nav-place-monitor-hide", kind: "nav-place", strict: true, finding: "docs-return", section: "Monitors", top: "monitors", how: ["pointer"], toast: { press: { sel: ".tf-mon-pacts button", text: "Hide" }, rows: MONITOR_ROWS, hides: true } },
   ] },
   { page: "Way back, a link set", route: "sets/payout-stack", trips: [
     { id: "nav-place-set", kind: "nav-place", strict: true, finding: "docs-return", section: "Link sets", top: "sets" },

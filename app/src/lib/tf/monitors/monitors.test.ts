@@ -12,7 +12,7 @@ import {
   stripPaint,
   stateChip,
   gaps,
-  hiddenFoldOpen,
+  keepDrawn,
   kindWord,
   prefill,
   routePrefill,
@@ -49,6 +49,8 @@ function row(over: Partial<MonitorRow>): MonitorRow {
     actions: ["pause_monitor"],
     refreshes: true,
     samples: [],
+    bar: "u".repeat(48),
+    down_since: null,
     ...over,
   };
 }
@@ -72,11 +74,8 @@ describe("the order", () => {
 });
 
 describe("the state chip", () => {
-  test("says since when a monitor is down, from its samples", () => {
-    const down = row({
-      state: "down",
-      samples: [sample(90, "up"), sample(60, "down"), sample(30, "down"), sample(1, "down")],
-    });
+  test("says since when a monitor is down, as the backend read it", () => {
+    const down = row({ state: "down", down_since: sample(60, "down").taken_at });
     const chip = stateChip(down, new Date(NOW));
     expect(chip.tone).toBe("err");
     expect(chip.label).toBe("down");
@@ -87,10 +86,10 @@ describe("the state chip", () => {
   });
 
   test("keeps the day on a monitor down since before today (#1986)", () => {
-    const at = (day: number) => ({ taken_at: new Date(2026, 9, day, 12, 40).toISOString(), state: "down" });
+    const at = (day: number) => new Date(2026, 9, day, 12, 40).toISOString();
     const now = new Date(2026, 9, 16, 9, 0);
-    expect(stateChip(row({ state: "down", samples: [at(15)] }), now).since).toBe("since yesterday 12:40");
-    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).since).toBe("since Mon 12:40");
+    expect(stateChip(row({ state: "down", down_since: at(15) }), now).since).toBe("since yesterday 12:40");
+    expect(stateChip(row({ state: "down", down_since: at(12) }), now).since).toBe("since Mon 12:40");
   });
 
   test("says down alone when no sample says since when", () => {
@@ -138,16 +137,18 @@ describe("the columns", () => {
 });
 
 describe("the bar", () => {
-  test("is 48 half-hours, the worst reading in each, a gap where there was none", () => {
-    const bar = segments(row({ samples: [sample(10, "down"), sample(20, "up"), sample(45, "warn")] }), NOW);
+  test("is the backend's 48 half-hours, a letter each, oldest first; a short or strange one is a gap", () => {
+    const bar = segments(row({ bar: `${"-".repeat(44)}umwd` }));
     expect(bar).toHaveLength(48);
-    expect(bar[47]).toBe("down");
-    expect(bar[46]).toBe("warn");
+    expect(bar.slice(44)).toEqual(["up", "paused", "warn", "down"]);
     expect(bar[0]).toBe("gap");
+    // Fewer letters are the newest half-hours: what is missing is older, and a letter no state has is no reading.
+    expect(segments(row({ bar: "dx" })).slice(45)).toEqual(["gap", "down", "gap"]);
+    expect(segments(row({ bar: "p" }))[47]).toBe("paused");
   });
 
   test("is all paused for a paused monitor", () => {
-    expect(new Set(segments(row({ tombstoned: true, samples: [sample(10, "up")] }), NOW))).toEqual(new Set(["paused"]));
+    expect(new Set(segments(row({ tombstoned: true, bar: "ud".repeat(24) })))).toEqual(new Set(["paused"]));
   });
 });
 
@@ -186,17 +187,6 @@ describe("the filter", () => {
     expect(hiddenNames(visibleMonitors(rows, { ...base, states: ["Down"] }, index))).toEqual(["noisy"]);
     expect(hiddenNames(visibleMonitors(rows, { ...base, states: ["Up"] }, index))).toEqual([]);
     expect(hiddenNames(visibleMonitors(rows, { ...base, scope: "mine" }, index))).toEqual([]);
-  });
-
-  test("the hidden fold opens by itself only when it holds every match, and otherwise stays as the reader left it", () => {
-    const some = visibleMonitors(rows, base, index);
-    const onlyHidden = visibleMonitors(rows, { ...base, text: "noisy" }, index);
-    const none = visibleMonitors(rows, { ...base, text: "nothing" }, index);
-    expect(hiddenFoldOpen(null, some)).toBe(false);
-    expect(hiddenFoldOpen(null, onlyHidden)).toBe(true);
-    expect(hiddenFoldOpen(null, none)).toBe(false);
-    expect(hiddenFoldOpen(true, some)).toBe(true);
-    expect(hiddenFoldOpen(false, onlyHidden)).toBe(false);
   });
 
   test("the words match the monitor, the asset and the type", () => {
@@ -317,14 +307,43 @@ test("the strip paints each bar its state's colour, a pixel apart, as one backgr
     { state: "down" as const, at: 1, title: "" },
     { state: "gap" as const, at: 2, title: "" },
   ];
+  const gaps = "repeating-linear-gradient(to right, transparent 0 2px, var(--tf-mon-gap) 2px 3px)";
   expect(stripPaint(bars, false)).toEqual({
-    image:
-      "linear-gradient(to right, color-mix(in srgb, var(--ok) 80%, transparent) 0px 2px, transparent 2px 3px, " +
-      "var(--err) 3px 5px, transparent 5px 6px, var(--sheet-2) 6px 8px, transparent 8px 9px)",
+    image: `${gaps}, linear-gradient(to right, var(--tf-mon-up) 0px 3px, var(--err) 3px 6px, var(--rule-2) 6px 8px)`,
     width: 8,
     pitch: 3,
   });
+  // A run of one state is one stretch of colour, however many bars it holds: a day up is one stop pair.
+  const day = Array.from({ length: 48 }, (_, at) => ({ state: (at < 46 ? "up" : "down") as "up" | "down", at, title: "" }));
+  expect(stripPaint(day, false).image).toBe(`${gaps}, linear-gradient(to right, var(--tf-mon-up) 0px 138px, var(--err) 138px 143px)`);
   // Narrow, the hourly bars are 3 px.
   expect(stripPaint(bars.slice(0, 1), true)).toMatchObject({ width: 3, pitch: 4 });
   expect(stripPaint([], false)).toEqual({ image: "none", width: 0, pitch: 3 });
+  // A hidden monitor's are grey, a down hour a shade darker; the open monitor's are 5 px.
+  expect(stripPaint(bars, false, true).image).toBe(`${gaps}, linear-gradient(to right, var(--rule) 0px 3px, var(--muted) 3px 6px, var(--rule-2) 6px 8px)`);
+  expect(stripPaint(bars, false, false, true)).toMatchObject({ width: 17, pitch: 6 });
+});
+
+describe("a read of the roster again (the monitors-page pass, 2026-11-19)", () => {
+  const a = row({ entity_id: "kuma:a", name: "a" });
+  const b = row({ entity_id: "kuma:b", name: "b", state: "warn", response_time_ms: 900 });
+  test("keeps every row whose drawn parts did not change, the list itself when none did", () => {
+    const before = [a, b];
+    // Every monitor's response moved and it was read a minute later: a's is not drawn, b's is (it is slow).
+    const next = [{ ...a, response_time_ms: 141, checked_at: "2026-10-16T14:00:00Z" }, { ...b, response_time_ms: 901 }];
+    const kept = keepDrawn(before, next);
+    expect(kept[0]).toBe(a);
+    expect(kept[1]).toBe(next[1]);
+    expect(keepDrawn(before, [{ ...a, checked_at: "x" }, { ...b }])).toBe(before);
+  });
+  test("draws again a row whose state, bar, uptime or hiding changed, and takes rows in and out", () => {
+    const changed = [{ ...a, bar: `${"u".repeat(47)}d` }, { ...b, hidden: true }];
+    const kept = keepDrawn([a, b], changed);
+    expect(kept[0]).toBe(changed[0]);
+    expect(kept[1]).toBe(changed[1]);
+    const c = row({ entity_id: "kuma:c", name: "c" });
+    expect(keepDrawn([a, b], [a, c]).map((r) => r.entity_id)).toEqual(["kuma:a", "kuma:c"]);
+    expect(keepDrawn([a, b], [{ ...a, uptime: [{ window: "30d", ratio: 0.5 }] }])[0]).not.toBe(a);
+    expect(keepDrawn(null, [a])).toEqual([a]);
+  });
 });

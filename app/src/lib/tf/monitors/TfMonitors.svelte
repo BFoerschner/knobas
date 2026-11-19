@@ -2,21 +2,24 @@
   Monitors (#864, R-11.3 to R-11.5): `#/monitors` and `#/monitors/unmonitored`,
   one page with two tabs as prototype-6's `renderMonitors(tab)`.
 
-  - **Monitors**: the filter bar (text over monitor, asset and type; *This
-    job / My jobs / All*; *Down / Slow / Up / Paused / Pending / Maintenance*; *Type*), then the
-    roster sorted down, slow, paused, up. Each row: the monitor and its
-    type, the state chip, the 24-hour bar, the response, the 30-day uptime,
-    what it **Watches** (the asset's name and type, linking to the asset),
-    *Ack* on a down monitor, which *Acked* or the toast's *Undo* takes back, *Pause* or *Resume* where the source offers
-    it, and *Hide*. A hidden monitor leaves the roster for the fold at its
-    end (*N hidden monitors*, closed until the reader opens it, or open by
-    itself when it holds every match), where it is drawn dimmed with a
-    neutral chip and *Unhide* in place of *Hide*. Every filter applies to the
-    fold as to the roster. Its alerts reach no inbox, so it raises no desktop
-    notification and offers no *Ack*; knobas-local, Uptime Kuma goes on
-    checking it. While a pause or resume is on its way its echo (*queued*, then *sent*,
-    `tf/queued.svelte.ts`, #2105) stands in the State cell after the state chip, because it says the state is changing,
+  - **Monitors** (redrawn in the monitors-page pass, 2026-11-19; Björn: "it should be one of the smoothest pages of
+    all"): the filter bar (text over monitor, asset and type; *This job / My jobs / All*; *Down / Slow / Up / Paused /
+    Pending / Maintenance*; *Type*), a line of what is wrong (*16 down, 2 slow, 200 up*, in the width that shouts),
+    then the roster sorted down, slow, paused, up, every row drawn and one line high. Each row: the monitor and its
+    type, its state (a chip where something is wrong, a quiet word where it is up), when it went down or how slow it
+    is, what it **Watches**, the 24-hour bar, the 30-day uptime, and *Ack* on a down monitor, which *Acked* takes
+    back. A row is pressed to open the monitor beside the roster (`#/monitors/at/<id>`, which an inbox alert opens
+    too; `Esc` closes it): its target, response, uptimes, certificate and assets, *Ack*, *Pause* or *Resume* where the
+    source offers it, *Hide* or *Unhide*, *Refresh* or *Sync now* (#2138, its failure under them), and its page in
+    Uptime Kuma. A hidden monitor (#2447) is drawn after the roster under one line that says so, dimmed, its bar
+    grey, its state neutral and with no *Ack*; every filter applies to it as to the roster. Its alerts reach no
+    inbox, so it raises no desktop notification; knobas-local, Uptime Kuma goes on checking it. While a pause or
+    resume is on its way its echo (*queued*, then *sent*, `tf/queued.svelte.ts`, #2105) stands after the state chip,
     and the button stays in its place, turned off, until the roster reads the new state.
+
+    A poll redraws only what it changed: each read keeps every row whose drawn parts are the same (`keepDrawn`), and
+    a row's response time is drawn only while it is slow, so a minute's poll that moves every response by a
+    millisecond draws nothing. The roster reads each monitor's bar as 48 letters (`0099`), not its day of samples.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
     A row whose create is on its way draws its echo instead (#1959, #2105),
@@ -38,15 +41,11 @@
   tabs (`staleLine`) with its fix, and the header then says nothing of when it
   synced: a check's own time is not a sync.
 
-  **Refresh (#2138, #2107's pieces).** Monitors has no page of one monitor,
-  so a monitor's *Refresh*, or *Sync now* where its source does not read one
-  item (`MonitorRow.refreshes`), ends its row's actions, after *Ack* and
-  *Pause* or *Resume*; its failure is a full-width line under that row. A
-  refresh reads the roster again over what it drew, and the pause and resume
-  echoes settle on that read as on any other. The roster holds only enabled
-  sources' monitors, so no row is turned off; a tombstoned monitor is drawn
-  *Paused* (#2100), so no row is withdrawn either: the two banners have
-  nothing to say here.
+  **Refresh (#2138, #2107's pieces).** Monitors has no page of one monitor, so the open monitor's *Refresh*, or
+  *Sync now* where its source does not read one item (`MonitorRow.refreshes`), is among its actions, and its failure
+  is a line under them. A refresh reads the roster again over what it drew, and the pause and resume echoes settle on
+  that read as on any other. The roster holds only enabled sources' monitors, so no row is turned off; a tombstoned
+  monitor is drawn *Paused* (#2100), so no row is withdrawn either.
 
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
@@ -108,8 +107,10 @@
 </script>
 
 <script lang="ts">
-  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
   import TfStateChip from "../TfStateChip.svelte";
+  import { stateWord } from "../state-word";
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
   import { badges } from "../badges.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
@@ -137,13 +138,13 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { dismiss, push } from "../../shell/toasts.svelte";
-  import { Windowed } from "../../shell/windowed.svelte";
   import { HeldOrder } from "../held-order.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
-  import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
+  import { sessionFilter } from "../filter/filter-state.svelte";
   import { MediaQuery } from "svelte/reactivity";
-  import { barsOf, stripPaint, type Bar } from "./monitors";
+  import { barsOf, keepDrawn, stripPaint, type Bar } from "./monitors";
+  import { chipCounts } from "../../assets/monitors";
   import { on } from "svelte/events";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
@@ -153,7 +154,6 @@
   import {
     stateChip,
     gaps,
-    hiddenFoldOpen,
     isRoute,
     isRouteId,
     kindWord,
@@ -171,6 +171,8 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { menuThing } from "../context/thing";
   import { createDetailRefresh, type DetailRefresh, type RefreshSubject } from "../refresh.svelte";
+  import { layers } from "../layers.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     ready,
@@ -202,33 +204,51 @@
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
-    /** What follows `monitors` in the address: `unmonitored`, or nothing. */
+    /** What follows `monitors` in the address: `unmonitored`, `at/<id>`, or nothing. */
     rest: string[];
     /** The chosen job (spec #2227), as a ticket key. */
     job: string | null;
     ports?: MonitorPorts;
-    /** Injectable clock, for the bars and the header's *synced*. */
+    /** Injectable clock, for the chips' *since* and the header's *synced*. */
     now?: Date;
   } & RoleFrameProps = $props();
 
-  /**
-   * The clock the bars, the chips' *since* and the header's *synced* read: the time of the last roster read. It was
-   * read once, as the page first drew, and a kept page's bars stopped at that hour, leaving out every sample since.
-   */
+  /** The clock the header's *synced* and the open monitor read: the time of the last roster read. */
   let readAt = $state(new Date());
   const now = $derived(fixedNow ?? readAt);
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");
-  /** The monitor the address opens the roster at, marked: an inbox alert's, a set member's. */
+  /** The monitor the address opens, beside the roster: an inbox alert's, a set member's. */
   const markedId = $derived(rest[0] === MONITOR_AT ? (rest[1] ?? null) : null);
+  /**
+   * The monitor open beside the roster: the address's, or a row's press. A press opens it on the page and changes no
+   * address, so nothing above the roster comes or goes as it opens (a deeper address drew the breadcrumb's bar, and the
+   * roster dropped under the pointer); `Esc` closes it as any panel on a page (`layers`). An address that names one
+   * opens it, and the way back is the address's.
+   */
+  let openId = $state<string | null>(untrack(() => markedId));
+  $effect(() => {
+    const id = markedId;
+    untrack(() => (openId = id));
+  });
+  const shown = pageVisible();
+  $effect(() => {
+    if (openId === null || openId === markedId || !shown()) return;
+    return untrack(() => layers.add({ kind: "panel", close: () => (openId = null) }));
+  });
+  /** *Close*: a press's monitor closes on the page; the address's goes back to the roster's own address. */
+  function closeMonitor() {
+    if (openId !== null && openId === markedId) location.hash = "#/monitors";
+    else openId = null;
+  }
 
   /**
-   * The roster as read: the read narrows itself to the sources filling the
-   * monitoring role, so nothing here keeps rows by source (#1297, ADR-0029
-   * as amended on 2026-10-19).
+   * The roster as drawn: the read narrows itself to the sources filling the monitoring role (#1297, ADR-0029 as
+   * amended on 2026-10-19). Raw, and each read keeps every row whose drawn parts are the same as the object it was
+   * (`keepDrawn`), so a poll redraws the rows it changed and nothing else (the monitors-page pass, 2026-11-19).
    */
-  // Raw: it is replaced whole and never changed in place, and a deep proxy made every row's read on a filter key go
-  // through one (PR #2479).
   let roster = $state.raw<MonitorRow[] | null>(null);
+  /** The roster as last read, every row its newest object: what the open monitor draws (its response, when it was read). */
+  let latest = $state.raw<ReadonlyMap<string, MonitorRow>>(new Map());
   let unwatched = $state<UnmonitoredAsset[] | null>(null);
   let sourceNames = $state<Record<string, string>>({});
   /** The sources as last read, `null` until then: whether one can sign in decides the band and the header's *synced*. */
@@ -245,14 +265,19 @@
   let creating = $state<MonitorSubject | null>(null);
   let opening = $state<string | null>(null);
 
-  /** Bumped to read both lists again. */
+  /** Bumped to read everything again: a write of the page's, a create's echo moving. */
   let revision = $state(0);
-  // The frame moves this when *Sync now*'s runs end and each time the page is shown again, so a token entered in Settings takes the band away (#2106).
+  /**
+   * Bumped when a run of the role's sources ends with something new (an Uptime Kuma poll, every minute), and when the
+   * page is shown again after one: the roster and what it is drawn with are read again, and *Assets nothing watches*
+   * only while it is the tab shown (#2106).
+   */
+  let synced = $state(0);
   let syncedAt = untrack(() => syncRevision);
   $effect(() => {
     if (syncRevision === syncedAt) return;
     syncedAt = syncRevision;
-    untrack(() => (revision += 1));
+    untrack(() => (synced += 1));
   });
   /** The refreshes waiting on the roster read that answers next (#2138). */
   let rereads: (() => void)[] = [];
@@ -260,8 +285,8 @@
   $effect(() => {
     if (!ready) return;
     void revision;
+    void synced;
     let live = true;
-    failed = null;
     const fail = (error: unknown) => {
       if (live) failed = ipcErrorMessage(error);
     };
@@ -269,9 +294,11 @@
       .monitorRoster()
       .then((rows) => {
         if (!live) return;
+        failed = null;
         keepRefreshers(rows);
         readAt = new Date();
-        roster = rows;
+        latest = new Map(rows.map((row) => [row.entity_id, row]));
+        roster = keepDrawn(untrack(() => roster), rows);
         settleRoster(rows);
       }, fail)
       .finally(() => {
@@ -287,19 +314,16 @@
         if (!live) return;
         const read: Record<string, string> = {};
         for (const alert of alerts) if (alert.acked_at !== null) read[alert.monitor_id] = alert.acked_at;
-        acked = read;
+        // The same acks as before are the same object: nothing that reads them draws again.
+        if (JSON.stringify(read) !== JSON.stringify(untrack(() => $state.snapshot(acked)))) acked = read;
       },
       () => {},
     );
-    ports.unmonitoredAssets().then((rows) => {
-      if (!live) return;
-      unwatched = gaps(rows);
-      settleUnwatched(rows);
-    }, fail);
     ports.listSources().then(
       (rows) => {
         if (!live) return;
-        sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+        const names = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+        if (JSON.stringify(names) !== JSON.stringify(untrack(() => $state.snapshot(sourceNames)))) sourceNames = names;
         sources = rows;
       },
       () => {
@@ -315,6 +339,31 @@
     return () => {
       live = false;
     };
+  });
+
+  // *Assets nothing watches*: on the first read and every write, when its tab is shown, and on a sync's end only while
+  // it is. Its own count, not the effect's cleanup, drops an answer a newer read replaced: a sync on the roster's tab
+  // wakes the effect and reads nothing, and must not drop the read in flight.
+  let unwatchedRevision = -1;
+  let unwatchedReads = 0;
+  $effect(() => {
+    if (!ready) return;
+    const at = revision;
+    const shown = tab === "unmonitored";
+    void synced;
+    if (at === unwatchedRevision && !shown) return;
+    unwatchedRevision = at;
+    const mine = ++unwatchedReads;
+    ports.unmonitoredAssets().then(
+      (rows) => {
+        if (mine !== unwatchedReads) return;
+        unwatched = gaps(rows);
+        settleUnwatched(rows);
+      },
+      (error: unknown) => {
+        if (mine === unwatchedReads) failed = ipcErrorMessage(error);
+      },
+    );
   });
 
   $effect(() => {
@@ -432,8 +481,6 @@
   // -- the filter bar --------------------------------------------------------
 
   const filter = sessionFilter("monitors");
-  /** The hidden fold as the reader last left it; `null` until touched, so it may open by itself on a search only it answers. */
-  const hiddenFold = sessionFold("monitors:hidden");
   // Prototype-6 opens Monitors on *All*.
   if (filter.scope === null) filter.scope = "all";
   $effect(() => {
@@ -473,12 +520,12 @@
           index,
         ),
   );
-  /** The marked monitor, whatever the filter and the fold say: the reader came for it. */
-  const markedRow = $derived(markedId === null ? null : (roster?.find((row) => row.entity_id === markedId) ?? null));
+  /** The open monitor, whatever the filter says: the reader came for it. */
+  const markedRow = $derived(openId === null ? null : (roster?.find((row) => row.entity_id === openId) ?? null));
   /**
    * The roster stays where it first drew (the still-rows pass, 2026-11-11): a check that goes down sorts first, and a
    * sync bringing it jumped every row under the pointer. It waits behind *Sort again*; a monitor a sync adds above
-   * waits behind *Show N new*. A row a press takes away (*Hide*) goes, and keeps its place for an *Undo*.
+   * waits behind *Show N new*. A row a press takes away (*Hide*) goes.
    */
   const rosterHold = new HeldOrder<(typeof kept.shown)[number]>((row) => row.entity_id, () => "", { keepLeft: false });
   const heldRoster = $derived(
@@ -487,19 +534,16 @@
       : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text])),
   );
   const heldBar = $derived({ waiting: heldRoster.waiting, stale: heldRoster.stale, show: () => rosterHold.release() });
-  const rows = $derived(markedRow !== null && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
-  const hiddenRows = $derived(markedRow === null ? kept.hidden : kept.hidden.filter((row) => row !== markedRow));
-  const foldOpen = $derived(hiddenFoldOpen(hiddenFold.open, kept));
-  /** The roster's own size, for the count: a hidden monitor is counted apart, unless it is marked and so a row of the list. */
-  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden || row === markedRow).length);
+  const rows = $derived(markedRow !== null && !markedRow.hidden && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
+  const hiddenRows = $derived(markedRow === null || !markedRow.hidden || kept.hidden.includes(markedRow) ? kept.hidden : [markedRow, ...kept.hidden]);
+  /** The roster's own size, for the count: a hidden monitor is counted apart. */
+  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
+  /** What the summary says: how many of the monitors not hidden read each way. */
+  const counts = $derived.by(() => {
+    const tally = Object.fromEntries(chipCounts((roster ?? []).filter((row) => !row.hidden)).map((chip) => [chip.state, chip.count]));
+    return { down: tally["down"] ?? 0, slow: tally["warn"] ?? 0, up: tally["up"] ?? 0, paused: tally["paused"] ?? 0, other: (tally["pending"] ?? 0) + (tally["other"] ?? 0) };
+  });
 
-  /** Only the reader's toggle is remembered, not the one the open attribute raises as the fold is drawn. */
-  function toggleFold(event: Event) {
-    const open = (event.currentTarget as HTMLDetailsElement).open;
-    if (open !== foldOpen) hiddenFold.open = open;
-  }
-
-  /** The header's line: how many checks, from which source, synced when. */
   /** Assets nothing watches: their own band, over their name, type and owner. */
   const unwatchedFilter = sessionFilter("monitors-unwatched");
   const unwatchedConfig: FilterConfig = { id: "monitors-unwatched", placeholder: "Filter assets", noun: "assets", one: "asset" };
@@ -513,12 +557,13 @@
   const hourlyBars = new MediaQuery("(max-width: 1240px)");
 
   /**
-   * A row's 24-hour strip, one element (`stripPaint`): its bars painted through the CSSOM (CSP refuses an inline
-   * style), and the bar under the pointer named in its title, as each bar's own title did.
+   * A monitor's 24-hour strip, one element (`stripPaint`): its bars painted through the CSSOM (CSP refuses an inline
+   * style), and the bar under the pointer named in its title. Painted once a row is drawn, again only when its bar
+   * changes (a keyed row whose drawn parts are the same is the same object, `keepDrawn`).
    */
-  function paintStrip(bars: Bar[], hourly: boolean) {
+  function paintStrip(bars: Bar[], hourly: boolean, quiet: boolean, big = false) {
     return (node: HTMLElement) => {
-      const paint = stripPaint(bars, hourly);
+      const paint = stripPaint(bars, hourly, quiet, big);
       node.style.setProperty("background-image", paint.image);
       node.style.setProperty("width", `${paint.width}px`);
       const name = (event: PointerEvent) => {
@@ -531,6 +576,25 @@
         node.style.removeProperty("background-image");
         node.style.removeProperty("width");
       };
+    };
+  }
+
+  /**
+   * The roster in blocks of `BLOCK` rows, each block a box the browser lays out and paints only near the viewport
+   * (`content-visibility: auto`, `monitors.css`). Every row is in the DOM, and a block's room is its rows' exact height
+   * (`blockRoom`), so a block drawn as it comes into view moves nothing. One box a block, not a row: each row its own
+   * box made 218 clips that every frame of a scroll laid out into layers again (the monitors-page pass, 2026-11-19).
+   */
+  const BLOCK = 16;
+  function blocksOf(list: readonly MonitorRow[]): MonitorRow[][] {
+    const blocks: MonitorRow[][] = [];
+    for (let at = 0; at < list.length; at += BLOCK) blocks.push(list.slice(at, at + BLOCK));
+    return blocks;
+  }
+  /** A block's room while it is not drawn: its rows at their one height, through the CSSOM (CSP refuses an inline style). */
+  function blockRoom(rows: number) {
+    return (node: HTMLElement) => {
+      node.style.setProperty("--tf-mon-rows", String(rows));
     };
   }
 
@@ -547,14 +611,14 @@
   const header = $derived.by(() => {
     if (roster === null) return "Checks from your monitoring source, each watching an asset.";
     const names = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
-    const newest = roster.map((row) => row.checked_at).sort().at(-1) ?? null;
+    const newest = [...latest.values()].map((row) => row.checked_at).sort().at(-1) ?? null;
     const from = names.length > 0 ? ` from ${names.join(" and ")}` : "";
     // A check's own time is not a sync: where a source can't sync, the band says how old its data is.
     const synced = newest !== null && sources !== null && stale.length === 0 ? `, synced ${ago(newest, now)}` : "";
     return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset.`;
   });
 
-  // -- a row's Refresh (#2138) -----------------------------------------------
+  // -- a monitor's Refresh (#2138) -------------------------------------------
 
   /** Each monitor's own *Refresh*, so one row's *Refreshing…* is not another's; made as the roster is read. */
   const refreshers = new Map<string, DetailRefresh>();
@@ -564,48 +628,11 @@
     for (const id of ids) if (!refreshers.has(id)) refreshers.set(id, createDetailRefresh(untrack(() => ports.refresh)));
   }
 
-  type Entry = { row: MonitorRow; failed: string | null; held?: never } | { row: null; failed: null; held?: boolean };
-  const FOLD_KEY = "\u0000hidden-fold";
-  const HELD_KEY = "\u0000held-row";
-  /** The row a mouse press on *Hide* sent to the fold, still holding its place under the pointer (F-138). */
-  let holding = $state.raw<{ id: string; row: MonitorRow; at: number; height: number } | null>(null);
-  /** Where its empty row stands: once it has left the list, and until *Undo* brings it back. */
-  const holdAt = $derived(holding !== null && !rows.some((row) => row.entity_id === holding?.id) ? holding.at : null);
-  $effect(() => {
-    if (holding === null) return;
-    return holdUnderPointer(() => document.querySelector(".tf-mon-held"), () => (holding = null));
-  });
-  /** The listed rows, the held row's empty one among them. */
-  const withHeld = (list: Entry[]): Entry[] => {
-    if (holdAt === null) return list;
-    const next = rows[holdAt];
-    const at = next === undefined ? list.length : list.findIndex((entry) => entry.row === next);
-    return [...list.slice(0, at), { row: null, failed: null, held: true }, ...list.slice(at)];
-  };
-  const withFailures = (list: readonly MonitorRow[]): Entry[] =>
-    list.flatMap((row) => {
-      const failed = refreshers.get(row.entity_id)?.failed ?? null;
-      return failed === null ? [{ row, failed }] : [{ row, failed: null }, { row, failed }];
-    });
-  /**
-   * The roster's table rows in order: each monitor, and under it the reason its
-   * refresh failed; then, when the filter keeps any hidden monitor, the fold's
-   * summary and, while it is open, those monitors the same way.
-   */
-  const entries = $derived<Entry[]>([
-    ...withHeld(withFailures(rows)),
-    ...(hiddenRows.length > 0 ? [{ row: null, failed: null }] : []),
-    ...(hiddenRows.length > 0 && foldOpen ? withFailures(hiddenRows) : []),
-  ]);
-  /**
-   * Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. A row is 71 nodes with its bars,
-   * so past 40 rows: at the 300 every list starts at, 218 live monitors drew 15,316 nodes and a 140 ms frame (2026-11-10), and
-   * at 100 a typed word that narrowed the roster under it drew every match, a key 119 ms at CPU 4x in knobas's window on
-   * Björn's PC (the ux13 Windows pass, 2026-11-15).
-   */
-  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42, from: 40 });
+  /** The open monitor as last read (its response and when it was read move with every poll), and its refresh. */
+  const panel = $derived(markedRow === null ? null : (latest.get(markedRow.entity_id) ?? markedRow));
+  const panelRefresh = $derived(panel === null ? undefined : refreshers.get(panel.entity_id));
 
-  /** A mark comes into view once, as the address names it; a later read of the roster leaves the reader where they are. */
+  /** An open monitor's row comes into view once, as the address names it; a later read leaves the reader where they are. */
   let broughtIn: string | null = null;
   $effect(() => {
     const id = markedId;
@@ -615,17 +642,10 @@
     }
     if (broughtIn === id || markedRow === null) return;
     broughtIn = id;
-    win.reveal(untrack(() => entries).findIndex((entry) => entry.row?.entity_id === id && entry.failed === null));
-    void tick().then(() => document.querySelector(".tf-kept:not([hidden]) .tf-mon-at")?.scrollIntoView?.({ block: "center" }));
+    void tick().then(() => document.querySelector(".tf-kept:not([hidden]) .tf-mon-row[aria-current]")?.scrollIntoView?.({ block: "nearest" }));
   });
 
-  function entryKey(entry: Entry): string {
-    if (entry.held) return HELD_KEY;
-    if (entry.row === null) return FOLD_KEY;
-    return entry.failed === null ? entry.row.entity_id : `${entry.row.entity_id}\u0000failed`;
-  }
-
-  /** What a row's *Refresh* reads: the roster holds only enabled sources' monitors. */
+  /** What a monitor's *Refresh* reads: the roster holds only enabled sources' monitors. */
   function subjectOf(row: MonitorRow): RefreshSubject {
     return {
       refreshes: row.refreshes,
@@ -642,7 +662,7 @@
     });
   }
 
-  // -- the row actions -------------------------------------------------------
+  // -- the actions -----------------------------------------------------------
 
   /** *Acked* holds about two seconds after it says so (F-351): a double press is one ack, and *Undo* is there at once. */
   const ackHold = new PressHold();
@@ -700,14 +720,19 @@
     push({ text: ipcErrorMessage(error), tone: "err" });
   }
 
-  /** *Hide* or *Unhide*: knobas-local, so the row moves at once and the roster is read again. */
-  async function setHidden(row: MonitorRow, hidden: boolean, event?: MouseEvent) {
-    if (pressing[row.entity_id]) return;
+  /**
+   * *Hide* turns into *Unhide* under the press, the same button with the monitor still open, so it holds about two
+   * seconds as *Acked* does (F-351): a double press is one hide. The toast's *Undo* is not held.
+   */
+  const hideHold = new PressHold();
+
+  /** *Hide* or *Unhide*: knobas-local, so the row moves at once (to the hidden monitors, or back) and the roster is read again. */
+  async function setHidden(row: MonitorRow, hidden: boolean, undo = false) {
+    if (pressing[row.entity_id] || (!undo && hideHold.held(row.entity_id))) return;
     pressing[row.entity_id] = true;
-    const box = hidden && heldByPointer(event) ? (event?.currentTarget as Element).closest("tr")?.getBoundingClientRect() : undefined;
-    if (box !== undefined) holding = { id: row.entity_id, row, at: rows.indexOf(row), height: box.height };
     try {
       await ports.setMonitorHidden(row.entity_id, hidden);
+      if (!undo) hideHold.hold(row.entity_id);
       if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
       // A hidden monitor is not down as far as the nav says: there is nothing left to act on.
       ports.badgesChanged?.();
@@ -715,7 +740,7 @@
         text: hidden
           ? `Hid ${row.name}. Its alerts stay quiet.`
           : `${row.name} is back on the roster, and its alerts reach the inbox again.`,
-        ...(hidden ? { action: { label: "Undo", run: () => void setHidden({ ...row, hidden: true }, false) } } : {}),
+        ...(hidden ? { action: { label: "Undo", run: () => void setHidden({ ...row, hidden: true }, false, true) } } : {}),
       });
       revision += 1;
     } catch (error) {
@@ -725,7 +750,7 @@
     }
   }
 
-  /** The pause and resume a row may offer, by the op its source declares. */
+  /** The pause and resume a monitor may offer, by the op its source declares. */
   const ROW_OPS: Record<string, { label: string; build: (entity: string) => WriteOpPayload }> = {
     pause_monitor: { label: "Pause", build: (entity) => ({ PauseMonitor: { entity } }) },
     resume_monitor: { label: "Resume", build: (entity) => ({ ResumeMonitor: { entity } }) },
@@ -788,16 +813,26 @@
     revision += 1;
   }
 
-  /** A row opens its asset; a click on a link or button inside it already did its own thing. */
+  /** An unwatched row opens its asset; a click on a link or button inside it already did its own thing. */
   function openAsset(event: MouseEvent, id: string) {
     if ((event.target as Element | null)?.closest("a, button")) return;
     location.hash = addressOf(id);
+  }
+
+  /** A monitor's row opens it beside the roster, and pressed again closes it; a press on a link or a button in it did its own thing. */
+  function openMonitor(event: MouseEvent, id: string) {
+    if ((event.target as Element | null)?.closest("a, button:not(.tf-mon-open)")) return;
+    if (openId === id) closeMonitor();
+    else openId = id;
   }
 
   /** A route opens at `#/route/<id>` (the Tree at its exposing asset), an asset at `#/asset/<id>`. */
   function addressOf(id: string): string {
     return `#/${isRouteId(id) ? "route" : "asset"}/${encodeURIComponent(id)}`;
   }
+
+  /** The uptime windows Kuma publishes, in words. */
+  const WINDOW_WORDS: Record<string, string> = { "1d": "1 day", "7d": "7 days", "30d": "30 days", "365d": "1 year" };
 </script>
 
 <header class="tf-fhead">
@@ -830,161 +865,188 @@
 {:else}
   <FilterBar config={unwatchedConfig} filter={unwatchedFilter} shown={unwatched === null ? null : shownUnwatched.length} total={unwatched?.length ?? null} />
 {/if}
-<div class="tf-cbody">
-  {#if failed !== null}
-    <p class="tf-ifail">Could not read the monitors: {failed}</p>
-  {/if}
-  {#if markedId !== null && roster !== null && markedRow === null}
-    <TfNothingHere message="knobas does not hold this monitor. It may not have synced yet." href="#/monitors" action="All monitors" />
-  {:else if tab === "unmonitored"}
-    {#if unwatched !== null && unwatched.length > 0 && shownUnwatched.length === 0}
-      <TfNoMatch noun="assets" filter={unwatchedFilter} />
-    {:else if unwatched !== null && unwatched.length > 0}
-      <table class="tf-tbl tf-mon-gaps">
-        <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
-        <tbody>
-          {#each shownUnwatched as asset (asset.id)}
-            {@const word = createWord(asset)}
-            <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
-              <td><a href={addressOf(asset.id)}>{asset.name}</a></td>
-              <td>{asset.type_label}</td>
-              <td>{asset.environment ?? ""}</td>
-              <td><span class="tf-rowval">{asset.owner ?? ""}</span></td>
-              <td class="tf-mon-acts">
-                {#if word !== null}
-                  <TfStateChip text="Monitor {word}" tone="info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)} />
-                {:else}
-                  <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
-                    >Create monitor…</button
-                  ></span></span>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {:else if unwatched !== null}
-      <div class="tf-empty">Every container, service, route, database and VM has a monitor.</div>
+
+{#snippet monitorRow(row: MonitorRow)}
+  <!-- A hidden monitor draws its state in no tone and offers no Ack: its alerts reach no inbox. -->
+  {@const chip = stateChip(row, fixedNow)}
+  {@const tone = row.hidden ? null : chip.tone}
+  {@const down = tone === "err" && !row.tombstoned}
+  {@const toggled = echoOn(row.entity_id, TOGGLE)}
+  <!-- The row's name is its link, so a key reaches it there; the press anywhere else in the row is the pointer's way. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="tf-mon-row"
+    class:tf-mon-err={down}
+    class:tf-mon-warn={tone === "warn"}
+    class:tf-mon-hid={row.hidden}
+    role="listitem"
+    aria-current={row.entity_id === openId ? "true" : undefined}
+    onclick={(event) => openMonitor(event, row.entity_id)}
+    {@attach menuThing(() => ({ kind: "monitor", id: row.entity_id, hash: monitorHash(row.entity_id), alerting: down && !(row.entity_id in acked), ack: () => void ack(row) }))}
+  >
+    <!-- The name is the row's button, for the keyboard; the pointer may press anywhere on the row. -->
+    <span class="tf-mon-name"
+      ><button type="button" class="tf-mon-open" aria-expanded={row.entity_id === openId}><Marked text={row.name} typed={filter.text} /></button
+      >{#if row.monitor_type}{" "}<span class="tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</span
+    >
+    <span class="tf-mon-state">
+      {#if tone === "err" || tone === "warn" || tone === "info"}<TfStateChip text={chip.label} {tone} />{:else}<span class="tf-mon-word">{stateWord(chip.label)}</span>{/if}
+      {#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}
+      {#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{:else if tone === "warn"}<span class="tf-mon-since">{responseText(row.response_time_ms)}</span>{/if}
+    </span>
+    <span class="tf-mbar" class:tf-mbar-hourly={hourlyBars.current} role="img" aria-label="Last 24 hours of {row.name}" {@attach paintStrip(barsOf(segments(row), hourlyBars.current), hourlyBars.current, row.hidden)}></span>
+    <span class="tf-mon-up">{uptimeText(row)}</span>
+    <span class="tf-mon-ack"
+      >{#if down}<button
+          type="button"
+          class="tf-btn tf-sm"
+          aria-pressed={row.entity_id in acked}
+          title={row.entity_id in acked ? "Acked. Press to take it back, so the alert asks again." : "Ack the alert: it stays open, and stops asking"}
+          onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}>{row.entity_id in acked ? "Acked" : "Ack"}</button
+        >{/if}</span
+    >
+    <span class="tf-mon-watch"
+      >{#each row.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{/each}</span
+    >
+  </div>
+{/snippet}
+
+<div class="tf-cbody tf-mon-body" {@attach sideWidth("monitor")}>
+  {#if tab === "all" && panel !== null}<TfSideEdge side="monitor" />{/if}
+  <div class="tf-mon-main">
+    {#if failed !== null}
+      <p class="tf-ifail">Could not read the monitors: {failed}</p>
     {/if}
-  {:else if roster !== null}
-    {#if entries.length > 0}
-      <table class="tf-tbl tf-mon">
-        <!-- Fixed columns: an action taken on one row, or a filter, moves nothing in the others. -->
-        <colgroup><col class="tf-monc-name" /><col class="tf-monc-state" /><col class="tf-monc-watch" /><col class="tf-monc-bars" /><col class="tf-monc-num" /><col class="tf-monc-num" /><col class="tf-monc-acts" /></colgroup>
-        <thead>
-          <tr><th>Monitor</th><th>State</th><th>Watches</th><th>Last 24 h<span class="tf-mbar-axis" aria-hidden="true"><span>24 h ago</span><span>now</span></span></th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th><span class="tf-sr">Actions</span></th></tr>
-        </thead>
-        <tbody {@attach win.list}>
-          {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
-          {#each win.slice(entries) as entry (entryKey(entry))}
-            {@const row = entry.row}
-            {#if row === null && entry.held}
-              <!-- Its words stay, dimmed, for as long as the pointer rests on it (F-064). Nothing in them can be pressed. -->
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <tr class="tf-mon-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(HELD_KEY)} {@attach heldHeight(holding?.height ?? 0)}>
-                {#if holding !== null}
-                  {@const was = holding.row}
-                  {@const chip = stateChip(was, now)}
-                  <td>{was.name}{#if was.monitor_type}{" "}<span class="tf-mon-type">{kindWord(was.monitor_type)}</span>{/if}</td>
-                  <td><div class="tf-mon-state"><TfStateChip text={chip.label} />{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
-                  <td>{#each was.assets as asset (asset.id)}<div><span class="tf-mon-asset">{asset.name}</span>{" "}<span class="tf-mon-type">{asset.type_label}</span></div>{/each}</td>
-                  <td><div class="tf-mon-24"><span class="tf-mon-figs">{responseText(was.response_time_ms)}, {uptimeText(was)}</span></div></td>
-                  <td class="tf-num"><span>{responseText(was.response_time_ms)}</span></td>
-                  <td class="tf-num"><span>{uptimeText(was)}</span></td>
-                  <td></td>
-                {:else}<td colspan="7"></td>{/if}
-              </tr>
-            {:else if row === null}
-              <tr class="tf-mon-foldrow" {@attach win.row(FOLD_KEY)}>
-                <td colspan="7">
-                  <!-- The summary alone, as Builds' folds: the hidden rows follow it while it is open. -->
-                  <details class="tf-mon-fold" open={foldOpen} ontoggle={toggleFold}>
-                    <summary
-                      ><span>{counted(hiddenRows.length, "hidden monitor", "hidden monitors")}</span>
-                      <span class="tf-dim">{hiddenRows.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span></summary
-                    >
-                  </details>
-                </td>
-              </tr>
-            {:else if entry.failed !== null}
-              <tr class="tf-mon-failed" {@attach win.row(entryKey(entry))}>
-                <td colspan="7"><div class="tf-banner tf-err tf-refresh-failed" role="alert">{entry.failed}</div></td>
-              </tr>
-            {:else}
-              {@const chip = stateChip(row, now)}
-              <!-- A hidden monitor draws its state in no tone and offers no Ack: its alerts reach no inbox. -->
-              {@const tone = row.hidden ? null : chip.tone}
-              {@const down = tone === "err" && !row.tombstoned}
-              {@const toggled = echoOn(row.entity_id, TOGGLE)}
-              {@const refresher = refreshers.get(row.entity_id)}
-              <tr
-                class:tf-mon-hid={row.hidden}
-                class:tf-mon-at={row.entity_id === markedId}
-                aria-current={row.entity_id === markedId ? "true" : undefined}
-                {@attach win.row(entryKey(entry))}
-                {@attach menuThing(() => ({ kind: "monitor", id: row.entity_id, hash: monitorHash(row.entity_id), alerting: down && !(row.entity_id in acked), ack: () => void ack(row) }))}
-              >
-                <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}{#if chip.since}<span class="tf-mon-since" title={chip.since}>{chip.since}</span>{/if}</div></td>
-                <!-- Before the bars and figures, not after them: the row's actions stand in the last column's place on hover, and this column's links have to stay in reach. -->
-                <td>
-                  {#each row.assets as asset (asset.id)}
-                    <div><a class="tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
+    {#if markedId !== null && roster !== null && markedRow === null}
+      <TfNothingHere message="knobas does not hold this monitor. It may not have synced yet." href="#/monitors" action="All monitors" />
+    {:else if tab === "unmonitored"}
+      {#if unwatched !== null && unwatched.length > 0 && shownUnwatched.length === 0}
+        <TfNoMatch noun="assets" filter={unwatchedFilter} />
+      {:else if unwatched !== null && unwatched.length > 0}
+        <table class="tf-tbl tf-mon-gaps">
+          <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
+          <tbody>
+            {#each shownUnwatched as asset (asset.id)}
+              {@const word = createWord(asset)}
+              <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
+                <td><a href={addressOf(asset.id)}>{asset.name}</a></td>
+                <td>{asset.type_label}</td>
+                <td>{asset.environment ?? ""}</td>
+                <td><span class="tf-rowval">{asset.owner ?? ""}</span></td>
+                <td class="tf-mon-acts">
+                  {#if word !== null}
+                    <TfStateChip text="Monitor {word}" tone="info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)} />
                   {:else}
-                    <span class="tf-dim">no asset</span>
-                  {/each}
-                </td>
-                <td>
-                  <div class="tf-mon-24">
-                    <span
-                      class="tf-mbar"
-                      class:tf-mbar-hourly={hourlyBars.current}
-                      role="img"
-                      aria-label="Last 24 hours of {row.name}"
-                      {@attach paintStrip(barsOf(segments(row, now.getTime()), hourlyBars.current), hourlyBars.current)}
-                    ></span>
-                    <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
-                    <span class="tf-mon-figs tf-rowval" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
-                  </div>
-                </td>
-                <td class="tf-num"><span class="tf-rowval">{responseText(row.response_time_ms)}</span></td>
-                <td class="tf-num"><span class="tf-rowval">{uptimeText(row)}</span></td>
-                <td class="tf-mon-acts"><div class="tf-rowend">
-                  {#if down}
-                    <button type="button" class="tf-btn tf-sm tf-mon-ack" aria-pressed={row.entity_id in acked} title={row.entity_id in acked ? "Acked. Press to take it back, so the alert asks again." : undefined} onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}
-                      >{row.entity_id in acked ? "Acked" : "Ack"}</button
-                    >
+                    <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
+                      >Create monitor…</button
+                    ></span></span>
                   {/if}
-                  <span class="tf-rowacts">
-                  <!-- Unkeyed: when the read turns *Pause* into *Resume* it is one button, so focus stays on it. -->
-                  {#each row.actions.filter((op) => op in ROW_OPS) as op}
-                    <button type="button" class="tf-btn tf-sm tf-ghost" aria-disabled={toggled !== null ? "true" : undefined} title={toggled !== null ? "On its way. It settles when the roster reads the new state." : undefined} onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
-                  {/each}
-                  <button
-                    type="button"
-                    class="tf-btn tf-sm tf-ghost"
-                    disabled={pressing[row.entity_id] === true}
-                    title={row.hidden ? "Show it on the roster and let its alerts reach the inbox again" : "Take it off the roster; its alerts stop reaching the inbox and stop notifying"}
-                    onclick={(event) => void setHidden(row, !row.hidden, event)}>{row.hidden ? "Unhide" : "Hide"}</button
-                  >
-                  {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small ghost />{/if}
-                  </span>
-                </div></td>
+                </td>
               </tr>
+            {/each}
+          </tbody>
+        </table>
+      {:else if unwatched !== null}
+        <div class="tf-empty">Every container, service, route, database and VM has a monitor.</div>
+      {/if}
+    {:else if roster !== null}
+      {#if roster.length === 0}
+        <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
+      {:else}
+        <!-- What is wrong, in the width that shouts: down and slow in their tones, the rest quiet (the monitors-page pass, 2026-11-19). -->
+        <p class="tf-mon-sum" aria-label="Monitors by state">
+          {#if counts.down + counts.slow === 0}
+            <span class="tf-mon-fig tf-mon-calm"><b>{counts.up}</b> up</span>
+          {:else}
+            <span class="tf-mon-fig" class:tf-mon-figerr={counts.down > 0}><b>{counts.down}</b> down</span>
+            <span class="tf-mon-fig" class:tf-mon-figwarn={counts.slow > 0}><b>{counts.slow}</b> slow</span>
+            <span class="tf-mon-fig tf-mon-calm"><b>{counts.up}</b> up</span>
+          {/if}
+          {#if counts.paused > 0}<span class="tf-mon-fig tf-mon-calm"><b>{counts.paused}</b> paused</span>{/if}
+          {#if counts.other > 0}<span class="tf-mon-fig tf-mon-calm"><b>{counts.other}</b> other</span>{/if}
+        </p>
+        {#if rows.length + hiddenRows.length > 0}
+          <div class="tf-mon-list" role="list" aria-label="Monitors">
+            <div class="tf-mon-head" aria-hidden="true">
+              <span>Monitor</span><span>State</span><span class="tf-mbar-axis"><span>24 h ago</span><span>now</span></span><span class="tf-mon-up">30 days</span><span></span><span class="tf-mon-watch">Watches</span>
+            </div>
+            {#each blocksOf(rows) as block, at (at)}<div class="tf-mon-block" {@attach blockRoom(block.length)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>{/each}
+            {#if hiddenRows.length > 0}
+              <!-- Hidden monitors are drawn after the roster, all of them, dimmed: nothing folds, so nothing redraws or moves (#2447, the monitors-page pass). -->
+              <div class="tf-mon-hidhead" role="presentation">
+                <span>{counted(hiddenRows.length, "hidden monitor", "hidden monitors")}</span>
+                <span class="tf-dim">{hiddenRows.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span>
+              </div>
+              {#each blocksOf(hiddenRows) as block, at (at)}<div class="tf-mon-block" {@attach blockRoom(block.length)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>{/each}
             {/if}
-          {/each}
-          {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("after")}></td></tr>{/if}
-        </tbody>
-      </table>
-    {:else if roster.length === 0}
-      <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
-    {:else}
-      <TfNoMatch noun="monitors" {filter}>
-        {#if scope !== "all"}
-          <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
+          </div>
+        {:else}
+          <TfNoMatch noun="monitors" {filter}>
+            {#if scope !== "all"}
+              <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
+            {/if}
+          </TfNoMatch>
         {/if}
-      </TfNoMatch>
+      {/if}
     {/if}
+  </div>
+  {#if tab === "all" && panel !== null}
+    {@const chip = stateChip(panel, now)}
+    {@const tone = panel.hidden ? null : chip.tone}
+    {@const down = tone === "err" && !panel.tombstoned}
+    {@const toggled = echoOn(panel.entity_id, TOGGLE)}
+    <!-- The open monitor: everything its row leaves out, and what can be done to it. `Esc` closes it. -->
+    <aside class="tf-mon-panel" aria-label={panel.name}>
+      <header>
+        <h2>{panel.name}</h2>
+        <button type="button" class="tf-btn tf-sm tf-ghost" onclick={closeMonitor}>Close</button>
+      </header>
+      <div class="tf-mon-pstate">
+        <TfStateChip text={chip.label} {tone} />
+        {#if toggled !== null}<TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}
+        {#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}
+        {#if panel.hidden}<span class="tf-dim">Hidden: its alerts reach no one.</span>{/if}
+      </div>
+      <div class="tf-mon-pbar">
+        <span class="tf-mbar tf-mbar-big" role="img" aria-label="Last 24 hours of {panel.name}" {@attach paintStrip(barsOf(segments(panel), false), false, panel.hidden, true)}></span>
+        <span class="tf-mbar-axis"><span>24 h ago</span><span>12 h</span><span>now</span></span>
+      </div>
+      <dl class="tf-mon-facts">
+        <dt>Checks</dt>
+        <dd>{kindWord(panel.monitor_type) || "A check"}{#if panel.target}{" "}<span class="tf-mono">{panel.target}</span>{/if}</dd>
+        <dt>Response</dt>
+        <dd>{responseText(panel.response_time_ms)}</dd>
+        <dt>Uptime</dt>
+        <dd>{#if panel.uptime.length === 0}—{:else}{#each panel.uptime as u, at (u.window)}{#if at > 0}{", "}{/if}{Number((u.ratio * 100).toFixed(2))} % over {WINDOW_WORDS[u.window] ?? u.window}{/each}{/if}</dd>
+        {#if panel.cert_days_remaining !== null}
+          <dt>Certificate</dt>
+          <dd>Expires in {counted(Math.floor(panel.cert_days_remaining), "day", "days")}</dd>
+        {/if}
+        <dt>Watches</dt>
+        <dd>{#each panel.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}">{asset.name}</a> <span class="tf-dim">{asset.type_label}</span>{:else}<span class="tf-dim">No asset. Link one from its asset's page.</span>{/each}</dd>
+        <dt>Read</dt>
+        <dd>{ago(panel.checked_at, now)} from {sourceNames[panel.source_id] ?? panel.source_id}</dd>
+      </dl>
+      <div class="tf-mon-pacts">
+        {#if down}
+          <button type="button" class="tf-btn tf-sm" aria-pressed={panel.entity_id in acked} onclick={() => void (panel.entity_id in acked ? unack(panel) : ack(panel))}>{panel.entity_id in acked ? "Acked" : "Ack"}</button>
+        {/if}
+        <!-- Unkeyed: when the read turns *Pause* into *Resume* it is one button, so focus stays on it. -->
+        {#each panel.actions.filter((op) => op in ROW_OPS) as op}
+          <button type="button" class="tf-btn tf-sm" aria-disabled={toggled !== null ? "true" : undefined} title={toggled !== null ? "On its way. It settles when the roster reads the new state." : undefined} onclick={() => void toggle(panel, op)}>{ROW_OPS[op]!.label}</button>
+        {/each}
+        <button
+          type="button"
+          class="tf-btn tf-sm"
+          disabled={pressing[panel.entity_id] === true}
+          title={panel.hidden ? "Show it on the roster and let its alerts reach the inbox again" : "Move it to the hidden monitors; its alerts stop reaching the inbox and stop notifying"}
+          onclick={() => void setHidden(panel, !panel.hidden)}>{panel.hidden ? "Unhide" : "Hide"}</button
+        >
+        {#if panelRefresh}<TfDetailRefresh detail={subjectOf(panel)} refresh={panelRefresh} {reread} small />{/if}
+        {#if panel.web_url}<a class="tf-btn tf-sm tf-ghost" href={panel.web_url} target="_blank" rel="noreferrer">Open in Uptime Kuma</a>{/if}
+      </div>
+      {#if panelRefresh?.failed}<div class="tf-banner tf-err tf-refresh-failed" role="alert">{panelRefresh.failed}</div>{/if}
+    </aside>
   {/if}
 </div>
 {#if creating !== null}

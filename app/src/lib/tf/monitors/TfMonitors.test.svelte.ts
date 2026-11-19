@@ -1,8 +1,8 @@
 /**
  * Monitors (#864, R-11.3, R-11.4), mounted over stand-in reads: the header and
- * tabs, the roster's order and columns, the scopes, *Ack*, *Pause* and
- * *Resume*, *Hide* and the hidden fold, *Assets nothing watches*, and
- * *Create monitor*'s two writes.
+ * tabs, the roster's order and columns, the scopes, *Ack*, the open monitor
+ * with *Pause*, *Resume*, *Hide* and *Refresh*, the hidden monitors after the
+ * roster, *Assets nothing watches*, and *Create monitor*'s two writes.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -19,6 +19,7 @@ import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
 import { pressRefreshKey, refreshProbe, type RefreshProbe } from "../refresh.fixture";
 import { PRESS_HOLD_MS } from "../press-hold.svelte";
+import { layers } from "../layers.svelte";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -41,6 +42,8 @@ function monitor(entity_id: string, name: string, over: Partial<MonitorRow> = {}
     actions: ["pause_monitor"],
     refreshes: true,
     samples: [],
+    bar: "u".repeat(48),
+    down_since: null,
     ...over,
   };
 }
@@ -106,6 +109,7 @@ let refreshes: Set<(event: { payload: unknown }) => void>;
 let probe: RefreshProbe;
 
 beforeEach(() => {
+  layers.reset();
   toasts.items.splice(0);
   writes = [];
   edits = [];
@@ -201,13 +205,18 @@ async function draw(rest: string[], job: string | null = "PAY-231", stand: Monit
 }
 
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-const rows = () => [...target.querySelectorAll("tbody tr")];
+/** The roster's monitors (`.tf-mon-row`), or on *Assets nothing watches* its table's rows. */
+const rows = () => [...target.querySelectorAll(".tf-mon-row, tbody tr")];
+/** A row's first cell: the monitor's name and type, or the asset's name. */
+const first = (tr: Element) => tr.querySelector(".tf-mon-name, td");
+/** The open monitor beside the roster (`#/monitors/at/<id>`), where its actions are. */
+const panel = () => target.querySelector(".tf-mon-panel")!;
 const button = (tr: Element, label: string) =>
   [...tr.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label);
 
 test("a down monitor's chip holds the word, and the time beside it is plain text", async () => {
   const at = new Date(NOW.getTime() - 60 * 60_000).toISOString();
-  const down = monitor("kuma:9", "jira", { state: "down", samples: [{ taken_at: at, state: "down" }] });
+  const down = monitor("kuma:9", "jira", { state: "down", down_since: at });
   await draw([], null, ports({ monitorRoster: async () => [down] }));
   expect(text(rows()[0]!.querySelector(".tf-chip"))).toBe("Down");
   expect(text(rows()[0]!.querySelector(".tf-mon-since"))).toMatch(/^since \d\d:\d\d$/);
@@ -215,8 +224,8 @@ test("a down monitor's chip holds the word, and the time beside it is plain text
 
 test("Hide and Unhide tell the nav's badge, which leaves a hidden monitor out", async () => {
   let told = 0;
-  await draw([], "PAY-231", ports({ badgesChanged: () => (told += 1) }));
-  button(rows()[0]!, "Hide")!.click();
+  await draw(["at", "kuma:2"], "PAY-231", ports({ badgesChanged: () => (told += 1) }));
+  button(panel(), "Hide")!.click();
   await settle();
   expect(told).toBe(1);
 });
@@ -230,21 +239,74 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Monitors 4", "Assets nothing watches 2"]);
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
-  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual([
+  expect(rows().map((tr) => text(first(tr)))).toEqual([
     "flows-stage HTTP",
     "pg-payments TCP",
     "yard-planner HTTP",
     "payouts /health HTTP",
   ]);
-  const [, , , up] = rows();
-  const cells = [...up!.querySelectorAll("td")].map(text);
-  // The third is the figures under the bars, which CSS draws only where their columns have gone.
-  expect(cells.slice(1, 6)).toEqual(["Up", "payouts Service", "140 ms, 99.98 %", "140 ms", "99.98 %"]);
+  const [down, , , up] = rows();
+  // Up is a quiet word, not a chip; what is wrong is a chip, its tone down the row's edge.
+  const cells = [...up!.children].map(text);
+  expect(cells).toEqual(["payouts /health HTTP", "Up", "", "99.98 %", "", "payouts"]);
+  expect(up!.querySelector(".tf-chip")).toBeNull();
+  expect(down!.classList.contains("tf-mon-err")).toBe(true);
+  expect(text(down!.querySelector(".tf-chip.tf-err"))).toBe("Down");
   // The strip is one element, its 48 half-hours its background (`stripPaint`): 48 bars of 2 px a pixel apart.
   const strip = up!.querySelector<HTMLElement>(".tf-mbar")!;
   expect(strip.children).toHaveLength(0);
   expect(strip.style.width).toBe("143px");
-  expect(up!.querySelector<HTMLAnchorElement>("td a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
+  expect(up!.querySelector<HTMLAnchorElement>(".tf-mon-watch a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
+  // The name is the row's button, which opens the monitor beside the roster.
+  expect(up!.querySelector(".tf-mon-name button.tf-mon-open")?.getAttribute("aria-expanded")).toBe("false");
+  // What is wrong, first, in words a glance takes in.
+  expect(text(target.querySelector(".tf-mon-sum"))).toBe("1 down 1 slow 1 up 1 paused");
+  expect(target.querySelector(".tf-mon-sum .tf-mon-figerr")).not.toBeNull();
+});
+
+test("every monitor up is one quiet figure, and a row's response is drawn only while it is slow", async () => {
+  await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "a"), monitor("kuma:2", "b")] }));
+  expect(text(target.querySelector(".tf-mon-sum"))).toBe("2 up");
+  expect(rows().map((tr) => text(tr.querySelector(".tf-mon-state")))).toEqual(["Up", "Up"]);
+  unmount(view!);
+  view = null;
+  await draw([], null);
+  expect(text(rows()[1]!.querySelector(".tf-mon-state"))).toBe("Slow 1 900 ms");
+});
+
+test("a row press opens the monitor beside the roster on the page, Esc's panel, and the address's opens it too", async () => {
+  await draw([]);
+  const before = location.hash;
+  rows()[3]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  // No address of its own: nothing above the roster comes or goes as it opens.
+  expect(location.hash).toBe(before);
+  expect(rows()[3]!.getAttribute("aria-current")).toBe("true");
+  expect(text(panel().querySelector("h2"))).toBe("payouts /health");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector(".tf-mon-panel")).toBeNull();
+  expect(layers.open).toEqual([]);
+  // The name's button does the same from the keyboard, and pressed again closes it.
+  rows()[0]!.querySelector<HTMLButtonElement>(".tf-mon-open")!.click();
+  flushSync();
+  expect(text(panel().querySelector("h2"))).toBe("flows-stage");
+  rows()[0]!.querySelector<HTMLButtonElement>(".tf-mon-open")!.click();
+  flushSync();
+  expect(target.querySelector(".tf-mon-panel")).toBeNull();
+  unmount(view!);
+  view = null;
+  await draw(["at", "kuma:1"]);
+  expect(rows()[3]!.getAttribute("aria-current")).toBe("true");
+  // Opened by its address, the way back is the address's: no panel of the page's on the stack.
+  expect(layers.open).toEqual([]);
+  expect(text(panel().querySelector("h2"))).toBe("payouts /health");
+  expect(text(panel().querySelector(".tf-mon-facts"))).toContain("Response 140 ms");
+  expect(text(panel().querySelector(".tf-mon-facts"))).toContain("99.98 % over 30 days");
+  expect(text(panel().querySelector("header button"))).toBe("Close");
+  expect([...panel().querySelectorAll(".tf-mon-pacts button")].map(text)).toEqual(["Pause", "Hide", "Refresh"]);
+  expect(panel().querySelector<HTMLElement>(".tf-mbar")!.style.width).toBe("287px");
 });
 
 test("Ack is on a down monitor only, acks it by the monitor, and reads Acked", async () => {
@@ -338,11 +400,13 @@ test("Undo on the ack's toast takes it back", async () => {
 });
 
 test("Pause and Resume queue the source's op for that monitor", async () => {
-  await draw([]);
-  const [, , paused, up] = rows();
-  button(up!, "Pause")!.click();
+  await draw(["at", "kuma:1"]);
+  button(panel(), "Pause")!.click();
   await settle();
-  button(paused!, "Resume")!.click();
+  unmount(view!);
+  view = null;
+  await draw(["at", "kuma:3"]);
+  button(panel(), "Resume")!.click();
   await settle();
   expect(writes).toEqual([{ PauseMonitor: { entity: "kuma:1" } }, { ResumeMonitor: { entity: "kuma:3" } }]);
   expect(toasts.items.map((t) => t.text).filter((t) => t.startsWith("Queued:"))).toEqual([
@@ -351,34 +415,13 @@ test("Pause and Resume queue the source's op for that monitor", async () => {
   ]);
 });
 
-/** The fold of hidden monitors at the roster's end, its summary row apart from the monitors. */
-const fold = () => target.querySelector<HTMLDetailsElement>("details.tf-mon-fold");
-const monitorRows = () => rows().filter((tr) => !tr.classList.contains("tf-mon-foldrow"));
-const names = () => monitorRows().map((tr) => text(tr.querySelector("td")).replace(/ HTTP$| TCP$/, ""));
+/** The line the hidden monitors are drawn under, after the roster. */
+const hiddenLine = () => target.querySelector(".tf-mon-hidhead");
+const names = () => rows().map((tr) => text(first(tr)).replace(/ HTTP$| TCP$/, ""));
 const count = () => text(target.querySelector(".tf-fcount")) + text(target.querySelector(".tf-mon-hidn"));
-const row = (name: string) => monitorRows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
+const row = (name: string) => rows().find((tr) => text(first(tr)).startsWith(name))!;
 
-test("a mouse's Hide leaves the row's words in its place, with nothing to press, until the pointer leaves it (F-064)", async () => {
-  let roster = ROSTER;
-  await draw([], "PAY-231", ports({
-    monitorRoster: async () => roster,
-    setMonitorHidden: async (id, hidden) => {
-      roster = roster.map((each) => (each.entity_id === id ? { ...each, hidden } : each));
-      return hidden;
-    },
-  }));
-  button(row("flows-stage"), "Hide")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
-  await settle();
-  const held = target.querySelector(".tf-mon-held")!;
-  expect(text(held)).toContain("flows-stage");
-  expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
-  expect(held.querySelector(".tf-chip")!.classList.contains("tf-err"), "no tone").toBe(false);
-  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
-  await settle();
-  expect(target.querySelector(".tf-mon-held")).toBeNull();
-});
-
-test("Hide moves a monitor into the closed fold at the roster's end; opened, it is dimmed with Unhide and no Ack", async () => {
+test("Hide moves a monitor after the roster under its line, dimmed, with no tone and no Ack; Unhide brings it back", async () => {
   let roster = ROSTER;
   const stand = ports({
     monitorRoster: async () => roster,
@@ -388,83 +431,68 @@ test("Hide moves a monitor into the closed fold at the roster's end; opened, it 
       return hidden;
     },
   });
-  await draw([], "PAY-231", stand);
-  expect(fold()).toBeNull();
+  await draw(["at", "kuma:2"], "PAY-231", stand);
+  expect(hiddenLine()).toBeNull();
   expect(button(row("flows-stage"), "Ack")).toBeDefined();
-  button(row("flows-stage"), "Hide")!.click();
+  button(panel(), "Hide")!.click();
   await settle();
   expect(hides).toEqual([["kuma:2", true]]);
-  expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health"]);
-  expect(fold()!.open).toBe(false);
-  expect(text(fold()!.querySelector("summary"))).toBe("1 hidden monitor Its alerts don’t reach the inbox or notify you.");
-  expect(rows().at(-1)!.classList.contains("tf-mon-foldrow")).toBe(true);
-  expect(count()).toBe("3 monitors, 1 hidden");
-  expect(toasts.items.map((t) => t.text)).toContain(
-    "Hid flows-stage. Its alerts stay quiet.",
-  );
-
-  fold()!.open = true;
-  fold()!.dispatchEvent(new Event("toggle"));
-  await settle();
+  // Every hidden monitor is drawn, at once: nothing folds, so nothing redraws or moves as it opens.
   expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health", "flows-stage"]);
+  expect(text(hiddenLine())).toBe("1 hidden monitor Its alerts don’t reach the inbox or notify you.");
+  expect(hiddenLine()!.nextElementSibling!.firstElementChild).toBe(row("flows-stage"));
+  expect(count()).toBe("3 monitors, 1 hidden");
+  expect(toasts.items.map((t) => t.text)).toContain("Hid flows-stage. Its alerts stay quiet.");
   const hidden = row("flows-stage");
   expect(hidden.classList.contains("tf-mon-hid")).toBe(true);
-  expect(hidden.querySelector(".tf-chip")!.classList.contains("tf-err")).toBe(false);
+  expect(hidden.classList.contains("tf-mon-err")).toBe(false);
+  expect(hidden.querySelector(".tf-chip")).toBeNull();
   expect(button(hidden, "Ack")).toBeUndefined();
-  expect(button(hidden, "Hide")).toBeUndefined();
-  button(hidden, "Unhide")!.click();
+  expect(text(target.querySelector(".tf-mon-sum")), "a hidden monitor is not down as far as the page says").toBe("0 down 1 slow 1 up 1 paused");
+  expect(button(panel(), "Hide")).toBeUndefined();
+  // The press turned *Hide* into *Unhide* under the pointer, so it holds, as *Acked* does (F-351): a double press is one hide.
+  button(panel(), "Unhide")!.click();
+  await settle();
+  expect(hides).toEqual([["kuma:2", true]]);
+  toasts.items.find((t) => t.text.startsWith("Hid "))!.action!.run();
   await settle();
   expect(hides).toEqual([
     ["kuma:2", true],
     ["kuma:2", false],
   ]);
   expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner", "payouts /health"]);
-  expect(fold()).toBeNull();
+  expect(hiddenLine()).toBeNull();
   expect(count()).toBe("4 monitors");
 });
 
-test("a marked monitor that is hidden is a row of the list, so neither the count nor the fold counts it again", async () => {
+test("an open monitor that is hidden stays with the hidden monitors, counted once", async () => {
   const hiddenTwo = ROSTER.map((each) => (each.entity_id === "kuma:2" || each.entity_id === "kuma:1" ? { ...each, hidden: true } : each));
   await draw(["at", "kuma:2"], "PAY-231", ports({ monitorRoster: async () => hiddenTwo }));
-  expect(target.querySelector("tr.tf-mon-at")?.textContent).toContain("flows-stage");
-  expect(text(fold()!.querySelector("summary"))).toMatch(/^1 hidden monitor /);
-  expect(count()).toBe(`${monitorRows().length} monitors, 1 hidden`);
+  expect(target.querySelector(".tf-mon-row[aria-current]")?.textContent).toContain("flows-stage");
+  expect(text(hiddenLine())).toMatch(/^2 hidden monitors /);
+  expect(names()).toEqual(["pg-payments", "yard-planner", "flows-stage", "payouts /health"]);
+  expect(count()).toBe("2 monitors, 2 hidden");
 });
 
-test("the fold stays as the reader left it, and opens by itself on a search only hidden monitors answer", async () => {
+test("every filter applies to the hidden monitors: a search only they answer draws them, and none matching draws no line", async () => {
   await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((each) => (each.entity_id === "kuma:1" ? { ...each, hidden: true } : each)) }));
-  expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner"]);
-  expect(fold()!.open).toBe(false);
-
+  expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner", "payouts /health"]);
   sessionFilter("monitors").text = "payouts";
   await settle();
-  expect(fold()!.open).toBe(true);
   expect(names()).toEqual(["payouts /health"]);
   expect(target.querySelector(".tf-empty")).toBeNull();
   expect(count()).toBe("0 of 3 monitors, 1 hidden");
-
-  fold()!.open = false;
-  fold()!.dispatchEvent(new Event("toggle"));
-  await settle();
-  expect(names()).toEqual([]);
   sessionFilter("monitors").text = "";
-  await settle();
-  expect(fold()!.open).toBe(false);
-  expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner"]);
-});
-
-test("every filter applies to the hidden monitors: a fold with no match is not drawn", async () => {
-  await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((each) => (each.entity_id === "kuma:1" ? { ...each, hidden: true } : each)) }));
   sessionFilter("monitors").chips["st"] = ["Down"];
   await settle();
   expect(names()).toEqual(["flows-stage"]);
-  expect(fold()).toBeNull();
+  expect(hiddenLine()).toBeNull();
   expect(count()).toBe("1 of 3 monitors");
 });
 
 test("a hide the backend refuses keeps the row and says why", async () => {
-  await draw([], "PAY-231", ports({ setMonitorHidden: async () => Promise.reject({ code: "not_found", message: "no monitor \"kuma:1\" in the mirror" }) }));
-  button(rows().at(-1)!, "Hide")!.click();
+  await draw(["at", "kuma:1"], "PAY-231", ports({ setMonitorHidden: async () => Promise.reject({ code: "not_found", message: "no monitor \"kuma:1\" in the mirror" }) }));
+  button(panel(), "Hide")!.click();
   await settle();
   expect(names()).toContain("payouts /health");
   expect(toasts.items.some((t) => t.tone === "err")).toBe(true);
@@ -476,7 +504,7 @@ test("This job keeps the monitors watching what the job reaches; My jobs and All
     [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b).startsWith(label))!;
   scope("This job").click();
   await settle();
-  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["flows-stage HTTP"]);
+  expect(rows().map((tr) => text(first(tr)))).toEqual(["flows-stage HTTP"]);
   scope("All").click();
   await settle();
   expect(rows()).toHaveLength(4);
@@ -703,7 +731,7 @@ test("a sent create reads Monitor sent until the end of the sync that brings its
   watched = true;
   syncEnds();
   await settle();
-  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
+  expect(rows().map((tr) => text(first(tr)))).toEqual(["Gitea"]);
   expect(syncListeners.size).toBe(0);
 });
 
@@ -747,7 +775,7 @@ test("a create says Monitor queued, then Monitor sent, and goes once the roster 
   stand.unmonitoredAssets = async () => (await watched()).filter((row) => row.id !== "asset:pg");
   refreshed("kuma:9", 1);
   await settle();
-  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
+  expect(rows().map((tr) => text(first(tr)))).toEqual(["Gitea"]);
 });
 
 test("a pause and a resume each draw a row echo queued, then sent, gone once the roster's read shows the new state (#2105)", async () => {
@@ -760,17 +788,22 @@ test("a pause and a resume each draw a row echo queued, then sent, gone once the
       return { id: next++, state: "pending" } as QueuedWrite;
     },
   });
-  await draw([], null, stand);
-  const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
+  const props = $state({ ready: true, rest: ["at", "kuma:3"], job: null as string | null, ports: stand, now: NOW });
+  view = mount(TfMonitors, { target, props });
+  await settle();
+  const row = (name: string) => rows().find((tr) => text(first(tr)).startsWith(name))!;
   // In the State cell, after the state chip, because it says the state is changing (F-337, F-349).
   const echo = (name: string) => row(name).querySelector(".tf-mon-state .tf-queued-mark")?.textContent ?? null;
-  button(row("payouts /health"), "Pause")!.click();
+  button(panel(), "Resume")!.click();
   await settle();
-  button(row("yard-planner"), "Resume")!.click();
+  props.rest = ["at", "kuma:1"];
+  await settle();
+  button(panel(), "Pause")!.click();
   await settle();
   expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Queued", "Queued"]);
+  expect(text(panel().querySelector(".tf-mon-pstate .tf-queued-mark"))).toBe("Queued");
   // The button stays where it was, turned off, and a second press is nothing.
-  const pause = button(row("payouts /health"), "Pause")!;
+  const pause = button(panel(), "Pause")!;
   expect(pause.getAttribute("aria-disabled")).toBe("true");
   pause.click();
   await settle();
@@ -792,33 +825,36 @@ test("a pause and a resume each draw a row echo queued, then sent, gone once the
   refreshed("kuma:1", 30);
   await settle();
   expect([echo("payouts /health"), echo("yard-planner")]).toEqual([null, null]);
-  expect(button(row("payouts /health"), "Resume")).toBeDefined();
+  expect(button(panel(), "Resume")).toBeDefined();
 });
 
 // -- Refresh (#2138) ----------------------------------------------------------
 
-const rowNamed = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
+const rowNamed = (name: string) => rows().find((tr) => text(first(tr)).startsWith(name))!;
 
-test("a row whose source reads one monitor draws Refresh, one whose source does not draws Sync now (#2138)", async () => {
+test("an open monitor whose source reads one monitor draws Refresh, one whose source does not draws Sync now (#2138)", async () => {
   const roster = [monitor("kuma:1", "payouts /health"), monitor("other:9", "edge ping", { source_id: "other", refreshes: false })];
-  await draw([], null, ports({ monitorRoster: async () => roster }));
-  expect(text(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-refresh"))).toBe("Refresh");
-  expect(text(rowNamed("edge ping").querySelector(".tf-mon-acts .tf-refresh"))).toBe("Sync now");
-
-  rowNamed("edge ping").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  await draw(["at", "kuma:1"], null, ports({ monitorRoster: async () => roster }));
+  expect(text(panel().querySelector(".tf-refresh"))).toBe("Refresh");
+  unmount(view!);
+  view = null;
+  await draw(["at", "other:9"], null, ports({ monitorRoster: async () => roster }));
+  expect(text(panel().querySelector(".tf-refresh"))).toBe("Sync now");
+  panel().querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
   expect(probe.synced).toEqual(["other"]);
   expect(probe.refreshed).toEqual([]);
 });
 
-test("a row's Refresh is a small button in the row's trailing group, last after Pause (#2288)", async () => {
-  await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "payouts /health")] }));
-  const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-rowacts")!;
-  expect([...trail.querySelectorAll("button")].map((b) => [text(b), b.className])).toEqual([
-    ["Pause", "tf-btn tf-sm tf-ghost"],
-    ["Hide", "tf-btn tf-sm tf-ghost"],
-    ["Refresh", "tf-btn tf-sm tf-ghost tf-refresh"],
+test("the open monitor's actions are small buttons, Refresh after Pause and Hide, and no row holds them (#2288)", async () => {
+  await draw(["at", "kuma:1"], null, ports({ monitorRoster: async () => [monitor("kuma:1", "payouts /health", { web_url: "http://kuma.test/dashboard/1" })] }));
+  expect([...panel().querySelectorAll(".tf-mon-pacts :is(button, a)")].map((b) => [text(b), b.className])).toEqual([
+    ["Pause", "tf-btn tf-sm"],
+    ["Hide", "tf-btn tf-sm"],
+    ["Refresh", "tf-btn tf-sm tf-refresh"],
+    ["Open in Uptime Kuma", "tf-btn tf-sm tf-ghost"],
   ]);
+  expect(rowNamed("payouts /health").querySelector("button:not(.tf-mon-open)")).toBeNull();
 });
 
 test("Refresh reads the monitor from its source, then the roster again over what it drew, and settles a pause on that read (#2138)", async () => {
@@ -836,59 +872,64 @@ test("Refresh reads the monitor from its source, then the roster again over what
       return { id: 40, state: "pending" } as QueuedWrite;
     },
   });
-  await draw([], null, stand);
-  button(rowNamed("payouts /health"), "Pause")!.click();
+  await draw(["at", "kuma:1"], null, stand);
+  button(panel(), "Pause")!.click();
   await settle();
   heard.get(40)!(undefined);
   await settle();
   expect(rowNamed("payouts /health").querySelector(".tf-mon-state .tf-queued-mark")?.textContent).toBe("Sent");
   const before = reads;
 
-  const refresh = rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
+  const refresh = panel().querySelector<HTMLButtonElement>(".tf-refresh")!;
   refresh.click();
   await settle();
   expect(probe.refreshed).toEqual(["kuma:1"]);
   expect(reads).toBe(before + 1);
   // The roster stays drawn while its read is out, the button saying so.
   expect(rows()).toHaveLength(4);
-  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refreshing…");
+  expect(text(panel().querySelector(".tf-refresh"))).toBe("Refreshing…");
 
   roster = ROSTER.map((one) => (one.entity_id === "kuma:1" ? { ...one, tombstoned: true, actions: ["resume_monitor"] } : one));
   answer(roster);
   await settle();
-  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
-  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")).toBeNull();
-  expect(button(rowNamed("payouts /health"), "Resume")).toBeDefined();
+  expect(text(panel().querySelector(".tf-refresh"))).toBe("Refresh");
+  expect(rowNamed("payouts /health").querySelector(".tf-queued-mark")).toBeNull();
+  expect(button(panel(), "Resume")).toBeDefined();
 });
 
-test("a monitor whose refresh failed keeps the roster and says why under its row (#2138)", async () => {
-  await draw([], null, ports({ refresh: refreshProbe({ answer: async () => ({ outcome: "failed", reason: "Unreachable" }) }).ports }));
-  rowNamed("pg-payments").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+test("a monitor whose refresh failed keeps the roster and says why under its actions (#2138)", async () => {
+  await draw(["at", "kuma:4"], null, ports({ refresh: refreshProbe({ answer: async () => ({ outcome: "failed", reason: "Unreachable" }) }).ports }));
+  panel().querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
   const failed = target.querySelector(".tf-refresh-failed");
   expect(text(failed)).toBe("Couldn't refresh: Unreachable");
-  expect(failed!.closest("tr")!.previousElementSibling).toBe(rowNamed("pg-payments"));
-  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
+  expect(failed!.previousElementSibling!.classList.contains("tf-mon-pacts")).toBe(true);
   expect(rows().filter((tr) => tr.querySelector(".tf-mbar"))).toHaveLength(4);
 });
 
 test("a refresh whose roster read a second refresh's read replaced settles on that newer read (#2138)", async () => {
   let reads = 0;
   const answers: ((rows: MonitorRow[]) => void)[] = [];
-  await draw(
-    [],
-    null,
-    ports({
+  const props = $state({
+    ready: true,
+    rest: ["at", "kuma:1"],
+    job: null as string | null,
+    now: NOW,
+    ports: ports({
       monitorRoster: () => {
         reads += 1;
         if (reads === 1) return Promise.resolve(ROSTER);
-        return new Promise((resolve) => answers.push(resolve));
+        return new Promise<MonitorRow[]>((resolve) => answers.push(resolve));
       },
     }),
-  );
-  rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  });
+  view = mount(TfMonitors, { target, props });
   await settle();
-  rowNamed("pg-payments").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  panel().querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  await settle();
+  props.rest = ["at", "kuma:4"];
+  await settle();
+  panel().querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
   expect(answers).toHaveLength(2);
 
@@ -897,46 +938,61 @@ test("a refresh whose roster read a second refresh's read replaced settles on th
   await settle();
   answers[1]!(ROSTER);
   await settle();
-  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
-  expect(text(rowNamed("pg-payments").querySelector(".tf-refresh"))).toBe("Refresh");
+  expect(text(panel().querySelector(".tf-refresh"))).toBe("Refresh");
+  props.rest = ["at", "kuma:1"];
+  await settle();
+  expect(text(panel().querySelector(".tf-refresh"))).toBe("Refresh");
 });
 
 test("⌘R on the roster presses no row's Refresh: the page's is the header's Sync now (#2156)", async () => {
-  await draw([], null, ports({ monitorRoster: async () => ROSTER }));
-  expect(rowNamed("payouts /health").querySelector(".tf-refresh")).not.toBeNull();
+  await draw(["at", "kuma:1"], null, ports({ monitorRoster: async () => ROSTER }));
+  expect(panel().querySelector(".tf-refresh")).not.toBeNull();
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect([probe.refreshed, probe.synced]).toEqual([[], []]);
 });
 
-test("a long roster draws the monitors near the viewport, spacer rows standing for the rest below (#2210)", async () => {
-  const bulk = Array.from({ length: 2000 }, (_, i) => monitor(`kuma:bulk-${i}`, `api-${i} /health`));
-  await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
-  const drawn = target.querySelectorAll(".tf-mon tbody tr:not(.tf-wgap)").length;
-  expect(drawn).toBeGreaterThan(5);
-  expect(drawn).toBeLessThan(100);
-  expect(text(target.querySelector(".tf-mon tbody tr td"))).toBe("flows-stage HTTP");
-  expect(target.querySelectorAll(".tf-mon tbody tr.tf-wgap")).toHaveLength(1);
-  expect(target.querySelector<HTMLElement>(".tf-mon tbody tr.tf-wgap:last-child td")!.style.getPropertyValue("height")).not.toBe("");
-
-  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
-  field.value = "api-1999";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
-  await settle();
-  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["api-1999 /health HTTP"]);
-});
-
-test("a typed word that narrows the roster to 60 monitors draws those near the viewport, not all 60 (the ux13-overs pass)", async () => {
+test("every monitor is drawn at once, each one row of one height, and a typed word keeps the rows it matches (the monitors-page pass)", async () => {
   const bulk = Array.from({ length: 300 }, (_, i) => monitor(`kuma:bulk-${i}`, i < 60 ? `gate-${i} /health` : `api-${i} /health`));
   await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
+  // No windowing and no spacer rows: a roster this size is cheaper drawn whole than kept near the viewport.
+  expect(rows()).toHaveLength(304);
+  expect(target.querySelector(".tf-wgap")).toBeNull();
+  const kept = rows()[10];
   const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
   field.value = "gate-";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
-  // At 100 a narrowed roster drew every match whole, a key of 119 ms at CPU 4x on Björn's PC.
-  expect(rows().length).toBeGreaterThan(5);
-  expect(rows().length).toBeLessThan(60);
-  expect(target.querySelectorAll(".tf-mon tbody tr.tf-wgap")).toHaveLength(1);
+  expect(rows()).toHaveLength(60);
+  field.value = "";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(rows()).toHaveLength(304);
+  expect(kept!.isConnected, "a row the word left out is drawn again, not the one it kept").toBe(false);
+});
+
+test("a read that changes one monitor draws that row again and leaves every other as it was", async () => {
+  let read = ROSTER;
+  const props = $state({ ready: true, rest: [] as string[], job: null as string | null, ports: ports({ monitorRoster: async () => read }), now: NOW, syncRevision: 0 });
+  view = mount(TfMonitors, { target, props });
+  await settle();
+  const before = rows();
+  // A poll: every response moved, every monitor was read again, and pg-payments' newest half-hour went down.
+  read = ROSTER.map((one) => ({ ...one, response_time_ms: (one.response_time_ms ?? 0) + 1, checked_at: "2026-10-16T14:00:00Z", bar: one.entity_id === "kuma:1" ? `${"u".repeat(47)}d` : one.bar }));
+  const seen = new Set<Element>();
+  const watch = new MutationObserver((list) => {
+    for (const m of list) {
+      const row = (m.target instanceof Element ? m.target : m.target.parentElement)?.closest(".tf-mon-row");
+      if (row) seen.add(row);
+    }
+  });
+  watch.observe(target, { subtree: true, childList: true, attributes: true, characterData: true });
+  props.syncRevision = 1;
+  await settle();
+  watch.disconnect();
+  expect(rows()).toEqual(before);
+  // pg-payments is slow, so its response is drawn and moved; payouts' bar changed; the rest drew nothing.
+  expect([...seen].map((tr) => text(first(tr)))).toEqual(["pg-payments TCP", "payouts /health HTTP"]);
 });
 
 const NO_TOKEN = { id: "kuma", health: { state: "missing_secret", checked_at: "2026-08-22T08:00:00Z" }, auth_kind: "ApiToken" };
@@ -1016,18 +1072,18 @@ test("a kept page's bars move with each roster read: a check that went down sinc
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
     vi.setSystemTime(NOW);
-    let read = [monitor("kuma:1", "payouts /health", { samples: [{ taken_at: "2026-10-16T13:50:00Z", state: "up" }] })];
+    let read = [monitor("kuma:1", "payouts /health")];
     const props = $state({ ready: true, rest: [] as string[], job: null, ports: ports({ monitorRoster: async () => read }), syncRevision: 0 });
     view = mount(TfMonitors, { target, props });
     await settle();
     // Two hours on, a sync brings a sample of the check down; the page reads the roster again.
     vi.setSystemTime(new Date(NOW.getTime() + 2 * 3_600_000));
-    read = [monitor("kuma:1", "payouts /health", { state: "down", samples: [{ taken_at: "2026-10-16T13:50:00Z", state: "up" }, { taken_at: "2026-10-16T15:55:00Z", state: "down" }] })];
+    read = [monitor("kuma:1", "payouts /health", { state: "down", down_since: "2026-10-16T15:55:00Z", bar: `${"-".repeat(43)}uuuud` })];
     props.syncRevision = 1;
     await settle();
     const strip = target.querySelector<HTMLElement>(".tf-mbar")!;
     // The newest half-hour is the strip's right end: down, painted in --err, not a gap.
-    expect(strip.style.getPropertyValue("background-image")).toMatch(/var\(--err\) 141px 143px, transparent 143px 144px\)$/);
+    expect(strip.style.getPropertyValue("background-image")).toMatch(/var\(--err\) 141px 143px\)$/);
   } finally {
     vi.useRealTimers();
   }

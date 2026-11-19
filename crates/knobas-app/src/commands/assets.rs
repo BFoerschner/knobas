@@ -877,6 +877,11 @@ pub async fn set_monitoring_settings(
 /// (`#/assets/monitors`) and the estate is not scoped by the room the reader
 /// came from.
 ///
+/// `with_samples` (`withSamples`, PR #2479's monitors-page pass) asks for each
+/// row's day of samples beside its [`bar`](assets::MonitorRow::bar); left out,
+/// it is `true`, the answer as it always was. The Monitors tab passes `false`:
+/// the samples were 1.4 MB of the 1.42 MB it read on every Uptime Kuma poll.
+///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
@@ -885,9 +890,11 @@ pub async fn set_monitoring_settings(
 pub async fn monitor_roster<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
+    with_samples: Option<bool>,
 ) -> Result<Vec<assets::MonitorRow>, IpcError> {
     let pool = lifecycle.pool()?;
-    let mut rows = assets::monitor_roster(&pool, lifecycle.registry()).await?;
+    let mut rows =
+        assets::monitor_roster(&pool, lifecycle.registry(), with_samples.unwrap_or(true)).await?;
     let offered = monitor_write_ops(&app, &rows).await?;
     assets::offer_actions(&mut rows, &offered);
     Ok(rows)
@@ -1232,6 +1239,7 @@ mod tests {
             ("unack_alert", "monitorId"),
             ("set_monitor_hidden", "monitorId"),
             ("set_monitor_hidden", "hidden"),
+            ("monitor_roster", "withSamples"),
         ] {
             let body = crate::commands::mirror::invocation(MIRROR, call);
             assert!(

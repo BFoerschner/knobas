@@ -404,7 +404,8 @@ pub(crate) async fn append(
     Ok(written)
 }
 
-/// Delete every sample older than the retention setting reaches back to.
+/// Delete every sample older than the retention setting reaches back to, and
+/// every Monitors half-hour (`0099`) older than two days.
 ///
 /// `now` is a parameter and not a clock, so a fixture can place the horizon --
 /// the shape `knobas_app::time::passive::prune` has, and for its reason.
@@ -424,6 +425,12 @@ pub async fn prune(pool: &PgPool, now: DateTime<Utc>) -> Result<u64, sqlx::Error
         .execute(pool)
         .await?
         .rows_affected();
+    // The Monitors tab's half-hours (`0099`) draw the last day only: two days
+    // are kept, whatever the samples' retention.
+    sqlx::query("delete from knobas.monitor_half_hour where at < $1")
+        .bind(now - Duration::days(2))
+        .execute(pool)
+        .await?;
     Ok(taken)
 }
 

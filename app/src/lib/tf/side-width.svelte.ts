@@ -57,6 +57,7 @@ export const SIDES = {
   pr: { label: "Resize the side panel", at: "end", base: 300, min: 220, share: 0.45 },
   set: { label: "Resize the side panel", at: "end", base: 300, min: 220, share: 0.45 },
   assets: { label: "Resize the asset pane", at: "end", base: 340, min: 240, share: 0.5 },
+  monitor: { label: "Resize the monitor", at: "end", base: 360, min: 300, share: 0.45 },
 } as const satisfies Record<string, SideSpec>;
 
 export type SideId = keyof typeof SIDES;

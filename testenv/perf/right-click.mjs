@@ -24,7 +24,7 @@ const LINE = { 1: 100, 4: 100, 6: 200 };
 const THINGS = [
   { name: "ticket card", route: "#/tickets", sel: ".tf-tcard" },
   { name: "inbox line", route: "#/inbox", sel: ".tf-ib" },
-  { name: "monitor row", route: "#/monitors", sel: ".tf-mon tbody tr:not(.tf-mon-foldrow) td" },
+  { name: "monitor row", route: "#/monitors", sel: ".tf-mon-row .tf-mon-state" },
   { name: "repository row", route: "#/code", sel: "tbody tr.tf-row td:last-child" },
   { name: "Docs tree page", route: "#/docs/space/SCLENG", sel: ".tf-dl-leaf, .tf-sl" },
 ];

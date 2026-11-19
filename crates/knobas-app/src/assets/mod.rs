@@ -954,7 +954,25 @@ pub struct MonitorRow {
     /// day, and the nav's badge read them all on every sync's end (PR #2479,
     /// the monitors-builds pass). Thinned, a steady monitor's day is about a
     /// hundred.
+    ///
+    /// **Empty unless asked for** (`monitor_roster`'s `with_samples`): the
+    /// Monitors tab draws [`bar`](Self::bar) and [`down_since`](Self::down_since)
+    /// since the monitors-page pass (2026-11-19). Thinned, the day was still
+    /// 23,000 samples and 1.4 MB for 218 monitors, read from 305,000 rows in
+    /// 480 ms on every Uptime Kuma poll.
     pub samples: Vec<MonitorSample>,
+    /// **The last day as the tab draws it**: 48 half-hours on the UTC
+    /// half-hour grid, oldest first, the newest the half-hour now is in, one
+    /// letter each for the worst state sampled in it (`knobas.monitor_half_hour`,
+    /// `0099`): `d` down, `w` warn, `p` pending, `m` maintenance, `u` up, `-`
+    /// no reading (no sample, or only samples whose state did not resolve).
+    /// A tombstoned monitor's is drawn paused by the tab.
+    pub bar: String,
+    /// When the monitor went down, for one whose [`state`](Self::state) is
+    /// `down`: the first sample of the newest run of `down` samples, samples
+    /// that read nothing skipped. `null` for every other monitor, and for a
+    /// down one no sample says.
+    pub down_since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// One uptime ratio, at the window Kuma computed it over.
@@ -2083,6 +2101,71 @@ const ROSTER_SAMPLES: &str = "select entity_id, taken_at, state
    and taken_at >= now() - make_interval(hours => $2::int)
  order by entity_id asc, taken_at asc";
 
+/// How many half-hours the bar draws ([`MonitorRow::bar`]): the last day.
+pub const BAR_HALF_HOURS: usize = 48;
+
+/// The half-hours of these monitors' last day (`knobas.monitor_half_hour`,
+/// `0099`), the newest being the one now is in. Keyed reads on the table's
+/// primary key: about 3 ms for 218 monitors, where the samples behind them
+/// were 305,000 rows.
+const ROSTER_HALF_HOURS: &str = "select entity_id, at, worst
+  from knobas.monitor_half_hour
+ where entity_id = any($1::text[])
+   and at >= date_bin('30 minutes', now(), timestamptz '2000-01-01 00:00:00+00') - interval '23 hours 30 minutes'
+ order by entity_id asc, at asc";
+
+/// Each monitor's newest sample inside the bar's window, by one keyed read a
+/// monitor (`monitor_sample_entity_idx`). `distinct on` over the window read
+/// the whole day to keep one row a monitor: 270 ms at 218 monitors.
+const NEWEST_SAMPLES: &str = "select m.id as entity_id, s.state
+  from unnest($1::text[]) as m(id)
+  cross join lateral (
+    select state from knobas.monitor_sample
+     where entity_id = m.id and taken_at >= now() - make_interval(hours => $2::int)
+     order by taken_at desc limit 1) s";
+
+/// When each of these down monitors went down: the first `down` sample after
+/// the newest sample that read something else. Walks each one's index back
+/// through its outage only.
+const DOWN_SINCE: &str = "select m.id as entity_id,
+       (select min(s.taken_at) from knobas.monitor_sample s
+         where s.entity_id = m.id and s.state = 'down'
+           and s.taken_at > coalesce((select max(t.taken_at) from knobas.monitor_sample t
+                                       where t.entity_id = m.id and t.state is not null and t.state <> 'down'),
+                                     '-infinity'::timestamptz)) as since
+  from unnest($1::text[]) as m(id)";
+
+/// A half-hour's rank (`0099`'s `knobas.monitor_state_rank`) as its letter in
+/// [`MonitorRow::bar`].
+fn rank_letter(rank: i16) -> char {
+    match rank {
+        0 => 'd',
+        1 => 'w',
+        2 => 'p',
+        3 => 'm',
+        4 => 'u',
+        _ => '-',
+    }
+}
+
+/// The 48 letters of a monitor's bar from its half-hours, `first` the start
+/// of the oldest one drawn.
+fn bar_of(
+    half_hours: &[(chrono::DateTime<chrono::Utc>, i16)],
+    first: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let mut bar = vec!['-'; BAR_HALF_HOURS];
+    for (at, worst) in half_hours {
+        let index = (*at - first).num_minutes().div_euclid(30);
+        if let Ok(index) = usize::try_from(index)
+            && let Some(slot) = bar.get_mut(index)
+        {
+            *slot = rank_letter(*worst);
+        }
+    }
+    bar.into_iter().collect()
+}
+
 /// The longest a steady run of samples goes without one kept, in
 /// [`thin_samples`]: under half the bar's 30-minute bucket, so every bucket a
 /// run passes through keeps one of its samples.
@@ -2177,6 +2260,7 @@ const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
 pub async fn monitor_roster(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    with_samples: bool,
 ) -> Result<Vec<MonitorRow>, IpcError> {
     let fillers =
         crate::sources::crud::fillers(pool, registry, knobas_source::role::MONITORING).await?;
@@ -2197,19 +2281,48 @@ pub async fn monitor_roster(
     let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
 
     let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
-    for sample in sqlx::query(ROSTER_SAMPLES)
+    if with_samples {
+        for sample in sqlx::query(ROSTER_SAMPLES)
+            .bind(&ids)
+            .bind(BAR_WINDOW_HOURS)
+            .fetch_all(pool)
+            .await?
+        {
+            samples
+                .entry(sample.try_get("entity_id")?)
+                .or_default()
+                .push(MonitorSample {
+                    taken_at: sample.try_get("taken_at")?,
+                    state: sample.try_get("state")?,
+                });
+        }
+    }
+
+    // The bar's first half-hour, on the database's clock as the read's window is.
+    let first: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "select date_bin('30 minutes', now(), timestamptz '2000-01-01 00:00:00+00') - interval '23 hours 30 minutes'",
+    )
+    .fetch_one(pool)
+    .await?;
+    let mut half_hours: HashMap<String, Vec<(chrono::DateTime<chrono::Utc>, i16)>> = HashMap::new();
+    for row in sqlx::query(ROSTER_HALF_HOURS)
+        .bind(&ids)
+        .fetch_all(pool)
+        .await?
+    {
+        half_hours
+            .entry(row.try_get("entity_id")?)
+            .or_default()
+            .push((row.try_get("at")?, row.try_get("worst")?));
+    }
+    let mut newest: HashMap<String, Option<String>> = HashMap::new();
+    for row in sqlx::query(NEWEST_SAMPLES)
         .bind(&ids)
         .bind(BAR_WINDOW_HOURS)
         .fetch_all(pool)
         .await?
     {
-        samples
-            .entry(sample.try_get("entity_id")?)
-            .or_default()
-            .push(MonitorSample {
-                taken_at: sample.try_get("taken_at")?,
-                state: sample.try_get("state")?,
-            });
+        newest.insert(row.try_get("entity_id")?, row.try_get("state")?);
     }
 
     let mut attached: HashMap<String, Vec<MonitoredAsset>> = HashMap::new();
@@ -2230,7 +2343,8 @@ pub async fn monitor_roster(
             });
     }
 
-    rows.iter()
+    let mut out = rows
+        .iter()
         .map(|row| {
             let entity_id: String = row.try_get("entity_id")?;
             let source_id: String = row.try_get("source_id")?;
@@ -2238,10 +2352,10 @@ pub async fn monitor_roster(
             let declared = declarations.get(&source_id, MONITOR_KIND);
             let reading = reading_of(&payload, declared);
             let samples = thin_samples(samples.remove(&entity_id).unwrap_or_default());
-            let state = state_of(
-                samples.last().map(|newest| &newest.state),
-                &payload,
-                declared,
+            let state = state_of(newest.get(&entity_id), &payload, declared);
+            let bar = bar_of(
+                half_hours.get(&entity_id).map_or(&[][..], Vec::as_slice),
+                first,
             );
             Ok(MonitorRow {
                 source_id,
@@ -2269,10 +2383,30 @@ pub async fn monitor_roster(
                     MONITOR_KIND,
                 ),
                 samples,
+                bar,
+                down_since: None,
                 entity_id,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, IpcError>>()?;
+
+    let down: Vec<String> = out
+        .iter()
+        .filter(|row| row.state.as_deref() == Some("down"))
+        .map(|row| row.entity_id.clone())
+        .collect();
+    if !down.is_empty() {
+        let mut since: HashMap<String, Option<chrono::DateTime<chrono::Utc>>> = HashMap::new();
+        for row in sqlx::query(DOWN_SINCE).bind(&down).fetch_all(pool).await? {
+            since.insert(row.try_get("entity_id")?, row.try_get("since")?);
+        }
+        for row in &mut out {
+            if let Some(at) = since.remove(&row.entity_id) {
+                row.down_since = at;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// A roster row's [`MonitorRow::state`]: the newest sample's in the window
@@ -2290,13 +2424,6 @@ fn state_of(
             .and_then(|paths| knobas_core::payload::resolve_string(payload, &paths.status_name)),
     }
 }
-
-/// The newest sample of each of these monitors inside the bar's window.
-const NEWEST_SAMPLES: &str = "select distinct on (entity_id) entity_id, state
-  from knobas.monitor_sample
- where entity_id = any($1::text[])
-   and taken_at >= now() - make_interval(hours => $2::int)
- order by entity_id asc, taken_at desc";
 
 /// How many monitors on the roster read *down*: the nav's badge (PR #2479,
 /// the monitors-builds pass). A tombstoned monitor is paused, not down, and a
@@ -6981,6 +7108,36 @@ mod tests {
 
     use super::*;
 
+    /// A half-hour lands at its place from the bar's first, its rank as its letter; one before the first, past the
+    /// last or between two slots draws nowhere, and every other slot is no reading.
+    #[test]
+    fn a_half_hour_is_drawn_at_its_place_as_its_letter() {
+        let first = chrono::DateTime::parse_from_rfc3339("2026-11-18T12:00:00Z")
+            .unwrap()
+            .to_utc();
+        let at = |half_hours: i64| first + chrono::TimeDelta::minutes(30 * half_hours);
+        let bar = bar_of(
+            &[
+                (at(-1), 0),
+                (at(0), 4),
+                (at(1), 1),
+                (at(46), 9),
+                (at(47), 0),
+                (at(48), 0),
+            ],
+            first,
+        );
+        assert_eq!(bar.len(), BAR_HALF_HOURS);
+        assert_eq!(&bar[..2], "uw");
+        assert_eq!(&bar[46..], "-d", "a miss is no reading, the newest is down");
+        assert_eq!(bar.matches('-').count(), 45);
+        assert_eq!(
+            [0, 1, 2, 3, 4, 9, 7].map(rank_letter),
+            ['d', 'w', 'p', 'm', 'u', '-', '-'],
+            "0099's ranks, and a rank no state has is no reading"
+        );
+    }
+
     /// Samples a minute apart from midnight, one state a minute as `states` spells them (`u`p, `d`own, `w`arn, `-` none).
     fn minutes(states: &str) -> Vec<MonitorSample> {
         let start = chrono::DateTime::parse_from_rfc3339("2026-11-12T00:00:00Z")
@@ -7364,6 +7521,8 @@ mod tests {
             actions: Vec::new(),
             refreshes: true,
             samples: Vec::new(),
+            bar: String::new(),
+            down_since: None,
         };
         let offered = HashMap::from([(
             "kuma".to_owned(),

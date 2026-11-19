@@ -105,6 +105,7 @@ an SSH tunnel.
 | `extremes.mjs`, `extremes-items.json` | the extremes an `--extremes` run seeds, syncs, presses and removes (*The extremes*, below) |
 | `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
 | `syncing.mjs`, `lane-probe.mjs` | one source kept syncing for a run's length, and the felt waits a sync can hold timed at the backend per adapter (*With a sync running*, below) |
+| `monitors.mjs`, `budget-monitors.json`, `monitors-budget.sh` | Monitors' moments against a 239 Hz frame, and the lines (*Monitors at 239 Hz*, below) |
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
 | `soak.mjs`, `soak.sh`, `soak-repo.sh` | a repository's Code page browsed for a long while, then every other page, with what grows counted; what `just soak` runs and the repository it browses (*The soak*, below) |
 | `git-starts.mjs`, `git-shim/git`, `git-starts.sh` | how many `git` processes a press at a cloned repository starts, the counting `git` the backend runs under, and what `just git-starts` runs (*Starts of git*, below) |
@@ -207,6 +208,26 @@ only); a ticket's, a pull request's and a Docs page's held part is timed as thei
 the start of one, and a name ending in `$` alone (`--only 'ticket$'` is not Tickets' board). With the Mac's lock taken,
 `--attach <port>` drives a headless Chrome on the WSL box, as `moves.mjs` does (*Nothing moves*); its page reaches the
 app and the backend on the Mac through `ssh -R`, which adds the tunnel's round trip to each read.
+
+## Monitors at 239 Hz: `just monitors-budget`
+
+From the monitors-page pass (2026-11-19, `docs/decisions/2026-11-19-monitors-is-a-quiet-board.md`; Björn: "it should be
+one of the smoothest pages of all" and "it should be near 240 like everything else too"). `monitors.mjs` runs each
+moment a person has on Monitors under its own Chrome trace, at 1x, 4x and 6x, at 1440x868@1, 2560x1440@1.25 and
+5120x1440@1: the first open from Time (`open`, from the press until five monitors' rows are drawn), a `return`, the page
+`idle` for 3 s, a `beat` (every enabled source's run ends, as each Uptime Kuma poll does; `--beat` runs a command first
+that appends a sample to every monitor, as the poll's samples do) and `beats` (four, 2 s apart), a wheel `scroll` of
+the roster down 2,400 px and back at 3,000 px/s, a `hover` sweep with a move every 4 ms as a 239 Hz pointer sends them,
+and a `monitor` opened by its row's press and closed by `Esc`. For each it records the main thread's longest task, its
+tasks over a 239 Hz frame (`over4`, 4.2 ms), its work a presented frame (`perFrameMs`), the frames dropped at headless
+Chrome's 60 Hz, the rows the moment changed in the DOM (`rowsTouched`) and the IPC it made with the bytes.
+`--check budget-monitors.json` holds the lines; `--css <rules>` adds a stylesheet to every document, to measure a CSS
+change before making it.
+
+A beat needs a database whose monitors have a day of samples: the saved scale database's are from the day it was made,
+so a bar there is empty. Append one first (a sample a minute for 24 hours a monitor, some down, some slow; the pass's
+`day.sql` is in its decision note), and point `--beat` at a command that inserts one sample a monitor. `--attach`
+drives a Chrome on the WSL box through a tunnel, as `keys.mjs --attach` does.
 
 ## The inner pages: `just open-budget --inner`
 

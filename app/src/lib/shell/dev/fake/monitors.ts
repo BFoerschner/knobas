@@ -343,7 +343,35 @@ export function downFakeMonitor(): void {
   if (first) FORCED_DOWN.add(first.index);
 }
 
-export function fakeMonitorRoster() {
+/** The ranks `0099` keeps a half-hour's worst state by, and each one's letter in a roster row's `bar`. */
+const RANK: Record<string, number> = { down: 0, warn: 1, pending: 2, maintenance: 3, up: 4 };
+const LETTERS = ["d", "w", "p", "m", "u"];
+const HALF_HOUR = 30 * 60_000;
+
+/**
+ * A row's `bar` and `down_since` from its samples, as `assets::monitor_roster` reads them out of
+ * `knobas.monitor_half_hour`: 48 half-hours on the UTC grid ending with the one now is in, each the worst state
+ * sampled in it (`-` for none, or only misses); and the first sample of the newest run of `down`, misses skipped.
+ */
+export function fakeBar(samples: readonly { taken_at: string; state: string | null }[], now: number): { bar: string; down_since: string | null } {
+  const first = Math.floor(now / HALF_HOUR) * HALF_HOUR - 47 * HALF_HOUR;
+  const worst: number[] = Array.from({ length: 48 }, () => 9);
+  for (const sample of samples) {
+    const index = Math.floor((Date.parse(sample.taken_at) - first) / HALF_HOUR);
+    if (index < 0 || index >= 48) continue;
+    worst[index] = Math.min(worst[index]!, RANK[sample.state ?? ""] ?? 9);
+  }
+  let since: string | null = null;
+  for (let at = samples.length - 1; at >= 0; at -= 1) {
+    const sample = samples[at]!;
+    if (sample.state === null) continue;
+    if (sample.state !== "down") break;
+    since = sample.taken_at;
+  }
+  return { bar: worst.map((rank) => LETTERS[rank] ?? "-").join(""), down_since: since };
+}
+
+export function fakeMonitorRoster(withSamples = true) {
   const now = Date.now();
   const named = SEEDED_MONITORS.map(({ name, type }) => ({
     name,
@@ -393,7 +421,9 @@ export function fakeMonitorRoster() {
       actions: [tombstoned ? "resume_monitor" : "pause_monitor"],
       // Uptime Kuma reads one monitor (#2100), so every row draws *Refresh* (#2138).
       refreshes: true,
-      samples,
+      // The page asks for none (`withSamples: false`): it draws the bar.
+      samples: withSamples ? samples : [],
+      ...fakeBar(samples, now),
     };
   });
 }
@@ -402,8 +432,8 @@ export function fakeMonitorRoster() {
  * `?fake-monitors=<n>` (perf audit, #2200's class): the roster's monitors
  * repeated to `n` rows, each under its own id and name.
  */
-function bulkRoster(n: number): ReturnType<typeof fakeMonitorRoster> {
-  const base = fakeMonitorRoster();
+function bulkRoster(n: number, withSamples = true): ReturnType<typeof fakeMonitorRoster> {
+  const base = fakeMonitorRoster(withSamples);
   return Array.from({ length: n }, (_, i) => {
     const row = base[i % base.length]!;
     return { ...row, entity_id: `kuma:bulk-${i}`, name: `${row.name} ${i}` };
@@ -420,9 +450,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // invented on top.
     // Monitoring's read by definition, so it narrows itself to the role's
     // fillers by source, tombstones kept, as the server's does (#1297).
-    monitor_roster: () => {
+    monitor_roster: (args: Record<string, unknown>) => {
       const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
-      return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id));
+      const withSamples = args["withSamples"] !== false;
+      return (bulk > 0 ? bulkRoster(bulk, withSamples) : fakeMonitorRoster(withSamples)).filter((row) => fillers.has(row.source_id));
     },
     // The nav's badge (PR #2479): the roster's down rows, as the server counts them.
     monitors_down: () => {

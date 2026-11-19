@@ -1,98 +1,141 @@
-/* Monitors (#864): prototype-6's `.bar`, the roster's columns, the unwatched tab. */
+/* Monitors (#864; redrawn in the monitors-page pass, 2026-11-19, `docs/decisions/2026-11-19-monitors-is-a-quiet-board.md`):
+   a quiet roster in which what is wrong is the loud thing, the open monitor beside it, *Assets nothing watches*. */
 .tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* 48 half-hours at 2 px and a 1 px gap, whole pixels at any scale. Narrow, 24 hours at 3 px: `barsOf` merges them. */
 /* One element, its bars its background (`stripPaint`, PR #2479: 48 elements a row cost a filter key thousands of
-   restyles). The mask rounds each bar's ends, as `border-radius: 1px` did on a bar of its own. */
-.tf-mbar { display: inline-block; height: 14px; flex: none; vertical-align: middle; mask: url("strip-2.svg") 0 0 / 3px 14px repeat-x; }
-.tf-mbar.tf-mbar-hourly { mask-image: url("strip-3.svg"); mask-size: 4px 14px; }
+   restyles). 48 half-hours at 2 px and a 1 px gap, whole pixels at any scale; narrow, 24 hours at 3 px (`barsOf` merges
+   them). A roster's strips are plain backgrounds, square-ended: a mask made each one an effect of its own, and with every
+   monitor drawn, every frame of a scroll laid 218 of them out into layers on the main thread (the monitors-page pass,
+   2026-11-19). The open monitor's one strip, 5 px a bar, keeps the mask that rounds each bar's ends. */
+.tf-mbar { display: inline-block; height: 14px; flex: none; vertical-align: middle; }
+.tf-mbar.tf-mbar-big { height: 22px; mask: url("strip-5.svg") 0 0 / 6px 22px repeat-x; }
 .tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 400; color: var(--ink-2); }
-.tf-mon { table-layout: fixed; }
-.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed, .tf-mon-held):hover > td { background: var(--sheet-2); }
-.tf-monc-state { width: 216px; }
-.tf-monc-bars { width: 170px; }
-.tf-monc-num { width: 92px; }
-.tf-monc-watch { width: 17%; }
-/* Fixed whether or not a row holds *Ack*, so the columns do not move as a filter hides the last one down. The row's other
-   actions stand in place of its figures on hover (Motion), or of its bars where the figures have left their columns.
-   Where nothing hovers it is wider, under `not (hover: hover)` below. */
-.tf-monc-acts { width: 72px; }
-/* The chip holds the word and the time is plain text beside it, on the chip's line: a monitor that goes down while the
-   roster is on screen keeps its row's height, as every other row's is one line (the still-rows pass, PR #2479; it stood
-   on its own line before, and the row grew 19 px under the pointer). A time that has no room ends in an ellipsis, whole
-   in its title. A pause's or resume's echo stands beside the state chip, so the row holds its height as the echo comes
-   and goes (F-337, F-349). */
-/* As tall as a small button in every row, so a row that goes down and gains *Ack* keeps its height too. */
-.tf-mon-state { display: flex; flex-wrap: nowrap; gap: 2px 6px; align-items: center; min-width: 0; min-height: var(--control-h-sm); }
+
+/* The body: the roster across the whole width, and the open monitor in a column of its own over the rows' end, where
+   what they watch is, in a sidebar that drags. The roster keeps its width as a monitor opens, closes or is dragged
+   wider, so none of its rows is laid out or painted again: when the roster narrowed to make room, opening a monitor
+   drew every row on screen again, 212 to 243 ms at CPU 6x (the monitors-page pass, 2026-11-19). */
+.tf-cbody.tf-mon-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-monitor, 360px); column-gap: 22px; align-items: start; }
+.tf-mon-body > .tf-sedge { --tf-sedge-gap: 22px; }
+.tf-mon-main { grid-column: 1 / -1; grid-row: 1; min-width: 0; }
+
+/* What is wrong, first: down and slow as figures in the width that shouts (design system, *the width axis does the
+   shouting*), in their tones; up and the rest quiet beside them. Each figure keeps room for three digits, so a count
+   that grows moves nothing after it. */
+.tf-mon-sum { display: flex; flex-wrap: wrap; gap: 4px 26px; align-items: baseline; margin: 0 0 12px; min-height: calc(var(--t-d1) * var(--size-head) + 4px); font-size: calc(var(--t-md) * var(--fs)); color: var(--ink-2); }
+.tf-mon-fig { white-space: nowrap; }
+.tf-mon-fig b {
+  display: inline-block; min-width: 1.6em; margin-right: 5px; text-align: right;
+  --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%;
+  font-size: calc(var(--t-d1) * var(--fs)); line-height: 1; font-variant-numeric: tabular-nums; color: var(--ink-2);
+}
+.tf-mon-fig.tf-mon-figerr, .tf-mon-fig.tf-mon-figerr b { color: var(--err); }
+.tf-mon-fig.tf-mon-figwarn, .tf-mon-fig.tf-mon-figwarn b { color: var(--warn); }
+/* Every monitor up: the one figure is the ink, calm and whole. */
+.tf-mon-sum > .tf-mon-calm:only-child b { color: var(--ink); }
+
+/* The roster: one sheet, every row one line at one height, whatever it holds (a row that goes down gains a chip and
+   *Ack* and keeps its height), so nothing moves as states change, and a poll that changes one row lays out that row.
+   Columns are the list's, so they line up down the page. */
+/* What is read together stands together: the name, its state, its day and its month, and *Ack*; what it watches takes
+   the rest of a wide window at the row's end, so a full-screen roster does not spread a monitor across 5,000 px. */
+.tf-mon-list {
+  /* The strips' colours (`stripPaint`): up a pale `--ok`, mixed once here, and the gap between bars the row's own. */
+  --tf-mon-up: color-mix(in srgb, var(--ok) 42%, var(--sheet)); --tf-mon-gap: var(--sheet);
+  --mon-cols: minmax(160px, 340px) 188px 191px 64px 64px minmax(80px, 1fr);
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
+}
+.tf-mon-head, .tf-mon-row { display: grid; grid-template-columns: var(--mon-cols); column-gap: 14px; align-items: center; padding: 0 12px 0 14px; }
+/* Under the filter bar on a long list, on its own surface. */
+.tf-mon-head {
+  position: sticky; top: 47px; z-index: 2; height: 30px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); border-radius: 6px 6px 0 0;
+  font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); white-space: nowrap;
+}
+.tf-mon-head .tf-mbar-axis { width: 191px; }
+/* No `contain` and no `position` on a row: each made all 218 rows isolated pieces that every frame of a scroll laid out
+   into layers again on the main thread, 477 ms over a 2 s scroll at CPU 4x where the rows plain take 48 (the
+   monitors-page pass, 2026-11-19). The tone's edge and the selection are inset shadows for the same reason. */
+.tf-mon-row { height: 38px; border-top: 1px solid var(--rule-2); cursor: pointer; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-mon-head + .tf-mon-block > .tf-mon-row:first-child { border-top: 0; }
+/* A block of rows (`blocksOf`) is laid out and painted only near the viewport, its room its rows' own height while it is
+   not: every row is 38 px, border included, so a block drawn as it comes into view moves nothing. */
+.tf-mon-block { content-visibility: auto; contain-intrinsic-block-size: calc(var(--tf-mon-rows, 16) * 38px); }
+.tf-mon-row:hover { background: var(--sheet-2); --tf-mon-gap: var(--sheet-2); }
+/* What is wrong carries its tone down the row's edge too, so a column of down monitors reads from across the room. */
+.tf-mon-row.tf-mon-err { box-shadow: inset 3px 0 0 var(--err); }
+.tf-mon-row.tf-mon-warn { box-shadow: inset 3px 0 0 var(--warn); }
+/* The open monitor: selection is an outline (design system, *What the design is*), its tone's edge inside it. */
+.tf-mon-row[aria-current] { box-shadow: inset 0 0 0 2px var(--ink); }
+.tf-mon-row.tf-mon-err[aria-current] { box-shadow: inset 0 0 0 2px var(--ink), inset 5px 0 0 var(--err); }
+.tf-mon-row.tf-mon-warn[aria-current] { box-shadow: inset 0 0 0 2px var(--ink), inset 5px 0 0 var(--warn); }
+.tf-mon-row > :is(.tf-mon-name, .tf-mon-state, .tf-mon-watch, .tf-mon-up) { min-width: 0; }
+.tf-mon-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* The row opens as a whole, so its name carries no underline until pointed at (design system, *Layout*). */
+.tf-mon-open { font-weight: inherit; text-align: left; cursor: pointer; }
+.tf-mon-open:hover { text-decoration: underline; text-underline-offset: 2px; }
+.tf-mon-type { margin-left: 2px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 400; color: var(--ink-2); }
+.tf-mon-state { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow: hidden; }
+/* Up, paused, no reading: a word, quiet, where a chip would make 200 healthy rows a wall of green. */
+.tf-mon-word { color: var(--ink-2); white-space: nowrap; }
 .tf-mon-since { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.tf-mon-figs { display: none; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* The heads stay under the filter bar on a long list. At 900 px and below `.tf-cbody` scrolls sideways, so it would be their scrollport and they stay put. */
-@media (min-width: 901px) {
-  .tf-tbl:is(.tf-mon, .tf-mon-gaps) { overflow: clip; }
-  :is(.tf-mon, .tf-mon-gaps) thead th { position: sticky; top: 47px; z-index: 3; }
+.tf-mon-watch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-mon-watch a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.tf-mon-up { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink-2); }
+.tf-mon-ack { display: flex; justify-content: flex-end; }
+.tf-mon-row > .tf-mon-watch, .tf-mon-head > .tf-mon-watch { padding-left: 10px; }
+/* A hidden monitor: after the roster, under its own line, every word in the second ink and no tone anywhere. */
+.tf-mon-row.tf-mon-hid { color: var(--ink-2); }
+.tf-mon-row.tf-mon-hid .tf-mon-name { font-weight: 400; }
+.tf-mon-hidhead {
+  display: flex; gap: 8px; align-items: baseline; padding: 9px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
+  font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--ink-2); white-space: nowrap; overflow: hidden;
 }
-.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed) > td:first-child { overflow: hidden; text-overflow: ellipsis; }
-.tf-mon a.tf-mon-asset { text-decoration: underline; text-underline-offset: 2px; }
-.tf-mon .tf-mon-type { font-size: calc(var(--t-xs) * var(--fs)); }
-.tf-mon .tf-mon-asset { font-size: calc(var(--t-xs) * var(--fs)); color: inherit; }
-.tf-mon-acts { white-space: nowrap; text-align: right; }
-.tf-mon tbody tr:not(.tf-mon-foldrow) > td:first-child { font-size: calc(var(--t-md) * var(--fs)); font-weight: 500; white-space: nowrap; }
-.tf-mon .tf-mon-type { font-weight: 400; }
-/* The page never scrolls sideways: past what the table needs, the bars narrow, then the figures wait. */
-@media (max-width: 1240px) {
-  .tf-mbar-axis { width: 95px; }
-  .tf-monc-state { width: 160px; }
-  .tf-monc-bars { width: 122px; }
-  .tf-monc-num { width: 90px; }
-  .tf-monc-watch { width: 24%; }
-}
-/* The figures' columns go, and the figures stay: under the bars, in the row. */
-@media (max-width: 1040px) {
-  /* Narrowed to nothing, not `display: none`: a row's `colspan="7"` (the fold, a failure, a gap) would make two new columns of the
-     rest of the table's width, and with a hidden monitor the table stopped short of its box. */
-  .tf-monc-num { width: 0; }
-  .tf-mon :is(th, td).tf-num { padding: 0; overflow: hidden; }
-  .tf-mon th.tf-num { visibility: hidden; }
-  .tf-mon td.tf-num > * { display: none; }
-  .tf-mon-figs { display: block; margin-top: 2px; }
-  /* Now the last column: wide enough for the row's actions, which take the figures' line on hover and leave the bars
-     readable, so the bar under the pointer keeps its title. Lowered from the row's middle by what puts the group's top at the figures' line. */
-  .tf-monc-bars { width: 190px; }
-}
-@media (max-width: 1040px) and (hover: hover) {
-  .tf-mon .tf-mon-acts .tf-rowacts { transform: translateY(calc(-50% + 10px)); }
-}
-/* Where nothing hovers, a row's actions stand in it, all of them (Row actions), so the column holds the widest row's:
-   *Acked*, *Pause*, *Hide* and *Refreshing…* with their gaps and the cell's padding, 290 px of Archivo at `--t-sm`, and
-   a gap more. Monitor and Watches share what is left, which is what gives way. In 72 px the group ran past the table's
-   clipped edge (the README's Monitors picture, PR #2479). */
-@media not (hover: hover) {
-  .tf-monc-acts { width: 296px; }
-  .tf-monc-watch { width: auto; }
-}
-.tf-mon-lead { margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); }
-/* Figures read down their column: right-aligned, with room before the next one starts. */
-.tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; padding-right: 24px; }
-
-.tf-mon .tf-mon-failed > td { padding-top: 0; border-top: 0; }
-
-/* The hidden fold (#2447's monitors, drawn apart): its summary, then the rows dimmed while it is open. */
-.tf-mon .tf-mon-foldrow > td { padding: 0; }
-.tf-mon-fold > summary {
-  list-style: none; cursor: pointer; font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--ink-2);
-  padding: 10px 12px; display: flex; gap: 8px; align-items: baseline;
-}
-.tf-mon-fold > summary::-webkit-details-marker { display: none; }
-.tf-mon-fold > summary .tf-dim { font-weight: 400; }
-.tf-mon .tf-mon-hid > td { color: var(--ink-2); }
-/* The monitor an alert or a link opened the roster at: the list's selected row. */
-.tf-mon .tf-mon-at > td { box-shadow: inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
-.tf-mon .tf-mon-at > td:first-child { box-shadow: inset 2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
-.tf-mon .tf-mon-at > td:last-child { box-shadow: inset -2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
-.tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
+.tf-mon-hidhead .tf-dim { font-weight: 400; }
 .tf-mon-hidn { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }
-/* The count keeps room for *, 1 hidden*, as `.tf-fcount` does for its own words: *Hide* wrapping the band would move the rows under the pointer. */
+/* The count keeps room for *, 1 hidden*, as `.tf-fcount` does for its own words: *Hide* wrapping the band would move the rows. */
 .tf-fend:has(> .tf-mon-hidn) { justify-content: flex-end; min-width: 146px; }
 .tf-mon-hidn:empty { display: none; }
-/* A row *Hide* took away keeps its height and its words, dimmed and with no controls, until the pointer leaves it (F-064). */
-.tf-mon tr.tf-mon-held > td { height: var(--tf-row-held); }
-.tf-mon tr.tf-mon-held :is(td, .tf-mon-since, .tf-mon-figs) { color: var(--muted); }
+
+/* Narrower, the bars go hourly and the state's column narrows; under 1100 px what it watches waits for the panel. */
+@media (max-width: 1240px) {
+  .tf-mon-list { --mon-cols: minmax(140px, 300px) 160px 95px 60px 60px minmax(70px, 1fr); }
+  .tf-mon-head .tf-mbar-axis { width: 95px; }
+}
+@media (max-width: 1100px) {
+  .tf-mon-list { --mon-cols: minmax(120px, 1fr) 150px 95px 56px 60px; }
+  .tf-mon-watch { display: none; }
+}
+
+/* At 900 px and below every sidebar stacks: the open monitor goes under the roster. */
+@media (max-width: 900px) {
+  .tf-cbody.tf-mon-body { grid-template-columns: minmax(0, 1fr); }
+  .tf-mon-panel { grid-column: 1; grid-row: auto; position: static; }
+}
+/* The open monitor: a panel over the roster's end that stays in view as the roster scrolls under the filter bar. It
+   floats over the rows, so it carries the shadow (design system, *Shape, depth and spacing*). */
+.tf-mon-panel {
+  --tf-mon-up: color-mix(in srgb, var(--ok) 42%, var(--sheet)); --tf-mon-gap: var(--sheet);
+  grid-column: 2; grid-row: 1; z-index: 2; box-shadow: var(--shadow);
+  position: sticky; top: 59px; display: grid; gap: 14px; padding: 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
+  font-size: calc(var(--t-sm) * var(--fs)); min-width: 0;
+  /* Bounded by the window and scrolling on its own, as every sticky column is (#2091), so its last action is in reach. */
+  max-height: calc(100vh - 140px); overflow-y: auto;
+}
+.tf-mon-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.tf-mon-panel h2 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.tf-mon-pstate { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; min-height: var(--control-h-sm); }
+.tf-mon-pbar { display: grid; gap: 4px; justify-items: start; }
+.tf-mon-pbar .tf-mbar-axis { width: 287px; }
+.tf-mon-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; }
+.tf-mon-facts dt { color: var(--ink-2); }
+.tf-mon-facts dd { margin: 0; overflow-wrap: anywhere; }
+.tf-mon-facts a { text-decoration: underline; text-underline-offset: 2px; }
+.tf-mon-facts .tf-mono { font-size: calc(var(--t-xs) * var(--fs)); white-space: normal; overflow-wrap: anywhere; }
+.tf-mon-pacts { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
+.tf-mon-panel .tf-refresh-failed { margin: 0; }
+
+/* *Assets nothing watches*: a table, its heads under the filter bar. At 900 px and below `.tf-cbody` scrolls sideways. */
+@media (min-width: 901px) {
+  .tf-tbl.tf-mon-gaps { overflow: clip; }
+  .tf-mon-gaps thead th { position: sticky; top: 47px; z-index: 3; }
+}
+.tf-mon-acts { white-space: nowrap; text-align: right; }
