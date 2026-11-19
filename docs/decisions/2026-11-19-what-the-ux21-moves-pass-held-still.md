@@ -62,6 +62,16 @@ failed it every time.
 asks as every ask but the pick's own pair, whenever they come. The same pause passes; the read-ahead's order
 reversed, or a read-ahead from a list the forge answered, fails them.
 
+## Tickets' typed-filter test runs its own frames
+
+**Seen** while gating this pass: *a typed filter reads fifty a column…* failed both full `check-front` runs on
+`e6664948` (`expected 13 to be greater than 13`, and 8 for 8 once), with or without this pass's commits. jsdom's own
+animation frame came inside the wait for the words' answer on a loaded machine, so the screen's cards or the overscan
+had drawn before the test's first look. A 50 ms pause before that look failed it every time.
+
+**Taken.** It runs its frames itself, one at a time, as the test above it does: the answer's frame, then the screen's,
+then the overscan when `growWindowsNow` says. The same pause passes; `growWindowsNow` made a no-op fails it.
+
 ## Seen, not this pass's
 
 - A README's image read from the repository (`payout-service`'s `docs/img/logo.png` on the fixture) moves the text under

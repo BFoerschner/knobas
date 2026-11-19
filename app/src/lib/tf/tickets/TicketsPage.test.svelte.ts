@@ -470,15 +470,29 @@ const stacks = () =>
 test("a typed filter reads fifty a column under its total, a long column draws the cards near the screen, and Show N more reads the rest (#1024)", async () => {
   const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
   await open(h);
+  // The frames are the test's own, run one at a time (as the test above runs them): jsdom's own came inside the wait for
+  // the words' answer on a loaded machine, so the screen's cards or the overscan had drawn before the first look, and the
+  // overscan grew nothing past it (8 > 8, 13 > 13: the ux21 moves pass).
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  onTestFinished(() => (raf.mockRestore(), caf.mockRestore()));
+  const oneFrame = async () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(performance.now());
+    await settle();
+  };
   for (const char of "bulk") type(field(), char);
   await settle();
   // The words' read waits out the typing pause: on a loaded machine `settle` ended first, and both looks below saw the
-  // board before the answer, eight a column (the ux21 overs pass). Short turns, so the look comes before the frames
-  // that grow the overscan.
+  // board before the answer, eight a column (the ux21 overs pass).
   for (let turn = 0; turn < 500 && count() !== "115 of 133 tickets"; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
-  // The cards on screen, then the overscan below them once the frame that shows them has drawn (the sizes pass,
-  // 2026-11-15).
+  // The cards on screen, drawn the frame after the answer's, then the overscan below them once that frame has drawn (the
+  // sizes pass, 2026-11-15).
+  await oneFrame();
   const onScreen = stacks()[0]!.cards;
   growWindowsNow();
   await settle();
@@ -497,7 +511,7 @@ test("a typed filter reads fifty a column under its total, a long column draws t
     { head: "Done 55", cards: drawn, more: "Show 5 more done" },
   ]);
   const firstCards = [...target.querySelectorAll(".tf-tcard")];
-  await nextFrame();
+  await oneFrame();
   expect(stacks()[0]!.cards).toBe(drawn);
   expect(firstCards.every((card) => card.isConnected)).toBe(true);
   expect(count()).toBe("115 of 133 tickets");
