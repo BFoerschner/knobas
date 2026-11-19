@@ -7,6 +7,10 @@
    * Once drawn, its room stays when the fresh answer lands and the words go
    * (the inner-pages pass, 2026-11-12): the line sits above the list it
    * speaks for, and taking it away moved every row under it up a line.
+   *
+   * One line, cut with an ellipsis and whole in its title (`tf-held1`, the ux20 Windows pass, 2026-11-19): in a
+   * repository's tree column the line wrapped to two, so the tree dropped a line as it came and rose as it went, the
+   * room kept being one line.
    */
   import { heldLine } from "./repo/view-fresh.svelte";
 
@@ -20,4 +24,4 @@
   });
 </script>
 
-{#if line !== null}<p class="tf-heldnote" role="status">{line}</p>{:else if drawn}<p class="tf-heldnote" aria-hidden="true">&nbsp;</p>{/if}
+{#if line !== null}<p class="tf-heldnote tf-held1" role="status" title={line}>{line}</p>{:else if drawn}<p class="tf-heldnote tf-held1" aria-hidden="true">&nbsp;</p>{/if}

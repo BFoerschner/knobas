@@ -70,6 +70,13 @@ test("Settings › Renderers › Decompiler stacks its cell and holds two lines 
   expect(block(code, ".tf-dec-why")).toMatch(/white-space:\s*nowrap/);
 });
 
+test("a held view's line stays one line, the room it keeps, so a narrow column's tree does not move as it comes and goes (ux20 Windows pass, 2026-11-19)", () => {
+  const line = block(code, ".tf-heldnote.tf-held1");
+  expect(line).toMatch(/white-space:\s*nowrap/);
+  expect(line).toMatch(/overflow:\s*hidden/);
+  expect(line).toMatch(/text-overflow:\s*ellipsis/);
+});
+
 test("the spec's colour table was read, so the next two tests check something", () => {
   expect(COLOURS.length).toBeGreaterThanOrEqual(23);
 });
