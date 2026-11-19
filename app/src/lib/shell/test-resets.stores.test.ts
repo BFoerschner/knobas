@@ -282,7 +282,8 @@ test("clones.reset drops the marks and the finished count and unlistens", async 
   await clones.start({ entityId: "done", name: "n", repoUrl: null, root: null });
   expect(clones.finished).toBe(1);
   await clones.start({ entityId: "e", name: "n", repoUrl: null, root: null });
-  expect(Object.keys(clones.marks)).toEqual(["e"]);
+  // The finished clone keeps its folder as a mark until a page's checkout names it (the ux20 Windows pass).
+  expect(clones.marks).toEqual({ done: { kind: "cloned", path: "/q" }, e: { kind: "running", percent: 0, path: "/p" } });
   clones.reset();
   expect(clones.marks).toEqual({});
   expect(clones.finished).toBe(0);

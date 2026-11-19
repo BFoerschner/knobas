@@ -87,7 +87,8 @@
   const repoId = $derived(checkout?.repo_entity_id ?? entityId);
   const root = $derived(checkout?.clones_root ?? savedRoot);
   const mark = $derived(clones.marks[repoId]);
-  const path = $derived(checkout?.path ?? null);
+  /** A clone that just ended names its folder before the page reads the checkout again (`cloned`). */
+  const path = $derived(checkout?.path ?? (mark?.kind === "cloned" ? mark.path : null));
   const entries = $derived(apps.settings === null ? [] : menuOrder(apps.settings));
   const fileAt = $derived(path !== null && file !== null ? joinInside(path, file) : null);
   /** A file's page is only the one the file view gives: the repository's would be the wrong page. */
@@ -97,6 +98,10 @@
 
   $effect(() => {
     void apps.ensure();
+  });
+
+  $effect(() => {
+    if (checkout?.path != null && mark?.kind === "cloned") clones.forget(repoId);
   });
 
   $effect(() => {

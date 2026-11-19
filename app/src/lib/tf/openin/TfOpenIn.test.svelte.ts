@@ -59,6 +59,8 @@ const calls = {
 };
 let emit: (event: CloneEvent) => void = () => {};
 let cloneAnswer: CloneAnswer = { status: "cloning", path: "/Users/mara/code/payout-service" };
+/** Where the store's own read of the checkout finds the clone after it ends. */
+let checkedOut: string | null = "/Users/mara/code/payout-service";
 const PAGE = "https://git.tidewater.example/tidewater/payout-service";
 let browsed: string[] = [];
 let browse: (url: string) => Promise<void> = (url) => {
@@ -78,6 +80,7 @@ beforeEach(() => {
     return Promise.resolve();
   };
   cloneAnswer = { status: "cloning", path: "/Users/mara/code/payout-service" };
+  checkedOut = "/Users/mara/code/payout-service";
   apps = createApps({
     checkoutSettings: () => Promise.resolve(stored),
     setCheckoutApplications: (drafts, defaultApplication) => {
@@ -104,7 +107,7 @@ beforeEach(() => {
         calls.clone.push([entityId, stop]);
         return Promise.resolve(stop ? { status: "stopped", path: "/Users/mara/code/payout-service", removed: true } : cloneAnswer);
       },
-      entityCheckout: () => Promise.resolve(view("/Users/mara/code/payout-service")),
+      entityCheckout: () => Promise.resolve(view(checkedOut)),
       listen: (_event, handler) => {
         emit = (payload) => handler({ payload });
         return Promise.resolve(() => {});
@@ -288,6 +291,46 @@ test("a finished clone says where and on which branch, offers the default applic
   toast.action!.run();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode" }]]);
+});
+
+test("a finished clone reads Open in… from its end on, not Clone again while the page reads its checkout (ux20 Windows pass)", async () => {
+  await draw(view(null));
+  button("Clone", target).click();
+  await settle();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "progress", phase: "Receiving objects", percent: 100 });
+  flushSync();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "done" });
+  flushSync();
+  const faces = () => [...target.querySelectorAll("button")].map(text);
+  expect(faces()).toContain("Open in…");
+  expect(faces()).not.toContain("Clone");
+  expect(button("Open in…", target).title).toBe("Open /Users/mara/code/payout-service in an application");
+  await settle();
+  expect(faces()).toContain("Open in…");
+  expect(clones.marks[REPO]).toEqual({ kind: "cloned", path: "/Users/mara/code/payout-service" });
+});
+
+test("the page's checkout naming the folder drops the clone's mark", async () => {
+  await draw(view(null));
+  button("Clone", target).click();
+  await settle();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "done" });
+  await settle();
+  unmount(app!);
+  await draw(view("/Users/mara/code/payout-service"));
+  expect(clones.marks[REPO]).toBeUndefined();
+  expect(button("Open in…", target)).toBeTruthy();
+});
+
+test("a clone that ends with no folder the checkout names says Clone again", async () => {
+  checkedOut = null;
+  await draw(view(null));
+  button("Clone", target).click();
+  await settle();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "done" });
+  await settle();
+  expect(clones.marks[REPO]).toBeUndefined();
+  expect(button("Clone", target)).toBeTruthy();
 });
 
 test("a failed clone is said in place with what to do, and Try again starts it again", async () => {
