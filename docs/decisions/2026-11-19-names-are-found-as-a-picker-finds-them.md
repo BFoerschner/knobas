@@ -117,8 +117,9 @@ the saved scale home cloned, `dev-secrets.json` moved out, release builds of thi
 - **The sync** (1,000 tickets, median of five, the two builds alternated, each in a transaction rolled back): a date
   moved 1,219 ms before and 1,125 after, no trigger of the words firing; a new body 1,309 and 1,443, the words parsed
   again, 0.13 ms a row.
-- **A key the words read** (`took_ms`, median of nine, alternated): a word nobody wrote, where the head before found
-  nothing in 2 to 3 ms, now asks again for the nearest written one and answers with its rows: `pagintion` 33,
+- **A key the words read** (`took_ms`, median of nine, alternated, measured before the correction was asked beside
+  the first ask): a word nobody wrote, where the head before found nothing in 2 to 3 ms, now asks for the nearest
+  written one too and answers with its rows: `pagintion` 33,
   `idempotncy keys` 23, `shceduler` 31, `dashbord` 41. A written word is as before: `payout` 18 and 19, `retry` 20 and
   19. The scale home's bodies are built from 130 words, so almost no written word is part of a longer one there and
   the second ask is rarely made on it; on a real team's words it will be made more often.
@@ -158,8 +159,21 @@ afternoon, the head before missing them as much; the one rise beyond the swing i
 that found nothing before. The four new cases at 2560x1440@1.25 on the Mac: 78, 71, 78 and 85 ms at 4x, 82, 110,
 109 and 122 at 6x, every one under its line (100 and 130), nothing moved.
 
-**Owed.** The cases on the PC at 2560x1440@1.25 and the head before on the PC, and a run of the six older cases on
-a quiet Mac against their lines.
+**On the PC at 2560x1440@1.25** (headless Edge, the Mac's backend through the WSL box, Björn idle): `part` 35 / 73 /
+88, `loose` 41 / 74 / 102, `twenty` 67 / 90 / 131, under his lines.
+
+**The typo case after the word list.** With the mirror's words read, a whole swapped word is answered by the nearest
+written word, and often a letter before its end, so the case's presses were screened again on that head and moved to
+the keys at which the answer arrives (`["shcedule","r"]`, `["wbehoo","k"]`, `["inovi","c"]` and four more); one
+loose press moved the same way (`["authp","r"]`). Such a key asked the text, found nothing, then asked the corrected
+text: two round trips. The corrected text is known before the first is sent, so it is now asked beside it and taken
+only where the text found nothing, which keeps D10's rule that a correction never takes an answer away. On the PC
+at 1440x868@1: 116 / 126 / 190 ms before that change, 110 / 125 / 176 after, its `answered` 77 to 95 ms of which the
+backend's own time is 23 to 41 on the loaded Mac and the rest the tunnel to it. Over his 100 at 1x and 4x as
+measured; a run with the backend on the PC itself (a packaged build) is owed before this case is held to his lines.
+
+**Owed.** The head before on the PC, the typo case on the PC with its own backend, and a run of the six older cases
+on a quiet Mac against their lines.
 
 ## Same answers
 

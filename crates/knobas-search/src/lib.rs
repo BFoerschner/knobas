@@ -578,8 +578,23 @@ impl Searcher {
                 _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
             }
         };
-        let (rows, parted, picked) = tokio::join!(ask(text, parsed.prefix_last_term), parts, names);
+        // The corrected text is known before the first answer: asked beside it,
+        // and taken only where the text as typed found nothing, so a key with
+        // a word nobody wrote waits for one round trip, not two.
+        let corrected = async {
+            match reading.corrected.as_deref() {
+                Some(corrected) if !known_under.admits_nothing => {
+                    ask(Some(corrected), parsed.prefix_last_term)
+                        .await
+                        .map(Some)
+                }
+                _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
+            }
+        };
+        let (rows, parted, picked, corrected_rows) =
+            tokio::join!(ask(text, parsed.prefix_last_term), parts, names, corrected);
         let mut rows = rows?;
+        let corrected_rows = corrected_rows?;
         let mut needles = query::needles(&parsed.query.text);
         let mut needles_of = |asked: &str| {
             for needle in query::needles(asked) {
@@ -589,9 +604,9 @@ impl Searcher {
             }
         };
         if rows.is_empty()
-            && let Some(corrected) = reading.corrected.as_deref()
+            && let (Some(corrected), Some(answer)) = (reading.corrected.as_deref(), corrected_rows)
         {
-            rows = ask(Some(corrected), parsed.prefix_last_term).await?;
+            rows = answer;
             needles_of(corrected);
         }
         // The picker's names join the text's own answer (D6), and the rows of
