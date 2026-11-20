@@ -91,7 +91,7 @@ an SSH tunnel.
 | `frames.mjs` | the trace readers: what reached the display (the compositor's frame reporters), how many elements each style pass computed, the main thread's time by kind, its longest tasks |
 | `budget.mjs`, `budget.json` | the lines, per corpus (`fake`, `real`), and the check |
 | `long.mjs` | the long-run probe (the monitors-builds pass, 2026-11-12): Monitors left open while every source's run ends every `--every` seconds, then kept hidden behind the Inbox; main-thread time a minute, the longest task, a small read's wait, DOM, listener and heap growth, and a hover's cost at 1x and 4x, against `budget.json`'s `long` lines. `--attach` joins a running app (knobas's own WebView2), whose own syncs end its runs: an emit from the page (`plugin:event|emit`) froze the app's window for good |
-| `scrollers.mjs` | every box that scrolls on the app's pages, light and dark, with its own background and the colour under it; `--strict` fails on a transparent one |
+| `scrollers.mjs` | every box that scrolls on the app's pages, light and dark, with its own background and the colour under it; `--strict` fails on a transparent one, on a fixed or absolute layer over one where it draws nothing, and on a list whose wheel is hit-tested on the main thread (*A layer over a list*, below) |
 | `invalidations.mjs` | why a scroll restyles what it does, from Chromium's own invalidation records: for a rule that restyles far more than the rows that changed |
 | `profile.mjs` | a CPU profile of one moment (`--setup`, then `--act`), by function, for a slow key or page switch the frame probe names only by its task |
 | `moment.mjs` | the same moment under a Chrome trace (the inner-6x pass, 2026-11-15): each long task after `--act` split into script, style, layout and paint, and each style or layout pass in it with its elements or objects and, where script forced it, the frame that did. A profile's "(program)" is this |
@@ -143,6 +143,31 @@ cannot act on the fresh page, and so does every later call of an attempt that st
 error and goes on cannot wait out each deadline in turn. A soak's lap is not tried again (a fresh page would not read
 what the session grew): the soak ends failed-to-run. `compare.mjs` keeps its own way, a fresh Chrome for the next step.
 `KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit; `watchdog-test.sh` runs the tests at 0.01 in about 12 s.
+
+## A layer over a list (the ux24 pass, 2026-11-20)
+
+Twice in one release a layer that drew nothing took a list's scroll off the compositor in WebView2: the open chip's
+layer, fixed over the whole window (`8ab2aed9`), and the asset tree's wire layer, absolute over the whole tree
+(`cfd8cd01`), both `pointer-events: none`. Chromium then posts each wheel notch's hit test to the main thread, and the
+list moves at the main thread's pace (the board at 29 fps at CPU 6x). `frame-budget` caught neither: its `scroll` cases
+set `scrollTop` from script, which hit-tests nothing, and `run.mjs`'s `wheel` is one synthesized gesture with one hit
+test at its start, after which the compositor scrolls. A mouse wheel begins a scroll at each notch.
+
+`scrollers.mjs` (run by `frame-budget`, `--strict`) now checks it two ways at every stop, the light pass only:
+
+- **`layers()`**, in the DOM: each fixed or absolute element over a box that scrolls, on a 12 x 12 grid of the box,
+  let take presses for the question alone and asked whether it is above the list there and draws anything there (its
+  background, border, shadow, an SVG shape, its text). Seven bare points of 144 fail (`LAYER OVER A LIST`).
+- **`wheels`**, in Chromium itself: a real wheel notch (`Input.dispatchMouseEvent`) at five points of each list under a
+  trace of the `input` category, and every `PostingHitTestToMainThread` by the list and point it came from
+  (`MAIN-THREAD HIT TEST`). `--no-wheels` skips it.
+
+`frame-budget` runs it on the fixture with `?fake-assets=300`, so the tree has a long column (the bulk rack). With each
+fix reverted, both checks fail it in headless Chrome on the Mac: the chip's layer over the board (all five points of
+`.tf-cols` and a `.tf-vlist`) and the long column; the wire layer over the column. The head passes. The DOM check also
+names the chip's layer over Inbox and Builds, whose wheels Chromium still hit-tests on the compositor (as WebView2 did:
+the ux21 pass saw those on the compositor with the layer there); it fails them anyway, since nothing guarantees which
+lists an engine spares.
 
 ## What the numbers mean
 

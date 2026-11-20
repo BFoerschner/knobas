@@ -100,7 +100,7 @@ const PAGE = `
       const name = (n) => { const e = n.nodeType === 1 ? n : n.parentElement; return e ? e.tagName.toLowerCase() + (e.className && typeof e.className === "string" ? "." + e.className.trim().split(/\s+/).join(".") : "") : "?"; };
       r.what = [];
       r.obs = new MutationObserver((list) => { const t = now(); r.changes.push(t); r.what.push([t, [...new Set(list.map((m) => m.type[0] + ":" + name(m.target)))].slice(0, 4).join(" ")]); });
-      r.obs.observe(el ?? document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "data-entity"] });
+      r.obs.observe(el ?? document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "data-entity", "hidden"] });
       requestAnimationFrame(tick);
       return !!el;
     },

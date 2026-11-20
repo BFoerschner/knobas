@@ -44,8 +44,11 @@ if [ -n "$real" ]; then corpus="fake-real=$real" lines=real; else corpus="fake-s
 url="http://127.0.0.1:$port/?fake-ipc&$corpus#/inbox"
 "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/run.mjs" --app "$url" --out "$out/run.json" \
   --label "frame-budget $(git -C "$root" rev-parse --short HEAD)" --throttle "$throttle" --kinds scroll,type,nav,drag ${only:+--only "$only"} || exit 1
-"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/scrollers.mjs" --app "$url" --strict --out "$out/scrollers.json" > "$out/scrollers.log"
+# The scrollers' audit with a long asset column in the fixture's tree (`?fake-assets`), as the perf estate has on a real
+# database: it fails on a transparent scroller, and on a layer over a list that draws nothing there (the ux24 pass).
+"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/scrollers.mjs" --app "http://127.0.0.1:$port/?fake-ipc&fake-assets=300&$corpus#/inbox" --strict --out "$out/scrollers.json" > "$out/scrollers.log"
 scrollers=$?
+grep '^LAYER OVER' "$out/scrollers.log"
 tail -1 "$out/scrollers.log"
 node "$here/budget.mjs" "$out/run.json" --lines "$lines" --md "$out/budget.md"
 budget=$?
