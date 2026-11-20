@@ -92,9 +92,19 @@
   {#if why}
     <!-- A real `<mark>`: the line's text changes with every answer, so there is no node for the Highlight API to keep. -->
     <span class="tf-ln-why" class:tf-ln-code={why.code}>
-      <span class="tf-ln-why-t"
-        >{#if why.place}<span class="tf-ln-why-at">{why.place}</span>{/if}{#each why.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
-      >
+      {#if why.path}
+        <!-- A path as `TfPath` draws one: the folders give way, the file's name stays whole, the whole path on hover. -->
+        <span class="tf-ln-why-t tf-ln-why-path" title={why.segments.map((seg) => seg.text).join("")}
+          >{#if why.path.head.length > 0}<span class="tf-path-head"
+              >{#each why.path.head as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
+            >{/if}<span class="tf-path-tail">{#each why.path.tail as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
+          ></span
+        >
+      {:else}
+        <span class="tf-ln-why-t"
+          >{#if why.place}<span class="tf-ln-why-at">{why.place}</span>{/if}{#each why.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
+        >
+      {/if}
       {#if why.count}<span class="tf-ln-why-n">{why.count}</span>{/if}
     </span>
   {/if}

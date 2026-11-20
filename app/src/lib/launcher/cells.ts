@@ -110,6 +110,11 @@ export interface Why {
   code: boolean;
   /** What closes a file's line (*4 files*), `null` for everything else. */
   count: string | null;
+  /**
+   * A file its name found: `segments` cut at its last `/`, the folders (`head`, which gives way) and the file's name
+   * (`tail`, kept whole), drawn as `TfPath` draws a path. `null` for every other line.
+   */
+  path: { head: Segment[]; tail: Segment[] } | null;
   /** The excerpt it quotes, which says where the row opens. */
   excerpt: Excerpt;
 }
@@ -163,10 +168,30 @@ function fileWhy(excerpt: Excerpt, file: NonNullable<Excerpt["file"]>, files: Fi
     // The line's indent is the pane's to share with the lines around it; the row starts at its first letter.
     const [first, ...rest] = excerpt.segments;
     const segments = first && !first.hit ? [{ text: first.text.trimStart(), hit: false }, ...rest].filter((seg) => seg.text !== "") : [...excerpt.segments];
-    return { place: `${name}:${file.line}`, segments: cutLead(segments), code: true, count: by > 0 ? counted(by, "file", "files") : null, excerpt };
+    return { place: `${name}:${file.line}`, segments: cutLead(segments), code: true, count: by > 0 ? counted(by, "file", "files") : null, excerpt, path: null };
   }
   const by = files?.by_name ?? 0;
-  return { place: null, segments: excerpt.segments.map((seg) => ({ ...seg })), code: true, count: by > 0 ? counted(by, "file name", "file names") : null, excerpt };
+  const segments = excerpt.segments.map((seg) => ({ ...seg }));
+  return { place: null, segments, code: true, count: by > 0 ? counted(by, "file name", "file names") : null, excerpt, path: cutAtName(segments) };
+}
+
+/** A path's segments cut at its last `/`: the folders, that `/` with them, and the file's name. */
+export function cutAtName(segments: readonly Segment[]): { head: Segment[]; tail: Segment[] } {
+  const cut = segments.map((seg) => seg.text).join("").lastIndexOf("/") + 1;
+  const head: Segment[] = [];
+  const tail: Segment[] = [];
+  let at = 0;
+  for (const seg of segments) {
+    const end = at + seg.text.length;
+    if (end <= cut) head.push({ ...seg });
+    else if (at >= cut) tail.push({ ...seg });
+    else {
+      head.push({ text: seg.text.slice(0, cut - at), hit: seg.hit });
+      tail.push({ text: seg.text.slice(cut - at), hit: seg.hit });
+    }
+    at = end;
+  }
+  return { head, tail };
 }
 
 /** A run log's line, which the line names by its number. */
@@ -194,5 +219,6 @@ export function whyOf(hit: WhySource, cell: string | null = null): Why | null {
     code,
     count: null,
     excerpt,
+    path: null,
   };
 }

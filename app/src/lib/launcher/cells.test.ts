@@ -3,7 +3,7 @@
  * path is missing or empty says its kind's word, never a wrong place.
  */
 import { describe, expect, it } from "vitest";
-import { cellsOf, cutLead, whyOf } from "./cells";
+import { cellsOf, cutAtName, cutLead, whyOf } from "./cells";
 
 const of = (kind: string, path: string | null, title = "Retry payouts") =>
   cellsOf({ kind, entity_id: `src:${kind}:1`, title, path }, "Pull request");
@@ -154,6 +154,21 @@ describe("whyOf for a repository its files found (D10)", () => {
     expect(why.place).toBeNull();
     expect(why.segments.map((s) => (s.hit ? `[${s.text}]` : s.text)).join("")).toBe("charts/[ad-proxy]/values.yaml");
     expect(why.count).toBe("3 file names");
+    // Cut as `TfPath` cuts a path: the folders give way, the file's name stays whole (long-paths.mjs).
+    const flat = (segs: { text: string; hit: boolean }[]) => segs.map((s) => (s.hit ? `[${s.text}]` : s.text)).join("");
+    expect(flat(why.path!.head)).toBe("charts/[ad-proxy]/");
+    expect(flat(why.path!.tail)).toBe("values.yaml");
+  });
+
+  it("cuts a mark that runs over the last slash into the folders and the name", () => {
+    const cut = cutAtName([{ text: "src/", hit: false }, { text: "retry/Retry", hit: true }, { text: "Queue.java", hit: false }]);
+    expect(cut.head).toEqual([{ text: "src/", hit: false }, { text: "retry/", hit: true }]);
+    expect(cut.tail).toEqual([{ text: "Retry", hit: true }, { text: "Queue.java", hit: false }]);
+    expect(cutAtName([{ text: "README.md", hit: false }])).toEqual({ head: [], tail: [{ text: "README.md", hit: false }] });
+  });
+
+  it("has no path on a line its text found", () => {
+    expect(whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3, branch: "main" } })!.path).toBeNull();
   });
 
   it("is no line where the repository's name explains it", () => {

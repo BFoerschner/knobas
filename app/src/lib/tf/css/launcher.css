@@ -80,12 +80,13 @@
    each file, its path in mono with the file's name in ink and its line at the right, then up to three lines around the
    match, the neighbours quiet. A line too long for the pane ends in an ellipsis; nothing wraps. */
 .tf-ln-pv-n { padding: 0 18px 8px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
-.tf-ln-ex.tf-ln-file { display: grid; gap: 3px; }
+.tf-ln-ex.tf-ln-file { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .tf-ln-file-at {
   display: flex; align-items: baseline; gap: 12px; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures);
   font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2);
 }
-.tf-ln-file-path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: ltr; }
+/* A long path gives up its folders, as `TfPath` does (`.tf-path-head`): the file's name stays whole. */
+.tf-ln-file-path { flex: 1; min-width: 0; display: flex; white-space: nowrap; }
 .tf-ln-file-name { color: var(--ink); font-weight: 600; }
 .tf-ln-file-line { flex: none; white-space: nowrap; }
 .tf-ln-file-code {
@@ -197,6 +198,7 @@
 }
 .tf-ln-why-t { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-ln-why-at { font-weight: 600; margin-right: 6px; }
+.tf-ln-why-path { display: flex; }
 .tf-ln-why mark { background: var(--mark); color: var(--ink); border-radius: 2px; padding: 0 1px; }
 .tf-ln-why.tf-ln-code .tf-ln-why-t {
   --fs: var(--size-code); font-size: calc(var(--t-xs) * var(--fs)); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures);

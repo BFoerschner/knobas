@@ -68,11 +68,16 @@
       {#each fileExcerpts as excerpt (excerpt.file!.path)}
         {@const file = excerpt.file!}
         {@const words = markedWords(excerpt)}
+        {@const pieces = pathPieces(file.path, words)}
         <button type="button" class="tf-ln-ex tf-ln-file" onclick={() => onopen(excerpt)}>
+          <!-- The path as `TfPath` draws one: the folders give way, the file's name stays whole, the whole path on hover. -->
           <span class="tf-ln-file-at"
-            ><span class="tf-ln-file-path"
-              >{#each pathPieces(file.path, words) as piece, j (j)}{#if piece.hit}<mark class:tf-ln-file-name={piece.name}>{piece.text}</mark
-                  >{:else}<span class:tf-ln-file-name={piece.name}>{piece.text}</span>{/if}{/each}</span
+            ><span class="tf-ln-file-path" title={file.path}
+              >{#if pieces.some((piece) => !piece.name)}<span class="tf-path-head"
+                  >{#each pieces.filter((piece) => !piece.name) as piece, j (j)}{#if piece.hit}<mark>{piece.text}</mark>{:else}{piece.text}{/if}{/each}</span
+                >{/if}<span class="tf-path-tail tf-ln-file-name"
+                >{#each pieces.filter((piece) => piece.name) as piece, j (j)}{#if piece.hit}<mark>{piece.text}</mark>{:else}{piece.text}{/if}{/each}</span
+              ></span
             >{#if file.line != null}<span class="tf-ln-file-line">line {file.line}</span>{/if}</span
           >
           {#if file.line != null}
