@@ -11,6 +11,9 @@ test-util = []
 
 [dependencies]
 chrono.workspace = true
+# A file that is not UTF-8 read as Windows-1252 (`code_text::decode`, the
+# everything-search decisions, D4); already in the tree through gix.
+encoding_rs = "0.8"
 # `read_scoped` reads the cards and the sources' statuses side by side
 # (`future::try_join`, the scale pass of 2026-11-10).
 futures-util.workspace = true

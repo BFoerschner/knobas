@@ -4,6 +4,7 @@ pub mod briefs;
 pub mod builds;
 pub mod checkout;
 pub mod code_facts;
+pub mod code_text;
 pub mod context;
 pub mod detail;
 pub mod entity_list;

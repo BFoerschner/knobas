@@ -4094,6 +4094,7 @@ name = "knobas-core"
 version = "3.2.8"
 dependencies = [
  "chrono",
+ "encoding_rs",
  "futures-util",
  "knobas-db",
  "knobas-spi-types",
