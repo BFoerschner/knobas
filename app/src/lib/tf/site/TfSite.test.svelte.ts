@@ -59,7 +59,25 @@ const ports: SitePagePorts = {
   measure: () => insets,
 };
 
+let visits: { answer: (url: string) => undefined | null | { entity_id: string; kind: string }; see: (source: string, url: string) => Promise<{ entity_id: string; kind: string } | null>; leave: (source: string) => Promise<void> };
+let named: Record<string, string>;
+let seen: string[];
+
 beforeEach(() => {
+  named = {};
+  seen = [];
+  visits = {
+    answer: () => undefined,
+    see: (source, url) => {
+      seen.push(`see ${source} ${url}`);
+      const id = named[url];
+      return Promise.resolve(id === undefined ? null : { entity_id: id, kind: "page" });
+    },
+    leave: (source) => {
+      seen.push(`leave ${source}`);
+      return Promise.resolve();
+    },
+  };
   target = document.createElement("div");
   document.body.append(target);
   calls = [];
@@ -84,6 +102,7 @@ function draw(over: { visible?: boolean; back?: { hash: string; name: string; op
     layers,
     ports,
     store,
+    visits,
   });
   view = mount(TfSite, { target, props });
   flushSync();
@@ -248,4 +267,30 @@ test("the insets go again only when they change", () => {
   window.dispatchEvent(new Event("resize"));
   flushSync();
   expect(calls).toEqual([]);
+});
+
+test("Open in knobas appears for an address the mirror names, and goes to its page", async () => {
+  named["https://wiki.example/display/PAY/Retry"] = "confluence:page:88213";
+  store.update(status());
+  draw();
+  expect(target.querySelector(".tf-sitebar a.tf-btn")).toBeNull();
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+  const open = target.querySelector<HTMLAnchorElement>(".tf-sitebar a.tf-btn");
+  expect(open?.textContent).toBe("Open in knobas");
+  expect(open?.getAttribute("href")).toContain("confluence%3Apage%3A88213");
+  expect(seen).toEqual(["see wiki https://wiki.example/display/PAY/Retry"]);
+});
+
+test("leaving the site's page refreshes what it stood on; showing it again does not", () => {
+  store.update(status());
+  const { props } = draw();
+  expect(seen.filter((one) => one.startsWith("leave"))).toEqual([]);
+  props.visible = false;
+  flushSync();
+  expect(seen.filter((one) => one.startsWith("leave"))).toEqual(["leave wiki"]);
+  props.visible = true;
+  flushSync();
+  expect(seen.filter((one) => one.startsWith("leave"))).toEqual(["leave wiki"]);
 });
