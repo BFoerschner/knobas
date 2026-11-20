@@ -39,7 +39,10 @@
 /* ---------- an opening's acknowledgement (`TfAck.svelte`, `shell/ack.svelte.ts`, ux21): a small ink chip where the
    press was, about a second, nothing to press. Its place is set before it draws and it floats, so nothing moves for it;
    it fades in over 90 ms and out over 160 ms, and with reduced motion it just comes and goes. ---------- */
-.tf-acks { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+/* The chips' layer takes no room (the ux21 Windows pass): a fixed box over the whole window, even one that lets every
+   press through, made WebView2 hit-test each wheel on the main thread, and Tickets' board and a Docs space scrolled
+   there, 71 and 29 frames a second at CPU 4x and 6x. The chip is fixed itself, so it still places against the window. */
+.tf-acks { position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 40; pointer-events: none; }
 .tf-ack {
   position: fixed; display: flex; align-items: center; gap: 6px; max-width: 360px; box-sizing: border-box;
   padding: 4px 10px 4px 8px; border-radius: 6px; background: var(--ink); color: var(--sheet); box-shadow: var(--shadow);

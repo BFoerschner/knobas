@@ -96,6 +96,12 @@ test("an opening's chip floats where the press was, one line, nothing to press, 
   expect(chip).toMatch(/white-space:\s*nowrap/);
   expect(chip).toMatch(/pointer-events:\s*none/);
   expect(block(code, ".tf-acks")).toMatch(/pointer-events:\s*none/);
+  // The layer takes no room: a fixed box over the whole window made WebView2 scroll the board and a Docs space on the
+  // main thread (the ux21 Windows pass).
+  const layer = block(code, ".tf-acks");
+  expect(layer).not.toMatch(/inset:/);
+  expect(layer).toMatch(/width:\s*0;/);
+  expect(layer).toMatch(/height:\s*0;/);
   expect(code).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.tf-ack \{ animation: none; transition: none; \}/);
 });
 
