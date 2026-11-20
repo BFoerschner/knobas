@@ -47,7 +47,8 @@ from navigation start:
 | No job, after: the first frame, All tickets' cards in it | 455 | 1668 | 2526 |
 | Chosen job, before / after: its card | 384 / 413 | 1415 / 1391 | 2092 / 2074 |
 
-The same at 2560x1440@1.25 within 40 ms of these. The first frame comes later than the empty page did, because it is
+The same at 2560x1440@1.25 within 40 ms of these. The chosen job's 1x, measured again over nine loads, is 387 before
+and 388 after: the 29 ms above is noise. The first frame comes later than the empty page did, because it is
 the board rather than a sentence; the board itself arrives earlier than it could through the button, and nothing
 paints before it.
 
