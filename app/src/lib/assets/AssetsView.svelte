@@ -681,8 +681,11 @@
    * more after the pane drew. What depends on an asset by a link can't be
    * known before the walk, so the section has no final height to keep; it
    * shows once, whole, as a detail page's header does (`heldHead`, at most
-   * 500 ms). Declared after the read's effect, so a new asset is held from
-   * the frame its selection changes.
+   * 500 ms). While held it draws no *Reading…* line, so its room is the least
+   * any answer takes and the answer only adds to it: a pane scrolled to its
+   * end (it keeps its scroll from one asset to the next) would otherwise
+   * scroll back by what the answer took away. Declared after the read's
+   * effect, so a new asset is held from the frame its selection changes.
    */
   const dependsDrawn = heldHead(
     () => selectedId,
@@ -2787,7 +2790,8 @@
           {#if dependsFailure !== null}
             <p class="empty">{dependsFailure}</p>
           {:else if dependsOn === null}
-            <p class="empty">Reading…</p>
+            <!-- Not while held: the held room is the least the answer can take, so it only grows, and a pane scrolled to its end doesn't move. -->
+            {#if dependsDrawn.shown}<p class="empty">Reading…</p>{/if}
           {:else if dependsOn.assets.length === 0}
             <p class="empty">Nothing depends on this.</p>
           {:else}
@@ -3851,6 +3855,13 @@
     margin: 0;
     padding: 12px 0;
     border-top: 1px solid var(--rule-2);
+  }
+
+  /* A section held unseen (`dependsDrawn`) is never what the pane's scroll keeps in place: anchored to *History* while
+     *Depends on this* grew above it, a pane scrolled to its end scrolled on by the rows the walk added, and what was
+     on screen moved up with it (75 px at 2560x1440). */
+  .grp:global(.tf-heldbelow) {
+    overflow-anchor: none;
   }
 
   .acts + .grp,

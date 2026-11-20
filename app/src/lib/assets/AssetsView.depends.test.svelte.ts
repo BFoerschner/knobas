@@ -370,6 +370,8 @@ test("the panel and the sections under it wait unseen until the walk answers, th
   await waitFor(() => expect(ports.asked).toContain(TEAMCITY.id));
   await waitFor(() => expect(text()).toContain("knobas-teamcity"));
   expect(held()).toEqual(expect.arrayContaining([expect.stringContaining("Depends on this"), "History"]));
+  // Its room is the least an answer takes: no *Reading…* line while held, so the answer only adds to it.
+  expect(target.querySelector(".breaks")?.textContent).not.toContain("Reading…");
   // What stands above the panel draws at once.
   expect(target.querySelector(".pane > section.grp:not(.tf-heldbelow) h3")).not.toBeNull();
 

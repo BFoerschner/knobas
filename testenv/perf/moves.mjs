@@ -65,7 +65,8 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * after the page draws, which the fixture answers at once (the ux19 gate, 2026-11-19). `forget`: `localStorage` keys
  * removed before the first open (the image sizes kept from an earlier place or run), so it is the first ever.
  * `noWorkers`: the page has no `Worker`, so the render port is its plain one and a diagram fence stays its source (a
- * diagram drawn late moves what stands under it, a mover of its own the case leaves out).
+ * diagram drawn late moves what stands under it, a mover of its own the case leaves out). `scroll`: a scroller pressed
+ * with its end in view (the asset pane at 1440x868, whose lower sections are below the window otherwise).
  */
 /** Where a run's answer lands and what says it did: the tree's generated rows (`answer` above). */
 const RUN_ANSWER = { in: `${shown} .tf-ftree`, changes: `${shown} .tf-ftree a[data-made]`, hold: '.tf-fdir[data-path="docs"], .tf-fband' };
@@ -125,9 +126,10 @@ const PLACES = [
   // *Depends on this* answered after the pane (the ux23 gate, 2026-11-20): its *Reading…* line gave way to the
   // *Everything inside it* fold, and *Linked items*, *History* and the import line under it moved 24 px down on the live
   // suite. `knobas-jira-db` holds one thing and nothing links to it (the gate's shape); `knobas-teamcity` holds one and
-  // an agent depends on it (a row above the fold). The pane's own read at once, the panel's 250 ms after it.
-  { name: "asset-depends-late", fixture: true, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-jira-db"]`, hash: ["#/asset/asset%3Aknobas-jira-db", "#/asset/asset:knobas-jira-db"], away: "#/asset/asset%3Awsl-docker" },
-  { name: "asset-depends-links-late", fixture: true, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-teamcity"]`, hash: ["#/asset/asset%3Aknobas-teamcity", "#/asset/asset:knobas-teamcity"], away: "#/asset/asset%3Awsl-docker" },
+  // an agent depends on it (a row above the fold). The pane's own read at once, the panel's 250 ms after it. The pane
+  // keeps its scroll across a press, so it is pressed scrolled to its end, where the panel is in view at 1440x868 too.
+  { name: "asset-depends-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-jira-db"]`, hash: ["#/asset/asset%3Aknobas-jira-db", "#/asset/asset:knobas-jira-db"], away: "#/asset/asset%3Awsl-docker" },
+  { name: "asset-depends-links-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-teamcity"]`, hash: ["#/asset/asset%3Aknobas-teamcity", "#/asset/asset:knobas-teamcity"], away: "#/asset/asset%3Awsl-docker" },
   { name: "settings", start: "#/time", gear: true, hash: "#/settings", away: "Escape" },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
   { name: "settings-source", start: "#/settings/sources", press: `${shown} a[href^="#/settings/source/"]`, hash: "#/settings/source/", away: "Escape" },
@@ -237,6 +239,14 @@ async function leave(p) {
   else if (away.startsWith("#/")) { await js(`location.hash = ${JSON.stringify(away)}, 1`); await quiet(1200); }
   else { await press(await find(away === "settings" ? GEAR : nav(away))); await quiet(1200); }
 }
+/** `scroll`: a scroller the place is pressed with scrolled to its end (a reader on what stands at the bottom of it). */
+async function scrolled(p, rate) {
+  if (!p.scroll) return;
+  await cpu(1);
+  await js(`(() => { const e = document.querySelector(${JSON.stringify(p.scroll)}); if (e) e.scrollTop = e.scrollHeight; return 1; })()`);
+  await quiet(400);
+  await cpu(rate);
+}
 async function record(p) {
   await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!(p.key || p.type), still: p.still ?? null, changes: p.changes ?? null, answer: p.answer ?? null, trace })})`);
   const pressed = await act(p);
@@ -276,6 +286,7 @@ async function measure(p, rate) {
       await fresh(p.start, p);
       if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
       await sleep(firstAfter);
+      await scrolled(p, rate);
       await cpu(rate);
       if (rounds.includes("first")) {
         entry.first = await record(p);
@@ -296,6 +307,7 @@ async function measure(p, rate) {
         await leave(p);
         // A setup that opens the place's page is pressed once; one that opens a menu the return closed, again.
         if (p.setup && !p.setupOnce) { await press(await find(p.setup)); await quiet(1200); }
+        await scrolled(p, rate);
         entry.return = await record(p.returnBy ? { ...p, ...p.returnBy, press: undefined, text: undefined } : p);
         console.log(`${rate}x ${p.name} return: ${say(entry.return)}`);
         await quiet(800);
