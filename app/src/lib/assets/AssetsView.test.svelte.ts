@@ -1560,7 +1560,8 @@ test("a route to an asset in an open column draws a solid wire to its row", asyn
   const across = target.querySelector('svg.wires path.wire.across')!;
   expect(across.getAttribute("d"), "no line over the column between").toBe("");
   expect(target.querySelectorAll("svg.wires path.halo"), "a halo only under a line drawn").toHaveLength(1);
-  expect(target.querySelectorAll("svg.wires circle.land"), "both far ends keep their dot").toHaveLength(2);
+  expect(target.querySelectorAll("svg.wire-end circle.land"), "both far ends keep their dot, each in its own box").toHaveLength(2);
+  expect(target.querySelectorAll("svg.wires circle"), "the gap's layer draws no dot").toHaveLength(0);
 });
 
 /**
@@ -1630,12 +1631,36 @@ function layOut(rows: Record<string, number>, tall: number): void {
     if (this.matches("aside.pane")) return rect(680, 0, 320, tall);
     if (this.matches("div.cols")) return rect(0, 0, 680, tall);
     if (this.matches("ol.col")) return rect(0, 0, 220, window.innerHeight);
+    if (this.matches("div.colw")) return rect(0, 0, 230, window.innerHeight);
     if (this.matches("button.row")) return rect(20, 40, 200, 24);
     const key = this.getAttribute("data-wire");
     if (this.matches("li[data-wire]") && key !== null && rows[key] !== undefined) return rect(690, rows[key], 300, 20);
     return rect(0, 0, 0, 0);
   });
 }
+
+/**
+ * **No wire's layer lies over a column where it draws nothing** (the ux24 pass, 2026-11-20): one layer over the whole
+ * tree made WebView2 hit-test each wheel over the columns on the main thread while a wire showed. The lines are drawn
+ * in the gap from the last column's edge (230) to the pane's (680); a far end, its dot and its line's stretch inside
+ * the column, in a box of its own that ends where the gap begins, so no part is drawn twice.
+ */
+test("a wire's line is drawn in the gap between the columns and the pane, its far end in a box of its own", async () => {
+  layOut({ "exposes:route:gitea": 100, "via:route:gitea": 200 }, window.innerHeight);
+  render("#/asset/asset:vm-app-02");
+  await waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea", "via:route:gitea → asset:vm-app-02 across"]));
+  const gap = target.querySelector<SVGSVGElement>("svg.wires")!;
+  expect([gap.style.getPropertyValue("left"), gap.style.getPropertyValue("width")]).toEqual(["230px", "450px"]);
+  const ends = [...target.querySelectorAll<SVGSVGElement>("svg.wire-end")];
+  expect(ends.map((end) => end.getAttribute("data-wire"))).toEqual(["exposes:route:gitea", "via:route:gitea"]);
+  const [line, dot] = ends.map((end) => ({ left: parseFloat(end.style.getPropertyValue("left")), width: parseFloat(end.style.getPropertyValue("width")), height: parseFloat(end.style.getPropertyValue("height")) }));
+  // The line's far end: from its dot to the gap, no wider than the column's last few pixels and the dot.
+  expect(line!.left + line!.width).toBe(230);
+  expect(line!.width).toBeLessThan(20);
+  // A dot alone (`across`) is a box the dot's size.
+  expect(dot!.width).toBeLessThan(12);
+  expect(dot!.height).toBeLessThan(12);
+});
 
 /**
  * **A wire starts only from a route row the reader can see** (#1460).

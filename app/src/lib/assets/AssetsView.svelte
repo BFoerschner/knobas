@@ -904,6 +904,68 @@
     /** The landing point, where the dot goes. */
     x: number;
     y: number;
+    /**
+     * The box that draws the wire's far end over its column: the dot, and the stretch of the line left of the gap
+     * (`wireGap`), in the tree's pixels. Only that box lies over the column, so a wheel over the rest of it is the
+     * compositor's (the ux24 pass).
+     */
+    end: Box;
+  }
+
+  /** A layer's place in the tree's pixels. */
+  interface Box {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }
+
+  /**
+   * Where the wires' lines are drawn: the gap between the last column's edge and the pane's, from the tree's top to
+   * its foot. Nothing scrolls under it; a wire's stretch inside its column is its own small layer (`DrawnWire.end`).
+   * One layer over the whole tree made WebView2 hit-test each wheel over the columns on the main thread while a wire
+   * showed (the ux21 Windows pass found it with no wire; the ux24 pass took it off the columns with wires too).
+   */
+  let wireGap = $state<{ left: number; width: number }>({ left: 0, width: 0 });
+
+  /** A wire's curve at `t`, the cubic `measureWires` draws. */
+  function curveAt(p: readonly [number, number][], t: number): [number, number] {
+    const u = 1 - t;
+    const a = u * u * u,
+      b = 3 * u * u * t,
+      c = 3 * u * t * t,
+      d = t * t * t;
+    return [a * p[0]![0] + b * p[1]![0] + c * p[2]![0] + d * p[3]![0], a * p[0]![1] + b * p[1]![1] + c * p[2]![1] + d * p[3]![1]];
+  }
+
+  /**
+   * The far end's box: the dot, and every point of the curve left of `gapLeft`, widened by the halo's half and a pixel
+   * for the edge's smoothing. A line's box ends at the gap's left, so the two layers meet and draw no part twice.
+   */
+  function endBox(x: number, y: number, curve: readonly [number, number][] | null, gapLeft: number): Box {
+    const PAD = 1.6 + 1;
+    let left = x - 3 - PAD,
+      right = x + 3 + PAD,
+      top = y - 3 - PAD,
+      bottom = y + 3 + PAD;
+    if (curve !== null) {
+      for (let i = 0; i <= 256; i += 1) {
+        const [px, py] = curveAt(curve, i / 256);
+        if (px > gapLeft + PAD) continue;
+        left = Math.min(left, px - PAD);
+        top = Math.min(top, py - PAD);
+        bottom = Math.max(bottom, py + PAD);
+      }
+      right = gapLeft;
+    }
+    return { left, top, width: Math.max(0, right - left), height: bottom - top };
+  }
+
+  /** Places a wire layer at `box` through the CSSOM (the app's CSP refuses `style:`). */
+  function placeAt(box: Partial<Box>) {
+    return (node: SVGSVGElement) => {
+      for (const [key, value] of Object.entries(box)) node.style.setProperty(key, `${value}px`);
+    };
   }
 
   /**
@@ -942,6 +1004,7 @@
     const cols = stripEl;
     if (frame === null || pane === null || cols === null) {
       drawnWires = [];
+      wireGap = { left: 0, width: 0 };
       return;
     }
     const box = frame.getBoundingClientRect();
@@ -959,6 +1022,12 @@
     // a row below its bottom edge.
     const seenTop = Math.max(paneBox.top, box.top, 0);
     const seenBottom = Math.min(paneBox.bottom, box.bottom, window.innerHeight);
+    // The gap the lines cross: from the last column's edge to the pane's, on the device's pixel grid so the two layers
+    // that meet there leave no seam.
+    const scale = window.devicePixelRatio || 1;
+    const lastBox = cols.lastElementChild?.getBoundingClientRect() ?? null;
+    const lastRight = lastBox === null ? 0 : lastBox.right - box.left;
+    const gapLeft = Math.round(Math.min(Math.max(lastRight, 0), Math.max(startX, 0)) * scale) / scale;
 
     const next: DrawnWire[] = [];
     for (const wire of wireEnds) {
@@ -1008,6 +1077,8 @@
       const dive = Math.min(reach, 52);
       // Anything drawn after the far end's column lies between it and the pane: the line would cross its labels.
       const across = wire.column < shown.length - 1;
+      const reachX = startX - reach,
+        diveX = held.x + dive;
       next.push({
         key: wire.key,
         to: wire.rowId ?? `spine:${wire.column}`,
@@ -1023,9 +1094,24 @@
             `${round(held.x + dive)} ${round(held.y)}, ${round(held.x)} ${round(held.y)}`,
         x: round(held.x),
         y: round(held.y),
+        end: endBox(
+          round(held.x),
+          round(held.y),
+          across
+            ? null
+            : [
+                [round(startX), round(startY)],
+                [round(reachX), round(startY)],
+                [round(diveX), round(held.y)],
+                [round(held.x), round(held.y)],
+              ],
+          gapLeft,
+        ),
       });
     }
     drawnWires = next;
+    const width = Math.max(0, startX - gapLeft);
+    if (wireGap.left !== gapLeft || wireGap.width !== width) wireGap = { left: gapLeft, width };
   }
 
   /**
@@ -2147,25 +2233,39 @@
       Before the pane in document order and painted under it, so a wire that
       arrives at the pane's edge stops there.
     -->
-    <!-- Only while a wire is drawn (the ux21 Windows pass): an empty layer over the whole tree made WebView2 hit-test
-         each wheel on the main thread, and a column of 300 rows scrolled there at 49 frames a second at CPU 6x. -->
+    <!--
+      Only while a wire is drawn, and never over a column (the ux21 and ux24 Windows passes): a layer over a column that
+      draws nothing there made WebView2 hit-test each wheel on the main thread, and a column of 300 rows scrolled there
+      at 49 frames a second at CPU 6x. The lines are drawn in the gap between the last column and the pane, where
+      nothing scrolls (`wireGap`); each far end, its dot and its line's last few pixels, in a box of its own over its
+      column (`DrawnWire.end`). The curves are in the tree's pixels in both, shifted by the layer's place.
+    -->
     {#if drawnWires.length > 0}
-    <svg class="wires" aria-hidden="true">
+      <svg class="wires" aria-hidden="true" {@attach placeAt({ left: wireGap.left, width: wireGap.width })}>
+        <g transform="translate({-wireGap.left} 0)">
+          {#each drawnWires as wire (wire.key)}
+            <!-- A halo in the columns' own background under the wire, so a line over the strip's blank end stays a line.
+                 A wire with a column between its far end and the pane is its dot alone (`across`). -->
+            {#if !wire.across}<path class="halo" d={wire.d} />{/if}
+            <path
+              class="wire"
+              class:dashed={wire.dashed}
+              class:across={wire.across}
+              data-wire={wire.key}
+              data-to={wire.to}
+              d={wire.d}
+            />
+          {/each}
+        </g>
+      </svg>
       {#each drawnWires as wire (wire.key)}
-        <!-- A halo in the columns' own background under the wire, so a line over the strip's blank end stays a line.
-             A wire with a column between its far end and the pane is its dot alone (`across`). -->
-        {#if !wire.across}<path class="halo" d={wire.d} />{/if}
-        <path
-          class="wire"
-          class:dashed={wire.dashed}
-          class:across={wire.across}
-          data-wire={wire.key}
-          data-to={wire.to}
-          d={wire.d}
-        />
-        <circle class="land" cx={wire.x} cy={wire.y} r="3" />
+        <svg class="wire-end" aria-hidden="true" data-wire={wire.key} {@attach placeAt(wire.end)}>
+          <g transform="translate({-wire.end.left} {-wire.end.top})">
+            {#if !wire.across}<path class="halo" d={wire.d} /><path class="wire" class:dashed={wire.dashed} d={wire.d} />{/if}
+            <circle class="land" cx={wire.x} cy={wire.y} r="3" />
+          </g>
+        </svg>
       {/each}
-    </svg>
     {/if}
 
     <aside class="pane" tabindex="-1" bind:this={paneEl}>
@@ -3106,7 +3206,8 @@
   }
 
   /*
-    The wires (story 31). One transparent layer across the whole tree; the
+    The wires (story 31). A transparent layer over the gap between the columns
+    and the pane, and a small one over each far end (the ux24 pass); the
     curves are measured in `AssetsView`'s own `measureWires`, because where a
     row sits is a fact about a scroll offset and a font and no stylesheet
     knows it.
@@ -3115,34 +3216,42 @@
     rows and buttons a reader clicks, and a layer that took the click would
     make the columns unusable to look at a line.
   */
+  /* Placed by `placeAt`: the gap between the last column and the pane, from the tree's top to its foot. */
   .wires {
     position: absolute;
-    inset: 0;
-    width: 100%;
+    top: 0;
     height: 100%;
     pointer-events: none;
     /*
-      Clipped to the tree. Over the columns and under the pane (the same layer, between them in the markup): a wire is
-      drawn only where nothing stands between its far end and the pane (`across`), so it crosses no label, and the
-      columns can be opaque, which lets a long column scroll on the compositor (2026-11-19).
+      Clipped to its gap. Over the strip's blank end and under the pane (between them in the markup): a wire is drawn
+      only where nothing stands between its far end and the pane (`across`), so it crosses no label, and the columns
+      can be opaque, which lets a long column scroll on the compositor (2026-11-19). No part of it lies over a column.
     */
     overflow: hidden;
     z-index: 1;
   }
 
-  .wires path {
+  /* A wire's far end over its column, placed by `placeAt` at the box it draws in (`DrawnWire.end`). */
+  .wire-end {
+    position: absolute;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  :is(.wires, .wire-end) path {
     fill: none;
     stroke-linecap: round;
   }
 
-  .wires .halo {
+  :is(.wires, .wire-end) .halo {
     stroke: var(--paper);
     stroke-width: 3.2;
     opacity: 0.92;
   }
 
   /* A wire is structure, not state, so it is ink and not a tone. */
-  .wires .wire {
+  :is(.wires, .wire-end) .wire {
     stroke: var(--ink-2);
     stroke-width: 1;
     opacity: 0.75;
@@ -3150,11 +3259,12 @@
 
   /* Reached through something rather than pointed at: a spine standing in for
      the row, or a route that arrives at an asset above this one. */
-  .wires .wire.dashed {
+  :is(.wires, .wire-end) .wire.dashed {
     stroke-dasharray: 3 3;
   }
 
-  .wires .land {
+  /* The dot is drawn only in a far end's own box. */
+  .wire-end .land {
     fill: var(--ink-2);
     opacity: 0.9;
   }
@@ -3169,7 +3279,9 @@
   */
   .wires .halo,
   .wires .wire,
-  .wires .land {
+  .wire-end .halo,
+  .wire-end .wire,
+  .wire-end .land {
     animation: wire-in 160ms ease-out both;
   }
 
@@ -3182,7 +3294,9 @@
   @media (prefers-reduced-motion: reduce) {
     .wires .halo,
     .wires .wire,
-    .wires .land {
+    .wire-end .halo,
+    .wire-end .wire,
+    .wire-end .land {
       animation: none;
     }
   }
