@@ -9,7 +9,6 @@
 //   faces    ms until every face the page asked for has loaded (`document.fonts.ready` after the shell)
 //   facesAtShell  whether the interface's face was loaded in that first text frame (else it drew a fallback first)
 //   shifts   the layout shifts after the first contentful paint, and their summed score (a face landing late shows here)
-//   moved    the shell's text boxes that sat elsewhere 1.5 s later than in its first text frame
 // The medians are reported beside every run.
 import { writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
@@ -27,16 +26,15 @@ setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 20 * 60
 // Before the page's own scripts: paints and shifts as they happen, and the first frame that draws the shell's words.
 const PROBE = `
 (() => {
-  const r = window.__fp = { fcp: null, shell: null, facesAtShell: null, faces: null, shifts: [], boxes: null };
+  const r = window.__fp = { fcp: null, shell: null, facesAtShell: null, faces: null, shifts: [] };
   new PerformanceObserver((l) => { for (const e of l.getEntries()) if (e.name === "first-contentful-paint") r.fcp = e.startTime; }).observe({ type: "paint", buffered: true });
   new PerformanceObserver((l) => { for (const e of l.getEntries()) r.shifts.push({ at: Math.round(e.startTime), value: e.value }); }).observe({ type: "layout-shift", buffered: true });
-  const boxes = () => [...document.querySelectorAll(".tf h1, .tf h2, .tf a, .tf button, .tf li, .tf p")].slice(0, 400).map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)].join(","); });
   const ui = () => { const f = getComputedStyle(document.body).fontFamily.split(",")[0].trim(); return document.fonts.check("13px " + f); };
   const tick = () => {
     const shell = document.querySelector(".tf");
     if (shell && (shell.innerText || "").trim().length > 40) {
       requestAnimationFrame(() => setTimeout(() => {
-        r.shell = performance.now(); r.facesAtShell = ui(); r.boxes = boxes();
+        r.shell = performance.now(); r.facesAtShell = ui();
         document.fonts.ready.then(() => { r.faces = performance.now(); });
       }, 0));
       return;
@@ -44,7 +42,6 @@ const PROBE = `
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
-  window.__fpBoxes = boxes;
 })();`;
 
 const browser = await launch({ size });
@@ -72,20 +69,19 @@ for (const rate of throttles) {
       if (r) break;
     }
     await sleep(1500);
-    const later = await c.js("window.__fpBoxes()").catch(() => []);
     if (!r) { all.push({ failed: true }); continue; }
-    const moved = r.boxes.filter((box, i) => later[i] !== undefined && later[i] !== box).length;
+    r = await c.js("window.__fp").catch(() => r);
     const after = r.shifts.filter((s) => r.fcp !== null && s.at >= r.fcp);
-    all.push({ fcp: Math.round(r.fcp), shell: Math.round(r.shell), faces: Math.round(r.faces), facesAtShell: r.facesAtShell, shifts: after.length, shiftScore: Number(after.reduce((a, s) => a + s.value, 0).toFixed(4)), moved, of: r.boxes.length });
+    all.push({ fcp: Math.round(r.fcp), shell: Math.round(r.shell), faces: Math.round(r.faces), facesAtShell: r.facesAtShell, shifts: after.length, shiftScore: Number(after.reduce((a, s) => a + s.value, 0).toFixed(4)) });
   }
   const ok = all.filter((x) => !x.failed);
   result.throttles[rate] = {
     median: { fcp: median(ok.map((x) => x.fcp)), shell: median(ok.map((x) => x.shell)), faces: median(ok.map((x) => x.faces)) },
     facesAtShell: ok.filter((x) => x.facesAtShell).length + " of " + ok.length,
-    shifts: ok.reduce((a, x) => a + x.shifts, 0), moved: ok.reduce((a, x) => a + x.moved, 0),
+    shifts: ok.reduce((a, x) => a + x.shifts, 0),
     runs: all,
   };
-  console.log(`${size.name} ${rate}x: fcp ${result.throttles[rate].median.fcp} ms, shell ${result.throttles[rate].median.shell} ms, faces ${result.throttles[rate].median.faces} ms, face at first text frame ${result.throttles[rate].facesAtShell}, shifts ${result.throttles[rate].shifts}, moved ${result.throttles[rate].moved}`);
+  console.log(`${size.name} ${rate}x: fcp ${result.throttles[rate].median.fcp} ms, shell ${result.throttles[rate].median.shell} ms, faces ${result.throttles[rate].median.faces} ms, face at first text frame ${result.throttles[rate].facesAtShell}, shifts ${result.throttles[rate].shifts}`);
 }
 writeFileSync(out, JSON.stringify(result, null, 2));
 browser.stop();
