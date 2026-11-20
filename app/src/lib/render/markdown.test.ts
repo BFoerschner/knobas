@@ -85,3 +85,24 @@ test("a text drawn again gives the fence in the same place with the same code th
   expect(keepFenceRooms(nodesScope(rest), rooms, from)).toBe(3);
   expect(roomsOf(pieces)).toEqual([null, "125px", "146.4px"]);
 });
+
+// A rendered comparison's changed blocks (ux26, ruling 3): with `lines`, each top-level block says the source lines it
+// came from; a nested block says none; the sanitizer keeps the attribute; without `lines` nothing is added.
+test("with lines, each top-level block carries its source lines, through the sanitizer", () => {
+  const text = "# Title\n\nA paragraph\nof two lines.\n\n- one\n- two\n  - nested\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```js\nlet x = 1;\n```\n";
+  const box = document.createElement("div");
+  box.append(markdownFragment(text, LINKS, { lines: true }));
+  const said = [...box.children].map((el) => `${el.tagName.toLowerCase()} ${el.getAttribute("data-md-lines")}`);
+  // A list's lines run to the blank line after it, as markdown-it maps it.
+  expect(said).toEqual(["h1 1-1", "p 3-4", "ul 6-9", "table 10-12", "div 14-16"]);
+  expect(box.querySelector("li")?.hasAttribute("data-md-lines"), "a nested block marks nothing").toBe(false);
+  const plain = document.createElement("div");
+  plain.append(markdownFragment(text, LINKS));
+  expect(plain.querySelector("[data-md-lines]")).toBeNull();
+});
+
+test("an author's own data-md-lines in raw HTML marks at most its own block", () => {
+  const box = document.createElement("div");
+  box.append(markdownFragment('<div data-md-lines="1-99">raw</div>\n\nText', LINKS, { lines: true }));
+  expect([...box.querySelectorAll("[data-md-lines]")].map((el) => el.getAttribute("data-md-lines"))).toEqual(["1-99", "3-3"]);
+});

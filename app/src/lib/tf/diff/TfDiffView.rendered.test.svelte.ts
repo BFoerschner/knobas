@@ -137,3 +137,13 @@ test("Render as in the caption picks another renderer for this card; Use … by 
   await settle();
   expect(saved).toEqual([[{ pattern: "*.md", renderer: "markdown", pipeline: null }]]);
 });
+
+test("c on a rendered card says to open it as lines: it has none to comment on (ux26, ruling 1)", async () => {
+  const { createPendingComments } = await import("../../detail/view/pending-comments.svelte");
+  const { toasts } = await import("../../shell/toasts.svelte");
+  rendering.set(true);
+  draw([file("README.md")], { review: { entity: "pr", pending: createPendingComments(() => null) } });
+  key("c");
+  flushSync();
+  expect(toasts.items.at(-1)?.text).toBe("No open file takes a comment here. Open one as lines, then press c.");
+});

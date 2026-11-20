@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { openWith } from "../../render/defaults";
 import { allRenderers, HTML, IMAGE, MARKDOWN, MERMAID, OPENAPI, SOURCE, type Renderer } from "../../render/registry";
-import { docStage, hunkText, IMAGE_STAGE, renderedChoices, renderedPlan, renderedRoom, stageOf } from "./rendered";
+import { changedLines, docStage, hunkText, IMAGE_STAGE, meetsLines, renderedChoices, renderedPlan, renderedRoom, stageOf } from "./rendered";
 
 const add = (nu: number, text: string): DiffLine => ({ kind: "add", old: null, new: nu, text });
 const del = (old: number, text: string): DiffLine => ({ kind: "del", old, new: null, text });
@@ -103,4 +103,17 @@ test("a rendered card's room is its header, the caption, the stage and the foot"
   expect(renderedRoom(IMAGE, 868)).toBe(42 + 29 + 320 + 31);
   expect(renderedRoom(MARKDOWN, 1440)).toBe(42 + 29 + 640 + 31);
   expect(renderedRoom(MARKDOWN, 400)).toBe(42 + 29 + 360 + 31);
+});
+
+test("the lines a change touched: removed by their old numbers, added by their new ones, each run one range (ux26)", () => {
+  const ctx = (old: number, nu: number) => ({ kind: "context" as const, old, new: nu, text: "" });
+  const del = (old: number) => ({ kind: "del" as const, old, new: null, text: "" });
+  const add = (nu: number) => ({ kind: "add" as const, old: null, new: nu, text: "" });
+  const of = (lines: DiffLine[][]) => ({ path: "a.md", old_path: null, change: "modified" as const, additions: 0, deletions: 0, hunks: lines.map((l) => ({ header: "", lines: l })), truncated: false, threads: [] });
+  // An edit of lines 3 and 4, and lines added at the end.
+  expect(changedLines(of([[ctx(2, 2), del(3), del(4), add(3), add(4), add(5), ctx(5, 6)], [ctx(9, 10), add(11), add(12)]]))).toEqual({ old: [[3, 4]], new: [[3, 5], [11, 12]] });
+  // A deletion alone leaves nothing after.
+  expect(changedLines(of([[ctx(1, 1), del(2), ctx(3, 2)]]))).toEqual({ old: [[2, 2]], new: [] });
+  expect(meetsLines(3, 6, [[1, 2], [6, 9]])).toBe(true);
+  expect(meetsLines(3, 5, [[1, 2], [6, 9]])).toBe(false);
 });

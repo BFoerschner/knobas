@@ -408,6 +408,15 @@
 .tf-rside > .tf-stepfail { margin: 10px 0; }
 .tf-rside-doc > .tf-stepfail { margin: 10px 0; }
 .tf-rwait { padding: 14px 0; }
+/* A rendered Markdown file's changed blocks (ux26, ruling 3): on its own side, a 3 px bar and a tint that fades to
+   nothing by 60 % of the column, the caption's pair. The bar and the tint's start are outer shadows in the side's
+   padding, drawn outside the block's box, so marking a block moves none of its text. */
+.tf-rside-old .tf-md > .tf-rchg {
+  background-image: linear-gradient(90deg, var(--err-bg), transparent 60%); box-shadow: -9px 0 0 var(--err-bg), -12px 0 0 var(--err);
+}
+.tf-rside-new .tf-md > .tf-rchg {
+  background-image: linear-gradient(90deg, var(--ok-bg), transparent 60%); box-shadow: -9px 0 0 var(--ok-bg), -12px 0 0 var(--ok);
+}
 .tf-rside-img { box-sizing: border-box; height: calc(var(--tf-rstage) - 1px); padding: 14px; display: grid; place-items: center; }
 .tf-rstage-open .tf-rside-img { height: auto; }
 .tf-rside-img > img { max-width: 100%; max-height: 100%; object-fit: contain; }

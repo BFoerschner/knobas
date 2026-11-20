@@ -196,3 +196,29 @@ test("two outputs too long to match line by line still diff, and the card says h
   expect(squash(header().querySelector(".tf-add-n"))).toBe("+2100");
   expect(squash(header().querySelector(".tf-del-n"))).toBe("−2100");
 });
+
+// A pipeline's output, rendered (ux26, the decision list's section 19): `events.md.b64` decoded is Markdown, so its card
+// offers *Rendered*, which draws both outputs in the stage from the runs, reading no side's bytes.
+test("a decoded Markdown output offers Rendered and draws both outputs with no byte read", async () => {
+  const MD: DiffFile = { ...B64, path: "docs/events.md.b64" };
+  const asked: string[] = [];
+  const context = {
+    text: async () => null,
+    bytes: async (file: DiffFile, side: "old" | "new") => {
+      asked.push(`bytes ${side}:${file.path}`);
+      return new Uint8Array();
+    },
+    async piped(_file: DiffFile, side: "old" | "new"): Promise<PipeRun> {
+      return { outcome: "done", name: "events.md", output: { kind: "text", text: side === "old" ? "# Events\n\nOne a day.\n" : "# Events\n\nTwo a day.\n" } };
+    },
+  };
+  const md: DiffPipelines = { of: (path) => (path.endsWith(".md.b64") ? { name: null, pattern: "*.md.b64", steps: [{ step: "base64_decode" }] } : null) };
+  draw({ files: [MD], context, pipelines: md, piping: storedSetting() });
+  await settle();
+  const card = target.querySelector<HTMLElement>('.tf-diff[data-file="docs/events.md.b64"]')!;
+  const press = (name: string) => [...card.querySelectorAll<HTMLButtonElement>(".tf-fh .tf-seg button")].find((b) => b.textContent === name)!.click();
+  press("Rendered");
+  await settle();
+  expect([...card.querySelectorAll(".tf-rside-old .tf-md p, .tf-rside-new .tf-md p")].map((p) => p.textContent)).toEqual(["One a day.", "Two a day."]);
+  expect(asked, "the sides are the runs' outputs").toEqual([]);
+});

@@ -387,3 +387,47 @@ test("a PNG where no bytes reader is offered stays a binary file", () => {
   expect(card("assets/logo.png").textContent).toContain("A binary file: no lines to draw.");
 });
 
+
+// A rendered Markdown file's changed blocks (ux26, ruling 3): each top-level block holding a changed line is marked on
+// its own side; the stage opens at the first, and `n` steps to the next, both columns with it.
+const DOC_BEFORE = "# Retrying a payout\n\nA payout that fails is sent again.\n\n## Steps\n\n- Validate\n- Retry once\n\n## Inputs\n\nThe mandate.\n";
+const DOC_AFTER = "# Retrying a payout\n\nA payout that fails is sent again with backoff.\n\n## Steps\n\n- Validate\n- Retry three times\n\n## Inputs\n\nThe mandate.\n\n## Alerts\n\nThe channel hears.\n";
+const DOC = file("docs/retry.md", {
+  additions: 6,
+  deletions: 2,
+  hunks: [
+    { header: "@@ -1,8 +1,8 @@", lines: [ctx(1, 1, "# Retrying a payout"), ctx(2, 2, ""), del(3, "A payout that fails is sent again."), add(3, "A payout that fails is sent again with backoff."), ctx(4, 4, ""), ctx(5, 5, "## Steps"), ctx(6, 6, ""), ctx(7, 7, "- Validate"), del(8, "- Retry once"), add(8, "- Retry three times")] },
+    { header: "@@ -12 +12,5 @@", lines: [ctx(12, 12, "The mandate."), add(13, ""), add(14, "## Alerts"), add(15, ""), add(16, "The channel hears.")] },
+  ],
+});
+const marked = (path: string, at: "old" | "new") => [...side(path, at).querySelectorAll(".tf-md > .tf-rchg")].map((el) => el.tagName.toLowerCase() + " " + el.textContent!.trim().slice(0, 20).trim());
+
+test("a Markdown file's changed blocks are marked on their own side, and n steps to the next change", async () => {
+  const { context } = reader({ "docs/retry.md": [DOC_BEFORE, DOC_AFTER] });
+  // Where a marked block stands in the stage: its first line's number, 20 px a line (jsdom lays nothing out).
+  const real = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const lines = /^(\d+)-/.exec(this.getAttribute("data-md-lines") ?? "");
+    // As laid out, a block moves up as its stage scrolls.
+    const scrolled = this.closest(".tf-rstage")?.scrollTop ?? 0;
+    return { top: lines ? Number(lines[1]) * 20 - scrolled : 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+  };
+  try {
+    draw({ files: [DOC], context });
+    mode("docs/retry.md", "Rendered");
+    await settle();
+    expect(marked("docs/retry.md", "old")).toEqual(["p A payout that fails", "ul Validate\nRetry once"]);
+    expect(marked("docs/retry.md", "new")).toEqual(["p A payout that fails", "ul Validate\nRetry three", "h2 Alerts", "p The channel hears."]);
+    const stage = card("docs/retry.md").querySelector<HTMLElement>(".tf-rstage")!;
+    const foot = () => card("docs/retry.md").querySelector(".tf-rfoot-say")!.textContent;
+    // The paragraph (line 3) on both sides, the list (7), the new heading (14) and its paragraph (16): four changes.
+    expect(foot()).toBe("Change 1 of 4");
+    expect(stage.scrollTop, "opened at the first change").toBe(3 * 20 - 12);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
+    flushSync();
+    expect(stage.scrollTop).toBe(7 * 20 - 12);
+    expect(foot()).toBe("Change 2 of 4");
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+  }
+});

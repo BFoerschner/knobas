@@ -127,10 +127,15 @@ export function slug(heading: string): string {
 const engine = new MarkdownIt({ html: true, linkify: true, typographer: false });
 
 const escape = engine.utils.escapeHtml;
-const fence = (lang: string, code: string) =>
-  `<pre data-md-fence="${escape(lang)}"><code>${escape(code.replace(/\n$/, ""))}</code></pre>\n`;
-engine.renderer.rules.fence = (tokens, idx) => fence(tokens[idx]!.info.trim().split(/\s+/)[0] ?? "", tokens[idx]!.content);
-engine.renderer.rules.code_block = (tokens, idx) => fence("", tokens[idx]!.content);
+const fence = (lang: string, code: string, lines: string | null = null) =>
+  `<pre data-md-fence="${escape(lang)}"${lines === null ? "" : ` data-md-lines="${escape(lines)}"`}><code>${escape(code.replace(/\n$/, ""))}</code></pre>\n`;
+/** A block's source lines, where the text is drawn with them (`tf-lines` below). */
+const linesOf = (token: { attrGet(name: string): string | number | null }) => {
+  const lines = token.attrGet("data-md-lines");
+  return lines === null ? null : String(lines);
+};
+engine.renderer.rules.fence = (tokens, idx) => fence(tokens[idx]!.info.trim().split(/\s+/)[0] ?? "", tokens[idx]!.content, linesOf(tokens[idx]!));
+engine.renderer.rules.code_block = (tokens, idx) => fence("", tokens[idx]!.content, linesOf(tokens[idx]!));
 // `~~struck~~` is `<del>`, as GitHub draws it.
 engine.renderer.rules.s_open = () => "<del>";
 engine.renderer.rules.s_close = () => "</del>";
@@ -174,6 +179,20 @@ engine.core.ruler.push("tf-tasks", (state) => {
   return true;
 });
 
+/**
+ * Each top-level block's source lines (ux26, a rendered comparison's changed blocks, ruling 3): where the text is drawn
+ * with `lines`, every block-opening token of level 0 that markdown-it mapped (a paragraph, a heading, a list, a table, a
+ * fence, a quote, a rule) carries `data-md-lines="<from>-<to>"`, from 1, both ends counted. Raw HTML carries none.
+ */
+engine.core.ruler.push("tf-lines", (state) => {
+  if ((state.env as { lines?: boolean } | undefined)?.lines !== true) return true;
+  for (const token of state.tokens) {
+    if (token.level !== 0 || token.nesting < 0 || token.map === null || token.type === "inline" || token.type === "html_block") continue;
+    token.attrSet("data-md-lines", `${token.map[0] + 1}-${token.map[1]}`);
+  }
+  return true;
+});
+
 /** What raw HTML may keep (#2255; spec story 22). */
 export const SANITIZE: Config = {
   USE_PROFILES: { html: true },
@@ -186,12 +205,12 @@ export const SANITIZE: Config = {
     "poster", "background", "usemap", "download",
   ],
   ALLOW_DATA_ATTR: false,
-  ADD_ATTR: ["data-md-fence", "data-md-task", "data-md-attachment"],
+  ADD_ATTR: ["data-md-fence", "data-md-task", "data-md-attachment", "data-md-lines"],
 };
 
 /** `text` drawn as Markdown: sanitized, its links, fences and task boxes in place. */
-export function markdownFragment(text: string, links: MarkdownLinks): DocumentFragment {
-  const html = engine.render(text);
+export function markdownFragment(text: string, links: MarkdownLinks, how: { lines?: boolean } = {}): DocumentFragment {
+  const html = engine.render(text, how.lines ? { lines: true } : {});
   const fragment = DOMPurify.sanitize(html, { ...SANITIZE, RETURN_DOM_FRAGMENT: true });
   finish(fragment, links);
   return fragment;
@@ -204,8 +223,8 @@ export function markdownFragment(text: string, links: MarkdownLinks): DocumentFr
  * a 300 KB comment whole was most of a 194 ms task on a quarter-speed main thread before any of it could draw. A piece
  * never ends inside raw HTML that one block opens and a later one closes.
  */
-export function markdownPieces(text: string, links: MarkdownLinks): { next(budget: number): DocumentFragment | null; done(): boolean } {
-  const env = {};
+export function markdownPieces(text: string, links: MarkdownLinks, how: { lines?: boolean } = {}): { next(budget: number): DocumentFragment | null; done(): boolean } {
+  const env = how.lines ? { lines: true } : {};
   const tokens = engine.parse(text, env);
   // Cut only between top-level blocks, and never inside raw HTML a block opened and a later one closes (a `<details>`
   // around paragraphs), which sanitized apart would close early.
@@ -316,6 +335,11 @@ function finish(root: DocumentFragment, links: MarkdownLinks, seen = new Map<str
     const block = doc.createElement("div");
     block.className = "tf-fence";
     block.dataset["lang"] = lang;
+    // The fence's box is the block on the page: its source lines go with it (ux26, a comparison's changed blocks).
+    if (pre.dataset["mdLines"] !== undefined) {
+      block.dataset["mdLines"] = pre.dataset["mdLines"];
+      delete pre.dataset["mdLines"];
+    }
     const header = doc.createElement("header");
     const label = doc.createElement("span");
     label.textContent = lang === "" ? "text" : lang;

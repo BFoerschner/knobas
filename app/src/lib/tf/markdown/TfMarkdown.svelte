@@ -76,6 +76,7 @@
     attachments = null,
     imagesOf = "",
     onheld,
+    lines = false,
   }: {
     /** The Markdown. */
     text: string;
@@ -100,6 +101,8 @@
     imagesOf?: string;
     /** Told when something of the text starts or stops being held unseen for an image's size, so the page holds what stands under it. */
     onheld?: (held: boolean) => void;
+    /** Each top-level block carries the source lines it came from (`data-md-lines`): a rendered comparison marks the changed ones (ux26). */
+    lines?: boolean;
   } = $props();
 
   /** A text longer than this, in characters of Markdown, draws in pieces. */
@@ -126,13 +129,13 @@
     };
     const stop = () => stops.forEach((each) => each());
     if (text.length <= LONG) {
-      node.replaceChildren(markdownFragment(text, { base, fileLink }));
+      node.replaceChildren(markdownFragment(text, { base, fileLink }, { lines }));
       wire(node);
       return stop;
     }
     // A long text: parsed whole, drawn a piece of its top-level blocks at a time before an empty mark, whose nearing
     // the view draws the next.
-    const pieces = markdownPieces(text, { base, fileLink });
+    const pieces = markdownPieces(text, { base, fileLink }, { lines });
     const mark = document.createElement("div");
     mark.className = "tf-md-more";
     mark.setAttribute("aria-hidden", "true");

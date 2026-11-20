@@ -491,7 +491,7 @@
   }
   $effect(() => {
     for (const file of nearFiles()) {
-      if (file.made === undefined || file.change === "binary" || lined[keyOf(file)] !== undefined || !wantsLines(file)) continue;
+      if (file.made === undefined || file.change === "binary" || lined[keyOf(file)] !== undefined || !(wantsLines(file) || wantsMarks(file))) continue;
       untrack(() => readMadeLines(file));
     }
   });
@@ -775,7 +775,7 @@
     void Promise.all([one("old"), one("new")]).then(([old, nu]) => {
       const refused = [old, nu].find((got) => "why" in got);
       const made: PipedDiff =
-        refused && "why" in refused ? { kind: "failed", side: refused.side, why: refused.why } : pipedDiff(file, "run" in old ? old.run : null, "run" in nu ? nu.run : null);
+        refused && "why" in refused ? { kind: "failed", side: refused.side, why: refused.why } : pipedDiff(file, "run" in old ? old.run : null, "run" in nu ? nu.run : null, drawsBytes);
       // A refused read is asked again the next time the pipeline is turned on.
       if (refused) running.delete(name);
       runs = { ...runs, [name]: made };
@@ -877,7 +877,32 @@
   /** The renderer *Render as* picked per card, by `keyOf`, for the visit. */
   let picked = $state.raw<Record<string, string>>({});
   /** A file's rendered mode: the renderers that can draw both of its sides, and the plan of the one it draws with. */
-  type Planned = { plan: RenderedPlan; choices: Renderer[]; opened: Opened };
+  /** `path`: the name it is opened by, where it is not the file's own (a pipeline's output, ux26). */
+  type Planned = { plan: RenderedPlan; choices: Renderer[]; opened: Opened; path?: string };
+  /** Whether a renderer draws a pipeline's output of bytes by its name (a gunzipped picture): it is drawn rendered. */
+  const drawsBytes = (name: string) =>
+    renderedChoices({ path: name, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }, openWith({ path: name, binary: true }, allRenderers(), defaults.list), PIPED_CAN).length > 0;
+  /** A pipeline's two outputs are in hand: read as bytes, never again. */
+  const PIPED_CAN = { whole: false, bytes: true } as const;
+  /** A piped file's rendered mode, by its output's name (a decoded `notes.md` is Markdown), kept per run. */
+  const pipedPlans = new WeakMap<object, Planned | null>();
+  function pipedPlan(file: DrawnFile, piped: { file: DrawnFile; name: string }): Planned | null {
+    const chosen = picked[keyOf(file)];
+    const had = pipedPlans.get(piped);
+    if (had !== undefined && (had === null || chosen === undefined || had.plan.renderer.id === chosen)) return had;
+    const shown = { ...piped.file, path: piped.name };
+    const opened = openWith({ path: piped.name, binary: shown.change === "binary" }, allRenderers(), defaults.list);
+    const choices = renderedChoices(shown, opened, PIPED_CAN);
+    const plan = renderedPlan(shown, choices.find((r) => r.id === chosen) ?? choices[0] ?? null, PIPED_CAN);
+    const made = plan === null ? null : { plan, choices, opened, path: piped.name };
+    pipedPlans.set(piped, made);
+    return made;
+  }
+  /** A file's rendered mode: its pipeline output's where it is drawn piped, else its own. */
+  const planOf = (file: DrawnFile): Planned | null => {
+    const piped = pipedOf(file);
+    return piped !== null ? pipedPlan(file, piped) : plans.get(keyOf(file));
+  };
   /** Each file's rendered mode, where one of its renderers draws both sides and they can be read (by `keyOf`). */
   const plans = $derived.by(() => {
     // Worked out per file as it is drawn, not for every file of a change of thousands as it opens.
@@ -920,10 +945,10 @@
     };
   });
   /** *Render as*'s *Use ⟨name⟩ for `*.ext` by default*: the same `render.defaults` row the file viewer writes. */
-  async function makeDefault(file: DrawnFile, opened: Opened, chosen: Renderer) {
+  async function makeDefault(file: DrawnFile, opened: Opened, chosen: Renderer, path = file.path) {
     if (defaults.save === undefined) return;
     try {
-      await defaults.save(withDefault(defaults.list, makeDefaultPattern(opened, file.path), chosen.id));
+      await defaults.save(withDefault(defaults.list, makeDefaultPattern(opened, path), chosen.id));
       const { [keyOf(file)]: _, ...rest } = picked;
       picked = rest;
     } catch (cause) {
@@ -936,7 +961,7 @@
    * A card's own press, else *Rendered* where the band's toggle is on or the file is binary (it has no lines) and a
    * renderer can draw both of its sides, else its lines.
    */
-  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary") && plans.get(keyOf(file)) ? "rendered" : "lines");
+  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary" || pipedOf(file)?.file.change === "binary") && planOf(file) ? "rendered" : "lines");
   /** The band's *Rendered*, and `d`: every card's own press goes, so the toggle says how every file shows. */
   function toggleRendered() {
     rendering.set(!rendering.on);
@@ -955,6 +980,11 @@
     const reader = context;
     if (asked.has(name)) return;
     asked.add(name);
+    // A pipeline's outputs are in hand (ux26): drawn from the run, with no read.
+    if (pipedOf(file) !== null) {
+      asked.delete(name);
+      return;
+    }
     const read = async (): Promise<SideGot> => {
       // A generated file (ux26): its side is the generated folder's, by its token; none on a side it is not on.
       if (file.made !== undefined) {
@@ -983,7 +1013,14 @@
       })
       .then((side) => (got = { ...got, [name]: side }));
   }
-  const sideOf = (file: DrawnFile, side: Side): SideGot | undefined => got[`${side}\n${keyOf(file)}`];
+  const sideOf = (file: DrawnFile, side: Side): SideGot | undefined => {
+    const piped = pipedOf(file);
+    if (piped !== null) {
+      const content = piped.sides[side];
+      return content === null ? { kind: "absent" } : { kind: "drawn", content };
+    }
+    return got[`${side}\n${keyOf(file)}`];
+  };
 
   /** Counts the epochs seen: a rendered stage reads its sides again at each (`TfDiffRendered`'s `epoch`). */
   let sideEpoch = $state(0);
@@ -1060,6 +1097,11 @@
     file.made !== undefined
       ? lined[keyOf(file)] === undefined && file.change !== "binary"
       : fill !== null && lined[keyOf(file)] === undefined && (!counted || file.additions + file.deletions > 0) && file.change !== "binary";
+  /**
+   * A rendered Markdown file marks its changed blocks from its lines (ux26, ruling 3): they are read as its card nears the
+   * view, as an open file's lines are, though the card draws none.
+   */
+  const wantsMarks = (file: DrawnFile) => !isClosed(file) && modeOf(file) === "rendered" && plans.get(keyOf(file))?.plan.renderer.id === "markdown";
   /** Lines the card would draw now, were they here: open, as lines, not held behind *Load diff*. */
   const wantsLines = (file: DrawnFile) =>
     !isClosed(file) && modeOf(file) === "lines" && file.change !== "binary" && (loads[keyOf(file)] === true || !needsLoad(file));
@@ -1166,7 +1208,7 @@
   // card leaves before its turn comes is passed over.
   $effect(() => {
     if (fill === null) return;
-    const near = nearFiles().filter((file) => file.made === undefined && waits(file) && wantsLines(file)).map(keyOf);
+    const near = nearFiles().filter((file) => file.made === undefined && waits(file) && (wantsLines(file) || wantsMarks(file))).map(keyOf);
     // The file the reader is on first, then outward from it: a pick's own file is read before the overscan's.
     const on = current;
     if (on !== null && near.includes(on)) {
@@ -1286,7 +1328,7 @@
         const key = keyOf(file);
         // A card open rendered is its header, the caption, the stage and the foot: constants known before a side is read.
         // Planned only where it may be rendered (picked so, or binary): a list of thousands plans none as it opens.
-        const planned = (chosen[key] ?? (pill || file.change === "binary" ? "rendered" : "lines")) === "rendered" ? plans.get(key) : null;
+        const planned = (chosen[key] ?? (pill || file.change === "binary" ? "rendered" : "lines")) === "rendered" ? planOf(file) : null;
         const got = read[key];
         const waiting =
           file.made !== undefined
@@ -1653,7 +1695,9 @@
         const from = Math.max(0, at);
         const taker = [...keys.slice(from), ...keys.slice(0, from)].find((key) => cardFor(key)?.comment());
         if (taker === undefined) {
-          push({ text: "No open file takes a comment here. Open one, or show its raw diff, then press c." });
+          // A rendered card has no lines to comment on (ux26, ruling 1): it says how to get them.
+          const rendered = modeOf(here) === "rendered" && !isClosed(here);
+          push({ text: rendered ? "No open file takes a comment here. Open one as lines, then press c." : "No open file takes a comment here. Open one, or show its raw diff, then press c." });
           break;
         }
         current = taker;
@@ -1773,7 +1817,7 @@
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
       {@const got = lined[key]}
-      {@const planned = piped ? null : plans.get(key)}
+      {@const planned = planOf(file)}
       <TfDiffCard
         bind:this={cards[key]}
         file={piped?.file ?? lineOf(file)}
@@ -1799,7 +1843,8 @@
         loaded={loads[key] === true}
         onload={() => (loads = { ...loads, [key]: true })}
         current={current === key}
-        rendered={piped ? null : (planned?.plan ?? null)}
+        rendered={planned?.plan ?? null}
+        renderedAs={planned?.path ?? null}
         mode={modeOf(file)}
         onmode={(mode) => (modes = { ...modes, [key]: mode })}
         sideOf={(side) => sideOf(file, side)}
@@ -1808,9 +1853,9 @@
         ends={sideNames?.(file) ?? null}
         choices={planned?.choices ?? []}
         opened={planned?.opened ?? null}
-        pattern={planned ? makeDefaultPattern(planned.opened, file.path) : ""}
+        pattern={planned ? makeDefaultPattern(planned.opened, planned.path ?? file.path) : ""}
         onpick={(r) => (picked = { ...picked, [key]: r.id })}
-        onmakedefault={(r) => planned && void makeDefault(file, planned.opened, r)}
+        onmakedefault={(r) => planned && void makeDefault(file, planned.opened, r, planned.path ?? file.path)}
         {frame}
         {commands}
         expandable={context !== null && piped === null && file.made === undefined}

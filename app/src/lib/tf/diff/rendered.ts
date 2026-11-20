@@ -103,3 +103,31 @@ export const CARD_HEAD = 42;
 export function renderedRoom(renderer: Renderer, innerHeight: number): number {
   return CARD_HEAD + CAPTION + stageOf(renderer, innerHeight) + FOOT;
 }
+
+/** Runs of line numbers, from 1, both ends counted, in order. */
+export type LineRanges = [number, number][];
+
+/**
+ * The lines a change touched on each side (ux26, a rendered Markdown file's changed blocks, ruling 3): the removed lines
+ * by their old numbers, the added ones by their new numbers, each run of them one range. The diff's own answer: no
+ * second diff is worked out.
+ */
+export function changedLines(file: DiffFile): { old: LineRanges; new: LineRanges } {
+  const out: { old: LineRanges; new: LineRanges } = { old: [], new: [] };
+  const add = (into: LineRanges, n: number) => {
+    const last = into.at(-1);
+    if (last !== undefined && n <= last[1] + 1) last[1] = Math.max(last[1], n);
+    else into.push([n, n]);
+  };
+  for (const hunk of file.hunks)
+    for (const line of hunk.lines) {
+      if (line.kind === "del" && line.old !== null) add(out.old, line.old);
+      else if (line.kind === "add" && line.new !== null) add(out.new, line.new);
+    }
+  return out;
+}
+
+/** Whether the lines `from` to `to` (both counted) meet any of `ranges`. */
+export function meetsLines(from: number, to: number, ranges: LineRanges): boolean {
+  return ranges.some(([a, b]) => a <= to && b >= from);
+}

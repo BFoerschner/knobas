@@ -68,7 +68,7 @@
   import type { Opened } from "../../render/defaults";
   import type { Renderer } from "../../render/registry";
   import type { LineTokens, RenderPort } from "../../render/port";
-  import type { DiffMode, RenderedPlan, Side, SideGot } from "./rendered";
+  import { changedLines, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import TfDiffRendered from "./TfDiffRendered.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { onCodeSize } from "../fonts.svelte";
@@ -103,6 +103,7 @@
     talk,
     render,
     rendered,
+    renderedAs = null,
     mode,
     onmode,
     sideOf,
@@ -150,6 +151,8 @@
     render: RenderPort;
     /** The file's rendered mode (#2279), or `null` where it has none. */
     rendered: RenderedPlan | null;
+    /** The name the rendered sides are drawn as, where it is not the file's: a pipeline's output (`flow.svg`, ux26). */
+    renderedAs?: string | null;
     mode: DiffMode;
     onmode: (mode: DiffMode) => void;
     /** A rendered side as the view read it, and asking it to read one. */
@@ -213,6 +216,8 @@
   const sides = $derived(rendered ? rendered.sides.filter((side) => sideOf(side)?.kind !== "absent") : []);
   /** What the card shows. */
   const shows = $derived<DiffMode>(rendered === null ? "lines" : mode);
+  /** The rendered stage, while the card shows one: `n` and `p` step its changed blocks. */
+  let stageOf = $state<{ nextChange(step: 1 | -1, entering?: boolean): boolean } | null>(null);
   const MODES = $derived<{ mode: DiffMode; label: string }[]>(
     rendered === null
       ? []
@@ -319,6 +324,8 @@
    * `entering`: from another file, so its first hunk going down, its last going up.
    */
   export function nextHunk(step: 1 | -1, entering = false): boolean {
+    // A rendered Markdown file steps through its changed blocks (ux26, ruling 3).
+    if (!closed && rendered !== null && shows === "rendered") return stageOf?.nextChange(step, entering) ?? false;
     const to = !entering ? hunk + step : step === 1 ? 0 : starts.length - 1;
     if (!drawsLines || to < 0 || to >= starts.length) return false;
     hunk = to;
@@ -599,7 +606,26 @@
       <div class="tf-banner tf-warn tf-coarse">Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.</div>
     {/if}
     {#if rendered !== null && shows !== "lines"}
-      <TfDiffRendered plan={rendered} path={file.path} {sides} {sideOf} {load} {ends} {choices} {opened} {pattern} {onpick} {onmakedefault} {epoch} {render} {commands} {...frame ? { frame } : {}} />
+      <TfDiffRendered
+        bind:this={stageOf}
+        plan={rendered}
+        path={renderedAs ?? file.path}
+        {sides}
+        {sideOf}
+        {load}
+        {ends}
+        {choices}
+        {opened}
+        {pattern}
+        {onpick}
+        {onmakedefault}
+        {epoch}
+        {render}
+        {commands}
+        changed={rendered.renderer.id === "markdown" ? changedLines(file) : null}
+        partial={file.truncated || more !== null || waiting}
+        {...frame ? { frame } : {}}
+      />
     {:else if file.change === "binary"}
       <div class="tf-dfwhy">A binary file: no lines to draw.</div>
     {:else if !drawsLines}
