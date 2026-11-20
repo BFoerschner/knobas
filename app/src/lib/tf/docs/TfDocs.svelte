@@ -1449,12 +1449,14 @@
    * session's first read on a later mount, so the foot draws with the tree's first rows.
    */
   let makers = $state.raw<ReadonlySet<string> | null>(untrack(() => (ports === undefined ? knownPageMakers() : null)));
+  /** The sources' answer could not be read: the open page's writes decide, as without the port. */
+  let makersFailed = $state(false);
   $effect(() => {
     const read = io.pageMakers;
     if (read === undefined) return;
     read().then(
       (ids) => (makers = new Set(ids)),
-      () => {},
+      () => (makersFailed = true),
     );
   });
   /**
@@ -1463,7 +1465,13 @@
    * none of whose sources can create pages has none. Without the sources' answer, the open page's writes decide.
    */
   const footStands = $derived(
-    makers !== null ? tree !== null && tree.spaces.some((space) => makers!.has(space.source_id)) : page?.writes.includes("create_page") === true,
+    makers !== null
+      ? tree !== null && tree.spaces.some((space) => makers!.has(space.source_id))
+      : // While the answer is out (the session's first Docs, a few ms), the foot stands with the tree, so it never
+        // arrives after the rows; a wiki that cannot create pages then loses it once, which is the rare case.
+        io.pageMakers !== undefined && !makersFailed
+        ? tree !== null && tree.spaces.length > 0
+        : page?.writes.includes("create_page") === true,
   );
   /** Where the foot's *New page…* opens with no page to put it under: the shown space, else the first that can create. */
   const footSpace = $derived(

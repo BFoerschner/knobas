@@ -384,3 +384,9 @@ test("a wiki none of whose sources can create pages draws no foot, on the home o
   await go(["confluence:4"]);
   expect(foot(), "the page's own writes no longer put it there").toBeNull();
 });
+
+test("the foot stands with the tree's first rows while the sources' answer is still out, so it never arrives after them", async () => {
+  await draw([], { ...making(["confluence"]), pageMakers: vi.fn(() => new Promise<string[]>(() => {})) });
+  expect(spaceFolds()).toHaveLength(2);
+  expect(foot(), "drawn with the rows, before the answer").not.toBeNull();
+});

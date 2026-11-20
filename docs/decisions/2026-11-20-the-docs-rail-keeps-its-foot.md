@@ -20,15 +20,17 @@ reserve its room empty, overlay it, or leave it. **The foot belongs to the rail,
   the dialog on the shown space, or, if that space's source cannot create, the first space that can, at its first page.
   The dialog's own *Space* and *Under* choose from there. The open page's refusal still disables it with its reason.
 - A wiki none of whose sources can create pages has no foot anywhere. The page header's *New page…* still follows the
-  page's own writes. Until the sources' answer is in (or with no such port, as in older tests), the foot follows the open
-  page's writes, as it did.
+  page's own writes.
+- While the sources' answer is still out (the session's first Docs, a few ms), the foot stands with the tree's first
+  rows, so it never arrives after them; a wiki that cannot create pages then loses it once. If that read fails, or with
+  no such port (as in older tests), the foot follows the open page's writes, as it did.
 
 Not taken: an empty bar of the same height spends 47 px at the home on nothing. A bar laid over the box covers the same
 two rows. Leaving it breaks the 2026-11-19 ruling that a tree press moves nothing in the rail.
 
 **Tested.** `TfDocs.rail.test.svelte.ts`: the home draws the foot, and a page opened from the list keeps the same
 element and every row, as does going back home; the foot's *New page…* on the home opens on the first space that can
-create, at its first page; a wiki that cannot create pages draws no foot on the home or on a page that allows it. All
-three fail on the code before. `page-makers.test.ts`: read once and kept; a failed read is asked again.
+create, at its first page; a wiki that cannot create pages draws no foot on the home or on a page that allows it; and
+the foot stands with the first rows while the answer is out. All four fail on the code before. `page-makers.test.ts`: read once and kept; a failed read is asked again.
 
 **Reversing it** is `footStands` in `TfDocs.svelte` going back to `page?.writes.includes("create_page")`.
