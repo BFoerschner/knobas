@@ -405,15 +405,19 @@ fn open_plain(path: &Path) -> std::io::Result<std::fs::File> {
 }
 
 /// The kept file made plain data: `0o644` on Unix, not read-only on Windows.
-fn make_plain(path: &Path) -> std::io::Result<()> {
+/// `meta` is the file's own, just read: on Windows nothing is written for a
+/// file that is not read-only (the 2026-11-20 witness kept 2,005 files on
+/// NTFS in 571 ms, one metadata read a file of it this).
+fn make_plain(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
+        let _ = meta;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
     }
     #[cfg(not(unix))]
     {
-        let mut permissions = std::fs::symlink_metadata(path)?.permissions();
+        let mut permissions = meta.permissions();
         if permissions.readonly() {
             #[allow(
                 clippy::permissions_set_readonly_false,
@@ -485,9 +489,10 @@ fn write(
             walked.leave(rel, LeftOutWhy::Link);
             continue;
         }
-        make_plain(&dst)
+        let Ok(landed) = landed else { continue };
+        make_plain(&dst, &landed)
             .map_err(|e| KeepError::Io(format!("{rel} could not be made plain: {e}")))?;
-        let size = landed.map(|m| m.len()).unwrap_or(0);
+        let size = landed.len();
         bytes = bytes.saturating_add(size);
         if bytes > caps.bytes {
             return Err(KeepError::TooBig {

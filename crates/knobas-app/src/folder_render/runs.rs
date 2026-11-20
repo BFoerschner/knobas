@@ -713,6 +713,14 @@ impl Runs {
         }
     }
 
+    /// The run of `key` on `slot` is over, if it is still the one going.
+    fn end_going(&self, slot: &Slot, key: &str) {
+        let mut state = self.lock();
+        if state.going.get(slot).is_some_and(|going| going.key == key) {
+            state.going.remove(slot);
+        }
+    }
+
     fn set_state(&self, slot: &Slot, key: &str, next: FolderRunState) -> bool {
         let mut state = self.lock();
         match state.going.get_mut(slot) {
@@ -771,18 +779,26 @@ impl Runs {
             )
             .await;
         let took_ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
-        // A run stopped or replaced leaves nothing behind it.
+        // A run stopped or replaced leaves nothing behind it. A generated
+        // folder ends its run only once it is placed and remembered: an ask
+        // between would see neither a run nor a drawing.
+        let placing = matches!(ended, Ok(Output::Folder(_)));
         let still_ours = {
             let mut state = self.lock();
             match state.going.get(&slot) {
                 Some(going) if going.key == key => {
-                    state.going.remove(&slot);
+                    if !placing {
+                        state.going.remove(&slot);
+                    }
                     true
                 }
                 _ => false,
             }
         };
         if cancel.is_cancelled() || !still_ours {
+            if still_ours {
+                self.end_going(&slot, &key);
+            }
             if let Ok(Output::Folder(made)) = ended {
                 let dir = made.dir.clone();
                 let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(dir)).await;
@@ -820,6 +836,7 @@ impl Runs {
                             .insert(key.clone(), FolderFailure::Keep { reason });
                     }
                 }
+                self.end_going(&slot, &key);
             }
             Ok(Output::Bytes(bytes, kind)) => {
                 let drawn = FolderDrawn {
