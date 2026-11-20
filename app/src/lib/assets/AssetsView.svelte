@@ -863,7 +863,10 @@
   function windowOf(index: number): Windowed {
     let win = columnWindows.get(index);
     if (win === undefined) {
-      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1, scrolls: true, overscan: 1800 });
+      // `onScreen`: a level's first frame builds the rows on screen and one past them, the overscan two frames later (the
+      // compare-first-open pass, 2026-11-20: a VM's 300 containers). Every row is one `ROW_PX` line, and the column clips
+      // what is below it, so nothing on screen waits for the rest.
+      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1, scrolls: true, overscan: 1800, onScreen: true });
       columnWindows.set(index, win);
     }
     return win;
@@ -1023,9 +1026,11 @@
     const frame = tree;
     const pane = paneEl;
     const cols = stripEl;
-    if (frame === null || pane === null || cols === null) {
-      drawnWires = [];
-      wireGap = { left: 0, width: 0 };
+    // No wire to draw reads no box: the boxes laid out the column a press had just built in the press's own task, 75 ms of
+    // a 6x press beside a column of 300 (the compare-first-open pass, 2026-11-20). Each scroll of a column read them too.
+    if (frame === null || pane === null || cols === null || wireEnds.length === 0) {
+      if (drawnWires.length > 0) drawnWires = [];
+      if (wireGap.left !== 0 || wireGap.width !== 0) wireGap = { left: 0, width: 0 };
       return;
     }
     const box = frame.getBoundingClientRect();

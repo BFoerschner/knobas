@@ -1618,6 +1618,22 @@ test("moving to an asset no route reaches leaves no wire behind", async () => {
 });
 
 /**
+ * **No wire, no measuring** (the compare-first-open pass, 2026-11-20): the wires' boxes were read after every redraw,
+ * wired or not, and laid out a column of 300 a press had just built in the press's own task (75 ms of it at 6x).
+ */
+test("an asset no route reaches reads no box for wires, on its press or on a column's scroll", async () => {
+  render("#/asset/asset:postgres");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  const read = vi.spyOn(Element.prototype, "getBoundingClientRect");
+  const tree = document.querySelector("div.tree")!;
+  tree.querySelector("ol.col")!.dispatchEvent(new Event("scroll"));
+  flushSync();
+  const wired = read.mock.contexts.filter((el) => (el as Element).matches("div.tree, aside.pane, div.cols"));
+  expect(wired, "no box of the tree, the pane or the strip read for a wire").toEqual([]);
+  expect(wires()).toEqual([]);
+});
+
+/**
  * Lay the Tree out for one test: jsdom measures every element as zero, which
  * is the unlaid branch every other wire test runs on. `rows` is where each
  * route row sits, by its wire key, in the window's pixels; the frame and the
