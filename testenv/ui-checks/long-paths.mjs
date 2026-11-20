@@ -92,7 +92,7 @@ const SCREENS = [
   // A generated folder (ADR-0046): the band and the made bar with a 60-character renderer name, a generated file's
   // 140-character path, what was left out, and *Open in…* on the kept folder.
   { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
-  { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 4500, press: "2 left out" },
+  { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", press: "2 left out" },
   { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open button" },
   { id: "settings-renderers", route: "settings/renderers", tables: ".tf-stg-body .tf-tbl" },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
@@ -242,8 +242,20 @@ const PRESS = (words) => String.raw`(() => {
   return true;
 })()`;
 
+// How long a press waits for its control to be drawn. The screen's settle sits out no timer over 900 ms (chrome.mjs), so it can
+// call a page quiet while the fixture's folder run (1.5 s) is still going: "2 left out" on a generated folder came after the
+// press in about half the reads, a different size failing each run (2026-11-20). A person presses what is shown, so a press
+// waits for it, and still fails, saying it found nothing, when it never comes.
+const PRESS_WAIT_MS = 5000;
+
 const chrome = await launch("knobas-long-paths");
 const { send, evaluate } = chrome;
+const press = async (words) => {
+  for (const until = Date.now() + PRESS_WAIT_MS; ; await sleep(100)) {
+    if (await evaluate(PRESS(words))) return true;
+    if (Date.now() > until) return false;
+  }
+};
 const opener = screenOpener(chrome, port);
 await opener.install();
 // Headless, the page has no focus of its own, so a focus() would fire no focus event and the sign's bubble would stay shut.
@@ -260,11 +272,11 @@ for (const screen of SCREENS) {
       // `fake`: more of the fixture's switches the screen needs (a generated folder's `&fake-rerender`).
       await opener.openScreen({ route: screen.route, query: query + (screen.fake ?? "") });
       let stepped = true;
-      if (screen.press) stepped = await evaluate(PRESS(screen.press));
+      if (screen.press) stepped = await press(screen.press);
       for (const next of screen.then ?? []) {
         if (!stepped) break;
         await opener.settleAfterChange();
-        stepped = await evaluate(PRESS(next));
+        stepped = await press(next);
       }
       if (screen.context) {
         const [selector, words] = screen.context;
