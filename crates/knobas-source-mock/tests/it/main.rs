@@ -4,3 +4,4 @@
 //! name, so a test's full name still says where it lives.
 
 mod contract;
+mod files;

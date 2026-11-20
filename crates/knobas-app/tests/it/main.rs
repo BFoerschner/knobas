@@ -43,6 +43,7 @@ mod entity;
 mod entity_role;
 mod entity_view;
 mod estate_exit;
+mod everything_fixture;
 mod external_adapter;
 mod external_adapter_install;
 mod external_adapter_release;

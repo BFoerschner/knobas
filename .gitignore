@@ -1,6 +1,9 @@
 .worktrees/
 target/
 node_modules/
+# The fixture repository's vendored folder, which the files pass must leave
+# out (the everything-search decisions, D16): checked in, as a forge holds it.
+!fixtures/tidewater/files/tidewater/payout-service/node_modules/
 .DS_Store
 !.claude/agents
 dist

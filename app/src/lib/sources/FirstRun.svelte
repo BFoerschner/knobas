@@ -491,7 +491,7 @@
                     The name keeps naming the work, which is what a person
                     opening a demo build came for.
                   -->
-                  <small>35 fixture items · a 23-asset estate · no network, no credential</small>
+                  <small>38 fixture items · a 23-asset estate · no network, no credential</small>
                 </button>
               {/if}
               <button class="tf-fr-mod" onclick={() => (adding = true)}>
