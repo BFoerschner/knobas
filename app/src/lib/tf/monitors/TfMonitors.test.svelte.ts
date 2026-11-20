@@ -205,8 +205,11 @@ async function draw(rest: string[], job: string | null = "PAY-231", stand: Monit
 }
 
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-/** The roster's monitors (`.tf-mon-row`), or on *Assets nothing watches* its table's rows. */
-const rows = () => [...target.querySelectorAll(".tf-mon-row, tbody tr")];
+/**
+ * The roster's monitors shown (`.tf-mon-row`; one the typed words leave out stays drawn, `hidden`, the ux24 pass), or on
+ * *Assets nothing watches* its table's rows.
+ */
+const rows = () => [...target.querySelectorAll(".tf-mon-row:not([hidden]), tbody tr")];
 /** A row's first cell: the monitor's name and type, or the asset's name. */
 const first = (tr: Element) => tr.querySelector(".tf-mon-name, td");
 /** The open monitor beside the roster (`#/monitors/at/<id>`), where its actions are. */
@@ -952,7 +955,7 @@ test("⌘R on the roster presses no row's Refresh: the page's is the header's Sy
   expect([probe.refreshed, probe.synced]).toEqual([[], []]);
 });
 
-test("every monitor is drawn at once, each one row of one height, and a typed word keeps the rows it matches (the monitors-page pass)", async () => {
+test("every monitor is drawn at once, each one row of one height, and a typed word shows the rows it matches without building any (the monitors-page pass, ux24)", async () => {
   const bulk = Array.from({ length: 300 }, (_, i) => monitor(`kuma:bulk-${i}`, i < 60 ? `gate-${i} /health` : `api-${i} /health`));
   await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
   // No windowing and no spacer rows: a roster this size is cheaper drawn whole than kept near the viewport.
@@ -964,11 +967,44 @@ test("every monitor is drawn at once, each one row of one height, and a typed wo
   field.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
   expect(rows()).toHaveLength(60);
+  expect(target.querySelectorAll(".tf-mon-row"), "a row the word leaves out stays drawn, hidden").toHaveLength(304);
+  expect((kept as HTMLElement).hidden).toBe(true);
+  // Blocks of 16 the word left no row in are hidden as a whole, and each block's room is its shown rows'.
+  const blocks = [...target.querySelectorAll<HTMLElement>(".tf-mon-block")];
+  expect(blocks).toHaveLength(Math.ceil(304 / 16));
+  for (const b of blocks) {
+    const open = b.querySelectorAll(".tf-mon-row:not([hidden])").length;
+    expect(b.hidden).toBe(open === 0);
+    if (open > 0) expect(b.style.getPropertyValue("--tf-mon-rows")).toBe(String(open));
+  }
+  expect(blocks.some((b) => b.hidden)).toBe(true);
+  // The first shown row draws no rule over it, whichever row that is.
+  expect([...target.querySelectorAll(".tf-mon-top")]).toEqual([rows()[0]]);
+  // Backspace to nothing typed: every row shows again, and every one is the element it was (none built again).
+  const before = [...target.querySelectorAll(".tf-mon-row")];
   field.value = "";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
   expect(rows()).toHaveLength(304);
-  expect(kept!.isConnected, "a row the word left out is drawn again, not the one it kept").toBe(false);
+  expect(rows(), "a Backspace shows the rows it hid, not new ones").toEqual(before);
+  expect(kept!.isConnected && !(kept as HTMLElement).hidden).toBe(true);
+  expect(blocks.every((b) => !b.hidden && b.isConnected)).toBe(true);
+  expect([...target.querySelectorAll(".tf-mon-top")]).toEqual([rows()[0]]);
+});
+
+test("a word no monitor holds keeps the list drawn and hidden and says so, and Backspace shows it again", async () => {
+  await draw([], null);
+  const list = target.querySelector(".tf-mon-list")!;
+  sessionFilter("monitors").text = "zzz-nothing";
+  await settle();
+  expect(rows()).toHaveLength(0);
+  expect(target.querySelector<HTMLElement>(".tf-mon-list")).toBe(list);
+  expect((list as HTMLElement).hidden).toBe(true);
+  expect(target.querySelector(".tf-empty, .tf-nomatch")).not.toBeNull();
+  sessionFilter("monitors").text = "";
+  await settle();
+  expect((list as HTMLElement).hidden).toBe(false);
+  expect(rows()).toHaveLength(ROSTER.length);
 });
 
 test("a read that changes one monitor draws that row again and leaves every other as it was", async () => {

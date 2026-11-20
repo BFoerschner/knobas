@@ -55,7 +55,9 @@
    into layers again on the main thread, 477 ms over a 2 s scroll at CPU 4x where the rows plain take 48 (the
    monitors-page pass, 2026-11-19). The tone's edge and the selection are inset shadows for the same reason. */
 .tf-mon-row { height: 38px; border-top: 1px solid var(--rule-2); cursor: pointer; font-size: calc(var(--t-sm) * var(--fs)); }
-.tf-mon-head + .tf-mon-block > .tf-mon-row:first-child { border-top: 0; }
+/* The roster's first shown row (`topRow`): the header's edge is its rule. Not `:first-child`, since a row the typed
+   words leave out stays drawn, hidden (the ux24 pass). */
+.tf-mon-row.tf-mon-top { border-top: 0; }
 /* A block of rows (`blocksOf`) is laid out and painted only near the viewport, its room its rows' own height while it is
    not: every row is 38 px, border included, so a block drawn as it comes into view moves nothing. */
 .tf-mon-block { content-visibility: auto; contain-intrinsic-block-size: calc(var(--tf-mon-rows, 16) * 38px); }

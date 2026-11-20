@@ -265,10 +265,16 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
     }
     if (filter.states.length > 0 && !filter.states.includes(stateWord(stateChip(row).label))) return false;
     if (filter.type !== "" && kindWord(row.monitor_type) !== filter.type) return false;
-    const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
-    return matchesAll(haystack, filter.text);
+    return monitorMatches(row, filter.text);
   });
   return { shown: kept.filter((row) => !row.hidden), hidden: kept.filter((row) => row.hidden) };
+}
+
+/** Whether a monitor holds every typed word: in its name, its type, or the name or type of an asset it watches. */
+export function monitorMatches(row: MonitorRow, text: string): boolean {
+  if (text.trim() === "") return true;
+  const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
+  return matchesAll(haystack, text);
 }
 
 /**

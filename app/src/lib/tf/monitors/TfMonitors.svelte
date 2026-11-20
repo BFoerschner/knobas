@@ -170,6 +170,7 @@
     isRoute,
     isRouteId,
     kindWord,
+    monitorMatches,
     prefill,
     routePrefill,
     type MonitorSubject,
@@ -533,6 +534,12 @@
   const scope = $derived<"job" | "mine" | "all">(
     filter.scope === "job" && job !== null ? "job" : filter.scope === "mine" ? "mine" : "all",
   );
+  /**
+   * Every monitor the scope, the state chips and the type keep. The typed words don't take a row out of the DOM: they
+   * hide the rows they leave out (`shows`), so the next key brings a row back by an attribute and not by building it
+   * (the ux24 pass, 2026-11-20: a Backspace that brought every monitor back built all 218 rows again, 104 and 205 ms at
+   * CPU 4x and 6x at full screen in WebView2).
+   */
   const kept = $derived(
     roster === null
       ? { shown: [], hidden: [] }
@@ -543,11 +550,21 @@
             job,
             states: filter.chips["st"] ?? [],
             type: filter.dropdowns["type"] ?? "",
-            text: filter.text,
+            text: "",
           },
           index,
         ),
   );
+  /** The monitors the typed words keep, or `null` while nothing is typed. */
+  const matched = $derived.by(() => {
+    const text = filter.text;
+    if (roster === null || text.trim() === "") return null;
+    return new Set(roster.filter((row) => monitorMatches(row, text)).map((row) => row.entity_id));
+  });
+  /** Whether a drawn row shows: the typed words keep it, or it is the open monitor, whatever the filter says. */
+  function shows(row: MonitorRow): boolean {
+    return matched === null || matched.has(row.entity_id) || row.entity_id === openId;
+  }
   /** The open monitor, whatever the filter says: the reader came for it. */
   const markedRow = $derived(openId === null ? null : (roster?.find((row) => row.entity_id === openId) ?? null));
   /**
@@ -564,6 +581,11 @@
   const heldBar = $derived({ waiting: heldRoster.waiting, stale: heldRoster.stale, show: () => rosterHold.release() });
   const rows = $derived(markedRow !== null && !markedRow.hidden && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
   const hiddenRows = $derived(markedRow === null || !markedRow.hidden || kept.hidden.includes(markedRow) ? kept.hidden : [markedRow, ...kept.hidden]);
+  /** The rows the typed words keep, of the roster and of the hidden monitors: what the page counts and says. */
+  const shownRows = $derived(matched === null ? rows : rows.filter(shows));
+  const shownHidden = $derived(matched === null ? hiddenRows : hiddenRows.filter(shows));
+  /** The roster's first shown row draws no rule over it: the header's edge is its rule. */
+  const topRow = $derived(shownRows[0]?.entity_id ?? null);
   /** The roster's own size, for the count: a hidden monitor is counted apart. */
   const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
   /** What the summary says: how many of the monitors not hidden read each way. */
@@ -621,7 +643,10 @@
     for (let at = 0; at < list.length; at += BLOCK) blocks.push(list.slice(at, at + BLOCK));
     return blocks;
   }
-  /** A block's room while it is not drawn: its rows at their one height, through the CSSOM (CSP refuses an inline style). */
+  /**
+   * A block's room while it is not drawn: its shown rows at their one height, through the CSSOM (CSP refuses an inline
+   * style). The blocks stay the same 16 rows whatever is typed, so a key moves no row from one block to another.
+   */
   function blockRoom(rows: number) {
     return (node: HTMLElement) => {
       node.style.setProperty("--tf-mon-rows", String(rows));
@@ -929,7 +954,7 @@
   >
 </nav>
 {#if tab === "all"}
-  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal} held={heldBar}>
+  <FilterBar {config} {filter} shown={roster === null ? null : shownRows.length} total={unhiddenTotal} held={heldBar}>
     {#snippet after()}<span class="tf-mon-hidn">{#if hiddenRows.length > 0}, {hiddenRows.length} hidden{/if}</span>{/snippet}
   </FilterBar>
 {:else}
@@ -949,6 +974,8 @@
     class:tf-mon-err={down}
     class:tf-mon-warn={tone === "warn"}
     class:tf-mon-hid={row.hidden}
+    class:tf-mon-top={row.entity_id === topRow}
+    hidden={!shows(row)}
     role="listitem"
     aria-current={row.entity_id === openId ? "true" : undefined}
     onclick={(event) => openMonitor(event, row.entity_id)}
@@ -956,7 +983,7 @@
   >
     <!-- The name is the row's button, for the keyboard; the pointer may press anywhere on the row. -->
     <span class="tf-mon-name"
-      ><button type="button" class="tf-mon-open" aria-expanded={row.entity_id === openId}><Marked text={row.name} typed={filter.text} /></button
+      ><button type="button" class="tf-mon-open" aria-expanded={row.entity_id === openId}><Marked text={row.name} typed={shows(row) ? filter.text : ""} /></button
       >{#if row.monitor_type}{" "}<span class="tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</span
     >
     <span class="tf-mon-state">
@@ -976,9 +1003,15 @@
         >{/if}</span
     >
     <span class="tf-mon-watch" title={row.assets.length === 0 ? undefined : row.assets.map((asset) => asset.name).join(", ")}
-      >{#each row.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{/each}</span
+      >{#each row.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={shows(row) ? filter.text : ""} /></a>{/each}</span
     >
   </div>
+{/snippet}
+
+<!-- A block of rows (`blocksOf`): its room is its shown rows' (`blockRoom`), and with none shown it is hidden too. -->
+{#snippet monitorBlock(block: MonitorRow[])}
+  {@const open = matched === null ? block.length : block.filter(shows).length}
+  <div class="tf-mon-block" hidden={open === 0} {@attach blockRoom(open)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>
 {/snippet}
 
 <div class="tf-cbody tf-mon-body" {@attach sideWidth("monitor")}>
@@ -1040,22 +1073,24 @@
           {#if counts.paused > 0}<span class="tf-mon-fig tf-mon-calm"><b>{counts.paused}</b> paused</span>{/if}
           {#if counts.other > 0}<span class="tf-mon-fig tf-mon-calm"><b>{counts.other}</b> other</span>{/if}
         </p>
+        <!-- The rows the typed words leave out stay drawn, hidden, and so does the list when none is left (`shows`). -->
         {#if rows.length + hiddenRows.length > 0}
-          <div class="tf-mon-list" role="list" aria-label="Monitors">
+          <div class="tf-mon-list" role="list" aria-label="Monitors" hidden={shownRows.length + shownHidden.length === 0}>
             <div class="tf-mon-head" aria-hidden="true">
               <span>Monitor</span><span>State</span><span class="tf-mbar-axis"><span>24 h ago</span><span>now</span></span><span class="tf-mon-up">30 days</span><span></span><span class="tf-mon-watch">{#if anyWatches}Watches{/if}</span>
             </div>
-            {#each blocksOf(rows) as block, at (at)}<div class="tf-mon-block" {@attach blockRoom(block.length)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>{/each}
+            {#each blocksOf(rows) as block, at (at)}{@render monitorBlock(block)}{/each}
             {#if hiddenRows.length > 0}
               <!-- Hidden monitors are drawn after the roster, all of them, dimmed: nothing folds, so nothing redraws or moves (#2447, the monitors-page pass). -->
-              <div class="tf-mon-hidhead" role="presentation">
-                <span>{counted(hiddenRows.length, "hidden monitor", "hidden monitors")}</span>
-                <span class="tf-dim">{hiddenRows.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span>
+              <div class="tf-mon-hidhead" role="presentation" hidden={shownHidden.length === 0}>
+                <span>{counted(shownHidden.length, "hidden monitor", "hidden monitors")}</span>
+                <span class="tf-dim">{shownHidden.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span>
               </div>
-              {#each blocksOf(hiddenRows) as block, at (at)}<div class="tf-mon-block" {@attach blockRoom(block.length)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>{/each}
+              {#each blocksOf(hiddenRows) as block, at (at)}{@render monitorBlock(block)}{/each}
             {/if}
           </div>
-        {:else}
+        {/if}
+        {#if shownRows.length + shownHidden.length === 0}
           <TfNoMatch noun="monitors" {filter}>
             {#if scope !== "all"}
               <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
