@@ -10,12 +10,18 @@
   body says so itself, and the count reads *12+*.
 
   A page keep-alive hides closes its bar, so one bar at most is live.
+
+  **A launcher row opens its page here at the match** (the everything-search decisions, 2026-11-20, D12): when the page
+  shows with an arrival for its address (`arrival.svelte.ts`), the bar opens with the row's words and makes current the
+  first match whose block holds the quoted passage, else the first match. Until the reader moves, it aims again as more
+  of the page draws.
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
 
   import { addFindBar, filterKeys } from "./filter-keys";
-  import { canMark, clearMatches, drawMatches, findIn, selectedWords } from "./find-text";
+  import { arrival, holdsPiece, pieceOf, type Arrival } from "./arrival.svelte";
+  import { blockText, canMark, clearMatches, drawMatches, findIn, selectedWords } from "./find-text";
   import { pageHeading } from "./focus-keep";
   import { pageVisible } from "./kept-pages.svelte";
   import { layers } from "./layers.svelte";
@@ -54,6 +60,11 @@
   let touched = false;
   /** The current match is drawn as a selection, in a webview with no marks. */
   let selecting = false;
+  /** The passage a launcher row opened the page at (D12), bare, until a match in it is current or the reader moves. */
+  let aim: string | null = null;
+
+  /** The first match whose block holds the aimed passage, or -1. */
+  const aimedAt = (): number => (aim === null ? -1 : matches.findIndex((match) => holdsPiece(blockText(match), aim!)));
 
   /** The box that scrolls this page. A narrow window turns a ticket's column off as a scroller. */
   function scrollerOf(el: Element | null): HTMLElement | null {
@@ -86,20 +97,24 @@
     }
   }
 
-  /** The match to read now: from `seed` when ⌘F started on a selection, else the first at or below the reading line, past the last back to the first. */
+  /** The match to read now: from `seed` when ⌘F started on a selection, the passage a row opened the page at, else the first at or below the reading line, past the last back to the first. */
   function land(seed: Range | null = null): void {
     if (place === null || movedByHand()) place = { top: null, line: readingLine(), landed: topOf() };
     touched = false;
     const { line } = place;
+    const aimed = aimedAt();
+    if (aimed >= 0) aim = null;
     at = Math.max(
       seed !== null
         ? matches.findIndex((match) => match.compareBoundaryPoints(Range.START_TO_START, seed) >= 0)
-        : matches.findIndex((match) => lineOf(match) >= line - 1),
+        : aimed >= 0
+          ? aimed
+          : matches.findIndex((match) => lineOf(match) >= line - 1),
       0,
     );
     const current = matches[at]!;
     drawMatches(matches, at);
-    reveal(current, false);
+    reveal(current, aimed >= 0);
     currentLine = lineOf(current);
     place.landed = topOf();
   }
@@ -145,6 +160,19 @@
       clearMatches();
       return;
     }
+    // A row's passage drawn late, before the reader moved: it becomes current.
+    if (aim !== null && touched) aim = null;
+    const aimed = aimedAt();
+    if (aimed >= 0) {
+      aim = null;
+      at = aimed;
+      const current = matches[at]!;
+      drawMatches(matches, at);
+      reveal(current, true);
+      currentLine = lineOf(current);
+      if (place !== null) place.landed = topOf();
+      return;
+    }
     at = held === undefined ? -1 : matches.findIndex((match) => match.startContainer === held.startContainer && match.startOffset === held.startOffset);
     if (at === -1) {
       const lines = matches.map(lineOf);
@@ -154,6 +182,7 @@
   }
 
   function stop(): void {
+    aim = null;
     open = false;
     words = "";
     count = 0;
@@ -198,6 +227,28 @@
     });
   }
 
+  /**
+   * Opened by a launcher row (D12): the row's words, as one phrase where the page holds it, else its first word, and the
+   * match in the quoted passage current. Focus stays where the page put it: the reader came to read.
+   */
+  function arrive(what: Arrival): void {
+    const first = what.words[0];
+    if (first === undefined) return;
+    scroller = scrollerOf(root());
+    open = true;
+    aim = pieceOf(what);
+    void tick().then(() => {
+      touched = false;
+      place = { top: topOf(), line: readingLine(), landed: topOf() };
+      words = what.words.join(" ");
+      search();
+      if (count === 0 && words !== first) {
+        words = first;
+        search();
+      }
+    });
+  }
+
   function onkey(event: KeyboardEvent): void {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -218,6 +269,17 @@
   });
 
   $effect(() => addFindBar({ here: () => shown() && root()?.isConnected === true, open: openBar }));
+
+  // A launcher row that opened this page at its match (D12): taken once, when the page shows with something drawn.
+  $effect(() => {
+    if (!shown() || root() === null) return;
+    const here = location.hash;
+    if (!arrival.waiting(here)) return;
+    untrack(() => {
+      const what = arrival.take(here);
+      if (what !== null) arrive(what);
+    });
+  });
 
   // A hidden page holds no bar.
   $effect(() => {

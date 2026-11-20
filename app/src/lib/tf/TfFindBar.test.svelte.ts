@@ -2,6 +2,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
+import { arrival } from "./arrival.svelte";
 import { installFindKey } from "./filter-keys";
 import { pageContext } from "./kept-pages.svelte";
 import { layers } from "./layers.svelte";
@@ -132,4 +133,65 @@ test("a hidden page's bar takes no key", async () => {
   draw(() => false);
   await pressFind();
   expect(document.querySelector(".tf-findbar")).toBeNull();
+});
+
+// -- opening at the match (the everything-search decisions, D12) --
+
+async function settle(): Promise<void> {
+  flushSync();
+  await tick();
+  await tick();
+  flushSync();
+}
+
+test("a launcher row's arrival opens the bar on the match in the quoted passage", async () => {
+  location.hash = "#/ticket/t1";
+  page.innerHTML = "<p>The retry budget is fine.</p><p>Comment: it times out behind the proxy, so the retry budget stops.</p><p>retry</p>";
+  arrival.set("#/ticket/t1", { words: ["retry"], passage: "times out behind the proxy, so the retry budget stops." });
+  draw();
+  await settle();
+  expect(box().value).toBe("retry");
+  expect(count()).toBe("2 of 3");
+  // Taken: the page shown again opens nothing.
+  expect(arrival.waiting("#/ticket/t1")).toBe(false);
+});
+
+test("an arrival whose passage the page does not draw opens on the first match", async () => {
+  location.hash = "#/ticket/t2";
+  arrival.set("#/ticket/t2", { words: ["retry"], passage: "a passage this page never drew, with retry in it" });
+  draw();
+  await settle();
+  expect(count()).toBe("1 of 3");
+});
+
+test("words the page holds only apart are found by the first of them", async () => {
+  location.hash = "#/ticket/t3";
+  arrival.set("#/ticket/t3", { words: ["twice", "once"], passage: "retry twice" });
+  draw();
+  await settle();
+  expect(box().value).toBe("twice");
+  expect(count()).toBe("1 of 1");
+});
+
+test("an arrival for another address, or none, opens nothing", async () => {
+  location.hash = "#/ticket/t4";
+  arrival.set("#/ticket/other", { words: ["retry"], passage: "retry once" });
+  draw();
+  await settle();
+  expect(document.querySelector(".tf-findbar")).toBeNull();
+  arrival.clear();
+});
+
+test("a passage drawn after the bar opened becomes current, until the reader steps", async () => {
+  location.hash = "#/ticket/t5";
+  arrival.set("#/ticket/t5", { words: ["retry"], passage: "the late retry paragraph is here" });
+  draw();
+  await settle();
+  expect(count()).toBe("1 of 3");
+  const late = document.createElement("p");
+  late.textContent = "the late retry paragraph is here";
+  page.append(late);
+  await new Promise((done) => setTimeout(done, 40));
+  flushSync();
+  expect(count()).toBe("4 of 4");
 });

@@ -10,7 +10,8 @@
 <script lang="ts" module>
   /**
    * How many rows the frame an answer lands in draws: what the tallest list shows (*Everything*'s 840 px dialog, a
-   * row 31 px), so the rows drawn a frame later are all below the fold.
+   * row 31 px), so the rows drawn a frame later are all below the fold. A row with an evidence line is taller (D10), so
+   * the first frame draws more than the dialog shows, never less.
    */
   export const FIRST_FRAME_ROWS = 24;
 </script>
@@ -25,7 +26,7 @@
   import { entityAddress } from "../tf/address";
   import { stateWord } from "../tf/state-word";
   import { sentence } from "../tf/inbox/inbox";
-  import { cellsOf } from "./cells";
+  import { cellsOf, whyOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
   import { holdsAnswer, ticketsFirst, type LauncherRow } from "./rows";
 
@@ -186,6 +187,7 @@
         mono={cells.mono}
         title={cells.title}
         marks={marksIn(hit.marks, hit.title, cells.title)}
+        why={whyOf(hit, cells.cell)}
         chord={chordOf(row)}
         source={sourceOf(row)}
         id={optionId(index)}

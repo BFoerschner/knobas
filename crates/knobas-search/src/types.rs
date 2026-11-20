@@ -390,11 +390,12 @@ pub struct SearchHit {
 pub struct Excerpt {
     /// Where in the row it sits, as the reader finds it there: a page's
     /// section heading, `Heading` for that heading's own words,
-    /// `Comment by <name>`, a run log's `line <n>`. `None` for text the index
-    /// keeps no place for (a page's lead, a ticket's, pull request's or note's
-    /// text), for a comment's author line, whose text says
-    /// `Comment by <name>` itself (#2481), and for a page link's line, whose
-    /// text says `Links to <title> in <space>` itself (#2491).
+    /// `Comment by <name>`, a run log's `Log line <n>`, `Description` for a
+    /// ticket's or a pull request's own text (the everything-search
+    /// decisions, 2026-11-20, D10). `None` for text the index keeps no place
+    /// for (a page's lead, a note's text), for a comment's author line, whose
+    /// text says `Comment by <name>` itself (#2481), and for a page link's
+    /// line, whose text says `Links to <title> in <space>` itself (#2491).
     pub place: Option<String>,
     /// The text around the words, the words flagged (raw source text, as
     /// [`Segment`] says).

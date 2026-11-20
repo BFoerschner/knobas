@@ -3,7 +3,7 @@
  * path is missing or empty says its kind's word, never a wrong place.
  */
 import { describe, expect, it } from "vitest";
-import { cellsOf } from "./cells";
+import { cellsOf, cutLead, whyOf } from "./cells";
 
 const of = (kind: string, path: string | null, title = "Retry payouts") =>
   cellsOf({ kind, entity_id: `src:${kind}:1`, title, path }, "Pull request");
@@ -51,5 +51,78 @@ describe("cellsOf reads the engine's key cell first (#2452)", () => {
 
   it("an empty cell falls back to the path line", () => {
     expect(withCell("page", "", "Engineering › Payments").cell).toBe("Engineering");
+  });
+});
+
+describe("whyOf, the evidence line (D10)", () => {
+  const seg = (text: string, hit = false) => ({ text, hit });
+  const hit = (place: string | null, segments = [seg("The "), seg("payout", true), seg(" retried.")], marks: number[] = []) => ({
+    excerpts: [{ place, segments }, { place: "Comment by Priya", segments: [seg("other")] }],
+    marks,
+  });
+
+  it("quotes the first excerpt under its place", () => {
+    for (const place of ["Description", "Comment by Jonas Becker", "Backoff policy"]) {
+      const why = whyOf(hit(place))!;
+      expect(why.place).toBe(place);
+      expect(why.segments).toEqual([seg("The "), seg("payout", true), seg(" retried.")]);
+      expect(why.code).toBe(false);
+      expect(why.count).toBeNull();
+    }
+  });
+
+  it("names no place where the passage says it itself", () => {
+    expect(whyOf(hit(null))!.place).toBeNull();
+    expect(whyOf(hit("Heading"))!.place).toBeNull();
+  });
+
+  it("draws a log's line in the mono face under its number", () => {
+    const why = whyOf(hit("Log line 212"))!;
+    expect(why.place).toBe("Log line 212");
+    expect(why.code).toBe(true);
+  });
+
+  it("is null for a row with marks, and for one with no excerpt", () => {
+    expect(whyOf(hit("Description", undefined, [0, 3]))).toBeNull();
+    expect(whyOf({ excerpts: [] })).toBeNull();
+    expect(whyOf({ excerpts: [], marks: [] })).toBeNull();
+  });
+
+  it("is null where the key cell holds every quoted word: the key is its own reason (D9, row 18)", () => {
+    const keyed = { excerpts: [{ place: "Description", segments: [seg("Blocked by "), seg("PAY-231", true), seg(".")] }] };
+    expect(whyOf(keyed, "PAY-231")).toBeNull();
+    expect(whyOf(keyed, "PAY-232")).not.toBeNull();
+    expect(whyOf(keyed)).not.toBeNull();
+  });
+
+  it("keeps the excerpt it quotes, for opening at it", () => {
+    const h = hit("Description");
+    expect(whyOf(h)!.excerpt).toBe(h.excerpts[0]);
+  });
+});
+
+describe("cutLead", () => {
+  const seg = (text: string, hit = false) => ({ text, hit });
+
+  it("leaves a lead of 18 characters and less, and a passage that opens on a mark", () => {
+    expect(cutLead([seg("eighteen chars ok "), seg("x", true)])).toEqual([seg("eighteen chars ok "), seg("x", true)]);
+    expect(cutLead([seg("x", true), seg(" ".repeat(40))])).toEqual([seg("x", true), seg(" ".repeat(40))]);
+  });
+
+  it("cuts a longer lead to an ellipsis and its last 16 characters, from a word's start", () => {
+    const cut = cutLead([seg("The certificate on the old directory host "), seg("adproxy", true), seg("-01 expires")]);
+    expect(cut[0]).toEqual(seg("…directory host "));
+    expect(Array.from(cut[0]!.text).length).toBeLessThanOrEqual(17);
+    expect(cut.slice(1)).toEqual([seg("adproxy", true), seg("-01 expires")]);
+  });
+
+  it("starts at a word inside the kept 16, never mid-word", () => {
+    const cut = cutLead([seg("aaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbb cc "), seg("x", true)]);
+    expect(cut[0]!.text).toBe("…cc ");
+  });
+
+  it("keeps the last 16 as they are where no word starts in them", () => {
+    const cut = cutLead([seg("a".repeat(40)), seg("x", true)]);
+    expect(cut[0]!.text).toBe(`…${"a".repeat(16)}`);
   });
 });

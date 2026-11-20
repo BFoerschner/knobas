@@ -216,7 +216,8 @@
   import { linkedOn } from "../job/connections";
   import type { EscTarget } from "../escape";
   import { addFindBar, filterKeys } from "../filter-keys";
-  import { selectedWords } from "../find-text";
+  import { blockText, selectedWords } from "../find-text";
+  import { arrival, holdsPiece, pieceOf } from "../arrival.svelte";
   import { drafts } from "../drafts.svelte";
   import { sendKey } from "../inline-editor";
 
@@ -1165,6 +1166,40 @@
     findPlace.landed = main.scrollTop;
   }
 
+  /**
+   * **A launcher row opened this page at its match** (the everything-search decisions, 2026-11-20, D12): the passage it
+   * quoted, bare, until the page draws with the row's words. The bar opens on them as a Docs hit opens it, and the first
+   * match whose block holds the passage is current, else the first match.
+   */
+  let aim: string | null = null;
+  $effect(() => {
+    if (place.kind !== "page") return;
+    const here = location.hash;
+    if (!arrival.waiting(here)) return;
+    untrack(() => {
+      const what = arrival.take(here);
+      if (what === null || what.words.length === 0) return;
+      aim = pieceOf(what);
+      setFind(what.words.join(" "));
+    });
+  });
+
+  /** The first match, or the one in the passage a launcher row quoted. */
+  function jumpAimed(): void {
+    const piece = aim;
+    aim = null;
+    if (piece !== null) {
+      const all = matches();
+      const inPassage = all.findIndex((match) => {
+        const range = document.createRange();
+        range.selectNodeContents(match);
+        return holdsPiece(blockText(range), piece);
+      });
+      if (inPassage > 0) at = inPassage - 1;
+    }
+    jump(1);
+  }
+
   /** The page and the query the find bar last started on. */
   let started: { id: string; stems: string[] } | null = null;
   /** *Continue reading* pressed: the page it names, drawn, goes back to where it was left (F-431). */
@@ -1228,7 +1263,7 @@
         matches();
       } else if (stems.length > 0) {
         if (samePage && findTyped) findFromLine();
-        else jump(1);
+        else jumpAimed();
       } else marks = 0;
       afterPaint(follow);
     });

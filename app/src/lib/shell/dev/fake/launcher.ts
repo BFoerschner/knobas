@@ -195,8 +195,11 @@ type Hit = SearchResponse["groups"][number]["hits"][number];
  * fixture-only**: the engine's are `knobas_search::excerpt`'s, witnessed over
  * PostgreSQL.
  */
-function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
+function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null, lead: string | null = null): Hit["excerpts"] {
   const out: Hit["excerpts"] = [];
+  // The engine's order (D10): the excerpt marking the most distinct words first, the rest as they stand.
+  const marked = (excerpt: Hit["excerpts"][number]) => new Set(excerpt.segments.filter((one) => one.hit).map((one) => one.text.toLowerCase())).size;
+  const ordered = () => out.map((excerpt, index) => [excerpt, index] as const).sort((a, b) => marked(b[0]) - marked(a[0]) || a[1] - b[1]).map(([excerpt]) => excerpt);
   const marks = (piece: string) => {
     const lower = piece.toLowerCase();
     const segments: Hit["snippet"] = [];
@@ -228,7 +231,7 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
     }
   };
   const links: [string, string][] = [];
-  let place: string | null = null;
+  let place: string | null = lead;
   const lines = text.startsWith(title) ? text.slice(title.length).split("\n") : text.split("\n");
   lines.forEach((line, index) => {
     if (line.startsWith("\u001e")) {
@@ -247,7 +250,7 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
     for (const piece of pieces) {
       const lower = piece.toLowerCase();
       if (out.length >= 8 || !words.some((word) => lower.includes(word))) continue;
-      out.push({ place: firstLine === null ? place : `line ${firstLine + index}`, segments: marks(piece) });
+      out.push({ place: firstLine === null ? place : `Log line ${firstLine + index}`, segments: marks(piece) });
     }
   });
   // A link's line, once no other place shows the word (#2491).
@@ -260,6 +263,23 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
       place: null,
       segments: [{ text: "Links to ", hit: false }, ...marks(title), { text: " in ", hit: false }, ...marks(space)],
     });
+  }
+  return ordered();
+}
+
+/** The title's letters the words match, as the picker's marks are (UTF-16 pairs, ascending, never overlapping): a row its name explains draws no evidence line. */
+function fixtureMarks(title: string, words: string[]): number[] {
+  const lower = title.toLowerCase();
+  const spans = words
+    .map((word) => [lower.indexOf(word), word.length] as const)
+    .filter(([at]) => at >= 0)
+    .map(([at, length]) => [at, at + length] as const)
+    .sort((a, b) => a[0] - b[0]);
+  const out: number[] = [];
+  for (const [start, end] of spans) {
+    const last = out.length - 1;
+    if (last > 0 && start <= out[last]!) out[last] = Math.max(out[last]!, end);
+    else out.push(start, end);
   }
   return out;
 }
@@ -344,8 +364,10 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
     const hits = byKind.get(entry.kind) ?? [];
-    const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words);
-    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts });
+    const lead = entry.kind === "ticket" || entry.kind === "pr" ? "Description" : null;
+    const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words, null, lead);
+    const marks = fixtureMarks(entry.title, words);
+    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts, ...(marks.length > 0 ? { marks } : {}) });
     byKind.set(entry.kind, hits);
   }
   const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));

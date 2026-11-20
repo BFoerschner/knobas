@@ -65,7 +65,9 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * after the page draws, which the fixture answers at once (the ux19 gate, 2026-11-19). `forget`: `localStorage` keys
  * removed before the first open (the image and diagram sizes kept from an earlier place or run), so it is the first ever.
  * `scroll`: a scroller pressed with its end in view (the asset pane at 1440x868, whose lower sections are below the
- * window otherwise).
+ * window otherwise). `store`: `localStorage` keys set before the first open (the launcher's scope). `setupKey`: a key
+ * pressed before each open, as `setup` presses. `fill`: words put into a field (`into`) at once, before the place's `type`
+ * key is pressed: that key's answer is the one recorded, the words before it answered unrecorded.
  */
 /** Where a run's answer lands and what says it did: the tree's generated rows (`answer` above). */
 const RUN_ANSWER = { in: `${shown} .tf-ftree`, changes: `${shown} .tf-ftree a[data-made]`, hold: '.tf-fdir[data-path="docs"], .tf-fband' };
@@ -152,6 +154,9 @@ const PLACES = [
   { name: "settings-renderers-java-late", fixture: true, late: "java_runtime:900", fake: "fake-jar=oldjava", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
   { name: "folder-renderer-new", start: "#/settings/renderers", press: `${shown} a`, text: "Add a folder renderer", hash: "#/settings/renderers/folder/add", away: "Escape" },
   { name: "launcher", start: "#/tickets", key: CMD_K, hash: null, ready: "[role=dialog] [role=option]", anywhere: true, away: "Escape" },
+  // Everything's answer to words its rows' text holds (the everything-search decisions, D10): rows of one and two
+  // lines, the evidence line drawn with the answer, and nothing moving after.
+  { name: "launcher-everything", start: "#/tickets", store: { "knobas.launcher.scope": "everything" }, setupKey: CMD_K, fill: { into: "[role=dialog] input", text: real ? "partner even" : "retr" }, type: { into: "[role=dialog] input", key: real ? "t" : "y" }, hash: null, ready: "[role=dialog] .tf-ln-why", anywhere: true, away: "clear" },
   { name: "ticket-menu", start: "#/tickets", right: `${shown} .tf-tcard`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "create-monitor", optional: true, start: "#/monitors/unmonitored", press: `${shown} button`, text: "Create monitor", starts: true, hash: null, ready: "[role=dialog]", away: "Escape" },
   { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setupOnce: true, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },
@@ -197,6 +202,10 @@ async function fresh(hash, p = null) {
   await c.send("Page.navigate", { url: `${addressFor(p)}${hash}` });
   await loaded;
   for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
+  if (p?.store) {
+    await js(`(Object.entries(${JSON.stringify(p.store)}).forEach(([k, v]) => localStorage.setItem(k, v)), 1)`);
+    return fresh(hash, { ...p, store: null });
+  }
   if (p?.forget?.length) {
     // Removed, then the app loaded again, so nothing it read at start-up holds what was removed.
     await js(`(${JSON.stringify(p.forget)}.forEach((k) => localStorage.removeItem(k)), 1)`);
@@ -227,13 +236,18 @@ async function key({ key, code, modifiers = 0, windowsVirtualKeyCode = 0 }) {
 }
 /** The press, key or address that opens `p`. Returns what was pressed. */
 async function act(p) {
+  if (p.fill) {
+    // No press yet: the probe records from the key below.
+    await js(`(() => { const i = [...document.querySelectorAll(${JSON.stringify(p.fill.into)})].find((e) => e.getClientRects().length > 0); i.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(p.fill.text)}); i.dispatchEvent(new InputEvent("input", { bubbles: true })); return 1; })()`);
+    await quiet(1500);
+  }
   if (p.type) {
     await js(`(() => { const i = [...document.querySelectorAll(${JSON.stringify(p.type.into)})].find((e) => e.getClientRects().length > 0); i.focus(); return 1; })()`);
     const { key: k } = p.type;
     const code = `Key${k.toUpperCase()}`, windowsVirtualKeyCode = k.toUpperCase().charCodeAt(0);
     await c.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k, unmodifiedText: k, code, windowsVirtualKeyCode });
     await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode });
-    return `typed ${k}`;
+    return p.fill ? `${p.fill.text} then typed ${k}` : `typed ${k}`;
   }
   if (p.go) { await js(`__moves.go(${JSON.stringify(p.go)})`); return p.go; }
   if (p.key) { await key(p.key); return "key"; }
@@ -299,6 +313,7 @@ async function measure(p, rate) {
       await cpu(1);
       await fresh(p.start, p);
       if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
+      if (p.setupKey) { await key(p.setupKey); await quiet(1200); }
       if (!p.soon) await sleep(firstAfter);
       await scrolled(p, rate);
       await cpu(rate);

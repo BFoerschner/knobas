@@ -21,6 +21,7 @@
  * Idempotent retry window*. Not in the key cell, whose 118 px would then cut
  * the repository's name.
  */
+import type { Excerpt, Segment } from "../ipc";
 import { keyOf } from "../time/format";
 
 export interface Cells {
@@ -93,4 +94,81 @@ function placeOf(row: CellSource, singular: string): Cells {
     default:
       return word;
   }
+}
+
+/**
+ * **The evidence line** (the everything-search decisions, 2026-11-20, D10): where the words are, for a row its name does
+ * not explain. Drawn under the title only where the hit has an excerpt and its title no mark: a row found by its name
+ * says so with its marks, and one found by its key or a stem the excerpts miss has neither and stays one line.
+ */
+export interface Why {
+  /** Where it matched: *Description*, *Comment by Jonas Becker*, a section, *Log line 212*; `null` where the passage says it itself. */
+  place: string | null;
+  /** The passage, cut so its first mark sits in the line's first third. */
+  segments: Segment[];
+  /** Whether it is drawn in the mono face: a log's line. */
+  code: boolean;
+  /** What closes a file's line (*4 files*), `null` for everything else. */
+  count: string | null;
+  /** The excerpt it quotes, which says where the row opens. */
+  excerpt: Excerpt;
+}
+
+/** What `whyOf` reads of a hit. */
+export interface WhySource {
+  /** Absent from an answer written before #2431. */
+  excerpts?: readonly Excerpt[] | undefined;
+  marks?: readonly number[] | undefined;
+}
+
+/** The longest unmarked run a passage may open with before it is cut. */
+const LEAD_MOST = 18;
+/** What a cut lead keeps of its end. */
+const LEAD_KEPT = 16;
+
+const wordChar = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}_]/u.test(c);
+
+/**
+ * A passage's leading unmarked run of more than {@link LEAD_MOST} characters, cut to `…` and its last
+ * {@link LEAD_KEPT}, from a word's start where one is in them.
+ */
+export function cutLead(segments: readonly Segment[]): Segment[] {
+  const first = segments[0];
+  if (first === undefined || first.hit) return [...segments];
+  const chars = Array.from(first.text);
+  if (chars.length <= LEAD_MOST) return [...segments];
+  let from = chars.length - LEAD_KEPT;
+  for (let i = from; i < chars.length; i++) {
+    if (wordChar(chars[i]) && !wordChar(chars[i - 1])) {
+      from = i;
+      break;
+    }
+  }
+  return [{ text: `…${chars.slice(from).join("")}`, hit: false }, ...segments.slice(1)];
+}
+
+/** A run log's line, which the line names by its number. */
+const LOG_LINE = /^Log line \d+$/;
+
+/**
+ * The row's evidence line, or `null` where its name explains it or nothing is quoted. `cell` is the row's key cell: a
+ * row whose quoted words all stand in it (`PAY-231` typed, its body saying it too) was found by its key, which is its own
+ * reason (D9's table, row 18).
+ */
+export function whyOf(hit: WhySource, cell: string | null = null): Why | null {
+  const excerpt = hit.excerpts?.[0];
+  if (excerpt === undefined || (hit.marks?.length ?? 0) > 0) return null;
+  const key = cell?.toLowerCase() ?? "";
+  const words = excerpt.segments.filter((seg) => seg.hit).map((seg) => seg.text.trim().toLowerCase());
+  if (key !== "" && words.length > 0 && words.every((word) => key.includes(word))) return null;
+  const place = excerpt.place ?? null;
+  const code = place !== null && LOG_LINE.test(place);
+  return {
+    // A heading's own words say where they are.
+    place: place === "Heading" ? null : place,
+    segments: cutLead(excerpt.segments),
+    code,
+    count: null,
+    excerpt,
+  };
 }
