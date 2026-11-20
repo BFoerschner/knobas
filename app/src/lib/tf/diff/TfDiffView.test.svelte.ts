@@ -273,7 +273,8 @@ test("one file's tokens landing redraws that file's lines, not another file's", 
 // #2267, #2268, #2269: word marks, expanded context, the tree, collapse, keys, Load diff, the ceiling.
 
 const file = (path: string, more: Partial<DiffFile> = {}): DiffFile => ({ ...RETRY, path, ...more });
-const cardOf = (path: string) => [...target.querySelectorAll(".tf-diff")].find((card) => card.querySelector(".tf-fh .tf-mono")?.textContent?.endsWith(path))!;
+// A rename's header holds two paths (old → new): the card is found by its new one, the last.
+const cardOf = (path: string) => [...target.querySelectorAll(".tf-diff")].find((card) => [...card.querySelectorAll(".tf-fh .tf-mono")].at(-1)?.textContent?.endsWith(path))!;
 
 test("the file the scroll is in is measured after the frame's layout, not while the diff is built", () => {
   // The inner-6x pass (2026-11-15): read as the files were attached, it laid the half-built page out (a style pass of

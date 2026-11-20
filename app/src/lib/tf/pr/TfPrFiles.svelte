@@ -66,6 +66,7 @@
   import { echoOn, echoesOn, echoWrite, sameWords, settleEchoes, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import { compareSection } from "../diff/address";
+  import { endWords } from "../diff/rendered";
   import { rangeContext } from "../diff/context";
   import { pickedEnds, type PrPick } from "../diff/pick";
   import { diffOf } from "./files";
@@ -477,6 +478,7 @@
         viewed={section === null ? { paths: viewed, set: (path, on) => void toggle(path, on) } : null}
         review={section === null ? review : null}
         {context}
+        sideNames={ends === null ? null : () => ({ old: endWords(ends!.base), new: endWords(ends!.head) })}
         openAt={openAt && ends ? { entityId: openAt.entityId, at: ends.head } : openAt}
         cut={shown.truncated}
         repository={range?.repository ?? null}

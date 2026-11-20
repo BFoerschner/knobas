@@ -86,6 +86,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { caretOf, isSha, shortEnd } from "./sha";
+  import { endWords } from "./rendered";
   import { fillEnds, keptList, rangeFill, seedPages, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "./fill";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
   import type { DiffFill } from "./diff";
@@ -291,7 +292,7 @@
         <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
       {/if}
       {#key `${section}\n${range?.base}\n${range?.head}\n${ignoreWhitespace}`}
-        <TfDiffView {files} {cut} {context} {fill} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
+        <TfDiffView {files} {cut} {context} {fill} sideNames={range === null ? null : () => ({ old: endWords(range!.base), new: endWords(range!.head) })} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
       {/key}
     {/if}
   </TfWaiting>

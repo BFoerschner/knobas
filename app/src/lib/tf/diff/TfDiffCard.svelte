@@ -17,9 +17,10 @@
     (`expandable`), each gap offers the hidden lines down from the hunk
     above, up from the hunk below, or all of them; expanded fully, the two
     hunks join. The view reads the file once and keeps it (`onexpand`).
-  - **Rendered** (#2279): where the view offers a rendered mode, the header
-    switches the file between *Rendered* (`TfDiffRendered`), *Swipe* for an
-    image changed on both sides, and its *Lines* (a binary file's *Bytes*).
+  - **Rendered** (#2279; ux26's stage): where the view offers a rendered mode,
+    the header switches the file between its *Lines* (a binary file's *Bytes*)
+    and *Rendered* (`TfDiffRendered`): one two-state segment on every file a
+    renderer can draw on both sides. An image's own modes are the stage's.
     The buttons sit in `.tf-fh-acts`, which later header controls share.
   - **File pipeline** (#2270): where the file has one, the header names it
     (`.tf-ran`, and the pattern that made it the default) while it is on,
@@ -64,6 +65,8 @@
   import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
   import type { CommandPort } from "../../render/command";
+  import type { Opened } from "../../render/defaults";
+  import type { Renderer } from "../../render/registry";
   import type { LineTokens, RenderPort } from "../../render/port";
   import type { DiffMode, RenderedPlan, Side, SideGot } from "./rendered";
   import TfDiffRendered from "./TfDiffRendered.svelte";
@@ -79,6 +82,7 @@
   import { firstLine } from "../openin/openin";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import TfWrittenAt from "./TfWrittenAt.svelte";
+  import TfPath from "../TfPath.svelte";
   import { menuThing } from "../context/thing";
 
   let {
@@ -104,6 +108,13 @@
     sideOf,
     load,
     commands,
+    ends = null,
+    choices = [],
+    opened = null,
+    pattern = "",
+    onpick = () => {},
+    onmakedefault = () => {},
+    frame = undefined,
     openAt = null,
     repository = null,
     pipeline = null,
@@ -144,6 +155,16 @@
     sideOf: (side: Side) => SideGot | undefined;
     load: (side: Side) => void;
     commands: CommandPort;
+    /** Where each side is read, for the stage's caption (`main at 4f2a91c`, *working tree*). */
+    ends?: { old: string; new: string } | null;
+    /** The renderers that can draw this comparison, and *Render as*'s menu, pattern and two presses. */
+    choices?: readonly Renderer[];
+    opened?: Opened | null;
+    pattern?: string;
+    onpick?: (renderer: Renderer) => void;
+    onmakedefault?: (renderer: Renderer) => void;
+    /** Keeps a page's sanitized document for its frame: the IPC by default. */
+    frame?: ((document: string) => Promise<string>) | undefined;
     /** The repository an outdated thread's commit is in (#2318): its *at <sha>* links that commit's diff. */
     repository?: string | null;
     /** *Open in…* in the header, on the file at its first changed line; never on a deleted file. */
@@ -187,16 +208,14 @@
 
   /** The sides a rendered diff draws: the plan's, less one the reader found no file on. */
   const sides = $derived(rendered ? rendered.sides.filter((side) => sideOf(side)?.kind !== "absent") : []);
-  const swipes = $derived(rendered !== null && rendered.swipe && sides.length === 2);
-  /** What the card shows: a swipe that cannot swipe (one side absent) shows side by side. */
-  const shows = $derived<DiffMode>(rendered === null ? "lines" : mode === "swipe" && !swipes ? "rendered" : mode);
+  /** What the card shows. */
+  const shows = $derived<DiffMode>(rendered === null ? "lines" : mode);
   const MODES = $derived<{ mode: DiffMode; label: string }[]>(
     rendered === null
       ? []
       : [
-          { mode: "rendered", label: "Rendered" },
-          ...(swipes ? [{ mode: "swipe" as const, label: "Swipe" }] : []),
           { mode: "lines", label: file.change === "binary" ? "Bytes" : "Lines" },
+          { mode: "rendered", label: "Rendered" },
         ],
   );
 
@@ -516,11 +535,17 @@
 <div class="tf-diff" data-file={keyOf(file)} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root} {@attach place}>
   <!-- A right-click on the header is the file's (2026-11-16), where the diff names its repository and the file is still there. -->
   <div class="tf-fh" {@attach menuThing(() => (openAt !== null && file.change !== "deleted" ? { kind: "file", repoId: openAt.entityId, path: file.path } : null))}>
+    <!-- Who the file is, in one group that gives up its path's start before its controls go to a second line (ux26). -->
+    <span class="tf-fh-id">
     <button type="button" class="tf-fh-caret" aria-expanded={!closed} aria-label="{closed ? 'Expand' : 'Collapse'} {keyOf(file)}" onclick={ontoggle}
       ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d={closed ? "m6 4 4 4-4 4" : "m4 6 4 4 4-4"} /></svg></button
     >
     <span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}" title={file.change}>{badge}</span>
-    <span class="tf-mono">{old ? `${old} → ${shownPath}` : shownPath}</span>{#if shownHow !== null}<span class="tf-state">{shownHow}</span>{/if}
+    {#if old}
+      <span class="tf-fh-paths"><TfPath path={old} class="tf-fh-old" /><span class="tf-fh-to">{" → "}</span><TfPath path={shownPath} class="tf-fh-new" /></span>
+    {:else}
+      <TfPath path={shownPath} class="tf-fh-path" />
+    {/if}{#if shownHow !== null}<span class="tf-state">{shownHow}</span>{/if}
     {#if file.change !== "binary" && counted}
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>
@@ -532,6 +557,7 @@
       >
       {#if pipeline.pattern !== null}<span class="tf-ran-why">default for {pipeline.pattern}</span>{/if}
     {/if}
+    </span>
     {#if MODES.length > 0 || pipeline !== null}
       <span class="tf-fh-acts tf-trail">
         {#if pipeline !== null}
@@ -568,7 +594,7 @@
       <div class="tf-banner tf-warn tf-coarse">Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.</div>
     {/if}
     {#if rendered !== null && shows !== "lines"}
-      <TfDiffRendered plan={rendered} path={file.path} {sides} swipe={shows === "swipe"} {sideOf} {load} {render} {commands} />
+      <TfDiffRendered plan={rendered} path={file.path} {sides} {sideOf} {load} {ends} {choices} {opened} {pattern} {onpick} {onmakedefault} {render} {commands} {...frame ? { frame } : {}} />
     {:else if file.change === "binary"}
       <div class="tf-dfwhy">A binary file: no lines to draw.</div>
     {:else if !drawsLines}

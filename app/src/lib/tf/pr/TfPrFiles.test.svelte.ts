@@ -181,7 +181,7 @@ test("the Files section is read when the tab opens; the list names each file wit
   expect(list()).toEqual(["Abackoff.md+1 −0", "Mretry.rs+2 −1"]);
   expect(cards().map((one) => squash(one.querySelector(".tf-fh")))).toEqual([
     // An added Markdown file draws rendered from its hunk (#2279): the mode switch sits before Viewed.
-    "A docs/backoff.md +1 −0 RenderedLines Viewed",
+    "A docs/backoff.md +1 −0 LinesRendered Viewed",
     "M src/sepa/retry.rs +2 −1 Viewed",
   ]);
   // One hunk after another: a ⋯ row between them.

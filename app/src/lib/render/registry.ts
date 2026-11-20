@@ -182,9 +182,10 @@ export const SOURCE: Renderer = {
 /**
  * Page (ADR-0046): an HTML file drawn as `TfHtmlPage` draws a folder renderer's page, sanitized, in a frame that runs no
  * script and makes no request. After Source, so a repository's own `.html` opens as Source and *Render as* offers
- * Page; in a generated folder it is the default (two default rows the Code page appends there).
+ * Page; in a generated folder it is the default (two default rows the Code page appends there). A comparison draws it on
+ * both sides, two such frames (ux26, the stage pass).
  */
-export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: false };
+export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: true };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source, then Page. */
 const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, SOURCE, HTML];

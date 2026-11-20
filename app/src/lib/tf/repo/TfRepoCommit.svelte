@@ -26,6 +26,7 @@
   import TfWhitespaceBox from "../diff/TfWhitespaceBox.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import { shaOfCommit } from "../diff/address";
+  import { endWords } from "../diff/rendered";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -230,6 +231,7 @@
     {files}
     {cut}
     context={commitContext(ports.entityView, commitId, parent, ports.fileBytes, ports.piped)}
+    sideNames={() => ({ old: parent === null ? "the parent" : endWords(shaOfCommit(parent) ?? "the parent"), new: whole === null ? "this commit" : endWords(whole) })}
     openAt={whole === null ? null : { entityId: repoId, at: whole }}
     tools={readAt === null ? null : whitespace}
   />

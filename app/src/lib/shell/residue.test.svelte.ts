@@ -2402,10 +2402,9 @@ const CASES: Case[] = [
       app: mount(TfDiffRendered, {
         target,
         props: {
-          plan: { renderer: { id: "markdown", name: "Markdown", patterns: ["*.md"], fences: [], input: "text", output: "html", diff: true }, sides: ["old", "new"], swipe: false },
+          plan: { renderer: { id: "markdown", name: "Markdown", patterns: ["*.md"], fences: [], input: "text", output: "html", diff: true }, sides: ["old", "new"] },
           path: "README.md",
           sides: ["old", "new"],
-          swipe: false,
           sideOf: (side: "old" | "new") => ({ kind: "drawn", content: side === "old" ? "# Before" : "# After" }),
           load: () => {},
         },

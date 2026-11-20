@@ -736,6 +736,9 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
+    // A text side as bytes, as the app reads every rendered side (the stage pass, 2026-11-20).
+    const text = renderedDiffSide(commitAt, path);
+    if (typeof text === "string") return new TextEncoder().encode(text);
     throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
   }
   const branchAt = entityId.indexOf("@refs/heads/");

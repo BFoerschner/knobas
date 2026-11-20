@@ -21,10 +21,14 @@
     viewed ones start collapsed. Lines are windowed and a file over 1,500
     changed lines waits for *Load diff* (#2269); changed words are marked and
     context expands where the caller passes `context` (#2267).
-  - **Rendered** (#2279): a file whose renderer draws diffs (`rendered.ts`)
-    offers *Rendered* in its header, the file drawn before and after by its
-    renderer (`TfDiffRendered`); an image also swipes. Its sides come from
-    `context`, read once and kept beside expanded context's reads.
+  - **Rendered** (#2279; ux26's stage, `docs/decisions/2026-11-20-a-comparison-
+    is-drawn-rendered-and-may-end-at-the-working-tree.md`): a file one of whose
+    renderers draws both sides (`rendered.ts` `renderedChoices`) offers *Lines |
+    Rendered* in its header, the file drawn before and after in a stage whose
+    height the renderer's kind sets (`TfDiffRendered`); an image also swipes
+    and onion-skins. Its sides are `context`'s bytes, read at the clone first,
+    once, and kept; a card's room while rendered is the stage's constants, so
+    the windowed list places it right in its first frame.
   - **File pipelines** (#2270): where the caller runs pipelines (`context.piped`)
     and a file's pattern has a default pipeline (`pipelines`), both sides
     run through it and the outputs are diffed (`piped.ts`); the header names
@@ -91,14 +95,15 @@
     type WholeTexts,
   } from "./diff";
   import { diffLayout, SPLIT_ROOM, type DiffLayoutChoice } from "./diff-layout.svelte";
+  import { diffRendered, type DiffRenderedChoice } from "./diff-rendered.svelte";
   import TfRailBar from "../TfRailBar.svelte";
   import type { DiffTalk } from "./talk";
   import TfDiffCard from "./TfDiffCard.svelte";
   import { ipcCommands, type CommandPort } from "../../render/command";
-  import { openWith, type RendererDefault } from "../../render/defaults";
+  import { makeDefaultPattern, openWith, withDefault, type Opened, type RendererDefault } from "../../render/defaults";
   import { rendererDefaults } from "../../render/defaults.svelte";
-  import { allRenderers } from "../../render/registry";
-  import { hunkText, renderedPlan, type DiffMode, type Side, type SideGot } from "./rendered";
+  import { allRenderers, type Renderer } from "../../render/registry";
+  import { hunkText, renderedChoices, renderedPlan, renderedRoom, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
@@ -131,6 +136,9 @@
     fill = null,
     counted = true,
     calm = true,
+    sideNames = null,
+    frame = undefined,
+    rendering = diffRendered,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -145,8 +153,8 @@
     /** The parser's ceiling cut this diff. */
     cut?: boolean;
     render?: RenderPort;
-    /** The renderer each file opens with (#2263): its rendered diff is drawn by it. */
-    defaults?: { readonly list: readonly RendererDefault[] };
+    /** The renderer each file opens with (#2263): its rendered diff is drawn by it. *Render as*'s *Use … by default* saves here. */
+    defaults?: { readonly list: readonly RendererDefault[]; save?: (list: RendererDefault[]) => Promise<unknown> };
     /** Runs a command renderer's rendered diff: the IPC, a fake in tests. */
     commands?: CommandPort;
     layout?: DiffLayoutChoice;
@@ -181,6 +189,15 @@
      * Compare clears it while another pick's list is read, so the diff it dims sends nothing beside that read.
      */
     calm?: boolean;
+    /**
+     * Where each side of a file is read, for a rendered file's caption (`main at 4f2a91c`, *working tree*, *the index*).
+     * None: the caption says *before* and *after* alone.
+     */
+    sideNames?: ((file: DrawnFile) => { old: string; new: string }) | null;
+    /** Keeps a page's sanitized document for its frame (a rendered `.html`): the IPC by default, a fake in tests. */
+    frame?: ((document: string) => Promise<string>) | undefined;
+    /** The band's *Rendered*: the app's one choice, kept across a restart; a fake in tests. */
+    rendering?: DiffRenderedChoice;
   } = $props();
 
   let filter = $state("");
@@ -202,14 +219,25 @@
   /** Whether the file list is unfolded under its bar, where it has one. */
   let railOpen = $state(false);
 
-  /** Reads the column's width; a hidden page has none to read, so it keeps the last. */
+  /** The window's height, for a rendered card's stage (`clamp(360px, 56vh, 640px)`): read where the width is. */
+  let viewHeight = $state(typeof window === "undefined" ? 868 : window.innerHeight);
+  /** Reads the column's width, and the window's height with it; a hidden page has none to read, so it keeps the last. */
   function measure(node: HTMLElement) {
     if (typeof ResizeObserver === "undefined") return;
     const watch = new ResizeObserver(([entry]) => {
       if (entry !== undefined && entry.contentRect.width > 0) room = entry.contentRect.width;
+      if (window.innerHeight > 0 && window.innerHeight !== viewHeight) viewHeight = window.innerHeight;
     });
     watch.observe(node);
-    return () => watch.disconnect();
+    // The window growing taller leaves the column's width as it was: the stage's height follows the window's.
+    const resized = () => {
+      if (window.innerHeight > 0 && window.innerHeight !== viewHeight) viewHeight = window.innerHeight;
+    };
+    window.addEventListener("resize", resized, { passive: true });
+    return () => {
+      watch.disconnect();
+      window.removeEventListener("resize", resized);
+    };
   }
   /** As a set: a pull request of thousands of files asks it of every file, many times. */
   const viewedSet = $derived(new Set(viewed?.paths ?? []));
@@ -399,26 +427,71 @@
     return toks && toks.map(([part]) => part).join("") === cell.line.text ? toks : undefined;
   };
 
-  /** Each file's rendered mode, where its renderer draws diffs and the sides can be read (by `keyOf`). */
+  /** The renderer *Render as* picked per card, by `keyOf`, for the visit. */
+  let picked = $state.raw<Record<string, string>>({});
+  /** A file's rendered mode: the renderers that can draw both of its sides, and the plan of the one it draws with. */
+  type Planned = { plan: RenderedPlan; choices: Renderer[]; opened: Opened };
+  /** Each file's rendered mode, where one of its renderers draws both sides and they can be read (by `keyOf`). */
   const plans = $derived.by(() => {
     // Worked out per file as it is drawn, not for every file of a change of thousands as it opens.
     const can = { whole: context !== null, bytes: typeof context?.bytes === "function" };
     const list = defaults.list;
+    const chosen = picked;
+    const all = allRenderers();
+    // The choices by the file's name where nothing takes a file by its folder and every side is read as bytes: the
+    // band's *Rendered* plans every file of a list for its room, and 10,000 files asked the registry's globs each.
+    const byName = can.bytes && !all.some((r) => r.patterns.some((p) => p.includes("/"))) && !list.some((d) => d.pattern.includes("/")) ? new Map<string, { opened: Opened; choices: Renderer[] }>() : null;
+    const choicesOf = (file: DrawnFile) => {
+      const binary = file.change === "binary";
+      const name = byName === null ? null : `${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
+      const had = name === null ? undefined : byName!.get(name);
+      if (had !== undefined) return had;
+      const opened = openWith({ path: file.path, binary }, all, list);
+      const made = { opened, choices: renderedChoices(file, opened, can) };
+      if (name !== null) byName!.set(name, made);
+      return made;
+    };
     // By the file as drawn: one whose lines came is planned again with them.
-    const made = new WeakMap<DrawnFile, ReturnType<typeof renderedPlan>>();
+    const made = new WeakMap<DrawnFile, Planned | null>();
     return {
-      get(key: string) {
+      get(key: string): Planned | null {
         const listed = byKey.get(key);
         if (listed === undefined) return null;
         const file = lineOf(listed);
-        if (!made.has(file)) made.set(file, renderedPlan(file, openWith({ path: file.path, binary: file.change === "binary" }, allRenderers(), list).renderer, can));
+        if (!made.has(file)) {
+          const { opened, choices } = choicesOf(file);
+          // The card's pick, else the renderer it opens with where it draws both sides, else the first that does.
+          const renderer = choices.find((r) => r.id === chosen[key]) ?? choices[0] ?? null;
+          const plan = renderedPlan(file, renderer, can);
+          made.set(file, plan === null ? null : { plan, choices, opened });
+        }
         return made.get(file) ?? null;
       },
     };
   });
+  /** *Render as*'s *Use ⟨name⟩ for `*.ext` by default*: the same `render.defaults` row the file viewer writes. */
+  async function makeDefault(file: DrawnFile, opened: Opened, chosen: Renderer) {
+    if (defaults.save === undefined) return;
+    try {
+      await defaults.save(withDefault(defaults.list, makeDefaultPattern(opened, file.path), chosen.id));
+      const { [keyOf(file)]: _, ...rest } = picked;
+      picked = rest;
+    } catch (cause) {
+      push({ text: `Could not make ${chosen.name} the default: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
   /** The mode the reader picked per file; a binary file with a rendered mode opens in it (it has no lines). */
   let modes = $state.raw<Record<string, DiffMode>>({});
-  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? (plans.get(keyOf(file)) && file.change === "binary" ? "rendered" : "lines");
+  /**
+   * A card's own press, else *Rendered* where the band's toggle is on or the file is binary (it has no lines) and a
+   * renderer can draw both of its sides, else its lines.
+   */
+  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary") && plans.get(keyOf(file)) ? "rendered" : "lines");
+  /** The band's *Rendered*, and `d`: every card's own press goes, so the toggle says how every file shows. */
+  function toggleRendered() {
+    rendering.set(!rendering.on);
+    modes = {};
+  }
   /** Each side a rendered diff read, under `side\nkey`, and the reads made. */
   let got = $state.raw<Record<string, SideGot>>({});
   const asked = new Set<string>();
@@ -434,9 +507,12 @@
       const hunk = waits(file) ? null : hunkText(lineOf(file), side);
       if (hunk !== null) return { kind: "drawn", content: hunk };
       if (reader === null) return { kind: "failed", why: "nothing reads this diff's files" };
-      if (file.change === "binary") {
-        const bytes = await reader.bytes!(file, side);
-        return bytes === null ? { kind: "absent" } : { kind: "drawn", content: bytes };
+      // Every side as bytes, read at the clone first (`entity_file_bytes`): a text side read as a `file@` view asked the
+      // forge twice for one Markdown file at a clone (the stage pass, 2026-11-20). A text renderer decodes them.
+      if (reader.bytes !== undefined) {
+        const bytes = await reader.bytes(file, side);
+        if (bytes !== null) return { kind: "drawn", content: bytes };
+        return file.change === "binary" ? { kind: "absent" } : { kind: "failed", why: `the file ${NAMES[side]} the change is not there` };
       }
       const text = (await readWhole(file, reader))[side];
       return text === null ? { kind: "failed", why: `the file ${NAMES[side]} the change is not readable whole` } : { kind: "drawn", content: text };
@@ -707,16 +783,20 @@
   const fileRoom = $derived.by(() => {
     // What each file's room reads, read once for all of them: a list of 10,000 files asked each of every file (the
     // stored-compare pass, 2026-11-14).
-    const [filling, read, shutBy, loaded, all] = [fill !== null, lined, folds, loads, counted];
+    const [filling, read, shutBy, loaded, all, chosen, high, pill] = [fill !== null, lined, folds, loads, counted, modes, viewHeight, rendering.on];
     const viewedNow = viewedSet;
     return new Map(
       drawn.map((file) => {
         const key = keyOf(file);
+        // A card open rendered is its header, the caption, the stage and the foot: constants known before a side is read.
+        // Planned only where it may be rendered (picked so, or binary): a list of thousands plans none as it opens.
+        const planned = (chosen[key] ?? (pill || file.change === "binary" ? "rendered" : "lines")) === "rendered" ? plans.get(key) : null;
         const got = read[key];
         const waiting = filling && got === undefined && (!all || file.additions + file.deletions > 0) && file.change !== "binary";
         const lines = waiting ? waitingRows(file) : (got?.file ?? file).hunks.reduce((sum, hunk) => sum + hunk.lines.length + 1, 0);
         const big = needsLoad(file);
         const closed = shutBy[key] ?? (viewedNow.has(file.path) || (collapsedAtFirst(file.path) && (isLock(file.path) || !big)));
+        if (planned) return [key, closed ? 44 : renderedRoom(planned.plan.renderer, high)];
         const shut = closed || (big && loaded[key] !== true);
         return [key, shut ? 44 : 42 + Math.min(lines, 400_000) * 21];
       }),
@@ -1079,6 +1159,9 @@
         hold();
         break;
       }
+      case "d":
+        toggleRendered();
+        break;
       case "s":
         if (tight) push({ text: NO_ROOM });
         else layout.set(layout.chosen === "split" ? "unified" : "split");
@@ -1206,9 +1289,16 @@
     >
   </div>
   {@render tools?.()}
-  {#if anyPipe}
-    {@const all = pipeAll ?? piping.on}
-    <div class="tf-fchips">
+  {#if list || anyPipe}
+  <div class="tf-fchips">
+    {#if list}
+      <!-- Always drawn where the diff has its list: worked out per file, it would land late and move *Run pipelines*. -->
+      <button type="button" class="tf-drendered" aria-pressed={rendering.on} aria-keyshortcuts="d" title="Show files and folders as their renderers draw them: d" onclick={toggleRendered}
+        >Rendered</button
+      >
+    {/if}
+    {#if anyPipe}
+      {@const all = pipeAll ?? piping.on}
       <button
         type="button"
         aria-pressed={all}
@@ -1218,7 +1308,8 @@
           pipeOne = {};
         }}>Run pipelines</button
       >
-    </div>
+    {/if}
+  </div>
   {/if}
   {#if viewed && files.length > 0}
     {@const count = files.filter((file) => isViewed(file.path)).length}
@@ -1283,7 +1374,7 @@
       <p class="tf-dkeys tf-dim">
         <span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span>{#if viewed}<span><kbd>v</kbd> viewed</span>{/if}{#if review}<span
             ><kbd>c</kbd> comment</span
-          >{/if}<span><kbd>s</kbd> split</span>
+          >{/if}<span><kbd>d</kbd> rendered</span><span><kbd>s</kbd> split</span>
       </p>
     </div>
   {/if}
@@ -1293,6 +1384,7 @@
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
       {@const got = lined[key]}
+      {@const planned = piped ? null : plans.get(key)}
       <TfDiffCard
         bind:this={cards[key]}
         file={piped?.file ?? lineOf(file)}
@@ -1318,11 +1410,18 @@
         loaded={loads[key] === true}
         onload={() => (loads = { ...loads, [key]: true })}
         current={current === key}
-        rendered={piped ? null : (plans.get(key) ?? null)}
+        rendered={piped ? null : (planned?.plan ?? null)}
         mode={modeOf(file)}
         onmode={(mode) => (modes = { ...modes, [key]: mode })}
         sideOf={(side) => sideOf(file, side)}
         load={(side) => loadSide(file, side)}
+        ends={sideNames?.(file) ?? null}
+        choices={planned?.choices ?? []}
+        opened={planned?.opened ?? null}
+        pattern={planned ? makeDefaultPattern(planned.opened, file.path) : ""}
+        onpick={(r) => (picked = { ...picked, [key]: r.id })}
+        onmakedefault={(r) => planned && void makeDefault(file, planned.opened, r)}
+        {frame}
         {commands}
         expandable={context !== null && piped === null}
         expanded={piped ? undefined : expandedOf(key)}

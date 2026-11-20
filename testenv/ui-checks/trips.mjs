@@ -549,6 +549,12 @@ const PAGES = [
   { page: "A pull request's conversation", route: "pr/mock%3Apayout-service%23142/conversation", trips: [
     { id: "pr-comment", kind: "enter-twice", finding: "F-266", prep: [{ fill: ".tf-compose textarea", text: "Looks right to me." }, { wait: 150 }], press: { sel: ".tf-compose .tf-primary", text: "Comment" }, returns: "Comment on PR #142" },
   ] },
+  // A rendered diff (ux26's stage, 2026-11-20): the band's *Rendered* pressed twice by key toggles twice in place, and a
+  // card's own *Rendered* pressed twice by pointer draws its stage once and keeps it.
+  { page: "A commit's rendered diff", route: `${REPO}/commits/mock%3Atidewater%2Fpayout-service%40c90d11e4a7b2`, trips: [
+    { id: "rendered-pill-twice", kind: "enter-twice", strict: true, finding: "compare-rendered", query: "&fake-rendered-diff", prep: [{ wait: 800 }], press: { sel: ".tf-dtool .tf-drendered", text: "Rendered" } },
+    { id: "rendered-switch-pointer", kind: "pointer-twice", strict: true, finding: "compare-rendered", query: "&fake-rendered-diff", prep: [{ wait: 800 }], press: { sel: '.tf-diff[data-file="README.md"] .tf-fh .tf-seg button', text: "Rendered" }, rows: '.tf-diff[data-file="README.md"] .tf-rstage' },
+  ] },
   { page: "A pull request's diff", route: "pr/mock%3Apayout-service%23142/diff", trips: [
     { id: "reply-twice", kind: "enter-twice", strict: true, finding: "F-261", prep: [{ click: ".tf-thr-reply", text: "Reply…" }, { wait: 300 }, { fill: ".tf-reply textarea", text: "A cap at five tries." }, { wait: 150 }], press: { sel: ".tf-reply .tf-primary", text: "Reply" }, returns: "Reply…" },
     { id: "reply-opener-twice", kind: "enter-twice", strict: true, finding: "F-261", press: { sel: ".tf-thr-reply", text: "Reply…" } },

@@ -1,9 +1,8 @@
 /**
- * Rendered diffs (#2279) in the one diff component, mounted as its callers
- * mount it: a file whose renderer draws diffs offers *Rendered* beside its
- * lines, which draws the file before and after with that renderer; an image
- * also swipes. The engines are the jsdom ones (Markdown for real, a fake
- * command port); headless Chrome witnesses the drawn panes.
+ * Rendered diffs (#2279; ux26's stage) in the one diff component, mounted as its callers mount it: a file one of whose
+ * renderers draws both sides offers *Lines | Rendered*, which draws the file before and after in a stage whose height
+ * the renderer's kind sets; an image also swipes and onion-skins. The engines are the jsdom ones (Markdown for real, a
+ * fake command port); headless Chrome witnesses the drawn stage.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -12,6 +11,7 @@ import type { RenderContent, RenderRun, UserRenderer } from "../../ipc/app";
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { installCommands, type CommandPort } from "../../render/command";
 import { createDiffLayout } from "./diff-layout.svelte";
+import { imageMode } from "./image-mode.svelte";
 import TfDiffView from "./TfDiffView.svelte";
 
 const ctx = (old: number, nu: number, text: string): DiffLine => ({ kind: "context", old, new: nu, text });
@@ -67,6 +67,7 @@ afterEach(() => {
   target.remove();
   installCommands([]);
   blobs.restore();
+  imageMode.set("sides");
 });
 
 function draw(props: Record<string, unknown>) {
@@ -79,50 +80,103 @@ const settle = async () => {
   flushSync();
 };
 
-/** Reads each side whole, as a commit's reader does, and counts the reads. */
-function reader(texts: Record<string, [old: string, now: string]>, bytes?: Record<string, [old: Uint8Array | null, now: Uint8Array | null]>) {
+const enc = (text: string) => new TextEncoder().encode(text);
+
+/**
+ * Reads each side as its bytes, as every caller's reader does (the clone first), and its text whole for expanded
+ * context; counts the reads of each.
+ */
+function reader(texts: Record<string, [old: string | null, now: string | null]>, raw: Record<string, [old: Uint8Array | null, now: Uint8Array | null]> = {}) {
   const asked: string[] = [];
+  const bytesOf = (f: DiffFile, side: "old" | "new"): Uint8Array | null => {
+    const at = side === "old" ? 0 : 1;
+    if (raw[f.path]) return raw[f.path]![at];
+    const text = texts[f.path]?.[at];
+    return text === null || text === undefined ? null : enc(text);
+  };
   return {
     asked,
     context: {
       text: (f: DiffFile, side: "old" | "new") => (asked.push(`${side}:${f.path}`), Promise.resolve(texts[f.path]?.[side === "old" ? 0 : 1] ?? null)),
-      ...(bytes
-        ? { bytes: (f: DiffFile, side: "old" | "new") => (asked.push(`bytes ${side}:${f.path}`), Promise.resolve(bytes[f.path]?.[side === "old" ? 0 : 1] ?? null)) }
-        : {}),
+      bytes: (f: DiffFile, side: "old" | "new") => (asked.push(`bytes ${side}:${f.path}`), Promise.resolve(bytesOf(f, side))),
     },
   };
 }
 
-/** The mode buttons in the file header of the card for `path`. */
+/** The card for `path`, its header's mode buttons, and the stage's parts. */
 const card = (path: string) => [...target.querySelectorAll(".tf-diff")].find((el) => el.querySelector(".tf-fh .tf-mono")?.textContent === path)!;
 const modes = (path: string) => [...card(path).querySelectorAll<HTMLButtonElement>(".tf-fh .tf-seg button")].map((b) => `${b.textContent}${b.getAttribute("aria-pressed") === "true" ? "*" : ""}`);
 const mode = (path: string, name: string) => [...card(path).querySelectorAll<HTMLButtonElement>(".tf-fh .tf-seg button")].find((b) => b.textContent === name)!.click();
-const sides = (path: string) => [...card(path).querySelectorAll(".tf-ba > figure")].map((side) => side.querySelector("figcaption")?.textContent?.trim());
+const sides = (path: string) => [...card(path).querySelectorAll(".tf-rcap-side")].map((side) => side.textContent?.trim());
+const side = (path: string, which: "old" | "new") => card(path).querySelector<HTMLElement>(`.tf-rside-${which}`)!;
+const stage = (path: string) => card(path).querySelector<HTMLElement>(".tf-rstage")!;
+const imageModes = (path: string) => [...card(path).querySelectorAll<HTMLButtonElement>(".tf-rcap .tf-seg button")].map((b) => `${b.textContent}${b.getAttribute("aria-pressed") === "true" ? "*" : ""}`);
+const imageModeTo = (path: string, name: string) => [...card(path).querySelectorAll<HTMLButtonElement>(".tf-rcap .tf-seg button")].find((b) => b.textContent === name)!.click();
+const showAll = (path: string) => card(path).querySelector<HTMLButtonElement>(".tf-rfoot-all")!;
 
-test("a changed README shows Lines first, and Rendered draws it before and after", async () => {
+test("a changed README shows Lines first, and Rendered draws it before and after in the stage", async () => {
   const { context } = reader({ "README.md": [BEFORE, AFTER] });
   draw({ files: [README], context });
-  expect(modes("README.md")).toEqual(["Rendered", "Lines*"]);
+  expect(modes("README.md")).toEqual(["Lines*", "Rendered"]);
   expect(card("README.md").querySelector(".tf-dbody")).not.toBeNull();
 
   mode("README.md", "Rendered");
   await settle();
-  expect(modes("README.md")).toEqual(["Rendered*", "Lines"]);
+  expect(modes("README.md")).toEqual(["Lines", "Rendered*"]);
   expect(card("README.md").querySelector(".tf-dbody")).toBeNull();
   expect(sides("README.md")).toEqual(["before", "after"]);
-  const [old, now] = [...card("README.md").querySelectorAll(".tf-ba > figure")];
-  expect(old!.querySelector("h1")?.textContent).toBe("Payouts");
-  expect(old!.querySelector("strong")?.textContent).toBe("three");
-  expect(now!.querySelector("h1")?.textContent).toBe("Payout service");
-  expect(now!.querySelector("strong")?.textContent).toBe("five");
+  expect(side("README.md", "old").querySelector("h1")?.textContent).toBe("Payouts");
+  expect(side("README.md", "old").querySelector("strong")?.textContent).toBe("three");
+  expect(side("README.md", "new").querySelector("h1")?.textContent).toBe("Payout service");
+  expect(side("README.md", "new").querySelector("strong")?.textContent).toBe("five");
 
   mode("README.md", "Lines");
   flushSync();
-  expect(card("README.md").querySelector(".tf-ba")).toBeNull();
+  expect(card("README.md").querySelector(".tf-rstage")).toBeNull();
   expect(card("README.md").querySelector(".tf-dbody")).not.toBeNull();
 });
 
-test("the reads Rendered makes are the ones expanded context keeps: a second time asks nothing", async () => {
+test("the caption, the stage and the foot are drawn in the flush that turns the card, before any side answers", async () => {
+  const late: Record<string, (bytes: Uint8Array | null) => void> = {};
+  const context = {
+    text: () => Promise.resolve(null),
+    bytes: (_: DiffFile, which: "old" | "new") => new Promise<Uint8Array | null>((done) => (late[which] = done)),
+  };
+  draw({ files: [README], context, sideNames: () => ({ old: "main at 4f2a91c", new: "working tree" }) });
+  mode("README.md", "Rendered");
+  flushSync();
+  const box = stage("README.md");
+  expect(card("README.md").querySelector(".tf-rcap")).not.toBeNull();
+  expect(card("README.md").querySelector(".tf-rfoot")).not.toBeNull();
+  expect(sides("README.md")).toEqual(["before main at 4f2a91c", "after working tree"]);
+  expect([...box.classList].sort()).toEqual(["tf-rstage"]);
+  expect(side("README.md", "old").querySelectorAll(".tf-skel-bar")).toHaveLength(3);
+  expect(card("README.md").querySelector(".tf-rfoot-say")?.textContent).toBe("Reading both sides…");
+  expect(showAll("README.md").getAttribute("aria-disabled")).toBe("true");
+
+  late["old"]!(enc(BEFORE));
+  await settle();
+  // The answer lands inside its half: the stage is the same node, its classes as they were.
+  expect(stage("README.md")).toBe(box);
+  expect([...box.classList].sort()).toEqual(["tf-rstage"]);
+  expect(side("README.md", "old").querySelector("h1")?.textContent).toBe("Payouts");
+  expect(side("README.md", "new").querySelectorAll(".tf-skel-bar")).toHaveLength(3);
+  expect(card("README.md").querySelector(".tf-rfoot-say")?.textContent).toBe("Reading the working tree's side…");
+  showAll("README.md").click();
+  flushSync();
+  expect(box.classList.contains("tf-rstage-open")).toBe(false);
+
+  late["new"]!(enc(AFTER));
+  await settle();
+  expect(stage("README.md")).toBe(box);
+  expect(showAll("README.md").getAttribute("aria-disabled")).toBeNull();
+  showAll("README.md").click();
+  flushSync();
+  expect(box.classList.contains("tf-rstage-open")).toBe(true);
+  expect(showAll("README.md").textContent).toBe("Show less");
+});
+
+test("a text side is read as bytes, never through the source's text read, and a second time asks nothing", async () => {
   const { asked, context } = reader({ "README.md": [BEFORE, AFTER] });
   draw({ files: [README], context });
   mode("README.md", "Rendered");
@@ -131,7 +185,7 @@ test("the reads Rendered makes are the ones expanded context keeps: a second tim
   flushSync();
   mode("README.md", "Rendered");
   await settle();
-  expect(asked.sort()).toEqual(["new:README.md", "old:README.md"]);
+  expect(asked.sort()).toEqual(["bytes new:README.md", "bytes old:README.md"]);
   expect(sides("README.md")).toEqual(["before", "after"]);
 });
 
@@ -143,6 +197,7 @@ test("an added README shows its after side only, and a deleted one its before si
   mode("docs/old.md", "Rendered");
   await settle();
   expect(sides("docs/new.md")).toEqual(["after"]);
+  expect(stage("docs/new.md").classList.contains("tf-rstage-one")).toBe(true);
   expect(card("docs/new.md").querySelector("h1")?.textContent).toBe("Fresh");
   expect(sides("docs/old.md")).toEqual(["before"]);
   expect(card("docs/old.md").querySelector("h1")?.textContent).toBe("Stale");
@@ -160,14 +215,25 @@ test("a source file offers no rendered mode, and its header reads as before", ()
   expect(card("src/retry.rs").querySelector(".tf-fh")?.textContent?.replace(/\s+/g, " ").trim()).toBe("M src/retry.rs +1 −1");
 });
 
-test("a side that cannot be read says so, beside the side that was", async () => {
+test("a side that cannot be read says why in its half, beside the side that was", async () => {
   const { context } = reader({ "README.md": [BEFORE, AFTER] });
-  draw({ files: [README], context: { text: (f: DiffFile, side: "old" | "new") => (side === "old" ? Promise.reject(new Error("gone")) : context.text(f, side)) } });
+  draw({ files: [README], context: { ...context, bytes: (f: DiffFile, which: "old" | "new") => (which === "old" ? Promise.reject(new Error("gone")) : context.bytes(f, which)) } });
   mode("README.md", "Rendered");
   await settle();
-  const [old, now] = [...card("README.md").querySelectorAll(".tf-ba > figure")];
-  expect(old!.textContent).toContain("could not be read");
-  expect(now!.querySelector("h1")?.textContent).toBe("Payout service");
+  expect(side("README.md", "old").textContent).toContain("The side before could not be read: gone");
+  expect(side("README.md", "new").querySelector("h1")?.textContent).toBe("Payout service");
+});
+
+test("an .html file, which opens as Source, offers Rendered and draws each side as a page in a sandboxed frame", async () => {
+  const { context } = reader({ "site/index.html": ["<h1>Old</h1>", "<h1>New</h1>"] });
+  draw({ files: [file("site/index.html")], context, frame: () => Promise.resolve("t") });
+  expect(modes("site/index.html")).toEqual(["Lines*", "Rendered"]);
+  mode("site/index.html", "Rendered");
+  await settle();
+  const frames = [...stage("site/index.html").querySelectorAll("iframe")];
+  expect(frames.map((f) => f.getAttribute("sandbox"))).toEqual(["", ""]);
+  expect(frames.map((f) => f.getAttribute("srcdoc")?.includes("Old"))).toEqual([true, false]);
+  expect(frames.every((f) => f.classList.contains("tf-rstage-frame"))).toBe(true);
 });
 
 const PAGE: UserRenderer = { id: "pager", name: "Pager", command: "pager", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10, diff: true };
@@ -190,31 +256,34 @@ test("a user renderer that declares diff support draws each side through its com
   const { context } = reader({ "site/home.page": ["old page", "new page"], "notes.txt": ["a", "b"] });
   draw({ files: [file("site/home.page"), file("notes.txt")], context, commands: port });
   expect(modes("notes.txt")).toEqual([]);
-  expect(modes("site/home.page")).toEqual(["Rendered", "Lines*"]);
+  expect(modes("site/home.page")).toEqual(["Lines*", "Rendered"]);
 
   mode("site/home.page", "Rendered");
   await settle();
   expect(ran.sort()).toEqual(["pager:new page", "pager:old page"]);
-  const frames = [...card("site/home.page").querySelectorAll(".tf-ba > figure iframe")];
+  const frames = [...stage("site/home.page").querySelectorAll("iframe")];
   expect(frames.map((f) => f.getAttribute("sandbox"))).toEqual(["", ""]);
   expect(frames.map((f) => f.getAttribute("srcdoc")?.includes("<p>old page</p>"))).toEqual([true, false]);
 });
 
-test("a changed PNG opens rendered, side by side from each side's bytes, and swipes", async () => {
+test("a changed PNG opens rendered, side by side from each side's bytes, then swipes and onion-skins", async () => {
   const { asked, context } = reader({}, { "assets/logo.png": [pngBytes(1), pngBytes(2)] });
   draw({ files: [PNG], context });
-  expect(modes("assets/logo.png")).toEqual(["Rendered*", "Swipe", "Bytes"]);
+  expect(modes("assets/logo.png")).toEqual(["Bytes", "Rendered*"]);
   await settle();
+  expect(stage("assets/logo.png").classList.contains("tf-rstage-img")).toBe(true);
+  expect(imageModes("assets/logo.png")).toEqual(["Side by side*", "Swipe", "Onion"]);
   expect(sides("assets/logo.png")).toEqual(["before", "after"]);
-  const srcs = [...card("assets/logo.png").querySelectorAll<HTMLImageElement>(".tf-ba img")].map((img) => img.getAttribute("src"));
+  const srcs = [...stage("assets/logo.png").querySelectorAll<HTMLImageElement>(".tf-rside img")].map((img) => img.getAttribute("src"));
   expect(srcs).toHaveLength(2);
   expect(srcs.map((src) => blobs.made.get(src!)?.type)).toEqual(["image/png", "image/png"]);
   expect(new Uint8Array(await blobs.made.get(srcs[0]!)!.arrayBuffer()).at(-1)).toBe(1);
   expect(new Uint8Array(await blobs.made.get(srcs[1]!)!.arrayBuffer()).at(-1)).toBe(2);
 
-  mode("assets/logo.png", "Swipe");
+  imageModeTo("assets/logo.png", "Swipe");
   await settle();
-  const swipe = card("assets/logo.png").querySelector(".tf-swipe")!;
+  const box = stage("assets/logo.png");
+  const swipe = box.querySelector(".tf-swipe")!;
   expect([...swipe.querySelectorAll("img")].map((img) => img.getAttribute("src"))).toEqual(srcs);
   const range = swipe.querySelector<HTMLInputElement>("input[type=range]")!;
   const over = swipe.querySelector<HTMLElement>(".tf-swipe-after")!;
@@ -223,6 +292,18 @@ test("a changed PNG opens rendered, side by side from each side's bytes, and swi
   range.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   expect(over.style.getPropertyValue("clip-path")).toBe("inset(0 0 0 20%)");
+
+  imageModeTo("assets/logo.png", "Onion");
+  flushSync();
+  const onion = stage("assets/logo.png").querySelector<HTMLElement>(".tf-swipe-after")!;
+  expect(onion.classList.contains("tf-onion")).toBe(true);
+  expect(onion.style.getPropertyValue("clip-path")).toBe("");
+  expect(onion.style.getPropertyValue("opacity")).toBe("0.2");
+  range.value = "75";
+  range.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(onion.style.getPropertyValue("opacity")).toBe("0.75");
+  expect(stage("assets/logo.png")).toBe(box);
   expect(asked.sort()).toEqual(["bytes new:assets/logo.png", "bytes old:assets/logo.png"]);
 
   mode("assets/logo.png", "Bytes");
@@ -230,11 +311,21 @@ test("a changed PNG opens rendered, side by side from each side's bytes, and swi
   expect(card("assets/logo.png").textContent).toContain("A binary file: no lines to draw.");
 });
 
+test("the image's mode is one choice app-wide: a second image opens the way the first was left", async () => {
+  const OTHER = file("assets/mark.png", { change: "binary", additions: 0, deletions: 0, hunks: [] });
+  const { context } = reader({}, { "assets/logo.png": [pngBytes(1), pngBytes(2)], "assets/mark.png": [pngBytes(3), pngBytes(4)] });
+  draw({ files: [PNG, OTHER], context });
+  await settle();
+  imageModeTo("assets/logo.png", "Onion");
+  await settle();
+  expect(imageModes("assets/mark.png")).toEqual(["Side by side", "Swipe", "Onion*"]);
+});
+
 test("a changed D2 and Graphviz file draw before and after through the diagram engine", async () => {
   const { context } = reader({ "docs/flow.d2": ["a -> b", "a -> c"], "docs/flow.gv": ["digraph { a -> b }", "digraph { a -> c }"] });
   draw({ files: [file("docs/flow.d2"), file("docs/flow.gv")], context });
   for (const path of ["docs/flow.d2", "docs/flow.gv"]) {
-    expect(modes(path)).toEqual(["Rendered", "Lines*"]);
+    expect(modes(path)).toEqual(["Lines*", "Rendered"]);
     mode(path, "Rendered");
   }
   await settle();
@@ -242,7 +333,7 @@ test("a changed D2 and Graphviz file draw before and after through the diagram e
     ["docs/flow.d2", ["a -> b", "a -> c"]],
     ["docs/flow.gv", ["digraph { a -> b }", "digraph { a -> c }"]],
   ] as const) {
-    const panes = [...card(path).querySelectorAll(".tf-ba > figure .tf-fdiagram")];
+    const panes = [...stage(path).querySelectorAll(".tf-rside .tf-fdiagram")];
     // jsdom's port has no engine, so each side keeps its source (numbered lines).
     expect(panes).toHaveLength(2);
     codes.forEach((code, at) => expect(panes[at]!.textContent).toContain(code));
@@ -252,14 +343,14 @@ test("a changed D2 and Graphviz file draw before and after through the diagram e
 
 test("a swipe whose side cannot be read says so instead of reading on", async () => {
   const { context } = reader({}, { "assets/logo.png": [pngBytes(1), pngBytes(2)] });
-  const failing = { ...context, bytes: (f: DiffFile, side: "old" | "new") => (side === "new" ? Promise.reject(new Error("refused")) : context.bytes!(f, side)) };
+  const failing = { ...context, bytes: (f: DiffFile, which: "old" | "new") => (which === "new" ? Promise.reject(new Error("refused")) : context.bytes(f, which)) };
   draw({ files: [PNG], context: failing });
   await settle();
-  mode("assets/logo.png", "Swipe");
+  imageModeTo("assets/logo.png", "Swipe");
   flushSync();
-  const swipe = card("assets/logo.png").querySelector(".tf-swipe")!;
-  expect(swipe.textContent).toContain("The after side could not be read: refused");
-  expect(swipe.textContent).not.toContain("Reading both sides");
+  const box = stage("assets/logo.png");
+  expect(box.textContent).toContain("The side after could not be read: refused");
+  expect(box.querySelector(".tf-skel")).toBeNull();
 });
 
 test("an image's URLs are let go with the file, and an SVG side is sanitized", async () => {
@@ -280,17 +371,19 @@ test("an image's URLs are let go with the file, and an SVG side is sanitized", a
   expect(blobs.revoked.sort()).toEqual(made.map(([url]) => url).sort());
 });
 
-test("a PNG with no side before it (added) shows its after side only and does not swipe", async () => {
+test("a PNG with no side before it (added) shows its after side only, with no modes of its own", async () => {
   const { context } = reader({}, { "assets/logo.png": [null, pngBytes(2)] });
   draw({ files: [PNG], context });
   await settle();
   expect(sides("assets/logo.png")).toEqual(["after"]);
-  expect(modes("assets/logo.png")).toEqual(["Rendered*", "Bytes"]);
+  expect(modes("assets/logo.png")).toEqual(["Bytes", "Rendered*"]);
+  expect(imageModes("assets/logo.png")).toEqual([]);
 });
 
 test("a PNG where no bytes reader is offered stays a binary file", () => {
   const { context } = reader({});
-  draw({ files: [PNG], context });
+  draw({ files: [PNG], context: { text: context.text } });
   expect(modes("assets/logo.png")).toEqual([]);
   expect(card("assets/logo.png").textContent).toContain("A binary file: no lines to draw.");
 });
+

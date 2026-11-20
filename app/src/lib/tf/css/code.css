@@ -229,7 +229,16 @@
 .tf-diff + .tf-diff { margin-top: 12px; }
 /* The file's head stays in view through a long diff. */
 .tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; position: sticky; top: 0; z-index: 2; }
-.tf-diff .tf-fh > .tf-mono { min-width: 0; overflow-wrap: anywhere; }
+/* A long path is one line that gives up its start and keeps the file's name (ux26; design system, *Paths*): the file's
+   caret, badge, path and counts are one group that takes the row's room and shrinks its path, so the controls go to a
+   second line only where even the file's name leaves them none. A rename gives the new path 60 % of the pair's room. */
+.tf-diff .tf-fh-id { display: flex; align-items: center; gap: 4px 10px; flex: 1 1 0; min-width: min(100%, 240px); }
+.tf-diff .tf-fh-id > * { flex: none; }
+.tf-diff .tf-fh-id > .tf-path, .tf-diff .tf-fh-id > .tf-fh-paths { flex: 0 1 auto; min-width: 0; }
+.tf-diff .tf-fh-paths { display: inline-flex; align-items: center; gap: 6px; }
+.tf-diff .tf-fh-paths > .tf-fh-old { flex: 0 1 auto; max-width: 40%; }
+.tf-diff .tf-fh-paths > .tf-fh-new { flex: 0 1 auto; }
+.tf-diff .tf-fh-to { flex: none; color: var(--ink-2); }
 /* The drawer's `.tf-dbody` shares this name: a file's lines want its sideways scroll and none of its padding. */
 .tf-diff .tf-dbody { padding: 0; }
 .tf-diff .tf-ln { display: grid; grid-template-columns: calc(46px * var(--size-code)) calc(46px * var(--size-code)) 1fr auto; white-space: pre; position: relative; }
@@ -350,18 +359,44 @@
 .tf-diff .tf-ran.tf-running::before { content: "…"; }
 .tf-diff .tf-ran-why { --fs: var(--size-ui); font: 400 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); white-space: nowrap; }
 .tf-diff > .tf-banner { --fs: var(--size-ui); font-family: var(--sans); }
-/* A rendered diff (#2279): before and after side by side, `mockups/code-area/diff.html`. */
-.tf-ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.tf-ba.tf-ba-one { grid-template-columns: minmax(0, 1fr); }
-.tf-ba > figure { margin: 0; min-width: 0; display: flex; flex-direction: column; }
-.tf-ba > figure + figure { border-left: 1px solid var(--rule); }
-.tf-ba figcaption { padding: 6px 14px; --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
-.tf-ba-old figcaption { box-shadow: inset 3px 0 0 var(--err); }
-.tf-ba-new figcaption { box-shadow: inset 3px 0 0 var(--ok); }
-.tf-ba > figure > .tf-dim, .tf-ba > figure > .tf-stepfail { margin: 0; padding: 10px 14px; font-size: calc(var(--t-sm) * var(--fs)); }
-.tf-ba-body { min-width: 0; overflow: auto; background: var(--under); }
-.tf-ba-doc { padding: 0 14px; }
-.tf-ba-img { padding: 14px; display: grid; place-items: center; }
+/* A rendered diff (#2279) in its stage (ux26, 2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md):
+   a caption row, the stage and a foot, each at its final height from the frame the card turns. The stage's height comes
+   from the kind of renderer alone; what lands in it scrolls inside it, so nothing under the card moves. */
+.tf-rcap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); box-sizing: border-box; height: 29px; border-bottom: 1px solid var(--rule-2); position: relative; --fs: var(--size-ui); font: 400 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); }
+.tf-rcap.tf-rcap-one { grid-template-columns: minmax(0, 1fr); }
+.tf-rcap-side { display: block; min-width: 0; padding: 0 14px; line-height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-rcap-side b { font-weight: 600; color: var(--ink); margin-right: 4px; }
+.tf-rcap-old { box-shadow: inset 3px 0 0 var(--err); }
+.tf-rcap-new { box-shadow: inset 3px 0 0 var(--ok); }
+.tf-rcap-old + .tf-rcap-new { border-left: 1px solid var(--rule); }
+.tf-rcap-both b.tf-rcap-to { margin-left: 10px; }
+/* The image's modes and *Render as* at the row's right end, over the last column's words, on the row's own ground. */
+.tf-rcap-acts { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; gap: var(--control-gap); padding: 0 8px 0 12px; background: var(--sheet); }
+/* Its one row is at least the stage's height, so the rule between the two columns runs to the stage's foot. */
+.tf-rstage { --tf-rstage: clamp(360px, 56vh, 640px); height: var(--tf-rstage); overflow: auto; background: var(--under); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-rows: minmax(100%, max-content); align-content: start; }
+.tf-rstage.tf-rstage-img { --tf-rstage: 320px; }
+.tf-rstage.tf-rstage-one { grid-template-columns: minmax(0, 1fr); }
+.tf-rstage.tf-rstage-open { height: auto; overflow: visible; }
+.tf-rside { min-width: 0; }
+.tf-rside + .tf-rside { border-left: 1px solid var(--rule); }
+.tf-rside-doc { padding: 0 14px; }
+.tf-rside > .tf-stepfail { margin: 10px 0; }
+.tf-rside-doc > .tf-stepfail { margin: 10px 0; }
+.tf-rwait { padding: 14px 0; }
+.tf-rside-img { box-sizing: border-box; height: calc(var(--tf-rstage) - 1px); padding: 14px; display: grid; place-items: center; }
+.tf-rstage-open .tf-rside-img { height: auto; }
+.tf-rside-img > img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.tf-rside-old > img { outline: 2px solid var(--err); }
+.tf-rside-new > img { outline: 2px solid var(--ok); }
+/* A frame in the stage (a page, a command's output) scrolls itself, so the stage does not: one stage's height each. */
+.tf-rstage .tf-rframe, .tf-rstage .tf-rstage-frame { min-height: 0; height: calc(var(--tf-rstage) - 1px); }
+.tf-rstage.tf-rstage-open .tf-rframe, .tf-rstage.tf-rstage-open .tf-rstage-frame { height: 640px; }
+.tf-rside-doc:has(> .tf-rframe, > .tf-rstage-frame) { padding: 0; }
+/* A PDF's own head names the sides the caption already names. */
+.tf-rstage .tf-pdfd-head { display: none; }
+.tf-rfoot { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 31px; padding: 0 12px; border-top: 1px solid var(--rule-2); --fs: var(--size-ui); font: 400 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); }
+.tf-rfoot-say { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.tf-rfoot-all[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
 /* A PDF's rendered diff (#2282): page rows, before | after, the differing ones marked. */
 .tf-pdfd { background: var(--sheet); --under: var(--sheet); }
 .tf-pdfd-wait { margin: 0; padding: 10px 14px; font-size: calc(var(--t-sm) * var(--fs)); }
@@ -385,15 +420,18 @@
 .tf-pdfd-text > p { margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-pdfd-hunk { background: var(--sheet); }
 .tf-pdfd-none { align-self: center; padding: 24px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); font-style: italic; }
-.tf-ba-img > img, .tf-swipe-box img { max-width: 100%; background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0 / 16px 16px; }
-.tf-ba-old .tf-ba-img > img { outline: 2px solid var(--err); }
-.tf-ba-new .tf-ba-img > img { outline: 2px solid var(--ok); }
-.tf-swipe { padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.tf-swipe-box { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
-.tf-swipe-box img { display: block; }
+.tf-rside-img > img, .tf-swipe-box img { background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0 / 16px 16px; }
+/* Swipe and onion: the after side over the before, cut where the slider stands or as opaque as it says. */
+.tf-rside-over { box-sizing: border-box; height: calc(var(--tf-rstage) - 1px); }
+.tf-rstage-open .tf-rside-over { height: auto; }
+.tf-swipe { box-sizing: border-box; height: 100%; padding: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.tf-swipe-box { position: relative; display: inline-block; max-width: 100%; min-height: 0; line-height: 0; }
+.tf-swipe-box img { display: block; max-width: 100%; max-height: calc(var(--tf-rstage) - 72px); }
+.tf-rstage-open .tf-swipe-box img { max-height: none; }
 .tf-swipe-after { position: absolute; inset: 0; }
-.tf-swipe-after img { width: 100%; height: 100%; object-fit: contain; }
-.tf-swipe-bar { display: flex; gap: 8px; align-items: center; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-swipe-after img { width: 100%; height: 100%; max-height: none; object-fit: contain; }
+.tf-swipe-after.tf-onion { clip-path: none; }
+.tf-swipe-bar { display: flex; gap: 8px; align-items: center; flex: none; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-swipe-bar input { width: 240px; }
 /* In the gutter, at the start of the line's numbers, where the eye already is: at the row's far end it was 900 px from the code (F-244). */
 .tf .tf-addc {

@@ -104,7 +104,7 @@ test("a changed PDF opens Rendered, page by page side by side, and marks the one
   const pdf = pdfPort();
   draw([PDF("docs/spec.pdf")], { "docs/spec.pdf": [bytes("a", "b", "c"), bytes("a", "B", "c")] }, pdf.port);
   await settle();
-  expect([...card("docs/spec.pdf").querySelectorAll(".tf-fh .tf-seg button")].map((b) => `${b.textContent}${b.getAttribute("aria-pressed") === "true" ? "*" : ""}`)).toEqual(["Rendered*", "Bytes"]);
+  expect([...card("docs/spec.pdf").querySelectorAll(".tf-fh .tf-seg button")].map((b) => `${b.textContent}${b.getAttribute("aria-pressed") === "true" ? "*" : ""}`)).toEqual(["Bytes", "Rendered*"]);
   expect(rows("docs/spec.pdf")).toEqual([
     "same: page 1 before | page 1 after",
     "changed: page 2 before | page 2 after [changed]",

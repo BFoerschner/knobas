@@ -113,6 +113,11 @@ const PLACES = [
   { name: "rerender-again", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-madebar-run`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}/rendered/site/docs` },
   { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
   { name: "repo-commit", optional: "real", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
+  // A rendered side that lands late (the stage pass of ux26, 2026-11-20): *Rendered* on the commit's README draws the
+  // caption, the stage at its final height and the foot in the press's frame; each side's bytes 400 ms later land inside
+  // the stage, so nothing outside it moves (before, a late side's `Reading…` gave way to the document and pushed every
+  // card under it down).
+  { name: "diff-rendered-late", fixture: true, fake: "fake-rendered-diff", late: "entity_file_bytes:400", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, press: `${shown} .tf-diff[data-file="README.md"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-diff[data-file="README.md"] .tf-rstage`, away: `#/repo/${REPO}` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "app-add", optional: "real", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
   { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "Escape", tabs: true },

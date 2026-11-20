@@ -84,6 +84,7 @@
   import TfKeyed from "../TfKeyed.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
+  import { endWords } from "../diff/rendered";
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
   import { echoWrite, echoesOn, watchEchoes } from "../queued.svelte";
@@ -207,6 +208,11 @@
   let cut = $state(false);
   /** What the compare's diff is between, where the source settled it (#2310): context reads at its shas. */
   let range = $state.raw<DiffRange | null>(null);
+  /** A rendered file's caption: each side's branch and where it is read (`main at 4f2a91c`). */
+  const sideNamesOf = (at: DiffRange) => {
+    const [into, from] = [`${base} at ${endWords(at.base)}`, `${head ?? "head"} at ${endWords(at.head)}`];
+    return () => ({ old: into, new: from });
+  };
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
   /** The source answered the compare 404: it holds no such branch, as of that read. */
@@ -1015,7 +1021,15 @@
             <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
           {/if}
           {#key `${filesFor}\n${range?.base}\n${range?.head}`}
-            <TfDiffView {files} {cut} {context} {fill} {counted} calm={!reading} openAt={head === null ? null : { entityId: repoId, at: head }} />
+            <TfDiffView
+              {files}
+              {cut}
+              {context}
+              {fill}
+              {counted}
+              calm={!reading}
+              sideNames={range === null ? null : sideNamesOf(range)}
+              openAt={head === null ? null : { entityId: repoId, at: head }} />
           {/key}
         {/if}
       </TfWaiting>

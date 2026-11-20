@@ -138,7 +138,8 @@
           near.disconnect();
           go();
         },
-        { rootMargin: "800px 0px" },
+        // In a rendered diff's stage the pages scroll in the stage, not the page (the stage pass, 2026-11-20).
+        { root: node.closest(".tf-rstage, .tf-main, .tf-bmain"), rootMargin: "800px 0px" },
       );
       near.observe(node);
       return () => {
