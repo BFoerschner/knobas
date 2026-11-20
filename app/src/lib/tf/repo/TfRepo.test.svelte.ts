@@ -26,6 +26,8 @@ import type {
 } from "../../ipc/entity";
 import TfRepo, { forgetHeaderLooks, forgetHeaderSearches, type RepoPorts } from "./TfRepo.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
+import type { EntityRefresh } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import { drawsReading } from "../../shell/test-witness";
 import { forgetCounts } from "./last-commit-counts";
 
@@ -1116,6 +1118,23 @@ test("⌘R on a repository runs its Refresh, as a click does (#2156)", async () 
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect(probe.refreshed).toEqual([REPO]);
+});
+
+test("⌘R on a repository says it reads that repository, by its name, and ends in the same toast (ux25)", async () => {
+  toasts.items = [];
+  let release!: (answer: EntityRefresh) => void;
+  const probe = refreshProbe({ answer: () => new Promise<EntityRefresh>((resolve) => (release = resolve)) });
+  await draw([REPO], ports({ getEntity: repoDetail(), refresh: probe.ports }));
+  const wide = refreshButton()?.getBoundingClientRect().width;
+  pressRefreshKey();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Refreshing payout-service…"]);
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  expect(refreshButton()?.getBoundingClientRect().width).toBe(wide);
+  release({ outcome: "refreshed" });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual([expect.stringMatching(/^Refreshed payout-service from /)]);
+  toasts.items = [];
 });
 
 // Keep-alive inside the repository (#2248) and a hidden page's pause (#2249).

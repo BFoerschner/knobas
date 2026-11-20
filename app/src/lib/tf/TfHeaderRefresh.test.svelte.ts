@@ -11,7 +11,7 @@ import TfHeaderRefresh from "./TfHeaderRefresh.svelte";
 import { createDetailRefresh } from "./refresh.svelte";
 import { detailOf, refreshProbe } from "./refresh.fixture";
 import { toasts } from "../shell/toasts.svelte";
-import type { SourceSyncStatus } from "../ipc/sources";
+import type { EntityRefresh, SourceSyncStatus } from "../ipc/sources";
 
 /** The role frame's *Sync now*, as `TfKeptPage` hands it to the view. */
 const sync = createRawSnippet(() => ({ render: () => `<button type="button" class="tf-btn tf-syncnow">Sync now</button>` }));
@@ -29,6 +29,11 @@ afterEach(() => {
   view = undefined;
   target.remove();
 });
+
+/** Every promise queued so far, settled. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+}
 
 /** The buttons drawn, each as its label and whether it is the view's (`tf-syncnow`) or the detail's. */
 function draw(detail: ReturnType<typeof detailOf> | null): string[] {
@@ -99,7 +104,7 @@ test("while the source's last sync failed, the toast adds that to what the refre
   toasts.items = [];
 });
 
-test("a press while the source syncs says so at once, reads nothing again, and the button is Refresh again (the query audit, 2026-11-12)", async () => {
+test("a press while the source syncs says so at once, reads the page again at once, and the button is Refresh again (the query audit, 2026-11-12; ux25)", async () => {
   toasts.items = [];
   const detail = detailOf("teamcity:build:1");
   const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "run_in_flight" }) });
@@ -108,7 +113,8 @@ test("a press while the source syncs says so at once, reads nothing again, and t
   await refresh.refresh(detail, () => void (reread += 1));
   expect(refresh.reading).toBe(false);
   expect(refresh.failed).toBeNull();
-  expect(reread).toBe(0);
+  // The page's views are the source's own answers: read again now, the mirror left to the run.
+  expect(reread).toBe(1);
   expect(probe.synced).toEqual([]);
   expect(toasts.items.map((toast) => [toast.text, toast.tone ?? "plain"])).toEqual([
     ["Tidewater CI is syncing now. This page updates when that sync ends.", "plain"],
@@ -117,4 +123,67 @@ test("a press while the source syncs says so at once, reads nothing again, and t
   await refresh.refresh(detail, () => void (reread += 1));
   expect(toasts.items).toHaveLength(1);
   expect(probe.refreshed).toEqual(["teamcity:build:1", "teamcity:build:1"]);
+});
+
+test("a press the run held off presses once more when that run ends, and only once (Fable's ruling 4, ux25)", async () => {
+  toasts.items = [];
+  const detail = detailOf("teamcity:build:1");
+  const answers: EntityRefresh[] = [{ outcome: "run_in_flight" }, { outcome: "run_in_flight" }, { outcome: "refreshed" }];
+  const probe = refreshProbe({ answer: () => Promise.resolve(answers.shift() ?? { outcome: "refreshed" }) });
+  const refresh = createDetailRefresh(probe.ports);
+  await refresh.refresh(detail, () => {}, "build 1");
+  expect(probe.refreshed).toHaveLength(1);
+  // Another source's run ending is not this one's.
+  probe.end("another");
+  await settle();
+  expect(probe.refreshed).toHaveLength(1);
+  probe.end("teamcity");
+  await settle();
+  expect(probe.refreshed).toHaveLength(2);
+  // The retry found a run again: it says so and waits no more.
+  probe.end("teamcity");
+  await settle();
+  expect(probe.refreshed).toHaveLength(2);
+});
+
+test("a press the run held off does not press again for an item the page left (ux25)", async () => {
+  const detail = detailOf("teamcity:build:1");
+  const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "run_in_flight" }) });
+  const refresh = createDetailRefresh(probe.ports);
+  await refresh.refresh(detail, () => {});
+  refresh.reset();
+  probe.end("teamcity");
+  await settle();
+  expect(probe.refreshed).toHaveLength(1);
+});
+
+test("a named press says what it reads while it reads, and its end takes that toast's place (ux25)", async () => {
+  toasts.items = [];
+  const detail = detailOf("teamcity:build:1");
+  let release!: (answer: EntityRefresh) => void;
+  const probe = refreshProbe({ answer: () => new Promise<EntityRefresh>((resolve) => (release = resolve)) });
+  const refresh = createDetailRefresh(probe.ports);
+  const pressed = refresh.refresh(detail, () => {}, "payout-service");
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Refreshing payout-service…"]);
+  const id = toasts.items[0]?.id;
+  release({ outcome: "refreshed" });
+  await pressed;
+  expect(toasts.items.map((toast) => [toast.id, toast.text])).toEqual([[id, "Refreshed payout-service from Tidewater CI"]]);
+});
+
+test("a named press that fails drops its toast and keeps the one line under the header (ux25)", async () => {
+  toasts.items = [];
+  const detail = detailOf("teamcity:build:1");
+  const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "failed", reason: "502 Bad Gateway" }) });
+  const refresh = createDetailRefresh(probe.ports);
+  await refresh.refresh(detail, () => {}, "payout-service");
+  expect(toasts.items).toEqual([]);
+  expect(refresh.failed).toBe("Couldn't refresh: 502 Bad Gateway");
+});
+
+test("the button holds the width of its widest word, so Refreshing… moves nothing beside it (ux25)", () => {
+  draw(detailOf("teamcity:build:1"));
+  const held = target.querySelector(".tf-refresh .tf-keepw");
+  expect([held?.getAttribute("data-keep"), held?.getAttribute("data-keep2")]).toEqual(["Refresh", "Refreshing…"]);
+  expect(target.querySelector(".tf-refresh")?.textContent).toBe("Refresh");
 });

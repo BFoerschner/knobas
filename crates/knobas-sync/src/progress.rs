@@ -418,6 +418,16 @@ impl Source for Observed<'_> {
         self.inner.refresh(entity).await
     }
 
+    /// Delegated, and unreported, as [`refresh`](Self::refresh): a walk of
+    /// one parent is a refresh, not a run (ADR-0047).
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        self.inner.refresh_under(entity, cursor).await
+    }
+
     /// Delegated, and deliberately unreported: this decorator narrates a *sync
     /// run* -- a run id, a phase, a growing item count -- and the workflow read
     /// belongs to a detail somebody opened, which has no run and no progress

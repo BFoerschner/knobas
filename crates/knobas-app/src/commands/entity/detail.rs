@@ -658,8 +658,9 @@ mod tests {
         assert!(refreshes(&registry(), Some("teamcity"), "build"));
         assert!(!refreshes(&registry(), Some("teamcity"), "build_config"));
         assert!(refreshes(&registry(), Some("gitea"), "pr"));
+        // Walked with their repository (ADR-0047), so their pages draw *Refresh* and ⌘R reads one repository.
         for kind in ["repo", "branch", "commit"] {
-            assert!(!refreshes(&registry(), Some("gitea"), kind), "gitea {kind}");
+            assert!(refreshes(&registry(), Some("gitea"), kind), "gitea {kind}");
         }
         assert!(!refreshes(&registry(), Some("jira"), "jira_view"));
         assert!(!refreshes(&registry(), Some("mock"), "no-such-kind"));

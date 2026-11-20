@@ -349,6 +349,26 @@ impl Source for GiteaSource {
         crate::refresh::refresh(self, entity).await
     }
 
+    /// A repository, a branch or a commit: its repository walked as a run
+    /// walks it, from where the position says it stood (`crate::sync::walk_one`,
+    /// ADR-0047). `NotOffered` for the kinds `refresh` reads by number.
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        match self.key_of(entity)? {
+            crate::keys::GiteaKey::Repo { owner, repo }
+            | crate::keys::GiteaKey::Branch { owner, repo, .. }
+            | crate::keys::GiteaKey::Commit { owner, repo, .. } => {
+                crate::sync::walk_one(self, &owner, &repo, cursor).await
+            }
+            crate::keys::GiteaKey::Pr { .. } | crate::keys::GiteaKey::Issue { .. } => {
+                Ok(knobas_source::UnderAnswer::NotOffered)
+            }
+        }
+    }
+
     /// Perform one of the four writes M2 ratified for Gitea, the merge the
     /// source views added (#667), the review the pull request's toolbar
     /// writes (#705), its edit, close and reopen (#706), the branch delete

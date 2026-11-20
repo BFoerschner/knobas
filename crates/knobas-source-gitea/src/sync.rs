@@ -512,6 +512,107 @@ pub(crate) async fn run(
     Ok(next.to_json())
 }
 
+/// A refresh under one repository (ADR-0047, `Source::refresh_under`): the
+/// run's walk of `owner/name` alone, from where the stored position says it
+/// stood, and that position moved as the run would move it.
+///
+/// * **No position, no walk.** A cursor that does not parse, names no
+///   repository, or holds one the scope no longer admits owes a full sync
+///   (`run`'s rules); a position naming this one repository would make the
+///   next run incremental and cancel that sync and its sweep. So
+///   `NotOffered`, and the app runs the source.
+/// * **Identity first**, as `run`: only a token shown good lets a 404 below
+///   be read as a fact about the repository.
+/// * **The repository read by name** (`GET /repos/{owner}/{repo}`), which
+///   Gitea answers with the record its listing gives, so the fingerprint the
+///   change gate compares is the run's.
+/// * **Gone is a 404 on that read**: the repository's tombstone, and its entry
+///   leaves the position, so one that comes back is walked from blank.
+/// * **Any other refusal fails the refresh**: `walk_repo`'s skip arms are a
+///   run's, which goes on to the next repository; a refresh has none.
+/// * **The position moves only when the walk emitted something**, as a run's
+///   does; every other repository's entry and `repos_listed_at` stay.
+pub(crate) async fn walk_one(
+    source: &crate::GiteaSource,
+    owner: &str,
+    name: &str,
+    cursor: Option<&str>,
+) -> Result<knobas_source::UnderAnswer, SourceError> {
+    use knobas_source::UnderAnswer;
+    let Some(mut position) = GiteaCursor::parse(cursor) else {
+        return Ok(UnderAnswer::NotOffered);
+    };
+    let full_name = format!("{owner}/{name}");
+    if position.repos.is_empty()
+        || position
+            .repos
+            .keys()
+            .any(|stored| !in_scope(&source.config, stored))
+        || !admits(&source.config, owner, &full_name)
+    {
+        return Ok(UnderAnswer::NotOffered);
+    }
+    source.client.current_user().await?;
+    let raw = match source.client.get_repo(owner, name).await {
+        Ok(raw) => raw,
+        Err(error) if error.status() == Some(404) => {
+            let stored = position.entry_like(&full_name).map(|(key, _)| key.clone());
+            if let Some(key) = stored {
+                position.repos.remove(&key);
+            }
+            return Ok(UnderAnswer::Walked {
+                items: vec![map::repo_tombstone(&source.id, owner, name)],
+                cursor: Some(position.to_json()),
+            });
+        }
+        Err(error) => return Err(in_repository(&full_name, error)),
+    };
+    let repo: model::Repo = serde_json::from_value(raw.clone()).map_err(|error| {
+        SourceError::protocol(format!(
+            "gitea: {full_name} answered a record this adapter cannot read: {error}"
+        ))
+    })?;
+    if repo.owner_repo().is_none() {
+        return Err(SourceError::protocol(format!(
+            "gitea: {full_name} answered an unaddressable name {:?}",
+            repo.full_name
+        )));
+    }
+    let selected = Selected {
+        full_name: repo.full_name.clone(),
+        raw,
+        repo,
+        listed: false,
+    };
+    let before = position.repo(&selected.full_name);
+    let mut after = before.clone();
+    let mut buffer = Buffered(Vec::new());
+    let mut emitted = 0;
+    if let Err(RepoError::Fatal(error) | RepoError::Skip(error)) = sync_repo(
+        source,
+        &selected,
+        &before,
+        &mut after,
+        &mut buffer,
+        &mut emitted,
+    )
+    .await
+    {
+        return Err(in_repository(&selected.full_name, error));
+    }
+    if emitted == 0 {
+        return Ok(UnderAnswer::Walked {
+            items: Vec::new(),
+            cursor: None,
+        });
+    }
+    position.repos.insert(selected.full_name.clone(), after);
+    Ok(UnderAnswer::Walked {
+        items: buffer.0,
+        cursor: Some(position.to_json()),
+    })
+}
+
 /// How one repository's walk ended.
 enum Outcome {
     /// Walked: its position for the next run and the items it emitted, in

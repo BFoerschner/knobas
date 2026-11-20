@@ -154,9 +154,9 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // repository in scope. This is what retires the row of a
             // repository that was deleted upstream.
             full_sync_exhaustive: true,
-            // `crate::refresh` reads a pull request and an issue by id, and
-            // answers a repository, branch or commit not offered (#2146).
-            refreshes: false,
+            // Not by id: `refresh_under` walks the repository as a run
+            // walks it (ADR-0047), for this kind, a branch and a commit.
+            refreshes: true,
         },
         KindInfo {
             id: KIND_BRANCH.into(),
@@ -170,7 +170,8 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // branch -- and `branch` is precisely the kind links hang off
             // (spec §5a).
             full_sync_exhaustive: true,
-            refreshes: false,
+            // Its repository walked (ADR-0047).
+            refreshes: true,
         },
         KindInfo {
             id: KIND_PR.into(),
@@ -189,7 +190,8 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             monogram: "CM".into(),
             // `commits_per_repo`, likewise.
             full_sync_exhaustive: false,
-            refreshes: false,
+            // Its repository walked (ADR-0047).
+            refreshes: true,
         },
         KindInfo {
             id: KIND_TICKET.into(),

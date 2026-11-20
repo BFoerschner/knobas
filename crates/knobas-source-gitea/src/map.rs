@@ -202,6 +202,31 @@ pub(crate) fn branch_item(
     }
 }
 
+/// A repository whose own read answers 404, from a refresh under it
+/// (ADR-0047): the run leaves such a row to the next sweep, which a walk of
+/// one repository has no licence for, so the walk says so itself. The payload
+/// is synthesised, as a branch's tombstone is, with the names the parent
+/// declaration of the rows under it reads.
+pub(crate) fn repo_tombstone(source_id: &str, owner: &str, name: &str) -> SyncItem {
+    let full_name = format!("{owner}/{name}");
+    SyncItem {
+        entity: EntityRef::new(source_id, &keys::repo_key(owner, name)),
+        kind: KIND_REPO.to_owned(),
+        title: full_name.clone(),
+        body_text: body_text([full_name.clone()]),
+        author: None,
+        updated_at: None,
+        payload: serde_json::json!({
+            "full_name": full_name,
+            "name": name,
+            "owner": { "login": owner },
+            "deleted": true
+        }),
+        web_url: None,
+        deleted: true,
+    }
+}
+
 /// A branch that was in the cursor and is not in the listing any more.
 ///
 /// The payload is synthesised -- there is no record to keep, because the record

@@ -1879,6 +1879,28 @@ pub enum RefreshAnswer {
     NotOffered,
 }
 
+/// What a source answers when asked to read an item **and what stands under
+/// it** ([`Source::refresh_under`], ADR-0047): a repository, its branches, its
+/// pull requests, its issues and the commits of the branches that moved.
+#[derive(Debug, Clone)]
+pub enum UnderAnswer {
+    /// The walk ran: the items a run would have emitted for this one parent
+    /// from where it stood, the asked item's tombstone among them when the
+    /// source no longer has it, and the parent's own position moved where
+    /// the run would have left it. `cursor: None` leaves the stored position
+    /// as it is (the walk emitted nothing); `Some` replaces it whole, every
+    /// other parent's position kept as it was.
+    Walked {
+        /// What the walk emitted, in the order it emitted them.
+        items: Vec<SyncItem>,
+        /// The stored position with this parent's part moved, or `None`.
+        cursor: Option<Cursor>,
+    },
+    /// This adapter does not read this item's kind with what stands under
+    /// it, or holds no position to walk from: the app runs the source.
+    NotOffered,
+}
+
 impl WriteOp {
     /// Whether a [`WriteReceipt::remote_id`] for this op is the **local part
     /// of an entity id**: the item the write made, which `<source_id>:<remote_id>`
@@ -2007,6 +2029,34 @@ pub trait Source: Send + Sync {
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         let _ = entity;
         Ok(RefreshAnswer::NotOffered)
+    }
+    /// Read one item and what stands under it, from where the source's
+    /// stored position (`cursor`) says this parent stood: a **refresh under a
+    /// parent** (`CONTEXT.md` *Refresh*, ADR-0047). Asked by the engine when
+    /// [`refresh`](Source::refresh) answers [`RefreshAnswer::NotOffered`] for
+    /// `entity`, inside the same lock and transaction, so it never overlaps a
+    /// run of the source.
+    ///
+    /// It is a run's walk of one parent and nothing more: the items a run
+    /// would emit for that parent ([`UnderAnswer::Walked`]), the parent's
+    /// part of the position moved as the run would move it, every other
+    /// part untouched. No sweep and no [`Sink::walked_whole`]: a walk of one
+    /// parent never licenses one. A parent the source no longer has comes
+    /// back as its tombstone item. [`UnderAnswer::NotOffered`], the default,
+    /// is a kind this adapter does not walk this way, or a `cursor` that holds
+    /// no position (a full sync is owed, which a refresh may not cancel).
+    ///
+    /// A kind answered here counts as refreshed for
+    /// [`KindInfo::refreshes`], and [`contract::battery`] clause 13 holds it:
+    /// asked right after a run of an unchanged source, the walk emits
+    /// nothing and leaves the position.
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<UnderAnswer, SourceError> {
+        let _ = (entity, cursor);
+        Ok(UnderAnswer::NotOffered)
     }
     /// Why this source does not declare `op`, in words a person can act on,
     /// when the adapter knows more than that it does not. An Uptime Kuma with

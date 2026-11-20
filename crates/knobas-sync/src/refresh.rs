@@ -23,7 +23,7 @@
 //! resolves them once a refresh ends, as it does once a run ends.
 
 use knobas_core::entity::EntityRef;
-use knobas_source::{RefreshAnswer, Sink, Source, SourceError};
+use knobas_source::{Cursor, RefreshAnswer, Sink, Source, SourceError, UnderAnswer};
 use sqlx::{Connection, PgConnection, Postgres, Transaction};
 
 use crate::scheduler::SchedulerDeps;
@@ -219,7 +219,42 @@ async fn refresh_locked(
     }
 
     let outcome = match source.refresh(entity).await? {
-        RefreshAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),
+        RefreshAnswer::NotOffered => {
+            // The read of the item with what stands under it (ADR-0047),
+            // from the position the source stands at, read inside the lock
+            // as a run reads it: a run's end writes the whole cursor, and a
+            // position read before the lock could be one that run replaced.
+            let stored: Option<(Option<Cursor>,)> =
+                sqlx::query_as("select cursor from knobas.source_config where id = $1")
+                    .bind(source_id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            let stored = stored.and_then(|(cursor,)| cursor);
+            let (items, cursor) = match source.refresh_under(entity, stored.as_deref()).await? {
+                UnderAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),
+                UnderAnswer::Walked { items, cursor } => (items, cursor),
+            };
+            let gone = items
+                .iter()
+                .any(|item| item.deleted && item.entity.to_string() == entity);
+            write_items(tx, source_id, kinds, role_check, items).await?;
+            // The parent's position moves with its rows, in this transaction:
+            // Gitea's change gates compare the forge with the position, so
+            // rows written past it would be judged against a forge that may
+            // since have gone back to it (ADR-0047).
+            if let Some(cursor) = cursor {
+                sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+                    .bind(&cursor)
+                    .bind(source_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+            if gone {
+                RefreshOutcome::Gone
+            } else {
+                RefreshOutcome::Refreshed
+            }
+        }
         RefreshAnswer::Gone => {
             sqlx::query(TOMBSTONE)
                 .bind(entity)
@@ -239,21 +274,7 @@ async fn refresh_locked(
             } else {
                 RefreshOutcome::Refreshed
             };
-            // Judged as a run judges, on what the refresh read: the same
-            // rule an incremental run's handful of records is held to.
-            let kept_roles = role_check::load(tx, source_id).await?;
-            let role_check = (!role_check.is_empty()
-                && role_check::wanted(&role_check, &kept_roles))
-            .then_some(role_check);
-            let roles = {
-                let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
-                sink.item(item).await?;
-                sink.flush().await?;
-                sink.roles
-            };
-            if let Some(check) = roles {
-                role_check::record(tx, source_id, &kept_roles, &check.finish()).await?;
-            }
+            write_items(tx, source_id, kinds, role_check, vec![item]).await?;
             outcome
         }
     };
@@ -270,4 +291,31 @@ async fn refresh_locked(
     )
     .await?;
     Ok(outcome)
+}
+
+/// Write what a refresh read through the run's item write, judged as a run
+/// judges: the same role rule an incremental run's handful of records is
+/// held to.
+async fn write_items(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    kinds: std::collections::HashSet<String>,
+    role_check: knobas_source::role::data::DataCheck,
+    items: Vec<knobas_source::SyncItem>,
+) -> Result<(), SyncError> {
+    let kept_roles = role_check::load(tx, source_id).await?;
+    let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
+        .then_some(role_check);
+    let roles = {
+        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
+        for item in items {
+            sink.item(item).await?;
+        }
+        sink.flush().await?;
+        sink.roles
+    };
+    if let Some(check) = roles {
+        role_check::record(tx, source_id, &kept_roles, &check.finish()).await?;
+    }
+    Ok(())
 }

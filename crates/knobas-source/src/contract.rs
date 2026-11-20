@@ -510,8 +510,9 @@ where
     }
     // 13. The refresh (ADR-0031): declared exactly when it answers, kind by
     //     kind (#2146), and each kind it answers for read back as the sync
-    //     emitted it.
-    check_refresh(&*s, &d, &sink.0).await;
+    //     emitted it; a kind read with what stands under it (ADR-0047)
+    //     walked from the position the idle run of clause 2 kept.
+    check_refresh(&*s, &d, &sink.0, Some(&cursor)).await;
     // 14. Code pages (#2274): each template starts with `/` and carries only
     //     its page's placeholders -- see `code_pages::check`.
     if let Some(pages) = &d.code_pages
@@ -542,10 +543,17 @@ where
 ///   to each other as `Capability::Write` is to `write_ops`: an adapter that
 ///   answers for a kind declares it, and one that declares it answers for at
 ///   least one kind its sync emitted.
+/// * A kind `refresh` does not read may be read with what stands under it
+///   ([`crate::Source::refresh_under`], ADR-0047), and counts as refreshed
+///   then. Walked from `cursor`, the position a run just left on a source
+///   nothing changed since, it emits nothing and leaves the position as it
+///   is: the walk's analog of clause 2, without which every press would
+///   rewrite rows and move a position nothing moved.
 async fn check_refresh(
     s: &dyn crate::Source,
     d: &crate::SourceDescriptor,
     items: &[crate::SyncItem],
+    cursor: Option<&str>,
 ) {
     let mut kinds = std::collections::HashSet::new();
     let mut asked: Vec<&crate::SyncItem> = items
@@ -562,6 +570,36 @@ async fn check_refresh(
         });
         let kind = item.kind.as_str();
         if matches!(answer, crate::RefreshAnswer::NotOffered) {
+            let under = s.refresh_under(&id, cursor).await.unwrap_or_else(|error| {
+                panic!("refresh_under of {id}, which the sync emitted, failed: {error}")
+            });
+            if let crate::UnderAnswer::Walked {
+                items: walked,
+                cursor: moved,
+            } = under
+            {
+                assert!(
+                    declares && d.refreshes_kind(kind),
+                    "refresh_under walks {id} but the descriptor does not declare kind {kind:?} \
+                     refreshed (and Capability::Refresh) -- its detail would draw Sync now for a \
+                     press the walk answers"
+                );
+                if cursor.is_some() && !item.deleted {
+                    assert!(
+                        walked.is_empty(),
+                        "refresh_under of {id} on a source nothing changed since the run emitted \
+                         {} items -- a walk from the run's own position must find nothing",
+                        walked.len()
+                    );
+                    assert!(
+                        moved.is_none(),
+                        "refresh_under of {id} emitted nothing but moved the position -- a walk \
+                         that found nothing must leave it as it was"
+                    );
+                }
+                answered = true;
+                continue;
+            }
             assert!(
                 !d.refreshes_kind(kind),
                 "the descriptor declares kind {kind:?} refreshed but refresh answered NotOffered \
@@ -637,7 +675,7 @@ async fn check_refresh(
 /// witness, a monitor paused or deleted on the real server among it, so the
 /// suite hands this check the batch one of its runs emitted.
 pub async fn refreshes_as_it_syncs(source: &dyn crate::Source, items: &[crate::SyncItem]) {
-    check_refresh(source, &source.descriptor(), items).await;
+    check_refresh(source, &source.descriptor(), items, None).await;
 }
 
 /// Every payload path a kind's declaration names, read off its serialized
@@ -1977,6 +2015,14 @@ mod tests {
         RefreshesAnotherStatus,
         /// Answers a live item gone.
         RefreshesALiveItemAsGone,
+        /// Reads nothing by id and walks its item with what stands under it
+        /// (ADR-0047), finding nothing on a source nothing changed: the
+        /// conforming case of the walk.
+        WalksUnder,
+        /// Walks, and finds the sync's items again on a source nothing changed.
+        WalksUnderFindingWhatDidNotChange,
+        /// Walks, finds nothing, and moves the position all the same.
+        WalksUnderMovingThePosition,
     }
 
     struct TestSource {
@@ -2034,7 +2080,10 @@ mod tests {
                     | Behavior::RefreshesAKindDeclaredNotRefreshed
                     | Behavior::RefreshesAnotherTitle
                     | Behavior::RefreshesAnotherStatus
-                    | Behavior::RefreshesALiveItemAsGone => {
+                    | Behavior::RefreshesALiveItemAsGone
+                    | Behavior::WalksUnder
+                    | Behavior::WalksUnderFindingWhatDidNotChange
+                    | Behavior::WalksUnderMovingThePosition => {
                         vec![Capability::Search, Capability::Refresh]
                     }
                     _ => vec![Capability::Search],
@@ -2589,6 +2638,29 @@ mod tests {
                 _ => {}
             }
             Ok(crate::RefreshAnswer::Item(item))
+        }
+
+        /// The walk of clause 13's ADR-0047 half, bent as the behavior says.
+        async fn refresh_under(
+            &self,
+            _entity: &str,
+            cursor: Option<&str>,
+        ) -> Result<crate::UnderAnswer, SourceError> {
+            let items = match self.behavior {
+                Behavior::WalksUnder | Behavior::WalksUnderMovingThePosition => Vec::new(),
+                Behavior::WalksUnderFindingWhatDidNotChange => {
+                    let mut synced = super::VecSink(Vec::new());
+                    self.sync(None, &mut synced).await?;
+                    synced.0
+                }
+                _ => return Ok(crate::UnderAnswer::NotOffered),
+            };
+            let moved = (self.behavior == Behavior::WalksUnderMovingThePosition)
+                .then(|| format!("{} and on", cursor.unwrap_or_default()));
+            Ok(crate::UnderAnswer::Walked {
+                items,
+                cursor: moved,
+            })
         }
 
         async fn write(&self, op: WriteOp) -> Result<crate::WriteReceipt, SourceError> {
@@ -3660,6 +3732,36 @@ mod tests {
         run(Behavior::Refreshes)
             .await
             .expect("an adapter that refreshes faithfully must pass");
+    }
+
+    /// ADR-0047: a kind `refresh` does not read, walked with what stands
+    /// under it, counts as refreshed.
+    #[tokio::test]
+    async fn accepts_an_adapter_that_walks_its_items_with_what_stands_under_them() {
+        run(Behavior::WalksUnder)
+            .await
+            .expect("a walk that finds nothing on an unchanged source must pass");
+    }
+
+    /// Clause 2's rule for the walk: from the position a run just left on an
+    /// unchanged source, a walk that finds things would rewrite rows on every
+    /// press.
+    #[tokio::test]
+    async fn rejects_a_walk_that_finds_what_did_not_change() {
+        rejects(
+            Behavior::WalksUnderFindingWhatDidNotChange,
+            "a walk from the run's own position must find nothing",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_walk_that_moves_the_position_finding_nothing() {
+        rejects(
+            Behavior::WalksUnderMovingThePosition,
+            "emitted nothing but moved the position",
+        )
+        .await;
     }
 
     #[tokio::test]

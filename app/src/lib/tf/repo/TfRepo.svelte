@@ -382,6 +382,8 @@
   /** The repository's read: its row, its source, and what its *Refresh* offers (#2135). */
   let detail = $state<EntityDetail | null>(null);
   const repo = $derived<EntityRow | null>(detail?.row ?? null);
+  /** What ⌘R says it reads (ux25): the repository's name without its owner, *payout-service*. */
+  const shortName = $derived(repo === null ? undefined : (repo.title.slice(repo.title.lastIndexOf("/") + 1) || repo.title));
   /** The repository's source: where its writes go, named in their toasts. */
   const source = $derived<WriteSource | null>(detail?.source ?? null);
   let failed = $state<string | null>(null);
@@ -1301,7 +1303,7 @@
             if (branchRefused === null) newBranch = { from: null };
           }}>New branch…</button>
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" variant="ghost" />
-        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
+        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page name={shortName} />{/if}
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}

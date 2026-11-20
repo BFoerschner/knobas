@@ -22,6 +22,7 @@
     ghost = false,
     button = true,
     noun,
+    name,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -45,7 +46,16 @@
     button?: boolean;
     /** The one thing *Refresh* reads, where the view's *Sync now* stands beside it. */
     noun?: string | undefined;
+    /**
+     * What a press reads, in its toast: *Refreshing payout-service…*, then *Refreshed payout-service from …* (ux25).
+     * The item's title unless the page names it shorter (a repository's name without its owner).
+     */
+    name?: string | undefined;
   } = $props();
+  /** The words the toast names. */
+  const named = $derived(name ?? (detail.row as { title?: string }).title);
+  /** The button's word at rest. */
+  const word = $derived(noun === undefined ? "Refresh" : `Refresh ${noun}`);
   /** The button's classes: the Controls button at its size and look, and `tf-refresh`, which tests find it by. */
   const classes = $derived(["tf-btn", small && "tf-sm", ghost && "tf-ghost", "tf-refresh"].filter(Boolean).join(" "));
 
@@ -72,7 +82,7 @@
   /** What a click runs, and ⌘R. */
   function press() {
     if (busy) return;
-    if (offer === "refresh") void refresh.refresh(detail, reread);
+    if (offer === "refresh") void refresh.refresh(detail, reread, named);
     else if (sync !== null) void syncNow(sync);
   }
 
@@ -92,8 +102,13 @@
     type="button"
     class={classes}
     disabled={busy}
-    title="Read this item from {detail.source.display_name} again"
-    onclick={press}>{refresh.reading ? "Refreshing…" : noun === undefined ? "Refresh" : `Refresh ${noun}`}</button
+    title={named === undefined ? `Read this item from ${detail.source.display_name} again` : `Read ${named} from ${detail.source.display_name} again`}
+    onclick={press}
+    ><!-- As wide as its widest word, so *Refreshing…* moves nothing beside it (ux25). --><span
+      class="tf-keepw"
+      data-keep={word}
+      data-keep2="Refreshing…"><span>{refresh.reading ? "Refreshing…" : word}</span></span
+    ></button
   >
 {:else if sync !== null}
   <button
@@ -101,6 +116,7 @@
     class={classes}
     disabled={busy}
     title="Sync {detail.source.display_name}, which this item is from"
-    onclick={press}>{sync.running ? "Syncing…" : "Sync now"}</button
+    onclick={press}
+    ><span class="tf-keepw" data-keep="Sync now" data-keep2="Syncing…"><span>{sync.running ? "Syncing…" : "Sync now"}</span></span></button
   >
 {/if}

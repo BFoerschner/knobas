@@ -90,6 +90,16 @@ export function refreshProbe(options: RefreshProbeOptions = {}): RefreshProbe {
         },
       }),
       syncStatus: () => hold<SourceSyncStatus[]>([]),
+      // The next run of the source that {@link RefreshProbe.end} ends: what a press during a run waits for (ux25).
+      runEnds: (sourceId) =>
+        new Promise<void>((resolve) => {
+          const heard = ({ payload }: { payload: unknown }) => {
+            if ((payload as SourceSyncStatus).source_id !== sourceId) return;
+            handlers.delete(heard);
+            resolve();
+          };
+          handlers.add(heard);
+        }),
     },
   };
   return probe;

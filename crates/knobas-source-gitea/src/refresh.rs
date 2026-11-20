@@ -11,11 +11,13 @@
 //! ticket and a pull request.
 //!
 //! Repositories, branches and commits answer
-//! [`NotOffered`](RefreshAnswer::NotOffered), and the app runs the source for
-//! them instead (ruled in #2098's PR): a repository's item carries its teams
-//! and a branch's its repository's record, so either is a second and third
-//! read the run already makes; a commit never changes once made, and the run
-//! after a file commit reads it with the branch it moved.
+//! [`NotOffered`](RefreshAnswer::NotOffered) here (ruled in #2098's PR): a
+//! repository's item carries its teams and a branch's its repository's record,
+//! so either is a second and third read the run already makes; a commit never
+//! changes once made. The engine then asks `refresh_under`, which walks the
+//! item's repository as a run walks it (`crate::sync::walk_one`, ADR-0047),
+//! so a refresh of any of the three is a read of one repository, not a run of
+//! the source.
 //!
 //! **Gone is Gitea's 404 on the item's own read**, as the run's probes read
 //! it (#724): an issue deleted, a pull request in a repository deleted. A

@@ -9,6 +9,8 @@
 /* A button whose words change while it holds: as wide as its words at rest, so what stands beside it stays put. */
 .tf-keepw { display: inline-grid; justify-items: center; white-space: nowrap; }
 .tf-keepw::before { content: attr(data-keep); height: 0; visibility: hidden; overflow: hidden; }
+/* Its other word too, where the two are near in width and either may be the wider (ux25: *Refresh* and *Refreshing…*). */
+.tf-keepw[data-keep2]::after { content: attr(data-keep2); height: 0; visibility: hidden; overflow: hidden; }
 .tf-bhead .tf-sub a { color: inherit; }
 .tf-bhead h1 { white-space: nowrap; }
 .tf-bstale { margin: 0 22px 10px; }

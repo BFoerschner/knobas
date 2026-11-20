@@ -21,6 +21,6 @@ After a write landed, knobas caught the mirror up with an incremental run of the
 
 ## Consequences
 
-- ADR-0003 is unaffected: a refresh never sweeps and moves no watermark, so the next incremental run delivers the item again inside its overlap window.
+- ADR-0003 is unaffected: a refresh never sweeps and moves no watermark, so the next incremental run delivers the item again inside its overlap window. *Amended 2026-11-20 by [ADR-0047](0047-a-refresh-under-a-parent-walks-it-as-a-run-and-moves-its-position.md): a refresh under a parent (a Gitea repository, branch or commit) walks that parent as a run would and moves that parent's part of the position with its rows; still no sweep.*
 - `sync.item` has a second writer beside `run_once`, under the same lock and item path: only the sync crate writes the mirror, under the source's lock.
 - Hold detection compares mirror projections, so a refresh between two queued writes on one item can hold the second, as the post-write run already could.

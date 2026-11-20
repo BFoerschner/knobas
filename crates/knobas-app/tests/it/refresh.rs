@@ -37,6 +37,8 @@ const SOURCE: &str = "refreshing";
 const TICKET: &str = "refreshing:PAY-1";
 const BUILD: &str = "refreshing:BUILD-1";
 const FILED: &str = "refreshing:PAY-9";
+/// A parent its source reads with what stands under it (ADR-0047).
+const REPO: &str = "refreshing:REPO-1";
 const PATIENCE: Duration = Duration::from_secs(20);
 
 /// How the fake answers a read of one item.
@@ -62,6 +64,12 @@ struct Remote {
     /// One permit per sync the test lets through.
     door: Semaphore,
     syncs_entered: AtomicUsize,
+    /// The positions each walk under a parent was handed, in order.
+    walks: Mutex<Vec<Option<String>>>,
+    /// Whether a walk under REPO-1 finds something (PAY-1 and REPO-1 as the
+    /// source holds them, and a position moved past the one handed in), or
+    /// nothing, as on a source unchanged since the run.
+    walk_finds: Mutex<bool>,
 }
 
 fn ticket(key: &str, title: &str) -> SyncItem {
@@ -149,12 +157,36 @@ impl Source for Fake {
             Reads::Answers => Ok(match entity {
                 TICKET => RefreshAnswer::Item(ticket("PAY-1", &self.0.title.lock().unwrap())),
                 BUILD => RefreshAnswer::Item(build()),
+                REPO => RefreshAnswer::NotOffered,
                 FILED if *self.0.filed.lock().unwrap() => {
                     RefreshAnswer::Item(ticket("PAY-9", "Build #1 failed"))
                 }
                 _ => RefreshAnswer::Gone,
             }),
         }
+    }
+
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        if entity != REPO {
+            return Ok(knobas_source::UnderAnswer::NotOffered);
+        }
+        self.0.walks.lock().unwrap().push(cursor.map(str::to_owned));
+        if !*self.0.walk_finds.lock().unwrap() {
+            return Ok(knobas_source::UnderAnswer::Walked {
+                items: Vec::new(),
+                cursor: None,
+            });
+        }
+        let mut repo = ticket("REPO-1", "payout-service");
+        repo.kind = "repo".to_owned();
+        Ok(knobas_source::UnderAnswer::Walked {
+            items: vec![repo, ticket("PAY-1", &self.0.title.lock().unwrap())],
+            cursor: Some(format!("{} walked", cursor.unwrap_or("none"))),
+        })
     }
 
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
@@ -201,7 +233,7 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
         url_forms: Vec::new(),
         code_pages: None,
         write_ops: vec!["comment".to_owned(), "create_ticket".to_owned()],
-        entity_kinds: vec![kind("ticket"), kind("build")],
+        entity_kinds: vec![kind("ticket"), kind("build"), kind("repo")],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),
     }
@@ -306,6 +338,8 @@ async fn fixture(name: &str) -> Fixture {
         filed: Mutex::new(false),
         door: Semaphore::new(0),
         syncs_entered: AtomicUsize::new(0),
+        walks: Mutex::new(Vec::new()),
+        walk_finds: Mutex::new(true),
     });
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry(Arc::clone(&remote)));
     let heard = Heard::default();
@@ -1101,5 +1135,116 @@ async fn the_readers_refresh_says_a_run_is_in_flight_instead_of_waiting() {
         live_title(&f.state.pool, TICKET).await.as_deref(),
         Some("before")
     );
+    f.state.scheduler.shutdown().await;
+}
+
+/// The stored position, as a run or a walk left it.
+async fn stored_cursor(pool: &sqlx::PgPool) -> Option<String> {
+    sqlx::query_scalar("select cursor from knobas.source_config where id = $1")
+        .bind(SOURCE)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// ADR-0047: a parent `refresh` does not read is walked with what stands
+/// under it, from the stored position read inside the lock, and what the walk
+/// found is written with the parent's position moved, in one transaction. No
+/// run, no activity line, and the reader is told it refreshed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refresh_under_a_parent_writes_what_it_walked_and_moves_the_position_with_it() {
+    let f = fixture("refresh_under_walks").await;
+    sqlx::query("update knobas.source_config set cursor = 'c-7' where id = $1")
+        .bind(SOURCE)
+        .execute(&f.state.pool)
+        .await
+        .unwrap();
+    *f.remote.title.lock().unwrap() = "pushed".to_owned();
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "{answer:?}"
+    );
+    assert_eq!(*f.remote.walks.lock().unwrap(), [Some("c-7".to_owned())]);
+    assert_eq!(
+        live_title(&f.state.pool, REPO).await.as_deref(),
+        Some("payout-service")
+    );
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await.as_deref(),
+        Some("pushed"),
+        "what stands under the parent is written too"
+    );
+    assert_eq!(
+        stored_cursor(&f.state.pool).await.as_deref(),
+        Some("c-7 walked"),
+        "the parent's position moves with its rows"
+    );
+    assert_eq!(finished_runs(&f.state.pool, SOURCE).await, 1, "no run");
+    let lines: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.activity where actor = $1 and verb = 'synced'",
+    )
+    .bind(format!("sync:{SOURCE}"))
+    .fetch_one(&f.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(lines, 0, "a refresh is not a sync");
+    assert_eq!(
+        f.heard(),
+        [RefreshEnded {
+            entity_id: REPO.to_owned(),
+            write_id: None,
+            ended: RefreshEnd::Refreshed,
+        }]
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// A walk that found nothing leaves the position byte for byte, as an idle
+/// run does, and still says it refreshed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_that_found_nothing_leaves_the_position() {
+    let f = fixture("refresh_under_idle").await;
+    sqlx::query("update knobas.source_config set cursor = 'c-7' where id = $1")
+        .bind(SOURCE)
+        .execute(&f.state.pool)
+        .await
+        .unwrap();
+    *f.remote.walk_finds.lock().unwrap() = false;
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "{answer:?}"
+    );
+    assert_eq!(stored_cursor(&f.state.pool).await.as_deref(), Some("c-7"));
+    assert_eq!(
+        live_title(&f.state.pool, REPO).await,
+        None,
+        "nothing written"
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// Never beside a run (Fable's ruling 4): the walk is not asked while a run
+/// of the source holds its lock, and the reader is told the run is in flight.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_is_not_asked_while_a_run_holds_the_source() {
+    let f = fixture("refresh_under_in_flight").await;
+    let mut run = f.state.pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(SOURCE)
+        .execute(&mut *run)
+        .await
+        .unwrap();
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::RunInFlight)),
+        "{answer:?}"
+    );
+    assert!(f.remote.walks.lock().unwrap().is_empty(), "nothing walked");
+    run.rollback().await.unwrap();
     f.state.scheduler.shutdown().await;
 }
