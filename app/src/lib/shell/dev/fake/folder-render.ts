@@ -40,6 +40,8 @@ let tokens = 0;
 let storeSet: string | null = null;
 /** `?fake-long-paths` with `?fake-rerender`: the long renderer name and path. */
 let longMade = false;
+/** `?fake-rerender-files=<n>`: how many files `bulk/` holds (3,000 by default), for the timing of a big generated folder. */
+let bulkFiles = 3000;
 
 const enc = (text: string) => new TextEncoder().encode(text);
 
@@ -62,7 +64,7 @@ export function madeFiles(folder: string, n: number, long: boolean): Map<string,
   ]);
   if (n === 1) files.set("docs/old.md", enc("# Old\n\nThis page is gone after a re-run.\n"));
   else files.set("CHANGELOG.md", enc(`# Changes\n\nRun ${n}.\n`));
-  for (let i = 1; i <= 3000; i++) files.set(`bulk/part-${String(i).padStart(4, "0")}.txt`, enc(`part ${i} of the bulk\n`));
+  for (let i = 1; i <= bulkFiles; i++) files.set(`bulk/part-${String(i).padStart(4, "0")}.txt`, enc(`part ${i} of the bulk\n`));
   if (long) files.set(`docs/${"a-very-long-generated-folder-name-for-the-long-paths-check/".repeat(2)}and-a-long-file-name-at-the-end.md`.slice(0, 140), enc("# Long\n"));
   return files;
 }
@@ -70,7 +72,7 @@ export function madeFiles(folder: string, n: number, long: boolean): Map<string,
 function madeTree(token: string, files: Map<string, Uint8Array>): MadeTree {
   const sorted = [...files.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return {
-    dir: `/Users/someone/code/knobas-rendered/0123456789ab/folder.site.${token.slice(-8)}`,
+    dir: `${clonesRoot()}${longMade ? "\\knobas-rendered\\0123456789ab\\" : "/knobas-rendered/0123456789ab/"}folder.site.${token.slice(-8)}`,
     files: sorted.map(([path, b]) => ({ path, size: b.length })),
     bytes: sorted.reduce((sum, [, b]) => sum + b.length, 0),
     left_out: [
@@ -85,13 +87,16 @@ function gone(): never {
   throw { code: "not_found", message: "that generated folder is no longer kept: run the renderer again" };
 }
 
+/** The clones root the fixture's store sits beside: a long Windows one under `?fake-long-paths`. */
+const clonesRoot = () => (longMade ? "C:\\Users\\someone with a long name\\source\\repos\\clones for the payments team" : "/Users/someone/code");
+
 function storeView(): MadeStore {
   const folders = made.size;
   const bytesKept = [...made.values()].reduce((sum, m) => sum + m.tree.bytes, 0);
   return {
-    dir: `${storeSet ?? "/Users/someone/code"}/knobas-rendered`,
+    dir: `${storeSet ?? clonesRoot()}${longMade ? "\\" : "/"}knobas-rendered`,
     set: storeSet,
-    default_dir: "/Users/someone/code",
+    default_dir: clonesRoot(),
     place: storeSet === null ? "clones" : "set",
     folders,
     bytes: bytesKept,
@@ -155,9 +160,9 @@ function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {
 let seeded: FolderRenderer[] = [];
 
 keepSeed(drawn, bytes, failed, running, made, runsOf);
-const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade });
+const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles });
 onFakeReset(() => {
-  ({ bridge, saved, seeded, tokens, storeSet, longMade } = atLoad());
+  ({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles } = atLoad());
 });
 
 export function seed(params: URLSearchParams): void {
@@ -169,7 +174,26 @@ export function seed(params: URLSearchParams): void {
   // which draws, and one on a Mac, which fails with its program on stderr.
   if (params.has("fake-long-paths")) seeded = [...seeded, ...LONG_FOLDER_RENDERERS];
   longMade = params.has("fake-long-paths");
+  bulkFiles = Number(params.get("fake-rerender-files") ?? 3000) || 3000;
   if (params.has("fake-rerender")) seeded = [...seeded, { ...SITE, name: longMade ? "Low-code site generator for the payments team's order flows" : SITE.name }];
+  // `?fake-rerender-kept=<folder>`: that folder of payout-service already made, as a store holds it across a restart.
+  const kept = params.get("fake-rerender-kept");
+  if (kept !== null) {
+    const token = `fake-made-${String(++tokens).padStart(8, "0")}`;
+    const files = madeFiles(kept, 1, longMade);
+    const tree = madeTree(token, files);
+    made.set(token, { files, tree });
+    runsOf.set(`mock:tidewater/payout-service\u0000site\u0000${kept}`, 1);
+    drawn.set(`mock:tidewater/payout-service\u0000site\u0000${kept}`, {
+      token,
+      kind: { kind: "folder", files: tree.files.length, bytes: tree.bytes, left_out: tree.left_out_total },
+      size: tree.bytes,
+      commit: null,
+      from: "clone",
+      took_ms: 3200,
+      drawn_at: new Date().toISOString(),
+    });
+  }
   saved = seeded.map((r) => ({ ...r }));
 }
 

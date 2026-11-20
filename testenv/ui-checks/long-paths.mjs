@@ -74,6 +74,11 @@ const SCREENS = [
   { id: "repo-folder-render", route: `${REPO}/render/orchestra-map/src`, wait: 1900 },
   { id: "repo-folder-render-fails", route: `${REPO}/render/orchestra-map-mac/src`, wait: 1900 },
   { id: "repo-folder-menu", route: REPO, context: [".tf-ftree button", "src"] },
+  // A generated folder (ADR-0046): the band and the made bar with a 60-character renderer name, a generated file's
+  // 140-character path, what was left out, and *Open in…* on the kept folder.
+  { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
+  { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: "2 left out" },
+  { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open button" },
   { id: "settings-renderers", route: "settings/renderers" },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
   { id: "settings-folder-renderer", route: "settings/renderers/folder/orchestra-map" },
@@ -182,7 +187,8 @@ for (const screen of SCREENS) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: false });
     const size = `${width}x${height}@${scale}`;
     const read = async (query) => {
-      await opener.openScreen({ route: screen.route, query });
+      // `fake`: more of the fixture's switches the screen needs (a generated folder's `&fake-rerender`).
+      await opener.openScreen({ route: screen.route, query: query + (screen.fake ?? "") });
       let stepped = true;
       if (screen.press) stepped = await evaluate(PRESS(screen.press));
       for (const next of screen.then ?? []) {

@@ -395,6 +395,17 @@ const PAGES = [
   { page: "A folder's row on the tree", route: REPO, trips: [
     { id: "folder-glyph-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 900 }], press: { sel: ".tf-frmark a" }, leaves: true },
   ] },
+  // A folder's generated folder (ADR-0046, `?fake-rerender`'s *Low-code site* on `docs`): its glyph grafts the generated
+  // rows under a band, focus staying on the glyph; the band brings the real rows back, focus on the folder's row; *Run
+  // again* on the made bar is one press.
+  { page: "A folder's generated folder", route: REPO, trips: [
+    { id: "rerender-glyph", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 900 }], press: { sel: '.tf-fdir[data-path="docs"] + .tf-frmark a' }, leaves: true },
+  ] },
+  { page: "A folder's generated folder, grafted", route: `${REPO}/rendered/site/docs`, trips: [
+    { id: "rerender-real", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 2500 }], press: { sel: ".tf-fband" }, leaves: true, returns: "docs" },
+    { id: "rerender-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 2500 }], press: { sel: ".tf-madebar-run", text: "Run again" } },
+    { id: "rerender-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 2500 }], press: { sel: ".tf-madebar-run", text: "Run again" }, rows: ".tf-madebar-run" },
+  ] },
   { page: "Settings, adding a folder renderer", route: "settings/renderers/folder/add", trips: [
     { id: "folder-try-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
     { id: "folder-try-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
