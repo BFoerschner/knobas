@@ -52,3 +52,9 @@ sources and an installed adapter's.
 
 **Reversing it** is `TfPipeline`'s line back to the sentence and `chainSentence`, `TfRunChain`'s boxes unfolded, and the
 four labels back to their words.
+
+**Amended later that day (the bundled faces).** In Inter (`2026-11-20-the-faces-knobas-brings.md`) a pipeline's six
+actions with a 16 rem source name took 921 px. With the title's 169 px and its 16 px gap, that was 10 px more than the
+header's 1,096 px at 1440 x 868, so the actions dropped under the title, and `long-paths.mjs` held 20 of 24 Builds
+screens. A Builds header now cuts the source's name at 14 rem (`.tf-bhead .tf-btn > .tf-cut`), whole in its title. The
+branch on *Run on* is worth more to a person than the end of a long source name. 24 of 24 again; other headers keep 16 rem.

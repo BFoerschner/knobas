@@ -25,6 +25,9 @@
 .tf-keepw[data-keep2]::after { content: attr(data-keep2); height: 0; visibility: hidden; overflow: hidden; }
 .tf-bhead .tf-sub a { color: inherit; }
 .tf-bhead h1 { white-space: nowrap; }
+/* In Inter (2026-11-20) a pipeline's six actions with a 16 rem source name ran 10 px past its title's line at 1440 x 868:
+   a Builds header cuts the name at 14 rem, whole in its title. */
+.tf-bhead .tf-btn > .tf-cut { max-width: 14rem; }
 .tf-bstale { margin: 0 22px 10px; }
 .tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
 .tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
