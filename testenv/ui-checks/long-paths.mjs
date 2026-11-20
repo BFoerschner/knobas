@@ -21,6 +21,10 @@
 // Toasts and an opening's chip are read too (ux21, 2026-11-19: a toast carrying a path grew to three lines and 1,400 px): a
 // toast's line gives up its middle (`.tf-toast-head`), as a path's start does.
 // A visually hidden run (the sign's description, which the witness and a screen reader read) is left out.
+// A screen with `tables` (the renderers-columns pass, 2026-11-20: Björn's "in the renderers view, the command, the files, and so
+// on completely explode the columns") also holds every table it names to the shape Code's *Local checkout* column has: each
+// cell one line (a command, a pattern list, a path cut rather than wrapped), each column as wide with the long values as with
+// the fixture's short ones, and the table no wider than the box that holds it.
 //
 // Writes <out dir>/long-paths.json and exits 1 on any miss, or if a screen's step finds nothing.
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -90,7 +94,7 @@ const SCREENS = [
   { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
   { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 4500, press: "2 left out" },
   { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open button" },
-  { id: "settings-renderers", route: "settings/renderers" },
+  { id: "settings-renderers", route: "settings/renderers", tables: ".tf-stg-body .tf-tbl" },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
   { id: "settings-folder-renderer", route: "settings/renderers/folder/orchestra-map" },
   // A TeamCity configuration whose VCS roots are named by their whole addresses, 64th of a chain of 70 long names (the
@@ -101,11 +105,46 @@ const SCREENS = [
   { id: "build-chain-pinned", route: PIPELINE, press: ".tf-chainsign .tf-signbtn", sizes: BUILD_SIZES },
   { id: "build-run", route: RUN, wait: 300, sizes: BUILD_SIZES },
   { id: "build-run-unfolded", route: RUN, wait: 300, press: ".tf-chainfold", sizes: BUILD_SIZES },
+  // A command, ten patterns and five fences, a folder renderer's long lists, a pipeline's long name and steps, defaults with a
+  // deep pattern, and a Java deep under a profile (the renderers-columns pass).
+  { id: "settings-folder-renderer-lists", route: "settings/renderers/folder/orchestra-flows" },
+  { id: "settings-pipeline-edit", route: "settings/renderers", press: '[aria-label^="Edit Decode, unpack"]' },
 ];
+
+// Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables
+// wider than their box. A table is named by its classes and its place among the tables, so the short run's is found again.
+const TABLES = (selector) => String.raw`(() => {
+  const root = document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body;
+  const out = { wraps: [], widths: {}, wider: [] };
+  [...root.querySelectorAll(${JSON.stringify(selector)})].forEach((table, i) => {
+    if (table.getBoundingClientRect().width === 0) return;
+    const key = [...table.classList].join(".") + "#" + i;
+    out.widths[key] = [...table.querySelectorAll("thead th")].map((th) => Math.round(th.getBoundingClientRect().width));
+    const box = table.parentElement.getBoundingClientRect();
+    const b = table.getBoundingClientRect();
+    if (b.right > box.right + 1) out.wider.push({ at: key, over: Math.round(b.right - box.right) });
+    for (const td of table.querySelectorAll("tbody td")) {
+      const centres = [];
+      const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent.trim() === "" || node.parentElement.closest(".tf-sr, option, select")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const r of range.getClientRects()) if (r.width > 0) centres.push((r.top + r.bottom) / 2);
+      }
+      if (centres.length > 1 && Math.max(...centres) - Math.min(...centres) > 6)
+        out.wraps.push({ at: key + " > td:nth-child(" + (td.cellIndex + 1) + ")", text: td.textContent.trim().slice(0, 48), lines: Math.round((Math.max(...centres) - Math.min(...centres)) / 16) + 1 });
+    }
+  });
+  return JSON.stringify(out);
+})()`;
 
 // Runs in the page: what of a path's text leaves its boxes, and which boxes scroll sideways.
 const CHECK = String.raw`(() => {
   const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src|Orchestra Renderer/;
+  // What gives way on purpose, its whole in a title: a path's start, a toast's middle, and a command's program start and its
+  // arguments after the program's file (TfCommand, the renderers-columns pass).
+  const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args"];
   // A renderer's long name: held to its boxes as a path is, but it may end in an ellipsis.
   const NAME = /payments team's/;
   const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks")].filter(Boolean);
@@ -127,7 +166,7 @@ const CHECK = String.raw`(() => {
       for (let e = node.parentElement; e; e = e.parentElement) {
         const s = getComputedStyle(e);
         if (s.clipPath !== "none" || s.visibility === "hidden" || s.display === "none") hidden = true;
-        if (e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head")) cutOnPurpose = true;
+        if (CUT.some((c) => e.classList.contains(c))) cutOnPurpose = true;
         // A renderer's name, no path in it, in a box that ends it in an ellipsis: cut on purpose, whole in a title.
         if (name && s.textOverflow === "ellipsis" && s.overflowX !== "visible") cutOnPurpose = true;
       }
@@ -161,7 +200,7 @@ const CHECK = String.raw`(() => {
     // Strict: an ellipsis shows for a shortfall under a pixel, which rounds away in a +1 margin.
     if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth || !MARK.test(e.textContent) || e.closest(".tf-code")) continue;
     const s = getComputedStyle(e);
-    if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head") || e.closest(".tf-sr")) continue;
+    if (s.textOverflow !== "ellipsis" || CUT.some((c) => e.classList.contains(c)) || e.closest(".tf-sr")) continue;
     misses.push({ kind: "cut", at: where(e), text: e.textContent.trim().slice(-48), over: e.scrollWidth - e.clientWidth });
   }
   const scrolls = [];
@@ -169,7 +208,8 @@ const CHECK = String.raw`(() => {
     if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth + 1) continue;
     const s = getComputedStyle(e);
     // A clip is no scroll: the kept page clips what passes under the scroller's 8 px bar on purpose (chrome.css).
-    if (s.overflowX === "visible" || s.overflowX === "clip" || s.textOverflow === "ellipsis" || e.closest(".tf-code")) continue;
+    // A visually hidden run (a list's rest, which a screen reader reads) is not drawn, so it scrolls nothing either.
+    if (s.overflowX === "visible" || s.overflowX === "clip" || s.textOverflow === "ellipsis" || e.closest(".tf-code") || e.closest(".tf-sr")) continue;
     scrolls.push(where(e));
   }
   // A Builds header's line is one line, under the title and its actions, and the actions share the title's line.
@@ -252,7 +292,8 @@ for (const screen of SCREENS) {
         stepped = stepped && (await evaluate(`(() => { const e = [...document.querySelectorAll(".tf-toast button")].find((b) => b.textContent.trim() === ${JSON.stringify(screen.toast)}); if (!e) return false; e.click(); return true; })()`));
       }
       if (screen.press || screen.focus || screen.context) await opener.settleAfterChange();
-      return { stepped, ...JSON.parse(await evaluate(CHECK)) };
+      const tables = screen.tables ? JSON.parse(await evaluate(TABLES(screen.tables))) : null;
+      return { stepped, tables, ...JSON.parse(await evaluate(CHECK)) };
     };
     const shoot = async (name) => {
       if (!shots) return;
@@ -270,6 +311,11 @@ for (const screen of SCREENS) {
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),
+      ...(long.tables?.wraps ?? []).map((w) => ({ kind: "wraps", at: w.at, text: `${w.text} (${w.lines} lines)` })),
+      ...(long.tables?.wider ?? []).map((w) => ({ kind: "wider", at: w.at, text: "the table is wider than its box", over: w.over })),
+      ...Object.entries(long.tables?.widths ?? {})
+        .filter(([key, widths]) => short.tables?.widths[key] && widths.some((w, i) => Math.abs(w - short.tables.widths[key][i]) > 1))
+        .map(([key, widths]) => ({ kind: "columns", at: key, text: `columns ${short.tables.widths[key].join("/")} px with the short values, ${widths.join("/")} with the long` })),
     ];
     if (misses.length > 0) failed += 1;
     results.push({ screen: screen.id, size, misses });

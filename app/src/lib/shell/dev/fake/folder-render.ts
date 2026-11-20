@@ -226,6 +226,16 @@ const LONG_FOLDER_RENDERERS: FolderRenderer[] = [
     folders: [],
     output: "text",
     timeout_secs: 30,
+  },  // Long lists of what it takes, and a long command that makes a folder (the renderers-columns pass, 2026-11-20): Settings ›
+  // Renderers holds its row to one line. No folder of the fixture holds or is named one of these, so it draws none.
+  {
+    id: "orchestra-flows",
+    name: "Orchestra flows site for the payments team's order services",
+    command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-site.exe" build --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json" --source "{path}" --out {outdir} --theme dark`,
+    holds: ["*.orcproj", "*.orchestra.json", "orchestra.config.yaml", "flows.manifest", "*.flowset", "score-index.json", "*.orcpkg", "build.orchestra", "*.orclock", "orchestra.lock"],
+    folders: ["flows", "apps/*/flows", "services/payments/order-flows", "docs/architecture/sequence diagrams", "orchestra"],
+    output: "folder",
+    timeout_secs: 120,
   },
 ];
 

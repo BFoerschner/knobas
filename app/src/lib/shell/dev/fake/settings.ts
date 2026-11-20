@@ -96,9 +96,10 @@ export const LONG_RENDERERS: UserRenderer[] = [
   {
     id: "orchestra",
     name: "Orchestra score renderer for the payments team's sequence diagrams",
-    command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json" --format svg`,
-    patterns: ["*.rs"],
-    fences: [],
+    command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json" --format svg --width 1600 --height 900 --theme "payments team dark" --font "C:\Windows\Fonts\Cascadia Code.ttf"`,
+    // Ten patterns and five fences (the renderers-columns pass, 2026-11-20): Settings › Renderers holds each list to one line.
+    patterns: ["*.rs", "*.orchestra", "*.orc", "*.orc.json", "*.score.yaml", "docs/sequence/*.seq", "docs/architecture/payments team/*.puml", "*.mscgen", "*.msc", "flows/**/*.flow"],
+    fences: ["orchestra", "orchestra-score", "sequence-diagram", "payments-sequence", "msc"],
     input: "text",
     output: "svg",
     timeout_secs: 10,
@@ -123,6 +124,25 @@ const LONG_STEP: CommandStep = {
   command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-decode.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json"`,
   timeout_secs: 10,
 };
+
+/**
+ * `?fake-long-paths`' defaults and pipeline (the renderers-columns pass, 2026-11-20): a pattern that is a deep path with
+ * spaces, through a pipeline with a long name and five steps, the default for eight patterns, none of them a file in the
+ * fixture, so no file opens differently.
+ */
+const LONG_PIPELINE: NamedPipeline = {
+  id: "orchestra-scores",
+  name: "Decode, unpack and prettify the payments team's orchestra scores",
+  steps: [{ step: "base64_decode" }, { step: "gunzip" }, { step: "command", id: "orchestra-decode" }, { step: "pretty", format: "json" }, { step: "command", id: "upper" }],
+};
+const LONG_DEFAULTS: RendererDefault[] = [
+  { pattern: "docs/architecture/sequence diagrams/payments team/**/*.orchestra.json", renderer: "command:orchestra", pipeline: "orchestra-scores" },
+  ...["*.orc.b64", "*.orc.gz", "*.score.b64", "scores/**/*.b64", "flows/**/*.orc.gz", "docs/scores/*.gz", "archive/2025/**/*.orc.b64"].map((pattern) => ({
+    pattern,
+    renderer: "",
+    pipeline: "orchestra-scores",
+  })),
+];
 
 /** This feature's commands. */
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
@@ -183,6 +203,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   if (params.has("fake-diff-pipeline")) {
     pipelines = [{ id: "base64-json", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }];
     defaults = [{ pattern: "*.json.b64", renderer: "", pipeline: "base64-json" }];
+  }
+  if (params.has("fake-long-paths")) {
+    pipelines = [...pipelines, LONG_PIPELINE];
+    defaults = [...defaults, ...LONG_DEFAULTS];
   }
   const idOf = (name: string, i: number, kind: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `${kind}-${i + 1}`;
 
