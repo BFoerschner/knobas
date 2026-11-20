@@ -28,6 +28,7 @@
     name,
     renderers = [],
     switchTo = null,
+    onpick = () => {},
     view,
     refused = null,
     elapsed = 0,
@@ -51,6 +52,8 @@
     renderers?: readonly FolderRenderer[];
     /** The address that draws the folder with another renderer. */
     switchTo?: ((id: string) => string) | null;
+    /** *Render with* chose a renderer: the folder's pick (ux26), kept before the address changes. */
+    onpick?: (renderer: string) => void;
     /** The run's answer; `null` while it is asked. */
     view: FolderRenderView | null;
     /** Why the ask was refused. */
@@ -146,7 +149,11 @@
   {#if switchTo !== null && others.length > 0}
     <label class="tf-trail tf-madebar-as">
       <span class="tf-small">Render with</span>
-      <select class="tf-select" aria-label="Render with" title={name} value={renderer} onchange={(event) => (location.hash = switchTo(event.currentTarget.value))}>
+      <select class="tf-select" aria-label="Render with" title={name} value={renderer} onchange={(event) => {
+            // Choosing is picking, kept for this folder (ux26).
+            onpick(event.currentTarget.value);
+            location.hash = switchTo(event.currentTarget.value);
+          }}>
         {#each renderers as one (one.id)}<option value={one.id}>{one.name}</option>{/each}
       </select>
     </label>

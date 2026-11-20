@@ -51,6 +51,8 @@ export type CodeAt =
 /** What choosing an item does. `TfContextMenu`'s `carry` is the one reader. */
 export type Act =
   | { do: "go"; hash: string }
+  /** *Render with ⟨name⟩* on a folder (ux26): the folder's pick is kept, then the address. */
+  | { do: "render-with"; hash: string; repoId: string; folder: string; renderer: string }
   | { do: "copy"; text: Text; said: string }
   /** The document's own copy of the selection, so a page's `copy` handler still shapes what lands. */
   | { do: "copy-selection" }
@@ -389,7 +391,10 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
           ...(thing.kind === "folder"
             ? (ctx.renders?.(thing.repoId, thing.path) ?? []).map(
                 (r): Item => ({ id: `render-${r.id}`, label: `Render with ${r.name}`, act: {
-                    do: "go",
+                    do: "render-with",
+                    repoId: thing.repoId,
+                    folder: thing.path,
+                    renderer: r.id,
                     // A folder of files is browsed in the folder's place (ADR-0046); the rest are drawn in the file's.
                     hash: r.output === "folder" ? renderedHash(thing.repoId, r.id, thing.path) : folderRenderHash(thing.repoId, r.id, thing.path),
                   },

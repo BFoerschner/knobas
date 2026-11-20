@@ -681,6 +681,38 @@ pub async fn set_folder_renderers<R: tauri::Runtime>(
     crate::folder_render::save(&pool, &renderers).await
 }
 
+/// The folder renderer picked for each folder (ux26): `render.folder_picks`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn folder_render_picks<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::folder_render::FolderPick>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::picks(&pool).await
+}
+
+/// Pick `renderer` for `folder` of the repository `entity_id` names (`None` takes the pick away), and answer the
+/// picks as stored (ux26). Every place a person chooses a folder's renderer writes it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_folder_render_pick<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    folder: String,
+    renderer: Option<String>,
+) -> Result<Vec<crate::folder_render::FolderPick>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::set_pick(&pool, &entity_id, &folder, renderer.as_deref()).await
+}
+
 /// The forge reads a folder render needs where there is no clone: `None`
 /// before the sources are up, when only a clone can be read.
 fn forge_of<R: tauri::Runtime>(

@@ -27,6 +27,7 @@ import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 
 let bridge: FakeBridge | null = null;
 let saved: FolderRenderer[] = [];
+let picks: { repo: string; folder: string; renderer: string }[] = [];
 /** Drawings by slot, and the bytes by token. */
 const drawn = new Map<string, FolderDrawn>();
 const bytes = new Map<string, Uint8Array>();
@@ -163,6 +164,7 @@ keepSeed(drawn, bytes, failed, running, made, runsOf);
 const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles });
 onFakeReset(() => {
   ({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles } = atLoad());
+  picks = [];
 });
 
 export function seed(params: URLSearchParams): void {
@@ -246,6 +248,17 @@ export function attach(installed: FakeBridge): void {
 export function handlers(): Handlers {
   return {
     folder_renderers: () => saved,
+    // The pick per folder (ux26): kept for the session, the repository named as the backend resolves it (a branch's id
+    // names its repository).
+    folder_render_picks: () => picks,
+    set_folder_render_pick: (args) => {
+      const id = String(args["entityId"] ?? "");
+      const repo = id.includes("@") ? id.slice(0, id.indexOf("@")) : id;
+      const folder = String(args["folder"] ?? "").replace(/^\/+|\/+$/g, "");
+      const renderer = (args["renderer"] as string | null | undefined) ?? null;
+      picks = [...picks.filter((p) => !(p.repo === repo && p.folder === folder)), ...(renderer === null ? [] : [{ repo, folder, renderer }])];
+      return picks;
+    },
     set_folder_renderers: (args) => {
       saved = settle(args["renderers"] as FolderRendererDraft[]);
       return saved;

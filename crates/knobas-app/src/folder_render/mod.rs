@@ -127,6 +127,81 @@ pub struct FolderRendererDraft {
     pub timeout_secs: Option<u32>,
 }
 
+/// The folder renderer a person chose for one folder of one repository (ux26, the pick): one `knobas.setting` row of
+/// them, so a backup carries it, as it carries `render.defaults`.
+pub const PICKS_KEY: &str = "render.folder_picks";
+/// The most picks kept: past it the oldest goes.
+pub const MAX_PICKS: usize = 2_000;
+
+/// One pick: the renderer a folder of a repository gets, wherever a folder renderer is chosen for it (`docs/decisions/
+/// 2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md` ruling 10). A pick whose renderer is
+/// gone is passed over and left in place, so a renderer saved again under its id takes its folders back.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct FolderPick {
+    /// The repository's entity id.
+    pub repo: String,
+    /// The folder's path from the top; `""` the top.
+    pub folder: String,
+    /// The saved renderer's id.
+    pub renderer: String,
+}
+
+/// The picks, the newest last.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn picks(pool: &PgPool) -> Result<Vec<FolderPick>, IpcError> {
+    Ok(read_value(pool, PICKS_KEY)
+        .await?
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default())
+}
+
+/// `picks` with `folder` of `repo` picked to `renderer` (`None`: no pick), the newest last, at most [`MAX_PICKS`].
+#[must_use]
+pub fn with_pick(
+    mut picks: Vec<FolderPick>,
+    repo: &str,
+    folder: &str,
+    renderer: Option<&str>,
+) -> Vec<FolderPick> {
+    let folder = folder.trim_matches('/');
+    picks.retain(|pick| !(pick.repo == repo && pick.folder == folder));
+    if let Some(renderer) = renderer {
+        picks.push(FolderPick {
+            repo: repo.to_owned(),
+            folder: folder.to_owned(),
+            renderer: renderer.to_owned(),
+        });
+    }
+    let over = picks.len().saturating_sub(MAX_PICKS);
+    picks.drain(..over);
+    picks
+}
+
+/// Picks `renderer` for `folder` of the repository `entity_id` names (a branch's id names its repository), and answers
+/// the picks as stored.
+///
+/// # Errors
+///
+/// As [`picks`]; [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_pick(
+    pool: &PgPool,
+    entity_id: &str,
+    folder: &str,
+    renderer: Option<&str>,
+) -> Result<Vec<FolderPick>, IpcError> {
+    let repo = crate::checkout::repository_of(pool, entity_id)
+        .await
+        .unwrap_or_else(|| entity_id.to_owned());
+    let next = with_pick(picks(pool).await?, &repo, folder, renderer);
+    let value = serde_json::to_value(&next).map_err(IpcError::internal)?;
+    write_value(pool, PICKS_KEY, &value).await?;
+    Ok(next)
+}
+
 /// The saved folder renderers, in the person's order.
 ///
 /// # Errors
@@ -432,6 +507,43 @@ pub fn marks<'a>(
 
 #[cfg(test)]
 mod tests {
+    use super::{FolderPick, MAX_PICKS, with_pick};
+
+    fn pick(repo: &str, folder: &str, renderer: &str) -> FolderPick {
+        FolderPick {
+            repo: repo.to_owned(),
+            folder: folder.to_owned(),
+            renderer: renderer.to_owned(),
+        }
+    }
+
+    #[test]
+    fn picks_are_kept_per_repository_and_folder() {
+        let picks = with_pick(Vec::new(), "g:o/a", "flows/sepa", Some("lowcode"));
+        let picks = with_pick(picks, "g:o/b", "flows/sepa", Some("flowviz"));
+        let picks = with_pick(picks, "g:o/a", "/flows/sepa/", Some("flowviz"));
+        assert_eq!(
+            picks,
+            vec![
+                pick("g:o/b", "flows/sepa", "flowviz"),
+                pick("g:o/a", "flows/sepa", "flowviz")
+            ]
+        );
+        let picks = with_pick(picks, "g:o/a", "flows/sepa", None);
+        assert_eq!(picks, vec![pick("g:o/b", "flows/sepa", "flowviz")]);
+    }
+
+    #[test]
+    fn the_oldest_goes_past_the_cap() {
+        let mut picks = Vec::new();
+        for n in 0..=MAX_PICKS {
+            picks = with_pick(picks, "g:o/a", &format!("f{n}"), Some("r"));
+        }
+        assert_eq!(picks.len(), MAX_PICKS);
+        assert_eq!(picks[0].folder, "f1");
+        assert_eq!(picks.last().unwrap().folder, format!("f{MAX_PICKS}"));
+    }
+
     use super::*;
 
     fn draft(name: &str, command: &str) -> FolderRendererDraft {

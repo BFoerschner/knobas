@@ -250,6 +250,7 @@ const SMALL: Record<string, string> = {
   "tf/repo/TfRepoBuilds.svelte  page.ran": "a handful by what it is: the pipelines that build this repository and ran on the branch shown: as many as its CI configures for it, tens",
   "tf/repo/TfRepoCommits.svelte  shown": "capped where it is read or drawn: the commits the view answers, which the source cuts at a page",
   "tf/repo/TfRepoCompare.svelte  branches": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
+  "tf/repo/TfRepoFiles.svelte  taking": "named small: the folder renderers that take one folder, in the glyph's menu, which the person saves by hand in Settings (a handful)",
   "tf/repo/TfRepoCompareWorking.svelte  branches": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
   "tf/repo/TfRepoCompare.svelte  heads": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
   "tf/repo/TfRepoFiles.svelte  Object.entries(cutDirs).filter(([dir]) => dir === \"\" || open.has(dir))": "a handful by what it is: the notes on folders the source cut",

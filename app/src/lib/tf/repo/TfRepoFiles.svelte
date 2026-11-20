@@ -81,7 +81,11 @@
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
-  import { flushSync, tick, untrack } from "svelte";
+  import { flushSync, onMount, tick, untrack } from "svelte";
+  import { folderPicks } from "../../render/folder-picks.svelte";
+  import TfMenu from "../TfMenu.svelte";
+  import { programOf } from "../path";
+  import { settingsHash } from "../settings/settings";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
@@ -168,7 +172,9 @@
   import TfMadeBar from "../render/TfMadeBar.svelte";
   import TfMadeOpenIn from "../openin/TfMadeOpenIn.svelte";
   import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
-  import { failureLines, markSets, renderersFor } from "../../render/folder";
+  import { failureLines, markSets, rendererFor, renderersFor } from "../../render/folder";
+  import type { FolderRenderer } from "../../ipc/app";
+  import TfPath from "../TfPath.svelte";
   import { folderRenderMarks, type FolderMarks, type MadeTree } from "../../ipc/app";
   import { ipcMadePorts, type MadePorts } from "../../render/made-ports";
   import { folderRenderHash, pickMadeDefault, renderedHash, type FolderRenderAt } from "./repo";
@@ -751,8 +757,23 @@
       live = false;
     };
   });
-  /** The first renderer that takes the folder at `full`: the tree row's link. None inside a generated folder (ADR-0046). */
-  const folderRendererOf = (full: string) => (inGraft(full) ? undefined : renderersFor(full, folders.list, marks)[0]);
+  /**
+   * The renderer the folder at `full` gets (ux26): its pick, else the first that takes it; the tree row's link. None inside
+   * a generated folder (ADR-0046).
+   */
+  const folderRendererOf = (full: string) => (inGraft(full) ? undefined : rendererFor(full, folders.list, marks, folderPicks.of(repoId, full)));
+  /** Several renderers take the folder and none was picked: its glyph opens a menu to pick one (ux26, ruling 10). */
+  const folderAsks = (full: string) => folderPicks.of(repoId, full) === null && renderersFor(full, folders.list, marks).length > 1;
+  /** The glyph's menu, open for one folder. */
+  let pickFor = $state<{ folder: string; opener: HTMLElement } | null>(null);
+  let pickOpen = $state(false);
+  /** Choosing in the glyph's menu: the pick is kept for this folder, and the folder opens drawn by it. */
+  function pickRenderer(folder: string, by: FolderRenderer) {
+    pickOpen = false;
+    void folderPicks.set(repoId, repoId, folder, by.id).catch(() => {});
+    location.hash = renderLink(by, folder);
+  }
+  onMount(() => void folderPicks.ensure().catch(() => {}));
   const savedRenderer = (id: string) => folders.list.find((r) => r.id === id) ?? null;
   /** A folder's glyph and *Render with*: the generated folder's address for a folder kind, the drawing's for the rest. */
   const renderLink = (by: { id: string; output: string }, folder: string) =>
@@ -2089,15 +2110,27 @@
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >
         {#each [folderRendererOf(full)].filter((one) => one !== undefined) as by (by.id)}
-          <!-- A folder a folder renderer takes (ADR-0044): its drawing, or its generated folder (ADR-0046), a link of its own beside the row. -->
+          <!-- A folder a folder renderer takes (ADR-0044): its drawing, or its generated folder (ADR-0046), a link of its own beside the row.
+               Several renderers take it and none was picked (ux26): a button that opens the menu to pick one. -->
           <span class="tf-frmark"
-            ><a
+            >{#if folderAsks(full)}<button
+                type="button"
+                title="Render {row.name} with…"
+                aria-label="Render {row.name} with…"
+                aria-haspopup="menu"
+                aria-expanded={pickOpen && pickFor?.folder === full}
+                onclick={(event) => {
+                  pickFor = { folder: full, opener: event.currentTarget };
+                  pickOpen = true;
+                }}
+                ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg></button
+              >{:else}<a
               href={renderLink(by, full)}
               title="Render with {by.name}"
               aria-label="Render {row.name} with {by.name}"
               class:tf-on={by.output === "folder" && grafts.get(full)?.renderer === by.id}
               ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg></a
-            ></span
+            >{/if}</span
           >
         {/each}
       {:else if row.kind === "file"}
@@ -2231,6 +2264,7 @@
         renderer={renderedBy}
         renderers={folderChoices}
         folder={singleNow.folder}
+        onpick={(id) => void folderPicks.set(repoId, repoId, singleNow!.folder, id).catch(() => {})}
         commit={local?.commit ?? null}
         paths={sourcePaths}
         start={shownPage()}
@@ -2250,6 +2284,7 @@
       {@const graftFolder = renderedNow.folder}
       <TfMadeBar
         folder={graftFolder}
+        onpick={(id) => void folderPicks.set(repoId, repoId, graftFolder, id).catch(() => {})}
         {title}
         renderer={renderedNow.renderer}
         name={madeName}
@@ -2504,6 +2539,24 @@
   {/if}
   </div>
 </div>
+
+{#if pickFor !== null}
+  {@const at = pickFor.folder}
+  {@const taking = renderersFor(at, folders.list, marks)}
+  <!-- The glyph's menu (ux26): the renderers that take the folder, a name over its program; the choice is kept for it. -->
+  <TfMenu bind:open={pickOpen} opener={pickFor.opener} label="Render {at === '' ? 'the repository' : at} with" className="tf-rsw-m tf-frpick-m" focusOn="button">
+    <div class="tf-rsw-mh">Render with</div>
+    {#each taking as r, n (r.id)}
+      <button type="button" role="menuitemradio" aria-checked={n === 0} class:tf-on={n === 0} title="{r.name}
+{r.command}" onclick={() => pickRenderer(at, r)}>
+        <span class="tf-rsw-tick" aria-hidden="true">{n === 0 ? "✓" : ""}</span>
+        <span class="tf-rsw-name"><span class="tf-rsw-nm">{r.name}</span>{" "}<TfPath class="tf-rsw-sub" path={programOf(r.command)} title={r.command} /></span>
+      </button>
+    {/each}
+    <hr />
+    <a role="menuitem" href={settingsHash("renderers")} onclick={() => (pickOpen = false)}><span class="tf-rsw-tick" aria-hidden="true"></span>Folder renderers…</a>
+  </TfMenu>
+{/if}
 
 {#if committing && file !== null && file.sha !== null && branch !== null}
   <TfCommitFile

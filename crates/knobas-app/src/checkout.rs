@@ -1035,6 +1035,11 @@ pub async fn local_file_bytes(
     local::file_bytes(Path::new(&path), commit, file, cap).await
 }
 
+/// The repository `entity_id` is, or a branch's repository: `None` where the mirror names none.
+pub(crate) async fn repository_of(pool: &PgPool, entity_id: &str) -> Option<String> {
+    repo_of(pool, entity_id).await.ok()?.entity_id
+}
+
 /// The bytes of `file` in the working tree ([`working::END`]) or the index
 /// ([`working::INDEX`]) of `entity_id`'s checkout (ux26): only where git
 /// lists the file there, never through a link, up to `cap`.

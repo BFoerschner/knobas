@@ -282,6 +282,9 @@ vi.mock("../ipc/app", () => ({
   retryDatabase: () => deferred(undefined),
   completeFirstRun: () => deferred(undefined),
   ping: () => deferred("pong"),
+  // The pick per folder (ux26): read once by the Files tree, nothing kept.
+  folderRenderPicks: () => deferred([]),
+  setFolderRenderPick: () => deferred([]),
   pagesKeptOpen: () => deferred(5),
   setPagesKeptOpen: (count: number) => deferred(count),
   smoothScrolling: () => deferred(true),

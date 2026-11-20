@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { FolderRenderer } from "../ipc/app";
-import { failureLines, folderMatches, markSets, renderersFor, runningLine, tookLabel } from "./folder";
+import { failureLines, folderMatches, markSets, rendererFor, renderersFor, runningLine, tookLabel } from "./folder";
 import { folderRenderHash, readRepoRoute } from "../tf/repo/repo";
 
 const R = (id: string, over: Partial<FolderRenderer> = {}): FolderRenderer => ({ id, name: id, command: "t {path}", holds: [], folders: [], output: "detect", timeout_secs: 30, ...over });
@@ -26,6 +26,19 @@ test("a renderer takes a folder when both lists hold, the file glob by the backe
   expect(renderersFor("", saved, marks).map((r) => r.id)).toEqual(["every", "holding"]);
   // Marks not read yet: a renderer holding a glob takes nothing.
   expect(renderersFor("app/flows", saved, new Map()).map((r) => r.id)).toEqual(["every", "named"]);
+});
+
+test("a folder's renderer is its pick where that still takes it, else the first that does (ux26)", () => {
+  const first = R("first", { folders: ["flows"] });
+  const second = R("second", { folders: ["flows"] });
+  const elsewhere = R("elsewhere", { folders: ["docs"] });
+  const saved = [first, second, elsewhere];
+  expect(rendererFor("flows", saved, new Map(), null)?.id).toBe("first");
+  expect(rendererFor("flows", saved, new Map(), "second")?.id).toBe("second");
+  // A pick that no longer takes the folder, or a renderer deleted since: the first, and the pick is not the answer.
+  expect(rendererFor("flows", saved, new Map(), "elsewhere")?.id).toBe("first");
+  expect(rendererFor("flows", saved, new Map(), "gone")?.id).toBe("first");
+  expect(rendererFor("other", saved, new Map(), "second")).toBeUndefined();
 });
 
 test("a run's state and its failures read as lines", () => {

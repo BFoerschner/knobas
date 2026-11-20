@@ -13,6 +13,7 @@ import type {
   CommandStep,
   CommandStepDraft,
   FolderMarks,
+  FolderPick,
   FolderRenderer,
   FolderRendererDraft,
   FolderRenderView,
@@ -42,6 +43,7 @@ export type {
   FolderFailure,
   FolderMarks,
   FolderOutput,
+  FolderPick,
   FolderRenderer,
   FolderRendererDraft,
   FolderRenderMoved,
@@ -195,6 +197,16 @@ export function folderRenderers(): Promise<FolderRenderer[]> {
 /** Save the whole list of folder renderers; answers it as stored (ids, trimmed globs, held timeouts). */
 export function setFolderRenderers(renderers: FolderRendererDraft[]): Promise<FolderRenderer[]> {
   return invoke<FolderRenderer[]>("set_folder_renderers", { renderers });
+}
+
+/** The folder renderer picked for each folder of each repository (ux26, `render.folder_picks`). */
+export function folderRenderPicks(): Promise<FolderPick[]> {
+  return invoke<FolderPick[]>("folder_render_picks");
+}
+
+/** Picks `renderer` for `folder` of the repository `entityId` names (`null` takes the pick away); answers the picks as stored. */
+export function setFolderRenderPick(entityId: string, folder: string, renderer: string | null): Promise<FolderPick[]> {
+  return invoke<FolderPick[]>("set_folder_render_pick", { entityId, folder, renderer });
 }
 
 /** Where a folder render is asked for: the repository or branch, the renderer, the folder and its reads. */

@@ -40,6 +40,20 @@ export function renderersFor(path: string, saved: readonly FolderRenderer[], mar
   });
 }
 
+/**
+ * The renderer a folder gets (ux26, ruling 10): its pick where that renderer is still saved and still takes the folder,
+ * else the first saved renderer that takes it. The Files tree, the right-click menu and every comparison ask this.
+ */
+export function rendererFor(
+  path: string,
+  saved: readonly FolderRenderer[],
+  marks: ReadonlyMap<string, ReadonlySet<string>>,
+  pick: string | null,
+): FolderRenderer | undefined {
+  const taking = renderersFor(path, saved, marks);
+  return (pick === null ? undefined : taking.find((r) => r.id === pick)) ?? taking[0];
+}
+
 const where = (from: ReadFrom | null) => (from === "forge" ? "the source" : "your clone");
 
 /** What a run is doing, in a line. */

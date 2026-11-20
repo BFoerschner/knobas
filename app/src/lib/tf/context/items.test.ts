@@ -193,7 +193,7 @@ test("a folder a folder renderer takes offers its drawing by each that takes it,
   const menu = menuFor(thing, null, { ...ctx(), renders: (repo, path) => (asked.push([repo, path]), [{ id: "lc", name: "Low code" }, { id: "tree", name: "Tree" }]) });
   expect(asked).toEqual([["gitea:t/pay", "flows/orders"]]);
   expect(ids(menu).slice(0, 3)).toEqual(["render-lc", "render-tree", "|"]);
-  expect(item(menu, "render-lc")).toMatchObject({ label: "Render with Low code", act: { do: "go", hash: "#/repo/gitea%3At%2Fpay/render/lc/flows/orders" } });
+  expect(item(menu, "render-lc")).toMatchObject({ label: "Render with Low code", act: { do: "render-with", hash: "#/repo/gitea%3At%2Fpay/render/lc/flows/orders", repoId: "gitea:t/pay", folder: "flows/orders", renderer: "lc" } });
   // A file is offered none.
   expect(ids(menuFor({ kind: "file", repoId: "gitea:t/pay", path: "a.md" }, null, { ...ctx(), renders: () => [{ id: "lc", name: "Low code" }] }))).not.toContain("render-lc");
 });

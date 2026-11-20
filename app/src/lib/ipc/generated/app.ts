@@ -135,6 +135,25 @@ folders: Array<string>, };
 export type FolderOutput = "detect" | "image" | "text" | "markdown" | "html" | "folder";
 
 /**
+ * One pick: the renderer a folder of a repository gets, wherever a folder renderer is chosen for it (`docs/decisions/
+ * 2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md` ruling 10). A pick whose renderer is
+ * gone is passed over and left in place, so a renderer saved again under its id takes its folders back.
+ */
+export type FolderPick = { 
+/**
+ * The repository's entity id.
+ */
+repo: string, 
+/**
+ * The folder's path from the top; `""` the top.
+ */
+folder: string, 
+/**
+ * The saved renderer's id.
+ */
+renderer: string, };
+
+/**
  * The event's payload: a slot's run moved; the page showing it asks again.
  */
 export type FolderRenderMoved = { entity_id: string, renderer: string, folder: string, 

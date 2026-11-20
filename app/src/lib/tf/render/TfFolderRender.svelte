@@ -55,6 +55,7 @@
     start = true,
     changedInside = false,
     switchTo = null,
+    onpick = () => {},
     fileLink = null,
     title = "",
     ports = ipcFolderRenderPorts,
@@ -80,6 +81,8 @@
     changedInside?: boolean;
     /** The address that draws the folder with another renderer; `null` draws no switch. */
     switchTo?: ((id: string) => string) | null;
+    /** *Render with* chose a renderer: the folder's pick (ux26), kept before the address changes. */
+    onpick?: (renderer: string) => void;
     /** The href that opens a repository file, for Markdown's relative links. */
     fileLink?: ((to: string, line: number | null) => string) | null;
     /** The repository's name, for the top folder's header. */
@@ -198,7 +201,11 @@
       {#if switchTo !== null && others.length > 0}
         <label class="tf-frender-as">
           <span class="tf-dim tf-small">Render with</span>
-          <select class="tf-select" aria-label="Render with" title={renderer.name} value={renderer.id} onchange={(event) => (location.hash = switchTo(event.currentTarget.value))}>
+          <select class="tf-select" aria-label="Render with" title={renderer.name} value={renderer.id} onchange={(event) => {
+            // Choosing is picking, kept for this folder (ux26).
+            onpick(event.currentTarget.value);
+            location.hash = switchTo(event.currentTarget.value);
+          }}>
             {#each renderers as one (one.id)}<option value={one.id}>{one.name}</option>{/each}
           </select>
         </label>

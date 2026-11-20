@@ -15,6 +15,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { clonedHere } from "../repo/cloned-here.svelte";
+  import { folderPicks } from "../../render/folder-picks.svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, EntityDetail } from "../../ipc/entity";
@@ -395,6 +396,10 @@
     const from = reads ?? { head: Promise.resolve(null), checkout: Promise.resolve(null), forge: Promise.resolve(null) };
     switch (act.do) {
       case "go":
+        return ports.go(act.hash);
+      case "render-with":
+        // Choosing a folder's renderer is picking it for that folder (ux26, ruling 10).
+        void folderPicks.set(act.repoId, act.repoId, act.folder, act.renderer).catch(() => {});
         return ports.go(act.hash);
       case "copy": {
         const value = now(act.text);

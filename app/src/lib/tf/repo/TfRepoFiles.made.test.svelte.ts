@@ -15,6 +15,7 @@ import type { MadePorts } from "../../render/made-ports";
 import { pageContext } from "../kept-pages.svelte";
 import type { FolderRenderPorts } from "../render/TfFolderRender.svelte";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import { folderPicks } from "../../render/folder-picks.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 const HASH = "#/repo/gitea%3Atidewater%2Fpayout-service";
@@ -55,6 +56,9 @@ async function entityView(_at: string, section: string | null): Promise<SourceVi
 }
 
 const SITE: FolderRenderer = { id: "site", name: "Low-code site", command: "lc site {path} {outdir}", holds: [], folders: ["flows/*"], output: "folder", timeout_secs: 60 };
+/** A second renderer on the same folders (ux26, the pick): a drawing, not a folder of files. */
+const FLOW: FolderRenderer = { id: "flow", name: "Flow diagram", command: "C:\\Tools\\flowviz\\flowviz.exe {path} {out}", holds: [], folders: ["flows/*"], output: "image", timeout_secs: 60 };
+let savedRenderers: FolderRenderer[] = [SITE];
 
 /** What each run made, by token. */
 const MADE: Record<string, Record<string, string>> = {
@@ -183,7 +187,7 @@ function draw(start: Partial<Place>) {
         return place.changed;
       },
       defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
-      folders: createFolderRenderers({ read: async () => [SITE], save: async () => [] }),
+      folders: createFolderRenderers({ read: async () => savedRenderers, save: async () => [] }),
       folderMarks: () => Promise.resolve([]),
       folderPorts: fp.ports,
       madePorts,
@@ -205,6 +209,34 @@ const rowPaths = () => [...target.querySelectorAll<HTMLElement>(".tf-ftree [data
 const band = () => target.querySelector<HTMLButtonElement>(".tf-ftree .tf-fband");
 const glyph = (path: string) => target.querySelector<HTMLButtonElement>(`.tf-fdir[data-path="${path}"]`)?.nextElementSibling?.querySelector<HTMLAnchorElement>("a") ?? null;
 const RENDERED = { renderer: "site", folder: "flows/orders" };
+
+test("two renderers on a folder and no pick: the glyph opens a menu; choosing one keeps the pick and opens it (ux26)", async () => {
+  savedRenderers = [SITE, FLOW];
+  try {
+    draw({});
+    await settle();
+    target.querySelector<HTMLButtonElement>('.tf-fdir[data-path="flows"]')!.click();
+    await settle();
+    const mark = target.querySelector<HTMLElement>('.tf-fdir[data-path="flows/orders"]')!.nextElementSibling!;
+    expect(mark.querySelector("a"), "no link while the folder asks which").toBeNull();
+    const button = mark.querySelector<HTMLButtonElement>("button")!;
+    expect(button.getAttribute("aria-haspopup")).toBe("menu");
+    button.click();
+    flushSync();
+    const items = [...document.querySelectorAll<HTMLButtonElement>(".tf-frpick-m button[role=menuitemradio]")];
+    expect(items.map((b) => b.querySelector(".tf-rsw-nm")?.textContent)).toEqual(["Low-code site", "Flow diagram"]);
+    // A program, never a command line (the 2026-11-19 rule).
+    expect(items[1]!.querySelector(".tf-rsw-sub")?.getAttribute("title")).toBe(FLOW.command);
+    items[1]!.click();
+    flushSync();
+    expect(location.hash).toBe(`${HASH}/render/flow/flows/orders`);
+    expect(folderPicks.of(REPO, "flows/orders")).toBe("flow");
+    await settle();
+    expect(glyph("flows/orders")?.getAttribute("href"), "picked: a plain link to it again").toBe(`${HASH}/render/flow/flows/orders`);
+  } finally {
+    savedRenderers = [SITE];
+  }
+});
 
 test("a folder of files renderer's glyph links to the generated folder's address", async () => {
   draw({});
