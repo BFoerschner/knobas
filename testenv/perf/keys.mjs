@@ -406,6 +406,14 @@ for (const rate of throttles) {
     writeFileSync(out, JSON.stringify(results, null, 1));
   }
 }
+// A window this attached to is someone's (knobas's own WebView2 window, the ux23 gate): it gets back its own size, its
+// CPU and its focus, and the socket closes, so the probe exits after its results instead of holding 1440x868 on it.
+if (attachPort) {
+  await cpu(1).catch(() => {});
+  await c.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+  await c.send("Emulation.setFocusEmulationEnabled", { enabled: false }).catch(() => {});
+  c.close();
+}
 browser.stop();
 
 if (check) {
@@ -425,6 +433,7 @@ if (check) {
   console.log(over ? `keys: ${over} over their lines` : "keys: every key within its line");
   process.exit(over ? 1 : 0);
 }
+process.exit(0);
 
 /**
  * The views the show-every-ticket cases open (ux18), saved on the backend under their own ids: every ticket, as a board
