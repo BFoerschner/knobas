@@ -242,26 +242,76 @@ test("a chained pipeline's header names its step and the chain (R-9.13)", async 
   ];
   draw([PIPELINE.entity_id], "PAY-231", { settings: () => Promise.resolve({ ...SETTINGS, chain }) });
   await settle();
-  const sub = target.querySelector(".tf-bhead .tf-sub")!;
-  expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "TeamCity build configuration, builds payout-service. Triggered by VCS and Schedule. " +
-      "Step 2 of the chain Payout_Build › Payout_IntegrationTests › Payout_Deploy_Staging.",
+  // The chain is a sign of a few words (the build-header pass, 2026-11-20); the whole chain is its description.
+  const sign = target.querySelector<HTMLButtonElement>(".tf-bhead .tf-sub .tf-chainsign .tf-signbtn")!;
+  expect(sign.textContent?.replace(/\s+/g, " ").trim()).toBe("Step 2 of 3");
+  expect(document.getElementById(sign.getAttribute("aria-describedby")!)?.textContent).toBe(
+    "Step 2 of the chain Payout_Build › Payout_IntegrationTests › Payout_Deploy_Staging.",
   );
+  // Its bubble lists the steps, first step first, each opening its pipeline, this one marked.
+  expect(target.querySelector(".tf-chainlist")).toBeNull();
+  sign.click();
+  flushSync();
+  const steps = [...target.querySelectorAll<HTMLAnchorElement>(".tf-chainlist a")];
+  expect(steps.map((a) => a.textContent)).toEqual(chain.map((step) => step.name));
+  expect(steps.map((a) => a.getAttribute("href"))).toEqual(chain.map((step) => `#/builds/${encodeURIComponent(step.pipeline)}`));
+  expect(steps.map((a) => a.getAttribute("aria-current"))).toEqual([null, "page", null]);
 });
 
-test("the header says what it is in the source's word, the repository it builds and what triggers it", async () => {
-  draw();
+test("the header's line names a VCS root named by its address by its own name, the rest as how many more, whole in their title", async () => {
+  const address = "https://git.tidewater.example/payments-platform/payout-service-repository-name-that-is-long.git";
+  const scripts = "ssh://git@git.tidewater.example:7999/payments-platform/shared-build-scripts.git";
+  const repositories = [
+    { name: `${address}#refs/heads/main`, url: address, default_branch: "refs/heads/main", entity_id: "gitea:repo:tidewater/payout-service" },
+    { name: `${scripts}#refs/heads/main`, url: scripts, default_branch: null, entity_id: null },
+  ];
+  draw(undefined, undefined, { settings: () => Promise.resolve({ ...SETTINGS, repositories }) });
   await settle();
-  expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
   const sub = target.querySelector(".tf-bhead .tf-sub")!;
   expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "TeamCity build configuration, builds payout-service. Triggered by VCS and Schedule.",
+    "TeamCity build configuration, builds payout-service-repository-name-that-is-long and 1 more. Triggered by VCS and Schedule.",
   );
-  expect(sub.querySelector("a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Atidewater%2Fpayout-service");
-  expect(button("Run…")).toBeDefined();
-  expect(button("Run on feature/PAY-231-sepa-retry")).toBeDefined();
-  expect(button("Open in TeamCity")).toBeDefined();
-  expect(target.querySelector(".tf-stale")).toBeNull();
+  const whole = `${address}#refs/heads/main\n${address}\n\n${scripts}#refs/heads/main\n${scripts}`;
+  const repo = sub.querySelector<HTMLAnchorElement>("a.tf-bsub-repo")!;
+  expect([repo.getAttribute("href"), repo.title]).toEqual(["#/repo/gitea%3Arepo%3Atidewater%2Fpayout-service", whole]);
+  expect(sub.querySelector<HTMLElement>(".tf-bsub-more")?.title).toBe(whole);
+  expect(sub.querySelectorAll("a")).toHaveLength(1);
+  // The triggers give way first, whole in their title.
+  expect(sub.querySelector<HTMLElement>(".tf-bsub-trig")?.title).toBe("Triggered by VCS and Schedule.");
+  // A repository the mirror does not hold is named, not linked.
+  if (page) unmount(page);
+  page = null;
+  draw(undefined, undefined, { settings: () => Promise.resolve({ ...SETTINGS, repositories: repositories.slice(1) }) });
+  await settle();
+  const alone = target.querySelector(".tf-bhead .tf-sub")!;
+  expect(alone.querySelector("a")).toBeNull();
+  expect(alone.querySelector(".tf-bsub-repo")?.textContent).toBe("shared-build-scripts");
+  expect(alone.querySelector(".tf-bsub-more")).toBeNull();
+});
+
+test("an installed adapter's pipeline opens its own page, named by its source's display name, with no TeamCity word", async () => {
+  // A CI adapter installed from a release (ADR-0028): a kind knobas has no descriptor for until it reads the adapter's own.
+  const opened: string[] = [];
+  const acme = { ...PIPELINE, entity_id: "acme:pipeline:42", source_id: "acme", source_name: "Acme Pipelines (staging)", web_url: "https://ci.acme.test/p/42" };
+  const drawn = draw([acme.entity_id], null, {
+    adapters: () => Promise.resolve([]),
+    sources: () => Promise.resolve([{ ...SOURCE, id: "acme", adapter_kind: "acme-ci", display_name: "Acme Pipelines (staging)" }]),
+    openExternal: (url) => {
+      opened.push(url);
+      return Promise.resolve();
+    },
+  });
+  drawn.goPipeline(acme);
+  await settle();
+  expect(target.querySelector(".tf-bhead .tf-bsub-kind")?.textContent).toBe("Acme Pipelines (staging), builds");
+  const open = target.querySelector<HTMLButtonElement>('.tf-bhead .tf-acts button[aria-label^="Open in"]')!;
+  expect(open.getAttribute("aria-label")).toBe("Open in Acme Pipelines (staging)");
+  // A long name is cut in the button, whole in its title.
+  expect(open.title).toBe("Open in Acme Pipelines (staging)");
+  expect(open.querySelector(".tf-cut")?.textContent).toBe("Open in Acme Pipelines (staging)");
+  open.click();
+  await settle();
+  expect(opened).toEqual(["https://ci.acme.test/p/42"]);
 });
 
 test("Pin writes through the list's pins", async () => {

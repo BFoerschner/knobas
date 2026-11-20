@@ -6,6 +6,18 @@
 /* A title too long to share its line keeps its words, and the actions go under it. */
 .tf-bhead > .tf-acts { order: 1; flex: none; margin-left: auto; }
 .tf-bhead .tf-sub { order: 2; flex-basis: 100%; max-width: 80ch; }
+/* The pipeline's line (the build-header pass, 2026-11-20): one line at every width, as tall as one line from the first
+   paint. The triggers give way first, then the source's words, each whole in its title; the repository's name only once
+   those are gone (a share of the shrink a ten-thousandth of theirs), and the chain's sign never. As wide as the header,
+   not 80ch: a name and a sign fit there. */
+.tf-bhead .tf-bsub { display: flex; align-items: baseline; column-gap: .3em; min-width: 0; max-width: none; white-space: nowrap; min-height: 1lh; }
+.tf-bsub-kind { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-bsub-repo { flex: 0 0.0001 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-bsub-more, .tf-bsub-sep { flex: none; }
+/* The full stop sits on the name, not a gap after it. */
+.tf-bsub-sep { margin-left: -.3em; }
+.tf-bsub-trig { flex: 0 1000000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-bsub > .tf-sign { flex: none; align-self: center; }
 /* A button whose words change while it holds: as wide as its words at rest, so what stands beside it stays put. */
 .tf-keepw { display: inline-grid; justify-items: center; white-space: nowrap; }
 .tf-keepw::before { content: attr(data-keep); height: 0; visibility: hidden; overflow: hidden; }

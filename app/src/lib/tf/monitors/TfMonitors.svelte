@@ -1160,7 +1160,9 @@
           onclick={() => void setHidden(panel, !panel.hidden)}>{panel.hidden ? "Unhide" : "Hide"}</button
         >
         {#if panelRefresh}<TfDetailRefresh detail={subjectOf(panel)} refresh={panelRefresh} {reread} small />{/if}
-        {#if panel.web_url}<a class="tf-btn tf-sm tf-ghost" href={panel.web_url} target="_blank" rel="noreferrer">Open in Uptime Kuma</a>{/if}
+        <!-- Named after the monitor's own source, as Settings › Sources names it, never a product (the build-header pass,
+             2026-11-20: two monitoring sources, or one an installed adapter fills, are not "Uptime Kuma"). -->
+        {#if panel.web_url}<a class="tf-btn tf-sm tf-ghost" href={panel.web_url} target="_blank" rel="noreferrer" title="Open in {sourceNames[panel.source_id] || panel.source_id}"><span class="tf-cut">Open in {sourceNames[panel.source_id] || panel.source_id}</span></a>{/if}
       </div>
       {#if panelRefresh?.failed}<div class="tf-banner tf-err tf-refresh-failed" role="alert">{panelRefresh.failed}</div>{/if}
     </aside>

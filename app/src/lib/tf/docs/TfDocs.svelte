@@ -2113,7 +2113,7 @@
               />
               {#if p.web_url}
                 {@const url = p.web_url}
-                <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
+                <button type="button" class="tf-btn tf-ghost" title="Open in {p.source_name}" onclick={() => open(url)}><span class="tf-cut">Open in {p.source_name}</span></button>
               {/if}
               {#if !syncInMore && !beside}
                 <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />

@@ -33,6 +33,7 @@ import type {
 import { DEBOUNCE_MS } from "../launcher";
 import { createTestNav } from "./test-nav.svelte";
 import AssetsView from "./AssetsView.svelte";
+import { sourceRoles } from "../tf/roles.svelte";
 import { waitFor } from "../shell/test-wait";
 
 /** The clock the history's *ago* readings are relative to. */
@@ -1750,6 +1751,26 @@ test("the pane lists the monitors watching the asset, with their state", async (
     "postgres-slow-query Paused or gone from Kuma",
     "postgres-wal no reading Open in Kuma",
   ]);
+});
+
+/**
+ * Each monitor names its own source as Settings › Sources does (the build-header pass, 2026-11-20): a second monitoring
+ * source, or one an installed adapter fills, is not "Kuma".
+ */
+test("once the source list is read, a monitor's Open in and its gone line name its own source", async () => {
+  sourceRoles.take([{ id: "kuma", display_name: "Kuma (EU)", roles: [{ role: "monitoring", reads: [] }], role_misses: [] }]);
+  try {
+    render(`#/asset/${CONTAINER.id}`);
+    await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+    const rows = [...target.querySelectorAll(".watch li")].map((row) => (row.textContent ?? "").replace(/\s+/g, " ").trim());
+    expect(rows).toEqual([
+      "postgres-check Down Open in Kuma (EU)",
+      "postgres-slow-query Paused or gone from Kuma (EU)",
+      "postgres-wal no reading Open in Kuma (EU)",
+    ]);
+  } finally {
+    sourceRoles.forget();
+  }
 });
 
 /**

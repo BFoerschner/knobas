@@ -3013,7 +3013,12 @@ Settings › Checkouts and › Renderers (its list, a renderer's dialog, a folde
 2560 x 1440 at 125 %, 1920 x 1080 at 200 % and the window's smallest, 1100 x 600. It fails when a path's text runs past
 the window or past any box that holds it (the start `TfPath` gives up on purpose excepted; a renderer's long name may end
 in an ellipsis), or when a box scrolls
-sideways with the long paths and not with the short ones. Run it as the trips run, under the machine's lock:
+sideways with the long paths and not with the short ones. Since 2026-11-20 (the build-header pass) `?fake-long-paths`
+also makes the payouts chain 70 long-named steps with `Payout_Docker` 64th, names each VCS root by its whole address with a
+second the mirror does not hold, and gives TeamCity a long display name; six Builds screens (the pipeline, its chain's
+sign focused, hovered and pinned, a run's chain folded and unfolded) run at 1440 x 868 in place of 1920 x 1080, and fail
+too when the pipeline's line is more than one line or, at 1400 px and wider, its actions leave the title's line. Run it
+as the trips run, under the machine's lock:
 
 ```sh
 testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5341 node testenv/ui-checks/long-paths.mjs "$TMPDIR/long-paths" --port 5341

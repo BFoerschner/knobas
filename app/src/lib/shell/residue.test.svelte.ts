@@ -403,6 +403,7 @@ const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).defa
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfMadeOpenIn = (await import("../tf/openin/TfMadeOpenIn.svelte")).default;
 const TfCloneSign = (await import("../tf/repo/TfCloneSign.svelte")).default;
+const TfChainSign = (await import("../tf/builds/TfChainSign.svelte")).default;
 const TfAppPage = (await import("../tf/openin/TfAppPage.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
@@ -1412,6 +1413,28 @@ const CASES: Case[] = [
       target.querySelector(".tf-clonesign")?.dispatchEvent(new PointerEvent("pointerenter"));
       target.querySelector<HTMLButtonElement>(".tf-signbtn")?.click();
       [...target.querySelectorAll<HTMLButtonElement>(".tf-signbubble button")].find((b) => b.textContent === "Copy path")?.click();
+    },
+  },
+  {
+    /** A pipeline's chain sign (the build-header pass, 2026-11-20): `TfSign`'s, pinned open, a layer and window listeners. */
+    name: "TfChainSign",
+    source: "lib/tf/TfSign.svelte",
+    open: (target) => ({
+      app: mount(TfChainSign, {
+        target,
+        props: {
+          chain: [
+            { pipeline: "teamcity:buildType:A", name: "A" },
+            { pipeline: "teamcity:buildType:B", name: "B" },
+          ],
+          pipelineId: "teamcity:buildType:B",
+          layers: createLayers(),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector(".tf-chainsign")?.dispatchEvent(new PointerEvent("pointerenter"));
+      target.querySelector<HTMLButtonElement>(".tf-signbtn")?.click();
     },
   },
   {

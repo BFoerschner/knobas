@@ -256,7 +256,7 @@
   <div class="tf-tktable tf-tkacts" class:tf-hidden={!rowsHeld.shown} inert={!rowsHeld.shown}>
     {#if detail.web_url}
       {@const url = detail.web_url}
-      <a href={url} onclick={(event) => openWeb(event, url)}
+      <a href={url} title="Open in {detail.source.display_name}" onclick={(event) => openWeb(event, url)}
         ><span>Open in {detail.source.display_name}</span><span class="tf-chev" aria-hidden="true">›</span></a
       >
     {/if}

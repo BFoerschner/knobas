@@ -2,14 +2,16 @@
   Where a saved view comes from (#879, R-3.22, R-3.23), under the board head,
   in prototype-6's words (`vwSrcLine`): board or filter, its type, the active
   sprint and its end, its query and a Kanban board's sub-filter (each only when it has one), when the
-  last sync read it, and *Open in Jira*, naming the view's own ticket system
-  (`system`, #2032). Then, per project the source does not
+  last sync read it, and *Open in ⟨source⟩*, naming the source the view comes from as Settings › Sources names it
+  (the build-header pass, 2026-11-20: two Jira sources are not both "Jira"), else its ticket system (`system`,
+  #2032). Then, per project the source does not
   sync that holds tickets on it, a warn line with *Sync <project> too*, which
   opens the source's page with the project added, unsaved.
 -->
 <script lang="ts">
   import type { SavedViewSource } from "../../ipc/search";
   import { ago } from "../../shell/time";
+  import { sourceRoles } from "../roles.svelte";
   import { sourceHash } from "../settings/settings";
   import { savedViewKindWords, savedViewQueries, sprintEnds } from "./views";
 
@@ -32,6 +34,9 @@
     location.hash = sourceHash(sourceId, { field: "projects", value: project });
   }
 
+  /** Who *Open in* names: the view's source by its display name, else its ticket system. */
+  const where = $derived(sourceRoles.displayName(sourceId) ?? savedViewSource.system);
+
   /** What the view's query and sub-query say, each only when its record carries one (#2050). */
   const queries = $derived(savedViewQueries(savedViewSource));
 
@@ -47,7 +52,7 @@
       ? ": "
       : " and "}<code>{query}</code>{/each}. Read again at every sync, last
   {ago(savedViewSource.last_read)}.
-  {#if savedViewSource.web_url}<a href={savedViewSource.web_url} onclick={open}>Open in {savedViewSource.system}</a>{/if}
+  {#if savedViewSource.web_url}<a href={savedViewSource.web_url} onclick={open}>Open in {where}</a>{/if}
 </p>
 {#each savedViewSource.unsynced as { project, count } (project)}
   <p class="tf-vw-srcline tf-vw-warn">

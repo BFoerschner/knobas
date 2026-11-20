@@ -677,7 +677,7 @@ pin_label $tf/openin/TfOpenIn.svelte '}}>Open in…<svg class="tf-caret"' \
     "the checkout's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenIn.svelte 'role="menuitem" onclick={() => run(' \
     "the menu's applications are still menu items, which the driver walks to"
-pin_label $tf/repo/TfCloneSign.svelte '<span class="tf-sr" id="{uid}-path">{path}</span>' \
+pin_label $tf/repo/TfCloneSign.svelte '<span class="tf-sr" id="{uid}-desc">{path}</span>' \
     "the repository page's clone's sign still holds the clone's path as a reading of its own"
 pin_label $tf/repo/TfRepo.svelte '<TfOpenIn entityId={repoId}' \
     "the repository page still offers the Open in… the driver presses"

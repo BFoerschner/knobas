@@ -100,6 +100,8 @@
 .tf-tktable > :first-child { border-top: 0; }
 .tf-tktable > a:hover, .tf-tktable > button:hover { background: rgba(0,0,0,.07); }
 .tf-tktable.tf-tkacts > a, .tf-tktable.tf-tkacts > button { grid-template-columns: minmax(0, 1fr) 8px; }
+/* *Open in ⟨source⟩* with a long display name ends in an ellipsis, whole in its title (the build-header pass, 2026-11-20). */
+.tf-tktable.tf-tkacts > :is(a, button) > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .tf-tktable .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
 .tf-tktable .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
 .tf-tktable .tf-st.tf-asks { color: var(--card-ink); }

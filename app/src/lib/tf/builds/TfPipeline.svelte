@@ -68,7 +68,8 @@
   import { counted } from "../counted";
   import { pageVisible } from "../kept-pages.svelte";
   import { RunHold } from "./run-hold.svelte";
-  import { chainSentence } from "./chain";
+  import { repositoryShortName } from "./chain";
+  import TfChainSign from "./TfChainSign.svelte";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
@@ -371,7 +372,20 @@
   const word = $derived(pipelineWord(adapters, adapterKind));
   const repositories = $derived(settings?.repositories ?? []);
   const triggers = $derived(triggersSentence(settings));
-  const chain = $derived(chainSentence(settings?.chain ?? [], pipeline.entity_id));
+  const chainSteps = $derived(settings?.chain ?? []);
+  /** The line's start: the source and what the pipeline is in its word, and *builds* where it names repositories. */
+  const kindLine = $derived(
+    `${pipeline.source_name}${word !== null ? ` ${word}` : ""}${repositories.length > 0 ? ", builds" : "."}`,
+  );
+
+  /** The first repository: the line names it, and how many more there are. */
+  const built = $derived(repositories[0] ?? null);
+  /** Each repository's whole name, and its address where that says more, one to a line. */
+  const repositoriesTitle = $derived(
+    repositories
+      .map((repository) => (repository.url !== null && repository.url !== repository.name ? `${repository.name}\n${repository.url}` : repository.name))
+      .join("\n\n"),
+  );
   const stale = $derived(staleLine(pipeline, sources, sync));
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
   const fallback = $derived(defaultBranch(settings));
@@ -653,12 +667,22 @@
 <header class="tf-fhead tf-bhead">
   <div>
     <h1>{pipeline.name}</h1>
-    <div class="tf-sub">
-      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{#if repositories.length > 0}, builds
-        {#each repositories as repository, at (at)}{#if at > 0},{" "}{/if}{#if repository.entity_id !== null}<a
-              class="tf-mono"
-              href={`#/repo/${encodeURIComponent(repository.entity_id)}`}>{repository.name}</a
-            >{:else}<span class="tf-mono">{repository.name}</span>{/if}{/each}{/if}.{triggers !== "" ? ` ${triggers}` : ""}{chain !== "" ? ` ${chain}` : ""}
+    <!-- One line, always (the build-header pass, 2026-11-20): what it is, the first repository by its own name and how
+         many more, what triggers it and the chain's sign. What gives way when the line is short is the triggers, then
+         the source's words, each whole in its title; the repository's name only when it alone is wider than the line;
+         the sign never does. -->
+    <div class="tf-sub tf-bsub">
+      <span class="tf-bsub-kind" title={kindLine}>{kindLine}</span
+      >{#if built !== null}{" "}{#if built.entity_id !== null}<a
+            class="tf-bsub-repo tf-mono"
+            href={`#/repo/${encodeURIComponent(built.entity_id)}`}
+            title={repositoriesTitle}>{repositoryShortName(built.name)}</a
+          >{:else}<span class="tf-bsub-repo tf-mono" title={repositoriesTitle}>{repositoryShortName(built.name)}</span
+          >{/if}{#if repositories.length > 1}{" "}<span class="tf-bsub-more" title={repositoriesTitle}
+            >and {repositories.length - 1} more</span
+          >{/if}<span class="tf-bsub-sep">.</span>{/if}{#if triggers !== ""}{" "}<span class="tf-bsub-trig" title={triggers}
+          >{triggers}</span
+        >{/if}{#if chainSteps.length > 1}{" "}<TfChainSign chain={chainSteps} pipelineId={pipeline.entity_id} />{/if}
     </div>
   </div>
   <div class="tf-acts">
@@ -691,7 +715,7 @@
       <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
     {/if}
     {#if pipeline.web_url !== null}
-      <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={openInSource}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
+      <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={openInSource}><span class="tf-wide tf-cut">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
     {/if}
     <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
   </div>

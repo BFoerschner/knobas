@@ -860,6 +860,28 @@ test("the open monitor's actions are small buttons, Refresh after Pause and Hide
   expect(rowNamed("payouts /health").querySelector("button:not(.tf-mon-open)")).toBeNull();
 });
 
+test("an open monitor's Open in names its own source and opens its own page: two monitoring sources, one an installed adapter's", async () => {
+  // The build-header pass, 2026-11-20: it said "Open in Uptime Kuma" whatever source the monitor came from.
+  const sources = async () => [
+    sourceFacts("kuma", { display_name: "Kuma (EU)" }),
+    sourceFacts("pingly", { display_name: "Pingly, an installed adapter" }),
+  ];
+  const rows = [
+    monitor("kuma:1", "payouts /health", { web_url: "http://kuma.test/dashboard/1" }),
+    { ...monitor("pingly:7", "ledger /ready", { web_url: "https://pingly.test/checks/7" }), source_id: "pingly" },
+  ];
+  for (const [id, words, url] of [
+    ["kuma:1", "Open in Kuma (EU)", "http://kuma.test/dashboard/1"],
+    ["pingly:7", "Open in Pingly, an installed adapter", "https://pingly.test/checks/7"],
+  ] as const) {
+    if (view) unmount(view);
+    view = null;
+    await draw(["at", id], null, ports({ monitorRoster: async () => rows, listSources: sources }));
+    const open = [...panel().querySelectorAll<HTMLAnchorElement>(".tf-mon-pacts a")].find((a) => text(a).startsWith("Open in"))!;
+    expect([text(open), open.title, open.getAttribute("href")]).toEqual([words, words, url]);
+  }
+});
+
 test("Refresh reads the monitor from its source, then the roster again over what it drew, and settles a pause on that read (#2138)", async () => {
   let roster = ROSTER;
   let reads = 0;

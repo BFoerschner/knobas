@@ -216,6 +216,10 @@
 /* Weight 500 wherever it stands: `.tf button { font: inherit }` outweighs `.tf-btn`, so a `<button>` took its parent's weight (700 in a section's heading) while an `<a>` beside it kept 500. */
 .tf .tf-btn { font-weight: 500; }
 .tf-btn:hover { border-color: var(--ink-2); }
+/* A button's words that hold a name of the reader's, a source's display name in *Open in ⟨source⟩*: cut at their end
+   past 16 rem, whole in the button's title (the build-header pass, 2026-11-20), so a long name can't push the actions
+   beside it off their line. */
+.tf-btn > .tf-cut { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; }
 /* An empty state's words are `--ink-2`, and its one action should not inherit that and read as disabled. */
 .tf-empty .tf-btn { color: var(--ink); }
 /* The view's *Sync now* is a header's button, and under an empty state's sentence it is a page body's: small (F-425). */
@@ -341,10 +345,11 @@
 /* A button that is part of a chip's text, drawn as that text (design system, Controls: chip buttons). */
 .tf-chipbtn { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 .tf-chipbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 2px; }
-/* The clone's sign (design system, Controls: the clone's sign): where a repository page reads from, *Local* and how the clone
-   stands or *Remote*, outlined as a label is, one line of the subline tall, so it neither moves the tabs nor holds a path.
-   What is cut is the standing, at its end; *Local* stays whole. */
-.tf-clonesign { position: relative; display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; }
+/* A sign (`TfSign`, design system, Controls: the sign): a few words for what is too long for its line, outlined as a label
+   is, one line of the subline tall, so it neither moves what is under it nor holds a path. The clone's sign says where a
+   repository page reads from, *Local* and how the clone stands or *Remote*; the chain's sign a pipeline's step, *Step 64
+   of 70*. What is cut is the state, at its end; the word stays whole. */
+.tf-sign { position: relative; display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; }
 .tf-signbtn {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 18px; padding: 0 6px;
   border: 1px solid var(--rule); border-radius: 3px; background: none; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs));
@@ -366,6 +371,12 @@
 .tf-signbubble-drawn b { font-weight: 600; }
 .tf-signbubble-state { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-signbubble-acts { display: flex; flex-wrap: wrap; gap: var(--control-gap); margin-top: 2px; }
+/* The chain's bubble: the steps numbered, first step first, this pipeline's in ink; a long chain scrolls in the bubble. */
+.tf-chainlist { margin: 0; padding: 0 4px 0 2.6em; background: var(--sheet); max-height: min(24rem, 50vh); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; font-variant-numeric: tabular-nums; line-height: 1.45; }
+.tf-chainlist li::marker { color: var(--ink-2); }
+.tf-chainlist a { color: var(--ink-2); text-decoration: none; }
+.tf-chainlist a:hover { color: var(--ink); text-decoration: underline; }
+.tf-chainlist a[aria-current] { color: var(--ink); font-weight: 600; }
 /* A path on one line (`TfPath`, design system, Paths): its start gives way, all of it if need be, and its end does not
    until it alone is wider than the box, so the folder it names stays in view; the whole path is its title. The end
    shrinks by none of it: a share of the shrink as small as 0.3 px put an ellipsis on its last letters. */

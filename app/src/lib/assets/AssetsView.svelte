@@ -165,6 +165,7 @@
     readsWide,
   } from "./editing";
   import { filterKeys } from "../tf/filter-keys";
+  import { sourceRoles } from "../tf/roles.svelte";
   import { pageVisible } from "../tf/kept-pages.svelte";
   import { layers as sharedLayers } from "../tf/layers.svelte";
   import { inTextField } from "../shell/keys";
@@ -1798,6 +1799,14 @@
   }
 
   /**
+   * A monitor's source as Settings › Sources names it, else *Kuma*, the monitoring source this view was built
+   * over (the build-header pass, 2026-11-20: an installed monitoring adapter's monitor is not "Kuma").
+   */
+  function monitorSource(entityId: string): string {
+    return sourceRoles.displayName(entityId.slice(0, Math.max(0, entityId.indexOf(":")))) ?? "Kuma";
+  }
+
+  /**
    * Hand a route's URL to the OS browser — spec §12.2's *open URL*, which
    * this ticket is the one that finally has a URL for.
    *
@@ -2864,7 +2873,7 @@
                     a blank beside a live row would read as "up".
                   -->
                   {#if watch.tombstoned}
-                    <span class="faint">Paused or gone from Kuma</span>
+                    <span class="faint">Paused or gone from {monitorSource(watch.entity_id)}</span>
                   {:else if watch.state !== null}
                     <span class="hl {watch.state}">{stateWord(watch.state)}</span>
                   {:else}
@@ -2872,7 +2881,7 @@
                   {/if}
                   {#if watch.web_url !== null}
                     <button class="link" onclick={() => void openInBrowser(watch.web_url!)}>
-                      Open in Kuma
+                      Open in {monitorSource(watch.entity_id)}
                     </button>
                   {/if}
                 </li>

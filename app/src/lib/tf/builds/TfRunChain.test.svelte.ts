@@ -111,3 +111,44 @@ test("a run in no chain, or whose chain could not be read, draws no panel", asyn
   await settle();
   expect(target.querySelector(".tf-chain")).toBeNull();
 });
+
+test("a chain of seventy steps folds its middle around the run's own, and a press on a fold shows every step", async () => {
+  const name = (i: number) => `Release_Train_${i}: run the payments team's contract tests against every sandbox`;
+  const long: ChainStepRow[] = Array.from({ length: 70 }, (_, i) =>
+    i === 63 ? { pipeline_id: P("Docker"), name: "Payout_Docker", run: run(1187, "ok") } : { pipeline_id: P(`T${i}`), name: name(i), run: null },
+  );
+  draw(long);
+  await settle();
+  const names = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-chainrow a b")].map((b) => b.textContent);
+  expect(names()).toEqual([name(0), name(61), name(62), "Payout_Docker", name(64), name(65), name(69)]);
+  const folds = [...target.querySelectorAll<HTMLButtonElement>(".tf-chainfold")];
+  expect(folds.map((b) => text(b))).toEqual(["… 60 more", "… 3 more"]);
+  // A long name ends in an ellipsis in its box: whole in its title.
+  expect(target.querySelector<HTMLAnchorElement>(".tf-chainrow a")?.title).toBe(name(0));
+  expect(target.querySelector(".tf-chainrow a[aria-current=page] b")?.textContent).toBe("Payout_Docker");
+  // The folds are a pointer's: the keyboard's way is the header's toggle.
+  expect(folds.map((b) => b.tabIndex)).toEqual([-1, -1]);
+  folds[1]!.click();
+  flushSync();
+  expect(names()).toHaveLength(70);
+  expect(target.querySelectorAll(".tf-chainfold")).toHaveLength(0);
+  expect(target.querySelectorAll(".tf-chainrow .tf-arrow")).toHaveLength(69);
+  // The header's toggle folds it again, and unfolds it, keeping its place: as wide as its longer words.
+  const toggle = target.querySelector<HTMLButtonElement>(".tf-chain > header button")!;
+  expect([text(toggle), toggle.getAttribute("aria-expanded")]).toEqual(["Show fewer", "true"]);
+  toggle.click();
+  flushSync();
+  expect(names()).toHaveLength(7);
+  expect([text(toggle), toggle.getAttribute("aria-expanded")]).toEqual(["Show all 70 steps", "false"]);
+  expect(toggle.querySelector(".tf-keepw")?.getAttribute("data-keep")).toBe("Show all 70 steps");
+  toggle.click();
+  flushSync();
+  expect(names()).toHaveLength(70);
+});
+
+test("a chain of seven steps or fewer has no toggle and no fold", async () => {
+  draw(CHAIN);
+  await settle();
+  expect(target.querySelector(".tf-chain > header button")).toBeNull();
+  expect(target.querySelector(".tf-chainfold")).toBeNull();
+});

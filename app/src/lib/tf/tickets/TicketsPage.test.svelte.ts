@@ -1969,12 +1969,26 @@ test("a Jira view's header says where it comes from: board and type, JQL, last r
     opened.push(url);
     return Promise.resolve();
   };
+  // Before the source list is read, the view's ticket system names it.
+  sourceRoles.forget();
   await open(h, null, "jira-board-21");
   expect(srcLines()).toEqual([
     "Jira decides which tickets, from the Kanban board Payments and Ops flow: project in (PAY, OPS) ORDER BY Rank ASC and fixVersion is EMPTY. Read again at every sync, last 4 min ago. Open in Jira",
   ]);
   [...target.querySelectorAll<HTMLAnchorElement>(".tf-vw-srcline a")].find((a) => a.textContent === "Open in Jira")!.click();
   expect(opened).toEqual(["https://jira.example/secure/RapidBoard.jspa?rapidView=21"]);
+  // Once it is, *Open in* names the view's own source as Settings › Sources does (the build-header pass, 2026-11-20): with
+  // two Jira sources, "Open in Jira" would not say which. What decides the tickets stays the ticket system's word.
+  try {
+    sourceRoles.take([
+      { id: "jira", display_name: "Jira (payments)", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+      { id: "jira-oss", display_name: "Jira (open source)", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+    ]);
+    flushSync();
+    expect(srcLines()[0]).toMatch(/^Jira decides which tickets, .* Open in Jira \(payments\)$/);
+  } finally {
+    sourceRoles.forget();
+  }
 });
 
 test("a Scrum view names its active sprint and when it ends", async () => {
@@ -2053,7 +2067,7 @@ test("a second ticket system's view says where it comes from, what decides it, a
   const h = kestrelHarness();
   await open(h, null, "kestrel-board-7");
   expect(srcLines()).toEqual([
-    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9: project = CUS. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9: project = CUS. Read again at every sync, last 4 min ago. Open in Tidewater Kestrel",
     "2 tickets on it are in WEB, which the Kestrel source does not sync, so they are missing here. Sync WEB too",
   ]);
   // The tickets are the corpus's, mirrored from `jira`; the words about the view are what may not say so.
@@ -2086,7 +2100,7 @@ test("a saved view with no query says what decides it with no dangling query, in
   h.views[1]!.saved_view_source = { ...h.views[1]!.saved_view_source!, source_query: "", unsynced: [] };
   await open(h, null, "kestrel-board-7");
   expect(srcLines()).toEqual([
-    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9. Read again at every sync, last 4 min ago. Open in Tidewater Kestrel",
   ]);
   expect(target.querySelector(".tf-vw-srcline code")).toBeNull();
 
@@ -2104,7 +2118,7 @@ test("a saved view's own query and sub-query show in its source line and View se
   h.views[1]!.saved_view_source = { ...h.views[1]!.saved_view_source!, source_query: "is:open milestone:train", sub_query: "label:ops", sprint: null, unsynced: [] };
   await open(h, null, "kestrel-board-7");
   expect(srcLines()).toEqual([
-    "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Tidewater Kestrel",
   ]);
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();

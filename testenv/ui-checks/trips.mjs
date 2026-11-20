@@ -369,6 +369,17 @@ const PAGES = [
   { page: "A file's Render as", route: `${REPO}/files/src/sepa/retry.rs`, trips: [
     { id: "render-as-long-key", kind: "enter-twice", strict: true, finding: "render-as-path", query: "&fake-long-paths", prep: [{ wait: 600 }, { click: ".tf-rsw-face", starts: "Render as" }, { wait: 400 }], fits: ".tf-rsw-m", press: { sel: "[role=menuitemradio]", starts: "Orchestra on the Mac" }, returns: "Render as Orchestra on the Mac" },
   ] },
+  // A pipeline 64th of a chain of 70 long names (the build-header pass, 2026-11-20: Björn's "builds <huge repo link> step 64
+  // of the chain x > y > z > foo > bar > etc."): the chain's sign pinned open by a press keeps its bubble inside the window
+  // with no step wider than it, and a step picked by Enter opens that step's pipeline; a second Enter opens nothing more.
+  { page: "A pipeline's chain", route: "builds/teamcity%3AbuildType%3APayout_Docker", trips: [
+    { id: "build-chain-step-key", kind: "enter-twice", strict: true, finding: "build-header-paths", query: "&fake-long-paths", prep: [{ wait: 600 }, { click: ".tf-chainsign .tf-signbtn", starts: "Step 64" }, { wait: 400 }], fits: ".tf-signbubble:not(.tf-sr)", press: { sel: ".tf-chainlist a", starts: "Payout_Deploy_Staging" }, leaves: true },
+  ] },
+  // A run's chain folded around it: the header's toggle shows every step and folds them again, keeping focus, so a second
+  // Enter never opens a step.
+  { page: "A run's chain", route: "build/teamcity%3AbuildType%3APayout_Docker/teamcity%3Abuild%3APayout_Docker-611", trips: [
+    { id: "build-chain-unfold-key", kind: "enter-twice", strict: true, finding: "build-header-paths", query: "&fake-long-paths", prep: [{ wait: 800 }], press: { sel: ".tf-chain > header button", starts: "Show all" }, rows: ".tf-chainrow a" },
+  ] },
   { page: "A repository's Open in…", route: REPO, trips: [
     { id: "openin-browser-key", kind: "enter-twice", strict: true, finding: "open-on-gitea", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", starts: "Browser" }, returns: "Open in…" },
     { id: "openin-add-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", text: "Add an application" }, leaves: true },

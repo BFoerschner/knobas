@@ -194,6 +194,15 @@ function inSource(id: string, ctx: MenuContext): Item {
   return { id: "web", label: name ? `Open in ${name}` : "Open in browser", act: { do: "browser", url: { read: "web" } } };
 }
 
+/**
+ * A file's, a folder's or a line's page on its repository's code host: *Open in ⟨source⟩* where the source is known,
+ * as `inSource` names an item's (the build-header pass, 2026-11-20: it said *Open in browser* while the source was known).
+ */
+function inForge(repoId: string, ctx: MenuContext): Item {
+  const name = ctx.sourceName(sourceOf(repoId));
+  return { id: "forge", label: name ? `Open in ${name}` : "Open in browser", act: { do: "browser", url: { read: "forge" } } };
+}
+
 /** The copy of the item's page at its source. */
 function copyLink(): Item {
   return { id: "copy-link", label: "Copy link", act: { do: "copy", text: { read: "web" }, said: "Copied the link" } };
@@ -382,7 +391,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         ],
         [
           ...openIn(thing.repoId, thing.repoId, at, ctx, facts),
-          { id: "forge", label: "Open in browser", act: { do: "browser", url: { read: "forge" } } },
+          inForge(thing.repoId, ctx),
         ],
         [
           {

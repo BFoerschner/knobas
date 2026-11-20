@@ -122,6 +122,23 @@ test("a run: its log and tests, Re-run queued, its page on TeamCity", () => {
   expect(item(entries, "web").label).toBe("Open in TeamCity");
 });
 
+test("each Open in names its own source by its display name: two of one kind, and an installed adapter's", () => {
+  // Two TeamCity servers and an installed (wasm) CI adapter, each named in Settings › Sources (the build-header pass, 2026-11-20).
+  const names: Record<string, string> = { tcwork: "TeamCity (work)", tcoss: "TeamCity (OSS)", acme: "Acme Pipelines", fj: "Forgejo at home" };
+  const named = ctx({ sourceName: (id) => names[id] ?? null });
+  const run = (source: string) => menuFor({ kind: "run", id: `${source}:9`, pipelineId: `${source}:Pay`, hash: "#/x" }, null, named);
+  expect(item(run("tcwork"), "web").label).toBe("Open in TeamCity (work)");
+  expect(item(run("tcoss"), "web").label).toBe("Open in TeamCity (OSS)");
+  expect(item(run("acme"), "web").label).toBe("Open in Acme Pipelines");
+  // Each opens its own item's page: the item's own web address, read as the menu opens.
+  expect(item(run("acme"), "web").act).toEqual({ do: "browser", url: { read: "web" } });
+  // A file's page on its code host names that host too, not the browser.
+  const file = menuFor({ kind: "line", repoId: "fj:t/pay", path: "src/a.rs", line: 3 }, null, named);
+  expect(item(file, "forge")).toMatchObject({ label: "Open in Forgejo at home", act: { do: "browser", url: { read: "forge" } } });
+  // A source the list does not know: the browser, which is what opens it.
+  expect(item(menuFor({ kind: "folder", repoId: "gone:t/pay", path: "src" }, null, named), "forge").label).toBe("Open in browser");
+});
+
 test("a monitor offers Acknowledge only where its row shows an open alert", () => {
   expect(ids(menuFor({ kind: "monitor", id: "k:1", hash: "#/m" }, null, ctx()))).not.toContain("ack");
   expect(ids(menuFor({ kind: "monitor", id: "k:1", hash: "#/m", alerting: true }, null, ctx()))).toContain("ack");

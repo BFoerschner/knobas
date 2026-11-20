@@ -303,6 +303,7 @@ export function addFakeRuns(now: Date = new Date()): void {
 
 onFakeReset(() => {
   built = null;
+  longPaths = false;
 });
 
 /** {@link history} built from scratch, from the seed, for the day of `now`. */
@@ -351,7 +352,7 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
       configs.map((config) => ({
         entity_id: `${SOURCE}:buildType:${config}`,
         source_id: SOURCE,
-        source_name: SOURCE_NAME,
+        source_name: longPaths ? LONG_SOURCE_NAME : SOURCE_NAME,
         name: config,
         group: path.split("/").at(-1) ?? path,
         path: path.split("/"),
@@ -638,14 +639,16 @@ export function fakeSettings(config: string): PipelineSettings {
     repositories:
       repo === null
         ? []
-        : [
-            {
-              name: repo,
-              url: `http://gitea.example/tidewater/${repo}.git`,
-              default_branch: "refs/heads/main",
-              entity_id: `mock:tidewater/${repo}`,
-            },
-          ],
+        : longPaths
+          ? longRepositories(repo)
+          : [
+              {
+                name: repo,
+                url: `http://gitea.example/tidewater/${repo}.git`,
+                default_branch: "refs/heads/main",
+                entity_id: `mock:tidewater/${repo}`,
+              },
+            ],
     triggers: [
       {
         name: "VCS",
@@ -667,7 +670,7 @@ export function fakeSettings(config: string): PipelineSettings {
     parameters: parameters(config),
     parameter_write_op: "set_parameter",
     parameter_specs: parameterSpecs(config),
-    chain: chainOf(config).map((step) => ({ pipeline: `${SOURCE}:buildType:${step}`, name: step })),
+    chain: chainOf(config).map((step) => ({ pipeline: `${SOURCE}:buildType:${stepId(step)}`, name: step })),
     steps: stepNames(config),
   };
 }
@@ -691,7 +694,41 @@ const CHAINS = [
 ];
 
 function chainOf(config: string): string[] {
-  return CHAINS.find((chain) => chain.includes(config)) ?? [];
+  return (longPaths ? [LONG_CHAIN, ...CHAINS.slice(1)] : CHAINS).find((chain) => chain.includes(config)) ?? [];
+}
+
+/**
+ * `?fake-long-paths` (the build-header pass, 2026-11-20: Björn's "Teamcity configuration, builds <huge repo link> step
+ * 64 of the chain x > y > z > foo > bar > etc."): the payouts chain seventy steps long, `Payout_Docker` its 64th, the
+ * steps around it with long names, and each repository a VCS root named as TeamCity names one by default, by its whole
+ * address and branch, with a second root the mirror does not hold.
+ */
+let longPaths = false;
+/** `?fake-long-paths`' display name: *Open in ⟨source⟩* and the header's line cut it, whole in their titles. */
+const LONG_SOURCE_NAME = "Tidewater TeamCity for the payments team's release trains, EU data centre";
+const LONG_STEP_WORDS = [
+  "reconcile the payments team's ledger snapshots against the settlement bank's end-of-day statement",
+  "publish the payments team's signed release candidate to the artifact repository for the audit trail",
+  "run the payments team's contract tests against every carrier and payment service provider sandbox",
+];
+const longStep = (no: number) => `Release_Train_${String(no).padStart(2, "0")}: ${LONG_STEP_WORDS[no % LONG_STEP_WORDS.length]}`;
+const LONG_CHAIN = [
+  "Payout_Build",
+  ...Array.from({ length: 62 }, (_, i) => longStep(i + 2)),
+  "Payout_Docker",
+  "Payout_Deploy_Staging",
+  ...Array.from({ length: 4 }, (_, i) => longStep(i + 66)),
+  "Payout_Deploy_Prod",
+];
+/** A long step's configuration id: its name up to the colon. */
+const stepId = (step: string) => step.split(":")[0]!;
+function longRepositories(repo: string): PipelineSettings["repositories"] {
+  const address = `https://git.tidewater.example/payments-platform/${repo}-repository-name-that-is-long.git`;
+  const scripts = "ssh://git@git.tidewater.example:7999/payments-platform/shared-build-scripts-repository-name-that-is-long.git";
+  return [
+    { name: `${address}#refs/heads/main`, url: address, default_branch: "refs/heads/main", entity_id: `mock:tidewater/${repo}` },
+    { name: `${scripts}#refs/heads/main`, url: scripts, default_branch: "refs/heads/main", entity_id: null },
+  ];
 }
 
 /**
@@ -704,7 +741,7 @@ export function fakeRunChain(runId: string, now: Date = new Date()): ChainStepRo
   if (config === undefined) return [];
   const run = runs.get(config)!.find((r) => r.entity_id === runId)!;
   return chainOf(config).map((step) => ({
-    pipeline_id: `${SOURCE}:buildType:${step}`,
+    pipeline_id: `${SOURCE}:buildType:${stepId(step)}`,
     name: step,
     run: step === config ? run : ((runs.get(step) ?? []).find((r) => r.branch === run.branch) ?? null),
   }));
@@ -756,6 +793,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
   // `fake-scale` (`fake-scale.ts`): a history thousands of runs long.
   const depth = params.has("fake-scale") ? SCALE_HISTORY : OLDER_DEPTH;
+  longPaths = params.has("fake-long-paths");
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));

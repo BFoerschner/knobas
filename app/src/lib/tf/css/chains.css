@@ -6,6 +6,17 @@
   border-radius: 4px; text-decoration: none; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink);
 }
 .tf-chainrow .tf-link span { color: var(--ink-2); }
+/* A step's long name ends in an ellipsis, whole in its title (the build-header pass, 2026-11-20). */
+.tf-chainrow .tf-link { min-width: 0; max-width: min(22rem, 100%); }
+.tf-chainrow .tf-link b, .tf-chainrow .tf-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A folded middle: as tall as a box, its words in the line's ink, a press shows every step. */
+.tf-chainfold {
+  align-self: stretch; padding: 6px 10px; border: 1px dashed var(--rule); border-radius: 4px; background: none; color: var(--ink-2);
+  font: inherit; font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap; cursor: pointer;
+}
+.tf-chainfold:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-chainfold:focus-visible, .tf-chain > header button.tf-open:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tf-chain > header button.tf-open { border: 0; background: none; font: inherit; font-size: calc(var(--t-sm) * var(--fs)); cursor: pointer; }
 .tf-chainrow .tf-link.tf-ok { border-left-color: var(--ok); }
 .tf-chainrow .tf-link.tf-err { border-left-color: var(--err); }
 .tf-chainrow .tf-link.tf-run { border-left-color: var(--info); }

@@ -265,7 +265,7 @@
         <div class="tf-acts">
           {@render buttonsOf(headerActions, false)}
           {#if detail.web_url !== null}
-            <a class="tf-btn tf-ghost" href={detail.web_url} onclick={openLink}>Open in {detail.source.display_name}</a>
+            <a class="tf-btn tf-ghost" href={detail.web_url} title="Open in {detail.source.display_name}" onclick={openLink}><span class="tf-cut">Open in {detail.source.display_name}</span></a>
           {/if}
           <TfDetailRefresh {detail} {refresh} {reread} page />
         </div>

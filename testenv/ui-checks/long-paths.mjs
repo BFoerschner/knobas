@@ -15,7 +15,9 @@
 //   - a run of a path's text reaches past the window, or past any box that holds it, cut or spilling, unless it is the start of a
 //     path drawn by `TfPath` (`.tf-path-head`), which gives up its middle for the folder at its end, whole path on hover;
 //   - an ellipsis cuts a path, other than that start (a renderer's long name may end in one: its whole name is its title);
-//   - a box scrolls sideways with the long paths and did not with the fixture's short ones.
+//   - a box scrolls sideways with the long paths and did not with the fixture's short ones;
+//   - a Builds header's line under its title is more than one line tall (the build-header pass, 2026-11-20), or its
+//     actions are not on the title's line, at 1440x868 too.
 // Toasts and an opening's chip are read too (ux21, 2026-11-19: a toast carrying a path grew to three lines and 1,400 px): a
 // toast's line gives up its middle (`.tf-toast-head`), as a path's start does.
 // A visually hidden run (the sign's description, which the witness and a screen reader read) is left out.
@@ -41,7 +43,16 @@ const SIZES = [
   [960, 540, 2],
   [1100, 600, 1],
 ];
+// The Builds screens add 1440x868, the size Björn's report came from (the build-header pass, 2026-11-20).
+const BUILD_SIZES = [
+  [5120, 1440, 1],
+  [2048, 1152, 1.25],
+  [1440, 868, 1],
+  [1100, 600, 1],
+];
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
+const PIPELINE = "builds/teamcity%3AbuildType%3APayout_Docker";
+const RUN = "build/teamcity%3AbuildType%3APayout_Docker/teamcity%3Abuild%3APayout_Docker-611";
 // `press`: the control to press first, by its words, `~` and words it holds, or a selector; `then`: more to press after it, in
 // order (a menu's item); `focus`: the control to focus (the sign's bubble opens on it); `context`: what to right-click, by a
 // selector and the words it holds; `item`: then a menu's row to press, by a selector; `wait`: ms to wait before reading (a
@@ -82,6 +93,14 @@ const SCREENS = [
   { id: "settings-renderers", route: "settings/renderers" },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
   { id: "settings-folder-renderer", route: "settings/renderers/folder/orchestra-map" },
+  // A TeamCity configuration whose VCS roots are named by their whole addresses, 64th of a chain of 70 long names (the
+  // build-header pass, 2026-11-20: Björn's "builds <huge repo link> step 64 of the chain x > y > z > foo > bar > etc.").
+  { id: "build-pipeline", route: PIPELINE, sizes: BUILD_SIZES },
+  { id: "build-chain-focus", route: PIPELINE, focus: ".tf-chainsign .tf-signbtn", sizes: BUILD_SIZES },
+  { id: "build-chain-hover", route: PIPELINE, hover: ".tf-chainsign .tf-signbtn", sizes: BUILD_SIZES },
+  { id: "build-chain-pinned", route: PIPELINE, press: ".tf-chainsign .tf-signbtn", sizes: BUILD_SIZES },
+  { id: "build-run", route: RUN, wait: 300, sizes: BUILD_SIZES },
+  { id: "build-run-unfolded", route: RUN, wait: 300, press: ".tf-chainfold", sizes: BUILD_SIZES },
 ];
 
 // Runs in the page: what of a path's text leaves its boxes, and which boxes scroll sideways.
@@ -153,6 +172,17 @@ const CHECK = String.raw`(() => {
     if (s.overflowX === "visible" || s.overflowX === "clip" || s.textOverflow === "ellipsis" || e.closest(".tf-code")) continue;
     scrolls.push(where(e));
   }
+  // A Builds header's line is one line, under the title and its actions, and the actions share the title's line.
+  for (const root of roots) for (const head of root.querySelectorAll(".tf-bhead")) {
+    const sub = head.querySelector(".tf-sub"), title = head.querySelector("h1"), acts = head.querySelector(".tf-acts");
+    if (!sub || !title || sub.getBoundingClientRect().width === 0) continue;
+    const line = parseFloat(getComputedStyle(sub).lineHeight) || 18;
+    const tall = sub.getBoundingClientRect().height;
+    if (tall > line * 1.5 + 2) misses.push({ kind: "lines", at: where(sub), text: "the header's line wraps", over: Math.round(tall - line) });
+    // Narrower, a title too long to share its line sends the actions under it, by design (builds.css).
+    if (acts && innerWidth >= 1400 && Math.abs(acts.getBoundingClientRect().top - title.getBoundingClientRect().top) > title.getBoundingClientRect().height)
+      misses.push({ kind: "acts", at: where(acts), text: "the header's actions left the title's line", over: Math.round(acts.getBoundingClientRect().top - title.getBoundingClientRect().top) });
+  }
   return JSON.stringify({ misses, scrolls, page: document.documentElement.scrollWidth > innerWidth + 1 });
 })()`;
 
@@ -183,7 +213,7 @@ const results = [];
 let failed = 0;
 for (const screen of SCREENS) {
   if (only && !only.some((word) => screen.id.includes(word))) continue;
-  for (const [width, height, scale] of SIZES) {
+  for (const [width, height, scale] of screen.sizes ?? SIZES) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: false });
     const size = `${width}x${height}@${scale}`;
     const read = async (query) => {
