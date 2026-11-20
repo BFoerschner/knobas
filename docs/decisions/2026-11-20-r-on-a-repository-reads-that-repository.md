@@ -77,3 +77,21 @@ A failure drops the toast and keeps its one line under the header (`TfDetailBann
 - `TfHeaderRefresh.test.svelte.ts`: a press during a run reads the page again at once and presses once more when that
   run ends, and only once, and not for an item the page left; a named press's toast is replaced in place; a failure
   drops it; the button holds its width. `TfRepo.test.svelte.ts`: ⌘R on a repository names it. Each killed by a mutant.
+
+## Gates
+
+On `b99dfbcd` in a clean clone, on the Mac (the PC was Björn's for the second half of the pass). `svelte-check` 0
+errors over 1,590 files; vitest 5,841 passed, 1 skipped, in 388 files; `just check-scripts` ok; `just clippy` and
+`cargo fmt --check` clean; `knobas-source` 267 and 42, `knobas-sync` 258 and 38, `knobas-source-gitea` 367, 110 and
+6, `knobas-app` 1,735 passed in 16 binaries (83 ignored). Press trips `--strict` 310 of 310; the witness test 305
+checks; `just moves` over the pages with a header *Refresh* or *Sync now* (repository and its tabs, pull request,
+ticket, pipeline, run, Docs page, monitor, Tickets, Code, Builds, Docs, Monitors) at 1x and 4x, 1440x868@1 and
+2560x1440@1.25, 340 cases, nothing moved. `pixel-same.py` over those pages at 1440x868, 2048x1152@1.25 and 5120x1440:
+the header's right end on each (the buttons left of *Refresh* or *Sync now* stand up to 32 px further left at rest),
+and a few relative times; nothing else.
+
+## Owed on Windows
+
+- ⌘R on a repository in knobas's own window on Björn's work laptop, on his estate: the walk's time there and the
+  run's beside it. The Mac's numbers are against the testenv's Gitea over a tunnel.
+- The header at rest at 125 % in WebView2: *Refresh* held at *Refreshing…*'s width.
