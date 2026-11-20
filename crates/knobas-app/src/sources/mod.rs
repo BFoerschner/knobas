@@ -711,8 +711,7 @@ pub async fn bring_up<R: tauri::Runtime>(
                 {
                     let to = app.clone();
                     move |progress: &knobas_sync::code_files::FilesProgress| {
-                        use tauri::Emitter as _;
-                        let _ = to.emit(crate::events::CODE_FILES, progress);
+                        crate::events::emit(&to, None, crate::events::CODE_FILES, progress);
                     }
                 },
             )),

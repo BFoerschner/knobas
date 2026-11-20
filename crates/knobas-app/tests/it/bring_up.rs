@@ -287,6 +287,7 @@ async fn bring_up_reports_starting_with_the_step_once_the_schema_is_up() {
             "starting: closing any timer left running",
             "starting: interrupting start-work steps a quit left running",
             "starting: storing the adapters' declarations",
+            "starting: opening the files index",
             "starting: starting the sync engine",
             "starting: starting the nightly backup",
             "starting: registering the capture shortcut",
