@@ -140,8 +140,8 @@ async function settle(): Promise<void> {
   flushSync();
 }
 
-async function draw(rest: string[]): Promise<void> {
-  const live = $state({ ready: true, rest, job: null, ports: ports() });
+async function draw(rest: string[], more: Partial<DocsPorts> = {}): Promise<void> {
+  const live = $state({ ready: true, rest, job: null, ports: { ...ports(), ...more } });
   props = live;
   view = mount(TfDocs, { target, props, context: pageContext(() => host.shown) });
   await settle();
@@ -334,4 +334,53 @@ test("a step back puts the rail as that entry had it, and one forward too", asyn
   props.rest = ["confluence:9"];
   await settle();
   expect(picker().value).toBe("confluence/ENG");
+});
+
+// The rail's foot (the ux23 Windows pass, 2026-11-20, Fable's ruling, `docs/decisions/2026-11-20-the-docs-rail-keeps-its-foot.md`):
+// a page opened from the list of spaces drew *New page…* under the rail, which took the bottom rows of the rail out of view.
+/** Ports where every page can be added under, and the sources say `makers` can create pages. */
+const making = (makers: string[]): Partial<DocsPorts> => ({
+  docsPage: vi.fn(async (id: string) => ({ ...pageOf(id), writes: ["create_page"] as DocPage["writes"] })),
+  pageMakers: vi.fn(async () => makers),
+  refusedWrites: vi.fn(async () => []),
+});
+const foot = () => rail().querySelector<HTMLElement>(".tf-dl-foot");
+
+test("the rail's foot stands on the home where a source can create pages, and a page opened from the list keeps it and every row", async () => {
+  await draw([], making(["confluence"]));
+  const drawn = foot();
+  expect(drawn, "the home draws the foot as a page does").not.toBeNull();
+  await toggle(spaceFold("Operations"), true);
+  await toggle(fold("Runbooks")!, true);
+  const rows = layout();
+
+  await go(["confluence:4"]);
+  expect(current()).toBe("Restart the ledger");
+  expect(foot(), "the same foot: nothing arrives under the rail").toBe(drawn);
+  expect(layout().filter((line) => !line.startsWith("A:Restart"))).toEqual(rows.filter((line) => !line.startsWith("A:Restart")));
+
+  // And back on the home it stays.
+  history.pushState(null, "", "#/docs");
+  noteArrival({ hash: location.hash, how: null, returning: false });
+  props.rest = [];
+  await settle();
+  expect(foot()).toBe(drawn);
+});
+
+test("the foot's New page on the home opens on the first space that can create, at its first page", async () => {
+  await draw([], making(["confluence"]));
+  foot()!.querySelector("button")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
+  expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")!.value).toBe("confluence:1");
+  [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Cancel")!.click();
+  await settle();
+});
+
+test("a wiki none of whose sources can create pages draws no foot, on the home or on a page", async () => {
+  await draw([], making([]));
+  expect(foot()).toBeNull();
+  await go(["confluence:4"]);
+  expect(foot(), "the page's own writes no longer put it there").toBeNull();
 });

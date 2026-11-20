@@ -143,6 +143,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDocsSpace from "./TfDocsSpace.svelte";
   import { heldTree, pageCount, readHeld, readParts, spaceWhole, type TreeReads } from "./tree-store";
+  import { knownPageMakers, pageMakers } from "./page-makers";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
@@ -252,6 +253,11 @@
     refusedWrites?: RefusedWritesPort;
     /** Hears `sync:state`, whose run ends read Docs again (#2072), and `item:refreshed` (#2102); the bridge's when omitted. */
     listen?: PipelinePorts["listen"];
+    /**
+     * The sources whose adapter declares `create_page` (`page-makers.ts`, 2026-11-20): the rail's foot stands while a
+     * space of the tree is one of theirs. Left out, the foot follows the open page's writes, as it did.
+     */
+    pageMakers?: () => Promise<readonly string[]>;
   }
 
   type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "entityBriefs" | "createLink" | "unlink" | "search" | "launcherHome">;
@@ -302,6 +308,7 @@
       getEntity: realEntityHead,
       openExternal: realOpenExternal,
       copy: (text) => navigator.clipboard.writeText(text),
+      pageMakers: () => pageMakers(),
     },
   );
   /**
@@ -1437,6 +1444,33 @@
    * answer speaks for it only where that is the page's own space; elsewhere
    * the dialog asks about its own *Under*.
    */
+  /**
+   * The sources that can create pages, once read (`page-makers.ts`); `null` before, or with no such port. Known from the
+   * session's first read on a later mount, so the foot draws with the tree's first rows.
+   */
+  let makers = $state.raw<ReadonlySet<string> | null>(untrack(() => (ports === undefined ? knownPageMakers() : null)));
+  $effect(() => {
+    const read = io.pageMakers;
+    if (read === undefined) return;
+    read().then(
+      (ids) => (makers = new Set(ids)),
+      () => {},
+    );
+  });
+  /**
+   * The rail's foot, *New page…* (Fable's ruling, 2026-11-20): it belongs to the rail, not to the open page, so it stands
+   * on the home as on a page and the rail's scroll box keeps its height when a page opens from the list of spaces. A wiki
+   * none of whose sources can create pages has none. Without the sources' answer, the open page's writes decide.
+   */
+  const footStands = $derived(
+    makers !== null ? tree !== null && tree.spaces.some((space) => makers!.has(space.source_id)) : page?.writes.includes("create_page") === true,
+  );
+  /** Where the foot's *New page…* opens with no page to put it under: the shown space, else the first that can create. */
+  const footSpace = $derived(
+    shownSpace !== undefined && (makers === null || makers.has(shownSpace.source_id))
+      ? shownSpace
+      : tree?.spaces.find((space) => makers?.has(space.source_id)),
+  );
   const treeNewPageRefusal = $derived(
     shownSpace === undefined || shownSpace === pageSpace ? refusal("create_page") : null,
   );
@@ -1909,8 +1943,7 @@
         {/if}
       {/if}
     </div>
-    {#if page?.writes.includes("create_page")}
-      {@const p = page}
+    {#if footStands}
       <div class="tf-dl-foot">
         <button
           type="button"
@@ -1918,8 +1951,15 @@
           {...refusedAttrs(treeNewPageRefusal)}
           onclick={() => {
             if (treeNewPageRefusal !== null) return;
-            const space = shownSpace ?? pageSpace;
-            newPage = { space: space ? spaceId(space) : null, parent: p.entity_id };
+            const p = page;
+            if (p !== null && p.writes.includes("create_page")) {
+              const space = shownSpace ?? pageSpace;
+              newPage = { space: space ? spaceId(space) : null, parent: p.entity_id };
+            } else {
+              // No page to put it under: the dialog opens on a space that can create, at its first page, and its own
+              // *Space* and *Under* choose.
+              newPage = { space: footSpace ? spaceId(footSpace) : null, parent: null };
+            }
           }}
           >New page…</button>
       </div>
@@ -2240,7 +2280,7 @@
     title={newPage.title ?? ""}
     text={newPage.text ?? ""}
     {job}
-    sourceName={page?.source_name ?? "the source"}
+    sourceName={page?.source_name ?? tree.spaces.find((space) => spaceId(space) === newPage?.space)?.source_name ?? "the source"}
     {layers}
     onclose={() => (newPage = null)}
     oncreate={createPage}
