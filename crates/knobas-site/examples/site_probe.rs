@@ -498,6 +498,15 @@ fn steps(sites: Sites, proxy: EventLoopProxy<Task>, second: bool) {
     sleep(2500);
     if second {
         verdicts(true);
+        // Nothing of the probe's stays on the machine: both sessions go, as *Forget…* removes them.
+        for source in ["a", "b"] {
+            let forgot = rt.block_on(sites.forget(source, true));
+            log(
+                "forgot",
+                json!({ "source": source, "answer": format!("{forgot:?}") }),
+            );
+        }
+        sleep(1500);
         return finish(&sites, &proxy, &rt);
     }
     sites.hide("b");
