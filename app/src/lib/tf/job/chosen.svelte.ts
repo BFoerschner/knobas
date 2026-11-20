@@ -40,6 +40,12 @@ export interface ChosenJob {
   readonly id: string | null;
   /** Make `id` (a ticket's entity id) the chosen job, and keep it. */
   choose(id: string): void;
+  /**
+   * No chosen job any more, if `id` is still the one chosen: the ticket page
+   * at home found knobas no longer holds it (2026-11-20), so home is *All
+   * tickets* again (`home.ts`).
+   */
+  forget(id: string): void;
   /** Read the kept choice again: the shell's mount, as a restart does. */
   load(): void;
   /** Tests only: no chosen job, nothing kept. */
@@ -63,6 +69,11 @@ export function createChosenJob(storage: () => KeptStorage | null): ChosenJob {
       if (untrack(() => id) === next) return;
       id = next;
       kept.write(next);
+    },
+    forget(gone) {
+      if (untrack(() => id) !== gone) return;
+      id = null;
+      kept.clear();
     },
     load() {
       id = read();

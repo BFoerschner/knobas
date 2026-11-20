@@ -927,6 +927,15 @@ const CASES: Case[] = [
           lifecycle: readyLifecycle(),
           onsearch: () => {},
           ontimer: undefined,
+          // A role page (Tickets, where a blank address lands, 2026-11-20) reads its role's runs from the window's
+          // role syncs, which hear `sync:state` for as long as the window lives (`role-sync.svelte.ts`): the window's
+          // listener, not the shell's, so a store of the case's own that installs none stands in for it.
+          roleSyncs: createRoleSyncs({
+            syncRole: () => deferred([]),
+            syncNow: () => deferred(0),
+            syncStatus: () => deferred([]),
+            listen: () => Promise.resolve(() => {}),
+          }),
           badges: createBadges({
             failingBuilds: () => deferred(0),
             monitorsDown: () => deferred(0),

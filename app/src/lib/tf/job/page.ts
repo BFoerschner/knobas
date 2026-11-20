@@ -11,7 +11,8 @@
  *   (`chosen.svelte.ts`) and replaces the address with the ticket's;
  * - the bare `#/job` (home, `home.ts`) while a job is chosen: that job's
  *   page, under the bare address, where `Esc` does nothing. With none chosen
- *   it is the shell's own empty page in `TfPage.svelte`.
+ *   the shell puts *All tickets* in its place (`home.ts`), and a chosen job
+ *   knobas no longer holds is forgotten here (`home`), which does the same.
  *
  * One page per ticket: every address of a ticket's entity id is one page
  * instance (#2247), so landing from `#/job/<id>` on `#/ticket/<id>` draws
@@ -38,6 +39,7 @@ export const page = definePage({
   props: ({ route, back, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
     segment: segmentOf(route) ?? "",
     choose: route.view === "job" && route.key !== null,
+    home: route.view === "job" && route.key === null,
     toMention: route.view === "ticket" && route.tab === MENTION_TAB,
     back,
     timer,

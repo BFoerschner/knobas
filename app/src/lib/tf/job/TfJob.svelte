@@ -112,6 +112,7 @@
   let {
     segment,
     choose = false,
+    home = false,
     back = null,
     timer,
     layers,
@@ -128,6 +129,8 @@
     segment: string;
     /** A `#/job/<…>` address: choose the ticket as the job once read, and land on its own address. */
     choose?: boolean;
+    /** Home, the bare `#/job`: a chosen job knobas no longer holds is forgotten, and home is *All tickets* (`home.ts`). */
+    home?: boolean;
     /** A `#/ticket/<id>/mention` address: bring the newest comment that mentions the reader into view. */
     toMention?: boolean;
     /** Where `Esc` goes, which the breadcrumb's hint names (#2228); `null` where it does nothing. */
@@ -283,6 +286,16 @@
       refresh.reset();
       reader.open(wanted);
     });
+  });
+  // Home's chosen job that knobas no longer holds (deleted at its source, its
+  // source removed, another database): forgotten, and the shell puts *All
+  // tickets* in home's place (`home.ts`, 2026-11-20). After the open above, so
+  // a `null` is this segment's answer. A read that failed is not "gone": it
+  // stays, saying why.
+  $effect(() => {
+    if (!home || !pageShown() || detail !== null) return;
+    const gone = segment;
+    untrack(() => chosenJob.forget(gone));
   });
 
   /** *Hide here* (R-7.5): one member off this ticket only, with *Undo*. The set is not touched. */

@@ -20,11 +20,11 @@
     the role's sources ends with something new; shown again, a page re-reads
     only if one did while it was hidden. The button and its runs are this frame's, so every role
     view draws the same one, and its runs outlive a view drawn again.
-  - **A bare `#/job`** is home (`home.ts`, spec #2227). While a job is chosen
-    (`job/chosen.svelte.ts`) the job page draws it there, under the bare
-    address; with none chosen this file says how a ticket becomes the job,
-    with a button to Tickets. Job has no breadcrumb, and it is the Job top
-    page: `Esc` does nothing there (#2228).
+  - **A bare `#/job`** is home while a job is chosen (`home.ts`, spec #2227):
+    the job page draws it there (`job/chosen.svelte.ts`), under the bare
+    address, with no breadcrumb, and `Esc` does nothing there (#2228). With
+    none chosen home is *All tickets* (2026-11-20): the shell replaces a bare
+    `#/job` with `#/tickets` before this file draws, so it draws nothing for it.
   - **A full view not built yet** starts with the breadcrumb (R-1.6,
     `TfCrumbs.svelte`): its path, and *Back to <name>* beside `Esc` where `Esc`
     goes somewhere, none on a section's top page. It is an empty page that
@@ -127,21 +127,7 @@
 {:else if page}
   <!-- Drawn above. -->
 {:else if route.view === "job"}
-  <div class="tf-full">
-    <header class="tf-fhead">
-      <div>
-        <h1>Job</h1>
-        <div class="tf-sub">The job: a ticket's card, its sections and its conversation.</div>
-      </div>
-    </header>
-    <div class="tf-empty">
-      <p>
-        No job is chosen yet. A ticket becomes the job when you press Work on this, Resume work or Start work on its
-        page, or start the timer on it.
-      </p>
-      <a class="tf-btn" href="#/tickets">All tickets</a>
-    </div>
-  </div>
+  <!-- A bare `#/job` with no chosen job: the shell has already put `#/tickets` in its place (`home.ts`). -->
 {:else if route.view === "full"}
   {@const name = SECTION_NAME[route.section]}
   <div class="tf-full">

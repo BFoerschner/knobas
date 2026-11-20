@@ -171,17 +171,20 @@ function jobOnScreen(): string | null {
 
 test("starting the timer on a ticket makes it the chosen job: #/job draws it, and Link to names it", async () => {
   await openOn("#/time", "Time");
+  // With no chosen job, home is All tickets (2026-11-20).
   location.hash = "#/job";
-  await until(() => target.textContent?.includes("No job is chosen yet") ?? false, "#/job never drew its empty state");
+  await until(() => location.hash === "#/tickets", `#/job with no chosen job stayed at ${location.hash}`);
   await search("PAY-231");
   press("Tab");
   expect(chain()).toEqual(TICKET_OWN);
   // *Start timer*, under *Work on this* (F-637).
   press("ArrowDown");
   press("Enter");
+  await until(() => chosenJob.id === "mock:PAY-231", "the timer's ticket never became the chosen job");
+  expect(launcher(), "Start timer closes the launcher").toBeNull();
+  location.hash = "#/job";
   await until(() => jobOnScreen() === "PAY-231", "#/job never drew the ticket the timer started on");
   expect(location.hash, "#/job stays the home address").toBe("#/job");
-  expect(launcher(), "Start timer closes the launcher").toBeNull();
   location.hash = "#/builds";
   // By its section, not its words: the entry carries the Builds count (ux18: the failures still unread) beside its name.
   await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.getAttribute("data-section") === "builds", "Builds never drew");

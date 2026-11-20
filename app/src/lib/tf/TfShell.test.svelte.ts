@@ -346,8 +346,6 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   const tops = [
     ...NAV.map((section) => `#/${section}`),
     "#/tickets/view-1",
-    // Home: the chosen job's page, or the empty state with none (spec #2396).
-    "#/job",
   ];
   for (const top of tops) {
     await at(top);
@@ -973,6 +971,7 @@ test("a card row's narrowing and a tab the page does not have are not where an e
   expect(scopedTicket.section).toBeNull();
   expect(navEntry("Code").getAttribute("href")).toBe("#/pr/9");
   await at("#/tickets");
+  chosenJob.choose("jira:PAY-231");
   await at("#/job");
   await at("#/inbox");
   expect(navEntry("Tickets").getAttribute("href"), "home is not a place in Tickets").toBe("#/tickets");
@@ -1284,21 +1283,33 @@ test("the nav reads Tickets first and the rest in order, with no Job entry (spec
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 
-/** The bare `#/job`'s empty state, or `null` where it is not drawn. */
-function emptyHome(): HTMLElement | null {
-  return seen(".tf-full").find((page) => page.querySelector("h1")?.textContent === "Job" && page.querySelector(".tf-empty") !== null) ?? null;
+/** Whether a bare `#/job` with no chosen job was let stand: home with none chosen is All tickets (2026-11-20). */
+function emptyHome(): boolean {
+  return location.hash === "#/job";
 }
 
-test("with no chosen job, #/job says how a ticket becomes the job, and its button goes to Tickets", async () => {
+test("with no chosen job, #/job is replaced by All tickets before anything under it draws, leaving no step back to it", async () => {
   start();
-  await at("#/job");
-  const home = emptyHome();
-  expect(home, "the empty state").not.toBeNull();
-  expect(home!.textContent).toMatch(/start the timer on it/i);
-  expect(home!.textContent).toMatch(/Start work/);
-  const button = [...home!.querySelectorAll<HTMLAnchorElement>("a.tf-btn")].find((a) => a.textContent?.trim() === "All tickets")!;
-  expect(button.getAttribute("href")).toBe("#/tickets");
-  expect(location.hash).toBe("#/job");
+  await at("#/inbox");
+  const before = history.length;
+  const drawn: string[] = [];
+  const watch = new MutationObserver(() => drawn.push(location.hash));
+  watch.observe(target, { childList: true, subtree: true });
+  location.hash = "#/job";
+  await settle();
+  watch.disconnect();
+  expect(location.hash).toBe("#/tickets");
+  expect(drawn.filter((hash) => hash === "#/job"), "nothing was drawn under a bare #/job").toEqual([]);
+  expect(navEntry("Tickets").getAttribute("aria-current")).toBe("page");
+  expect(history.length - before, "the hash step, replaced: no #/job to go back to").toBe(1);
+});
+
+test("a shell mounted on a bare #/job with no chosen job draws All tickets in its first frame", async () => {
+  location.hash = "#/job";
+  start();
+  expect(location.hash, "replaced before the first frame").toBe("#/tickets");
+  await settle();
+  expect(location.hash).toBe("#/tickets");
 });
 
 /** A browser storage that keeps what the shell wrote, across remounts. */
@@ -1334,7 +1345,7 @@ test("opening #/job/<id> makes it the chosen job: after a restart with the stora
     expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
     await restartOn("#/job");
     expect(seen(".tf-jobcard .tf-jobkey").map((key) => key.textContent)).toEqual(["PAY-231"]);
-    expect(emptyHome(), "the chosen job, not the empty state").toBeNull();
+    expect(emptyHome(), "the chosen job, at home").toBe(true);
     expect(location.hash, "#/job stays the home address").toBe("#/job");
   } finally {
     removeStorage();
@@ -1360,7 +1371,7 @@ test("a browser storage that throws, or is empty, leaves the shell working with 
   try {
     start();
     await at("#/job");
-    expect(emptyHome(), "a failed read: no chosen job").not.toBeNull();
+    expect(emptyHome(), "a failed read: no chosen job, so All tickets").toBe(false);
     await at("#/job/PAY-231");
     expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent, "a failed write still opens the job").toBe("PAY-231");
   } finally {
@@ -1369,7 +1380,7 @@ test("a browser storage that throws, or is empty, leaves the shell working with 
   installStorage();
   try {
     await restartOn("#/job");
-    expect(emptyHome(), "an empty storage: no chosen job").not.toBeNull();
+    expect(emptyHome(), "an empty storage: no chosen job, so All tickets").toBe(false);
   } finally {
     removeStorage();
   }

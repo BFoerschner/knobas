@@ -3,7 +3,8 @@
  * mount over the whole fake IPC (`?fake-ipc`'s handlers): `#/ticket/<entity
  * id>` draws the page in its reading mood, on a sheet, and chooses nothing;
  * `#/job/<entity id>` chooses the ticket and lands on its page, on the
- * yellow; a bare `#/job` draws the chosen job's page, or the empty state. The
+ * yellow; a bare `#/job` draws the chosen job's page, or with none chosen
+ * lands on All tickets, as it does when that job is no longer held. The
  * card's foot holds the one decision, and the nav has no Job entry. It lives
  * under `dev/` because only the harness may import the harness
  * (`house-rules.test.ts`).
@@ -183,9 +184,11 @@ test("#/job/<tab>, an old tab's address, lands on the ticket's own address: the 
   expect(chosenJob.id).toBe("mock:PAY-231");
 });
 
-test("a bare #/job draws the chosen job's page, and says how to choose one when none is", async () => {
-  await openOn("#/job", "No job is chosen yet");
+test("a bare #/job draws the chosen job's page, and with none chosen lands on All tickets (2026-11-20)", async () => {
+  await openOn("#/job", "All tickets");
+  expect(location.hash, "no chosen job: home is All tickets").toBe("#/tickets");
   expect(pageCard()).toBeNull();
+  expect(target.textContent).not.toContain("No job is chosen yet");
   unmount(app!);
   app = undefined;
 
@@ -194,6 +197,42 @@ test("a bare #/job draws the chosen job's page, and says how to choose one when 
   const page = await pageOf("PAY-231");
   expect(mood(page)).toBe("pinned");
   expect(location.hash, "home keeps its address").toBe("#/job");
+});
+
+test("a chosen job knobas no longer holds is forgotten at home, which lands on All tickets (2026-11-20)", async () => {
+  chosenJob.choose("mock:PAY-99999");
+  await openOn("#/job", "All tickets");
+  await until(() => location.hash === "#/tickets", `home on a gone job stayed at ${location.hash}`);
+  expect(chosenJob.id, "the gone job is no longer chosen").toBeNull();
+  expect(target.textContent).not.toContain("knobas does not hold this ticket");
+});
+
+test("a window opened on no address with a chosen job lands on home, #/job, drawing that job (2026-11-20)", async () => {
+  chosenJob.choose("mock:PAY-231");
+  await openOn("", "Retry failed SEPA payouts");
+  expect(location.hash).toBe("#/job");
+  expect(mood(await pageOf("PAY-231"))).toBe("pinned");
+});
+
+test("the chosen job's own ticket page, not held, says so and forgets nothing: only home does", async () => {
+  chosenJob.choose("mock:PAY-99999");
+  await openOn("#/ticket/mock%3APAY-99999", "knobas does not hold this ticket");
+  expect(location.hash).toBe("#/ticket/mock%3APAY-99999");
+  expect(chosenJob.id).toBe("mock:PAY-99999");
+});
+
+test("home whose chosen job could not be read says why and keeps the job: a failed read is not a gone ticket", async () => {
+  installFakeTauri(
+    recorded({
+      ...demoHandlers(),
+      get_entity: () => Promise.reject({ code: "db_unavailable", message: "the database is not answering" }),
+      entity_briefs: () => Promise.reject({ code: "db_unavailable", message: "the database is not answering" }),
+    }),
+  );
+  chosenJob.choose("mock:PAY-231");
+  await openOn("#/job", "could not be opened");
+  expect(location.hash).toBe("#/job");
+  expect(chosenJob.id).toBe("mock:PAY-231");
 });
 
 test("the nav has no Job entry, and Tickets is current on a ticket page in both moods", async () => {

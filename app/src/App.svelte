@@ -44,9 +44,11 @@
    * keeps what is the whole app's: the bring-up, the session-wide stores, the
    * launcher, the timer verb and the dialogs it opens.
    *
-   * A window opened on no address lands on Tickets, at `#/tickets`.
+   * A window opened on no address lands on home (`home.ts`): the chosen job's
+   * page at `#/job`, or with none chosen *All tickets* at `#/tickets`, decided
+   * here, before the shell mounts, so its first frame is home's.
    */
-  homeIfBlank(location);
+  homeIfBlank(location, chosenJob.id);
 
   /** Go to an address the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
   function navigate(hash: string) {

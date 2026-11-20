@@ -112,6 +112,7 @@
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
+  import { homeInstead } from "./home";
   import { scopedTicket } from "./job/scoped.svelte";
   import { sideWidths } from "./side-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
@@ -522,6 +523,16 @@
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
+  /**
+   * Home with no chosen job is *All tickets* (`home.ts`, 2026-11-20): a bare
+   * `#/job` then (typed, kept in history, or home whose chosen job the
+   * ticket page found gone) is replaced by `#/tickets` before anything
+   * under it draws, so the page that only pointed at Tickets is never shown.
+   */
+  $effect.pre(() => {
+    const instead = homeInstead(route, chosenJob.id);
+    if (instead !== null) untrack(() => replaceHash(instead));
+  });
   // Every sidebar's width (the ticket page card's among them, #2402), kept in the same storage.
   sideWidths.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));

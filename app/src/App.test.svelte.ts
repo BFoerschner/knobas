@@ -599,22 +599,23 @@ test("a rejection landing while the boot seed is in flight is not written back t
 });
 
 /**
- * **The app boots straight into the Job page** (#881, spec #2227 *Home*):
- * the ticket-first shell, at `#/job`, with nothing of the rooms UI drawn and,
- * with no job chosen yet, the empty state that points at Tickets.
+ * **The app boots straight into home** (#881, spec #2227 *Home*; 2026-11-20):
+ * the ticket-first shell, with nothing of the rooms UI drawn. With no job
+ * chosen, home is All tickets at `#/tickets`, its own page from the shell's
+ * first frame: never the page that only pointed at Tickets.
  */
-test("the window opens on the Job page at #/job, in the ticket-first shell", async () => {
+test("with no chosen job the window opens on All tickets at #/tickets, in the ticket-first shell, from its first frame", async () => {
   dbReady = true;
   expect(location.hash, "the test must start on no address").toBe("");
   const historyAtStart = history.length;
   app = mount(App, { target, props: {} });
   await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
-  expect(location.hash).toBe("#/job");
+  expect(location.hash, "the shell's first frame is already at All tickets").toBe("#/tickets");
+  expect(target.querySelector(".tf-kept:not([hidden]) h1")?.textContent, "the first frame draws All tickets' own page").toContain("All tickets");
   expect(history.length, "the blank address is replaced, not pushed").toBe(historyAtStart);
   expect(target.querySelector(".tf-top .tf-brand")?.textContent).toBe("knobas");
-  // Home is a ticket page, under Tickets: Job has no nav entry (spec #2396).
   expect(target.querySelector('.tf-nav [aria-current="page"]')?.textContent?.trim()).toBe("Tickets");
-  expect(target.textContent).toContain("No job is chosen yet");
+  expect(target.textContent).not.toContain("No job is chosen yet");
 });
 
 /**
