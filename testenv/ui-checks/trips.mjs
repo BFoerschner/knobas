@@ -158,6 +158,12 @@
 //                 ↓ and Space each scroll it, and unless ⌘ or Ctrl with the wheel over it zooms the window and scrolls nothing, held from the app and
 //                 again after a press on `header` takes focus back from the page (with focus in the page the app hears no key). Puts the zoom back at 100 %.
 //
+//   cold-start    2026-11-20 (Björn: "the knobas app should open in the all-tickets view. It looks kind of broken when it starts in the
+//                 'no job has been selected'"). Opens the app cold on no address, with `chosen` in the browser's storage (an entity id, or
+//                 nothing), and records every frame from the first one the shell draws: its address and the shown page's heading. Fails if
+//                 any frame draws `never` (the words of a page that must not paint), if the first frame isn't at `first` with a heading
+//                 starting `heading` (when named), or if it doesn't end at `lands`.
+//
 //   rows-still    The still-rows pass (PR #2479, 2026-11-11; Björn: "another repo just pops in where my cursor was"). Records the box of every
 //                 `rows` element in view, each frame, from the first draw (3 rows, or all there are) until the page has settled, and fails if
 //                 one of those rows moves or changes height, leaves, or a row comes in above one of them in its column. `query` holds `fake-late`, so each
@@ -241,7 +247,19 @@ const RIGHT_CLICK = [
   ] },
 ];
 
+// The cold start (2026-11-20): with no chosen job the window opens on All tickets from its first frame, never on a page that only
+// points at it; with one, on home drawing it; with one knobas no longer holds, on All tickets once it has looked.
+const NEVER = ["No job is chosen yet", "knobas does not hold this ticket"];
+const COLD = [
+  { page: "Cold start", route: "", trips: [
+    { id: "cold-no-job", kind: "cold-start", finding: "start-all-tickets", chosen: null, first: "#/tickets", heading: "All tickets", lands: "#/tickets", never: NEVER },
+    { id: "cold-chosen-job", kind: "cold-start", finding: "start-all-tickets", chosen: "mock:PAY-231", first: "#/job", lands: "#/job", never: NEVER, drawn: ".tf-jobcard .tf-jobkey" },
+    { id: "cold-gone-job", kind: "cold-start", finding: "start-all-tickets", chosen: "mock:PAY-99999", lands: "#/tickets", heading: "All tickets", never: NEVER },
+  ] },
+];
+
 const PAGES = [
+  ...COLD,
   ...RIGHT_CLICK,
   // The still-rows pass (PR #2479, 2026-11-11): each late read lands after the first draw, and nothing drawn may move.
   { page: "Code, Repositories", route: "code", trips: [
@@ -3436,6 +3454,52 @@ async function worker(queue, results) {
     return { reasons, note: notes.join("; ") };
   }
 
+  async function coldStart(t) {
+    const reasons = [];
+    // Before the app's own scripts: the storage as a restart finds it, and a recorder of each frame from the shell's first.
+    const source = String.raw`(() => {
+      if (window.top !== window) return;
+      ${t.chosen ? `localStorage.setItem("knobas.job.chosen", ${JSON.stringify(t.chosen)});` : `localStorage.removeItem("knobas.job.chosen");`}
+      const never = ${JSON.stringify(t.never ?? [])};
+      const rec = (window.__cold = { frames: [], painted: [] });
+      const look = () => {
+        if (document.querySelector(".tf")) {
+          const h1 = [...document.querySelectorAll(".tf-main h1")].find((e) => e.getClientRects().length > 0);
+          const frame = { hash: location.hash, h1: h1 ? h1.textContent.trim().replace(/\s+/g, " ").slice(0, 40) : null };
+          const last = rec.frames.at(-1);
+          if (!last || last.hash !== frame.hash || last.h1 !== frame.h1) rec.frames.push(frame);
+          const text = document.querySelector(".tf-main")?.innerText ?? "";
+          for (const words of never) if (text.includes(words) && !rec.painted.includes(words)) rec.painted.push(words);
+        }
+        if (rec.frames.length < 50) requestAnimationFrame(look);
+      };
+      requestAnimationFrame(look);
+    })()`;
+    const added = await send("Page.addScriptToEvaluateOnNewDocument", { source });
+    try {
+      await opener.openScreen({ name: t.id, route: t.route, query: t.query, job: false });
+      if (t.drawn) {
+        for (let i = 0; i < 100 && !(await evaluate(`!!document.querySelector(${JSON.stringify(`.tf-kept:not([hidden]) ${t.drawn}`)})`)); i++) await sleep(50);
+      }
+      await sleep(400);
+    } finally {
+      await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: added.result.identifier });
+    }
+    const rec = JSON.parse(await evaluate(`JSON.stringify(window.__cold ?? null)`));
+    if (!rec || rec.frames.length === 0) throw new Error("the shell never drew");
+    const first = rec.frames[0];
+    for (const words of rec.painted) reasons.push(`"${words}" painted`);
+    if (t.first && first.hash !== t.first) reasons.push(`the first frame was at ${first.hash || "no address"}, not ${t.first}`);
+    if (t.first && t.heading && !(first.h1 ?? "").startsWith(t.heading)) reasons.push(`the first frame's heading was ${first.h1 === null ? "none" : `"${first.h1}"`}, not "${t.heading}"`);
+    const last = rec.frames.at(-1);
+    const hash = await evaluate(`location.hash`);
+    if (hash !== t.lands) reasons.push(`it ended at ${hash || "no address"}, not ${t.lands}`);
+    if (t.heading && !(last.h1 ?? "").startsWith(t.heading)) reasons.push(`it ended under "${last.h1}", not "${t.heading}"`);
+    if (t.drawn && !(await evaluate(`!!document.querySelector(${JSON.stringify(`.tf-kept:not([hidden]) ${t.drawn}`)})`))) reasons.push(`${t.drawn} never drew`);
+    if (t.chosen && t.lands === "#/tickets" && (await evaluate(`localStorage.getItem("knobas.job.chosen")`)) !== null) reasons.push("the gone job is still chosen");
+    return { reasons, note: rec.frames.map((f) => `${f.hash} "${f.h1 ?? ""}"`).join(" → ") };
+  }
+
   async function rightClick(t) {
     await open(t);
     const reasons = [];
@@ -3532,7 +3596,7 @@ async function worker(queue, results) {
     return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
   }
 
-  const KINDS = { "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   for (let t = queue.shift(); t; t = queue.shift()) {
     const began = Date.now();
     const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };
