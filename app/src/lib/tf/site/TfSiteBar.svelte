@@ -58,6 +58,14 @@
   const armed = $derived(store.armed.has(source));
   const step = backStep();
 
+  const readable = (path: string) => {
+    try {
+      return decodeURI(path);
+    } catch {
+      return path;
+    }
+  };
+
   /** The address in parts: the scheme only for plain http, the host, then the rest. */
   const at = $derived.by(() => {
     const url = status?.url ?? null;
@@ -67,7 +75,8 @@
       return {
         plain: parsed.protocol === "http:" ? "http://" : "",
         host: parsed.host,
-        rest: `${parsed.pathname === "/" && parsed.search === "" ? "" : parsed.pathname}${parsed.search}${parsed.hash}`,
+        // Read as a browser shows it: `%20` as a space. Text, never markup.
+        rest: `${parsed.pathname === "/" && parsed.search === "" ? "" : readable(parsed.pathname)}${parsed.search}${parsed.hash}`,
         whole: url,
       };
     } catch {

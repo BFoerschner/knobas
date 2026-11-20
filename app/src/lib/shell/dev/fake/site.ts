@@ -6,7 +6,8 @@
  *
  * Tidewater Jira's and Tidewater Confluence's pages open inside knobas; the others open the browser.
  * `?fake-site=off` turns them all off. `?fake-site-dirty` makes every page hold changes, so a close, a reload and
- * another address ask. A view commits its page 250 ms after it is made, as a fast local site would.
+ * another address ask. `?fake-long-paths` opens a site at a long address. A view commits its page 250 ms after it is
+ * made, as a fast local site would.
  */
 import type { SiteInsets, SiteSetting, SiteStatus } from "../../../ipc/site";
 import { onFakeReset } from "../fake-seed";
@@ -107,6 +108,11 @@ function place(site: FakeSite): void {
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const off = params.get("fake-site") === "off";
   const dirty = params.has("fake-site-dirty");
+  // `?fake-long-paths`: a site's first page at a long address, for the bar's address in `long-paths.mjs`.
+  const first = (base: string) =>
+    params.has("fake-long-paths")
+      ? `${base}/display/PAY/folders with spaces/a repository-name-that-is-long and a page whose title runs on past any bar?view=edit&pageId=88213`
+      : `${base}/`;
   const settings = new Map<string, SiteSetting>(
     Object.entries(BASES).map(([source, base]) => [
       source,
@@ -210,7 +216,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const site: FakeSite = { status: blank(source), insets: (args["insets"] as SiteInsets | undefined) ?? null, wanted: false, history: [], at: 0 };
       sites.set(source, site);
       emit(site);
-      load(site, url ?? `${base}/`);
+      load(site, url ?? first(base));
       return { done: true, asks: null };
     },
     site_show: (args) => {

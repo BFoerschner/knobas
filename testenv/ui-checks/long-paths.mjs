@@ -122,6 +122,8 @@ const SCREENS = [
   { id: "launcher-file-rows", route: "tickets", launcher: "settlebridge" },
   { id: "launcher-file-pane", route: "tickets", launcher: "#r settlebridge" },
   { id: "launcher-file-names", route: "tickets", launcher: "#r deployment" },
+  // A source's site at a long address (ADR-0048): the host whole, the rest given up at its end, the whole in the title.
+  { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
 ];
 
 // Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables
@@ -157,7 +159,7 @@ const CHECK = String.raw`(() => {
   const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src|Orchestra Renderer/;
   // What gives way on purpose, its whole in a title: a path's start, a toast's middle, and a command's program start and its
   // arguments after the program's file (TfCommand, the renderers-columns pass).
-  const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args"];
+  const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args", "tf-site-path"];
   // A renderer's long name: held to its boxes as a path is, but it may end in an ellipsis.
   const NAME = /payments team's/;
   const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks"), document.querySelector(".tf-launch")].filter(Boolean);
