@@ -581,7 +581,12 @@ bytes 150 ms after the views (`forget` removes the image and diagram sizes kept 
 `docs/decisions/2026-11-19-a-readme-image-keeps-its-room.md`); `repo-readme-diagram-late` opens the same README with
 every drawing 900 ms late (`?fake-diagram-late=<ms>`, the fixture's: the app's port asks its engine that much later),
 past the text's hold, so each drawing lands with the page under it drawn and must stay in its source's room
-(`docs/decisions/2026-11-20-a-diagram-keeps-its-room.md`). Such a place is the fixture's only; `--real` leaves it out.
+(`docs/decisions/2026-11-20-a-diagram-keeps-its-room.md`); `diff-rendered-late` presses *Rendered* on a commit's README
+with each side's bytes 400 ms late, and `repo-local-rendered` the same on Local changes' Markdown file, so each side lands
+inside the stage and nothing outside it may move; `repo-compare-working` opens Compare with *From* the working tree, its
+names 60 ms late and its counts 300 ms late, which fill the rows in place (ux26,
+`docs/decisions/2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md`). Such a place is the
+fixture's only; `--real` leaves it out.
 
 ```sh
 just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25

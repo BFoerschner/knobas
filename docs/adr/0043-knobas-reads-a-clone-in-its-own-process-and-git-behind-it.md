@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0049
 ---
 
 # knobas reads a clone in its own process, and git behind it
+
+*Amended by [ADR-0049](0049-a-comparison-may-end-at-the-working-tree.md) (2026-11-20): the working tree against a commit is git's too.*
 
 Amends [ADR-0021](0021-knobas-reads-a-checkouts-state-with-read-only-git.md), [ADR-0026](0026-knobas-reads-a-checkouts-uncommitted-diff.md), [ADR-0036](0036-knobas-reads-any-diff-at-a-checkout-that-holds-both-commits.md) and [ADR-0041](0041-knobas-reads-a-branchs-tree-at-its-checkout-and-fetches-its-tip-there.md).
 

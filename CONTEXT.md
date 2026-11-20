@@ -31,6 +31,10 @@ _Avoid_: editor (an application may be a terminal, a file manager or a git clien
 Where a [checkout](#checkout)'s working tree stands right now: its branch or detached head, its upstream and how far ahead and behind, and how many paths are changed, untracked or conflicted. Read by read-only `git status` when the checkout panel opens and when the window regains focus; never stored, never polled, and not run again where nothing git reads changed since its last answer (ADR-0021 as amended 2026-11-10; on Windows too since 2026-11-16). It stays git's own answer where a clone's commits are read in knobas's process (ADR-0043): what is changed in a working tree depends on the person's filters and settings. The branch name the mirror holds is compared to it, never passed to git (ADR-0021).
 _Avoid_: git status (the command, not the fact), dirty/clean as the whole state, local branch
 
+**Working tree** (as an end):
+The files of a repository's [checkout](#checkout) as they stand on disk, uncommitted changes and the untracked files git does not ignore included, as one end of a comparison: written `~working-tree`, a name git refuses for a branch (ux26, ADR-0049). A head only, against a commit the checkout holds or a branch (then the merge base of its tip and `HEAD`). Always git's own answer, read again when the page is shown, on the window's focus and on a refresh, kept by the checkout's stamp so an untouched tree starts no git; never watched or polled. Ignored files are never listed, read or copied.
+_Avoid_: local changes (the tab's two halves, against the index and `HEAD`), worktree (one more checkout), workspace
+
 ## Sync
 
 **Source**:
@@ -224,7 +228,7 @@ _Avoid_: shortcut, hotkey, binding
 An operation that changes data in a source: status, comment, approval, trigger, worklog, page, pausing a [monitor](#monitor). Links, contexts, notes and [blocks](#block) are never write-back; a [worklog](#worklog) is one.
 
 **Compare**:
-Where a [pull request](#kind) is proposed: *Into* is its base and *From* its head, any two branches of the repository, the default branch on either side (2026-11-13: a pull request from the default branch brings it into another). What it changes and the commits it carries are the source's compare from *Into* to *From*. A branch's own view measures the branch against the default branch, so it speaks for the compare only while *Into* is the default and *From* is not.
+Where a [pull request](#kind) is proposed: *Into* is its base and *From* its head, any two branches of the repository, the default branch on either side (2026-11-13: a pull request from the default branch brings it into another). *From* may also be the [working tree](#working-tree-as-an-end) (ux26): then nothing is proposed, the form says where the checkout stands, and what it changes is the working tree against *Into*'s merge base with `HEAD`. What it changes and the commits it carries are the source's compare from *Into* to *From*. A branch's own view measures the branch against the default branch, so it speaks for the compare only while *Into* is the default and *From* is not.
 _Avoid_: diff page (the diff between any two commits, at its own address), branch view
 
 **Account**:
@@ -298,6 +302,10 @@ _Avoid_: file list cache, snapshot, held read (a page's read of the source, kept
 **Diff**:
 The line-by-line difference between two versions of a set of files, as a source view's diff block carries it: per file its path and old path, what happened to it, its line counts and its hunks. Parsed from the unified diff text a git server answers, or that is read at a checkout holding both commits (ADR-0036; only there can whitespace be ignored), by one parser every git adapter shares. At a checkout that text is written in knobas's own process, the bytes `git diff` prints, and by git itself where a setting of the repository's would change them (ADR-0043). Capped per file and per view; a file over the cap keeps its counts and says it was cut. A range's diff may be read as its **file list** first (each file's paths, change and counts, no lines; every file, with no per-view cap) and each file's lines as the reader reaches it, a page at a time: the files and lines are those of the whole read. At a clone the list's **names** come first of all (each file's paths, change and modes, no counts, 2026-11-14), drawn while the counts are read and filled in place. A pull request's diff also carries its **line threads** and may take new line comments.
 _Avoid_: patch (the text before it is parsed), changeset, delta
+
+**Rendered comparison**:
+A file of a [diff](#diff) drawn by a renderer on both sides, before and after, in place of its lines: *Lines | Rendered* in its header wherever a renderer can draw both sides (an image, Markdown, a diagram, a PDF, a page, a command renderer's output), *Rendered* in the diff's band for every such file, remembered (ux26). It stands in the **stage**, whose height comes from the kind of renderer and never from what lands in it, so a side that is late moves nothing. Each side is the file's bytes at its end, read at the clone first.
+_Avoid_: preview, visual diff (it marks no pixel), side-by-side (that is split, the lines' layout)
 
 **File pipeline**:
 The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`. A **named pipeline** is one saved with a name, which a default per file pattern names by id (so editing it changes every pattern that uses it); a **command step** is one of the person's own programs as a step, under ADR-0033.

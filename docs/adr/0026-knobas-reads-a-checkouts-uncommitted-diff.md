@@ -1,8 +1,10 @@
 ---
-status: accepted, amended by ADR-0036 and ADR-0043
+status: accepted, amended by ADR-0036, ADR-0043 and ADR-0049
 ---
 
 # knobas reads a checkout's uncommitted diff
+
+*Amended by [ADR-0049](0049-a-comparison-may-end-at-the-working-tree.md) (2026-11-20): a commit may be named: the working tree against it.*
 
 Amends [ADR-0021](0021-knobas-reads-a-checkouts-state-with-read-only-git.md).
 
