@@ -51,8 +51,10 @@ in a tantivy index in the profile, and PostgreSQL keeps what that index stands a
 - A profile has a folder knobas can rebuild and PostgreSQL does not know. Removing the folder costs one fill.
 - The forge is asked for one archive a repository on the first fill, one at a time, inside a run's bound.
 - A file's text is stored decoded. *Files* still reads bytes from the clone or the forge.
-- tantivy is 35 crates new to the lockfile and about 3.7 MB of the binary by the spike. *To fill: as built.* Its on-disk format is its own: a version
-  that changes it gets a new folder name and a fill.
-- The witnesses: `code_text`'s unit tests and property, `knobas-files/tests/it` (the read, the bound, the writes),
+- tantivy is 35 crates new to the lockfile and about 3.7 MB of the binary by the spike. As built, the windowless
+  backend in release on the Mac grew by 5.1 MB stripped (72.8 to 77.9 MB), for everything this build added. Its
+  on-disk format is its own: a version that changes it gets a new folder name and a fill.
+- The witnesses: `code_text`'s unit tests, `knobas-files/tests/it` (the read, the bound, the writes),
   `knobas-sync/tests/it/code_files.rs` (the pass, a crash between the two stores), `knobas-search/tests/it/files.rs`
-  (the ranking table), the live script against Gitea and Forgejo, and `files::the_files_read_alone` over a corpus.
+  (the ranking table), the live clause `the_archive_hands_over_every_blob_of_the_tree` against Gitea, and
+  `files::the_files_read_alone` over a corpus.
