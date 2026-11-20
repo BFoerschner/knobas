@@ -14,27 +14,25 @@
   /* Each role's face (Settings › Fonts, 2026-11-18, `fonts.svelte.ts`): the family chosen for it first (`--<role>-chosen`,
      which `fonts.svelte.ts` sets on <html>), then the face knobas brings along, so a font missing on this machine draws
      in the bundled one. *Interface* is `--sans`, *Headings* `--head` (every rule that narrows with `"wdth"`), *Reading*
-     `--serif`, *Code* `--mono`. The brand is a mark, not text: Archivo whatever is chosen. */
-  --sans: var(--ui-chosen, "Archivo Variable"), "Archivo Variable", system-ui, sans-serif;
-  --head: var(--head-chosen, "Archivo Variable"), "Archivo Variable", system-ui, sans-serif;
-  --serif: var(--read-chosen, "Source Serif 4 Variable"), "Source Serif 4 Variable", Georgia, serif;
-  --brand: "Archivo Variable", system-ui, sans-serif;
+     `--serif`, *Code* `--mono`. The brand is a mark, not text: Inter whatever is chosen. Since 2026-11-20 the bundled
+     face of the first three is Inter, and of Code Cascadia Code (`fonts/fonts.css`); Reading keeps its token's name. */
+  --sans: var(--ui-chosen, "Inter"), "Inter", system-ui, sans-serif;
+  --head: var(--head-chosen, "Inter"), "Inter", system-ui, sans-serif;
+  --serif: var(--read-chosen, "Inter"), "Inter", system-ui, sans-serif;
+  --brand: "Inter", system-ui, sans-serif;
   /* Each role's size, a number (`fonts.svelte.ts` writes it on <html>, 85 to 130 %). Every rule that sets a role's
      family copies it into `--fs`, which inherits, and every font size is multiplied by `--fs` (`code-face.test.ts`):
      a size evens one face out against the others, its text and line boxes follow it, the lengths tuned around text
      hold. Zoom makes everything bigger. At 1 every computed size is what it was. */
   --size-ui: 1; --size-head: 1; --size-read: 1; --size-code: 1;
   --fs: var(--size-ui);
-  /* Archivo's word space is narrow: at 11 to 15 px words run together, so the interface opens it a little. A chosen
-     interface face keeps its own (`fonts.svelte.ts` sets both to `normal`). */
-  --ui-letter: .006em; --ui-word: .06em;
-  /* Code's face (2026-11-16): the family chosen in Settings › Appearance first (`--mono-chosen`, which
-     `code-face.svelte.ts` sets on <html>), then the bundled JetBrains Mono, its stand-ins while it loads (the
-     `@font-face` rules at the end of this file), and the system's monospace, so a font missing on this machine draws
-     in JetBrains Mono and never in a proportional face. `--mono-ligatures` is *Ligatures in code*, off until set:
+  /* Code's face (2026-11-16): the family chosen in Settings › Fonts first (`--mono-chosen`, which `fonts.svelte.ts`
+     sets on <html>), then the bundled Cascadia Code (2026-11-20), its stand-ins while it loads (`fonts/fonts.css`), and
+     the system's monospace, so a font missing on this machine draws in Cascadia Code and never in a proportional face.
+     `--mono-ligatures` is *Ligatures in code*, on until turned off (2026-11-20; Björn: "enable ligatures by default"):
      every rule that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
-  --mono: var(--mono-chosen, "JetBrains Mono"), "JetBrains Mono", "JetBrains Mono over Menlo", "JetBrains Mono over Consolas", ui-monospace, monospace;
-  --mono-ligatures: none;
+  --mono: var(--mono-chosen, "Cascadia Code"), "Cascadia Code", "Cascadia Code over Menlo", "Cascadia Code over Consolas", ui-monospace, monospace;
+  --mono-ligatures: normal;
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
@@ -81,8 +79,7 @@
    no scroll behind the window, and the paper under it ---------- */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
-/* The word space Archivo needs (`--ui-letter`, `--ui-word`, above). */
-body { --fs: var(--size-ui); font: calc(var(--t-sm) * var(--fs))/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: var(--ui-letter); word-spacing: var(--ui-word); accent-color: var(--ink); }
+body { --fs: var(--size-ui); font: calc(var(--t-sm) * var(--fs))/1.45 var(--sans); -webkit-font-smoothing: antialiased; accent-color: var(--ink); }
 /* Code is drawn in code's face wherever it appears: a fence, a macro's block, a `{noformat}`, an inline `code` or `tt`
    in any rendered text, a key. A rule that styles one names `--mono` too, or inherits this; at no specificity, so
    such a rule wins without a fight (`code-face.test.ts`). */
@@ -152,19 +149,3 @@ a { color: var(--info); text-decoration: none; }
 
 /* The yellow card: the ticket you are on, and nothing else. */
 .tf .tf-card { background: var(--card); color: var(--card-ink); }
-
-/* ---------- JetBrains Mono's stand-ins (2026-11-16): the system's own monospace, sized to JetBrains Mono's
-   metrics, drawn in the moment before the bundled face has loaded (`shell/faces.ts` loads it once the app is
-   idle), so a line of code is as wide and sits where it will when the face lands, and nothing moves.
-   JetBrains Mono: 600 of 1000 units an advance, ascent 1020, descent 300, no line gap. `size-adjust` matches the
-   advance (Menlo 1233 of 2048, Consolas 1126 of 2048); the overrides are JetBrains Mono's, divided by it, since
-   `size-adjust` scales them too. WebKit takes `size-adjust` and not yet the overrides; every code view sets a
-   line height of its own, so they move nothing there either way. ---------- */
-@font-face {
-  font-family: "JetBrains Mono over Menlo"; src: local("Menlo"), local("Menlo-Regular");
-  size-adjust: 99.66%; ascent-override: 102.35%; descent-override: 30.1%; line-gap-override: 0%;
-}
-@font-face {
-  font-family: "JetBrains Mono over Consolas"; src: local("Consolas");
-  size-adjust: 109.13%; ascent-override: 93.47%; descent-override: 27.49%; line-gap-override: 0%;
-}

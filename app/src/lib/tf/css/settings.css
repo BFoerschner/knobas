@@ -228,11 +228,11 @@ select.tf-stg-in { padding-inline-start: 4px; }
 
 /* Settings › Fonts (2026-11-18, `TfFontsSection.svelte`, `TfFontRole.svelte`). The proof: a word in each role's face at
    the display step (34 px) times the role's size, on one baseline, and two rules across them: the baseline, and the
-   bundled Archivo's x-height (.526 em) at 34 px, which a face evened out meets with its lower case. The guide is an empty flex item, so its
+   bundled Inter's x-height (.546 em) at 34 px, which a face evened out meets with its lower case. The guide is an empty flex item, so its
    synthesized baseline is its foot and it stands on the shared baseline, as tall as that x-height. */
 .tf-fr-proof { margin: 0 0 6px; background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .tf-fr-proofline { position: relative; display: flex; align-items: baseline; gap: 28px; padding: 16px 20px 12px; white-space: nowrap; overflow: hidden; }
-.tf-fr-guide { position: relative; flex: none; width: 0; height: calc(var(--t-d1) * .526); margin-right: -28px; }
+.tf-fr-guide { position: relative; flex: none; width: 0; height: calc(var(--t-d1) * .546); margin-right: -28px; }
 .tf-fr-guide::before, .tf-fr-guide::after { content: ""; position: absolute; left: -40px; width: 4000px; border-top: 1px solid var(--rule); }
 .tf-fr-guide::before { top: 0; border-top: 1px dashed var(--focus); }
 .tf-fr-guide::after { bottom: 0; }
@@ -268,6 +268,15 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-fr-key { --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; letter-spacing: -.01em; }
 .tf-fr-h { --fs: var(--size-head); font-family: var(--head); font-weight: 700; font-variation-settings: "wdth" 88; font-stretch: 88%; font-size: calc(var(--t-lg) * var(--fs)); }
 .tf-fr-sample-read p { --fs: var(--size-read); font-family: var(--serif); font-size: calc(17.5px * var(--fs)); line-height: 1.65; max-width: 62ch; }
+/* The faces knobas brings along (2026-11-20): a row each, its licence's text unfolding under it. The text is the
+   licence file as written, line breaks and all, so it keeps them and wraps a long line. */
+.tf-fr-lics-note { margin: 0 0 8px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-fr-lic { border-top: 1px solid var(--rule-2); }
+.tf-fr-lic:last-child { border-bottom: 1px solid var(--rule-2); }
+.tf-fr-lic > summary { display: flex; align-items: baseline; gap: 10px; min-height: var(--control-h); padding: 6px 2px; cursor: pointer; font-size: calc(var(--t-md) * var(--fs)); }
+.tf-fr-lic-role { margin-left: auto; color: var(--ink-2); }
+.tf-fr-lic > summary .tf-dim:last-child { min-width: 14em; text-align: right; }
+.tf-fr-lic-text { margin: 0 0 12px; padding: 10px 12px; max-height: 320px; overflow: auto; white-space: pre-wrap; background: var(--sheet); border: 1px solid var(--rule-2); border-radius: 4px; font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.5; }
 
 /* Settings › Docs' spaces (PR #2479, 2026-11-17): a box per space, in columns as wide as a name, so many spaces read as a list. */
 .tf-stg-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 16px; margin-top: 4px; }

@@ -93,7 +93,7 @@ test("no retry button while it is still coming up", () => {
 });
 
 /**
- * The design system keeps JetBrains Mono for real code values (#1402): the
+ * The design system keeps the code face for real code values (#1402): the
  * raw failure message is one, the sentences around it are not. *Retry* is
  * the design system's primary button.
  */

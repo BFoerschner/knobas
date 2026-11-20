@@ -21,20 +21,16 @@
   - **No inline styles anywhere** (`style-src 'self'`). Prototype-6's 345
     inline `style` attributes become classes as each view is ported.
 
-  Width is set with `font-variation-settings: "wdth" N`, so Archivo's width
-  cannot depend on how `@font-face` declares its range, and with
-  `font-stretch: N%` beside it (Settings › Fonts, 2026-11-18), the one
-  property that narrows a chosen Headings face through its own width axis or
-  its condensed members. `code-face.test.ts` holds the pair.
+  Width is set with `font-variation-settings: "wdth" N` and `font-stretch: N%`
+  beside it (Settings › Fonts, 2026-11-18), the one property that narrows a
+  chosen Headings face through its own width axis or its condensed members.
+  The bundled Inter has no width axis and draws them at its normal width
+  (2026-11-20). `code-face.test.ts` holds the pair.
 
-  Fonts are vendored from npm, never fetched. Archivo comes from its `wdth`
-  file: the package's default file carries only `wght`, and without the
-  width axis the job key draws at normal width.
+  The faces are the app's own files in `fonts/`, each beside its licence,
+  never fetched (`fonts/fonts.css`).
 */
-@import "@fontsource-variable/archivo/wdth.css";
-@import "@fontsource-variable/source-serif-4/opsz.css";
-@import "@fontsource/jetbrains-mono/latin-400.css";
-@import "@fontsource/jetbrains-mono/latin-600.css";
+@import "./fonts/fonts.css";
 
 
 /*

@@ -156,7 +156,7 @@
 .tf-tchip .tf-chip { font-size: calc(var(--t-2xs) * var(--fs)); padding: 0 5px; }
 .tf-ment { --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--mark); color: var(--ink); }
-/* A callout, the comments, a table and what the page belongs to are Archivo in the serif page: they take the interface's spacing back. */
+/* A callout, the comments, a table and what the page belongs to are the interface's in the reading page: they take its spacing back. */
 .tf-doc :is(.tf-callout, .tf-cmts, td, th) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(h3, p, li, dd, dt), .tf-doc > .tf-dl-note, .tf-doc h2 .tf-tools { letter-spacing: .006em; word-spacing: .06em; }
 /* A match on the row you are on keeps the normal mark's pair, in both themes. */
 .tf-rd-tree a[aria-current="true"] mark { background: var(--mark); color: var(--ink); }

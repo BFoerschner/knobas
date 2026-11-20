@@ -88,7 +88,7 @@
     --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%;
   }
 
-  /* Archivo, the row step, secondary ink: these are sentences, not code. */
+  /* The interface face, the row step, secondary ink: these are sentences, not code. */
   .boot-b p {
     margin-top: 10px;
     font-size: calc(var(--t-sm) * var(--fs));

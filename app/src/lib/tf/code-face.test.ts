@@ -6,8 +6,8 @@
  * Read off disk, every stylesheet and every component's `<style>` under `app/src/`, as the style gate does. It fails
  * when
  *
- * - (a) `--mono` does not start with the chosen family and fall back to the bundled JetBrains Mono, its stand-ins and
- *   the system's monospace, or `--mono-ligatures` is not `none` until set;
+ * - (a) `--mono` does not start with the chosen family and fall back to the bundled Cascadia Code, its stand-ins and
+ *   the system's monospace, or `--mono-ligatures` is not `normal` until turned off (2026-11-20);
  * - (b) the base rule is missing: `pre`, `code`, `kbd`, `samp` and `tt` take `--mono` and the ligature switch at no
  *   specificity, so code in any rendered text (Markdown, a Confluence macro, Jira's `{code}`, `{noformat}` and
  *   `{{monospace}}`) is drawn in it with no rule of its own;
@@ -35,6 +35,8 @@ import { expect, test } from "vitest";
 /** `app/src/`, off `cwd`: Vitest's root is `app/`. */
 const ROOT = join(process.cwd(), "src");
 const TOKENS = "lib/tf/css/tokens.css";
+/** The bundled faces' `@font-face` rules (2026-11-20). */
+const FACES = "lib/tf/fonts/fonts.css";
 
 /** The code views' own classes: each draws code whatever element carries it. */
 const CODE_CLASSES = [
@@ -170,16 +172,19 @@ const sources = files(ROOT, /\.(css|svelte)$/).map((file) => ({ file, text: read
 const sheets = sources.map(({ file, text }) => ({ file, rules: rules(stylesheet(file, text)) }));
 const codeClasses = new Set([...CODE_CLASSES, ...sources.filter(({ file }) => file.endsWith(".svelte")).flatMap(({ text }) => markupCodeClasses(text))]);
 
-test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are off until set", () => {
+test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are on until turned off", () => {
   const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
   expect(tokens).toMatch(
-    /--mono: var\(--mono-chosen, "JetBrains Mono"\), "JetBrains Mono", "JetBrains Mono over Menlo", "JetBrains Mono over Consolas", ui-monospace, monospace;/,
+    /--mono: var\(--mono-chosen, "Cascadia Code"\), "Cascadia Code", "Cascadia Code over Menlo", "Cascadia Code over Consolas", ui-monospace, monospace;/,
   );
-  expect(tokens).toMatch(/--mono-ligatures: none;/);
-  // Each stand-in is a local face sized to JetBrains Mono's advance, so nothing moves when the bundled face lands.
+  expect(tokens).toMatch(/--mono-ligatures: normal;/);
+  // The bundled face at 105 %, and each stand-in a local face sized to its advance there, so nothing moves when it lands.
+  const faces = readFileSync(join(ROOT, FACES), "utf8");
+  expect(faces).toMatch(/@font-face \{\s*font-family: "Cascadia Code"; font-style: normal;[^}]*src: url\("\.\/cascadia-code\/CascadiaCode\.woff2"\)[^}]*size-adjust: 105%;/);
+  expect(faces).toMatch(/@font-face \{\s*font-family: "Cascadia Code"; font-style: italic;[^}]*src: url\("\.\/cascadia-code\/CascadiaCodeItalic\.woff2"\)[^}]*size-adjust: 105%;/);
   for (const stand of ["Menlo", "Consolas"]) {
-    const face = new RegExp(`@font-face \\{\\s*font-family: "JetBrains Mono over ${stand}"; src: local\\("${stand}"\\)[^}]*size-adjust: [\\d.]+%`);
-    expect(tokens).toMatch(face);
+    const face = new RegExp(`@font-face \\{\\s*font-family: "Cascadia Code over ${stand}"; src: local\\("${stand}"\\)[^}]*size-adjust: [\\d.]+%`);
+    expect(faces).toMatch(face);
   }
 });
 
@@ -259,9 +264,9 @@ test("(e) no stylesheet, component or module names a monospace family but --mono
 
 /** Each role's family token, its chosen family's property, its size and its bundled face. */
 const ROLE_TOKENS = [
-  { token: "--sans", role: "ui", chosen: "--ui-chosen", bundled: '"Archivo Variable"', rest: "system-ui, sans-serif" },
-  { token: "--head", role: "head", chosen: "--head-chosen", bundled: '"Archivo Variable"', rest: "system-ui, sans-serif" },
-  { token: "--serif", role: "read", chosen: "--read-chosen", bundled: '"Source Serif 4 Variable"', rest: "Georgia, serif" },
+  { token: "--sans", role: "ui", chosen: "--ui-chosen", bundled: '"Inter"', rest: "system-ui, sans-serif" },
+  { token: "--head", role: "head", chosen: "--head-chosen", bundled: '"Inter"', rest: "system-ui, sans-serif" },
+  { token: "--serif", role: "read", chosen: "--read-chosen", bundled: '"Inter"', rest: "system-ui, sans-serif" },
 ] as const;
 const ROLE_OF: Record<string, string> = { sans: "ui", head: "head", serif: "read", mono: "code" };
 
@@ -301,8 +306,8 @@ test("(f) each role's token is the chosen family, then the bundled face; every s
   expect(tokens).toContain("--fs: var(--size-ui);");
   // The form's label column holds one line of interface text, so it follows the interface's size.
   expect(tokens).toContain("--tf-label: calc(132px * var(--size-ui));");
-  // Archivo's word space, which a chosen interface face does without.
-  expect(tokens).toMatch(/body \{[^}]*letter-spacing: var\(--ui-letter\); word-spacing: var\(--ui-word\);/);
+  // Archivo's opened word space went with it (2026-11-20): Inter keeps its own.
+  expect(tokens).not.toMatch(/--ui-letter|--ui-word/);
 });
 
 test("(g) every rule that sets a role's family sets --fs to that role's size", () => {
@@ -402,7 +407,7 @@ test("(k) no stylesheet or component names a bundled proportional family but its
     if (file === TOKENS) continue;
     for (const { selectors, decls } of found) {
       const set = family(decls);
-      if (set !== null && /Archivo|Source Serif/.test(set)) named.push(`${file} ${selectors.join(", ")}: ${set}`);
+      if (set !== null && /Inter\b|Archivo|Source Serif/.test(set)) named.push(`${file} ${selectors.join(", ")}: ${set}`);
     }
   }
   expect(named).toEqual([]);

@@ -27,7 +27,7 @@
 #          follows unless `data-theme` is set; unset leaves Chrome's default)
 #        SHOT_FULL=1 (the whole of a long page in one image: the viewport grows to
 #          its tallest scroller's content, at most 8000 px, #1396)
-#        SHOT_SCALE=2 (device pixels per CSS pixel, 1 to 3, default 1)
+#        SHOT_SCALE=2 (device pixels per CSS pixel: 1, 1.25, 1.5, 2 or 3, default 1)
 #        SHOT_NOW=2026-08-22T15:05:00Z (the same picture on any machine, any day:
 #          the page's clock stops there, in UTC and en-GB; scripts/shot-steps.mjs)
 #        SHOT_ALLOW_ERRORS=1 (keep going when a page throws: every shot runs over

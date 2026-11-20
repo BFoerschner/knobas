@@ -53,20 +53,21 @@ test("a family is a trimmed name, its CSS quotes dropped, and the role's bundled
   expect(familyName("  Fira Code ")).toBe("Fira Code");
   expect(familyName('"Iosevka Term"')).toBe("Iosevka Term");
   expect(familyName("'Menlo'")).toBe("Menlo");
-  expect(familyName("jetbrains mono")).toBeNull();
+  expect(familyName("cascadia code")).toBeNull();
   expect(familyName("   ")).toBeNull();
   expect(familyName(null)).toBeNull();
   expect(familyName("a\nb")).toBe("ab");
   expect(familyName("x".repeat(201))).toBeNull();
   expect(cssFamily('Odd "Name" \\ 2')).toBe('"Odd \\"Name\\" \\\\ 2"');
-  // Each role's own bundled face, by its name or its family's.
-  expect(familyName("Archivo", "ui")).toBeNull();
-  expect(familyName("archivo variable", "head")).toBeNull();
-  expect(familyName("Source Serif 4", "read")).toBeNull();
-  expect(familyName("Source Serif 4 Variable", "read")).toBeNull();
-  // Another role's bundled face is a choice like any.
-  expect(familyName("JetBrains Mono", "ui")).toBe("JetBrains Mono");
-  expect(familyName("Archivo", "code")).toBe("Archivo");
+  // Each role's own bundled face (2026-11-20: Inter, and Cascadia Code for code).
+  expect(familyName("Inter", "ui")).toBeNull();
+  expect(familyName("inter", "head")).toBeNull();
+  expect(familyName("Inter", "read")).toBeNull();
+  // Another role's bundled face, and the faces bundled before, are a choice like any.
+  expect(familyName("Cascadia Code", "ui")).toBe("Cascadia Code");
+  expect(familyName("Inter", "code")).toBe("Inter");
+  expect(familyName("Archivo", "ui")).toBe("Archivo");
+  expect(familyName("Source Serif 4", "read")).toBe("Source Serif 4");
 });
 
 test("a size is one of the ten steps, 85 to 130 in fives, the nearest one, 100 for anything else", () => {
@@ -82,13 +83,15 @@ test("a size is one of the ten steps, 85 to 130 in fives, the nearest one, 100 f
 });
 
 test("the even step draws a face's lower case as tall as the bundled face's, when that is on the scale", () => {
-  expect(BUNDLED_X_HEIGHT).toEqual({ ui: 0.526, head: 0.526, read: 0.475, code: 0.55 });
-  // Georgia (.481) for Interface: .526 / .481 = 109 %.
-  expect(evenStep("ui", 0.481)).toBe(110);
-  // Courier New (.423) for Code: .55 / .423 = 130 %.
+  // Inter's .546 (1118 of 2048) for the first three; Cascadia's .518 at its 105 % for Code.
+  expect(BUNDLED_X_HEIGHT).toEqual({ ui: 1118 / 2048, head: 1118 / 2048, read: 1118 / 2048, code: (1060 / 2048) * 1.05 });
+  // Georgia (.481) for Interface: .546 / .481 = 113 %.
+  expect(evenStep("ui", 0.481)).toBe(115);
+  // Courier New (.423) for Code: Cascadia's .518 at its 105 % is .544, and .544 / .423 = 129 %.
   expect(evenStep("code", 0.423)).toBe(130);
-  // A face as tall as the bundled one: 100.
-  expect(evenStep("read", 0.475)).toBe(100);
+  // A face as tall as the bundled one: 100 (Archivo's .526 is 104 % off Inter's, on the scale at 105).
+  expect(evenStep("read", 0.546)).toBe(100);
+  expect(evenStep("ui", 0.526)).toBe(105);
   // Too far off either way, or not said.
   expect(evenStep("code", 0.3)).toBeNull();
   expect(evenStep("ui", 0.8)).toBeNull();
@@ -96,14 +99,14 @@ test("the even step draws a face's lower case as tall as the bundled face's, whe
   expect(evenStep("ui", 0)).toBeNull();
 });
 
-test("nothing kept: the bundled faces at 100 %, no ligatures, and nothing written on <html>", () => {
+test("nothing kept: the bundled faces at 100 %, ligatures on, and nothing written on <html>", () => {
   const style = rootStyle();
   const fonts = createFonts(() => storage(), () => style);
   for (const role of ROLES) {
     expect(fonts.family(role)).toBeNull();
     expect(fonts.size(role)).toBe(100);
   }
-  expect(fonts.ligatures).toBe(false);
+  expect(fonts.ligatures).toBe(true);
   expect([...style.props]).toEqual([]);
 });
 
@@ -119,11 +122,9 @@ test("every role's family and size are kept across a restart and written on <htm
   fonts.setSize("head", 90);
   fonts.setSize("read", 125);
   fonts.setSize("code", 112);
-  fonts.setLigatures(true);
+  fonts.setLigatures(false);
   const written = {
     "--ui-chosen": '"Helvetica Neue"',
-    "--ui-letter": "normal",
-    "--ui-word": "normal",
     "--head-chosen": '"Avenir Next Condensed"',
     "--read-chosen": '"Georgia"',
     "--mono-chosen": '"Fira Code"',
@@ -131,7 +132,7 @@ test("every role's family and size are kept across a restart and written on <htm
     "--size-head": "0.9",
     "--size-read": "1.25",
     "--size-code": "1.1",
-    "--mono-ligatures": "normal",
+    "--mono-ligatures": "none",
   };
   expect(Object.fromEntries(style.props)).toEqual(written);
   expect(Object.fromEntries(kept.items)).toEqual({
@@ -143,7 +144,7 @@ test("every role's family and size are kept across a restart and written on <htm
     "knobas.head.size": "90",
     "knobas.read.size": "125",
     "knobas.code.size": "110",
-    "knobas.code.ligatures": "on",
+    "knobas.code.ligatures": "off",
   });
 
   // The next run: written as the module loads, so the first draw is already in it.
@@ -151,14 +152,14 @@ test("every role's family and size are kept across a restart and written on <htm
   const again = createFonts(() => kept, () => after);
   expect(again.family("read")).toBe("Georgia");
   expect(again.size("read")).toBe(125);
-  expect(again.ligatures).toBe(true);
+  expect(again.ligatures).toBe(false);
   expect(Object.fromEntries(after.props)).toEqual(written);
 
   for (const role of ROLES) {
     again.setFamily(role, null);
     again.setSize(role, 100);
   }
-  again.setLigatures(false);
+  again.setLigatures(true);
   expect([...after.props]).toEqual([]);
   expect([...kept.items]).toEqual([]);
 });
@@ -173,14 +174,62 @@ test("the code font kept before Settings › Fonts is still read under its key",
   const fonts = createFonts(() => kept, () => style);
   expect(fonts.family("code")).toBe("Menlo");
   expect(style.props.get("--mono-chosen")).toBe('"Menlo"');
-  expect(style.props.get("--mono-ligatures")).toBe("normal");
+  // `on` was the switch's mark while ligatures were off until set; on is the default now, so nothing is written.
+  expect(fonts.ligatures).toBe(true);
+  expect(style.props.has("--mono-ligatures")).toBe(false);
+});
+
+test("ligatures are on until turned off, and stay off once turned off (2026-11-20)", () => {
+  const kept = storage();
+  kept.items.set(LIGATURES_KEY, "off");
+  const style = rootStyle();
+  const fonts = createFonts(() => kept, () => style);
+  expect(fonts.ligatures).toBe(false);
+  expect(style.props.get("--mono-ligatures")).toBe("none");
+  fonts.setLigatures(true);
+  expect(kept.items.has(LIGATURES_KEY)).toBe(false);
+  expect(style.props.has("--mono-ligatures")).toBe(false);
+});
+
+test.each([
+  // Björn's: Cascadia installed and set to 105 % is the bundled Cascadia at its 100 %.
+  ["Cascadia Code", "105", null],
+  ["CaskaydiaCove Nerd Font Mono", "105", null],
+  ["cascadia mono", "110", "105"],
+  // A Cascadia kept at 100 % keeps its drawn size: 100 over 1.05 is 95.
+  ['"Cascadia Code PL"', null, "95"],
+  ["Cascadia Code NF", "130", "125"],
+])("a kept %s at %s %% becomes the bundled Cascadia, its size divided by 1.05 onto a step", (family, size, now) => {
+  const kept = storage();
+  kept.items.set(fontKey("code"), family);
+  if (size !== null) kept.items.set(sizeKey("code"), size);
+  const style = rootStyle();
+  const fonts = createFonts(() => kept, () => style);
+  expect(fonts.family("code")).toBeNull();
+  expect(kept.items.has(fontKey("code"))).toBe(false);
+  expect(kept.items.get(sizeKey("code")) ?? null).toBe(now);
+  expect(fonts.size("code")).toBe(now === null ? 100 : Number(now));
+  // Once: a second start reads what the first left.
+  const again = createFonts(() => kept, () => rootStyle());
+  expect(again.size("code")).toBe(fonts.size("code"));
+});
+
+test("another kept code face keeps its size, and Cascadia chosen for another role is that role's choice", () => {
+  const kept = storage();
+  kept.items.set(fontKey("code"), "Fira Code");
+  kept.items.set(sizeKey("code"), "105");
+  kept.items.set(fontKey("ui"), "Cascadia Code");
+  const fonts = createFonts(() => kept, () => rootStyle());
+  expect(fonts.family("code")).toBe("Fira Code");
+  expect(fonts.size("code")).toBe(105);
+  expect(fonts.family("ui")).toBe("Cascadia Code");
 });
 
 test("a kept size off the steps is read onto the nearest, and a kept bundled name is no choice", () => {
   const kept = storage();
   kept.items.set(sizeKey("ui"), "137");
   kept.items.set(sizeKey("code"), "nonsense");
-  kept.items.set(fontKey("read"), "Source Serif 4");
+  kept.items.set(fontKey("read"), "Inter");
   const style = rootStyle();
   const fonts = createFonts(() => kept, () => style);
   expect(fonts.size("ui")).toBe(130);
@@ -236,7 +285,7 @@ test("reset is the bundled faces at 100 % with nothing kept and nobody listening
   fonts.onSize(heard);
   fonts.setFamily("ui", "Avenir");
   fonts.setSize("read", 120);
-  fonts.setLigatures(true);
+  fonts.setLigatures(false);
   heard.mockClear();
   fonts.reset();
   expect([...style.props]).toEqual([]);

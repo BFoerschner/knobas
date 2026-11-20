@@ -184,7 +184,7 @@
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: calc(14px * var(--fs)) system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
-/* A pull request's number is a number: Archivo in tabular figures, not a code value. */
+/* A pull request's number is a number: the interface face in tabular figures, not a code value. */
 .tf-prno { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 500; }
 /* The sha, in the repository's table and a pull request's: its own width, and the message takes the rest. */
 .tf-rcommits td.tf-mono { width: calc(110px * var(--size-code)); white-space: nowrap; }

@@ -4,6 +4,7 @@
  * tables are read out of `docs/specs/2026-10-15-ticket-first-design-system.md`,
  * so a token that drifts from the spec fails here.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliDecompressSync } from "node:zlib";
@@ -196,9 +197,9 @@ test("every text token clears 4.5:1 on paper, sheet and sheet-2, light and dark"
 });
 
 /*
- * Width is `font-variation-settings: "wdth" N` for Archivo, with `font-stretch: N%` beside it since Settings › Fonts
- * (2026-11-18): a chosen Headings face narrows through its own width axis or condensed members, which only
- * `font-stretch` reaches. Archivo's `@font-face` declares `font-stretch: 62% 125%`, so it draws the same either way.
+ * Width is `font-variation-settings: "wdth" N`, with `font-stretch: N%` beside it since Settings › Fonts (2026-11-18):
+ * a chosen Headings face narrows through its own width axis or condensed members, which only `font-stretch` reaches.
+ * The bundled Inter has neither and draws both at its normal width (2026-11-20).
  * Every `font-stretch` is a `"wdth"`'s twin, at the same width (`code-face.test.ts` holds that every narrowed rule has one).
  */
 test("width comes from font-variation-settings, and font-stretch only as its twin at the same width", () => {
@@ -225,32 +226,54 @@ test("reduced motion stops the pulse and every other animation in the shell", ()
   expect(reduced).toMatch(/\.tf \*[^{]*\{ transition: none !important; animation: none !important; \}/);
 });
 
-test("the three families are vendored from npm, Archivo from its width-axis file", () => {
-  expect(code).toMatch(/@import "@fontsource-variable\/archivo\/wdth\.css";/);
-  expect(code).toMatch(/@import "@fontsource-variable\/source-serif-4\//);
-  expect(code).toMatch(/@import "@fontsource\/jetbrains-mono\//);
-  expect(code).not.toMatch(/https?:/);
+/**
+ * The faces are the app's own files (2026-11-20, `fonts/fonts.css`): imported once, before every rule, never fetched,
+ * and every file a face names is in its folder beside its licence (`OFL.txt`) and its `SOURCE.md`, whose SHA-256 is
+ * the file's. Cascadia Code's licence reserves its name for Microsoft's files as they are, so a changed byte there is a
+ * licence breach as much as a different font; Inter's is held the same way, so a new version is a deliberate change.
+ */
+test("the faces are the app's own files, each beside its licence, as SOURCE.md says they are", () => {
+  expect(css).toMatch(/^@import "\.\/fonts\/fonts\.css";$/m);
+  expect(code).not.toMatch(/@fontsource|https?:/);
+  const fonts = join(APP, "src/lib/tf/fonts");
+  const faces = readFileSync(join(fonts, "fonts.css"), "utf8");
+  expect(faces).not.toMatch(/https?:/);
+  const files = [...faces.matchAll(/url\("\.\/([\w-]+)\/([\w-]+\.woff2)"\)/g)].map(([, folder, file]) => ({ folder: folder!, file: file! }));
+  expect(files.map(({ folder }) => folder).filter((folder, i, all) => all.indexOf(folder) === i)).toEqual(["inter", "cascadia-code"]);
+  expect(files).toHaveLength(9);
+  for (const { folder, file } of files) {
+    const bytes = readFileSync(join(fonts, folder, file));
+    expect(bytes.subarray(0, 4).toString("latin1"), file).toBe("wOF2");
+    const source = readFileSync(join(fonts, folder, "SOURCE.md"), "utf8");
+    expect(source, `${folder}/SOURCE.md names ${file}`).toContain(`| \`${file}\` |`);
+    expect(source.split("\n").find((line) => line.includes(`\`${file}\``)), file).toContain(createHash("sha256").update(bytes).digest("hex"));
+    const licence = readFileSync(join(fonts, folder, "OFL.txt"), "utf8");
+    expect(licence, `${folder}/OFL.txt`).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  }
+  // The copyright notice above the licence's text, where a reserved name is declared.
+  const notice = (folder: string) => readFileSync(join(fonts, folder, "OFL.txt"), "utf8").split("This Font Software is licensed")[0]!;
+  expect(notice("cascadia-code")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
+  expect(notice("inter")).toMatch(/The Inter Project Authors/);
+  expect(notice("inter")).not.toMatch(/Reserved Font Name/);
 });
 
 /**
- * The axis is in the font file, not synthesised: the latin Archivo the
- * stylesheet imports has an `fvar` axis record `wdth` whose minimum is 62.0.
+ * The axes are in the font files, not synthesised: Inter's `opsz` (14 to 32), which draws headings in its display cut
+ * by itself, and its `wght`; Cascadia Code's `wght` (200 to 700), which code's 400 and 600 take.
  *
- * WOFF2 keeps its table data in one Brotli stream after a variable-length
- * table directory; an `fvar` axis record is the tag followed by min, default
- * and max as 16.16 fixed. The default-only file (`index.css`) carries `wght`
- * alone and fails this.
+ * WOFF2 keeps its table data in one Brotli stream after a variable-length table directory; an `fvar` axis record is
+ * the tag followed by min, default and max as 16.16 fixed.
  */
-test("the vendored Archivo carries a wdth axis from 62", () => {
-  const face = readFileSync(join(APP, "node_modules/@fontsource-variable/archivo/wdth.css"), "utf8");
-  const latin = face.match(/archivo-latin-wdth-normal \*\/[\s\S]*?url\(\.\/(files\/[^)]+)\)/);
-  expect(latin, "no latin face in wdth.css").not.toBeNull();
-  const font = readFileSync(join(APP, "node_modules/@fontsource-variable/archivo", latin![1]!));
-  expect(font.subarray(0, 4).toString("latin1")).toBe("wOF2");
-  expect(axes(font)).toContainEqual({ tag: "wdth", min: 62 });
+test("the bundled Inter has its optical size and weight axes, Cascadia Code its weight axis", () => {
+  const font = (path: string) => readFileSync(join(APP, "src/lib/tf/fonts", path));
+  const inter = font("inter/inter-latin-opsz-normal.woff2");
+  expect(axes(inter, "opsz")).toContainEqual({ tag: "opsz", min: 14, max: 32 });
+  expect(axes(inter, "wght")).toContainEqual({ tag: "wght", min: 100, max: 900 });
+  expect(axes(font("cascadia-code/CascadiaCode.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-code/CascadiaCodeItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
 });
 
-function axes(woff2: Buffer): { tag: string; min: number }[] {
+function axes(woff2: Buffer, tag: string): { tag: string; min: number; max: number }[] {
   const tables = woff2.readUInt16BE(12);
   const compressed = woff2.readUInt32BE(20);
   let at = 48;
@@ -273,9 +296,9 @@ function axes(woff2: Buffer): { tag: string; min: number }[] {
     if (transformed) base128();
   }
   const data = brotliDecompressSync(woff2.subarray(at, at + compressed));
-  const found: { tag: string; min: number }[] = [];
-  for (let index = data.indexOf("wdth"); index !== -1; index = data.indexOf("wdth", index + 1)) {
-    if (index + 16 <= data.length) found.push({ tag: "wdth", min: data.readInt32BE(index + 4) / 65536 });
+  const found: { tag: string; min: number; max: number }[] = [];
+  for (let index = data.indexOf(tag); index !== -1; index = data.indexOf(tag, index + 1)) {
+    if (index + 16 <= data.length) found.push({ tag, min: data.readInt32BE(index + 4) / 65536, max: data.readInt32BE(index + 12) / 65536 });
   }
   return found;
 }

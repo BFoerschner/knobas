@@ -3483,7 +3483,7 @@
   }
 
   /* Pushed to the far end, so the readings line up down the strip however
-     long the names before them are. A duration is Archivo with tabular figures. */
+     long the names before them are. A duration is the interface face with tabular figures. */
   .alerts .wh {
     margin-left: auto;
     flex: none;

@@ -34,7 +34,8 @@
 //       `scroll:testid=<id>` scrolls that element into view.
 //   SHOT_FULL=1 grows the viewport to the tallest scrolling element's content before the
 //   capture (at most 8000 px), so a long page is one image.
-//   SHOT_SCALE=2 captures that many device pixels per CSS pixel (1 to 3, default 1).
+//   SHOT_SCALE=2 captures that many device pixels per CSS pixel (1, 1.25, 1.5, 2 or 3, default 1; 1.25 and 1.5 are
+//   Windows at 125 % and 150 %).
 //   SHOT_NOW=2026-08-22T15:05:00Z makes the same page draw the same picture on any machine,
 //   any day: `new Date()` and `Date.now()` answer that instant, the timezone is UTC, the locale
 //   en-GB, motion is reduced, the caret is hidden, and text is drawn with no hinting and no LCD fringes. The fixture
@@ -74,8 +75,8 @@ const guard = (name, fallback) => {
 const START_WAIT_S = guard("SHOT_START_WAIT_S", 120);
 const STEP_WAIT_S = guard("SHOT_STEP_WAIT_S", 60);
 const scale = process.env.SHOT_SCALE || "1";
-if (!/^[123]$/.test(scale)) {
-  console.error(`shot: SHOT_SCALE must be 1, 2 or 3, got '${scale}'`);
+if (!/^(?:[123]|1\.25|1\.5)$/.test(scale)) {
+  console.error(`shot: SHOT_SCALE must be 1, 1.25, 1.5, 2 or 3, got '${scale}'`);
   process.exit(2);
 }
 const pinnedAt = process.env.SHOT_NOW ? Date.parse(process.env.SHOT_NOW) : null;

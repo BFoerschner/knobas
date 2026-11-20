@@ -2,14 +2,15 @@
  * Every font face the sheet declares is loaded once the window is up, not when a page first draws a word in it
  * (the render-cost pass, 2026-11-14).
  *
- * A browser loads a face only when text needs it: JetBrains Mono 400 the first time a page draws a run's number or
- * a key, Source Serif the first time Docs draws a page. The face arrives a task after that page drew, and Chromium
+ * A browser loads a face only when text needs it: the code face the first time a page draws a run's number or
+ * a key, another script's part of Inter the first time a name in it is drawn. The face arrives a task after that page drew, and Chromium
  * then lays out every text of the page again ("Fonts changed"): on Builds' first open at 4x, a second layout of 1,391
  * of its 1,396 objects, 17 to 20 ms, in the frames that should be showing it. Loading every face while the app is
  * idle after its first draw pays that once, on the page the app opened on, before anything is pressed.
  *
- * The faces are the app's own files (`tf.css` imports them from npm), so loading the ones no page uses yet costs a
- * few local reads and no network.
+ * The faces are the app's own files (`tf/fonts/fonts.css`), so loading the ones no page uses yet costs a few local
+ * reads and no network. The interface's latin face is not among them: `index.html` preloads it, so it has landed
+ * before the first draw (2026-11-20).
  */
 
 /** The page's font set, as much of it as this reads: jsdom has none. */

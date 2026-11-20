@@ -131,7 +131,7 @@ test.each([
 
 test("the option under the keys draws in the specimen before it is chosen; Enter chooses it for the whole app", async () => {
   await draw();
-  expect(caption()).toBe("JetBrains Mono, 100 %");
+  expect(caption()).toBe("Cascadia Code, 100 %");
   key("ArrowDown");
   key("ArrowDown");
   expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"Menlo"/);
@@ -148,9 +148,9 @@ test("the option under the keys draws in the specimen before it is chosen; Enter
 });
 
 test.each([
-  ["ui", "--sans", "Arial", '"Archivo Variable"'],
-  ["head", "--head", "Avenir Next Condensed", '"Archivo Variable"'],
-  ["read", "--serif", "Georgia", '"Source Serif 4 Variable"'],
+  ["ui", "--sans", "Arial", '"Inter"'],
+  ["head", "--head", "Avenir Next Condensed", '"Inter"'],
+  ["read", "--serif", "Georgia", '"Inter"'],
 ] as const)("%s's specimen previews through %s, and shows the bundled face with nothing chosen", async (role, property, pick, bundled) => {
   await draw(role);
   expect(specimen().style.getPropertyValue(property)).toMatch(new RegExp(`^${bundled}`));
@@ -181,7 +181,7 @@ test("a name typed that is not installed is taken, and the specimen says it draw
   key("Enter");
   expect(fonts.family("read")).toBe("Iowan Old Style");
   expect(style.props.get("--read-chosen")).toBe('"Iowan Old Style"');
-  expect(caption()).toBe("Iowan Old Style is not installed on this machine, so this draws as Source Serif 4.");
+  expect(caption()).toBe("Iowan Old Style is not installed on this machine, so this draws as Inter.");
   // Leaving the field chooses what it holds, as Enter does.
   field().value = "Georgia";
   field().dispatchEvent(new Event("input", { bubbles: true }));
@@ -202,10 +202,10 @@ test("a Headings face that cannot draw narrow says it draws at its normal width"
 
 test("Use the bundled face goes back to it", async () => {
   await draw("ui");
-  expect(button("Use Archivo")).toBeUndefined();
+  expect(button("Use Inter")).toBeUndefined();
   fonts.setFamily("ui", "Arial");
   flushSync();
-  button("Use Archivo")!.click();
+  button("Use Inter")!.click();
   flushSync();
   expect(fonts.family("ui")).toBeNull();
   expect(style.props.has("--ui-chosen")).toBe(false);
@@ -253,7 +253,7 @@ test("a notch clicked sets its size, and Back to 100 % shows only off 100", asyn
   flushSync();
   expect(fonts.size("code")).toBe(115);
   expect(target.querySelector(".tf-fr-on")).toBe(target.querySelectorAll(".tf-fr-notch")[6]);
-  expect(caption()).toBe("JetBrains Mono, 115 %");
+  expect(caption()).toBe("Cascadia Code, 115 %");
   button("Back to 100 %")!.click();
   flushSync();
   expect(fonts.size("code")).toBe(100);
@@ -262,20 +262,20 @@ test("a notch clicked sets its size, and Back to 100 % shows only off 100", asyn
 test("the step that evens the chosen face out is ringed and named, and nothing sets itself", async () => {
   await draw("ui");
   expect(target.querySelector(".tf-fr-even")).toBeNull();
-  // Avenir Next Condensed's x-height .468 against Archivo's .526: 112 %, on the scale at 110.
+  // Avenir Next Condensed's x-height .468 against Inter's .546: 117 %, on the scale at 115.
   fonts.setFamily("ui", "Avenir Next Condensed");
   flushSync();
   const even = target.querySelector(".tf-fr-even")!;
-  expect(even).toBe(target.querySelectorAll(".tf-fr-notch")[5]);
-  expect(even.getAttribute("title")).toBe("110 %: lower case as tall as Archivo's");
-  expect(target.querySelector(".tf-fr-hint")!.textContent).toBe("The ring at 110 % draws Avenir Next Condensed's lower case as tall as Archivo's.");
+  expect(even).toBe(target.querySelectorAll(".tf-fr-notch")[6]);
+  expect(even.getAttribute("title")).toBe("115 %: lower case as tall as Inter's");
+  expect(target.querySelector(".tf-fr-hint")!.textContent).toBe("The ring at 115 % draws Avenir Next Condensed's lower case as tall as Inter's.");
   expect(fonts.size("ui")).toBe(100);
-  fonts.setSize("ui", 110);
+  fonts.setSize("ui", 115);
   flushSync();
   expect(target.querySelector(".tf-fr-hint")).toBeNull();
 });
 
-test("Ligatures in code is a switch under Code alone, off until set, for all code at once", async () => {
+test("Ligatures in code is a switch under Code alone, on until turned off, for all code at once", async () => {
   await draw("read");
   expect(target.querySelector('[role="switch"]')).toBeNull();
   unmount(view!);
@@ -283,11 +283,11 @@ test("Ligatures in code is a switch under Code alone, off until set, for all cod
   await draw("code");
   const sw = target.querySelector<HTMLButtonElement>('[role="switch"]')!;
   expect(sw.getAttribute("aria-label")).toBe("Ligatures in code");
-  expect(sw.getAttribute("aria-checked")).toBe("false");
+  expect(sw.getAttribute("aria-checked")).toBe("true");
   sw.click();
   flushSync();
-  expect(sw.getAttribute("aria-checked")).toBe("true");
-  expect(style.props.get("--mono-ligatures")).toBe("normal");
+  expect(sw.getAttribute("aria-checked")).toBe("false");
+  expect(style.props.get("--mono-ligatures")).toBe("none");
   sw.click();
   flushSync();
   expect(style.props.has("--mono-ligatures")).toBe(false);
@@ -309,4 +309,24 @@ test("the Fonts section is the proof line and the four roles in order, one read 
     "Code size",
   ]);
   expect(installedFonts).toHaveBeenCalledTimes(1);
+});
+
+test("the faces that come with knobas are listed with their licences, each text read when it is opened (2026-11-20)", async () => {
+  view = mount(TfFontsSection, { target, props: { installedFonts: () => Promise.resolve(FONTS) } });
+  await settle();
+  const section = target.querySelector<HTMLElement>(".tf-fr-lics")!;
+  expect(section.querySelector("h2")!.textContent).toBe("Fonts that come with knobas");
+  expect(section.querySelector(".tf-fr-lics-note")!.textContent).toBe("Free to use, share and bundle under the SIL Open Font License 1.1.");
+  const rows = [...section.querySelectorAll<HTMLDetailsElement>("details.tf-fr-lic")];
+  expect(rows.map((row) => row.querySelector("summary")!.textContent!.replace(/\s+/g, " ").trim())).toEqual([
+    "Inter 4.1Interface, Headings, Reading© The Inter Project Authors",
+    "Cascadia Code 2407.24Code© Microsoft Corporation",
+  ]);
+  const text = rows[1]!.querySelector("pre")!;
+  expect(text.textContent).toBe("");
+  rows[1]!.open = true;
+  rows[1]!.dispatchEvent(new Event("toggle"));
+  await vi.waitFor(() => expect(text.textContent).toContain("with Reserved Font Name Cascadia Code."));
+  expect(text.textContent).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  expect(rows[0]!.querySelector("pre")!.textContent).toBe("");
 });

@@ -1,6 +1,6 @@
 /* ---------- the first-run wizard (#1400): spec §14a in the tf scope ----------
    The wizard has the whole window and no top or status bar, so the root is one
-   row. The step breadcrumb is sentence case in Archivo, drawn the way the tabs
+   row. The step breadcrumb is sentence case in the interface face, drawn the way the tabs
    mark the current one; nothing here is mono, since nothing on it is a code value. */
 .tf-fr-root { grid-template-rows: minmax(0, 1fr); }
 .tf-fr-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

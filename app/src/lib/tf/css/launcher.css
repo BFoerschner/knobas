@@ -1,7 +1,7 @@
 /* ---------- the ⌘K launcher (#1422): prototype-6's `.dialog.launch`, on TfDialog ----------
    Wider than the prototype's 620 px: a box whose placeholder names the grammar, and three-cell rows. Rules on
    a button or an input name `.tf` too, or `.tf button { font: inherit; color: inherit }` wins. The height is fixed so the box does not jump as
-   answers replace each other. Mono only on a ticket's key; everything else is Archivo. */
+   answers replace each other. Mono only on a ticket's key; everything else is the interface face. */
 .tf-dialog.tf-launch { width: min(840px, calc(100vw - 32px)); height: min(588px, 84vh); }
 /* One column model for every row (F-625): the tag, the key cell, and what a row is about, so a *Go to* row's words start where a result's title does.
    A name runs across the tag and the key cell (F-640), so a short key stays near its title. */

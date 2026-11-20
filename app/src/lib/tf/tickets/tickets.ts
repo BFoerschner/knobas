@@ -202,7 +202,7 @@ export function columnWidth(windowWidth: number): number {
  *
  * The summary's lines are counted by the column it stands in (the ux18 Windows pass): `column` px wide
  * ({@link columnWidth}), less the stack's and the card's 30 px of padding and border, at 5.05 px a character, the
- * narrowest Archivo's summaries ran (32 characters a line measured at 232 px, where this counts 40). Counted at 40 a
+ * narrowest Archivo's summaries ran (Inter since 2026-11-20 runs wider, so this stays a floor; 32 characters a line measured at 232 px, where this counts 40). Counted at 40 a
  * line whatever the column, a 520 px column (97 a line here, about 70 measured) reckoned a title of 41 to 70
  * characters a line taller than it draws. `size` is Interface's size over 100 % (Settings › Fonts): the summary, its
  * lines and the key line follow it; the padding and the avatar hold.

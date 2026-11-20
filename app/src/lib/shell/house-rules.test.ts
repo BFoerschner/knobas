@@ -209,7 +209,7 @@ test("no {@html} — source text is untrusted (gotcha 7)", () => {
 
 /**
  * `default-src 'self'`: a bundle reaches nothing on the network but the IPC.
- * Fonts are npm-vendored (`@fontsource/*`) and bundled, never fetched.
+ * Fonts are the app's own files (`lib/tf/fonts/`), bundled, never fetched.
  *
  * Two exemptions, and both are exempt because they cannot reach anything:
  *

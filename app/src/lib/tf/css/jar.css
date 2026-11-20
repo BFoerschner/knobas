@@ -2,9 +2,9 @@
   The JAR view (ux19, `tf/render/TfJar.svelte`, the design system's *Layout*: a Java archive on the Code page).
   Loaded with the view, never at start-up.
 
-  The OpenAPI view's grammar: hairline rows on the sheet, the code face for every name in the archive, Archivo for
+  The OpenAPI view's grammar: hairline rows on the sheet, the code face for every name in the archive, the interface face for
   words, an opened row inset on `--sheet-2` with the fill's edge. One thing is loud: the version, in the method
-  column's cut (Archivo at width 62, weight 800), beside the artifact's name in the head and in its own column of the
+  column's cut (the headings face at width 62, weight 800), beside the artifact's name in the head and in its own column of the
   dependency list, so 150 libraries are scanned by name and version. No tone for what kind of archive it is: that is
   not a state. An unsafe or encrypted entry is one: `--warn`.
 */

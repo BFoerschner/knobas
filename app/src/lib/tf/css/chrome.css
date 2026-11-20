@@ -52,7 +52,7 @@
 /* The target is capped, the chip's title carries the full text; a ticket key is a code value (mono), a label is not. */
 .tf-timer-key { font-size: calc(var(--t-xs) * var(--fs)); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-timer-key.tf-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-/* A duration is Archivo with tabular figures, not mono (design system, Type). */
+/* A duration is the interface face with tabular figures, not mono (design system, Type). */
 .tf-timer-t { font-size: calc(var(--t-sm) * var(--fs)); font-variant-numeric: tabular-nums; }
 .tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
 .tf-timer.tf-off .tf-timer-stop { background: none; }
@@ -201,7 +201,7 @@
 /* The one "nothing here" state (`TfNothingHere.svelte`): the same block, held down the page so it reads as the page's answer. */
 .tf-nohere { padding-top: 72px; }
 
-/* The job key: Archivo at width 62, weight 800, 64px. The identity of the app. */
+/* The job key: the headings face (Inter's display cut) at weight 800, 64px, narrowed where the face can be. The identity of the app. */
 .tf-jobkey { font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d3) * var(--fs)); line-height: 1; letter-spacing: -.01em; }
 
 /* ---------- buttons: the design system's Controls section (#2238, #2280), drawn on `#/controls` ----------
