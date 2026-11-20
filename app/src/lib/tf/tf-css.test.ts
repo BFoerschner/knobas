@@ -364,6 +364,14 @@ test("the launcher sets mono on a ticket's key cell, a code evidence line and th
   expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|mono)\b/);
 });
 
+test("the launcher's dialog does not clip to its rounded corners, so a wheel over its list scrolls on the compositor (2026-11-20)", () => {
+  // `overflow: hidden` with `border-radius` on the dialog made Chromium hit-test each wheel over the list on the main thread.
+  const rules = (selector: string) => launcherRules.filter(([s]) => s === selector).map(([, body]) => body).join(";");
+  expect(rules(".tf-dialog.tf-launch")).toMatch(/overflow:\s*visible/);
+  // Its footer's fill keeps to the corners the dialog no longer clips.
+  expect(rules(".tf-launch > footer")).toMatch(/border-radius:\s*0 0 7px 7px/);
+});
+
 test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 17px box, no capitals and no rooms tokens (#1422)", () => {
   const selected = launcherRules.find(([selector]) => selector.includes(".tf-ln-res.tf-ln-on"))?.[1] ?? "";
   expect(selected).toMatch(/background:\s*var\(--sheet-2\)/);

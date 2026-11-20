@@ -42,27 +42,34 @@ const SPACE = real ? "SCLENG" : "ENG";
  * The windowed lists. `hash`: where the list is; `setup`: page script run once it drew (`__c` below); `list`: the
  * element that holds the rows (a `tbody`, or the box `win.list` is attached to), each of its matches a list; `head`: the
  * header cells, when the list has its own outside its rows; `optional`: a list this corpus may not hold (`"fixture"`:
- * on the fixture only, `true`: on either); `fake`: more of the fixture's switches, on the fixture only.
+ * not on the fixture, `"real"`: not on a real database, `true`: on either); `fake`: more of the fixture's switches, on the fixture only; `fixture`: a
+ * list the fixture alone holds, left out on a real database.
  */
 const LISTS = [
+  // From its first row: its team, language and checkout land after it drew (the code-list-columns pass, 2026-11-20).
+  { name: "cols-code-repos", hash: "#/code/repos", list: `${shown} .tf-cbody table.tf-tbl:not(.tf-cprs) > tbody` },
   // 500 more repositories on the fixture, so the list windows (from 300 rows), the long ones together by last push.
-  { name: "cols-code-repos", hash: "#/code/repos", fake: "fake-code-rows=5000", list: `${shown} .tf-cbody table.tf-tbl:not(.tf-cprs) > tbody` },
+  { name: "cols-code-repos-many", fixture: true, hash: "#/code/repos", fake: "fake-code-rows=5000", list: `${shown} .tf-cbody table.tf-tbl:not(.tf-cprs) > tbody` },
   { name: "cols-code-prs", hash: "#/code/prs", list: `${shown} .tf-cbody table.tf-cprs > tbody` },
   { name: "cols-tickets-list", hash: "#/tickets", setup: `await __c.click(/^List$/); await __c.click(/^Show \\d+ more$/); await __c.sleep(1500);`, list: `${shown} .tf-list table > tbody` },
   { name: "cols-inbox", hash: "#/inbox", list: `${shown} .tf-inbox` },
   { name: "cols-builds", hash: "#/builds", list: `${shown} .tf-pl-rows, ${shown} .tf-runtbl > tbody` },
-  { name: "cols-pipeline", hash: "#/builds", setup: `__c.vis(${JSON.stringify(`${shown} .tf-pl-rows a[href^="#/builds/"]`)})[0]?.click(); await __c.sleep(2500);`, list: `${shown} .tf-runtbl > tbody` },
+  // A TeamCity pipeline of the saved scale database; on the fixture, the rail's first.
+  real ? { name: "cols-pipeline", hash: "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", list: `${shown} .tf-runtbl > tbody` } : { name: "cols-pipeline", hash: "#/builds", setup: `__c.vis(${JSON.stringify(`${shown} .tf-pl-rows a[href^="#/builds/"]`)})[0]?.click(); await __c.sleep(2500);`, list: `${shown} .tf-runtbl > tbody` },
   { name: "cols-docs-space", hash: `#/docs/space/${SPACE}`, list: `${shown} .tf-dh-rows` },
   { name: "cols-monitors", hash: "#/monitors", list: `${shown} .tf-mon-list`, head: `${shown} .tf-mon-head > *` },
   { name: "cols-assets-column", optional: true, hash: real ? "#/asset/asset%3Aperf-hv01-vm001" : "#/asset/asset%3Abulk-rack", list: "ol.col" },
-  { name: "cols-repo-branches", hash: `${BIG_REPO}/branches`, list: `${shown} .tf-rbranches > tbody` },
-  { name: "cols-repo-commits", hash: `${BIG_REPO}/commits`, list: `${shown} .tf-rcommits > tbody` },
-  { name: "cols-repo-prs", hash: `${BIG_REPO}/prs`, list: `${shown} .tf-rprs > tbody` },
-  { name: "cols-repo-builds", hash: `${BIG_REPO}/builds`, list: `${shown} .tf-rbruns > tbody, ${shown} .tf-rbrail .tf-pl-rows` },
-  { name: "cols-pr-commits", hash: "#/code/prs", setup: `const a = __c.vis(${JSON.stringify(`${shown} a[href^="#/pr/"]`)})[0]; if (a) { location.hash = a.getAttribute("href") + "/commits"; await __c.sleep(3000); }`, list: `${shown} .tf-rcommits > tbody` },
-  { name: "cols-compare", hash: `${REPO}/compare`, list: `${shown} .tf-flist, ${shown} .tf-crows` },
+  // A repository's tabs, a pull request's commits and Compare read the forge on the saved scale database, which a run
+  // without the live products does not reach: there they are notes, as `moves.mjs`'s `optional: "real"` places are.
+  { name: "cols-repo-branches", optional: "real", hash: `${BIG_REPO}/branches`, list: `${shown} .tf-rbranches > tbody` },
+  { name: "cols-repo-commits", optional: "real", hash: `${BIG_REPO}/commits`, list: `${shown} .tf-rcommits > tbody` },
+  // The fixture's repository has no pull requests of its own.
+  { name: "cols-repo-prs", optional: true, hash: `${BIG_REPO}/prs`, list: `${shown} .tf-rprs > tbody` },
+  { name: "cols-repo-builds", optional: "real", hash: `${BIG_REPO}/builds`, list: `${shown} .tf-rbruns > tbody, ${shown} .tf-rbrail .tf-pl-rows` },
+  { name: "cols-pr-commits", optional: "real", hash: "#/code/prs", setup: `const a = __c.vis(${JSON.stringify(`${shown} a[href^="#/pr/"]`)})[0]; if (a) { location.hash = a.getAttribute("href") + "/commits"; await __c.sleep(3000); }`, list: `${shown} .tf-rcommits > tbody` },
+  { name: "cols-compare", optional: "real", hash: `${REPO}/compare`, list: `${shown} .tf-flist, ${shown} .tf-crows` },
 ];
-const picked = (l) => !only || only.some((w) => l.name === w || l.name.startsWith(w));
+const picked = (l) => !(l.fixture && real) && (!only || only.some((w) => l.name === w || l.name.startsWith(w)));
 
 // The page half: a frame loop that keeps each row's cells' first boxes and names any that differ later.
 const PAGE = `
@@ -121,7 +128,7 @@ window.__c = {
     requestAnimationFrame(tick);
     return 1;
   },
-  stop() { const st = __c.st; st.on = false; return { frames: st.frames, rows: st.rows, lists: st.lists, maxRows: st.maxRows, movers: st.movers }; },
+  stop() { const st = __c.st ?? { frames: 0, rows: 0, lists: 0, maxRows: 0, movers: [] }; st.on = false; return { frames: st.frames, rows: st.rows, lists: st.lists, maxRows: st.maxRows, movers: st.movers }; },
   /** Where to wheel: the middle of what of the list is on screen, and how far its scroller can go. */
   where(listSel) {
     const list = __c.vis(listSel).find((l) => { const r = l.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; }) ?? __c.vis(listSel)[0];
@@ -135,6 +142,16 @@ window.__c = {
     return { x: Math.round(left + Math.min(40, (right - left) / 2)), y: Math.round((top + bottom) / 2), top: s.scrollTop, room: s.scrollHeight - s.clientHeight, height: s.clientHeight, windowed: !!list.querySelector(":scope > .tf-wgap") || parseFloat(getComputedStyle(list).paddingTop) + parseFloat(getComputedStyle(list).paddingBottom) > 0 };
   },
 };
+// Armed by the address (\`columns-list\`): recording starts in the frame the list's first row is drawn, so a value a read
+// brings into a drawn row a moment later is seen however fast it lands.
+{
+  const armed = new URLSearchParams(location.search).get("columns-list");
+  if (armed) {
+    const [list, head, px] = JSON.parse(armed);
+    const poll = () => { if (document.body && __c.vis(list).some((l) => __c.rows(l).length > 0)) __c.start(list, head, px); else requestAnimationFrame(poll); };
+    requestAnimationFrame(poll);
+  }
+}
 1`;
 
 const attachPort = opt("--attach");
@@ -152,22 +169,26 @@ async function quiet(q = 1200, limit = 20000) {
   await js(`new Promise((res) => { let last = performance.now(); const o = new MutationObserver(() => { last = performance.now(); }); o.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true }); const t0 = performance.now(); const tick = () => { if (performance.now() - last >= ${q} || performance.now() - t0 > ${limit}) { o.disconnect(); res(1); } else setTimeout(tick, 50); }; tick(); })`, limit + 5000);
 }
 /** The app's address for a list: on the fixture, with the list's own switches added. */
-function addressFor(l) {
-  if (real || !l.fake) return base;
+function addressFor(l, arm = false) {
   const url = new URL(base);
-  for (const [k, v] of new URLSearchParams(l.fake)) url.searchParams.set(k, v);
+  if (!real && l.fake) for (const [k, v] of new URLSearchParams(l.fake)) url.searchParams.set(k, v);
+  if (arm) url.searchParams.set("columns-list", JSON.stringify([l.list, l.head ?? null, px]));
   // The fixture's switches are bare words (`?fake-ipc&fake-scale`), as `URLSearchParams` writes them with an `=`.
   return url.toString().replace(/=(?=&|$)/g, "");
 }
-async function fresh(hash, l) {
+async function fresh(hash, l, settle = true, arm = false) {
   const blank = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: "about:blank" });
   await blank;
   const loaded = c.once("Page.loadEventFired");
-  await c.send("Page.navigate", { url: `${addressFor(l)}${hash}` });
+  await c.send("Page.navigate", { url: `${addressFor(l, arm)}${hash}` });
   await loaded;
   for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(() => false)) break; await sleep(50); }
-  await quiet(1500);
+  if (settle) await quiet(1500);
+}
+/** Until a row of the list is drawn. */
+async function drawn(l) {
+  for (let i = 0; i < 400; i++) { if (await js(`__c.vis(${JSON.stringify(l.list)}).some((list) => __c.rows(list).length > 0)`).catch(() => false)) return; await sleep(25); }
 }
 const wheel = (at, deltaY) => c.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY });
 
@@ -178,6 +199,9 @@ async function scroll(l) {
   if (!at) return { found: false };
   const startTop = at.top;
   let went = 0, still = 0, top = at.top;
+  // A list opened a moment ago may not take a wheel yet (its page still placing itself): until 3 s have gone, a step
+  // that moved nothing is tried again rather than taken for the list's end.
+  const t0 = Date.now();
   for (const dir of [1, -1]) {
     for (let i = 0; i < steps; i++) {
       const now = await js(`__c.where(${JSON.stringify(l.list)})`);
@@ -188,7 +212,7 @@ async function scroll(l) {
       went = Math.max(went, Math.abs(t - startTop));
       still = Math.abs(t - top) < 1 ? still + 1 : 0;
       top = t;
-      if (still >= 3) break;
+      if (still >= 3 && Date.now() - t0 > 3000) break;
     }
     still = 0;
   }
@@ -204,10 +228,21 @@ for (const rate of throttles) {
       entry = { name: l.name, throttle: rate };
       try {
         await cpu(1);
-        await fresh(l.hash, l);
-        if (l.setup) { await js(`(async () => { ${l.setup} return 1; })()`); await quiet(1200); }
-        await cpu(rate);
-        await js(`__c.start(${JSON.stringify(l.list)}, ${JSON.stringify(l.head ?? null)}, ${px})`);
+        // A list opened by its address is recorded from its first row, at the throttle, so a value its reads bring into a
+        // drawn row while the reader is already scrolling counts (on the fixture each read lands late, `fake-late`): the
+        // repositories' team, language and checkout widened their columns that way. One a press opens, once it settled.
+        if (l.setup) {
+          await cpu(1);
+          await fresh(l.hash, l);
+          await js(`(async () => { ${l.setup} return 1; })()`);
+          await quiet(1200);
+          await cpu(rate);
+        } else {
+          await cpu(rate);
+          await fresh(l.hash, l, false, true);
+          await drawn(l);
+        }
+        if (l.setup) await js(`__c.start(${JSON.stringify(l.list)}, ${JSON.stringify(l.head ?? null)}, ${px})`);
         const s = await scroll(l);
         await sleep(300);
         const r = await js("__c.stop()");
@@ -231,7 +266,7 @@ save();
 let over = 0;
 for (const e of results.lists) {
   const l = LISTS.find((x) => x.name === e.name);
-  const optional = l?.optional === true || (l?.optional === "fixture" && !real);
+  const optional = l?.optional === true || (l?.optional === "fixture" && !real) || (l?.optional === "real" && real);
   if (e.failedToRun) { over++; console.log(failedLine(e)); continue; }
   if (e.error || e.found === false) {
     if (!optional) over++;
