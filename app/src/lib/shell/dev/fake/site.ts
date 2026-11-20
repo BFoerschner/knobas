@@ -1,5 +1,5 @@
 /**
- * `?fake-ipc`: a source's own website inside knobas (ADR-0048, decisions §24). The site commands answered and
+ * `?fake-ipc`: a source's own website inside knobas (ADR-0050, decisions §24). The site commands answered and
  * `site:status` emitted as the native side would, so `just dev`, the budgets, the press trips and `just moves` draw a
  * site's page. Where the native view would be, a grey block stands over the rectangle (a fixed element of the
  * document, as the native view is above the page), shown and hidden as the view would be.

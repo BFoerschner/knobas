@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
-# A source's own website shown inside knobas (ADR-0048,
+# A source's own website shown inside knobas (ADR-0050,
 # `docs/decisions/2026-11-20-a-sources-site-opens-inside-knobas.md`): the rules
 # a site's navigations, keys and lifetime follow, pure and tested on every
 # platform, and the native view that shows it, made with raw wry as a child of

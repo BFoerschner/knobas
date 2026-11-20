@@ -654,7 +654,7 @@
   onReady(ready, () => ports.docsChoices, (choices) => heldDocsChoices.hold(choices));
   // The runs marked read (ux18): until they answer, every failed run asks, as before there were marks.
   onReady(ready, () => () => runsRead.load(), () => {});
-  // Which sources' pages open inside knobas (ADR-0048): until they answer, every address opens the browser, as before.
+  // Which sources' pages open inside knobas (ADR-0050): until they answer, every address opens the browser, as before.
   onReady(ready, () => siteSettings, (list) => siteStore.hold(list));
   // *Sites kept open*, which the native side holds once read.
   onReady(ready, () => sitesKept, () => {});
@@ -670,7 +670,7 @@
       .then((rows) => {
         if (dead) return;
         sources = rows;
-        // The sites' nameplates (ADR-0048).
+        // The sites' nameplates (ADR-0050).
         siteStore.nameAll(rows);
         // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
         sourceRoles.take(rows);
@@ -716,7 +716,7 @@
         if (recolours(payload)) recoloured += 1;
       }),
     );
-    // A source's site (ADR-0048): its state, the keys it gave knobas, where its links went, its downloads, its close,
+    // A source's site (ADR-0050): its state, the keys it gave knobas, where its links went, its downloads, its close,
     // and the quit that asks about it.
     hold(ports.listen(EVENTS.siteStatus, ({ payload }) => siteStore.update(payload as SiteStatus)));
     hold(ports.listen(EVENTS.siteClosed, ({ payload }) => siteStore.closed((payload as { source: string }).source)));
@@ -763,7 +763,7 @@
     // ⌘R presses the page's *Refresh* or *Sync now* (#2156), and the webview
     // never reloads; an overlay owns the keyboard, as it does history's keys.
     if (onRefreshKey(event, dialogOpen())) return;
-    // `O` presses the page's *Open in ⟨source⟩*, `⇧O` opens the browser (ADR-0048).
+    // `O` presses the page's *Open in ⟨source⟩*, `⇧O` opens the browser (ADR-0050).
     if (onOpenKey(event, dialogOpen())) return;
     // ⌘+ / ⌘− / ⌘0 zoom the window from anywhere, a field and a dialog too, as a browser's do: the window's, not a page's.
     const zooming = zoomKey(event);
@@ -879,7 +879,7 @@
     }
   }
 
-  // ---- a source's site (ADR-0048) ----
+  // ---- a source's site (ADR-0050) ----
   /** The sites that hold changes, while knobas asks before it quits. */
   let quitting = $state<SiteStatus[] | null>(null);
   /** A site's native view covers the page: the floats stand out of its rectangle (decisions §7). */

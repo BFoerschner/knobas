@@ -1,5 +1,5 @@
 <!--
-  Settings › Sources › ⟨source⟩ › *Site* (ADR-0048, decisions §16): whether the source's pages open inside knobas, its
+  Settings › Sources › ⟨source⟩ › *Site* (ADR-0050, decisions §16): whether the source's pages open inside knobas, its
   sign-in kept on this computer and *Forget…*, and the addresses its site may show. Rows in the page's own grid.
 
   The switch is saved as it changes, with a toast. *Forget…* asks first, then closes the site (asking its page if it

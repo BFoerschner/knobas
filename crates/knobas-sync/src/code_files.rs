@@ -1,5 +1,5 @@
 //! **The files pass** (the everything-search decisions, 2026-11-20, D2, D3,
-//! D4 and D7; ADR-0048): every mirrored repository's files, on its default
+//! D4 and D7; ADR-0050): every mirrored repository's files, on its default
 //! branch's head, into the files index (`knobas-files`), so *Everything*
 //! finds a repository by its files' names and text.
 //!

@@ -1,5 +1,5 @@
 /**
- * A site's page (ADR-0048, decisions §7, §9, §10, §14, §16): when the native view is on screen, what the rectangle
+ * A site's page (ADR-0050, decisions §7, §9, §10, §14, §16): when the native view is on screen, what the rectangle
  * says, the insets sent once per change, the bar's question and the first Esc's cap.
  */
 import { flushSync, mount, tick, unmount } from "svelte";

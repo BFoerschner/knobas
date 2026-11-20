@@ -1,4 +1,4 @@
-/** What the bar and the shell's keys do to a site (ADR-0048, decisions §8, §10). */
+/** What the bar and the shell's keys do to a site (ADR-0050, decisions §8, §10). */
 import { expect, test } from "vitest";
 
 import type { SiteAsked, SiteStatus } from "../../ipc/site";

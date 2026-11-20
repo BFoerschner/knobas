@@ -428,7 +428,7 @@
         return void later(act.url, from).then((url) => (url === null ? push({ text: NO_PAGE, tone: "err" }) : openInBrowser(url, ports.openExternal)));
       }
       case "web": {
-        // *Open in ⟨source⟩*: its site when its pages open inside knobas, else the browser (ADR-0048).
+        // *Open in ⟨source⟩*: its site when its pages open inside knobas, else the browser (ADR-0050).
         const value = now(act.url);
         if (value !== undefined) return value === null ? void push({ text: NO_PAGE, tone: "err" }) : ports.openWeb(value, { source: act.source });
         return void later(act.url, from).then((url) => (url === null ? push({ text: NO_PAGE, tone: "err" }) : ports.openWeb(url, { source: act.source })));

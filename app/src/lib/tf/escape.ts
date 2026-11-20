@@ -67,7 +67,7 @@ export interface EscState {
   visiting?: boolean;
   /** The place the page says it sits under (`page-name.svelte.ts`), where the address cannot say it. */
   parent?: EscTarget | null;
-  /** On a site's page: a first `Esc` is down and the second still counts (ADR-0048, decisions §9). */
+  /** On a site's page: a first `Esc` is down and the second still counts (ADR-0050, decisions §9). */
   armed?: boolean;
 }
 

@@ -150,7 +150,7 @@ export type TfRoute =
     }
   | { view: "item"; id: string }
   | { view: "note"; id: string }
-  /** A source's own website inside knobas (ADR-0048): `#/site/<source id>`. No nav entry, no parent. */
+  /** A source's own website inside knobas (ADR-0050): `#/site/<source id>`. No nav entry, no parent. */
   | { view: "site"; source: string }
   | { view: "unknown"; hash: string };
 

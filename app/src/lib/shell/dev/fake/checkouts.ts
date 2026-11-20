@@ -124,7 +124,7 @@ function fakeRangeFile(entityId: string, base: string, head: string, path: strin
 const WORKING = "~working-tree";
 
 /**
- * The fixture's working tree against any base (ux26, ADR-0048): what its one uncommitted change, a Markdown file, a
+ * The fixture's working tree against any base (ux26, ADR-0050): what its one uncommitted change, a Markdown file, a
  * drawing and a new untracked note make, each file's text before and after, so a rendered side reads the same words
  * `entity_file_bytes` hands it for `~working-tree` and for the base's sha.
  */

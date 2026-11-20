@@ -1,4 +1,4 @@
-/** After a visit (ADR-0048, decisions §15). */
+/** After a visit (ADR-0050, decisions §15). */
 import { expect, test } from "vitest";
 
 import { createVisits } from "./visits";

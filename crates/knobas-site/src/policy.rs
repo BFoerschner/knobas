@@ -1,5 +1,5 @@
 //! Which addresses a site may show, and what crosses from a site to knobas
-//! (ADR-0048, decisions §4 and §6). Pure: no window, no clock, no I/O.
+//! (ADR-0050, decisions §4 and §6). Pure: no window, no clock, no I/O.
 //!
 //! Every top-level navigation of a site, its redirect hops and its new-window
 //! requests included, goes through [`decide`]. The platform hook answers wry's

@@ -1,4 +1,4 @@
-/* ---------- a source's own website inside knobas (ADR-0048, decisions §16, `tf/site/`) ----------
+/* ---------- a source's own website inside knobas (ADR-0050, decisions §16, `tf/site/`) ----------
    The site's page is one bar and the site. The bar sits where a page's breadcrumb sits, on the sheet, 40 px, so the
    site reads as one more knobas page whose body someone else draws. It says loudly only whose site this is, which is
    also whose sign-in the view carries. Everything else is small ghost buttons and one line in the code face. State is

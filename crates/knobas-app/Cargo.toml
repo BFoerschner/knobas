@@ -54,7 +54,7 @@ knobas-http = { path = "../knobas-http" }
 knobas-jar = { path = "../knobas-jar" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
-# A source's own website inside knobas (ADR-0048): the rules, the controller
+# A source's own website inside knobas (ADR-0050): the rules, the controller
 # and the native view, made with raw wry as a child of the main window.
 knobas-site = { path = "../knobas-site" }
 # The credential store, behind its trait. The concrete `KeyringStore` is picked

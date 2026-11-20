@@ -1,4 +1,4 @@
-//! A source's own website, shown inside knobas (ADR-0048).
+//! A source's own website, shown inside knobas (ADR-0050).
 //!
 //! - [`policy`]: which addresses a site may show, and what crosses from it.
 //! - [`keys`]: the keys knobas takes from a site, and Esc twice.

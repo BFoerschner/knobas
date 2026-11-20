@@ -2706,7 +2706,7 @@ const CASES: Case[] = [
     },
   },
   {
-    /** A source's site (ADR-0048): shown and hidden under a layer; its observer and its ⌘R go with the page. */
+    /** A source's site (ADR-0050): shown and hidden under a layer; its observer and its ⌘R go with the page. */
     name: "TfSite",
     source: "lib/tf/site/TfSite.svelte",
     open: (target) => {

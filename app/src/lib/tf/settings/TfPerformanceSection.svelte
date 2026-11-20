@@ -20,7 +20,7 @@
   import { boundedNumber, clampNote } from "./sections";
   import { setSitesKept, sitesKept } from "../../ipc/site";
 
-  /** *Sites kept open* (ADR-0048): 1 to 6, 2 until set. */
+  /** *Sites kept open* (ADR-0050): 1 to 6, 2 until set. */
   const SITES_MIN = 1;
   const SITES_MAX = 6;
 

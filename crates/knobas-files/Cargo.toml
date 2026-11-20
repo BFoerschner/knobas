@@ -5,7 +5,7 @@ version.workspace = true
 license.workspace = true
 
 # A repository's files as Everything finds them (the everything-search
-# decisions, 2026-11-20, D6 and D8; ADR-0048): one document a file in a
+# decisions, 2026-11-20, D6 and D8; ADR-0050): one document a file in a
 # tantivy index in the profile, asked by a typed word's start, counted by
 # repository. No other crate names a tantivy type.
 

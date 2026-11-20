@@ -1,5 +1,5 @@
 <!--
-  Compare with *From* the working tree (ux26, ADR-0048,
+  Compare with *From* the working tree (ux26, ADR-0050,
   `docs/decisions/2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md` ruling 5):
   `#/repo/<id>/compare/<into>...~working-tree`, the checkout's files as they stand on disk against *Into*, untracked
   files git does not ignore included.

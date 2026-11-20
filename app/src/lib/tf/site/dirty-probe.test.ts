@@ -1,5 +1,5 @@
 /**
- * The unsaved-changes probe (ADR-0048, decisions §10), the very script `crates/knobas-site/src/dirty-probe.js` that
+ * The unsaved-changes probe (ADR-0050, decisions §10), the very script `crates/knobas-site/src/dirty-probe.js` that
  * knobas runs in a site, against pages in a DOM: a page that would make a browser ask "Leave site?" answers `true`.
  */
 import { readFileSync } from "node:fs";

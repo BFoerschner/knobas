@@ -1,5 +1,5 @@
 /**
- * A source's own website inside knobas (ADR-0048) — `crates/knobas-app/src/commands/site.rs`.
+ * A source's own website inside knobas (ADR-0050) — `crates/knobas-app/src/commands/site.rs`.
  *
  * The types are generated from the Rust (`./generated/site.ts`): a field is explained in its Rust doc comment and
  * nowhere else. The `invoke` functions stay hand-written, pinned to the Rust by a test in that module which

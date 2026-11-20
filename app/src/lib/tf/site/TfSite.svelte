@@ -1,5 +1,5 @@
 <!--
-  A source's own website inside knobas (ADR-0048, decisions §7, §14, §16): the bar, and under it the rectangle the
+  A source's own website inside knobas (ADR-0050, decisions §7, §14, §16): the bar, and under it the rectangle the
   native view covers.
 
   The view is Rust's, by source id, and outlives this page: the page only says "show yours here" and "hide yours". It

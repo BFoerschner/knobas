@@ -232,7 +232,7 @@ impl Searcher {
 
     /// The same searcher, *Everything* finding a repository by its files in
     /// `files` too (the everything-search decisions, D8): the one switch, as
-    /// ADR-0048 says.
+    /// ADR-0050 says.
     #[must_use]
     pub fn with_files(mut self, files: knobas_files::FileIndex) -> Self {
         self.files = Some(files);

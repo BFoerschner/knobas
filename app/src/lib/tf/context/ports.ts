@@ -40,7 +40,7 @@ export interface MenuPorts {
   copySelection: () => boolean;
   /** The browser, on purpose: an item named *Open in browser*. */
   openExternal: (url: string) => Promise<void>;
-  /** *Open in ⟨source⟩*: its site inside knobas when its pages open there, else the browser (ADR-0048). */
+  /** *Open in ⟨source⟩*: its site inside knobas when its pages open there, else the browser (ADR-0050). */
   openWeb: (url: string, how: WebHow) => void;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   ackAlert: (monitorId: string) => Promise<unknown>;

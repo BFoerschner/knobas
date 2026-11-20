@@ -521,7 +521,7 @@ pub async fn delete(
     crate::docs::forget_run_embedded_html(pool, id).await?;
     // Its hidden spaces and a Docs home in it (PR #2479, 2026-11-17), as its embeds' row.
     crate::docs::forget_docs_choices(pool, id).await?;
-    // Its site's switch, allowed origins and *Kept since* (ADR-0048).
+    // Its site's switch, allowed origins and *Kept since* (ADR-0050).
     crate::site::forget_settings(pool, id).await?;
     Ok(())
 }

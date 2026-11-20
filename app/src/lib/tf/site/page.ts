@@ -1,5 +1,5 @@
 /**
- * A source's own website inside knobas (ADR-0048, decisions §14): `#/site/<source id>`. One kept page per source; the
+ * A source's own website inside knobas (ADR-0050, decisions §14): `#/site/<source id>`. One kept page per source; the
  * native view outlives the page and belongs to the Rust side, so a page mounted again finds its site as it was. It
  * lights no nav entry, is no top page and has no parent: `Esc` goes to its opener or nowhere.
  */

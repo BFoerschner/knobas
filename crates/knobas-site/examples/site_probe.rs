@@ -1,4 +1,4 @@
-//! The probe binary (ADR-0048, decisions §2, §24): knobas-site's own host and
+//! The probe binary (ADR-0050, decisions §2, §24): knobas-site's own host and
 //! controller, run against a local test site in a real window, with a log
 //! line per check. Run by hand on each platform when wry, Tauri or this crate
 //! changes; it needs a window, so it is not in `just check`.

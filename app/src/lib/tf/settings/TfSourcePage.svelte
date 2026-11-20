@@ -666,7 +666,7 @@
   {/if}
 </section>
 
-<!-- A source's own website inside knobas (ADR-0048), after Connection. -->
+<!-- A source's own website inside knobas (ADR-0050), after Connection. -->
 <TfSiteSection source={source.id} {name} />
 
 <section class="tf-stg-sec">

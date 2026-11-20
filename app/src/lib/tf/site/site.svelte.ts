@@ -1,5 +1,5 @@
 /**
- * The sites' store (ADR-0048, decisions §12, §14, §16): what the shell knows about each source's site, held so a press
+ * The sites' store (ADR-0050, decisions §12, §14, §16): what the shell knows about each source's site, held so a press
  * is answered in its own task with no read.
  *
  * - **settings**: each source's *Open its pages inside knobas*, base, own and allowed origins (`site_settings`), filled

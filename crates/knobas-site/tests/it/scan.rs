@@ -1,4 +1,4 @@
-//! Source scans that hold decisions §3 and §4 (ADR-0048): a site's view is
+//! Source scans that hold decisions §3 and §4 (ADR-0050): a site's view is
 //! wry's, never Tauri's, and is handed no IPC, no scheme and no script but
 //! the named ones.
 

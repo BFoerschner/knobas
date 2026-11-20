@@ -457,7 +457,7 @@ test("only the launcher resolves a pasted URL to an entity", () => {
     "lib/tf/context/TfContextMenu.svelte",
     "lib/tf/context/ports.ts",
     "lib/tf/pr/TfPr.svelte",
-    // Not a pasted text (ADR-0048): a site's page offers *Open in knobas* for the address it stands at, read from
+    // Not a pasted text (ADR-0050): a site's page offers *Open in knobas* for the address it stands at, read from
     // the mirror, and the items it stood on are refreshed when it is left. No text is rewritten.
     "lib/tf/site/visits.ts",
   ]);
@@ -718,7 +718,7 @@ test("no module splits an entity id into its key in place", () => {
 });
 
 /**
- * Where a web address opens is decided in one place (ADR-0048, decisions §12): `open-web.ts`. A module that takes the
+ * Where a web address opens is decided in one place (ADR-0050, decisions §12): `open-web.ts`. A module that takes the
  * browser's own opener (`openExternal`, or `openInBrowser`) opens the browser whatever the source's *Open its pages
  * inside knobas* says, so only `open-web.ts` and the two modules it stands in front of may import them, and an import
  * marked `// browser on purpose` (an item named *Open in browser* or *Browser*), which says why on its line.

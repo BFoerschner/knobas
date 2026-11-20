@@ -101,7 +101,7 @@ export function placeFor(press: Press | null, width: number, height: number, now
   return top >= ROOM_ABOVE ? { ...across, bottom: height - top + gap } : { ...across, top: bottom + gap };
 }
 
-/** The top bar's height: while a site is shown, the one band of knobas's own pixels a chip can stand in (ADR-0048). */
+/** The top bar's height: while a site is shown, the one band of knobas's own pixels a chip can stand in (ADR-0050). */
 export const TOP_BAND = 53;
 /** A chip's height, near enough to keep it inside the band. */
 const ACK_H = 26;

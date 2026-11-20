@@ -1,4 +1,4 @@
-//! The site commands through Tauri's own IPC pipeline (ADR-0048, decisions
+//! The site commands through Tauri's own IPC pipeline (ADR-0050, decisions
 //! §17): each is registered, its arguments decode, an address the site may
 //! not show and an origin that is not `http(s)://host[:port]` are refused,
 //! and every one answers `not_ready` before the sites are up.

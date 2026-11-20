@@ -249,7 +249,7 @@ test("a pipeline offers Mark all as read among what it does (ux18)", () => {
   expect(ids(entries).indexOf("read-all")).toBeLessThan(ids(entries).indexOf("|"));
 });
 
-test("a source whose pages open inside knobas offers Open in browser right after its Open in (ADR-0048)", () => {
+test("a source whose pages open inside knobas offers Open in browser right after its Open in (ADR-0050)", () => {
   const names: Record<string, string> = { jira: "Jira", fj: "Forgejo" };
   const inside = ctx({ sourceName: (id) => names[id] ?? null, opensInside: (id) => id === "jira" || id === "fj" });
   const ticket = menuFor({ kind: "ticket", id: "jira:PAY-1", hash: "#/ticket/jira%3APAY-1" }, null, inside);

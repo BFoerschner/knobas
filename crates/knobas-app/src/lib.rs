@@ -136,7 +136,7 @@ pub mod events {
     /// renderer's run on a folder moved (queued, copying, running) or ended
     /// (ADR-0044): the page showing that folder asks again. Broadcast.
     pub const FOLDER_RENDER: &str = "folder-render:moved";
-    /// Payload: `SiteStatus` -- a live site's state changed (ADR-0048). To
+    /// Payload: `SiteStatus` -- a live site's state changed (ADR-0050). To
     /// the main window by label, as every site event.
     pub const SITE_STATUS: &str = "site:status";
     /// Payload: `SiteKey` -- a key knobas took from a site, by name.
@@ -356,7 +356,7 @@ pub fn run() {
                     // it cost.
                     let started = std::time::Instant::now();
                     bundle::open_main_window(app, &bundle)?;
-                    // The sites ride on the main window (ADR-0048).
+                    // The sites ride on the main window (ADR-0050).
                     if let Some(profile) = app.try_state::<Profile>() {
                         site::start(app, &profile);
                     }
@@ -907,7 +907,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The page filters' ranking (the fuzzy-search pass, 2026-11-19),
         // appended at the foot: the list is append-only (§10.8).
         commands::search::fuzzy_rank,
-        // A source's own website inside knobas (ADR-0048), appended at the
+        // A source's own website inside knobas (ADR-0050), appended at the
         // foot (§10.8).
         commands::site::site_settings,
         commands::site::set_site_open_inside,
@@ -950,7 +950,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
 /// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
 fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // Every site's view first, on the main thread the exit handler runs on
-    // (ADR-0048).
+    // (ADR-0050).
     site::shutdown(app);
     // A folder renderer still running dies with everything it started
     // (ADR-0044).

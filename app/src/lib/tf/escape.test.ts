@@ -161,7 +161,7 @@ test("Esc in a field in a section inside the scroller still lands on that sectio
   document.body.replaceChildren();
 });
 
-describe("a site's page (ADR-0048, decisions §9)", () => {
+describe("a site's page (ADR-0050, decisions §9)", () => {
   const site = { view: "site", source: "wiki" } as const;
   const opener = { hash: "#/ticket/jira%3APAY-231", name: "PAY-231" };
 

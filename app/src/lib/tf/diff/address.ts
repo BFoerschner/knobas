@@ -17,7 +17,7 @@ import type { RangeDiff, SourceView } from "../../ipc/entity";
 import { isSha } from "./sha";
 
 /**
- * The working tree as an end of a comparison (ux26, ADR-0048): the checkout's files as they stand on disk, uncommitted
+ * The working tree as an end of a comparison (ux26, ADR-0050): the checkout's files as they stand on disk, uncommitted
  * changes and untracked files git does not ignore included. A name git refuses for a ref, so no branch can carry it, and
  * one `encodeURIComponent` leaves alone. A head only.
  */

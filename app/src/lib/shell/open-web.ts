@@ -1,5 +1,5 @@
 /**
- * Where a web address opens: in its source's site inside knobas, or in the browser (ADR-0048, decisions §12).
+ * Where a web address opens: in its source's site inside knobas, or in the browser (ADR-0050, decisions §12).
  *
  * Every *Open in ⟨source⟩* and every link in synced text ends here. With *Open its pages inside knobas* on for a
  * source, every address of that source opens in its site, from wherever it is pressed; with it off, nothing changes

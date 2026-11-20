@@ -7,7 +7,7 @@ no? [...] maybe a feature that can be turned on/off for each source [...] It sho
 aswell, so all the navigation should stay accessible. But I also don't want it to be too easy to go back to not
 accidentally lose data when i press esc once on accident (maybe ask to press esc twice, and also have dedicated x etc.)"
 
-Designed by Fable, built by Opus. The architecture is ADR-0048. This note is the forks and why each went the way it did.
+Designed by Fable, built by Opus. The architecture is ADR-0050. This note is the forks and why each went the way it did.
 
 ## Decided
 

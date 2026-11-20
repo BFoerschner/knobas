@@ -7,7 +7,7 @@
  * navigates the WebView itself to that page, where there is no way back and no
  * address bar, and `target="_blank"` opens a bare WebView window on Windows.
  * So every press on a link to another origin goes through `openWeb` (`open-web.ts`): its source's site inside
- * knobas when that source's pages open there (ADR-0048), else {@link openExternal} (http and https only), with a toast
+ * knobas when that source's pages open there (ADR-0050), else {@link openExternal} (http and https only), with a toast
  * when it refuses:
  *
  * - **{@link openLink}** is a link's own `onclick`, for a link the app draws

@@ -86,7 +86,7 @@ export const EVENTS = {
    * Settings › Search reads its status again.
    */
   codeFiles: "code:files",
-  /** `SiteStatus` — a live site's state changed (ADR-0048). */
+  /** `SiteStatus` — a live site's state changed (ADR-0050). */
   siteStatus: "site:status",
   /** `SiteKey` — a key knobas took from a site, by name. */
   siteKey: "site:key",

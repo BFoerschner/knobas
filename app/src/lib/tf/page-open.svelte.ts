@@ -1,5 +1,5 @@
 /**
- * What the bare letter `O` presses on the page in front of the reader (ADR-0048, decisions §12): the page's own
+ * What the bare letter `O` presses on the page in front of the reader (ADR-0050, decisions §12): the page's own
  * *Open in ⟨source⟩*, which opens its site inside knobas when that source's pages open there, else the browser. `⇧O`
  * opens the browser instead. A bare letter, as `M` is on a run and `L` on the job: never in a field, never with a
  * dialog open, never on a page keep-alive holds hidden.

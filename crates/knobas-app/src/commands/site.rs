@@ -1,4 +1,4 @@
-//! A source's own website inside knobas (ADR-0048, decisions §17): each
+//! A source's own website inside knobas (ADR-0050, decisions §17): each
 //! command a few lines over `crate::site`. Every one answers `NotReady`
 //! before the main window and the database are up.
 

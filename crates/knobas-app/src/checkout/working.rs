@@ -1,4 +1,4 @@
-//! The working tree as an end of a comparison (ux26, ADR-0048,
+//! The working tree as an end of a comparison (ux26, ADR-0050,
 //! `docs/decisions/2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md`):
 //! the files of a repository's checkout as they stand on disk, uncommitted
 //! changes included, with the untracked files git does not ignore, compared

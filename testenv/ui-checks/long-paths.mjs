@@ -122,7 +122,7 @@ const SCREENS = [
   { id: "launcher-file-rows", route: "tickets", launcher: "settlebridge" },
   { id: "launcher-file-pane", route: "tickets", launcher: "#r settlebridge" },
   { id: "launcher-file-names", route: "tickets", launcher: "#r deployment" },
-  // A source's site at a long address (ADR-0048): the host whole, the rest given up at its end, the whole in the title.
+  // A source's site at a long address (ADR-0050): the host whole, the rest given up at its end, the whole in the title.
   { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
 ];
 

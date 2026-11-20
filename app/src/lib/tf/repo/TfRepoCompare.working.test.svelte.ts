@@ -1,5 +1,5 @@
 /**
- * Compare with *From* the working tree (ux26, ADR-0048): *Working tree* is *From*'s first choice, its pick sets the
+ * Compare with *From* the working tree (ux26, ADR-0050): *Working tree* is *From*'s first choice, its pick sets the
  * address, and the page drawn for it is the form's short shape from its first flush, reads the working tree's names and
  * counted list and nothing of a branch, lists *Uncommitted changes* first among the commits, and reads again on focus
  * without laying down a state it drew already.

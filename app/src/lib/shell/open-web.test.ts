@@ -1,5 +1,5 @@
 /**
- * Where a web address opens (ADR-0048, decisions §12): the site of its source when that source's pages open inside
+ * Where a web address opens (ADR-0050, decisions §12): the site of its source when that source's pages open inside
  * knobas, else the browser.
  */
 import { describe, expect, test, vi } from "vitest";

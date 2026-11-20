@@ -1,5 +1,5 @@
 /**
- * After a visit (ADR-0048, decisions §15): the mirrored items whose pages a site showed are the ones the person stood
+ * After a visit (ADR-0050, decisions §15): the mirrored items whose pages a site showed are the ones the person stood
  * on. While the site is shown, each address it stands at is asked of the mirror (`resolve_url`, one read of the local
  * mirror, never a request to a source), the answer kept per address for the session; when the site's page stops being
  * shown, or the site closes, the last {@link REFRESH_LAST} of them are read again with the one-item refresh, one after

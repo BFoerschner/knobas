@@ -1,4 +1,4 @@
-//! A source's own website inside knobas (ADR-0048): the app's half.
+//! A source's own website inside knobas (ADR-0050): the app's half.
 //!
 //! The rules, the controller and the native view are `knobas-site`'s. Here:
 //! the Tauri shell they run on (the main thread, events to the main window,
