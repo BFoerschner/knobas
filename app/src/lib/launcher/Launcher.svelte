@@ -98,6 +98,7 @@
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
   import { arrival, arrivalOf } from "../tf/arrival.svelte";
+  import { fileHash, lineHash } from "../tf/repo/repo";
   import { cellsOf, whyOf } from "./cells";
   import type { Excerpt } from "../ipc";
   import TfDialog from "../tf/settings/TfDialog.svelte";
@@ -1015,11 +1016,16 @@
       box?.focus();
       return;
     }
-    const hash = addressOf(row);
+    let hash = addressOf(row);
     if (!hash) return;
-    if (row.kind === "hit" && OPENS_AT_MATCH.has(row.hit.kind)) {
+    if (row.kind === "hit") {
       const at = excerpt ?? whyOf(row.hit, cellsOf(row.hit, row.hit.kind).cell)?.excerpt ?? null;
-      if (at !== null) arrival.set(hash, arrivalOf(at));
+      const file = row.hit.kind === "repo" ? at?.file : undefined;
+      if (file) {
+        // A file's line opens the file there, its find bar on the words; a file its name found opens the file (D12).
+        hash = file.line != null ? lineHash(row.hit.entity_id, file.path, file.line) : fileHash(row.hit.entity_id, file.path);
+        if (file.line != null && at) arrival.set(hash, arrivalOf(at));
+      } else if (at !== null && OPENS_AT_MATCH.has(row.hit.kind)) arrival.set(hash, arrivalOf(at));
     }
     close();
     onnavigate(hash);

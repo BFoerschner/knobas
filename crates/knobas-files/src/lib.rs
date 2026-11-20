@@ -1,5 +1,5 @@
 //! **A repository's files, as *Everything* finds them** (the everything-search
-//! decisions, 2026-11-20, D6 and D8; ADR-0047).
+//! decisions, 2026-11-20, D6 and D8; ADR-0048).
 //!
 //! One tantivy index in the profile (`<profile>/files-1/`), one document a
 //! file of a mirrored repository's default branch: the repository's number

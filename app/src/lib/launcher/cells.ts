@@ -21,7 +21,7 @@
  * Idempotent retry window*. Not in the key cell, whose 118 px would then cut
  * the repository's name.
  */
-import type { Excerpt, Segment } from "../ipc";
+import type { Excerpt, FilesFound, Segment } from "../ipc";
 import { keyOf } from "../time/format";
 
 export interface Cells {
@@ -119,6 +119,8 @@ export interface WhySource {
   /** Absent from an answer written before #2431. */
   excerpts?: readonly Excerpt[] | undefined;
   marks?: readonly number[] | undefined;
+  /** A repository's files that hold the words (D10), where its files found it. */
+  files?: FilesFound | undefined;
 }
 
 /** The longest unmarked run a passage may open with before it is cut. */
@@ -147,6 +149,23 @@ export function cutLead(segments: readonly Segment[]): Segment[] {
   return [{ text: `…${chars.slice(from).join("")}`, hit: false }, ...segments.slice(1)];
 }
 
+/** *4 files*, *1 file name*. */
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * A repository its files found (D10): the file's name and line, then the line, both mono, then how many files hold the
+ * words by their text; or, where its name alone found it, the path with the letters marked, then how many files' names.
+ */
+function fileWhy(excerpt: Excerpt, file: NonNullable<Excerpt["file"]>, files: FilesFound | undefined): Why {
+  const name = file.path.slice(file.path.lastIndexOf("/") + 1);
+  if (file.line != null) {
+    const by = files?.by_text ?? 0;
+    return { place: `${name}:${file.line}`, segments: cutLead(excerpt.segments), code: true, count: by > 0 ? counted(by, "file", "files") : null, excerpt };
+  }
+  const by = files?.by_name ?? 0;
+  return { place: null, segments: excerpt.segments.map((seg) => ({ ...seg })), code: true, count: by > 0 ? counted(by, "file name", "file names") : null, excerpt };
+}
+
 /** A run log's line, which the line names by its number. */
 const LOG_LINE = /^Log line \d+$/;
 
@@ -158,6 +177,8 @@ const LOG_LINE = /^Log line \d+$/;
 export function whyOf(hit: WhySource, cell: string | null = null): Why | null {
   const excerpt = hit.excerpts?.[0];
   if (excerpt === undefined || (hit.marks?.length ?? 0) > 0) return null;
+  const file = excerpt.file;
+  if (file) return fileWhy(excerpt, file, hit.files);
   const key = cell?.toLowerCase() ?? "";
   const words = excerpt.segments.filter((seg) => seg.hit).map((seg) => seg.text.trim().toLowerCase());
   if (key !== "" && words.length > 0 && words.every((word) => key.includes(word))) return null;

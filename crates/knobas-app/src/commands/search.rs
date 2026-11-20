@@ -123,6 +123,7 @@ pub async fn search(
         &lifecycle.pool()?,
         lifecycle.registry(),
         lifecycle.picker(),
+        &lifecycle.files(),
         query,
     )
     .await
@@ -540,11 +541,16 @@ pub async fn search_picked(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
     picker: &knobas_search::picker::Picker,
+    files: &knobas_files::FileIndex,
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
     Ok(searcher(pool, registry)
         .await?
         .with_picker(picker.clone())
+        // A repository found by its files under *Everything* (the
+        // everything-search decisions, D8): an index that holds nothing
+        // answers as before.
+        .with_files(files.clone())
         .search(query)
         .await?)
 }

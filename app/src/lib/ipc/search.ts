@@ -28,6 +28,9 @@ import type {
 
 export type {
   EverythingMatches,
+  FileAt,
+  FilesFound,
+  FilesProgress,
   SearchSettings,
   ActionKey,
   FuzzyRanked,

@@ -86,6 +86,19 @@ pub struct RawHit {
     /// the picker's names joined the page, never read from a statement.
     #[sqlx(skip)]
     marks: Vec<u32>,
+    /// What the files found of the row's repository (the everything-search
+    /// decisions, 2026-11-20, D9 and D10): its counts and the excerpt of the
+    /// file it is shown by. Set after the statements, never read from one.
+    #[sqlx(skip)]
+    pub(crate) in_files: Option<InFiles>,
+}
+
+/// A repository the files found ([`RawHit::in_files`]).
+#[derive(Debug, Clone)]
+pub(crate) struct InFiles {
+    pub(crate) found: crate::types::FilesFound,
+    /// The file it is shown by, as its first excerpt.
+    pub(crate) excerpt: crate::types::Excerpt,
 }
 
 /// Whether a names answer is **few**: it fills no kind (`per_group` rows of
@@ -227,13 +240,19 @@ impl RawHit {
             excerpt_text: None,
             excerpt_line: None,
             marks: Vec::new(),
+            in_files: None,
         }
     }
 
     /// Whether the row is one the picker read loosely (D5): its rank is
     /// below zero, which no statement's rank ever is.
     fn picked_loosely(&self) -> bool {
-        self.rank.is_some_and(|rank| rank < 0.0)
+        self.in_files.is_none() && self.rank.is_some_and(|rank| rank < 0.0)
+    }
+
+    /// The row's entity id, for a hit.
+    pub(crate) fn id(&self) -> Option<&str> {
+        self.entity_id.as_deref().filter(|_| self.is_hit())
     }
 }
 
@@ -550,12 +569,18 @@ fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
     let title = row.title.unwrap_or_default();
     // A ticket's or a pull request's own text is its description (D10).
     let lead = matches!(row.group_kind.as_str(), "ticket" | "pr").then_some("Description");
-    let excerpts = match &row.excerpt_text {
+    let mut excerpts = match &row.excerpt_text {
         Some(text) if !needles.is_empty() => {
             crate::excerpt::excerpts(&title, text, row.excerpt_line, needles, lead)
         }
         _ => Vec::new(),
     };
+    // A repository the files found is shown by its file first (D10).
+    let files = row.in_files.map(|found| {
+        excerpts.insert(0, found.excerpt);
+        excerpts.truncate(crate::excerpt::MAX);
+        found.found
+    });
     Some(SearchHit {
         row: EntityRow {
             entity_id,
@@ -576,6 +601,7 @@ fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
             .unwrap_or_default(),
         excerpts,
         marks: row.marks,
+        files,
     })
 }
 
@@ -608,6 +634,7 @@ mod tests {
             excerpt_text: None,
             excerpt_line: None,
             marks: Vec::new(),
+            in_files: None,
         }
     }
 
@@ -632,6 +659,7 @@ mod tests {
             excerpt_text: None,
             excerpt_line: None,
             marks: Vec::new(),
+            in_files: None,
         }
     }
 

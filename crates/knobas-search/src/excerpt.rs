@@ -98,7 +98,11 @@ fn read_excerpts(
         {
             return;
         }
-        out.push(Excerpt { place, segments });
+        out.push(Excerpt {
+            place,
+            segments,
+            file: None,
+        });
     };
     // **Nothing past the last excerpt is read** (the broad-keys pass,
     // 2026-11-13): `keep` takes no more once the list is full, so the rest of
@@ -630,7 +634,11 @@ mod tests {
             {
                 return;
             }
-            out.push(Excerpt { place, segments });
+            out.push(Excerpt {
+                place,
+                segments,
+                file: None,
+            });
         };
         if let Some(first) = first_line {
             for (offset, line) in text.lines().enumerate() {
@@ -686,6 +694,7 @@ mod tests {
                 out.push(Excerpt {
                     place: None,
                     segments,
+                    file: None,
                 });
             }
         }

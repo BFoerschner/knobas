@@ -126,3 +126,37 @@ describe("cutLead", () => {
     expect(cut[0]!.text).toBe(`…${"a".repeat(16)}`);
   });
 });
+
+describe("whyOf for a repository its files found (D10)", () => {
+  const seg = (text: string, hit = false) => ({ text, hit });
+  const line = {
+    place: "src/main/java/com/acme/adproxy/ADProxyServer.java:7",
+    segments: [seg("public final class "), seg("ADProxy", true), seg("Server {")],
+    file: { path: "src/main/java/com/acme/adproxy/ADProxyServer.java", line: 7, before: "", after: "" },
+  };
+  const named = {
+    place: null,
+    segments: [seg("charts/"), seg("ad-proxy", true), seg("/values.yaml")],
+    file: { path: "charts/ad-proxy/values.yaml", line: null, before: "", after: "" },
+  };
+
+  it("names the file and its line, quotes the line in mono, and closes with the files by text", () => {
+    const why = whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3 } })!;
+    expect(why.place).toBe("ADProxyServer.java:7");
+    expect(why.code).toBe(true);
+    expect(why.count).toBe("4 files");
+    expect(why.segments.find((s) => s.hit)!.text).toBe("ADProxy");
+    expect(whyOf({ excerpts: [line], files: { by_text: 1, by_name: 0 } })!.count).toBe("1 file");
+  });
+
+  it("draws a file its name found as its path, marked, and the files by name", () => {
+    const why = whyOf({ excerpts: [named], files: { by_text: 0, by_name: 3 } })!;
+    expect(why.place).toBeNull();
+    expect(why.segments.map((s) => (s.hit ? `[${s.text}]` : s.text)).join("")).toBe("charts/[ad-proxy]/values.yaml");
+    expect(why.count).toBe("3 file names");
+  });
+
+  it("is no line where the repository's name explains it", () => {
+    expect(whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3 }, marks: [0, 3] })).toBeNull();
+  });
+});

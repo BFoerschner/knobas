@@ -195,6 +195,8 @@
 .tf-ln-tok { font-weight: 600; color: var(--ink); text-align: center; border: 1px solid var(--rule); border-radius: 3px; padding: 0 2px; }
 /* The keys the box answers, at the bottom of the ⌘? overlay. */
 .tf-ln-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-top: 1px solid var(--rule); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+/* A sentence under the keys (D17): what Everything reads besides the names, as quiet as the keys. */
+.tf-ln-note { padding: 0 18px 8px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* A token the parser reports rather than honours, drawn as the chip bar draws one. */
 .tf-ln-greyed .tf-ln-tok { color: var(--ink-2); border-style: dashed; }
 /* The colour legend at the card's foot (#2421): per kind, each tone's monogram and the words that give it. */

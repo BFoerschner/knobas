@@ -66,7 +66,17 @@ place: string | null,
  * The text around the words, the words flagged (raw source text, as
  * [`Segment`] says).
  */
-segments: Array<Segment>, };
+segments: Array<Segment>, 
+/**
+ * The file it quotes, for a repository found by its files (the
+ * everything-search decisions, 2026-11-20, D10): `place` is then
+ * `<path>:<line>`, or the path where its name found it, and `segments`
+ * the line or the path, the matched letters flagged.
+ *
+ * Added to a frozen type (§10.8): optional on the wire and left out when
+ * absent.
+ */
+file?: FileAt, };
 
 /**
  * What a favourite names: an entity (`knobas.entity.id`) or a saved list
@@ -92,6 +102,38 @@ value: string,
  * What is drawn beside it: a project's name, `you` for `@me`, or empty.
  */
 detail: string, };
+
+/**
+ * The file an excerpt quotes (D10, D11): its path in the repository, and
+ * where its text holds the words, the line and the lines around it. A file
+ * found by its name alone has no line.
+ */
+export type FileAt = { path: string, 
+/**
+ * The line's number, from 1.
+ */
+line: number | null, 
+/**
+ * The line before it, or empty.
+ */
+before: string, 
+/**
+ * The line after it, or empty.
+ */
+after: string, };
+
+/**
+ * How many of a repository's files hold the words (D10).
+ */
+export type FilesFound = { 
+/**
+ * Files whose text holds them.
+ */
+by_text: number, 
+/**
+ * Files whose path holds them.
+ */
+by_name: number, };
 
 /**
  * The progress the pass reports at each repository's end, as `code:files`
@@ -612,7 +654,17 @@ excerpts: Array<Excerpt>,
  * Added to a frozen type (§10.8): optional on the wire and left out when
  * empty, so a reader written before it decodes a hit as it did.
  */
-marks?: Array<number>, entity_id: string, kind: string, source_id: string, title: string, 
+marks?: Array<number>, 
+/**
+ * Under *Everything*, a repository's files that hold the words (the
+ * everything-search decisions, 2026-11-20, D10): how many by their text
+ * and how many by their names. The file it is shown by is its first
+ * excerpt ([`Excerpt::file`]).
+ *
+ * Added to a frozen type (§10.8): optional on the wire and left out when
+ * absent.
+ */
+files?: FilesFound, entity_id: string, kind: string, source_id: string, title: string, 
 /**
  * When the source says the item changed, an RFC 3339 timestamp; `None`
  * if the source never dated the item.

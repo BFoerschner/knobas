@@ -39,6 +39,7 @@ pub mod corpus;
 pub(crate) mod coverage;
 pub mod excerpt;
 pub mod favourites;
+mod files;
 pub mod frames;
 pub mod group;
 pub mod home;
@@ -57,6 +58,7 @@ pub mod types;
 pub(crate) mod under;
 pub mod vocab;
 
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use sqlx::PgPool;
@@ -72,10 +74,10 @@ pub use query::{
 pub use saved::{Refusal, SavedList, SmartListSummary};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, EverythingMatches, Excerpt, FieldSuggestion, FilterAnswer, FilterCoverage,
-    FilterDimension, FilterSuggestions, KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery,
-    Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment,
-    SourceAnswer, SourceSuggestion,
+    EntityRow, EverythingMatches, Excerpt, FieldSuggestion, FileAt, FilesFound, FilterAnswer,
+    FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion, PageSearch,
+    ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
+    SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -180,6 +182,11 @@ pub struct Searcher {
     /// the everything-search decisions, D13): every box on unless
     /// [`Self::with_everything`] says otherwise.
     everything: EverythingMatches,
+    /// The files index (the everything-search decisions, D8 and D9): a
+    /// repository is found by its files' names and text under *Everything*
+    /// ([`Self::with_files`]). `None`, and an index that holds no file,
+    /// answer exactly as before it.
+    files: Option<knobas_files::FileIndex>,
 }
 
 impl Searcher {
@@ -199,6 +206,7 @@ impl Searcher {
             windows: cfg!(windows),
             picker: None,
             everything: EverythingMatches::default(),
+            files: None,
         }
     }
 
@@ -219,6 +227,15 @@ impl Searcher {
     #[must_use]
     pub fn planned_as_windows(mut self, windows: bool) -> Self {
         self.windows = windows;
+        self
+    }
+
+    /// The same searcher, *Everything* finding a repository by its files in
+    /// `files` too (the everything-search decisions, D8): the one switch, as
+    /// ADR-0048 says.
+    #[must_use]
+    pub fn with_files(mut self, files: knobas_files::FileIndex) -> Self {
+        self.files = Some(files);
         self
     }
 
@@ -272,6 +289,7 @@ impl Searcher {
             windows: cfg!(windows),
             picker: None,
             everything: EverythingMatches::default(),
+            files: None,
         }
     }
 
@@ -605,11 +623,31 @@ impl Searcher {
                 }
             })
         };
+        // The files (the everything-search decisions, D8): under
+        // *Everything*, with words, a box of them set, and the kinds asked for
+        // admitting repositories. Read beside the picker's names, and their
+        // rows read by the picker's statement.
+        let file_reads = knobas_files::Reads {
+            names: everything.file_names,
+            text: everything.file_text,
+        };
+        let filing = self
+            .files
+            .as_ref()
+            .filter(|files| files.holds_files())
+            .filter(|_| !filters.titles && !file_reads.none() && !known_under.admits_nothing)
+            .filter(|_| {
+                let kinds = filters.kind_scope();
+                kinds.is_empty() || kinds.iter().any(|kind| kind == "repo")
+            })
+            .and(text)
+            .map(str::to_owned);
         let names = async {
-            let Some((typed, _)) = &picking else {
-                return Ok::<Option<Vec<RawHit>>, SearchError>(None);
-            };
-            self.picked_rows(typed, &filters, query.limit)
+            let typed = picking.as_ref().map(|(typed, _)| typed.as_str());
+            if typed.is_none() && filing.is_none() {
+                return Ok::<Option<PickedRows>, SearchError>(None);
+            }
+            self.named_and_filed(typed, filing.as_deref(), file_reads, &filters, query.limit)
                 .await
                 .map(Some)
         };
@@ -686,14 +724,25 @@ impl Searcher {
         // the longer words follow in the room both leave (D10): a name the
         // second ask also found stands where the merge put it, not after a
         // single mention.
-        if let (Some(picked), Some((_, typed))) = (picked?, &picking) {
-            rows = group::with_names(
-                rows,
-                picked,
-                &|title| typed.names(title),
-                PER_GROUP,
-                query.limit,
-            );
+        // The files' rows the text alone found, placed last (D9 row 7), and
+        // what the files found of every repository on the page.
+        let mut filed: Option<(Vec<RawHit>, HashMap<String, group::InFiles>)> = None;
+        if let Some(picked) = picked? {
+            let PickedRows {
+                rows: picked,
+                found,
+                text_only,
+            } = picked;
+            let (last, picked): (Vec<RawHit>, Vec<RawHit>) = picked
+                .into_iter()
+                .partition(|row| row.id().is_some_and(|id| text_only.contains(id)));
+            let named = |title: &str| {
+                picking
+                    .as_ref()
+                    .is_some_and(|(_, typed)| typed.names(title))
+            };
+            rows = group::with_names(rows, picked, &named, PER_GROUP, query.limit);
+            filed = Some((last, found));
         }
         if let Some(parted) = parted?.filter(|parted| !parted.is_empty()) {
             if let Some(asked) = reading.parts.as_deref() {
@@ -704,6 +753,18 @@ impl Searcher {
         if let (Some(keyed), Some(answer)) = (keyed.as_deref(), keyed_rows) {
             needles_of(keyed);
             rows = group::keyed_first(answer, rows, PER_GROUP, query.limit);
+        }
+        if let Some((last, found)) = filed {
+            if last.iter().any(RawHit::is_hit) {
+                rows = group::filled(rows, last, PER_GROUP, query.limit);
+            }
+            // A repository the statements found that the files found too
+            // keeps its place and is shown by its file (D9 point 6).
+            for row in &mut rows {
+                if let Some(in_files) = row.id().and_then(|id| found.get(id)) {
+                    row.in_files = Some(in_files.clone());
+                }
+            }
         }
         if let Some((_, typed)) = &picking {
             group::mark(&mut rows, typed);
@@ -769,6 +830,108 @@ impl Searcher {
             limit.saturating_mul(2),
         );
         Ok(sql::fetch_kept(&self.pool, built).await?)
+    }
+
+    /// The picker's names and the repositories the files found (the
+    /// everything-search decisions, D8 and D9), read side by side on two
+    /// blocking threads, then by one statement ([`sql::picked_sql`]): the
+    /// picker's rows with their ranks, and each repository the files found
+    /// and the picker did not with the rank D9 gives it. A repository of a
+    /// source the query leaves out is dropped.
+    async fn named_and_filed(
+        &self,
+        typed: Option<&str>,
+        filing: Option<&str>,
+        reads: knobas_files::Reads,
+        filters: &EffectiveFilters,
+        limit: u32,
+    ) -> Result<PickedRows, SearchError> {
+        let picker = self.picker.clone().zip(typed.map(str::to_owned));
+        let limits = picker::Limits {
+            sources: filters.sources.clone(),
+        };
+        let files = self.files.clone().zip(filing.map(str::to_owned));
+        let most = if filters.sources.is_empty() { 30 } else { 200 };
+        let asked = files.clone();
+        let (picked, in_files) = tokio::join!(
+            async move {
+                match picker {
+                    Some((picker, typed)) => {
+                        tokio::task::spawn_blocking(move || picker.pick(&typed, &limits))
+                            .await
+                            .unwrap_or_default()
+                    }
+                    None => picker::Picked::default(),
+                }
+            },
+            async move {
+                match asked {
+                    Some((index, typed)) => {
+                        tokio::task::spawn_blocking(move || index.ask(&typed, reads, most))
+                            .await
+                            .unwrap_or_default()
+                    }
+                    None => Vec::new(),
+                }
+            }
+        );
+        let mut ids = picked.ids();
+        let mut ranks = picked.ranks();
+        let mut found: HashMap<String, group::InFiles> = HashMap::new();
+        let mut text_only: HashSet<String> = HashSet::new();
+        if let Some((index, typed)) = &files {
+            let repos = index.repos();
+            let terms = knobas_core::code_text::query(typed).terms;
+            let (mut named, mut texted) = (0_usize, 0_usize);
+            for hit in in_files {
+                let Some(repo) = repos.get(&hit.no) else {
+                    continue;
+                };
+                if !filters.sources.is_empty() && !filters.sources.contains(&repo.source_id) {
+                    continue;
+                }
+                let id = repo.entity_id.clone();
+                found.insert(
+                    id.clone(),
+                    group::InFiles {
+                        found: types::FilesFound {
+                            by_text: hit.by_text,
+                            by_name: hit.by_name,
+                        },
+                        excerpt: files::excerpt(&hit.best, &terms),
+                    },
+                );
+                // A repository the picker chose keeps the picker's rank.
+                if ids.contains(&id) {
+                    continue;
+                }
+                let rank = if hit.by_name > 0 {
+                    named += 1;
+                    files::named_rank(named - 1)
+                } else {
+                    texted += 1;
+                    text_only.insert(id.clone());
+                    files::text_rank(texted - 1)
+                };
+                ids.push(id);
+                ranks.push(rank);
+            }
+        }
+        if ids.is_empty() {
+            return Ok(PickedRows::default());
+        }
+        let built = sql::picked_sql(&ids, &ranks, filters, PER_GROUP, limit.saturating_mul(2));
+        let mut rows: Vec<RawHit> = sql::fetch_kept(&self.pool, built).await?;
+        for row in &mut rows {
+            if let Some(in_files) = row.id().and_then(|id| found.get(id)) {
+                row.in_files = Some(in_files.clone());
+            }
+        }
+        Ok(PickedRows {
+            rows,
+            found,
+            text_only,
+        })
     }
 
     /// The rows **a word's first characters** are answered with: one typed
@@ -1540,6 +1703,15 @@ enum Named {
     /// Not a word's first characters, or asked with what the stored
     /// characters do not hold: the words' ranking answers, as before.
     NotAsked,
+}
+
+/// What [`Searcher::named_and_filed`] read: the rows, what the files found of
+/// each repository, and the repositories only the files' text found.
+#[derive(Default)]
+struct PickedRows {
+    rows: Vec<RawHit>,
+    found: HashMap<String, group::InFiles>,
+    text_only: HashSet<String>,
 }
 
 /// Whether `text` is a word's first characters as the stored ones hold them

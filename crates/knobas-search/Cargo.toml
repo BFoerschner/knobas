@@ -14,6 +14,9 @@ test-util = []
 # needs `sqlx` but not `knobas-db` -- the database crate is a test dependency
 # only. Stream E owns this crate from M1's contract PR onwards.
 [dependencies]
+# The files index *Everything* finds a repository by (the everything-search
+# decisions, 2026-11-20, D8): asked beside the picker's names.
+knobas-files = { path = "../knobas-files" }
 chrono.workspace = true
 # For `OWNED_KINDS` only: the catalog carries the kinds knobas owns beside the
 # ones descriptors declare, and that list lives with the reserved namespaces it
@@ -42,6 +45,8 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+# The files index of the ranking table's tests, in a temporary folder.
+tempfile = "3"
 # The exit criterion's measurement (interfaces §6.3: "a bench, not a claim").
 #
 # `default-features = false` on purpose (open question **E-Q4**): the defaults

@@ -53,6 +53,26 @@ const PIPELINE = hit("teamcity:Deploy", "pipeline", "Deploy payouts", [
   { place: "Log line 382", segments: [{ text: "connection refused, ", hit: false }, { text: "retry", hit: true }] },
 ]);
 const TITLED = hit("jira:PAY-1", "ticket", "Retry everything", []);
+/** A repository its files found (D10, D12): a file's line, and one found by its file's name. */
+const GATEWAY = {
+  ...hit("gitea:tidewater/ledger-gateway", "repo", "tidewater/ledger-gateway", [
+    {
+      place: "src/RetryServer.java:7",
+      segments: [{ text: "public final class ", hit: false }, { text: "Retry", hit: true }, { text: "Server {", hit: false }],
+      file: { path: "src/RetryServer.java", line: 7, before: "", after: "" },
+    },
+  ]),
+  files: { by_text: 4, by_name: 3 },
+};
+const CHARTS = {
+  ...hit("gitea:tidewater/charts", "repo", "tidewater/charts", [
+    { place: null, segments: [{ text: "charts/", hit: false }, { text: "retry", hit: true }, { text: "/values.yaml", hit: false }], file: { path: "charts/retry/values.yaml", line: null, before: "", after: "" } },
+  ]),
+  files: { by_text: 0, by_name: 1 },
+};
+
+/** Whether the answer holds the repositories the files found (the tests at the end). */
+let withRepos = false;
 
 function response(raw: string): SearchResponse {
   return {
@@ -67,6 +87,7 @@ function response(raw: string): SearchResponse {
       { kind: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", total: 1, hits: [TITLED] },
       { kind: "pipeline", label: "Pipeline", plural: "Pipelines", monogram: "PL", total: 1, hits: [PIPELINE] },
       { kind: "page", label: "Page", plural: "Pages", monogram: "PG", total: 1, hits: [PAGE] },
+      ...(withRepos ? [{ kind: "repo", label: "Repository", plural: "Repositories", monogram: "RE", total: 2, hits: [GATEWAY, CHARTS] }] : []),
     ],
     total: 3,
     took_ms: 3,
@@ -165,6 +186,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  withRepos = false;
   if (app) unmount(app);
   app = undefined;
   vi.useRealTimers();
@@ -327,4 +349,32 @@ test("Enter on a log's line opens the pipeline as it did, with no arrival", asyn
   const log = String(onnavigate.mock.calls[0]![0]);
   expect(log).toContain("builds");
   expect(arrival.waiting(log)).toBe(false);
+});
+
+test("a repository's file line opens the file at its line, its find bar on the words", async () => {
+  withRepos = true;
+  const { onnavigate } = open("everything");
+  await settle();
+  await type("retry");
+  const rows = [...target.querySelectorAll<HTMLElement>(".tf-ln-res")];
+  const gateway = rows.find((row) => row.textContent?.includes("ledger-gateway"))!;
+  expect(gateway.querySelector(".tf-ln-why-at")!.textContent).toBe("RetryServer.java:7");
+  expect(gateway.querySelector(".tf-ln-why-n")!.textContent).toBe("4 files");
+  gateway.click();
+  flushSync();
+  const hash = String(onnavigate.mock.calls[0]![0]);
+  expect(hash).toBe("#/repo/gitea%3Atidewater%2Fledger-gateway/line/7/src/RetryServer.java");
+  expect(arrival.take(hash)).toEqual({ words: ["retry"], passage: "public final class RetryServer {" });
+});
+
+test("a repository found by a file's name opens that file", async () => {
+  withRepos = true;
+  const { onnavigate } = open("everything");
+  await settle();
+  await type("retry");
+  const charts = [...target.querySelectorAll<HTMLElement>(".tf-ln-res")].find((row) => row.textContent?.includes("tidewater/charts") || row.textContent?.includes("charts"))!;
+  expect(charts.querySelector(".tf-ln-why-n")!.textContent).toBe("1 file name");
+  charts.click();
+  flushSync();
+  expect(String(onnavigate.mock.calls[0]![0])).toBe("#/repo/gitea%3Atidewater%2Fcharts/files/charts/retry/values.yaml");
 });

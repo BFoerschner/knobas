@@ -343,6 +343,111 @@ onFakeReset(() => {
   everything = EVERY_BOX;
 });
 
+/**
+ * The fixture's repositories found by their files (the everything-search decisions, D16): the renamed repository, whose
+ * classes and image still say its old name `SettleBridge` while its name, README and pom do not, and a client of it that
+ * only imports it. **Fixture-only**, beside the corpus rather than in it, so no pinned count of the corpus moves; the
+ * engine's read is `knobas-files`', witnessed in `knobas-search`'s ranking table.
+ */
+export const FAKE_FILE_REPOS: readonly { entity_id: string; title: string; files: readonly (readonly [string, string])[] }[] = [
+  {
+    entity_id: "mock:tidewater/ledger-gateway",
+    title: "tidewater/ledger-gateway",
+    files: [
+      [
+        "src/main/java/com/tidewater/settlebridge/SettleBridgeServer.java",
+        "package com.tidewater.settlebridge;\n\nimport com.tidewater.settlebridge.config.SettleBridgeConfig;\n\n/** Terminates TLS and forwards settlement batches to the ledger. */\npublic final class SettleBridgeServer {\n    private final SettleBridgeConfig config;\n}",
+      ],
+      ["src/main/java/com/tidewater/settlebridge/config/SettleBridgeConfig.java", "public record SettleBridgeConfig(String host, int port) {\n    public static SettleBridgeConfig fromEnv() {"],
+      ["src/test/java/com/tidewater/settlebridge/SettleBridgeServerTest.java", "class SettleBridgeServerTest {\n    void startsOnTheConfiguredPort() {}"],
+      ["deploy/k8s/deployment.yaml", "spec:\n  containers:\n    - name: gateway\n      image: registry.tidewater.example/settle-bridge:4.2.0"],
+      ["README.md", "# Ledger gateway\nForwards settlement batches to the ledger."],
+    ],
+  },
+  {
+    entity_id: "mock:tidewater/ledger-api",
+    title: "tidewater/ledger-api",
+    files: [
+      ["src/main/java/com/tidewater/ledger/SettleClient.java", "import com.tidewater.settlebridge.client.Client;\npublic class SettleClient {}"],
+      ["src/main/java/com/tidewater/ledger/LedgerClient.java", "public class LedgerClient {}"],
+    ],
+  },
+];
+
+/** An identifier's words as the engine reads them, cut down: lower-cased runs and their capital parts, each to the run's end. */
+function fileWords(text: string): string[] {
+  const out: string[] = [];
+  for (const run of text.match(/[\p{L}\p{N}_-]+/gu) ?? []) {
+    const bare = run.replace(/[_-]/g, "");
+    out.push(bare.toLowerCase());
+    for (const at of [...bare.matchAll(/(?<=[a-z0-9])[A-Z]|(?<=[A-Z])[A-Z](?=[a-z])/g)].map((m) => m.index ?? 0)) out.push(bare.slice(at).toLowerCase());
+  }
+  return out;
+}
+
+/** The fixture's files answer to `words` (D8 in miniature): each repository whose files hold every word of four letters and more. */
+export function fakeFilesFound(words: readonly string[]) {
+  const asked = words.filter((word) => word.length >= 3).map((word) => word.replace(/[_-]/g, ""));
+  if (asked.length === 0) return [];
+  const holds = (text: string) => {
+    const said = fileWords(text);
+    return asked.every((term) => said.some((word) => (term.length <= 3 ? word === term : word.startsWith(term))));
+  };
+  return FAKE_FILE_REPOS.flatMap((repo) => {
+    const byName = repo.files.filter(([path]) => holds(path));
+    const byText = repo.files.filter(([, text]) => holds(text));
+    const shown = [...byName, ...byText].sort((a, b) => Number(!byName.includes(a)) - Number(!byName.includes(b)) || a[0].length - b[0].length)[0];
+    if (!shown) return [];
+    const lines = shown[1].split("\n");
+    const at = lines.findIndex((line) => holds(line) && /class |record |interface /.test(line));
+    const line = at >= 0 ? at : lines.findIndex((line) => holds(line));
+    return [{ repo, byName: byName.length, byText: byText.length, path: shown[0], lines, line: line >= 0 && byText.includes(shown) ? line : null }];
+  });
+}
+
+/** The letters of `text` the words cover, as segments: a run whose word begins with one, marked over the word's length. */
+function fileMarks(text: string, words: readonly string[]): Hit["snippet"] {
+  const asked = words.filter((word) => word.length >= 3);
+  const out: Hit["snippet"] = [];
+  let at = 0;
+  const lower = text.toLowerCase();
+  while (at < text.length) {
+    let found: [number, number] | null = null;
+    for (const word of asked) {
+      for (let i = at; i < text.length; i++) {
+        let j = i;
+        let k = 0;
+        while (j < text.length && k < word.length) {
+          if (lower[j] === "_" || lower[j] === "-") j++;
+          else if (lower[j] === word[k]) (j++, k++);
+          else break;
+        }
+        if (k === word.length && (i === 0 || !/[a-z0-9]/.test(lower[i - 1]!) || /[A-Z]/.test(text[i]!))) {
+          if (found === null || i < found[0]) found = [i, j];
+          break;
+        }
+      }
+    }
+    if (found === null) break;
+    if (found[0] > at) out.push({ text: text.slice(at, found[0]), hit: false });
+    out.push({ text: text.slice(found[0], found[1]), hit: true });
+    at = found[1];
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false });
+  return out;
+}
+
+/** A found repository's first excerpt, as `knobas_search::files::excerpt` makes it. */
+export function fakeFileExcerpt(found: ReturnType<typeof fakeFilesFound>[number], words: readonly string[]): Hit["excerpts"][number] {
+  if (found.line === null) return { place: null, segments: fileMarks(found.path, words), file: { path: found.path, line: null, before: "", after: "" } };
+  const text = found.lines[found.line] ?? "";
+  return {
+    place: `${found.path}:${found.line + 1}`,
+    segments: fileMarks(text.trim(), words),
+    file: { path: found.path, line: found.line + 1, before: found.lines[found.line - 1] ?? "", after: found.lines[found.line + 1] ?? "" },
+  };
+}
+
 /** What a box covers, read off the fixture as the backend counts the mirror. */
 function searchSettingsAnswer(): SearchSettings {
   const live = CORPUS.filter((entry) => entry.deleted_at === null);
@@ -387,6 +492,29 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     const marks = fixtureMarks(entry.title, words);
     hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts, ...(marks.length > 0 ? { marks } : {}) });
     byKind.set(entry.kind, hits);
+  }
+  // Everything finds a repository by its files too (D8): named by them before only said, after the corpus's own rows.
+  if (!titles && wanted("repo") && (everything.file_names || everything.file_text)) {
+    const found = fakeFilesFound(words).filter((one) => (everything.file_names && one.byName > 0) || (everything.file_text && one.byText > 0));
+    found.sort((a, b) => b.byName - a.byName || b.byText - a.byText);
+    for (const one of found) {
+      const hits = byKind.get("repo") ?? [];
+      hits.push({
+        entity_id: one.repo.entity_id,
+        kind: "repo",
+        source_id: "mock",
+        title: one.repo.title,
+        updated_at: SYNCED_AT,
+        synced_at: SYNCED_AT,
+        path: null,
+        state: null,
+        rank: one.byName > 0 ? 0.5 : -2,
+        snippet: [],
+        excerpts: [fakeFileExcerpt(one, words)],
+        files: { by_text: one.byText, by_name: one.byName },
+      });
+      byKind.set("repo", hits);
+    }
   }
   const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));
   const groups = [...byKind]

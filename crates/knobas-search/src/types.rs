@@ -382,6 +382,41 @@ pub struct SearchHit {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<Vec<u32>>", optional)]
     pub marks: Vec<u32>,
+    /// Under *Everything*, a repository's files that hold the words (the
+    /// everything-search decisions, 2026-11-20, D10): how many by their text
+    /// and how many by their names. The file it is shown by is its first
+    /// excerpt ([`Excerpt::file`]).
+    ///
+    /// Added to a frozen type (§10.8): optional on the wire and left out when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub files: Option<FilesFound>,
+}
+
+/// How many of a repository's files hold the words (D10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FilesFound {
+    /// Files whose text holds them.
+    pub by_text: u32,
+    /// Files whose path holds them.
+    pub by_name: u32,
+}
+
+/// The file an excerpt quotes (D10, D11): its path in the repository, and
+/// where its text holds the words, the line and the lines around it. A file
+/// found by its name alone has no line.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FileAt {
+    pub path: String,
+    /// The line's number, from 1.
+    pub line: Option<u32>,
+    /// The line before it, or empty.
+    pub before: String,
+    /// The line after it, or empty.
+    pub after: String,
 }
 
 /// **What *Everything* matches** beyond names and keys, a box each in
@@ -455,6 +490,16 @@ pub struct Excerpt {
     /// The text around the words, the words flagged (raw source text, as
     /// [`Segment`] says).
     pub segments: Vec<Segment>,
+    /// The file it quotes, for a repository found by its files (the
+    /// everything-search decisions, 2026-11-20, D10): `place` is then
+    /// `<path>:<line>`, or the path where its name found it, and `segments`
+    /// the line or the path, the matched letters flagged.
+    ///
+    /// Added to a frozen type (§10.8): optional on the wire and left out when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub file: Option<FileAt>,
 }
 
 /// A run of excerpt text, and whether it is part of the match.
