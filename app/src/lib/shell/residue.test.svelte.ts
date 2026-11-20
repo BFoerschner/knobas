@@ -304,6 +304,14 @@ vi.mock("../ipc/app", () => ({
   folderRenderOutput: () => deferred(new Uint8Array()),
   folderRenderFrame: () => deferred(""),
   folderRenderMarks: () => deferred([]),
+  folderRenderTree: () => deferred({ dir: "/s/knobas-rendered/x/f.site.0123abcd", files: [{ path: "README.md", size: 1 }], bytes: 1, left_out: [], left_out_total: 0 }),
+  folderRenderFile: () => new Promise(() => {}),
+  folderRenderFileBytes: () => deferred(new Uint8Array()),
+  folderRenderOpen: () => deferred([]),
+  folderRenderStore: () =>
+    deferred({ dir: "/s/knobas-rendered", set: null, default_dir: "/s", place: "clones", folders: 0, bytes: 0, cap_bytes: 4 * 1024 ** 3 }),
+  setFolderRenderStore: () => new Promise(() => {}),
+  clearFolderRenderStore: () => new Promise(() => {}),
 }));
 
 /**
@@ -413,6 +421,7 @@ const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfHtmlPage = (await import("../tf/render/TfHtmlPage.svelte")).default;
 const TfMadeBar = (await import("../tf/render/TfMadeBar.svelte")).default;
+const TfMadeList = (await import("../tf/render/TfMadeList.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
@@ -1747,6 +1756,27 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** Try it's list of a generated folder (ADR-0046): it reads the tree by its token, and a file's bytes for the viewer. */
+    name: "TfMadeList",
+    source: "lib/tf/render/TfMadeList.svelte",
+    open: (target) => ({
+      app: mount(TfMadeList, {
+        target,
+        props: {
+          drawn: { token: "t", kind: { kind: "folder", files: 1, bytes: 1, left_out: 0 }, size: 1, commit: null, from: "clone", took_ms: 1, drawn_at: "2026-11-20T08:00:00Z" },
+          ports: {
+            tree: () => deferred({ dir: "/s/x", files: [{ path: "a/README.md", size: 1 }], bytes: 1, left_out: [], left_out_total: 0 }),
+            file: () => new Promise(() => {}),
+            fileBytes: () => deferred(new TextEncoder().encode("# a")),
+          },
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>(".tf-madelist-file")?.click();
+    },
   },
   {
     /** The made bar (ADR-0046): its panel's effect closes what a new answer no longer has. */

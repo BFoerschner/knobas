@@ -43,6 +43,7 @@
   import { ago } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfHtmlPage from "./TfHtmlPage.svelte";
+  import TfMadeList from "./TfMadeList.svelte";
 
   let {
     entityId,
@@ -230,6 +231,9 @@
       <div class="tf-frender-out" class:tf-frender-held={!view?.current}>
         {#if shownFailed !== null}
           <div class="tf-fpad"><div class="tf-stepfail" role="alert"><b>Could not read what {renderer.name} drew.</b><span>{shownFailed}</span></div></div>
+        {:else if drawn.kind.kind === "folder"}
+          <!-- A folder of files (ADR-0046): Settings' *Try it* lists what it made. -->
+          <TfMadeList {drawn} />
         {:else if shown === null || shown.token !== drawn.token}
           <div class="tf-empty"><p>Reading what {renderer.name} drew…</p></div>
         {:else if drawn.kind.kind === "image" && shown.image !== undefined}

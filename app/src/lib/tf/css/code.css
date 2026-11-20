@@ -618,6 +618,11 @@
 .tf-madebar .tf-madebar-as .tf-select { max-width: 14rem; text-overflow: ellipsis; }
 .tf-madebar .tf-madebar-open { display: flex; min-width: 92px; }
 .tf-madebar .tf-madebar-run { min-width: 84px; justify-content: center; }
+/* Settings' Try it on a folder of files (ADR-0046): the made line, then the generated tree in the tree's rows, 320 px. */
+.tf-madelist { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
+.tf-madelist-line { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-madelist-tree { height: 320px; border: 1px solid var(--rule); border-radius: 6px; }
+.tf-madelist-tree .tf-madelist-file { font-weight: 400; }
 .tf-madebar-more { padding: 10px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); }
 .tf-madebar-left { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
 .tf-madebar-left > li { display: contents; }

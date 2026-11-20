@@ -63,6 +63,8 @@
   import { needsWords, secondsWhy } from "./form-words";
   import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
   import TfFolderRenderersTable from "./TfFolderRenderersTable.svelte";
+  import TfMadeStoreRow from "./TfMadeStoreRow.svelte";
+  import { folderRenderStore, type MadeStore } from "../../ipc/app";
   import { folderRenderers, type FolderRenderers } from "../../render/folders.svelte";
   import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
@@ -78,6 +80,7 @@
     piping = diffPipelines,
     folders = folderRenderers,
     decompiler = realDecompilerPorts,
+    madeStore = () => folderRenderStore(),
   }: {
     ports?: RendererPorts;
     defaults?: RendererDefaults;
@@ -88,6 +91,8 @@
     decompiler?: DecompilerPorts;
     /** The folder renderers' list: the app's unless a test hands its own. */
     folders?: FolderRenderers;
+    /** Where generated folders are kept (ADR-0046): the bridge's read, a fake in tests. */
+    madeStore?: () => Promise<MadeStore>;
   } = $props();
 
   /** `null` until the read answers. */
@@ -97,11 +102,15 @@
    * nothing-moves pass): the folder renderers' table landing alone pushed *Default renderers* 30 px down.
    */
   let foldersRead = $state(false);
+  /** Where generated folders are kept, read with the folder renderers so its row lands with their table (ADR-0046). */
+  let madePlace = $state.raw<MadeStore | null>(null);
   $effect(() => {
-    folders.load().then(
-      () => (foldersRead = true),
-      () => (foldersRead = true),
+    const listed = folders.load().catch(() => {});
+    const placed = madeStore().then(
+      (read) => (madePlace = read),
+      () => {},
     );
+    void Promise.all([listed, placed]).then(() => (foldersRead = true));
   });
   /** The renderer being edited: an index into `saved`, `"new"`, or none. */
   let editing = $state<number | "new" | null>(null);
@@ -349,6 +358,7 @@
   </div>
 
   <TfFolderRenderersTable {folders} answered={foldersRead} />
+  {#if madePlace !== null}<TfMadeStoreRow store={madePlace} onstore={(next) => (madePlace = next)} />{/if}
 
   {#if editing !== null}
     <TfDialog title={editing === "new" ? "Add a renderer" : `Edit ${saved[editing]?.name ?? ""}`} why={formWhy} onclose={() => (editing = null)}>

@@ -204,6 +204,7 @@ const SMALL: Record<string, string> = {
   "tf/pr/TfPrMerge.svelte  ready": "a handful by what it is: the merge dialog's lines",
   "tf/pr/TfPrMerge.svelte  reasons": "a handful by what it is: the merge dialog's reasons",
   "tf/render/TfMadeBar.svelte  renderers": "the person's own folder renderers that take one folder: a handful",
+  "tf/render/TfMadeList.svelte  tree.left_out": "at most fifty by the backend's cap (`keep::LEFT_OUT_SHOWN`), the rest counted",
   "tf/render/TfMadeBar.svelte  made.leftOut": "at most fifty by the backend's cap (`keep::LEFT_OUT_SHOWN`), the rest counted",
   "tf/openin/TfMadeOpenIn.svelte  entries": "the person's own Open in applications: a handful",
   "tf/pr/TfPrPicker.svelte  range.commits": "a handful by what it is: the commits a reader picked a range across",

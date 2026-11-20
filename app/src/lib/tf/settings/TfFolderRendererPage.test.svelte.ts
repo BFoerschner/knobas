@@ -236,3 +236,24 @@ test("each way back to the list names the entry it lands on, and the list focuse
   expect(document.activeElement?.querySelector("a")?.getAttribute("aria-label")).toBe("Edit B");
   expect(takeLanding("folder-renderers")).toBeNull();
 });
+
+test("typing {outdir} makes it a folder of files: the kind is set and the others are disabled (ADR-0046)", async () => {
+  const s = store();
+  app = mount(TfFolderRendererPage, { target, props: { at: { renderer: null, repo: null, folder: null }, folders: s.folders, reads, ports: ports().p, leave: () => {} } });
+  await settle();
+  expect([...target.querySelectorAll(".tf-phs .tf-mono")].map((e) => e.textContent)).toEqual(["{path}", "{out}", "{outdir}"]);
+  type("Name", "Docs site");
+  type("Command", "lc site {path} --out {outdir}");
+  await settle();
+  const select = target.querySelector<HTMLSelectElement>("#tf-frp-out")!;
+  expect(select.value).toBe("folder");
+  const others = [...select.options].filter((o) => o.value !== "folder");
+  expect(others.every((o) => o.disabled && o.title === "The command holds {outdir}, so it makes a folder")).toBe(true);
+  // Chosen without {outdir}, the command field says what it needs.
+  type("Command", "lc site {path}");
+  await settle();
+  select.value = "folder";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  expect(target.textContent).toContain("Put {outdir} where the tool takes its output folder.");
+});

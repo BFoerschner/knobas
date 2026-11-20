@@ -33,6 +33,7 @@
     elapsed = 0,
     made = null,
     changedInside = false,
+    busy = false,
     openIn,
     onpress,
     onreal,
@@ -60,6 +61,8 @@
     made?: { files: number; bytes: number; leftOut: readonly MadeLeftOut[]; leftOutTotal: number } | null;
     /** The checkout changed files under the folder, which the generated folder (of the commit) leaves out. */
     changedInside?: boolean;
+    /** A run goes, or its new generated folder is still being read: the bar says so to assistive technology. */
+    busy?: boolean;
     /** *Open in…*, drawn in its held room. */
     openIn?: Snippet;
     /** *Run again* or *Stop*. */
@@ -127,7 +130,7 @@
   };
 </script>
 
-<div class="tf-madebar" class:tf-warn={status.tone === "warn"} class:tf-err={status.tone === "err"}>
+<div class="tf-madebar" aria-busy={busy} class:tf-warn={status.tone === "warn"} class:tf-err={status.tone === "err"}>
   {#if folder === ""}<span class="tf-p">{title || "The top folder"}</span>{:else}<TfPath path={folder} class="tf-p" />{/if}
   <span role="status" title="{status.text}{changedNote}">{status.text}{changedNote}</span>
   {#if leftOut > 0}

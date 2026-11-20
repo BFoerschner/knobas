@@ -129,6 +129,7 @@ export const OUTPUTS: readonly { value: FolderOutput; label: string }[] = [
   { value: "text", label: "Text" },
   { value: "markdown", label: "Markdown" },
   { value: "html", label: "A page (HTML, drawn without scripts)" },
+  { value: "folder", label: "A folder of files, browsed in the folder's place" },
 ];
 
 /** What a renderer takes, in words, for the table. */

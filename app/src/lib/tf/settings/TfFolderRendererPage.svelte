@@ -40,6 +40,7 @@
   import {
     commandWhy,
     FOLDER_PLACEHOLDERS,
+    makesFolder,
     folderDraftFrom,
     OUTPUTS,
     sameFolderDraft,
@@ -88,7 +89,12 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   const changed = $derived(!sameFolderDraft(draft, folderDraftFrom(saved)));
-  const commandSays = $derived(commandWhy(draft.command));
+  const commandSays = $derived(commandWhy(draft.command, draft.output));
+  /** `{outdir}` in the command sets *It makes* by itself (ADR-0046). */
+  const folderKind = $derived(makesFolder(draft.command));
+  $effect(() => {
+    if (folderKind && draft.output !== "folder") draft.output = "folder";
+  });
   const why = $derived(
     busy
       ? null
@@ -294,7 +300,7 @@
 {:else}
   <header class="tf-stg-h">
     <h1>{title}</h1>
-    <p>The Code page draws every folder it takes with it, in the file’s place, and offers it on the folder’s row.</p>
+    <p>The Code page draws every folder it takes with it, in the file’s place, or browses the files it makes in the folder’s place.</p>
   </header>
   <form
     class="tf-apppage"
@@ -314,7 +320,9 @@
       <p class="tf-stg-p">
         It runs as you, with no shell, in an empty folder of its own. knobas writes a copy of the folder, at the commit the Code page shows, and
         passes its path as <span class="tf-mono">{"{path}"}</span>. Print what it makes, or write it to <span class="tf-mono">{"{out}"}</span>: text after
-        it stays, so <span class="tf-mono">{"{out}.png"}</span> names a PNG. To start in the folder, run a shell yourself:
+        it stays, so <span class="tf-mono">{"{out}.png"}</span> names a PNG. To make a folder of files, write them into
+        <span class="tf-mono">{"{outdir}"}</span>: knobas keeps them and the Code page shows them in the folder’s place, each drawn as a file of its kind.
+        To start in the folder, run a shell yourself:
         <span class="tf-mono">sh -c "cd '{"{path}"}' &amp;&amp; lowcode render"</span>, or on Windows <span class="tf-mono">cmd /c "cd /d {"{path}"} &amp;&amp; lowcode render"</span>.
       </p>
       <div class="tf-phs" aria-label="Placeholders knobas fills in">
@@ -340,10 +348,19 @@
         </div>
       </div>
       <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-frp-out">It makes<small>A page is drawn without its scripts. It scrolls in its frame even where it hides its overflow, but not inside a box of its own that clips.</small></label>
+        <label class="tf-stg-l" for="tf-frp-out"
+          >It makes<small
+            >A page is drawn without its scripts. It scrolls in its frame even where it hides its overflow, but not inside a box of its own that clips.
+            In a folder of files, a page must carry its own styles and images.</small
+          ></label
+        >
         <div class="tf-stg-c">
           <select id="tf-frp-out" class="tf-stg-in" bind:value={draft.output}>
-            {#each OUTPUTS as one (one.value)}<option value={one.value}>{one.label}</option>{/each}
+            {#each OUTPUTS as one (one.value)}<option
+                value={one.value}
+                disabled={folderKind && one.value !== "folder"}
+                title={folderKind && one.value !== "folder" ? "The command holds {outdir}, so it makes a folder" : undefined}>{one.label}</option
+              >{/each}
           </select>
         </div>
       </div>
@@ -410,6 +427,8 @@
       The program runs the folder’s files with your rights: a tool that builds or runs what is in it (<span class="tf-mono">npm install</span>,
       <span class="tf-mono">gradle</span>) runs what was pushed. It runs only when you open a folder’s drawing or press <b>Run again</b>, never on its own.
       The copy holds what git holds at the commit: LFS files are their pointers, and links are files holding their target.
+      What it writes into <span class="tf-mono">{"{outdir}"}</span> is kept as plain files: links, .git folders and names Windows does not take are
+      left out, and nothing in it is run.
     </p>
 
     <div class="tf-stg-acts tf-appacts">

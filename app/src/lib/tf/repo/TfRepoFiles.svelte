@@ -1045,6 +1045,13 @@
     return by === null || taking.some((r) => r.id === by.id) ? taking : [by, ...taking];
   });
   const madeShown = $derived(renderedNow === null ? null : (grafts.get(renderedNow.folder)?.index ?? null));
+  /** The address's run goes, or the generated folder it answered is not in the tree yet. */
+  const madeBusy = $derived.by(() => {
+    const view = madeRun.view;
+    if (renderedNow === null || view === null || view.running !== null) return renderedNow !== null;
+    const drawn = view.drawn?.kind.kind === "folder" ? view.drawn : null;
+    return drawn !== null && grafts.get(renderedNow.folder)?.token !== drawn.token;
+  });
   /** A page in a generated folder opens as one, after the person's own defaults (ADR-0046). */
   const MADE_DEFAULTS = [
     { pattern: "*.html", renderer: "html", pipeline: null },
@@ -2253,6 +2260,7 @@
         elapsed={madeRun.elapsed}
         made={madeShown === null ? null : { files: madeShown.files.length, bytes: madeShown.bytes, leftOut: madeShown.leftOut, leftOutTotal: madeShown.leftOutTotal }}
         changedInside={[...changed].some((p) => underFolder(p, graftFolder))}
+        busy={madeBusy}
         onpress={() => madeRun.press()}
         onreal={() => realFiles(graftFolder)}
       >
