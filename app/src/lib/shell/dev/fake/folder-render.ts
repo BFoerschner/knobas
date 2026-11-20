@@ -130,8 +130,8 @@ export function fakePage(folder: string, command: string): string {
 
 const slotOf = (at: Pick<FolderAsk, "entityId" | "renderer" | "folder">) => `${at.entityId}\u0000${at.renderer}\u0000${at.folder}`;
 
-function tell(at: Pick<FolderAsk, "entityId" | "renderer" | "folder">, state: FolderRenderView["running"]) {
-  bridge?.emit("folder-render:moved", { entity_id: at.entityId, renderer: at.renderer, folder: at.folder, running: state });
+function tell(at: Pick<FolderAsk, "entityId" | "renderer" | "folder" | "lane">, state: FolderRenderView["running"]) {
+  bridge?.emit("folder-render:moved", { entity_id: at.entityId, renderer: at.renderer, folder: at.folder, running: state, lane: at.lane ?? "" });
 }
 
 function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {

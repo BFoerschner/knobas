@@ -417,7 +417,7 @@ function runningPorts() {
   };
   const end = () => {
     ended = true;
-    heard?.({ payload: { entity_id: REPO, renderer: "site", folder: "flows/orders", running: null } });
+    heard?.({ payload: { entity_id: REPO, renderer: "site", folder: "flows/orders", running: null, lane: "" } });
   };
   return { ports, end };
 }

@@ -33,7 +33,7 @@ function harness(start: boolean, lane?: string) {
     run = new FolderRun(() => at, ports);
   });
   flushSync();
-  const tell = (running: unknown, folder = "flows", lane?: string) => heard?.({ payload: { entity_id: "r", renderer: "site", folder, running, ...(lane === undefined ? {} : { lane }) } });
+  const tell = (running: unknown, folder = "flows", lane?: string) => heard?.({ payload: { entity_id: "r", renderer: "site", folder, running, lane: lane ?? "" } });
   return { asked, at, run: () => run, stop, tell };
 }
 

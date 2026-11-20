@@ -111,7 +111,7 @@ export class FolderRun {
       void this.#ports
         .listen(EVENTS.folderRender, ({ payload }) => {
           const moved = payload as FolderRenderMoved;
-          if (moved.entity_id !== slot.entityId || moved.renderer !== slot.renderer || moved.folder !== slot.folder || (moved.lane ?? "") !== slot.lane) return;
+          if (moved.entity_id !== slot.entityId || moved.renderer !== slot.renderer || moved.folder !== slot.folder || moved.lane !== slot.lane) return;
           if (moved.running !== null && this.view !== null) {
             // Progress: the state alone, no ask.
             this.view = { ...this.view, running: moved.running };

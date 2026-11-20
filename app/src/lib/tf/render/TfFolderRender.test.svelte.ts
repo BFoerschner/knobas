@@ -207,14 +207,14 @@ test("Stop stops the run; an event moves the state and an ending asks again", as
   expect(f.stopped).toEqual(["lister:flows/app"]);
 
   // Another folder's event is not this one's.
-  f.tell({ entity_id: "gitea:repo:o/r", renderer: "lister", folder: "other", running: null });
+  f.tell({ entity_id: "gitea:repo:o/r", renderer: "lister", folder: "other", running: null, lane: "" });
   await settle();
   expect(f.asked).toHaveLength(1);
-  f.tell({ entity_id: "gitea:repo:o/r", renderer: "lister", folder: "flows/app", running: { state: "copying", done: 2, total: 9 } });
+  f.tell({ entity_id: "gitea:repo:o/r", renderer: "lister", folder: "flows/app", running: { state: "copying", done: 2, total: 9 }, lane: "" });
   flushSync();
   expect(target.querySelector(".tf-banner.tf-info")!.textContent).toContain("Copying 2 of 9 files");
   expect(f.asked).toHaveLength(1);
-  f.tell({ entity_id: "gitea:repo:o/r", renderer: "lister", folder: "flows/app", running: null });
+  f.tell({ entity_id: "gitea:repo:o/r", renderer: "lister", folder: "flows/app", running: null, lane: "" });
   await settle();
   expect(f.asked.map((a) => a.ask)).toEqual(["open", "look"]);
   expect(target.querySelector(".tf-code")?.textContent).toContain("line one");
