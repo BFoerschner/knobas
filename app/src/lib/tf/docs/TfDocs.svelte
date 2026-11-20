@@ -610,8 +610,8 @@
       () => {},
     );
   }
-  /** A fold drawn open whose pages are not read yet (`TfDocTree`'s `need`). */
-  const needFold = (id: string) => void needParts({ folds: [id] });
+  /** A fold drawn open whose pages are not read yet (`TfDocTree`'s `need`): settles once its read is drawn or has failed. */
+  const needFold = (id: string) => needParts({ folds: [id] });
 
   $effect(() => {
     const id = target;

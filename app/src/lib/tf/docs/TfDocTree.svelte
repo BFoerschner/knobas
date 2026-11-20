@@ -15,7 +15,11 @@
 
   Drawn from part of the tree too (the instant-open pass, 2026-11-12,
   `tree-store.ts`): a page that says it has pages under it is a fold before
-  they are read, and opening it asks for them (`need`).
+  they are read, and opening it asks for them (`need`). **A fold draws its
+  pages once it holds them all** (the ux24 Windows pass, 2026-11-20): the
+  outline may hold some of a fold's pages, and a fold that drew those and then
+  the rest as its read landed moved every row under it twice. Until the read
+  answers it draws none; if it fails, what it holds.
 
   **Folds open for the open page only while the rail follows it** (`follow`, 2026-11-19): after the launcher, another
   section or a search brought the page. A press in Docs moves nothing in the tree, so a page opened from a link or a
@@ -27,6 +31,7 @@
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
   import Self from "./TfDocTree.svelte";
+  import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import type { DocNode, DocSpace } from "../../ipc/entity";
   import { echoesOn } from "../queued.svelte";
@@ -62,8 +67,8 @@
     reveal?: string[];
     /** Whether the folds holding the open page start open: the rail follows the page (2026-11-19). */
     follow?: boolean;
-    /** A fold drawn open whose pages are not read yet: read them (`tree-store.ts`). */
-    need?: ((id: string) => void) | undefined;
+    /** A fold drawn open whose pages are not read yet: read them (`tree-store.ts`), settling when the read has answered or failed. */
+    need?: ((id: string) => Promise<void> | void) | undefined;
   } = $props();
 
   const index = $derived(under ?? childrenByParent(space));
@@ -89,13 +94,32 @@
     else if (!now) open.delete(id);
   }
 
+  /** The folds whose read has answered (or failed) since they opened: they draw what they hold, whole or not. */
+  const answered = new SvelteSet<string>();
+  /** The folds whose read is out. */
+  const reading = new Set<string>();
+
   // Every fold drawn open whose pages are not read yet asks for them, once each time it opens.
   $effect(() => {
     if (need === undefined) return;
+    const read = need;
     for (const node of nodes) {
-      if ((holding.has(node.entity_id) || open.has(node.entity_id)) && childrenMissing(node, index)) need(node.entity_id);
+      const id = node.entity_id;
+      if (!(holding.has(id) || open.has(id))) {
+        if (untrack(() => answered.has(id))) answered.delete(id);
+        continue;
+      }
+      if (!childrenMissing(node, index) || reading.has(id) || untrack(() => answered.has(id))) continue;
+      reading.add(id);
+      void Promise.resolve(read(id)).finally(() => {
+        reading.delete(id);
+        answered.add(id);
+      });
     }
   });
+
+  /** Whether fold `node` waits for its read before it draws its pages: it holds some of them, or none, and is asking. */
+  const waits = (node: DocNode): boolean => need !== undefined && childrenMissing(node, index) && !answered.has(node.entity_id);
 </script>
 
 {#snippet rows()}
@@ -111,7 +135,7 @@
         ></summary
       >
       <div class="tf-fold-in">
-        {#if starts || open.has(node.entity_id)}
+        {#if (starts || open.has(node.entity_id)) && !waits(node)}
           <Self {space} parent={node.entity_id} {current} under={index} held={holding} path={way} opened={open} {need} />
         {/if}
         {#each queued as echo, n (n)}

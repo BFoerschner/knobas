@@ -137,6 +137,42 @@ test("a page with pages under it is a fold before they are read, and opening it 
   expect(io.docsTree).not.toHaveBeenCalled();
 });
 
+/** Home's fold in the rail, with its space opened. */
+async function openHome(): Promise<HTMLDetailsElement> {
+  const space = target.querySelector<HTMLDetailsElement>(".tf-rd-tree details")!;
+  space.open = true;
+  space.dispatchEvent(new Event("toggle"));
+  await settle();
+  const home = [...target.querySelectorAll<HTMLDetailsElement>(".tf-rd-tree .tf-dl-tree details")].find((d) => d.querySelector("summary")?.textContent === "Home")!;
+  home.open = true;
+  home.dispatchEvent(new Event("toggle"));
+  await settle();
+  return home;
+}
+const chapters = (home: HTMLDetailsElement) => [...home.querySelectorAll(":scope > .tf-fold-in summary")].map((s) => s.textContent);
+
+test("a fold the outline cut short draws none of its pages until it holds them all, then all at once", async () => {
+  // The ux24 Windows pass (2026-11-20): *Archive* opened drew the two pages the outline held, then two more when its read
+  // landed, 136 ms later at CPU 6x, and every row under it moved twice.
+  let answer: (() => void) | null = null;
+  const io = await draw([], ports({ docsNodes: vi.fn((asked: DocsNodesAsked) => new Promise<DocSpace[]>((done) => (answer = () => done(nodes(asked))))) }));
+  const home = await openHome();
+  expect(io.docsNodes).toHaveBeenCalledWith({ pages: [], folds: ["c:home"], spaces: [] });
+  expect(chapters(home), "none of the 24 it holds while the rest is read").toEqual([]);
+  answer!();
+  await settle();
+  expect(chapters(home), "all 30 at once").toHaveLength(30);
+  expect(io.docsNodes).toHaveBeenCalledTimes(1);
+});
+
+test("a fold whose read fails draws the pages it holds", async () => {
+  const io = await draw([], ports({ docsNodes: vi.fn(async () => Promise.reject(new Error("the mirror is busy"))) }));
+  const home = await openHome();
+  expect(io.docsNodes).toHaveBeenCalledTimes(1);
+  expect(chapters(home)).toHaveLength(24);
+  expect(chapters(home)[0]).toBe("Chapter 00");
+});
+
 test("a space's page reads its space whole and lists it once it is in", async () => {
   let answer: (parts: DocSpace[]) => void = () => {};
   const io = await draw([], ports());
