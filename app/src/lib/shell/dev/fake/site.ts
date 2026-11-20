@@ -6,7 +6,8 @@
  *
  * Tidewater Jira's and Tidewater Confluence's pages open inside knobas; the others open the browser.
  * `?fake-site=off` turns them all off. `?fake-site-dirty` makes every page hold changes, so a close, a reload and
- * another address ask. `?fake-long-paths` opens a site at a long address. A view commits its page 250 ms after it is
+ * another address ask. `?fake-long-paths` opens a site at a long address; `?fake-site-esc=<ms>` holds the first Esc
+ * that long. A view commits its page 250 ms after it is
  * made, as a fast local site would.
  */
 import type { SiteInsets, SiteSetting, SiteStatus } from "../../../ipc/site";
@@ -48,7 +49,7 @@ interface FakeSite {
   at: number;
 }
 
-function blank(source: string): SiteStatus {
+function blank(source: string, escMs = 500): SiteStatus {
   return {
     source,
     phase: "opening",
@@ -62,7 +63,7 @@ function blank(source: string): SiteStatus {
     keyboard: "shell",
     asks_origin: null,
     failure: null,
-    esc_again_ms: 500,
+    esc_again_ms: escMs,
   };
 }
 
@@ -86,6 +87,8 @@ function place(site: FakeSite): void {
   if (el === null) return;
   const on = site.status.shown && site.insets !== null;
   el.hidden = !on;
+  // The inline display below would beat `hidden`: off is said here too.
+  el.style.display = on ? "grid" : "none";
   if (!on || site.insets === null) return;
   const level = Number.parseFloat(getComputedStyle(document.documentElement).zoom || "1") || 1;
   const px = (v: number) => `${v / level}px`;
@@ -97,7 +100,6 @@ function place(site: FakeSite): void {
     bottom: px(site.insets.bottom),
     background: "#d5d9de",
     color: "#4b5663",
-    display: "grid",
     placeItems: "center",
     font: "13px system-ui, sans-serif",
     zIndex: "30",
@@ -108,6 +110,8 @@ function place(site: FakeSite): void {
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const off = params.get("fake-site") === "off";
   const dirty = params.has("fake-site-dirty");
+  // `?fake-site-esc=<ms>`: how long the second Esc counts, so a screenshot can catch the first one's cap down.
+  const escMs = Number(params.get("fake-site-esc") ?? 500) || 500;
   // `?fake-long-paths`: a site's first page at a long address, for the bar's address in `long-paths.mjs`.
   const first = (base: string) =>
     params.has("fake-long-paths")
@@ -213,7 +217,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         load(existing, url);
         return { done: true, asks: null };
       }
-      const site: FakeSite = { status: blank(source), insets: (args["insets"] as SiteInsets | undefined) ?? null, wanted: false, history: [], at: 0 };
+      const site: FakeSite = { status: blank(source, escMs), insets: (args["insets"] as SiteInsets | undefined) ?? null, wanted: false, history: [], at: 0 };
       sites.set(source, site);
       emit(site);
       load(site, url ?? first(base));
