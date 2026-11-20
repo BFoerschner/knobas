@@ -79,6 +79,25 @@ these departures, each a small call:
 - **The page menu's trim** (Windows) is one rule for the main window and a site (`knobas_site::menu`), each with its
   own list. The saved web sign-in (§13 b) is not built: Björn's call, after he has used the rest.
 
+## Measured on Björn's PC (2026-11-20, 16:45)
+
+`crates/knobas-site/examples/site_probe.rs` on WebView2 157.0.4341.60, Ryzen 5 5600X, Björn idle by the guard, in a scratch
+profile under his Temp folder, removed after. Every check passed: the page saw no `__TAURI_INTERNALS__` or `isTauri` and
+fetched none of `tauri://`, `ipc://` or `knobas-render://` (nor their `http://*.localhost` forms); a second site on the same
+origin started with no cookie and a second run got each site's own back; a frame on another origin loaded; a link to
+another origin went to the browser and was never shown (its first request reached the server, as §6 says); a redirect to
+an unknown origin while landing stopped and asked; `window.open` opened no window and a `target=_blank` link on the site's
+own origin loaded in place; a download landed in the folder knobas named (WebView2 had already cleaned `../../probe.txt`
+to `_.._probe.txt`); the probe answered changed for a page that objects and a close asked; a typed key reached the page,
+the first Esc did and armed, the second was taken and went back, F5 was taken and never reached the page; microphone,
+location, clipboard read and notifications were refused. Making a view took 231 to 245 ms on the main thread; the
+stand-in shell's longest frame around it was 52 ms. A shown site's WebView2 tree held about 308 MB of working set, the
+shell's 274 MB; a hidden one, at WebView2's low memory level, fell from 243 MB to 21 MB.
+
+The probe found one fault, fixed before this note: after the bar's *Open here anyway* WebView2 asked "Leave site?" itself
+and the load waited on it. A forced close, reload or new address now answers the page's own leave dialog once, within 3 s
+(`SiteView::leave_freely`).
+
 ## Tested
 
 The rules are pure functions with tests and mutants: the navigation table, the key table, Esc's timing, a site's
