@@ -23,6 +23,16 @@ export const AHEAD_QUIET_MS = 1000;
 
 let lastInput = 0;
 const heard = () => (lastInput = performance.now());
+/** The reader's input, which the waits below hear; a pointer on its way to a press counts too (Fable's ruling). */
+const INPUT = ["keydown", "pointerdown", "pointermove", "wheel", "scroll", "touchstart"] as const;
+let listening = false;
+/** Hears the reader's input from now on, for the whole session: a page built ahead later waits on it too. */
+function listenForInput(): void {
+  if (listening || typeof addEventListener !== "function") return;
+  listening = true;
+  for (const event of INPUT) addEventListener(event, heard, { capture: true, passive: true });
+  heard();
+}
 
 function idle(): Promise<void> {
   return new Promise((resolve) => {
@@ -31,7 +41,12 @@ function idle(): Promise<void> {
   });
 }
 
-async function quietAndIdle(): Promise<void> {
+/**
+ * Once the reader has been still {@link AHEAD_QUIET_MS} and the window is idle: when something is built ahead of its
+ * press, here a section's page, and a repository's Compare (`TfRepo.svelte`, the compare-first-open pass, 2026-11-20).
+ */
+export async function quietAndIdle(): Promise<void> {
+  listenForInput();
   for (;;) {
     const since = performance.now() - lastInput;
     if (since < AHEAD_QUIET_MS) await new Promise((resolve) => setTimeout(resolve, AHEAD_QUIET_MS - since));
@@ -64,9 +79,7 @@ export function openAhead(
   if (wait === quietAndIdle && /jsdom/i.test(navigator.userAgent)) return () => {};
   started = true;
   let stopped = false;
-  // A pointer on its way to a nav entry is the moment before a press (Fable's ruling): it counts as input too.
-  const events = ["keydown", "pointerdown", "pointermove", "wheel", "scroll", "touchstart"] as const;
-  for (const event of events) addEventListener(event, heard, { capture: true, passive: true });
+  listenForInput();
   heard();
   void (async () => {
     for (const section of sections) {
@@ -80,9 +93,7 @@ export function openAhead(
       holdAhead(hrefOf(section));
       if (wait === quietAndIdle) await twoFrames();
     }
-  })().finally(() => {
-    for (const event of events) removeEventListener(event, heard, { capture: true });
-  });
+  })();
   return () => {
     stopped = true;
   };

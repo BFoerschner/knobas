@@ -127,6 +127,7 @@
   import TfZoomLevel from "./TfZoomLevel.svelte";
   import { installZoomInput, zoom as sharedZoom, zoomKey, type Zoom } from "./zoom.svelte";
   import { noteScrolls } from "./scrolled";
+  import { readLandingAtAddress } from "./repo/hover-reads";
   import "./tf.css";
 
   let {
@@ -870,6 +871,8 @@
     // Each box's place first, while the last frame's layout is clean: a page the move hides takes it from there.
     const onhash = () => {
       noteScrolls();
+      // A repository's landing reads before its page is built (Fable's ruling, the compare-first-open pass).
+      readLandingAtAddress(location.hash);
       arrive();
     };
     window.addEventListener("hashchange", onhash);

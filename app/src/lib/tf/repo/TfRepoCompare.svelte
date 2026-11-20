@@ -483,7 +483,8 @@
       checking = null;
     });
     if (!again && listing !== undefined) {
-      void ports.rangeNames?.(repoId, from, to).then(
+      // The names asked with the early list, where they were (before the page was built); else asked now.
+      void (early?.names ?? ports.rangeNames?.(repoId, from, to))?.then(
         (names) => {
           // Not over a counted list this pick drew already (the pair drawn before, below).
           if (!alive() || landed || names === null || (filesFor === asked && counted)) return;
@@ -514,7 +515,7 @@
     }
     const answer: Promise<RangeDiff> =
       early !== null
-        ? early.catch(() => listing!(repoId, from, to, false, read))
+        ? early.list.catch(() => listing!(repoId, from, to, false, read))
         : listing !== undefined
           ? listing(repoId, from, to, false, read)
           : (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false);

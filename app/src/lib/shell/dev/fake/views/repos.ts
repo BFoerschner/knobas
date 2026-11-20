@@ -16,7 +16,7 @@
  * divergence: the mock adapter draws no view for a repository at all.
  */
 import { JAR_FILES, jarSize } from "../jar";
-import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
+import type { BranchPull, DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
 import { ago, agoStamp } from "../../../time";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
@@ -547,6 +547,26 @@ const PAYOUT_BRANCHES: {
   { name: "spike/sepa-instant", ahead: 2, behind: 9, pr: null, tip: ["9a1b2c3d4e5f", "Spike: SEPA Instant through the PSP sandbox", "mara", "2026-08-13T15:10:00Z"] },
   { name: "chore/bump-tokio", ahead: 0, behind: 6, pr: null, tip: ["5d77e1a2c3b4", "Bump tokio to 1.40", "jonas", "2026-08-17T10:15:00Z"] },
 ];
+
+/**
+ * `?fake-branch-pulls` (the compare-first-open pass, 2026-11-20): the mirror's `repo_branch_pulls` of `payout-service`,
+ * from the branches above, as the real mirror answers it: each branch with its tip and the pull request open from it. By
+ * default the fixture's mirror lists none, so the header reads each branch's view; Compare pressed before its standing
+ * lands then draws *New pull request* over a branch whose standing says a pull request is open.
+ */
+export function payoutBranchPulls(repoId: string): BranchPull[] {
+  if (repoId !== PAYOUT) return [];
+  return [
+    { entity_id: `${PAYOUT}@refs/heads/main`, name: "main", tip: "5d77e1a2c3b4", is_default: true, pull: null },
+    ...PAYOUT_BRANCHES.map(({ name, pr, tip }) => ({
+      entity_id: `${PAYOUT}@refs/heads/${name}`,
+      name,
+      tip: tip[0],
+      is_default: false,
+      pull: pr === null ? null : { branch: name, entity_id: pr, cell: `#${pr.slice(pr.lastIndexOf("#") + 1)}` },
+    })),
+  ];
+}
 
 // `code_facts` for the branches above and `main` (#986): the mirror holds every
 // branch, its author its tip's.

@@ -117,6 +117,39 @@ test("keepScroll leaves a page's rail where it was on a move inside the shown pa
   main.remove();
 });
 
+test("keepScroll writes no scroll on a move inside the shown page, so it lays out nothing in the move's task (compare-first-open pass)", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const rail = scroller(document.createElement("nav"));
+  anchor.append(rail);
+  main.append(anchor);
+  document.body.append(main);
+  const entry = $state({ value: { visible: true, address: "#/repo/r" } });
+  run(() => keepScroll(() => anchor, () => entry.value.visible, () => entry.value.address));
+  main.scrollTop = 300;
+  rail.scrollTop = 600;
+  const writes = vi.fn();
+  for (const el of [main, rail]) {
+    const own = Object.getOwnPropertyDescriptor(el, "scrollTop")!;
+    const read = own.get!;
+    Object.defineProperty(el, "scrollTop", { get: () => read(), set: (n: number) => (writes(n), own.set!(n)), configurable: true });
+  }
+  entry.value = { visible: true, address: "#/repo/r/compare" };
+  flushSync();
+  expect(writes).not.toHaveBeenCalled();
+  expect([main.scrollTop, rail.scrollTop]).toEqual([300, 600]);
+  // A real hide still puts the place back on the show.
+  entry.value = { visible: false, address: "#/repo/r/compare" };
+  flushSync();
+  main.scrollTop = 0;
+  rail.scrollTop = 0;
+  entry.value = { visible: true, address: "#/repo/r/compare" };
+  flushSync();
+  expect([main.scrollTop, rail.scrollTop]).toEqual([300, 600]);
+  main.remove();
+});
+
 test("keepScroll sets a page back only at the address it was left at; another address starts at the top (F-454, F-067)", () => {
   const main = scroller(document.createElement("div"));
   main.className = "tf-main";

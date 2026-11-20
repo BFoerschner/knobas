@@ -9,15 +9,24 @@
  * draws it at once anyway, and a page opened and left again costs the forge nothing more. An early answer is taken
  * once, and only within {@link FRESH_MS}; one that failed is the page's own read again.
  */
-import type { RangeFiles } from "../../ipc/entity";
+import type { RangeFiles, RangeNames } from "../../ipc/entity";
 
 /** The list read the pages use (`RepoPorts.rangeFiles`). */
 export type ListRange = (entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string) => Promise<RangeFiles>;
 
+/** The clone's names of a range (`RepoPorts.rangeNames`): `null` where no clone can answer it. */
+export type NameRange = (entityId: string, base: string, head: string) => Promise<RangeNames | null>;
+
 /** How long an early answer stands for the page's read: past it the page reads anew. */
 export const FRESH_MS = 30_000;
 
-const early = new Map<string, { at: number; answer: Promise<RangeFiles> }>();
+/** An early ask: the list, and the clone's names beside it where the ports read them. */
+export interface EarlyCompare {
+  list: Promise<RangeFiles>;
+  names: Promise<RangeNames | null> | null;
+}
+
+const early = new Map<string, { at: number; answer: Promise<RangeFiles>; names: Promise<RangeNames | null> | null }>();
 const askedOnce = new Set<string>();
 let reads = 0;
 
@@ -28,18 +37,22 @@ const keyOf = (repoId: string, base: string, head: string) => `${repoId}\u0000${
  * for (the landing's *New pull request*): its read is named `ahead:…`, which the backend sends in the sync's lane, so it
  * goes to the forge only once a person's reads there are answered (the landing-rounds pass, 2026-11-16: it went out
  * beside the landing's README). A pointer resting on a link is a reach for the press, and goes as a person's read.
+ * `names`: the clone's names of the pair, asked beside it, which Compare draws first where they land first (Fable's
+ * ruling, the compare-first-open pass, 2026-11-20): asked by Compare itself, they left only once it was built.
  */
-export function askCompareEarly(list: ListRange | undefined, repoId: string, base: string, head: string, ahead = false): void {
+export function askCompareEarly(list: ListRange | undefined, repoId: string, base: string, head: string, ahead = false, names?: NameRange): void {
   if (list === undefined || base === "" || head === "" || base === head) return;
   const key = keyOf(repoId, base, head);
   if (askedOnce.has(key)) return;
   askedOnce.add(key);
   const answer = list(repoId, base, head, false, `${ahead ? "ahead:" : ""}compare-early-${++reads}`);
+  const named = names?.(repoId, base, head) ?? null;
   // A failed early read is not taken: the page asks for itself.
   answer.catch(() => {
     if (early.get(key)?.answer === answer) early.delete(key);
   });
-  early.set(key, { at: Date.now(), answer });
+  named?.catch(() => {});
+  early.set(key, { at: Date.now(), answer, names: named });
 }
 
 /**
@@ -51,13 +64,23 @@ export function compareReads(repoId: string, base: string, head: string): void {
   askedOnce.add(keyOf(repoId, base, head));
 }
 
-/** The early answer to `base`...`head`, or the read under way, once; `null` where none was asked or it is stale. */
-export function takeCompareEarly(repoId: string, base: string, head: string): Promise<RangeFiles> | null {
+/** The early read of `base`...`head` while it stands, without taking it: settled once it answered; `null` where none is. */
+export function earlyAsked(repoId: string, base: string, head: string): Promise<unknown> | null {
+  const asked = early.get(keyOf(repoId, base, head));
+  if (asked === undefined || Date.now() - asked.at > FRESH_MS) return null;
+  return asked.answer.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/** The early answer to `base`...`head` and its names, or the reads under way, once; `null` where none was asked or it is stale. */
+export function takeCompareEarly(repoId: string, base: string, head: string): EarlyCompare | null {
   const key = keyOf(repoId, base, head);
   const asked = early.get(key);
   if (asked === undefined) return null;
   early.delete(key);
-  return Date.now() - asked.at > FRESH_MS ? null : asked.answer;
+  return Date.now() - asked.at > FRESH_MS ? null : { list: asked.answer, names: asked.names };
 }
 
 /** Once the page is idle: what the landing's early compare waits for after the landing drew, so it never goes out in its round. */

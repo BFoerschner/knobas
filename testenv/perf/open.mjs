@@ -163,6 +163,9 @@ function innerPlaces(i) {
     { name: "repo-builds", start: R, press: tab("builds"), hash: `${R}/builds`, useful: [[`${shown} .tf-rbt tbody tr, ${shown} .tf-rbp-ok, ${shown} .tf-rbruns tbody tr, ${shown} .tf-rb-notrun, ${shown} .tf-kept:not([hidden]) .tf-nohere`, 1, false, "^Reading"]], away: files },
     { name: "repo-commit", start: `${R}/commits`, go: `${R}/commits/${enc(i.commit)}`, hash: `${R}/commits/`, useful: [diff], marks: { head: [[`${shown} h2.tf-cgroup-h .tf-mono`, 1]] }, awayGo: `${R}/commits` },
     { name: "repo-compare", start: R, press: tab("compare"), hash: `${R}/compare`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff, ${shown} .tf-cdiff .tf-empty`, 1]], away: files },
+    // Compare pressed 300 ms after the landing's tree drew, before the page builds it ahead (Fable's ruling, the
+    // compare-first-open pass, 2026-11-20): the path a quick reader takes keeps a number of its own.
+    { name: "repo-compare-cold", start: R, soon: { drawn: treeTop[0], ms: 300 }, press: tab("compare"), hash: `${R}/compare`, useful: [[`${shown} .tf-cform`, 1], [`${shown} .tf-cdiff .tf-diff, ${shown} .tf-cdiff .tf-empty`, 1]], away: files },
     // A branch of many files (8, 13 and 8 in the three sets): its list of files, every row counted wherever it stands, and
     // the first file's lines on screen. Not three cards on screen: the form stands above the diff, so at 1440x868 one or
     // two reach the window whatever the branch changes, and the place never counted as useful (the ux21 pass).
@@ -256,7 +259,7 @@ async function quiet(ms = 1200, limit = 20000) {
 }
 
 /** A fresh app at `hash`, drawn and quiet. */
-async function fresh(hash) {
+async function fresh(hash, soon = null) {
   const blank = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: "about:blank" });
   await blank;
@@ -264,7 +267,11 @@ async function fresh(hash) {
   await c.send("Page.navigate", { url: `${base}${hash}` });
   await loaded;
   for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
-  await quiet(1500);
+  // `soon`: on as soon as what it names is drawn and `ms` more, not once the page has been quiet.
+  if (soon !== null) {
+    for (let i = 0; i < 400; i++) { if (await js(`!!document.querySelector(${JSON.stringify(soon.drawn)})`).catch(unlessStalled(false))) break; await sleep(25); }
+    await sleep(soon.ms);
+  } else await quiet(1500);
   await js("__open.wrap(), 1");
 }
 
@@ -412,9 +419,11 @@ for (const rate of throttles) {
 /** An inner place's rounds: first after start, return, return after every section, return after every source's run. */
 async function innerRounds(place, rate, entry) {
   await cpu(1);
-  await fresh(place.start);
-  await sleep(firstAfter);
-  await quiet(600);
+  await fresh(place.start, place.soon ?? null);
+  if (!place.soon) {
+    await sleep(firstAfter);
+    await quiet(600);
+  }
   await cpu(rate);
   if (rounds.includes("first")) {
     entry.first = await measure(place);

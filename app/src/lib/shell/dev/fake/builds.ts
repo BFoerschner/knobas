@@ -38,6 +38,7 @@ import type {
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { fakeRoleScope } from "./corpus";
+import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { dayKey } from "../../../time/day";
 
@@ -887,7 +888,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     },
     // The header's *New pull request*: the fixture's mirror says nothing of its branches, so the header reads each branch's
     // view as it did before the mirror could answer (the forge-rounds pass, 2026-11-15).
-    repo_branch_pulls: () => [],
+    // `?fake-branch-pulls` answers it as the real mirror does (`payoutBranchPulls`, the compare-first-open pass).
+    repo_branch_pulls: (args) =>
+      new URLSearchParams(globalThis.location?.search).has("fake-branch-pulls") ? payoutBranchPulls(String(args["repoId"] ?? "")) : [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
     commit_repositories: (args) =>
       ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {

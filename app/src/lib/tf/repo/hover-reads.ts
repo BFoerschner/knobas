@@ -38,6 +38,10 @@ export const PRESS_KEEP_MS = 3000;
  * makes, with the same arguments: `TfRepo.svelte`'s header, tabs and counts, the Files tab's top listing.
  */
 export function readLandingAhead(entityId: string): void {
+  // A press and the address it sets ask once: the second joins the first's reads (the compare-first-open pass).
+  const last = landingAsked.get(entityId);
+  if (last !== undefined && Date.now() - last < PRESS_KEEP_MS) return;
+  landingAsked.set(entityId, Date.now());
   const quiet = (read: Promise<unknown>) => void read.catch(() => {});
   // The README guess as the landing makes it (the ux16 overs pass, 2026-11-17): asked once the record names the source's
   // tree sections, which comes back before the page's build at 6x, so the README is not a second round after it. On
@@ -56,10 +60,47 @@ export function readLandingAhead(entityId: string): void {
   for (const section of ["files", "commits", "branches"]) quiet(readViewAhead(entityId, section, PRESS_KEEP_MS));
 }
 
+/** When each landing's reads were last asked, by entity. */
+const landingAsked = new Map<string, number>();
+/** The repository pages drawn now, shown or kept hidden, by entity: how many. */
+const pagesHeld = new Map<string, number>();
+
+/** A repository's page is drawn for `entityId` (shown or kept): its landing reads for itself. Returns its release. */
+export function holdRepoPage(entityId: string): () => void {
+  pagesHeld.set(entityId, (pagesHeld.get(entityId) ?? 0) + 1);
+  return () => {
+    const n = (pagesHeld.get(entityId) ?? 1) - 1;
+    if (n > 0) pagesHeld.set(entityId, n);
+    else pagesHeld.delete(entityId);
+  };
+}
+
+/**
+ * The address moved to a repository's landing no page holds (a launcher's jump, a link set by a page, history): its
+ * reads start now, before the page is built, as a press on its link starts them (Fable's ruling, the compare-first-open
+ * pass, 2026-11-20). Called by the shell as the address changes. A page kept for it reads again as it is shown.
+ */
+export function readLandingAtAddress(hash: string): void {
+  const id = landingOf(hash);
+  if (id !== null && !pagesHeld.has(id)) readLandingAhead(id);
+}
+
+/** Tests only: no landing asked, no page held. */
+export function forgetLandingReads(): void {
+  landingAsked.clear();
+  pagesHeld.clear();
+  guessed.clear();
+}
+
 /** A repository's landing that `href` names (`#/repo/<id>`), else `null`. */
 function landingOf(href: string): string | null {
   const repo = /^#\/repo\/([^/]+)$/.exec(href);
-  return repo ? decodeURIComponent(repo[1]!) : null;
+  if (!repo) return null;
+  try {
+    return decodeURIComponent(repo[1]!);
+  } catch {
+    return null;
+  }
 }
 
 /** How long the pointer stands on a link before its read starts. */

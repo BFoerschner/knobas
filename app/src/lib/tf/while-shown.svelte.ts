@@ -89,7 +89,14 @@ export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => b
   });
   $effect(() => {
     if (!shown() || saved === null) return;
-    const same = !hid || untrack(address) === leftAt;
+    // A move inside the shown page: nothing hid, so every box still holds its scroll. A write would only lay out the
+    // half-built page in the task that builds it (Fable's ruling, the compare-first-open pass, 2026-11-20: 17 ms of style
+    // and 28 of layout at 6x in Compare's first open).
+    if (!hid) {
+      saved = null;
+      return;
+    }
+    const same = untrack(address) === leftAt;
     for (const [el, top, left] of saved) {
       el.scrollTop = same ? top : 0;
       el.scrollLeft = same ? left : 0;

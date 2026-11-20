@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { entityView, readViewAhead } from "../../ipc/entity";
-import { installHoverReads, landingGuess, readOf, REST_MS } from "./hover-reads";
+import { forgetLandingReads, holdRepoPage, installHoverReads, landingGuess, readLandingAtAddress, readOf, REST_MS } from "./hover-reads";
 
 const sent: { cmd: string; args: unknown }[] = [];
 let answers: ((value: unknown) => void)[] = [];
@@ -23,6 +23,7 @@ let root: HTMLElement;
 let stop: () => void;
 beforeEach(() => {
   vi.useFakeTimers();
+  forgetLandingReads();
   sent.length = 0;
   answers = [];
   root = document.createElement("div");
@@ -169,6 +170,41 @@ test("a press asks the landing's README guess once the record names the tree's s
 test("Enter on a repository's link reads its landing as a press does", async () => {
   vi.useRealTimers();
   root.querySelector("#repo")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await flush();
+  expect(sent.map((s) => s.cmd)).toContain("get_entity");
+});
+
+// The compare-first-open pass (2026-11-20, Fable's ruling): an address arrival (a launcher jump) read the landing only once
+// the page was built, 118 and 166 ms after the address at 4x and 6x before the press got its own reads.
+test("an address on a repository's landing reads it before the page is built; a tab's address reads nothing", async () => {
+  vi.useRealTimers();
+  readLandingAtAddress("#/repo/gitea%3Atidewater%2Fpayout-service/commits");
+  await flush();
+  expect(sent).toEqual([]);
+  readLandingAtAddress("#/repo/gitea%3Atidewater%2Fpayout-service");
+  await flush();
+  expect(sent.map((s) => s.cmd)).toEqual(["get_entity", "code_facts", "repo_branch_pulls", "repo_pipelines", "entity_view", "entity_view", "entity_view"]);
+});
+
+test("a press and the address it sets read the landing once", async () => {
+  vi.useRealTimers();
+  root.querySelector("#repo")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  await flush();
+  const n = sent.length;
+  expect(n).toBeGreaterThan(0);
+  readLandingAtAddress("#/repo/gitea%3Atidewater%2Fpayout-service");
+  await flush();
+  expect(sent).toHaveLength(n);
+});
+
+test("a repository a page holds reads nothing at its address: the page reads again as it is shown", async () => {
+  vi.useRealTimers();
+  const release = holdRepoPage("gitea:tidewater/payout-service");
+  readLandingAtAddress("#/repo/gitea%3Atidewater%2Fpayout-service");
+  await flush();
+  expect(sent).toEqual([]);
+  release();
+  readLandingAtAddress("#/repo/gitea%3Atidewater%2Fpayout-service");
   await flush();
   expect(sent.map((s) => s.cmd)).toContain("get_entity");
 });

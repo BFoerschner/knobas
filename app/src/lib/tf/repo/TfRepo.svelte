@@ -156,6 +156,11 @@
     cancelRead?: (read: string) => Promise<boolean>;
     /** A compare's file names at the clone, no counts, `null` where it cannot say (the stored-compare pass, 2026-11-14): drawn while `rangeFiles` reads. */
     rangeNames?: (entityId: string, base: string, head: string) => Promise<RangeNames | null>;
+    /**
+     * What Compare's build ahead of its press waits for (the compare-first-open pass): the reader still and the window
+     * idle (`quietAndIdle`). Under jsdom nothing is built ahead unless a test gives its own.
+     */
+    aheadWait?: () => Promise<void>;
   }
 
   /**
@@ -305,7 +310,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import { heldHead } from "../held-head.svelte";
   import { provideTabRereads } from "./refreshed.svelte";
-  import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
+  import { holdSlot, NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
   import { parentPage } from "../page-name.svelte";
   import { itemHash } from "../job/job";
@@ -313,7 +318,9 @@
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { landInPlace } from "../land-in-place";
   import { HELD_AFTER_MS } from "./view-fresh.svelte";
-  import { askCompareEarly, whenIdle } from "./compare-early";
+  import { askCompareEarly, earlyAsked, whenIdle } from "./compare-early";
+  import { quietAndIdle } from "../ahead";
+  import { holdRepoPage } from "./hover-reads";
   import type { SourceSyncStatus } from "../../ipc/sources";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
@@ -378,6 +385,26 @@
 
   /** How many pull requests the repository's read asks for: every one the mirror holds. */
   const LIMIT = 1000;
+
+  /** Whether a read again answered what the page holds: then it writes nothing, and nothing is laid out anew. */
+  const sameAnswer = (held: unknown, next: unknown): boolean => held !== null && JSON.stringify(held) === JSON.stringify(next);
+
+  // This page reads its repository's landing for itself: the shell's address change asks it only for a repository no
+  // page holds (`readLandingAtAddress`).
+  $effect(() => {
+    const id = repoId;
+    if (id !== null) return holdRepoPage(id);
+  });
+
+  /** Two frames on (what was just shown has drawn), then the window idle: when a read behind a press goes out. */
+  function afterDrawn(): Promise<void> {
+    const frame = () =>
+      new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+        else setTimeout(resolve, 16);
+      });
+    return frame().then(frame).then(whenIdle);
+  }
 
   /** The repository's read: its row, its source, and what its *Refresh* offers (#2135). */
   let detail = $state<EntityDetail | null>(null);
@@ -531,7 +558,10 @@
   function readBranchPulls(id: string, alive: () => boolean): Promise<void> {
     return (ports.repoBranchPulls ?? repoBranchPulls)(id).then(
       (answer) => {
-        if (alive()) branchPulls = Array.isArray(answer) ? answer : "failed";
+        if (!alive()) return;
+        const next = Array.isArray(answer) ? answer : "failed";
+        // The same answer again (a tab switched, the window back): nothing to lay out anew.
+        if (!sameAnswer(branchPulls, next)) branchPulls = next;
       },
       () => {
         if (alive() && branchPulls === null) branchPulls = "failed";
@@ -571,7 +601,11 @@
         if (!newest()) return;
         const next = branchOptions(view?.sections[0] ?? null, (view as ShownView | null)?.unsynced ?? []);
         settleEchoes(id, (echo) => echo.kind === MADE && next.some((option) => option.name === echo.text));
-        if (again) void landInPlace(page, () => (branches = next));
+        // The same list again writes nothing: a tab's switch read it in that tab's first open, and `landInPlace` laid
+        // the half-built tab out to land it (the compare-first-open pass, 2026-11-20).
+        if (again && sameAnswer(branches, next)) {
+          // Nothing moved.
+        } else if (again) void landInPlace(page, () => (branches = next));
         else branches = next;
         branchesFailed = false;
         branchesReading = false;
@@ -705,13 +739,22 @@
     };
   });
 
-  // Another tab of the page shown: the lists read again, so Compare and *New pull request* know a branch made since.
+  // Another tab of the page shown: the lists read again, so Compare and *New pull request* know a branch made since. Once
+  // the tab has drawn and the window is idle (Fable's ruling, the compare-first-open pass, 2026-11-20): read in the press,
+  // the four answers landed inside the tab's first open, each laying out the half-built tab, 31 ms of Compare's 200 at 6x.
   let slotWas: string | null = null;
   $effect(() => {
     const now = slot;
     const was = slotWas;
     slotWas = now;
-    if (was !== null && was !== now) untrack(rereadLists);
+    if (was === null || was === now) return;
+    let live = true;
+    void afterDrawn().then(() => {
+      if (live) untrack(rereadLists);
+    });
+    return () => {
+      live = false;
+    };
   });
 
   // Whether the source offers *New branch…* and a commit onto the branch is
@@ -751,7 +794,7 @@
       return;
     }
     if (!alive()) return;
-    detail = found;
+    if (!(again && sameAnswer(detail, found))) detail = found;
     const filter: EntityFilter = {
       sources: [found.row.source_id],
       kinds: ["pr"],
@@ -769,6 +812,7 @@
       (rows) => {
         if (!alive()) return;
         const next = repoPrs(rows, found.row);
+        if (again && sameAnswer(prs, next)) return;
         if (again) void landInPlace(page, () => (prs = next));
         else prs = next;
       },
@@ -988,6 +1032,71 @@
     return proposed;
   });
 
+  /** Bumped where Compare built ahead is shown at another pair than it was built for: it is built afresh ({@link compareAhead}). */
+  let compareGen = $state(0);
+  /** The pair Compare was built ahead at, until it is first shown. */
+  let compareAhead: { base: string; head: string } | null = null;
+
+  // An address on Compare that no press reached for (a launcher jump, a link set by a page): the pair it names is asked
+  // before Compare is built, as a press on its link asks it (Fable's ruling, the compare-first-open pass, 2026-11-20). At
+  // 6x the build took 100 ms and more before Compare asked for itself.
+  $effect.pre(() => {
+    const id = repoId;
+    if (slot !== "compare" || id === null) return;
+    const place = route;
+    untrack(() => {
+      const base = place.base ?? defaultBranch?.name ?? null;
+      const head = place.branch ?? compareProposed;
+      // Built ahead for another pair than this address names: built afresh for it, so it never shows the other pair's
+      // diff dimmed while it reads its own, as a pick would.
+      if (compareAhead !== null && (compareAhead.base !== base || compareAhead.head !== head)) compareGen += 1;
+      compareAhead = null;
+      if (base !== null && head !== null) askCompareEarly(ports.rangeFiles, id, base, head, false, ports.rangeNames);
+    });
+  });
+
+  /**
+   * **Compare built ahead of its press** (Fable's ruling, the compare-first-open pass, 2026-11-20). Its first open drew in
+   * 206 and 317 ms at 4x and 6x full screen on Björn's PC, four tasks around reads that went out late, each laying the
+   * page out again; built while the reader looks at the landing, the press is a return, one style pass and one layout, and
+   * its first frame holds the whole page. Once the landing's tree has drawn (or a moment after the page opened on another
+   * tab), the reader has been still a second and the window is idle, the Compare tab is mounted hidden at the bare
+   * `compare` address, on the branch *New pull request* proposes. Only on a page shown, with more than one branch; without
+   * a clone, once the early compare (asked here in the background lane if the landing has not) has answered, so the forge
+   * is asked nothing new but the branch's standing, which goes in that lane too. Nothing is staged and nothing moves: the
+   * tab is hidden until its press shows it whole.
+   */
+  $effect(() => {
+    const id = repoId;
+    const wait = ports.aheadWait ?? (/jsdom/i.test(navigator.userAgent) ? null : quietAndIdle);
+    if (wait === null || !ready || !visible || id === null || known === null || oneBranch || slot === "compare" || held.places.compare !== undefined) return;
+    if (checkout === undefined) return;
+    const noClone = sentence !== null && sentence.path === null;
+    const drew = treeDrew;
+    let live = true;
+    void Promise.race([drew.promise, new Promise((resolve) => setTimeout(resolve, COMPARE_EARLY_AFTER_MS))])
+      .then(() => (live ? wait() : undefined))
+      .then(() => {
+        if (!live || !noClone) return;
+        const [base, head] = untrack(() => [defaultBranch?.name ?? null, compareProposed]);
+        if (base === null || head === null || base === head) return;
+        askCompareEarly(untrack(() => ports.rangeFiles), id, base, head, true, untrack(() => ports.rangeNames));
+        return earlyAsked(id, base, head)?.then(() => (live ? wait() : undefined));
+      })
+      .then(() => {
+        if (!live) return;
+        untrack(() => {
+          const [base, head] = [defaultBranch?.name ?? null, compareProposed];
+          if (base === null || head === null || base === head || tabs.repoId !== id) return;
+          compareAhead = { base, head };
+          tabs = holdSlot(tabs, [id, "compare"]);
+        });
+      });
+    return () => {
+      live = false;
+    };
+  });
+
   /** How many branches the header asks before it gives up on finding one with nothing open: a source's burst stays small. */
   const ASKED = 8;
   /** How many of them are read at once, as the Branches tab reads them: one at a time took 2.5 s on a live forge. */
@@ -1141,7 +1250,7 @@
     void Promise.race([drew.promise, new Promise((resolve) => setTimeout(resolve, COMPARE_EARLY_AFTER_MS))])
       .then(() => (live ? whenIdle() : undefined))
       .then(() => {
-        if (live) askCompareEarly(untrack(() => ports.rangeFiles), id, base, head, true);
+        if (live) askCompareEarly(untrack(() => ports.rangeFiles), id, base, head, true, untrack(() => ports.rangeNames));
       });
     return () => {
       live = false;
@@ -1182,7 +1291,7 @@
     if (at === null) return;
     comparing = setTimeout(() => {
       comparing = null;
-      askCompareEarly(ports.rangeFiles, at.id, at.from, at.to);
+      askCompareEarly(ports.rangeFiles, at.id, at.from, at.to, false, ports.rangeNames);
     }, COMPARE_REST_MS);
   }
   function pressOnCompare(event: PointerEvent | KeyboardEvent) {
@@ -1191,7 +1300,7 @@
     if (at === null) return;
     if (comparing !== null) clearTimeout(comparing);
     comparing = null;
-    askCompareEarly(ports.rangeFiles, at.id, at.from, at.to);
+    askCompareEarly(ports.rangeFiles, at.id, at.from, at.to, false, ports.rangeNames);
   }
   /** Heard on the page, not on each link: the links are drawn by the header, the tabs and a tab's rows. */
   function watchCompareLinks(element: HTMLElement) {
@@ -1367,6 +1476,7 @@
               {:else if one === "branches"}
                 <TfRepoBranches {ports} {repoId} {source} {refreshed} {builds} />
               {:else if one === "compare" && known !== null}
+                {#key compareGen}
                 <TfRepoCompare
                   {ports}
                   {repoId}
@@ -1383,6 +1493,7 @@
                   pulls={branchPulls}
                   onNewBranch={() => (newBranch = { from: null })}
                 />
+                {/key}
               {:else if one === "commits"}
                 <TfRepoCommits {ports} {repoId} {at} {source} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
               {:else if one === "builds"}

@@ -29,6 +29,13 @@ import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { echoFollower } from "../echo-events.fixture";
 import { forgetEchoes, type EchoListen } from "../queued.svelte";
 import TfRepo, { forgetBranches, type RepoPorts } from "./TfRepo.svelte";
+
+/** Each list landed in place over what the page drew (`landInPlace`), by the first call's spy. */
+const landings = vi.hoisted(() => [] as number[]);
+vi.mock("../land-in-place", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../land-in-place")>();
+  return { ...real, landInPlace: (...args: Parameters<typeof real.landInPlace>) => (landings.push(Date.now()), real.landInPlace(...args)) };
+});
 import { forgetEarlyCompares } from "./compare-early";
 
 const NOW = new Date(2026, 10, 9, 14, 32);
@@ -46,6 +53,8 @@ let writes: WriteOpPayload[];
 let forge: string[];
 /** Pull requests the mirror holds. */
 let prs: EntityRow[];
+/** The pull request lists read. */
+let prReads = 0;
 /** Held back, the next read of the branch list waits for it. */
 let gate: Promise<void> | null;
 /** The bridge's events, raised by the test as the backend would tell them. */
@@ -73,6 +82,8 @@ beforeEach(() => {
   writes = [];
   forge = [];
   prs = [pr(1, "SEPA retry")];
+  prReads = 0;
+  landings.length = 0;
   gate = null;
   heard = [];
   location.hash = "";
@@ -149,7 +160,10 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
         } as unknown as EntityDetail;
       throw { code: "not_found", message: `${id} is not in the mirror` };
     },
-    listEntities: async (): Promise<EntityPage> => ({ rows: prs, total: prs.length, tally: null, groups: null }),
+    listEntities: async (): Promise<EntityPage> => {
+      prReads += 1;
+      return { rows: prs, total: prs.length, tally: null, groups: null };
+    },
     entityView: async (id, section): Promise<ShownView | SourceView | null> => {
       reads.push([id, section]);
       if (id === REPO && section === "branches") {
@@ -225,6 +239,12 @@ async function settle() {
   }
 }
 
+/** Past the frames a tab's press draws in and the idle turn after them: when its read of the lists goes out. */
+async function afterDrawn() {
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await settle();
+}
+
 async function go(rest: string[]) {
   live.rest = rest;
   await settle();
@@ -267,7 +287,34 @@ test("another tab shown reads the list again, and the header's New pull request 
   const before = branchReads();
   forge = ["fix/from-a-push"];
   await go([REPO, "commits"]);
+  await afterDrawn();
   expect(branchReads()).toBeGreaterThan(before);
+  expect(offered()).toContain("fix/from-a-push");
+});
+
+test("a tab's press reads the lists again only once the tab has drawn, not in its open (compare-first-open pass)", async () => {
+  await drawLive([REPO]);
+  const before = { branches: branchReads(), prs: prReads };
+  await go([REPO, "commits"]);
+  expect(branchReads(), "no branch read in the tab's open").toBe(before.branches);
+  expect(prReads, "no pull request read in the tab's open").toBe(before.prs);
+  await afterDrawn();
+  expect(branchReads()).toBe(before.branches + 1);
+  expect(prReads).toBeGreaterThan(before.prs);
+});
+
+test("the lists read again with the same answer write nothing and land nothing (compare-first-open pass)", async () => {
+  await drawLive([REPO]);
+  const option = header().options[0];
+  landings.length = 0;
+  await go([REPO, "commits"]);
+  await afterDrawn();
+  expect(landings, "an answer equal to what the page holds is not landed").toEqual([]);
+  expect(header().options[0]).toBe(option);
+  forge = ["fix/from-a-push"];
+  await go([REPO]);
+  await afterDrawn();
+  expect(landings.length, "a new branch lands in place").toBeGreaterThan(0);
   expect(offered()).toContain("fix/from-a-push");
 });
 
@@ -618,8 +665,9 @@ test("a press quicker than the pointer's rest opens Compare, which reads the lis
   await go(COMPARE("feature/PAY-231-sepa-retry"));
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
-  expect(asked.map((a) => [a.base, a.head]), "the list was asked once, by Compare").toEqual([["main", "feature/PAY-231-sepa-retry"]]);
-  expect(asked[0]!.read).not.toMatch(/^compare-early-/);
+  // Asked as the address named Compare, before it was built, and taken by Compare (the compare-first-open pass).
+  expect(asked.map((a) => [a.base, a.head]), "the list was asked once").toEqual([["main", "feature/PAY-231-sepa-retry"]]);
+  expect(asked[0]!.read, "by the address, ahead of Compare's build").toMatch(/^compare-early-/);
 });
 
 test("with a clone nothing is asked early at the landing; the pointer resting on New pull request asks it", async () => {
@@ -656,4 +704,82 @@ test("the press on a compare's link asks its list at once, as a person's read, a
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
   expect(asked, "Compare took the press's read").toHaveLength(1);
+});
+
+// The compare-first-open pass (2026-11-20, Fable's ruling): Compare's first open drew in 206 and 317 ms at 4x and 6x full
+// screen on Björn's PC, four tasks around reads that went out late. Built ahead while the reader looks at the landing,
+// its press is a return that reads nothing again.
+const shownKept = () => [...target.querySelectorAll(".tf-kept")].filter((el) => !el.closest("[hidden]"));
+const aheadPorts = (rangeFiles: NonNullable<RepoPorts["rangeFiles"]>) => ports({ rangeFiles, aheadWait: () => Promise.resolve() });
+
+test("Compare is built ahead, hidden, once the landing has drawn and the reader is still; its press reads nothing again", async () => {
+  forgetEarlyCompares();
+  const { asked, rangeFiles } = listing();
+  await drawLive([REPO], aheadPorts(rangeFiles));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  const built = target.querySelector(".tf-compare");
+  expect(built, "Compare is built").not.toBeNull();
+  expect(built!.closest("[hidden]"), "and hidden").not.toBeNull();
+  expect(text(built!.querySelector(".tf-cdiff")), "with its diff read").toContain("feature/PAY-231-sepa-retry.txt");
+  expect(shownKept().some((el) => el.querySelector(".tf-ftree, .tf-fileview") !== null), "the landing stays shown").toBe(true);
+  const [lists, views] = [asked.length, reads.length];
+
+  await go([REPO, "compare"]);
+  expect(target.querySelector(".tf-compare"), "the same Compare, shown").toBe(built);
+  expect(built!.closest("[hidden]")).toBeNull();
+  expect(asked, "no list asked again").toHaveLength(lists);
+  expect(reads.slice(views).filter(([id, section]) => id !== REPO || section !== "branches"), "no view read again but the tab's lists").toEqual([]);
+});
+
+test("New pull request onto the branch Compare was built ahead for shows it; another branch's address builds Compare afresh", async () => {
+  forgetEarlyCompares();
+  forge = ["fix/other"];
+  const { rangeFiles } = listing();
+  await drawLive([REPO], aheadPorts(rangeFiles));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  const built = target.querySelector(".tf-compare");
+  expect(built).not.toBeNull();
+  const proposed = target.querySelector<HTMLSelectElement>("#tf-cmp-from")!.value;
+
+  await go(COMPARE(proposed));
+  expect(target.querySelector(".tf-compare"), "the proposed branch's address shows what was built").toBe(built);
+
+  await go([REPO]);
+  await go(COMPARE(proposed === "fix/other" ? "feature/PAY-231-sepa-retry" : "fix/other"));
+  expect(target.querySelector(".tf-compare"), "a shown Compare is a pick from here on, as before").toBe(built);
+});
+
+test("an address on another branch than Compare was built ahead for builds it afresh, never showing the other diff", async () => {
+  forgetEarlyCompares();
+  forge = ["fix/other"];
+  const { rangeFiles } = listing();
+  await drawLive([REPO], aheadPorts(rangeFiles));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  const built = target.querySelector(".tf-compare");
+  expect(built).not.toBeNull();
+  const proposed = target.querySelector<HTMLSelectElement>("#tf-cmp-from")!.value;
+  const other = proposed === "fix/other" ? "feature/PAY-231-sepa-retry" : "fix/other";
+
+  await go(COMPARE(other));
+  const now = target.querySelector(".tf-compare");
+  expect(now, "built afresh for the address").not.toBe(built);
+  expect(diffPaths()).toEqual([`${other}.txt`]);
+});
+
+test("nothing is built ahead while the page is hidden: a page left before the reader was still builds nothing", async () => {
+  forgetEarlyCompares();
+  const { rangeFiles } = listing();
+  const waits: (() => void)[] = [];
+  await drawLive([REPO], ports({ rangeFiles, aheadWait: () => new Promise<void>((resolve) => waits.push(resolve)) }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  expect(waits.length, "waiting for the reader to be still").toBeGreaterThan(0);
+  live.visible = false;
+  await settle();
+  for (const done of waits.splice(0)) done();
+  await settle();
+  expect(target.querySelector(".tf-compare")).toBeNull();
 });

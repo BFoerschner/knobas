@@ -81,6 +81,12 @@ const PLACES = [
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },
+  // Compare pressed once the landing has been looked at (its tab above, built ahead while the reader is still), and
+  // pressed 300 ms after the landing's tree drew, before it is built ahead (Fable's ruling, the compare-first-open pass).
+  // The fixture's mirror lists no branch's pull request by default, so only the branch's standing, read 350 ms late here,
+  // says #142 is open from the branch Compare proposes, and the form shrank from *New pull request* to *Open PR #142*, on
+  // the code before this pass too. With `fake-branch-pulls` the mirror answers as the real one does.
+  { name: "repo-compare-soon", fixture: true, fake: "fake-branch-pulls", start: `#/repo/${REPO}`, soon: { drawn: `${shown} .tf-ftree .tf-d0`, ms: 300 }, press: `${shown} .tf-tabs a[href="#/repo/${REPO}/compare"]`, hash: `#/repo/${REPO}/compare`, away: `#/repo/${REPO}` },
   // The checkout read after the README drew (the ux21 pass): *Clone* landed beside *Render as* and *Pipeline* and pushed
   // them 59 px on the live suite at 4x. The views at once and the checkout within the header's 500 ms hold, so the header
   // draws with it as it does there. `ledger`: not cloned, and a README with no image (an image's first load moves the
@@ -195,6 +201,13 @@ async function fresh(hash, p = null) {
     await js(`(${JSON.stringify(p.forget)}.forEach((k) => localStorage.removeItem(k)), 1)`);
     return fresh(hash, { ...p, forget: null });
   }
+  // `soon`: pressed this soon after what it names is drawn, not once the page has been quiet, so before anything a page
+  // builds once the reader is still (Compare built ahead of its press, the compare-first-open pass, 2026-11-20).
+  if (p?.soon) {
+    for (let i = 0; i < 200; i++) { if (await js(`!!document.querySelector(${JSON.stringify(p.soon.drawn)})`).catch(unlessStalled(false))) break; await sleep(25); }
+    await sleep(p.soon.ms);
+    return;
+  }
   await quiet(1500);
 }
 async function find(selector, text = null, starts = false) {
@@ -285,7 +298,7 @@ async function measure(p, rate) {
       await cpu(1);
       await fresh(p.start, p);
       if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
-      await sleep(firstAfter);
+      if (!p.soon) await sleep(firstAfter);
       await scrolled(p, rate);
       await cpu(rate);
       if (rounds.includes("first")) {
