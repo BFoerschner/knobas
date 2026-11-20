@@ -20,7 +20,6 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
-  import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, DiffFile, DiffRange, RangeFiles, WorkingAt } from "../../ipc/entity";
@@ -179,8 +178,8 @@
   }
 </script>
 
+<!-- Compare's own width for *Commits*, as the person dragged it there: its edge is Compare's (one page draws a sidebar's edge). -->
 <div class="tf-compare tf-cworking" {@attach sideWidth("compare")}>
-  <TfSideEdge side="compare" />
   <div>
     <h2 class="tf-cgroup-h">Compare</h2>
     <form class="tf-panel tf-cform" onsubmit={(event) => event.preventDefault()}>
