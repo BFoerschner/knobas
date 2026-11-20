@@ -43,16 +43,9 @@ pub const KEPT: &[&str] = &[
     "copyImage",
 ];
 
-/// One item of a menu, as [`removals`] reads it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Item<'a> {
-    /// A command, a check box or a radio item, by its name.
-    Command(&'a str),
-    /// An item that opens more items (*More tools*, *Writing direction*).
-    Submenu(&'a str),
-    /// A rule between groups.
-    Separator,
-}
+/// One item of a menu, as [`removals`] reads it: the one rule a site's page
+/// menu is trimmed by too (`knobas_site::menu`).
+pub use knobas_site::menu::Item;
 
 /// Whether a command named `name` stays. `inspect`: a development build,
 /// whose *Inspect* stays.
@@ -68,29 +61,7 @@ pub fn keeps(name: &str, inspect: bool) -> bool {
 /// another.
 #[must_use]
 pub fn removals(items: &[Item<'_>], inspect: bool) -> Vec<usize> {
-    let mut stays = vec![false; items.len()];
-    let mut item_before = false;
-    let mut pending: Option<usize> = None;
-    for (index, item) in items.iter().enumerate() {
-        match item {
-            Item::Command(name) if keeps(name, inspect) => {
-                if let Some(rule) = pending.take() {
-                    stays[rule] = true;
-                }
-                stays[index] = true;
-                item_before = true;
-            }
-            Item::Separator if item_before => {
-                pending = Some(index);
-                item_before = false;
-            }
-            Item::Command(_) | Item::Submenu(_) | Item::Separator => {}
-        }
-    }
-    (0..items.len())
-        .rev()
-        .filter(|index| !stays[*index])
-        .collect()
+    knobas_site::menu::removals(items, |name| keeps(name, inspect))
 }
 
 /// Hook `window`'s web view. Does nothing off Windows.

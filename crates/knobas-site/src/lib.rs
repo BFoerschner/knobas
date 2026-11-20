@@ -16,6 +16,7 @@
 pub mod failures;
 pub mod host;
 pub mod keys;
+pub mod menu;
 pub mod policy;
 pub mod scripts;
 pub mod session;

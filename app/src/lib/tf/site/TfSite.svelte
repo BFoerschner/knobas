@@ -40,6 +40,8 @@
   import { siteStore, type SiteStore } from "./site.svelte";
   import TfSiteBar from "./TfSiteBar.svelte";
   import TfSiteVeil from "./TfSiteVeil.svelte";
+  import { siteVisits, type Visits } from "./visits";
+  import type { UrlMatch } from "../../ipc/entity";
 
   const BRIDGE: SitePagePorts = {
     show: (source, insets, focus, esc) => void siteShow(source, insets, focus, esc).catch(() => {}),
@@ -58,6 +60,7 @@
     layers,
     ports = BRIDGE,
     store = siteStore,
+    visits = siteVisits,
   }: {
     source: string;
     visible: boolean;
@@ -65,6 +68,8 @@
     layers: Pick<Layers, "open">;
     ports?: SitePagePorts;
     store?: SiteStore;
+    /** What the site's addresses name in the mirror, and the refresh after a visit (decisions §15). */
+    visits?: Pick<Visits, "answer" | "see" | "leave">;
   } = $props();
 
   const status = $derived(store.status.get(source) ?? null);
@@ -133,6 +138,29 @@
     });
   });
 
+  /** The mirrored item the site's address names, for *Open in knobas*; `null` while unknown or for nothing. */
+  let match = $state<UrlMatch | null>(null);
+  $effect(() => {
+    const url = status?.url ?? null;
+    if (!visible || url === null) {
+      match = null;
+      return;
+    }
+    let dead = false;
+    match = untrack(() => visits.answer(url)) ?? null;
+    void untrack(() => visits.see(source, url)).then((found) => {
+      if (!dead) match = found;
+    });
+    return () => {
+      dead = true;
+    };
+  });
+  // Leaving the site's page, or its close: the items it stood on are read again.
+  $effect(() => {
+    if (visible && status !== null) return;
+    untrack(() => void visits.leave(source));
+  });
+
   // ⌘R with the keyboard in knobas reloads the site, through the page's question (decisions §8).
   $effect(() => {
     if (!visible) return;
@@ -168,7 +196,7 @@
 </script>
 
 <div class="tf-site" data-source={source}>
-  <TfSiteBar {source} {name} {status} {setting} back={backOf} {store} />
+  <TfSiteBar {source} {name} {status} {setting} back={backOf} {store} {match} />
   <div class="tf-site-room" bind:this={room}>
     <TfSiteVeil
       {name}

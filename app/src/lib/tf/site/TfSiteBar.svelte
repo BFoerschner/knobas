@@ -24,6 +24,8 @@
   import { backStep } from "../page-name.svelte";
   import { answerAnyway, answerKeep, BRIDGE_ACTIONS, closeSite, reloadSite, siteBack, siteForward, type SiteActionPorts } from "./actions";
   import { siteStore, type SiteStore } from "./site.svelte";
+  import type { UrlMatch } from "../../ipc/entity";
+  import { entityAddress } from "../address";
 
   let {
     source,
@@ -33,6 +35,7 @@
     back,
     store = siteStore,
     actions = BRIDGE_ACTIONS,
+    match = null,
   }: {
     source: string;
     name: string;
@@ -42,6 +45,8 @@
     store?: SiteStore;
     /** What the bar's buttons do; the bridge's when omitted. */
     actions?: SiteActionPorts;
+    /** The mirrored item the address names: *Open in knobas* goes to its page (decisions §15). */
+    match?: UrlMatch | null;
   } = $props();
 
   /** The nameplate and *Back to*'s name are cut past this many characters, the whole name in the title. */
@@ -175,6 +180,9 @@
       </span>
     {/if}
     <span class="tf-site-acts">
+      {#if match !== null}
+        <a class="tf-btn tf-sm tf-ghost" href={entityAddress(match.kind, match.entity_id)}>Open in knobas</a>
+      {/if}
       <button type="button" class="tf-btn tf-sm tf-ghost" disabled={status?.url == null && !setting?.base} onclick={browse}>Open in browser</button>
       {#if back !== null}
         <a class="tf-esc" href={back.hash} onclick={goBack} title={back.name}>

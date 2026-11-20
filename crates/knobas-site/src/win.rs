@@ -14,17 +14,19 @@
 use std::rc::Rc;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
-    COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_PERMISSION_STATE_DENY,
-    COREWEBVIEW2_PHYSICAL_KEY_STATUS, COREWEBVIEW2_PROCESS_FAILED_KIND,
-    COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL, COREWEBVIEW2_WEB_ERROR_STATUS,
-    ICoreWebView2, ICoreWebView2_3, ICoreWebView2_14, ICoreWebView2Settings4,
+    COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
+    COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU, COREWEBVIEW2_KEY_EVENT_KIND,
+    COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+    COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_PHYSICAL_KEY_STATUS,
+    COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL,
+    COREWEBVIEW2_WEB_ERROR_STATUS, ICoreWebView2, ICoreWebView2_3, ICoreWebView2_11,
+    ICoreWebView2_14, ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Settings4,
 };
 use webview2_com::{
-    AcceleratorKeyPressedEventHandler, HistoryChangedEventHandler, NavigationCompletedEventHandler,
-    PermissionRequestedEventHandler, ProcessFailedEventHandler,
-    ServerCertificateErrorDetectedEventHandler, SourceChangedEventHandler,
-    TrySuspendCompletedHandler,
+    AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
+    HistoryChangedEventHandler, NavigationCompletedEventHandler, PermissionRequestedEventHandler,
+    ProcessFailedEventHandler, ServerCertificateErrorDetectedEventHandler,
+    SourceChangedEventHandler, TrySuspendCompletedHandler,
 };
 use windows_core::{BOOL, Interface, PWSTR};
 use wry::{MemoryUsageLevel, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
@@ -204,6 +206,17 @@ pub fn harden(view: &WebView, hooks: &Hooks) -> Hardened {
                 })),
                 &raw mut token,
             )?;
+            if let Ok(core11) = core.cast::<ICoreWebView2_11>() {
+                core11.add_ContextMenuRequested(
+                    &ContextMenuRequestedEventHandler::create(Box::new(|_, args| {
+                        if let Some(args) = args {
+                            trim_menu(&args)?;
+                        }
+                        Ok(())
+                    })),
+                    &raw mut token,
+                )?;
+            }
             Ok(())
         })()
     };
@@ -211,6 +224,53 @@ pub fn harden(view: &WebView, hooks: &Hooks) -> Hardened {
         tracing::warn!(%error, "a site's controller could not be fully set up");
     }
     Hardened
+}
+
+/// WebView2's page menu on a site, trimmed to `menu::SITE_KEPT`.
+///
+/// # Safety
+///
+/// On the main thread, with the live args of a `ContextMenuRequested`.
+unsafe fn trim_menu(args: &ICoreWebView2ContextMenuRequestedEventArgs) -> windows_core::Result<()> {
+    use crate::menu::{Item, removals, site_keeps};
+    // SAFETY: COM calls on the live args, the out-pointers ours.
+    unsafe {
+        let items = args.MenuItems()?;
+        let mut count = 0_u32;
+        items.Count(&raw mut count)?;
+        let mut read: Vec<(COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, String)> =
+            Vec::with_capacity(count as usize);
+        for index in 0..count {
+            let item = items.GetValueAtIndex(index)?;
+            let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND::default();
+            item.Kind(&raw mut kind)?;
+            let mut name = PWSTR::null();
+            item.Name(&raw mut name)?;
+            read.push((kind, webview2_com::take_pwstr(name)));
+        }
+        let menu: Vec<Item<'_>> = read
+            .iter()
+            .map(|(kind, name)| {
+                if *kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR {
+                    Item::Separator
+                } else if *kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU {
+                    Item::Submenu(name)
+                } else {
+                    Item::Command(name)
+                }
+            })
+            .collect();
+        let gone = removals(&menu, |name| site_keeps(name, cfg!(debug_assertions)));
+        for index in &gone {
+            if let Ok(index) = u32::try_from(*index) {
+                items.RemoveValueAtIndex(index)?;
+            }
+        }
+        if gone.len() == menu.len() {
+            args.SetHandled(true)?;
+        }
+    }
+    Ok(())
 }
 
 /// The address and history, read from the view.
