@@ -63,6 +63,9 @@ const STOPS = [
   ["assets wires", "#/asset/asset%3Anotebook", ""],
   // Last: the launcher stays open over whatever comes after it.
   ["launcher", "#/inbox", `document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })); await __a.sleep(800)`],
+  // Everything's rows with their evidence lines (the everything-search build, 2026-11-20): a list long enough to scroll,
+  // which the empty board above is not.
+  ["launcher everything", "#/tickets", `if (!document.querySelector("[role=dialog] input")) document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })); await __a.sleep(800); const box = document.querySelector("[role=dialog] input"); if (box) { if (localStorage.getItem("knobas.launcher.scope") !== "everything") box.dispatchEvent(new KeyboardEvent("keydown", { key: "d", metaKey: true, bubbles: true, cancelable: true })); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(box, "retry"); box.dispatchEvent(new InputEvent("input", { bubbles: true })); } await __a.sleep(1500)`],
 ];
 
 const AUDIT = `
