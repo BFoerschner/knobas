@@ -151,6 +151,7 @@
   import TfFileMore from "./TfFileMore.svelte";
   import TfFindBar from "../TfFindBar.svelte";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
+  import TfHtmlPage from "../render/TfHtmlPage.svelte";
   import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
   import { markSets, renderersFor } from "../../render/folder";
   import { folderRenderMarks, type FolderMarks } from "../../ipc/app";
@@ -2014,6 +2015,9 @@
       {:else if drawAs === "markdown"}
         <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} imagesOf={at} /></div>
         <TfFindBar root={() => rendered} within="in this file" />
+      {:else if drawAs === "html"}
+        <!-- A page (ADR-0046): sanitized, in the frame that runs no script and makes no request. -->
+        <TfHtmlPage html={drawn.text} title="{drawn.path.slice(drawn.path.lastIndexOf('/') + 1)}, drawn as a page" frame={(doc) => folderPorts.frame(doc)} room=".tf-fileview" />
       {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
         <TfDiagram engine={drawAs} code={drawn.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}

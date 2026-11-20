@@ -21,56 +21,28 @@
   (`render/frame-room.ts`).
 -->
 <script lang="ts" module>
-  import {
-    folderRender,
-    folderRenderFrame,
-    folderRenderLeave,
-    folderRenderOutput,
-    folderRenderStop,
-    type FolderAsk,
-    type FolderRenderView,
-  } from "../../ipc/app";
-  import { EVENTS } from "../../ipc";
-  import { listen as tauriListen } from "@tauri-apps/api/event";
   import { thousands } from "../counted";
 
-  /** What the pane reaches the backend through: the IPC, a fake in tests. */
-  export interface FolderRenderPorts {
-    render(at: FolderAsk): Promise<FolderRenderView>;
-    stop(entityId: string, renderer: string, folder: string): Promise<void>;
-    leave(entityId: string, renderer: string, folder: string): Promise<void>;
-    output(token: string): Promise<Uint8Array>;
-    frame(document: string): Promise<string>;
-    listen(event: string, handler: (event: { payload: unknown }) => void): Promise<() => void>;
-  }
-
-  export const ipcFolderRenderPorts: FolderRenderPorts = {
-    render: folderRender,
-    stop: folderRenderStop,
-    leave: folderRenderLeave,
-    output: folderRenderOutput,
-    frame: folderRenderFrame,
-    listen: (event, handler) => tauriListen(event, handler),
-  };
-
+  // The ports moved to the run's loop (`render/folder-run.svelte.ts`, ADR-0046); named here as before.
+  export { ipcFolderRenderPorts, type FolderRenderPorts } from "../../render/folder-run.svelte";
 </script>
 
 <script lang="ts">
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { FolderRenderer, FolderRenderMoved } from "../../ipc/app";
+  import type { FolderRenderer } from "../../ipc/app";
   import { failureLines, runningLine, tookLabel } from "../../render/folder";
-  import { frameDocument, type FrameBridge } from "../../render/frame";
+  import { FolderRun, ipcFolderRenderPorts, type FolderRenderPorts } from "../../render/folder-run.svelte";
+  import type { FrameBridge } from "../../render/frame";
   import { tauriBridge } from "../../render/command";
-  import { FRAME_SCHEME } from "../../render/frame";
-  import { fitRoom, zoomThrough } from "../../render/frame-room";
+  import { fitRoom } from "../../render/frame-room";
   import { typedImageBlob } from "../../render/image";
   import type { RenderPort } from "../../render/port";
   import { renderPort } from "../../render/port";
   import { ago } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
-  import { PressHold } from "../press-hold.svelte";
+  import TfHtmlPage from "./TfHtmlPage.svelte";
 
   let {
     entityId,
@@ -117,102 +89,19 @@
     now?: () => Date;
   } = $props();
 
-  let view = $state<FolderRenderView | null>(null);
-  let refused = $state<string | null>(null);
-  /** What the drawing's token read as: an image's URL, text, or the frame's address. */
-  let shown = $state<{ token: string; image?: string; text?: string; frame?: { src?: string; srcdoc?: string } } | null>(null);
+  // The ask and listen loop (`FolderRun`): open while shown, look when kept hidden, again on each move.
+  const run = new FolderRun(
+    () => ({ entityId, renderer: renderer.id, command: renderer.command, folder, commit, paths, start }),
+    untrack(() => ports),
+  );
+  const view = $derived(run.view);
+  const refused = $derived(run.refused);
+  const press = () => run.press();
+  /** What the drawing's token read as: an image's URL, text, or a page's source. */
+  let shown = $state<{ token: string; image?: string; text?: string; html?: string } | null>(null);
   let shownFailed = $state<string | null>(null);
   /** The image's zoom: `null` fits it to the pane. */
   let zoom = $state<number | null>(null);
-  /** Moves every second while a tool runs, so its time counts up. */
-  let tick = $state(0);
-  let askedAt = 0;
-
-  /** *Run again* and *Stop* are one button (focus stays on it), held after a press so a double press acts once. */
-  const hold = new PressHold();
-  function press() {
-    if (hold.held()) return;
-    hold.hold();
-    // The press answers in its own frame; the backend's answer (and its events) replace this.
-    if (view?.running) {
-      view = { ...view, running: null };
-      void ports.stop(entityId, renderer.id, folder);
-    } else {
-      if (view !== null) view = { ...view, running: { state: "queued" }, failure: null };
-      answer("again");
-    }
-  }
-
-  const ask = (kind: FolderAsk["ask"]) =>
-    ports.render({ entityId, renderer: renderer.id, folder, commit, paths, ask: kind });
-
-  function answer(kind: FolderAsk["ask"]) {
-    const asked = ++askedAt;
-    ask(kind).then(
-      (next) => {
-        if (asked !== askedAt) return;
-        view = next;
-        refused = null;
-      },
-      (cause: unknown) => {
-        if (asked === askedAt) refused = ipcErrorMessage(cause);
-      },
-    );
-  }
-
-  // The folder, the renderer or the commit changed: ask again, starting a run where the page is shown.
-  $effect(() => {
-    void [entityId, renderer.id, renderer.command, folder, commit, paths];
-    const kind = start ? "open" : "look";
-    untrack(() => {
-      view = null;
-      shown = null;
-      zoom = null;
-      answer(kind);
-    });
-  });
-
-  // A page shown again after it was kept hidden opens the render: a run starts where nothing is kept.
-  let wasShown = untrack(() => start);
-  $effect(() => {
-    const now = start;
-    if (now && !wasShown) untrack(() => answer("open"));
-    wasShown = now;
-  });
-
-  // The run moved or ended: ask again.
-  $effect(() => {
-    const at = { entityId, renderer: renderer.id, folder };
-    let live = true;
-    let off: (() => void) | null = null;
-    void ports
-      .listen(EVENTS.folderRender, ({ payload }) => {
-        const moved = payload as FolderRenderMoved;
-        if (moved.entity_id !== at.entityId || moved.renderer !== at.renderer || moved.folder !== at.folder) return;
-        if (moved.running !== null && view !== null) {
-          // Progress: the state alone, no ask.
-          view = { ...view, running: moved.running };
-          return;
-        }
-        untrack(() => answer("look"));
-      })
-      .then((unlisten) => {
-        if (live) off = unlisten;
-        else unlisten();
-      });
-    return () => {
-      live = false;
-      off?.();
-      void ports.leave(at.entityId, at.renderer, at.folder).catch(() => {});
-    };
-  });
-
-  // The run's clock.
-  $effect(() => {
-    if (view?.running?.state !== "running") return;
-    const every = setInterval(() => (tick += 1), 1000);
-    return () => clearInterval(every);
-  });
 
   // The drawing's bytes, read once per token.
   $effect(() => {
@@ -226,21 +115,20 @@
     let made: string | null = null;
     shownFailed = null;
     const kind = drawn.kind;
+    // A folder of files is no bytes: Settings draws its list, the Code page its tree (ADR-0046).
+    if (kind.kind === "folder") {
+      shown = { token: drawn.token };
+      return;
+    }
     ports
       .output(drawn.token)
-      .then(async (bytes) => {
+      .then((bytes) => {
         if (!live) return;
         if (kind.kind === "image") {
           made = URL.createObjectURL(typedImageBlob(bytes, kind.mime));
           shown = { token: drawn.token, image: made };
         } else if (kind.kind === "html") {
-          const document = frameDocument("html", new TextDecoder().decode(bytes));
-          if (!bridge.isTauri()) {
-            shown = { token: drawn.token, frame: { srcdoc: document } };
-            return;
-          }
-          const token = await ports.frame(document);
-          if (live) shown = { token: drawn.token, frame: { src: bridge.convertFileSrc(`folder.${token}`, FRAME_SCHEME) } };
+          shown = { token: drawn.token, html: new TextDecoder().decode(bytes) };
         } else if (kind.kind === "undrawable") {
           shown = { token: drawn.token };
         } else {
@@ -262,7 +150,7 @@
   const failed = $derived(failure === null || failure.why === "stopped" ? null : failureLines(failure));
   const stopped = $derived(failure?.why === "stopped");
   const short = (sha: string | null | undefined) => (sha ? sha.slice(0, 7) : null);
-  const elapsed = $derived((void tick, running?.state === "running" ? running.elapsed_ms + tick * 1000 : 0));
+  const elapsed = $derived(run.elapsed);
   const cut = $derived(folder.lastIndexOf("/") + 1);
   /** The text's lines, at most this many drawn: a generator's 64 MB of text is not a page. */
   const LINE_CAP = 20_000;
@@ -362,8 +250,8 @@
               {@attach sized(zoom)}
             />
           </div>
-        {:else if drawn.kind.kind === "html" && shown.frame !== undefined}
-          <iframe class="tf-rframe tf-frender-frame" sandbox="" title="{renderer.name}'s page" src={shown.frame.src} srcdoc={shown.frame.srcdoc} {@attach fitRoom(".tf-frender")} {@attach zoomThrough}></iframe>
+        {:else if drawn.kind.kind === "html" && shown.html !== undefined}
+          <TfHtmlPage html={shown.html} title="{renderer.name}'s page" frame={(doc) => ports.frame(doc)} room=".tf-frender" {bridge} extra="tf-frender-frame" />
         {:else if drawn.kind.kind === "markdown" && shown.text !== undefined}
           <div class="tf-rendered"><TfMarkdown text={shown.text} base={folder} {fileLink} {render} /></div>
         {:else if drawn.kind.kind === "text" && shown.text !== undefined}

@@ -119,6 +119,11 @@ export interface RepoRoute {
   /** Files: a folder drawn by a folder renderer (`render/<renderer id>/<folder>`, ADR-0044); absent for none. */
   render?: FolderRenderAt;
   /**
+   * Files: inside a folder's generated folder (`rendered/<renderer>/<folder>/…`, ADR-0046); absent for none. With it
+   * set, `path`, `line` and `place` are the generated file's, its path from the generated folder's top.
+   */
+  rendered?: FolderRenderAt;
+  /**
    * Files: a place inside a rendered file (`at/<place>/<path>`, ux18): an OpenAPI spec's operation (`get /pets/{id}`)
    * or schema (`schemas/Pet`), encoded whole; absent for none.
    */
@@ -144,6 +149,17 @@ const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit"]);
  */
 export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
+  if (rest[1] === RENDERED) {
+    const landing: RepoRoute = { repoId, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null };
+    // `rendered/<renderer>` with no folder is the Files landing.
+    if (!rest[2] || !rest[3]) return landing;
+    const rendered = { renderer: rest[2], folder: rest[3] === "." ? "" : rest[3] };
+    // The normal Files tails under it; anything else, or a rendering inside it, is the generated folder's landing.
+    const inner = readRepoRoute([rest[0] ?? "", ...rest.slice(4)]);
+    if (inner.tab !== "files" || inner.render !== undefined || inner.rendered !== undefined) return { ...landing, rendered };
+    const at: RepoRoute = { ...landing, path: inner.path, line: inner.line, rendered };
+    return inner.place === undefined ? at : { ...at, place: inner.place };
+  }
   if (rest[1] === RENDER && rest[2]) {
     const render = { renderer: rest[2], folder: rest.slice(3).join("/") };
     return { repoId, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null, render };
@@ -174,7 +190,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
 
 /** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
 export function knowsRepoTab(rest: readonly string[]): boolean {
-  return rest[1] === undefined || rest[1] === LINE || ((rest[1] === RENDER || rest[1] === AT) && !!rest[2]) || TABS.has(rest[1]);
+  return rest[1] === undefined || rest[1] === LINE || ((rest[1] === RENDER || rest[1] === RENDERED || rest[1] === AT) && !!rest[2]) || TABS.has(rest[1]);
 }
 
 /** The address of the repository page, a tab of it, or a place inside a tab. */
@@ -200,6 +216,22 @@ const LINE = "line";
 const RENDER = "render";
 /** The segment a place inside a rendered file starts with (ux18): not a tab, the Files tab lit. */
 const AT = "at";
+/** The segment a generated folder starts with (ADR-0046): not a tab, the Files tab lit. */
+const RENDERED = "rendered";
+
+/**
+ * The Files tab inside `folder`'s generated folder made by folder renderer `renderer` (ADR-0046): its landing, or the
+ * generated file at `path` (from the generated folder's top), at a line or a place where given. The folder is one
+ * segment encoded whole, `.` the top, so the address says where the folder stops and the file starts.
+ */
+export function renderedHash(repoId: string, renderer: string, folder: string, path?: string | null, at?: { line: number } | { place: string }): string {
+  const head = [repoHash(repoId), RENDERED, encodeURIComponent(renderer), folder === "" ? "." : encodeURIComponent(folder)];
+  if (path === undefined || path === null || path === "") return head.join("/");
+  const segments = path.split("/").map(encodeURIComponent);
+  if (at !== undefined && "line" in at) return [...head, LINE, String(at.line), ...segments].join("/");
+  if (at !== undefined && "place" in at) return [...head, AT, encodeURIComponent(at.place), ...segments].join("/");
+  return [...head, "files", ...segments].join("/");
+}
 
 /**
  * The Files tab with `folder` drawn by folder renderer `renderer` (ADR-0044). The renderer comes before the folder,
@@ -471,6 +503,21 @@ export function pickDefaultFile(entries: readonly TreeEntry[]): string | null {
     if (best === null || (markdown && !/\.(md|markdown|mdown|mkd)$/.test(best.toLowerCase()))) best = entry.name;
   }
   return best;
+}
+
+/**
+ * The file a generated folder's landing opens (ADR-0046): its README as `pickDefaultFile` picks one; else an
+ * `index.md` (or `.markdown`, `.mdown`, `.mkd`); else `index.html` or `index.htm`; else its one entry when that is a
+ * file; else none.
+ */
+export function pickMadeDefault(entries: readonly TreeEntry[]): string | null {
+  const readme = pickDefaultFile(entries);
+  if (readme !== null) return readme;
+  const files = entries.filter((e) => e.kind === "file");
+  const named = (re: RegExp) => files.find((e) => re.test(e.name.toLowerCase()))?.name ?? null;
+  const index = named(/^index\.(md|markdown|mdown|mkd)$/) ?? named(/^index\.html?$/);
+  if (index !== null) return index;
+  return entries.length === 1 && entries[0]?.kind === "file" ? entries[0].name : null;
 }
 
 /**

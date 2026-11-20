@@ -35,6 +35,9 @@ import {
   headLine,
   lineHash,
   pickDefaultFile,
+  pickMadeDefault,
+  knowsRepoTab,
+  renderedHash,
   readRepoRoute,
   repoHash,
   repoPrs,
@@ -613,4 +616,50 @@ test("a branch's standing from the mirror: its open pull request, and none offer
   expect(mirrorStanding(pulls, "bare")?.canOpenPr, "no tip held: nothing said ahead").toBe(false);
   expect(mirrorStanding(pulls, "main")?.canOpenPr).toBe(false);
   expect(mirrorStanding(pulls, "gone"), "a branch the mirror lacks is read as before").toBeUndefined();
+});
+
+test("a generated folder's addresses read back: its landing, a file, a line and a place (ADR-0046)", () => {
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  const landing = renderedHash(REPO, "site", "apps/order-flow");
+  expect(landing).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/rendered/site/apps%2Forder-flow");
+  expect(readRepoRoute(segments(landing))).toEqual({
+    repoId: REPO,
+    tab: "files",
+    path: null,
+    line: null,
+    commit: null,
+    branch: null,
+    base: null,
+    pipeline: null,
+    rendered: { renderer: "site", folder: "apps/order-flow" },
+  });
+  // The top folder is `.`.
+  expect(renderedHash(REPO, "site", "")).toMatch(/\/rendered\/site\/\.$/);
+  expect(readRepoRoute(segments(renderedHash(REPO, "site", ""))).rendered).toEqual({ renderer: "site", folder: "" });
+  // A file with a space and a `%`, nested: the folder stops where its segment ends.
+  const file = renderedHash(REPO, "site", "apps/order-flow", "docs/a b%.md");
+  expect(file).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/rendered/site/apps%2Forder-flow/files/docs/a%20b%25.md");
+  expect(readRepoRoute(segments(file))).toMatchObject({ tab: "files", path: "docs/a b%.md", rendered: { renderer: "site", folder: "apps/order-flow" } });
+  const line = renderedHash(REPO, "site", "a/b", "c.md", { line: 12 });
+  expect(readRepoRoute(segments(line))).toMatchObject({ path: "c.md", line: 12, rendered: { folder: "a/b" } });
+  const place = renderedHash(REPO, "site", "a", "openapi.yaml", { place: "get /pets/{id}" });
+  expect(readRepoRoute(segments(place))).toMatchObject({ path: "openapi.yaml", place: "get /pets/{id}", rendered: { folder: "a" } });
+  // `rendered/x` with no folder is the Files landing; a rendering inside a rendering is the generated landing.
+  expect(readRepoRoute([REPO, "rendered", "x"])).toMatchObject({ tab: "files", path: null });
+  expect(readRepoRoute([REPO, "rendered", "x"]).rendered).toBeUndefined();
+  expect(readRepoRoute([REPO, "rendered", "x", "a", "rendered", "y", "b", "files", "c.md"])).toMatchObject({ path: null, rendered: { renderer: "x", folder: "a" } });
+  expect(readRepoRoute([REPO, "rendered", "x", "a", "render", "y", "b"])).toMatchObject({ path: null, rendered: { renderer: "x", folder: "a" } });
+  expect(readRepoRoute([REPO, "rendered", "x", "a", "commits"])).toMatchObject({ tab: "files", path: null });
+  expect(knowsRepoTab([REPO, "rendered", "x", "a"])).toBe(true);
+});
+
+test("a generated folder's landing opens its README, then an index page, then its one file (ADR-0046)", () => {
+  const file = (name: string) => ({ name, kind: "file" as const, size: 1, section: `file:${name}` });
+  const dir = (name: string) => ({ name, kind: "dir" as const, size: null, section: `files:${name}` });
+  expect(pickMadeDefault([file("index.html"), file("index.md"), file("README.md")])).toBe("README.md");
+  expect(pickMadeDefault([file("index.html"), file("index.md")])).toBe("index.md");
+  expect(pickMadeDefault([file("a.txt"), file("Index.HTM")])).toBe("Index.HTM");
+  expect(pickMadeDefault([file("out.png")])).toBe("out.png");
+  expect(pickMadeDefault([dir("img")])).toBeNull();
+  expect(pickMadeDefault([file("a.txt"), file("b.txt")])).toBeNull();
 });

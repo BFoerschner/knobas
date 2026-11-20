@@ -80,3 +80,14 @@ test("a renderer registered later goes ahead of Source, by file pattern and by f
   }
   expect(names(renderersFor({ path: "docs/architecture.box", binary: false }))).toEqual(["Source"]);
 });
+
+test("a repository's own .html opens as Source and offers Page; Page comes after Source (ADR-0046)", () => {
+  const offered = renderersFor({ path: "site/index.html", binary: false });
+  expect(offered[0]?.id).toBe("source");
+  expect(offered.map((r) => r.name)).toEqual(["Source", "Page"]);
+  expect(renderersFor({ path: "a.HTM", binary: false }).map((r) => r.id)).toEqual(["source", "html"]);
+  // A renderer registered later still goes before Source, and so before Page.
+  const off = register({ id: "x", name: "X", patterns: ["*.html"], fences: [], input: "text", output: "html", diff: false });
+  expect(renderersFor({ path: "a.html", binary: false }).map((r) => r.id)).toEqual(["x", "source", "html"]);
+  off();
+});
