@@ -779,22 +779,17 @@ impl Runs {
             )
             .await;
         let took_ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
-        // A run stopped or replaced leaves nothing behind it. A generated
-        // folder ends its run only once it is placed and remembered: an ask
-        // between would see neither a run nor a drawing.
-        let placing = matches!(ended, Ok(Output::Folder(_)));
-        let still_ours = {
-            let mut state = self.lock();
-            match state.going.get(&slot) {
-                Some(going) if going.key == key => {
-                    if !placing {
-                        state.going.remove(&slot);
-                    }
-                    true
-                }
-                _ => false,
-            }
-        };
+        // A run stopped or replaced leaves nothing behind it. A run ends only
+        // once what it answered is kept: a generated folder placed and
+        // remembered, a drawing remembered and written, a failure recorded.
+        // An ask between would see neither a run nor its answer, and a test
+        // waiting for the run to end read the disk before the drawing was on
+        // it (the ux23 gate's loaded suite, 2026-11-20).
+        let still_ours = self
+            .lock()
+            .going
+            .get(&slot)
+            .is_some_and(|going| going.key == key);
         if cancel.is_cancelled() || !still_ours {
             if still_ours {
                 self.end_going(&slot, &key);
@@ -869,9 +864,11 @@ impl Runs {
                     })
                     .await;
                 }
+                self.end_going(&slot, &key);
             }
             Err(failure) => {
                 self.lock().failures.insert(key.clone(), failure);
+                self.end_going(&slot, &key);
             }
         }
         self.tell(&slot, None);
@@ -1466,19 +1463,28 @@ mod tests {
         }
     }
 
-    /// Ask until the slot runs no more, as the page does on each event.
+    /// Ask until the slot runs no more, as the page does on each event: the
+    /// run's own events, not a clock. A 20 s deadline that answered whatever
+    /// was drawn read a slow second run as the first one's drawing under the
+    /// full suite's load (the ux23 gate, 2026-11-20).
     async fn settled(
         runs: &Arc<Runs>,
         r: &FolderRenderer,
         files: &[(&str, &str)],
     ) -> FolderRenderView {
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let moved = Arc::new(tokio::sync::Notify::new());
+        let told = Arc::clone(&moved);
+        runs.on_moved(move |_| told.notify_waiters());
         loop {
+            // Waiting before asking, so an event between the two is not missed.
+            let next = moved.notified();
+            tokio::pin!(next);
+            next.as_mut().enable();
             let view = runs.view(&slot(), r, Ok(resolved(r, files)), Ask::Look);
-            if view.running.is_none() || Instant::now() > deadline {
+            if view.running.is_none() {
                 return view;
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            next.await;
         }
     }
 
