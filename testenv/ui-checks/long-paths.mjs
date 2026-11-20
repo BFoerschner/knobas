@@ -101,6 +101,8 @@ const SCREENS = [
   { id: "build-chain-pinned", route: PIPELINE, press: ".tf-chainsign .tf-signbtn", sizes: BUILD_SIZES },
   { id: "build-run", route: RUN, wait: 300, sizes: BUILD_SIZES },
   { id: "build-run-unfolded", route: RUN, wait: 300, press: ".tf-chainfold", sizes: BUILD_SIZES },
+  // A source's site at a long address (ADR-0048): the host whole, the rest given up at its end, the whole in the title.
+  { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
 ];
 
 // Runs in the page: what of a path's text leaves its boxes, and which boxes scroll sideways.
@@ -127,7 +129,7 @@ const CHECK = String.raw`(() => {
       for (let e = node.parentElement; e; e = e.parentElement) {
         const s = getComputedStyle(e);
         if (s.clipPath !== "none" || s.visibility === "hidden" || s.display === "none") hidden = true;
-        if (e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head")) cutOnPurpose = true;
+        if (e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head") || e.classList.contains("tf-site-path")) cutOnPurpose = true;
         // A renderer's name, no path in it, in a box that ends it in an ellipsis: cut on purpose, whole in a title.
         if (name && s.textOverflow === "ellipsis" && s.overflowX !== "visible") cutOnPurpose = true;
       }
@@ -161,7 +163,7 @@ const CHECK = String.raw`(() => {
     // Strict: an ellipsis shows for a shortfall under a pixel, which rounds away in a +1 margin.
     if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth || !MARK.test(e.textContent) || e.closest(".tf-code")) continue;
     const s = getComputedStyle(e);
-    if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head") || e.closest(".tf-sr")) continue;
+    if (s.textOverflow !== "ellipsis" || e.classList.contains("tf-path-head") || e.classList.contains("tf-toast-head") || e.classList.contains("tf-site-path") || e.closest(".tf-sr")) continue;
     misses.push({ kind: "cut", at: where(e), text: e.textContent.trim().slice(-48), over: e.scrollWidth - e.clientWidth });
   }
   const scrolls = [];
