@@ -252,7 +252,16 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">Your working tree changes nothing against {drawnFor ?? into}.</div>
         {:else if files !== null}
-          <TfDiffView {files} {context} {fill} {counted} calm={!reading} {sideNames} epoch={working?.stamp ?? null} openAt={{ entityId: repoId, at: null }} />
+          <TfDiffView
+            {files}
+            {context}
+            {fill}
+            {counted}
+            calm={!reading}
+            {sideNames}
+            epoch={working?.stamp ?? null}
+            folders={range === null ? null : { entityId: repoId, before: range.base, after: WORKING_TREE }}
+            openAt={{ entityId: repoId, at: null }} />
         {/if}
       </TfWaiting>
     {/if}

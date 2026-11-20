@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile } from "../../ipc/entity";
-import { badgeOf, collapsedAtFirst, LOAD_OVER, needsLoad, treeOf } from "./tree";
+import { badgeOf, collapsedAtFirst, LOAD_OVER, needsLoad, treeOf, type TreeRow } from "./tree";
 
 const file = (path: string, more: Partial<DiffFile> = {}): DiffFile => ({
   path,
@@ -15,9 +15,12 @@ const file = (path: string, more: Partial<DiffFile> = {}): DiffFile => ({
   ...more,
 });
 
+const said = (row: TreeRow) =>
+  row.kind === "dir" ? `[${row.path}]` : row.kind === "gdir" ? `<${row.group.folder}>` : row.kind === "gband" ? `band` : `${row.made ? "made " : ""}${row.depth}:${row.name}`;
+
 test("the tree groups files under their directory, each named in full, root files first", () => {
   const rows = treeOf([file("src/retry.rs"), file("Cargo.lock"), file(".gitea/workflows/ci.yml"), file("src/generated/schema.rs"), file("src/a.rs")]);
-  expect(rows.map((row) => (row.kind === "dir" ? `[${row.path}]` : `${row.depth}:${row.name}`))).toEqual([
+  expect(rows.map(said)).toEqual([
     "0:Cargo.lock",
     "[.gitea/workflows]",
     "1:ci.yml",
@@ -27,6 +30,15 @@ test("the tree groups files under their directory, each named in full, root file
     "[src/generated]",
     "1:schema.rs",
   ]);
+});
+
+test("a grouped folder sorts with the directories by its path: its row, its band, then its generated files (ux26)", () => {
+  const made = (path: string) => ({ ...file(path), key: `docs\u0000${path}` });
+  const rows = treeOf([file("README.md"), file("src/a.rs"), file("ci/run.yml")], [{ folder: "docs", files: [made("index.md"), made("steps/03-retry.md")] }]);
+  expect(rows.map(said)).toEqual(["0:README.md", "[ci]", "1:run.yml", "<docs>", "band", "made 1:index.md", "made 1:steps/03-retry.md", "[src]", "1:a.rs"]);
+  // A folder of the same path as a directory sorts right after it; the top folder before every directory.
+  expect(treeOf([file("docs/x.md")], [{ folder: "docs", files: [] }]).map(said)).toEqual(["[docs]", "1:x.md", "<docs>", "band"]);
+  expect(treeOf([file("a/b.md")], [{ folder: "", files: [] }]).map(said)).toEqual(["<>", "band", "[a]", "1:b.md"]);
 });
 
 test("a badge says what happened to the file", () => {

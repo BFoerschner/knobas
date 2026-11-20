@@ -337,6 +337,7 @@
           {fill}
           epoch={workingAt?.stamp ?? null}
           sideNames={range === null ? null : () => ({ old: endWords(range!.base), new: working ? "working tree" : endWords(range!.head) })}
+          folders={range !== null && readAt === "checkout" ? { entityId: range.repository, before: range.base, after: working ? WORKING_TREE : range.head } : null}
           openAt={{ entityId: repoId, at: working ? null : head }}
           tools={readAt === null ? null : whitespace}
         />

@@ -37,6 +37,9 @@ const STOPS = [
   // A folder's generated folder (ADR-0046, `&fake-rerender` on the fixture): the tree with its band, the rail down the
   // generated rows and a big folder of them open, and the made bar over the file.
   ["a generated folder", "#/repo/mock%3Atidewater%2Fpayout-service/rendered/site/docs", `await __a.sleep(2600); __a.vis('.tf-fdir[data-path="docs/bulk"]')[0]?.click(); await __a.sleep(900)`],
+  // A folder renderer in a comparison (ux26, `&fake-rerender`): Compare with the working tree, *Rendered* on, `docs` run
+  // on both sides, its generated files' cards inset under its bar with the rail, and the rail's generated rows.
+  ["a folder in a comparison", "#/repo/mock%3Atidewater%2Fpayout-service/compare/~working-tree", `await __a.sleep(900); __a.vis(".tf-drendered")[0]?.click(); await __a.sleep(700); __a.vis(".tf-dfolder .tf-madebar-run")[0]?.click(); await __a.sleep(3500)`],
   ["a pull request", "#/code/prs", `__a.vis("main a[href*='/pr/']")[0]?.click(); await __a.sleep(2500)`],
   ["builds", "#/builds", ""],
   ["a pipeline", "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", ""],

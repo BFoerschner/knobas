@@ -439,6 +439,17 @@ const PAGES = [
     { id: "rerender-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 2500 }], press: { sel: ".tf-madebar-run", text: "Run again" } },
     { id: "rerender-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 2500 }], press: { sel: ".tf-madebar-run", text: "Run again" }, rows: ".tf-madebar-run" },
   ] },
+  // The folder's pick (ux26, ruling 10): two renderers take `docs` and none is picked, so its glyph opens the pick's menu,
+  // which stands inside the window with a 60-character name; a choice by key lands on its generated folder.
+  { page: "A folder two renderers take", route: REPO, trips: [
+    { id: "render-with-pick", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-rerender&fake-rerender-two&fake-long-paths", prep: [{ wait: 900 }, { click: '.tf-fdir[data-path="docs"] + .tf-frmark button' }, { wait: 300 }], fits: ".tf-frpick-m", press: { sel: ".tf-frpick-m button", starts: "Docs diagram" }, leaves: true },
+  ] },
+  // A folder renderer in a comparison (ux26, the decision list's sections 9 and 10): *Rendered* on, `docs` grouped under its
+  // bar; *Run* is one press, its words turning to *Stop* in place with focus on it.
+  { page: "A folder in a comparison", route: `${REPO}/compare/~working-tree`, trips: [
+    { id: "folder-compare-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 900 }, { click: ".tf-drendered" }, { wait: 600 }], press: { sel: ".tf-dfolder .tf-madebar-run", text: "Run" } },
+    { id: "folder-compare-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-rerender", prep: [{ wait: 900 }, { click: ".tf-drendered" }, { wait: 600 }], press: { sel: ".tf-dfolder .tf-madebar-run", text: "Run" }, rows: ".tf-dfolder .tf-madebar-run" },
+  ] },
   { page: "Settings, adding a folder renderer", route: "settings/renderers/folder/add", trips: [
     { id: "folder-try-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
     { id: "folder-try-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },

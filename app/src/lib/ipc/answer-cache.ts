@@ -172,6 +172,10 @@ export const QUIET: ReadonlySet<string> = new Set([
   "folder_render_file_bytes",
   "folder_render_store",
   "folder_render_open",
+  // A comparison's two generated folders compared, and the renderer picked per folder (ux26): neither moves the mirror.
+  "folder_render_compare",
+  "folder_render_picks",
+  "set_folder_render_pick",
   "docs_search",
   "search",
   "launcher_home",

@@ -118,11 +118,33 @@ export type DrawnFile = DiffFile & {
   half?: "staged" | "unstaged";
   /** Worked out here (`lineDiff`) with a changed middle too long to match line by line: drawn removed whole, then added whole. */
   coarse?: true;
+  /**
+   * What tells it apart where its label and path may repeat (ux26): a generated file of a folder's generated compare is
+   * `<folder>\u0000<generated path>`, so two folders' `index.md` do not collide.
+   */
+  key?: string;
+  /**
+   * A generated file of a folder's generated compare (ux26, ruling 7): its two sides are read from the two generated
+   * folders by their tokens (`null`: not on that side), or, for a renderer that draws one output, the two outputs.
+   */
+  made?: MadeSides;
 };
 
-/** What tells a drawn file apart from the others: its label, else its path. */
+/** Where a generated file's two sides are read (ux26): each side's token, and whether it is a renderer's single output. */
+export interface MadeSides {
+  /** The folder whose generated compare it is in. */
+  folder: string;
+  old: string | null;
+  new: string | null;
+  /** A single-output renderer's drawing (`folder_render_output`), not a file of a generated folder. */
+  single: boolean;
+  /** Each side's size, where the compare said it. */
+  sizes: { old: number | null; new: number | null };
+}
+
+/** What tells a drawn file apart from the others: its key, else its label, else its path. */
 export function keyOf(file: DrawnFile): string {
-  return file.label ?? file.path;
+  return file.key ?? file.label ?? file.path;
 }
 
 /**

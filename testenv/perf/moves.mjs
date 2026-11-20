@@ -72,6 +72,13 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
 /** Where a run's answer lands and what says it did: the tree's generated rows (`answer` above). */
 const RUN_ANSWER = { in: `${shown} .tf-ftree`, changes: `${shown} .tf-ftree a[data-made]`, hold: '.tf-fdir[data-path="docs"], .tf-fband' };
 
+/**
+ * A folder's generated compare's answer in a comparison (ux26): the cards column and the rail take what it brings anew in
+ * its frame (the rows under the pressed folder's group move down for its rows, by design), the pressed folder's bar and
+ * its row and band in the rail held to their boxes; `changes` says the answer drew.
+ */
+const FOLDER_ANSWER = (changes) => ({ in: `${shown} .tf-dgrid`, changes, hold: '.tf-dfolder[data-folder="docs"] .tf-dfbar, .tf-dgdir[data-folder="docs"], .tf-dgband[data-folder="docs"]' });
+
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
   { name: "tickets-list", start: "#/tickets", press: `${shown} button, ${shown} [role=tab]`, text: "List", hash: "#/tickets", away: "time", returnBy: { nav: "tickets" } },
@@ -112,6 +119,13 @@ const PLACES = [
   { name: "rerender-graft", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}`, press: `${shown} .tf-fdir[data-path="docs"] + .tf-frmark a`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}` },
   { name: "rerender-file", fixture: true, fake: "fake-rerender", start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-ftree a[data-made][href$="/files/page.html"]`, hash: `#/repo/${REPO}/rendered/site/docs/files/`, away: `#/repo/${REPO}/rendered/site/docs` },
   { name: "rerender-again", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-madebar-run`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}/rendered/site/docs` },
+  // A folder renderer in a comparison (ux26, the decision list's sections 9 and 10): with *Rendered* on, Compare with
+  // the working tree groups `docs` under its bar; *Run* runs both sides (each 1.5 s, so both land late), and their
+  // answer (the generated cards, the rail's generated rows) lands in one frame with the bar and the folder's row and band
+  // held. Then a side that fails (its stderr under the bar) and two sides that made the same (the note's words).
+  { name: "folder-compare-answer", fixture: true, fake: "fake-rerender", store: { "knobas.diff-rendered": "1" }, answer: FOLDER_ANSWER(`${shown} .tf-dunder .tf-diff .tf-fh`), start: `#/repo/${REPO}/compare/~working-tree`, press: `${shown} .tf-dfolder .tf-madebar-run:not([disabled])`, hash: null, ready: `${shown} .tf-dfolder`, away: `#/repo/${REPO}/compare/~working-tree` },
+  { name: "folder-compare-failed", fixture: true, fake: "fake-rerender&fake-rerender-fail", store: { "knobas.diff-rendered": "1" }, answer: FOLDER_ANSWER(`${shown} .tf-dffail`), start: `#/repo/${REPO}/compare/~working-tree`, press: `${shown} .tf-dfolder .tf-madebar-run:not([disabled])`, hash: null, ready: `${shown} .tf-dfolder`, away: `#/repo/${REPO}/compare/~working-tree` },
+  { name: "folder-compare-same", fixture: true, fake: "fake-rerender&fake-rerender-same", store: { "knobas.diff-rendered": "1" }, answer: FOLDER_ANSWER(`${shown} .tf-dfnote`), start: `#/repo/${REPO}/compare/~working-tree`, press: `${shown} .tf-dfolder .tf-madebar-run:not([disabled])`, hash: null, ready: `${shown} .tf-dfolder`, away: `#/repo/${REPO}/compare/~working-tree` },
   { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
   { name: "repo-commit", optional: "real", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
   // A rendered side that lands late (the stage pass of ux26, 2026-11-20): *Rendered* on the commit's README draws the

@@ -585,8 +585,13 @@ past the text's hold, so each drawing lands with the page under it drawn and mus
 with each side's bytes 400 ms late, and `repo-local-rendered` the same on Local changes' Markdown file, so each side lands
 inside the stage and nothing outside it may move; `repo-compare-working` opens Compare with *From* the working tree, its
 names 60 ms late and its counts 300 ms late, which fill the rows in place (ux26,
-`docs/decisions/2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md`). Such a place is the
-fixture's only; `--real` leaves it out.
+`docs/decisions/2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-working-tree.md`); `folder-compare-answer`,
+`folder-compare-failed` and `folder-compare-same` open that comparison with *Rendered* on (`store`), `docs` grouped
+under its bar by `?fake-rerender`'s *Low-code site*, and press *Run*: both sides run 1.5 s and their answer (the
+generated cards and the rail's generated rows, a side's stderr under the bar, the note's words) is a run's answer, the
+pressed folder's bar, row and band held (`FOLDER_ANSWER`); the rows under the group move down for its rows in that
+frame, by design, and nowhere else (`?fake-rerender-fail` fails the working tree's side, `?fake-rerender-same` makes both
+sides the same). Such a place is the fixture's only; `--real` leaves it out.
 
 ```sh
 just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25

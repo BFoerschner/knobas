@@ -239,6 +239,7 @@
     context={commitContext(ports.entityView, commitId, parent, ports.fileBytes, ports.piped)}
     sideNames={() => ({ old: parent === null ? "the parent" : endWords(shaOfCommit(parent) ?? "the parent"), new: whole === null ? "this commit" : endWords(whole) })}
     openAt={whole === null ? null : { entityId: repoId, at: whole }}
+    folders={readAt === "checkout" && whole !== null && parent !== null && shaOfCommit(parent) !== null ? { entityId: repoId, before: shaOfCommit(parent)!, after: whole } : null}
     tools={readAt === null ? null : whitespace}
   />
 {/if}

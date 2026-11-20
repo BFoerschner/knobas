@@ -94,6 +94,14 @@ const SCREENS = [
   { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
   { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", press: "2 left out" },
   { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open button" },
+  // A folder renderer in a comparison (ux26): Compare with the working tree, *Rendered* on, `docs` grouped under its bar with
+  // the 60-character renderer's name, the rail's band, the bar in each state, the generated files' paths (one of 140
+  // characters), and the glyph's menu where two renderers take the folder.
+  { id: "compare-folder-idle", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender", press: ".tf-drendered", wait: 600 },
+  { id: "compare-folder-running", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender", press: ".tf-drendered", then: [".tf-dfolder .tf-madebar-run"], wait: 300 },
+  { id: "compare-folder-made", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender", press: ".tf-drendered", then: [".tf-dfolder .tf-madebar-run"], wait: 3500 },
+  { id: "compare-folder-failed", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender&fake-rerender-fail", press: ".tf-drendered", then: [".tf-dfolder .tf-madebar-run"], wait: 3500 },
+  { id: "compare-folder-pick", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender&fake-rerender-two", press: ".tf-drendered", then: [".tf-dgband", ".tf-dfmark"], wait: 300 },
   { id: "settings-renderers", route: "settings/renderers", tables: ".tf-stg-body .tf-tbl" },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
   { id: "settings-folder-renderer", route: "settings/renderers/folder/orchestra-map" },

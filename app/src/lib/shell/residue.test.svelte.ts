@@ -426,6 +426,9 @@ const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfHtmlPage = (await import("../tf/render/TfHtmlPage.svelte")).default;
 const TfMadeBar = (await import("../tf/render/TfMadeBar.svelte")).default;
 const TfMadeList = (await import("../tf/render/TfMadeList.svelte")).default;
+const TfDiffFolder = (await import("../tf/diff/TfDiffFolder.svelte")).default;
+const { FolderCompare } = await import("../render/folder-compare.svelte");
+const { fakeCompareBackend } = await import("../render/folder-compare.test-support");
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
@@ -1838,6 +1841,21 @@ const CASES: Case[] = [
         props: { folder: "src", renderer: "site", name: "Site", view: null, onpress: () => {}, onreal: () => {} },
       }),
     }),
+  },
+  {
+    /** A grouped folder's bar in a comparison (ux26): its effect opens what a failure that answers a press said. */
+    name: "TfDiffFolder",
+    source: "lib/tf/diff/TfDiffFolder.svelte",
+    open: (target) => {
+      const fake = fakeCompareBackend();
+      const renderer = { id: "site", name: "Site", command: "site {path} --out {outdir}", holds: [], folders: ["docs"], output: "folder" as const, timeout_secs: 30 };
+      // The compare is the view's (an effect root per grouped folder); here it outlives the bar, as the view's does.
+      let compare!: InstanceType<typeof FolderCompare>;
+      $effect.root(() => {
+        compare = new FolderCompare(() => ({ entityId: "repo", renderer, folder: "docs", before: "a".repeat(40), after: "~working-tree" }), fake.ports);
+      });
+      return { app: mount(TfDiffFolder, { target, props: { folder: "docs", renderer, compare, ends: { old: "main", new: "your working tree" }, onreal: () => {} } }) };
+    },
   },
   {
     /** The renderer switcher (#2263): open, its menu registers a layer and a window click listener. */

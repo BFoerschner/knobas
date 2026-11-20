@@ -13,9 +13,18 @@ import type { FolderFailure, FolderMarks, FolderRenderer, FolderRunState, ReadFr
 import { secondsLabel } from "../time/format";
 import { thousands } from "../tf/counted";
 
+/** Each glob compiled once: a comparison asks every changed folder of a list (ux26). */
+const globs = new Map<string, RegExp>();
+
 function glob(pattern: string): RegExp {
-  const body = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
-  return new RegExp(`^${body}$`, "i");
+  let made = globs.get(pattern);
+  if (made === undefined) {
+    const body = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+    made = new RegExp(`^${body}$`, "i");
+    if (globs.size >= 500) globs.clear();
+    globs.set(pattern, made);
+  }
+  return made;
 }
 
 /** Whether folder glob `pattern` takes the folder at `path` (`""` the top). */

@@ -127,3 +127,9 @@ function withRow(list: readonly RendererDefault[], pattern: string, change: Part
   if (at === -1) return [...list, { pattern, renderer: "", pipeline: null, ...change }];
   return list.map((d, i) => (i === at ? { ...d, ...change } : d));
 }
+
+/** A page in a generated folder opens as one, after the person's own defaults (ADR-0046); a comparison's generated files too (ux26). */
+export const MADE_DEFAULTS: readonly RendererDefault[] = [
+  { pattern: "*.html", renderer: "html", pipeline: null },
+  { pattern: "*.htm", renderer: "html", pipeline: null },
+];

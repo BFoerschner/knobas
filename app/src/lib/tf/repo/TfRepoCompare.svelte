@@ -1043,6 +1043,7 @@
               {counted}
               calm={!reading}
               sideNames={range === null ? null : sideNamesOf(range)}
+              folders={range !== null && fillAt?.local === true ? { entityId: range.repository, before: range.base, after: range.head } : null}
               openAt={head === null ? null : { entityId: repoId, at: head }} />
           {/key}
         {/if}

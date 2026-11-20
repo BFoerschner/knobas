@@ -17,6 +17,12 @@
  * fence, that page, a PNG, a PDF, an HTML page, an OpenAPI file and `bulk/` with 3,000 files, and leaves out two
  * entries. *Run again* answers a second tree with `CHANGELOG.md` added and `docs/old.md` gone. With `?fake-long-paths`
  * its name is 60 characters and the folder holds a 140-character path.
+ *
+ * A comparison's sides (ux26) run in lanes of their own (`cmp:<end>`), each a slot of its own. The working tree's lane
+ * makes a generated folder that differs from a commit's in three files, adds one and holds one that differs only in
+ * line endings; two commits' lanes make the same. `folder_render_compare` compares two generated folders as the backend
+ * does. `?fake-rerender-same` makes the working tree's the same too, `?fake-rerender-fail` fails the working tree's
+ * lane, and `?fake-rerender-two` adds a second renderer on `docs`, *Docs diagram*, so the folder's pick has a choice.
  */
 import type { FolderAsk, FolderDrawn, FolderRenderer, FolderRendererDraft, FolderRenderView, MadeStore, MadeTree } from "../../../ipc/app";
 import type { ViewBlock } from "../../../ipc/generated/entity";
@@ -43,11 +49,14 @@ let storeSet: string | null = null;
 let longMade = false;
 /** `?fake-rerender-files=<n>`: how many files `bulk/` holds (3,000 by default), for the timing of a big generated folder. */
 let bulkFiles = 3000;
+/** `?fake-rerender-same` and `?fake-rerender-fail` (ux26): the working tree's lane makes the same as a commit's, or fails. */
+let laneSame = false;
+let laneFails = false;
 
 const enc = (text: string) => new TextEncoder().encode(text);
 
 /** The generated folder of run `n` (from 1) of *Low-code site* on `folder`: path to bytes. */
-export function madeFiles(folder: string, n: number, long: boolean): Map<string, Uint8Array> {
+export function madeFiles(folder: string, n: number, long: boolean, working = false): Map<string, Uint8Array> {
   const files = new Map<string, Uint8Array>([
     [
       "README.md",
@@ -67,6 +76,16 @@ export function madeFiles(folder: string, n: number, long: boolean): Map<string,
   else files.set("CHANGELOG.md", enc(`# Changes\n\nRun ${n}.\n`));
   for (let i = 1; i <= bulkFiles; i++) files.set(`bulk/part-${String(i).padStart(4, "0")}.txt`, enc(`part ${i} of the bulk\n`));
   if (long) files.set(`docs/${"a-very-long-generated-folder-name-for-the-long-paths-check/".repeat(2)}and-a-long-file-name-at-the-end.md`.slice(0, 140), enc("# Long\n"));
+  if (working) {
+    // The working tree's generated folder (ux26): three files differ, one is new, one differs only in line endings.
+    files.set("docs/steps.md", enc("# Steps\n\n1. Take the order.\n2. Take the payment.\n3. Retry a failed payment three times.\n4. Ship it.\n\nBack to [the start](../README.md).\n"));
+    files.set("bulk/part-0001.txt", enc("part 1 of the bulk, regenerated\n"));
+    files.set("img/flow.png", Uint8Array.from([...PNG.slice(0, -1), 0x83]));
+    files.set("docs/alert.md", enc("# Alert\n\nThe payments channel hears when the last retry fails.\n"));
+    files.set("bulk/part-0002.txt", enc("part 2 of the bulk\r\n"));
+    // `?fake-long-paths`: the 140-character generated path differs too, so a comparison lists it.
+    if (long) files.set(`docs/${"a-very-long-generated-folder-name-for-the-long-paths-check/".repeat(2)}and-a-long-file-name-at-the-end.md`.slice(0, 140), enc("# Long, regenerated\n"));
+  }
   return files;
 }
 
@@ -128,7 +147,8 @@ export function fakePage(folder: string, command: string): string {
   return `<style>${css}</style><h1>${folder || "The top folder"}</h1><main>${has("wide") ? '<div class="tf-wide"></div>' : ""}<ol id="rows">${rows}</ol><p id="end">The end.</p></main>`;
 }
 
-const slotOf = (at: Pick<FolderAsk, "entityId" | "renderer" | "folder">) => `${at.entityId}\u0000${at.renderer}\u0000${at.folder}`;
+/** A slot by its lane too (ux26): a comparison's sides never share the Files tab's. */
+const slotOf = (at: Pick<FolderAsk, "entityId" | "renderer" | "folder" | "lane">) => `${at.entityId}\u0000${at.renderer}\u0000${at.folder}\u0000${at.lane ?? ""}`;
 
 function tell(at: Pick<FolderAsk, "entityId" | "renderer" | "folder" | "lane">, state: FolderRenderView["running"]) {
   bridge?.emit("folder-render:moved", { entity_id: at.entityId, renderer: at.renderer, folder: at.folder, running: state, lane: at.lane ?? "" });
@@ -161,9 +181,9 @@ function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {
 let seeded: FolderRenderer[] = [];
 
 keepSeed(drawn, bytes, failed, running, made, runsOf);
-const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles });
+const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles, laneSame, laneFails });
 onFakeReset(() => {
-  ({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles } = atLoad());
+  ({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles, laneSame, laneFails } = atLoad());
   picks = [];
 });
 
@@ -178,6 +198,9 @@ export function seed(params: URLSearchParams): void {
   longMade = params.has("fake-long-paths");
   bulkFiles = Number(params.get("fake-rerender-files") ?? 3000) || 3000;
   if (params.has("fake-rerender")) seeded = [...seeded, { ...SITE, name: longMade ? "Low-code site generator for the payments team's order flows" : SITE.name }];
+  if (params.has("fake-rerender-two")) seeded = [...seeded, DIAGRAM];
+  laneSame = params.has("fake-rerender-same");
+  laneFails = params.has("fake-rerender-fail");
   // `?fake-rerender-kept=<folder>`: that folder of payout-service already made, as a store holds it across a restart.
   const kept = params.get("fake-rerender-kept");
   if (kept !== null) {
@@ -185,8 +208,8 @@ export function seed(params: URLSearchParams): void {
     const files = madeFiles(kept, 1, longMade);
     const tree = madeTree(token, files);
     made.set(token, { files, tree });
-    runsOf.set(`mock:tidewater/payout-service\u0000site\u0000${kept}`, 1);
-    drawn.set(`mock:tidewater/payout-service\u0000site\u0000${kept}`, {
+    runsOf.set(`mock:tidewater/payout-service\u0000site\u0000${kept}\u0000`, 1);
+    drawn.set(`mock:tidewater/payout-service\u0000site\u0000${kept}\u0000`, {
       token,
       kind: { kind: "folder", files: tree.files.length, bytes: tree.bytes, left_out: tree.left_out_total },
       size: tree.bytes,
@@ -208,6 +231,17 @@ const SITE: FolderRenderer = {
   folders: ["docs", "src/*"],
   output: "folder",
   timeout_secs: 60,
+};
+
+/** `?fake-rerender-two`'s second renderer on `docs` (ux26): a folder two renderers take, for the pick. */
+const DIAGRAM: FolderRenderer = {
+  id: "docs-diagram",
+  name: "Docs diagram",
+  command: "/Users/someone/tools/flowviz/bin/flowviz {path} --out {outdir}",
+  holds: [],
+  folders: ["docs"],
+  output: "folder",
+  timeout_secs: 30,
 };
 
 const LONG_FOLDER_RENDERERS: FolderRenderer[] = [
@@ -241,6 +275,27 @@ const LONG_FOLDER_RENDERERS: FolderRenderer[] = [
   },
 ];
 
+/** Two generated folders compared as `folder_render::made::compare` does: only what differs, the rest counted. */
+function compareMade(before: string | null, after: string | null, eolAside: boolean) {
+  const a = before === null ? new Map<string, Uint8Array>() : (made.get(before) ?? gone()).files;
+  const b = after === null ? new Map<string, Uint8Array>() : (made.get(after) ?? gone()).files;
+  const binary = (x: Uint8Array | undefined) => x !== undefined && x.slice(0, 8000).includes(0);
+  const same = (x: Uint8Array, y: Uint8Array) => x.length === y.length && x.every((v, i) => v === y[i]);
+  const crlf = (x: Uint8Array) => new TextDecoder().decode(x).replace(/\r\n/g, "\n");
+  const files: { path: string; change: "added" | "deleted" | "modified"; before_size: number | null; after_size: number | null; binary: boolean }[] = [];
+  let sameCount = 0;
+  let eol = 0;
+  for (const path of [...new Set([...a.keys(), ...b.keys()])].sort()) {
+    const x = a.get(path);
+    const y = b.get(path);
+    const bin = binary(x) || binary(y) || /\.(png|pdf)$/.test(path);
+    if (x !== undefined && y !== undefined && same(x, y)) sameCount += 1;
+    else if (x !== undefined && y !== undefined && eolAside && !bin && crlf(x) === crlf(y)) eol += 1;
+    else files.push({ path, change: x === undefined ? "added" : y === undefined ? "deleted" : "modified", before_size: x?.length ?? null, after_size: y?.length ?? null, binary: bin });
+  }
+  return { files, same: sameCount, eol_only: eol, before_files: a.size, after_files: b.size };
+}
+
 export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
@@ -251,7 +306,7 @@ export function handlers(): Handlers {
     // The pick per folder (ux26): kept for the session, the repository named as the backend resolves it (a branch's id
     // names its repository).
     // Two generated folders compared (ux26): nothing differs in the fixture's own runs.
-    folder_render_compare: () => ({ files: [], same: 0, eol_only: 0, before_files: 0, after_files: 0 }),
+    folder_render_compare: (args) => compareMade((args["before"] as string | null) ?? null, (args["after"] as string | null) ?? null, args["eolAside"] === true),
     folder_render_picks: () => picks,
     set_folder_render_pick: (args) => {
       const id = String(args["entityId"] ?? "");
@@ -283,13 +338,15 @@ export function handlers(): Handlers {
         slot,
         setTimeout(() => {
           running.delete(slot);
-          if (renderer.command.includes("fail")) {
+          if (renderer.command.includes("fail") || (laneFails && at.lane === "cmp:~working-tree")) {
             failed.set(slot, { status: 2, stderr: `${/^"([^"]*)"|^(\S+)/.exec(renderer.command)?.slice(1).find((w) => w !== undefined) ?? ""}: no project file in ${at.folder || "the top folder"}\n` });
           } else if (renderer.output === "folder") {
             const token = `fake-made-${String(++tokens).padStart(8, "0")}`;
             const n = (runsOf.get(slot) ?? 0) + 1;
             runsOf.set(slot, n);
-            const files = madeFiles(at.folder, n, longMade);
+            // A comparison's side makes its end's folder: the working tree's differs, every commit's is the first run's.
+            const lane = at.lane ?? "";
+            const files = lane === "" ? madeFiles(at.folder, n, longMade) : madeFiles(at.folder, 1, longMade, lane === "cmp:~working-tree" && !laneSame);
             const tree = madeTree(token, files);
             made.set(token, { files, tree });
             drawn.set(slot, {

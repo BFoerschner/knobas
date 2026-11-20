@@ -142,7 +142,8 @@
   {:else if files.length === 0 && untracked.length === 0}
     <div class="tf-empty">Working tree clean.</div>
   {:else}
-    <TfDiffView {files} {context} {sideNames} {epoch} openAt={{ entityId: repoId, at: null }} />
+    <!-- A folder's generated compare here is HEAD against the working tree, the index's split aside (ux26, section 8). -->
+    <TfDiffView {files} {context} {sideNames} {epoch} folders={head === null ? null : { entityId: repoId, before: head, after: WORKING_TREE }} openAt={{ entityId: repoId, at: null }} />
     {#if read.unstaged.truncated || read.staged.truncated}
       <p class="tf-dim tf-local-note">
         The diff is cut here: it is over knobas's ceiling of {thousands(DIFF_CEILING)} lines. Your editor has all of it.

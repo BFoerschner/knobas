@@ -73,6 +73,7 @@
   import { fillEnds, rangeFill, seedPages, type RangeFilePagesRead, type RangeFileRead, type RangeFilesRead } from "../diff/fill";
   import type { DiffFill } from "../diff/diff";
   import TfPrPicker from "./TfPrPicker.svelte";
+  import { clonedHere } from "../repo/cloned-here.svelte";
 
   let {
     prId,
@@ -479,6 +480,7 @@
         review={section === null ? review : null}
         {context}
         sideNames={ends === null ? null : () => ({ old: endWords(ends!.base), new: endWords(ends!.head) })}
+        folders={ends !== null && range !== null && clonedHere(range.repository) ? { entityId: range.repository, before: ends.base, after: ends.head } : null}
         openAt={openAt && ends ? { entityId: openAt.entityId, at: ends.head } : openAt}
         cut={shown.truncated}
         repository={range?.repository ?? null}

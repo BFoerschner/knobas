@@ -694,6 +694,61 @@
 .tf-madebar .tf-madebar-as .tf-select { flex: 0 1 14rem; min-width: 6rem; max-width: 14rem; text-overflow: ellipsis; }
 .tf-madebar .tf-madebar-open { display: flex; min-width: 92px; }
 .tf-madebar .tf-madebar-run { min-width: 84px; justify-content: center; }
+/* A folder renderer in a comparison (ux26, the decision list's sections 8 and 9; design system, Generated folders): the
+   made bar as a grouped folder's row in the cards column, its generated files inset under it with the info rail. The
+   rail is a background image, as in the Files tree: nothing positioned lies in the cards column or the rail. The rows
+   keep the column's 12 px between them (the windowed list counts it), the inset box taking it as its own top. */
+.tf-dcards > .tf-dfolder + .tf-diff, .tf-dcards > .tf-dfolder + .tf-dfolder, .tf-dcards > .tf-diff + .tf-dfolder,
+.tf-dcards > .tf-dunder + .tf-dfolder, .tf-dcards > .tf-dunder + .tf-diff { margin-top: 12px; }
+.tf-dcards > .tf-dfolder + .tf-dunder { margin-top: 0; padding-top: 12px; }
+.tf-dfolder { --fs: var(--size-ui); font-family: var(--sans); }
+.tf-dfolder .tf-dfbar { border: 0; border-radius: 6px; }
+.tf-dfolder > .tf-dffail { margin-top: 8px; border-bottom: 0; border-radius: 6px; }
+.tf-dfolder > .tf-dffail pre { margin: 0; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper); }
+.tf-dunder {
+  padding-left: 14px;
+  background-image: linear-gradient(var(--info), var(--info)); background-repeat: no-repeat; background-position: 5px 0; background-size: 2px 100%;
+}
+.tf-dfolder > .tf-dunder { padding-top: 12px; }
+.tf-dunder > .tf-diff + .tf-dfend { margin-top: 12px; }
+.tf-dfnote {
+  box-sizing: border-box; height: 96px; margin: 0; display: grid; place-items: center; padding: 0 16px; text-align: center;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs));
+}
+.tf-dfend {
+  box-sizing: border-box; height: 24px; line-height: 24px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--ink-2); --fs: var(--size-ui); font: 400 calc(var(--t-xs) * var(--fs))/24px var(--sans);
+}
+/* The band's runs: the count and *Run N folder renders*, before *Back to top*. */
+.tf-dtool .tf-drun { margin-left: auto; display: inline-flex; align-items: center; gap: var(--control-gap); }
+.tf-dtool .tf-dtool-prog ~ .tf-drun { margin-left: 0; }
+.tf-dtool .tf-drun ~ .tf-dtop { margin-left: 0; }
+.tf-dtool .tf-drun-n { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tf-dtool .tf-drun > .tf-btn { min-width: 84px; justify-content: center; }
+/* The rail (mock tag 8): a directory a renderer takes ends in the Files tree's glyph, its 22 px kept from the first frame;
+   a grouped folder is its row, the band under it, its generated files with the rail down their left. */
+.tf-flist .tf-fdir.tf-dfr { display: flex; align-items: center; gap: 2px; padding-right: 4px; }
+.tf-flist .tf-dfr-p { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.tf-flist .tf-dfr-g { flex: none; display: inline-flex; width: 20px; height: 20px; }
+.tf-flist button.tf-dfmark {
+  margin: 0; width: 20px; height: 20px; padding: 0; justify-content: center; border: 0; border-radius: 3px; color: var(--ink-2);
+}
+.tf-flist button.tf-dfmark:hover { background: var(--rule-2); color: var(--ink); }
+.tf-flist :is(.tf-dfmark, .tf-dgdir) svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tf-flist .tf-fdir.tf-dgdir { display: flex; align-items: center; gap: 6px; color: var(--ink); }
+.tf-flist .tf-dgdir > .tf-path { flex: 1 1 auto; min-width: 0; }
+.tf-flist button.tf-dgband {
+  margin: 2px 2px 0; width: calc(100% - 4px); padding: 3px 8px; border: 0; border-radius: 4px; background: var(--info-bg); color: var(--info);
+  --fs: var(--size-ui); font: 400 calc(var(--t-xs) * var(--fs)) var(--sans); white-space: nowrap;
+}
+.tf-flist button.tf-dgband > :first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-flist button.tf-dgband > :last-child { flex: none; text-decoration: underline; text-underline-offset: 2px; }
+.tf-flist button.tf-dgband:hover { background: var(--info-bg); box-shadow: inset 0 0 0 1px var(--info); }
+.tf-flist button.tf-dmade, .tf-flist button.tf-dmade:hover, .tf-flist button.tf-dmade[aria-current="true"] { background-image: linear-gradient(var(--info), var(--info)); background-repeat: no-repeat; background-position: 12px 0; background-size: 2px 100%; }
+.tf-flist button.tf-dmade + button.tf-dmade { border-top: 0; }
+/* While what groups the folders is read (at most 300 ms, section 20): the list holds its room unseen. */
+.tf-dgrid.tf-dheld { visibility: hidden; }
+
 /* Settings' Try it on a folder of files (ADR-0046): the made line, then the generated tree in the tree's rows, 320 px. */
 .tf-madelist { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
 .tf-madelist-line { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }

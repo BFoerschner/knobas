@@ -83,9 +83,8 @@
   import { filterKeys } from "../filter-keys";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
-  import TfMenu from "../TfMenu.svelte";
-  import { programOf } from "../path";
-  import { settingsHash } from "../settings/settings";
+  import { heldWrite } from "../../shell/held-write";
+  import TfFolderPickMenu from "../render/TfFolderPickMenu.svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
@@ -98,7 +97,7 @@
   import { onCodeSize } from "../fonts.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { allRenderers, BYTES_CAP, type Renderer } from "../../render/registry";
-  import { defaultPipeline, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
+  import { defaultPipeline, MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -174,7 +173,6 @@
   import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
   import { failureLines, markSets, rendererFor, renderersFor } from "../../render/folder";
   import type { FolderRenderer } from "../../ipc/app";
-  import TfPath from "../TfPath.svelte";
   import { folderRenderMarks, type FolderMarks, type MadeTree } from "../../ipc/app";
   import { ipcMadePorts, type MadePorts } from "../../render/made-ports";
   import { folderRenderHash, pickMadeDefault, renderedHash, type FolderRenderAt } from "./repo";
@@ -975,29 +973,30 @@
       grafts.set(folder, next);
       return;
     }
-    const boxTop = box.getBoundingClientRect().top;
-    const drawnRows = [...box.querySelectorAll<HTMLElement>("[data-path]")].filter((el) => el.getBoundingClientRect().bottom > boxTop);
     const inside = (p: string) => p !== folder && underFolder(p, folder);
     const relOf = (p: string) => (folder === "" ? p : p.slice(folder.length + 1));
-    const pick =
-      drawnRows.find((el) => !inside(el.dataset["path"]!)) ??
-      drawnRows.find((el) => {
-        const p = el.dataset["path"]!;
-        return !p.endsWith(BAND) && (next.index!.has(relOf(p)) || next.index!.listingOf(relOf(p)) !== undefined);
-      }) ??
-      drawnRows.find((el) => el.dataset["path"] === `${folder}${BAND}`);
-    const anchor = pick === undefined ? null : { path: pick.dataset["path"]!, top: pick.getBoundingClientRect().top };
-    grafts.set(folder, next);
-    flushSync();
-    if (anchor === null) return;
-    const find = () => [...box.querySelectorAll<HTMLElement>("[data-path]")].find((el) => el.dataset["path"] === anchor.path);
-    let row = find();
-    if (row === undefined) {
-      treeWin.reveal(rows.findIndex((r) => r.path === anchor.path));
-      flushSync();
-      row = find();
-    }
-    if (row !== undefined) box.scrollTop += row.getBoundingClientRect().top - anchor.top;
+    const rowsNow = () => [...box.querySelectorAll<HTMLElement>("[data-path]")];
+    heldWrite(() => grafts.set(folder, next), {
+      rows: rowsNow,
+      top: () => box.getBoundingClientRect().top,
+      choose: (drawnRows) =>
+        drawnRows.find((el) => !inside(el.dataset["path"]!)) ??
+        drawnRows.find((el) => {
+          const p = el.dataset["path"]!;
+          return !p.endsWith(BAND) && (next.index!.has(relOf(p)) || next.index!.listingOf(relOf(p)) !== undefined);
+        }) ??
+        drawnRows.find((el) => el.dataset["path"] === `${folder}${BAND}`),
+      idOf: (row) => row.dataset["path"]!,
+      same: (path) => {
+        const find = () => rowsNow().find((el) => el.dataset["path"] === path);
+        const row = find();
+        if (row !== undefined) return row;
+        treeWin.reveal(rows.findIndex((r) => r.path === path));
+        flushSync();
+        return find();
+      },
+      scrollBy: (_row, px) => (box.scrollTop += px),
+    });
   }
 
   /** *Real files*: the graft goes; at its own address, the folder's README or the repository's landing opens. */
@@ -1073,11 +1072,6 @@
     const drawn = view.drawn?.kind.kind === "folder" ? view.drawn : null;
     return drawn !== null && grafts.get(renderedNow.folder)?.token !== drawn.token;
   });
-  /** A page in a generated folder opens as one, after the person's own defaults (ADR-0046). */
-  const MADE_DEFAULTS = [
-    { pattern: "*.html", renderer: "html", pipeline: null },
-    { pattern: "*.htm", renderer: "html", pipeline: null },
-  ];
   /** The landing's file: a README, an index page, the only file (`pickMadeDefault`). */
   const madeDefault = $derived.by(() => {
     if (renderedNow === null) return null;
@@ -2544,18 +2538,7 @@
   {@const at = pickFor.folder}
   {@const taking = renderersFor(at, folders.list, marks)}
   <!-- The glyph's menu (ux26): the renderers that take the folder, a name over its program; the choice is kept for it. -->
-  <TfMenu bind:open={pickOpen} opener={pickFor.opener} label="Render {at === '' ? 'the repository' : at} with" className="tf-rsw-m tf-frpick-m" focusOn="button">
-    <div class="tf-rsw-mh">Render with</div>
-    {#each taking as r, n (r.id)}
-      <button type="button" role="menuitemradio" aria-checked={n === 0} class:tf-on={n === 0} title="{r.name}
-{r.command}" onclick={() => pickRenderer(at, r)}>
-        <span class="tf-rsw-tick" aria-hidden="true">{n === 0 ? "✓" : ""}</span>
-        <span class="tf-rsw-name"><span class="tf-rsw-nm">{r.name}</span>{" "}<TfPath class="tf-rsw-sub" path={programOf(r.command)} title={r.command} /></span>
-      </button>
-    {/each}
-    <hr />
-    <a role="menuitem" href={settingsHash("renderers")} onclick={() => (pickOpen = false)}><span class="tf-rsw-tick" aria-hidden="true"></span>Folder renderers…</a>
-  </TfMenu>
+  <TfFolderPickMenu bind:open={pickOpen} opener={pickFor.opener} folder={at} {taking} onpick={(r) => pickRenderer(at, r)} />
 {/if}
 
 {#if committing && file !== null && file.sha !== null && branch !== null}

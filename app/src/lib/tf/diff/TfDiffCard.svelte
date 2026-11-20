@@ -390,8 +390,10 @@
   }
   const old = $derived(file.old_path && file.old_path !== file.path ? file.old_path : null);
   /** A local change's label says how it stands (*modified, not staged*): words, so not in the path's mono. */
-  const shownHow = $derived(/ \(([^()]*(?:not staged|staged|untracked))\)$/.exec(keyOf(file))?.[1] ?? null);
-  const shownPath = $derived(shownHow === null ? keyOf(file) : keyOf(file).slice(0, keyOf(file).lastIndexOf(" (")));
+  /** What the card names it by: its label, else its path (a generated file's key holds its folder too, ux26). */
+  const named = $derived(file.label ?? file.path);
+  const shownHow = $derived(/ \(([^()]*(?:not staged|staged|untracked))\)$/.exec(named)?.[1] ?? null);
+  const shownPath = $derived(shownHow === null ? named : named.slice(0, named.lastIndexOf(" (")));
   const badge = $derived(badgeOf(file));
   const chip = $derived(isLock(file.path) ? "lock file" : isGenerated(file.path) ? "generated" : null);
   const changed = $derived(file.additions + file.deletions);
@@ -540,7 +542,7 @@
   <div class="tf-fh" {@attach menuThing(() => (openAt !== null && file.change !== "deleted" ? { kind: "file", repoId: openAt.entityId, path: file.path } : null))}>
     <!-- Who the file is, in one group that gives up its path's start before its controls go to a second line (ux26). -->
     <span class="tf-fh-id">
-    <button type="button" class="tf-fh-caret" aria-expanded={!closed} aria-label="{closed ? 'Expand' : 'Collapse'} {keyOf(file)}" onclick={ontoggle}
+    <button type="button" class="tf-fh-caret" aria-expanded={!closed} aria-label="{closed ? 'Expand' : 'Collapse'} {named}" onclick={ontoggle}
       ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d={closed ? "m6 4 4 4-4 4" : "m4 6 4 4 4-4"} /></svg></button
     >
     <span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}" title={file.change}>{badge}</span>
@@ -567,7 +569,7 @@
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => onpipeline(!pipeline.on)}>{pipeline.on ? "Show raw" : "Run pipeline"}</button>
         {/if}
         {#if MODES.length > 0}
-          <span class="tf-seg" role="group" aria-label="Show {keyOf(file)} as">
+          <span class="tf-seg" role="group" aria-label="Show {named} as">
             {#each MODES as m (m.mode)}<button type="button" aria-pressed={shows === m.mode} onclick={() => onmode(m.mode)}>{m.label}</button>{/each}
           </span>
         {/if}
@@ -612,7 +614,7 @@
       </div>
     {:else if waiting}
       <!-- Its lines are being read: their room, held, so nothing below moves much when they come. -->
-      <div class="tf-dwait tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading {keyOf(file)}'s lines" {@attach room(waitingRows(file) * 21)}>
+      <div class="tf-dwait tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading {named}'s lines" {@attach room(waitingRows(file) * 21)}>
         {#each { length: Math.min(waitingRows(file), 6) }, k (k)}<span class="tf-skel-bar"></span>{/each}
       </div>
     {:else if file.hunks.length === 0 && file.old_mode && file.new_mode && file.old_mode !== file.new_mode}
@@ -631,7 +633,7 @@
             <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
           </div>
         {:else}
-          <div class="tf-dmore tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading more of {keyOf(file)}'s lines" {@attach near(onmore)}>
+          <div class="tf-dmore tf-skel tf-skel-lines" aria-busy="true" aria-label="Reading more of {named}'s lines" {@attach near(onmore)}>
             <span class="tf-skel-bar"></span><span class="tf-skel-bar"></span>
           </div>
         {/if}
