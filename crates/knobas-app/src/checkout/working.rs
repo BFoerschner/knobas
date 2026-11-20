@@ -527,6 +527,59 @@ fn with_untracked(
     files
 }
 
+/// The files of git's `--raw` list that changed: with `diff.autoRefreshIndex`
+/// off (it must be, or git rewrites the index) a file only touched is listed
+/// with no content change (Git for Windows with `core.autocrlf`, witnessed
+/// 2026-11-20), which the counted read then leaves out, so the names would
+/// draw a row that goes. A file whose working copy is the index's (`status`
+/// names it not) and whose index blob is the base's blob changed nothing.
+fn only_changed(
+    files: Vec<DiffFile>,
+    raw: &[u8],
+    status: &Status,
+    index: &HashMap<String, (String, String)>,
+) -> Vec<DiffFile> {
+    // Each listed path's blob on the base's side, from the raw records themselves (the parsed files keep only one blob).
+    let text = String::from_utf8_lossy(raw);
+    let mut base_blob: HashMap<String, String> = HashMap::new();
+    let mut tokens = text.split('\0').map(|t| t.trim_start_matches('\n'));
+    while let Some(token) = tokens.next() {
+        let Some(meta) = token.strip_prefix(':') else {
+            continue;
+        };
+        let parts: Vec<&str> = meta.split(' ').collect();
+        let (Some(old_blob), Some(new_blob), Some(letter)) = (
+            parts.get(2),
+            parts.get(3),
+            parts.get(4).and_then(|s| s.bytes().next()),
+        ) else {
+            break;
+        };
+        let n = if matches!(letter, b'R' | b'C') { 2 } else { 1 };
+        let paths: Vec<&str> = tokens.by_ref().take(n).collect();
+        if letter == b'M'
+            && n == 1
+            && new_blob.bytes().all(|b| b == b'0')
+            && let Some(path) = paths.first()
+        {
+            base_blob.insert((*path).to_owned(), (*old_blob).to_owned());
+        }
+    }
+    files
+        .into_iter()
+        .filter(|file| {
+            let Some(old) = base_blob.get(&file.path) else {
+                return true;
+            };
+            let same_as_index = !status.changed.contains(&file.path);
+            let index_is_base = index
+                .get(&file.path)
+                .is_some_and(|(_, blob)| !old.is_empty() && blob.starts_with(old.as_str()));
+            !(same_as_index && index_is_base)
+        })
+        .collect()
+}
+
 /// The working tree's files against `base`, with no counts: what the page
 /// draws first.
 ///
@@ -539,13 +592,14 @@ pub async fn names(path: &Path, base: &str) -> Result<(Vec<DiffFile>, bool, Work
         let status = status(path).await?;
         return Ok((files, cut, at_now(path, &status).await));
     }
-    let (listed, status) = tokio::join!(
+    let (listed, status, index) = tokio::join!(
         diff(path, Form::Raw, base, false, &[], usize::MAX),
-        status(path)
+        status(path),
+        index(path)
     );
-    let ((out, cut), status) = (listed?, status?);
+    let ((out, cut), status, index) = (listed?, status?, index?);
     let (files, cut) = parse_raw(&out, cut);
-    let files = with_untracked(files, &status, None);
+    let files = with_untracked(only_changed(files, &out, &status, &index), &status, None);
     let _ = with_kept(path, |a| a.names.insert(key, (files.clone(), cut))).await;
     Ok((files, cut, at_now(path, &status).await))
 }
@@ -1055,6 +1109,34 @@ mod tests {
             !files
                 .iter()
                 .any(|f| f.path.contains(".env") || f.path.starts_with("build/"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_only_touched_is_in_neither_list() {
+        let (dir, sha) = changed();
+        let at = dir.path();
+        write(at, "same.txt", "unchanged\n");
+        git(at, &["add", "same.txt"]);
+        git(at, &["commit", "-q", "-m", "same"]);
+        let head = git(at, &["rev-parse", "HEAD"]);
+        // Rewritten with the same bytes and a later time: git's raw list names it, with no change.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(at, "same.txt", "unchanged\n");
+        let (named, _, _) = names(at, &head).await.unwrap();
+        let (counted, _, _) = counted(at, &head, false).await.unwrap();
+        assert!(
+            !named.iter().any(|f| f.path == "same.txt"),
+            "{:?}",
+            paths(&named)
+        );
+        assert_eq!(paths(&named), paths(&counted));
+        // Against the first commit, which lacks it, it is added in both.
+        let (named, _, _) = names(at, &sha).await.unwrap();
+        assert!(
+            named
+                .iter()
+                .any(|f| f.path == "same.txt" && f.change == DiffChange::Added)
         );
     }
 
