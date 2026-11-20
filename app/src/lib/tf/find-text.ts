@@ -34,6 +34,13 @@ function blockOf(from: Element | null, known: Map<Element, Element | null>): Ele
   return block;
 }
 
+/** The drawn text of the block a match starts in: what a launcher row's passage is looked for in (D12, `arrival.svelte.ts`). */
+export function blockText(range: Range): string {
+  const start = range.startContainer;
+  const from = start.nodeType === Node.TEXT_NODE ? start.parentElement : (start as Element);
+  return blockOf(from, new Map())?.textContent ?? "";
+}
+
 /** A range over `run`'s text from `start` to `end`, as offsets into the run joined up. */
 function rangeOver(run: readonly Text[], start: number, end: number): Range {
   const range = document.createRange();

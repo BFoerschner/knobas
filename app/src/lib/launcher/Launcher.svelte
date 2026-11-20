@@ -97,6 +97,9 @@
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
+  import { arrival, arrivalOf } from "../tf/arrival.svelte";
+  import { cellsOf, whyOf } from "./cells";
+  import type { Excerpt } from "../ipc";
   import TfDialog from "../tf/settings/TfDialog.svelte";
   import { docsSearchHash } from "../tf/docs/docs";
   import { aimed, watchPointer } from "./aim";
@@ -976,7 +979,15 @@
   /** ⌘S, with no other modifier. */
   const isSaveChord = (event: KeyboardEvent) => isBoxChord(event, "s");
 
-  function activate(row: LauncherRow) {
+  /**
+   * Where a row opens at its match (the everything-search decisions, 2026-11-20, D12): the page of a ticket, a pull
+   * request or a Docs page opens its find bar on the words, at the passage. A log's line, and a row with nothing quoted,
+   * open as they did.
+   */
+  const OPENS_AT_MATCH = new Set(["ticket", "pr", "page"]);
+
+  /** `excerpt`: the pane's excerpt it was opened from; else the evidence line's, where the row draws one. */
+  function activate(row: LauncherRow, excerpt: Excerpt | null = null) {
     if (row.kind === "widen") {
       widen(row.words);
       box?.focus();
@@ -1006,6 +1017,10 @@
     }
     const hash = addressOf(row);
     if (!hash) return;
+    if (row.kind === "hit" && OPENS_AT_MATCH.has(row.hit.kind)) {
+      const at = excerpt ?? whyOf(row.hit, cellsOf(row.hit, row.hit.kind).cell)?.excerpt ?? null;
+      if (at !== null) arrival.set(hash, arrivalOf(at));
+    }
     close();
     onnavigate(hash);
   }
@@ -1402,7 +1417,7 @@
         <Preview
           title={previewRow?.kind === "hit" ? previewRow.hit.title : null}
           excerpts={previewRow?.kind === "hit" ? previewRow.hit.excerpts : []}
-          onopen={() => previewRow && activate(previewRow)}
+          onopen={(excerpt) => previewRow && activate(previewRow, excerpt)}
         />
       {/if}
       </div>

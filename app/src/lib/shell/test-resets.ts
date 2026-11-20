@@ -20,6 +20,8 @@
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
   // The windowed lists waiting to read where they sit (the Windows pass, 2026-11-14): a test's are read, or let go once unmounted.
+  // A launcher row's hand-over to the page it opens (the everything-search decisions, D12): forgotten between tests.
+  "tf/arrival.svelte.ts#held": async () => (await import("../tf/arrival.svelte")).arrival.clear(),
   "shell/windowed.svelte.ts#unplaced": async () => (await import("./windowed.svelte")).placeWindowsNow(),
   // The lists waiting two frames to draw their overscan below the view (the sizes pass, 2026-11-15): grown now, and the
   // wait for those frames let go, so the next test's lists wait for frames of their own.

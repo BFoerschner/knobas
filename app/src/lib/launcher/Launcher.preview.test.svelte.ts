@@ -13,6 +13,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LauncherHome, SearchHit, SearchQuery, SearchResponse } from "../ipc";
+import { arrival } from "../tf/arrival.svelte";
 import Launcher from "./Launcher.svelte";
 import { PREVIEW_DEBOUNCE_MS } from "./Preview.svelte";
 import { createScope } from "./scope.svelte";
@@ -49,7 +50,7 @@ const PAGE = hit("confluence:7", "page", "Retry runbook", [
   { place: "Comment by Priya", segments: [{ text: "Cap the ", hit: false }, { text: "retry", hit: true }] },
 ]);
 const PIPELINE = hit("teamcity:Deploy", "pipeline", "Deploy payouts", [
-  { place: "line 382", segments: [{ text: "connection refused, ", hit: false }, { text: "retry", hit: true }] },
+  { place: "Log line 382", segments: [{ text: "connection refused, ", hit: false }, { text: "retry", hit: true }] },
 ]);
 const TITLED = hit("jira:PAY-1", "ticket", "Retry everything", []);
 
@@ -237,7 +238,7 @@ test("the pane waits for the selection to settle, then draws its excerpts with t
   flushSync();
   expect(pane()?.textContent).toContain("Retry everything");
   await paused();
-  expect(excerpts()).toEqual(["line 382: connection refused, [retry]"]);
+  expect(excerpts()).toEqual(["Log line 382: connection refused, [retry]"]);
 
   press("ArrowDown");
   await paused();
@@ -271,4 +272,59 @@ test("⌘D to Titles takes the pane away and the dialog back to its size", async
   await settle();
   expect(pane()).toBeNull();
   expect(dialog().classList.contains("tf-launch-deep")).toBe(false);
+});
+
+// -- the evidence line and opening at the match (the everything-search decisions, D10 and D12) --
+
+test("a row its text found draws one evidence line, a row with no passage stays one line", async () => {
+  open("everything");
+  await settle();
+  await type("retry");
+  const rows = [...target.querySelectorAll<HTMLElement>(".tf-ln-res")];
+  const line = (title: string) => rows.find((row) => row.textContent?.includes(title))!.querySelector(".tf-ln-why");
+  expect(line("Retry everything")).toBeNull();
+  expect(line("Deploy payouts")!.classList.contains("tf-ln-code")).toBe(true);
+  // A lead over 18 characters is cut to its last words, so the mark sits in the line's first third.
+  expect(line("Deploy payouts")!.querySelector(".tf-ln-why-t")!.textContent).toBe("Log line 382…refused, retry");
+  expect(line("Retry runbook")!.querySelector(".tf-ln-why-at")!.textContent).toBe("Backoff policy");
+  expect(line("Retry runbook")!.querySelector("mark")!.textContent).toBe("retry");
+});
+
+test("a click on an excerpt opens the page at that excerpt", async () => {
+  const { onnavigate } = open("everything");
+  await settle();
+  await type("retry");
+  press("ArrowDown");
+  press("ArrowDown");
+  await paused();
+  (pane()!.querySelectorAll(".tf-ln-ex")[1] as HTMLElement).click();
+  flushSync();
+  const hash = String(onnavigate.mock.calls[0]![0]);
+  expect(arrival.take(hash)).toEqual({ words: ["retry"], passage: "Cap the retry" });
+});
+
+test("Enter on a row with an evidence line opens it at the line's passage", async () => {
+  const { onnavigate } = open("everything");
+  await settle();
+  await type("retry");
+  press("ArrowDown");
+  press("ArrowDown");
+  press("Enter");
+  flushSync();
+  const hash = String(onnavigate.mock.calls[0]![0]);
+  expect(hash).toContain("confluence");
+  expect(arrival.take(hash)).toEqual({ words: ["retry"], passage: "Wait, then retry again." });
+});
+
+test("Enter on a log's line opens the pipeline as it did, with no arrival", async () => {
+  arrival.clear();
+  const { onnavigate } = open("everything");
+  await settle();
+  await type("retry");
+  press("ArrowDown");
+  press("Enter");
+  flushSync();
+  const log = String(onnavigate.mock.calls[0]![0]);
+  expect(log).toContain("builds");
+  expect(arrival.waiting(log)).toBe(false);
 });

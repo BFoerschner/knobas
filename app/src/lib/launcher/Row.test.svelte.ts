@@ -148,3 +148,51 @@ test("where the webview has no Highlight API the row draws without marks", () =>
   done();
   vi.unstubAllGlobals();
 });
+
+const why = {
+  place: "Comment by Jonas Becker",
+  segments: [
+    { text: "…times out behind ", hit: false },
+    { text: "ADProxy", hit: true },
+    { text: ", so the retry", hit: false },
+  ],
+  code: false,
+  count: null,
+  excerpt: { place: "Comment by Jonas Becker", segments: [] },
+};
+
+test("a row with no evidence is one line, and one with it two, the monogram and key on the first (D10)", () => {
+  const one = render();
+  expect(one.target.querySelector(".tf-ln-why")).toBeNull();
+  one.done();
+
+  const two = render({ why });
+  const row = two.target.querySelector(".tf-ln-res")!;
+  const line = row.querySelector(".tf-ln-why")!;
+  expect(line.parentElement).toBe(row);
+  // After the title: grid order puts the monogram, key and title on the first line.
+  expect([...row.children].map((c) => c.className.split(" ")[0])).toEqual(["tf-ln-mg", "tf-ln-k", "tf-ln-t", "tf-ln-why"]);
+  expect(line.querySelector(".tf-ln-why-at")!.textContent).toBe("Comment by Jonas Becker");
+  const mark = line.querySelector("mark")!;
+  expect(mark.textContent).toBe("ADProxy");
+  expect(line.querySelector(".tf-ln-why-t")!.textContent).toBe("Comment by Jonas Becker…times out behind ADProxy, so the retry");
+  expect(line.classList.contains("tf-ln-code")).toBe(false);
+  expect(line.querySelector(".tf-ln-why-n")).toBeNull();
+  two.done();
+});
+
+test("a log's line is drawn mono, and a count stands in its own box", () => {
+  const { target, done } = render({ why: { ...why, place: "Log line 212", code: true, count: "4 files" } });
+  const line = target.querySelector(".tf-ln-why")!;
+  expect(line.classList.contains("tf-ln-code")).toBe(true);
+  expect(line.querySelector(".tf-ln-why-n")!.textContent).toBe("4 files");
+  expect(line.querySelector(".tf-ln-why-t")!.contains(line.querySelector(".tf-ln-why-n"))).toBe(false);
+  done();
+});
+
+test("an evidence line that looks like markup is drawn as text", () => {
+  const { target, done } = render({ why: { ...why, segments: [{ text: "<img src=x>", hit: false }, { text: "<b>x</b>", hit: true }] } });
+  expect(target.querySelectorAll("img, b")).toHaveLength(0);
+  expect(target.querySelector("mark")!.textContent).toBe("<b>x</b>");
+  done();
+});

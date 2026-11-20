@@ -164,6 +164,23 @@
 .tf-ln-k { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-ln-k.tf-ln-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-weight: 600; color: var(--ink); }
 
+/* The evidence line (the everything-search decisions, 2026-11-20, D10): where the words are, for a row its name does not
+   explain. The second grid row, under the title and what trails it; the monogram and the key cell stay centred on the
+   first. The only ink in it is the mark, so the eye lands on the word and reads outward. */
+.tf .tf-ln-res:has(> .tf-ln-why) { row-gap: 1px; padding-bottom: 7px; }
+.tf-ln-res > .tf-ln-why {
+  grid-column: 3 / -1; min-width: 0; display: flex; align-items: baseline; gap: 8px;
+  font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.4; color: var(--ink-2);
+}
+.tf-ln-why-t { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tf-ln-why-at { font-weight: 600; margin-right: 6px; }
+.tf-ln-why mark { background: var(--mark); color: var(--ink); border-radius: 2px; padding: 0 1px; }
+.tf-ln-why.tf-ln-code .tf-ln-why-t {
+  --fs: var(--size-code); font-size: calc(var(--t-xs) * var(--fs)); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures);
+}
+/* Its own box, so the ellipsis never takes it. */
+.tf-ln-why-n { flex: none; white-space: nowrap; font-size: calc(var(--t-2xs) * var(--fs)); }
+
 /* An author or under: search a source cannot answer (#141): a fact about the corpus, not a fault. */
 .tf-ln-gap {
   padding: 10px 18px; border-bottom: 1px solid var(--rule); box-shadow: inset 3px 0 0 var(--warn); background: var(--sheet-2);

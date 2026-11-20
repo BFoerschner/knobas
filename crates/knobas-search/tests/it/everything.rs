@@ -221,7 +221,7 @@ async fn a_word_only_in_a_run_log_answers_the_pipeline_coloured_by_its_last_run(
     assert_eq!(
         read(&hit.excerpts),
         vec![(
-            Some("line 382".to_owned()),
+            Some("Log line 382".to_owned()),
             format!("connection refused {t} at 10:02"),
             vec![t.clone()]
         )]
@@ -246,7 +246,7 @@ async fn a_pipeline_its_name_and_its_log_both_match_is_one_hit_with_the_log_line
     assert_eq!(
         read(&hits[0].excerpts),
         vec![(
-            Some("line 2".to_owned()),
+            Some("Log line 2".to_owned()),
             format!("{t} started"),
             vec![t.clone()]
         )]
@@ -373,7 +373,7 @@ async fn a_hit_through_a_stem_the_reader_misses_carries_no_excerpt() {
 }
 
 #[tokio::test]
-async fn a_ticket_hit_quotes_its_text_and_not_its_title() {
+async fn a_ticket_hit_quotes_its_description_and_not_its_title() {
     let pool = pool().await;
     searcher(&pool).await;
     let t = token();
@@ -394,7 +394,7 @@ async fn a_ticket_hit_quotes_its_text_and_not_its_title() {
     assert_eq!(
         excerpts,
         vec![(
-            None,
+            Some("Description".to_owned()),
             format!("The {t} batch fails on AC04."),
             vec![t.clone(), "AC04".to_owned()]
         )]

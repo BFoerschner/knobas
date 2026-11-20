@@ -534,9 +534,11 @@ fn grouped(rows: Vec<RawHit>, kinds: &KindCatalog, needles: &[String]) -> Vec<Re
 fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
     let (entity_id, synced_at) = row.entity_id.zip(row.synced_at)?;
     let title = row.title.unwrap_or_default();
+    // A ticket's or a pull request's own text is its description (D10).
+    let lead = matches!(row.group_kind.as_str(), "ticket" | "pr").then_some("Description");
     let excerpts = match &row.excerpt_text {
         Some(text) if !needles.is_empty() => {
-            crate::excerpt::excerpts(&title, text, row.excerpt_line, needles)
+            crate::excerpt::excerpts(&title, text, row.excerpt_line, needles, lead)
         }
         _ => Vec::new(),
     };

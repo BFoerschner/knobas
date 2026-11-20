@@ -3,7 +3,7 @@
   The preview pane of *Everything* (#2431, spec #2419): where the words appear
   in the selected row, from the hit's own `excerpts`, the words marked. One
   read: the excerpts came with the answer, so the pane asks no port for
-  anything. Each excerpt is a button that opens the row.
+  anything. Each excerpt is a button that opens the row at that excerpt (D12).
 
   A hit with no excerpt may be one by its title, its key, a stem the excerpts'
   rule misses or a property, and the pane cannot tell them apart, so its
@@ -28,7 +28,8 @@
     /** The selected row's title, or `null` when no row is selected or it is no hit. */
     title: string | null;
     excerpts: Excerpt[];
-    onopen: () => void;
+    /** Open the row at the excerpt pressed. */
+    onopen: (excerpt: Excerpt) => void;
   } = $props();
 </script>
 
@@ -41,7 +42,7 @@
       <p class="tf-ln-none">No passage to quote.</p>
     {:else}
       {#each excerpts as excerpt, i (i)}
-        <button type="button" class="tf-ln-ex" onclick={onopen}>
+        <button type="button" class="tf-ln-ex" onclick={() => onopen(excerpt)}>
           {#if excerpt.place}<span class="tf-ln-ex-at">{excerpt.place}</span>{/if}
           <span class="tf-ln-ex-t"
             >{#each excerpt.segments as seg, j (j)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span

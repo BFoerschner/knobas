@@ -1,10 +1,14 @@
 <!--
   One selectable line of the launcher (#2421, spec #2419): three cells like a
   table. The kind's monogram in the state's tone, a key cell a person reads
-  (`cells.ts` decides it per kind), and the title. No second line, no
-  excerpt, no path, no state chip and no provenance: the state is the
-  monogram's colour, and what a second line said is in the title or not
-  worth the row's height.
+  (`cells.ts` decides it per kind), and the title. No path, no state chip and
+  no provenance: the state is the monogram's colour.
+
+  **One second line, only where the name is no explanation** (the
+  everything-search decisions, 2026-11-20, D10): a row *Everything* found by
+  its text, and not by its name, says where under its title, the place and
+  then the passage with the words marked (`whyOf` in `cells.ts`). It comes
+  with the answer, so the row's height is known before it paints.
 
   Results, the board's recents and the sheet's pinned row all draw this, so
   "a row" is one thing everywhere.
@@ -21,6 +25,7 @@
   import { menuThing, type Thing } from "../tf/context/thing";
   import type { Tone } from "../ipc/entity";
   import { markTitle } from "./marks";
+  import type { Why } from "./cells";
 
   let {
     monogram,
@@ -30,6 +35,7 @@
     mono = false,
     title,
     marks = [],
+    why = null,
     chord = null,
     source = null,
     id,
@@ -50,6 +56,8 @@
     title: string;
     /** The title's matched letters, pairs of start and end in UTF-16 code units of `title` (`marks.ts`). */
     marks?: readonly number[];
+    /** Where the words are, for a row its name does not explain (D10): a second line under the title. */
+    why?: Why | null;
     /** The chord bound to the row (#2429): a saved list's, which opens it from anywhere. */
     chord?: string | null;
     /** The source's name, where another row in the list has this row's key (#1476): two tickets, not one drawn twice. */
@@ -81,4 +89,13 @@
   <span class="tf-ln-t" {@attach markTitle(() => ({ title, marks }))}>{title}</span>
   {#if source}<span class="tf-ln-src" title={source}>{source}</span>{/if}
   {#if chord}<kbd class="tf-ln-chord" title="Its key">{chordLabel(chord)}</kbd>{/if}
+  {#if why}
+    <!-- A real `<mark>`: the line's text changes with every answer, so there is no node for the Highlight API to keep. -->
+    <span class="tf-ln-why" class:tf-ln-code={why.code}>
+      <span class="tf-ln-why-t"
+        >{#if why.place}<span class="tf-ln-why-at">{why.place}</span>{/if}{#each why.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
+      >
+      {#if why.count}<span class="tf-ln-why-n">{why.count}</span>{/if}
+    </span>
+  {/if}
 </button>
