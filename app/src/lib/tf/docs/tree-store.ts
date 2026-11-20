@@ -59,9 +59,14 @@ export function hasChildren(node: DocNode, under: ReadonlyMap<string | null, unk
   return under.has(node.entity_id) || (node.children ?? 0) > 0;
 }
 
-/** Whether the pages under `node` are still to be read: it says it has some, and none is held. */
-export function childrenMissing(node: DocNode, under: ReadonlyMap<string | null, unknown>): boolean {
-  return (node.children ?? 0) > 0 && !under.has(node.entity_id);
+/**
+ * Whether the pages under `node` are still to be read: it says it has more than are held. The outline holds the first
+ * pages of each level only (`OUTLINE_LEVEL_PAGES`), so a fold holding some of its pages may not hold them all (the ux23
+ * Windows pass, 2026-11-20: such a fold opened drew what the outline held and read no more, and the rest arrived with a
+ * later page's read, moving every row under them).
+ */
+export function childrenMissing(node: DocNode, under: ReadonlyMap<string | null, readonly unknown[]>): boolean {
+  return (node.children ?? 0) > (under.get(node.entity_id)?.length ?? 0);
 }
 
 /** `tree` with `parts` merged in: each part's pages put in their space, in the space's order. */
@@ -126,9 +131,16 @@ export async function readParts(reads: TreeReads, asked: Partial<DocsNodesAsked>
   if (tree === null || heldTree.complete) return null;
   const under = new Map<string, DocNode>();
   for (const space of tree.spaces) for (const page of space.pages) under.set(page.entity_id, page);
-  const hasUnder = new Set(tree.spaces.flatMap((s) => s.pages.map((p) => p.parent)));
+  // How many pages each page holds under it: a fold is read until it holds as many as it says it has (`childrenMissing`).
+  const held = new Map<string | null, number>();
+  for (const space of tree.spaces) for (const page of space.pages) held.set(page.parent, (held.get(page.parent) ?? 0) + 1);
+  const whole = (id: string) => {
+    const node = under.get(id)!;
+    const has = held.get(id) ?? 0;
+    return node.children === undefined ? has > 0 : has >= node.children;
+  };
   const pages = (asked.pages ?? []).filter((id) => !heldTree.pages.has(id));
-  const folds = (asked.folds ?? []).filter((id) => !heldTree.folds.has(id) && !(under.has(id) && (hasUnder.has(id) || (under.get(id)!.children ?? 0) === 0)));
+  const folds = (asked.folds ?? []).filter((id) => !heldTree.folds.has(id) && !(under.has(id) && whole(id)));
   const spaces = (asked.spaces ?? []).filter((id) => !heldTree.spaces.has(id));
   for (const id of pages) heldTree.pages.add(id);
   for (const id of folds) heldTree.folds.add(id);

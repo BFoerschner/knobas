@@ -114,6 +114,10 @@ test("a page with pages under it is a fold before they are read, and opening it 
   home.open = true;
   home.dispatchEvent(new Event("toggle"));
   await settle();
+  // The outline holds the first 24 of Home's 30 pages: opened, it reads the rest (the ux23 Windows pass, 2026-11-20),
+  // so they are drawn now and do not arrive with some later read, moving the rows under them.
+  expect(io.docsNodes).toHaveBeenCalledWith({ pages: [], folds: ["c:home"], spaces: [] });
+  expect([...target.querySelectorAll<HTMLDetailsElement>(".tf-rd-tree .tf-dl-tree details")].filter((d) => /^Chapter \d\d$/.test(d.querySelector("summary")?.textContent ?? "")), "every chapter").toHaveLength(30);
   const chapter = [...target.querySelectorAll<HTMLDetailsElement>(".tf-rd-tree .tf-dl-tree details")].find((d) => d.querySelector("summary")?.textContent === "Chapter 03");
   expect(chapter, "a page whose pages are not read is drawn as a fold").toBeDefined();
   expect(chapter!.querySelector(":scope > .tf-fold-in a")).toBeNull();
@@ -122,8 +126,14 @@ test("a page with pages under it is a fold before they are read, and opening it 
   await settle();
   expect(io.docsNodes).toHaveBeenCalledWith({ pages: [], folds: ["c:m3"], spaces: [] });
   expect([...chapter!.querySelectorAll(":scope > .tf-fold-in a")].map((a) => a.textContent)).toEqual(["Chapter 3 part 0", "Chapter 3 part 1"]);
-  // Under a fold the outline already holds, nothing is read.
-  expect(io.docsNodes).toHaveBeenCalledTimes(1);
+  // A fold read whole reads nothing again: Home closed and opened once more.
+  home.open = false;
+  home.dispatchEvent(new Event("toggle"));
+  await settle();
+  home.open = true;
+  home.dispatchEvent(new Event("toggle"));
+  await settle();
+  expect(io.docsNodes).toHaveBeenCalledTimes(2);
   expect(io.docsTree).not.toHaveBeenCalled();
 });
 
