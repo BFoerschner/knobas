@@ -815,20 +815,24 @@ async fn read_one(
 
 /// Every regular file of the stored tree from root `$2` of source `$1`: its
 /// path, size and blob, each level read by `sync.git_tree`'s key (D7 point
-/// 3). No link and no submodule.
+/// 3), a lateral lookup a level so no plan reads every level of the source
+/// (D15: a join on the key alone was planned as a scan of the source's
+/// levels on tables never analyzed). No link and no submodule.
 pub const FLAT_TREE_SQL: &str = "\
 with recursive walk (sha, prefix) as (
   select $2::bytea, ''::text
   union all
   select e.sha, w.prefix || e.name || '/'
     from walk w
-    join sync.git_tree t on t.source_id = $1 and t.sha = w.sha
+   cross join lateral (select t.names, t.modes, t.shas from sync.git_tree t
+                        where t.source_id = $1 and t.sha = w.sha limit 1) t
    cross join lateral unnest(t.names, t.modes, t.shas) as e (name, mode, sha)
    where e.mode = 16384
 )
 select w.prefix || e.name as path, e.size, e.sha
   from walk w
-  join sync.git_tree t on t.source_id = $1 and t.sha = w.sha
+ cross join lateral (select t.names, t.modes, t.sizes, t.shas from sync.git_tree t
+                      where t.source_id = $1 and t.sha = w.sha limit 1) t
  cross join lateral unnest(t.names, t.modes, t.sizes, t.shas) as e (name, mode, size, sha)
  where e.mode in (33188, 33261)";
 

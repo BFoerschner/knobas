@@ -798,3 +798,53 @@ async fn a_gitattributes_mark_and_latin_1_text_are_read_as_d4_says() {
     let (files, _) = world.files.index.in_repo(1, "settlebridge", Reads::BOTH, 8);
     assert!(files.is_empty(), "{files:?}");
 }
+
+/// D15: the flat tree is a walk by `sync.git_tree`'s key, a level at a time,
+/// never a scan of every level the source stores, even with workers made to
+/// look free on tables never analyzed.
+#[tokio::test]
+async fn the_flat_tree_reads_each_level_by_its_key() {
+    let world = world("code_files_plan", Forge::default()).await;
+    push(
+        &world,
+        "acme/plan",
+        "c1",
+        &[("a/b/C.java", b"class C {}"), ("D.java", b"class D {}")],
+    )
+    .await;
+    let root: Vec<u8> = sqlx::query_scalar("select root from sync.branch_tree limit 1")
+        .fetch_one(&world.pool)
+        .await
+        .unwrap();
+    let mut tx = world.pool.begin().await.unwrap();
+    sqlx::query(
+        "select set_config('parallel_setup_cost', '0', true), set_config('parallel_tuple_cost', '0', true),
+                set_config('min_parallel_table_scan_size', '0', true), set_config('min_parallel_index_scan_size', '0', true)",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let plan: serde_json::Value = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "explain (format json) {}",
+        code_files::FLAT_TREE_SQL
+    )))
+    .bind(SOURCE)
+    .bind(&root)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    // Every read of `git_tree` is by its key, the sha in the condition.
+    fn reads(node: &serde_json::Value, out: &mut Vec<String>) {
+        if node["Relation Name"] == "git_tree" {
+            out.push(format!("{} {}", node["Node Type"], node["Index Cond"]));
+        }
+        for child in node["Plans"].as_array().into_iter().flatten() {
+            reads(child, out);
+        }
+    }
+    let mut found = Vec::new();
+    reads(&plan[0]["Plan"], &mut found);
+    assert_eq!(found.len(), 2, "{plan}");
+    assert!(found.iter().all(|read| read.contains("sha =")), "{found:?}");
+    tx.rollback().await.unwrap();
+}
