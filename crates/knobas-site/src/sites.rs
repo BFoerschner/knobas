@@ -569,6 +569,9 @@ impl Sites {
             let source = source.to_owned();
             self.shell().on_main(Box::new(move || {
                 if let Some(view) = view(&source) {
+                    if force {
+                        view.leave_freely();
+                    }
                     view.load(&target);
                 }
                 this.sync(&source);
@@ -1072,7 +1075,12 @@ impl Sites {
                     SiteAct::Forward => view.forward(),
                     // A view that never committed reloads by loading its
                     // landing address again.
-                    SiteAct::Reload if committed => view.reload(),
+                    SiteAct::Reload if committed => {
+                        if force {
+                            view.leave_freely();
+                        }
+                        view.reload();
+                    }
                     SiteAct::Reload => view.load(&landing),
                     SiteAct::Stop => view.stop(),
                     SiteAct::Focus => view.focus(),

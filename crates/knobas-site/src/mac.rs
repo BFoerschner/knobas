@@ -27,7 +27,7 @@ use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags};
 use objc2_foundation::{NSObjectProtocol, NSString};
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtDarwin, WebViewExtDarwin, WebViewExtMacOS};
 
-use crate::host::{Hooks, KeyHook, ViewEvent, ViewSpec};
+use crate::host::{Hooks, KeyHook, LeaveFreely, ViewEvent, ViewSpec};
 use crate::keys::{Key, Press};
 
 /// The macOS release whose WebKit keeps a data store per identifier.
@@ -221,6 +221,7 @@ fn report_failure(event: &Rc<dyn Fn(ViewEvent)>, error: &AnyObject) {
 
 pub struct UiIvars {
     inner: Retained<AnyObject>,
+    leaving: LeaveFreely,
 }
 
 fn host_of_view(webview: &AnyObject) -> String {
@@ -352,6 +353,11 @@ define_class!(
 
         #[unsafe(method(_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:))]
         fn before_unload(&self, webview: &AnyObject, _message: &NSString, _frame: &AnyObject, handler: &block2::Block<dyn Fn(Bool)>) {
+            // The person already said "leave anyway" in the bar.
+            if self.ivars().leaving.take() {
+                handler.call((Bool::YES,));
+                return;
+            }
             let handler = handler.copy();
             sheet(
                 webview,
@@ -491,7 +497,7 @@ impl Drop for Wrapped {
 }
 
 /// Wrap `view`'s two delegates and route its keys.
-pub fn wrap(view: &WebView, source: &str, hooks: &Hooks) -> Wrapped {
+pub fn wrap(view: &WebView, source: &str, hooks: &Hooks, leaving: &LeaveFreely) -> Wrapped {
     let wk = view.webview();
     // SAFETY: a WryWebView is an NSView.
     let as_view: Retained<AnyObject> = unsafe { Retained::cast_unchecked(wk.clone()) };
@@ -531,7 +537,10 @@ pub fn wrap(view: &WebView, source: &str, hooks: &Hooks) -> Wrapped {
             proxy
         });
         let ui = ui.map(|inner| {
-            let proxy = mtm.alloc::<KnobasSiteUi>().set_ivars(UiIvars { inner });
+            let proxy = mtm.alloc::<KnobasSiteUi>().set_ivars(UiIvars {
+                inner,
+                leaving: leaving.clone(),
+            });
             let proxy: Retained<KnobasSiteUi> = msg_send![super(proxy), init];
             let () = msg_send![&*wk, setUIDelegate: &*proxy];
             proxy

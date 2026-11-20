@@ -12,7 +12,7 @@ use std::rc::Rc;
 use raw_window_handle::HasWindowHandle;
 use wry::{NewWindowResponse, PageLoadEvent, WebContext, WebView, WebViewBuilder};
 
-use crate::host::{Hooks, HostError, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
+use crate::host::{Hooks, HostError, LeaveFreely, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
 use crate::scripts::{DIRTY_PROBE, Dirty};
 
 /// knobas's main window, and how to give its own web view the keyboard.
@@ -43,6 +43,8 @@ fn wry_rect(bounds: Rect) -> wry::Rect {
 /// One site's view, and what must live as long as it.
 pub struct WryView {
     view: WebView,
+    /// The person said "leave anyway": the page's own leave dialog is answered.
+    leaving: LeaveFreely,
     /// The session folder's context (Windows), kept beside its view.
     _context: Box<WebContext>,
     #[cfg(target_os = "macos")]
@@ -128,12 +130,14 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
             "site view built"
         );
         let _ = view.zoom(spec.zoom);
+        let leaving = LeaveFreely::default();
         #[cfg(target_os = "macos")]
-        let mac = crate::mac::wrap(&view, &spec.source, &hooks);
+        let mac = crate::mac::wrap(&view, &spec.source, &hooks, &leaving);
         #[cfg(windows)]
-        let windows = crate::win::harden(&view, &hooks);
+        let windows = crate::win::harden(&view, &hooks, &leaving);
         Ok(Box::new(WryView {
             view,
+            leaving,
             _context: context,
             #[cfg(target_os = "macos")]
             _mac: mac,
@@ -249,5 +253,12 @@ impl SiteView for WryView {
     fn window_moved(&self) {
         #[cfg(windows)]
         crate::win::moved(&self.view);
+    }
+
+    fn leave_freely(&self) {
+        self.leaving.arm();
+        // WebView2 asks "Leave site?" itself unless its own dialogs are off.
+        #[cfg(windows)]
+        crate::win::own_dialogs(&self.view, false);
     }
 }

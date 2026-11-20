@@ -101,6 +101,9 @@ impl SiteView for FakeView {
     fn poll(&self) -> Option<ViewEvent> {
         None
     }
+    fn leave_freely(&self) {
+        self.state.borrow_mut().calls.push("leave freely".into());
+    }
 }
 
 impl Drop for FakeView {

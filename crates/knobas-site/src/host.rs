@@ -118,6 +118,30 @@ pub trait SiteView {
     fn poll(&self) -> Option<ViewEvent>;
     /// The main window moved (Windows: a page's drop-down follows it).
     fn window_moved(&self) {}
+    /// The person already answered "leave anyway" in the bar: the page's
+    /// own "Leave site?" for the next navigation, within [`LEAVE_FREELY`],
+    /// is answered yes rather than asked a second time.
+    fn leave_freely(&self) {}
+}
+
+/// How long a "leave anyway" answers the page's own leave dialog.
+pub const LEAVE_FREELY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// When the person last said "leave anyway" for one view.
+#[derive(Clone, Default)]
+pub struct LeaveFreely(Rc<std::cell::Cell<Option<std::time::Instant>>>);
+
+impl LeaveFreely {
+    /// The person said leave.
+    pub fn arm(&self) {
+        self.0.set(Some(std::time::Instant::now()));
+    }
+
+    /// Whether a leave dialog now is answered yes; it answers once.
+    #[must_use]
+    pub fn take(&self) -> bool {
+        self.0.take().is_some_and(|at| at.elapsed() < LEAVE_FREELY)
+    }
 }
 
 /// The platform: makes views, gives the keyboard back to knobas's own page,
