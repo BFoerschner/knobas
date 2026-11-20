@@ -73,6 +73,12 @@ describe("webPlace", () => {
     expect(webPlace("https://jira.example.evil.test/x", {}, s)).toEqual({ to: "browser" });
   });
 
+  test("with the source named, its own origin is scheme, host and port", () => {
+    const s = store(setting("jira", "https://jira.example"));
+    expect(webPlace("http://jira.example/x", { source: "jira" }, s)).toEqual({ to: "browser" });
+    expect(webPlace("https://jira.example:8443/x", { source: "jira" }, s)).toEqual({ to: "browser" });
+  });
+
   test("an address that is not http or https never reaches a site", () => {
     const s = store(setting("jira", "https://jira.example"));
     for (const url of ["javascript:alert(1)", "file:///etc/passwd", "ms-msdt:x", "not a url"]) {

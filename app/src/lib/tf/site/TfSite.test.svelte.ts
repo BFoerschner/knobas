@@ -260,13 +260,46 @@ test("another address asks with three answers, the browser in the middle", () =>
 });
 
 test("the insets go again only when they change", () => {
-  store.update(status());
-  draw();
-  calls = [];
-  // The same insets: nothing sent (a window resize changes the rectangle, not its distances from the edges).
-  window.dispatchEvent(new Event("resize"));
-  flushSync();
-  expect(calls).toEqual([]);
+  let fire: (() => void) | null = null;
+  const real = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(callback: () => void) {
+      fire = callback;
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  try {
+    store.update(status());
+    draw();
+    calls = [];
+    // The rectangle resized with the window: its distances from the edges did not change, nothing is sent.
+    fire!();
+    expect(calls).toEqual([]);
+    // The top bar wrapped: once.
+    insets = { top: 120, right: 0, bottom: 28, left: 0 };
+    fire!();
+    fire!();
+    expect(calls).toEqual(["show wiki 120 focus=false esc=true"]);
+  } finally {
+    globalThis.ResizeObserver = real;
+  }
+});
+
+test("every kind of layer hides the site: a panel and a drawer as a dialog does", () => {
+  for (const kind of ["panel", "drawer"] as const) {
+    store.update(status());
+    const { layers } = draw();
+    calls = [];
+    const off = layers.add({ kind, close: () => {} });
+    flushSync();
+    expect(calls, kind).toEqual(["hide wiki"]);
+    off();
+    flushSync();
+    if (view) unmount(view);
+    view = undefined;
+  }
 });
 
 test("Open in knobas appears for an address the mirror names, and goes to its page", async () => {

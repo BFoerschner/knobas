@@ -66,6 +66,8 @@ pub async fn site_allow<R: Runtime>(
     id: String,
     origin: String,
 ) -> Result<SiteSetting, IpcError> {
+    // A bad origin is refused before anything is read.
+    knobas_site::policy::Origin::parse(&origin).map_err(IpcError::invalid)?;
     let pool = lifecycle.pool()?;
     site::allow(&pool, &id, &origin, true).await?;
     site::setting_of(&pool, site::state(&app).ok().as_ref(), &id).await
@@ -83,6 +85,8 @@ pub async fn site_disallow<R: Runtime>(
     id: String,
     origin: String,
 ) -> Result<SiteSetting, IpcError> {
+    // A bad origin is refused before anything is read.
+    knobas_site::policy::Origin::parse(&origin).map_err(IpcError::invalid)?;
     let pool = lifecycle.pool()?;
     site::allow(&pool, &id, &origin, false).await?;
     site::setting_of(&pool, site::state(&app).ok().as_ref(), &id).await

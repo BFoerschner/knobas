@@ -95,6 +95,7 @@ mod run_ticket_ipc;
 mod search_ipc;
 mod search_settings;
 mod signals_ipc;
+mod site_ipc;
 mod sources_crud;
 mod sources_registry;
 mod standup_ipc;
