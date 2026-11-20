@@ -114,17 +114,49 @@ fn lock() -> std::sync::MutexGuard<'static, Store> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The folder spool files go in: one for this run, emptied of an earlier run's at first use.
+/// The folder spool files go in: one of this process's own under [`SPOOL_ROOT`], so two knobas on one machine (the
+/// app and a windowless backend, or two of either) never empty or overwrite each other's. One shared folder, emptied
+/// by each process at its first use and filled with files numbered per process, read one process's spool file as
+/// another's: "does not match its checksum: the archive is corrupt" (the ux23 gate's loaded suite, 2026-11-20).
 fn spool_dir() -> PathBuf {
     let mut s = lock();
     if let Some(dir) = &s.dir {
         return dir.clone();
     }
-    let dir = std::env::temp_dir().join("knobas-archives");
-    let _ = std::fs::remove_dir_all(&dir);
+    let root = std::env::temp_dir().join(SPOOL_ROOT);
+    sweep_spools(&root);
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let dir = root.join(format!("{}-{at}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     s.dir = Some(dir.clone());
     dir
+}
+
+/// Where every process's spool folder is made. Not `knobas-archives`, the one folder of the knobas before it, which
+/// such a knobas still empties whole at its first use.
+const SPOOL_ROOT: &str = "knobas-archive-spool";
+
+/// Remove what an earlier knobas left (a quit, a crash): each spool folder under `root` last written more than twelve
+/// hours ago, as the folder renders' scratch is swept (`folder_render::copy::sweep`), and the earlier knobas'
+/// `knobas-archives` once it is as old.
+fn sweep_spools(root: &Path) {
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(12 * 3600);
+    let stale = |path: &Path| {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .is_ok_and(|at| at < old)
+    };
+    let legacy = std::env::temp_dir().join("knobas-archives");
+    if stale(&legacy) {
+        let _ = std::fs::remove_dir_all(&legacy);
+    }
+    for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        if stale(&entry.path()) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 /// `size` bytes in MiB, to one place where it is not whole.
@@ -593,6 +625,34 @@ mod tests {
             }
         }
         !crc
+    }
+
+    /// A spool folder is this process's own, and what an earlier knobas left is swept only once it is twelve hours old:
+    /// another knobas running beside this one keeps its spool files.
+    #[cfg(unix)]
+    #[test]
+    fn a_spool_folder_is_the_process_own_and_only_a_stale_one_is_swept() {
+        let root = tempfile::tempdir().unwrap();
+        let (stale, beside) = (root.path().join("1-1"), root.path().join("2-2"));
+        for dir in [&stale, &beside] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("1.jar"), b"spooled").unwrap();
+        }
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(13 * 3600);
+        std::fs::File::open(&stale)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        sweep_spools(root.path());
+        assert!(!stale.exists(), "an earlier knobas' folder goes");
+        assert_eq!(std::fs::read(beside.join("1.jar")).unwrap(), b"spooled");
+        let ours = spool_dir();
+        let name = ours.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with(&format!("{}-", std::process::id())),
+            "{name}"
+        );
+        assert_eq!(ours.parent().unwrap().file_name().unwrap(), SPOOL_ROOT);
     }
 
     /// The store is the process's: its tests take turns, so one's evictions do not reach another's handles.
