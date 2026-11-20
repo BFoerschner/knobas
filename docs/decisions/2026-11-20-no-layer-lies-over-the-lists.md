@@ -30,6 +30,16 @@ itself, so it still places against the window, and with no chip showing nothing 
 window, the board and a Docs space scroll on the compositor again (4x: the board 166 frames a second against 89, its
 longest gap 12 ms against 42). `tf-css.test.ts` holds the layer to no room.
 
+## The asset tree's wires, the same way
+
+Assets' 300-row column (the perf estate's first VM) scrolled on the main thread in the window too, 49 frames a second
+at CPU 6x with an 88 ms gap, the chips' layer fixed or not. Its cause is the tree's own wire layer: an `<svg class="wires">`
+absolute over the whole tree, `pointer-events: none`, drawn even with no wire in it (the perf estate has no routes).
+Served into the window with the layer hidden, the column scrolls on the compositor (4x and 6x: gaps 6 ms); with
+`.cols` unpositioned instead, still on the main thread. The layer is now drawn only while a wire is
+(`drawnWires.length > 0`); `AssetsView.test.svelte.ts` holds a tree with no wire to no layer. A tree that draws wires
+still has the layer over its columns while they show; that is left as it is.
+
 A layer that must be over the page while it is not in use (a toast stack, a chip host) is a box of no size or of its
 content's size, never `inset: 0`. The app root (`.tf`) is fixed over the window too, but under the lists, as in ux20;
 dialogs, the scrim and a drag's cover cover it only while they are up.

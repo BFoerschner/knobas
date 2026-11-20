@@ -2147,6 +2147,9 @@
       Before the pane in document order and painted under it, so a wire that
       arrives at the pane's edge stops there.
     -->
+    <!-- Only while a wire is drawn (the ux21 Windows pass): an empty layer over the whole tree made WebView2 hit-test
+         each wheel on the main thread, and a column of 300 rows scrolled there at 49 frames a second at CPU 6x. -->
+    {#if drawnWires.length > 0}
     <svg class="wires" aria-hidden="true">
       {#each drawnWires as wire (wire.key)}
         <!-- A halo in the columns' own background under the wire, so a line over the strip's blank end stays a line.
@@ -2163,6 +2166,7 @@
         <circle class="land" cx={wire.x} cy={wire.y} r="3" />
       {/each}
     </svg>
+    {/if}
 
     <aside class="pane" tabindex="-1" bind:this={paneEl}>
       {#if detail === null}

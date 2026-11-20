@@ -653,6 +653,18 @@ test("the bare address draws the roots and nothing is selected", async () => {
 });
 
 /**
+ * **No wire layer while there is no wire** (the ux21 Windows pass, 2026-11-20): the layer lies over the whole tree, and
+ * an empty one there made WebView2 hit-test each wheel on the main thread, a long column scrolling at 49 frames a second
+ * at CPU 6x. It comes with the first wire (the wire tests below find it).
+ */
+test("a tree with no wire to draw has no wire layer over its columns", async () => {
+  render("#/assets/tree");
+
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  expect(target.querySelector("svg.wires")).toBeNull();
+});
+
+/**
  * **No tab strip** (#1459): the *Monitors* tab beside *Tree* named a roster
  * that went with the rooms UI (#1087), and one tab left is no strip. The Tree
  * is `#/assets`, which an asset page's breadcrumb links to.
