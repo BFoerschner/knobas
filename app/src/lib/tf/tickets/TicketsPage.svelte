@@ -137,7 +137,7 @@
     ticketViews,
     translateTicketView,
   } from "../../ipc/search";
-  import { openExternal } from "../../shell/open-external";
+  import { routeWeb as openExternal } from "../../shell/open-web";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
   import { Windowed } from "../../shell/windowed.svelte";

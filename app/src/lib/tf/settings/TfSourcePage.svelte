@@ -95,6 +95,7 @@
   import { replaceAddress } from "../opener";
   import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
+  import TfSiteSection from "../site/TfSiteSection.svelte";
   import TfSecretPrompt from "./TfSecretPrompt.svelte";
 
   let {
@@ -664,6 +665,9 @@
     </div>
   {/if}
 </section>
+
+<!-- A source's own website inside knobas (ADR-0048), after Connection. -->
+<TfSiteSection source={source.id} {name} />
 
 <section class="tf-stg-sec">
   <h2>Schedule</h2>

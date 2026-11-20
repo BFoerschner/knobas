@@ -484,6 +484,12 @@ pub async fn delete_source<R: tauri::Runtime>(
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
     state.scheduler.forget_source(&id, purge).await;
+    // Its site's session goes with it, as a credential does (ADR-0048).
+    if let Ok(sites) = crate::site::state(&app)
+        && let Err(error) = sites.forget(&id, true).await
+    {
+        tracing::warn!(%error, "a deleted source's site session was not removed");
+    }
     Ok(())
 }
 

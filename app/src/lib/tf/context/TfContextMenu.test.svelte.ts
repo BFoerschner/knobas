@@ -72,6 +72,7 @@ beforeEach(() => {
     copyLater: (text) => text.then((value) => void (calls["copyLater"] ??= []).push([value])),
     copySelection: () => ((calls["copySelection"] ??= []).push([]), true),
     openExternal: record("openExternal") as MenuPorts["openExternal"],
+    openWeb: record("openWeb") as MenuPorts["openWeb"],
     submitWrite: record("submitWrite", () => ({ id: 1 })) as MenuPorts["submitWrite"],
     ackAlert: record("ackAlert") as MenuPorts["ackAlert"],
     unackAlert: record("unackAlert") as MenuPorts["unackAlert"],
@@ -269,7 +270,7 @@ test("a right-click inside the menu draws no second menu and none of the web vie
   expect(menus()).toHaveLength(1);
 });
 
-test("Copy key writes the clipboard at once; Copy link waits on the read it started, and Open in Jira opens the browser", async () => {
+test("Copy key writes the clipboard at once; Copy link waits on the read it started, and Open in Jira opens its page where its pages open", async () => {
   await draw(TICKET_ROW);
   rightClick(page.querySelector(".t")!);
   row("copy-key").click();
@@ -284,7 +285,7 @@ test("Copy key writes the clipboard at once; Copy link waits on the read it star
   await settle();
   row("web").click();
   await settle();
-  expect(calls["openExternal"]).toEqual([["https://jira.example/browse/PAY-231"]]);
+  expect(calls["openWeb"]).toEqual([["https://jira.example/browse/PAY-231", { source: "jira" }]]);
 });
 
 test("Open goes to the thing; Start timer takes the title read as the menu opened", async () => {

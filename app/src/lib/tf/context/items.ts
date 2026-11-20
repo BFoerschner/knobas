@@ -57,7 +57,10 @@ export type Act =
   /** The document's own copy of the selection, so a page's `copy` handler still shapes what lands. */
   | { do: "copy-selection" }
   | { do: "search"; text: string }
+  /** The browser, on purpose: an item named *Open in browser*. */
   | { do: "browser"; url: Text }
+  /** *Open in ⟨source⟩*: its site inside knobas when the source's pages open there (ADR-0048), else the browser. */
+  | { do: "web"; url: Text; source: string }
   /** A web address of a source knobas mirrors: what it names, opened in the app, resolved when chosen. */
   | { do: "in-knobas"; url: string }
   | { do: "timer"; entityId: string }
@@ -111,6 +114,8 @@ export interface MenuContext {
   sourceName: (sourceId: string) => string | null;
   /** Whether a web address is on a source knobas mirrors (its base URL). */
   mirrored: (url: string) => boolean;
+  /** Whether a source's pages open inside knobas (ADR-0048): *Open in browser* then follows *Open in ⟨source⟩*. */
+  opensInside?: (sourceId: string) => boolean;
   /** The page's own thing: drawn without *Open*, since that is where the reader stands. */
   own?: boolean;
   /** The folder renderers that take a folder of a repository (ADR-0044), in the person's order; absent, none. */
@@ -192,10 +197,16 @@ function sheetItem(action: SheetAction, id: string): Item[] {
   }
 }
 
-/** *Open in ⟨source⟩*: the source's name when it is known, else the browser. */
-function inSource(id: string, ctx: MenuContext): Item {
-  const name = ctx.sourceName(sourceOf(id));
-  return { id: "web", label: name ? `Open in ${name}` : "Open in browser", act: { do: "browser", url: { read: "web" } } };
+/**
+ * *Open in ⟨source⟩*: the source's name when it is known, else the browser. When the source's pages open inside knobas
+ * (ADR-0048), *Open in browser* follows it, so the browser stays one press away; with them off both would do the same.
+ */
+function inSource(id: string, ctx: MenuContext): Item[] {
+  const source = sourceOf(id);
+  const name = ctx.sourceName(source);
+  if (!name) return [{ id: "web", label: "Open in browser", act: { do: "browser", url: { read: "web" } } }];
+  const web: Item = { id: "web", label: `Open in ${name}`, act: { do: "web", url: { read: "web" }, source } };
+  return ctx.opensInside?.(source) === true ? [web, { id: "web-browser", label: "Open in browser", act: { do: "browser", url: { read: "web" } } }] : [web];
 }
 
 /**
@@ -245,7 +256,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       const key = keyOf(thing.id);
       return grouped(
         [...open(thing.hash, ctx), ...fromSheet("ticket", thing.id, title, ctx)],
-        [inSource(thing.id, ctx)],
+        inSource(thing.id, ctx),
         [
           { id: "copy-key", label: "Copy key", hint: key, act: { do: "copy", text: key, said: `Copied ${key}` } },
           { id: "copy-key-title", label: "Copy key and title", act: { do: "copy", text: { read: "key-title" }, said: `Copied ${key} and its title` } },
@@ -256,14 +267,14 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
     case "pr":
       return grouped(
         [...open(thing.hash, ctx), ...fromSheet("pr", thing.id, title, ctx)],
-        [inSource(thing.id, ctx)],
+        inSource(thing.id, ctx),
         [{ id: "copy-title", label: "Copy title", act: { do: "copy", text: { read: "title" }, said: "Copied the title" } }, copyLink()],
       );
     case "repo": {
       const name = keyOf(thing.id);
       return grouped(
         [...open(thing.hash, ctx), ...fromSheet("repo", thing.id, title, ctx, [{ id: "commits", label: "Commits", act: { do: "go", hash: repoHash(thing.id, "commits") } }])],
-        [...openIn(thing.id, thing.id, { kind: "repository" }, ctx, facts), inSource(thing.id, ctx)],
+        [...openIn(thing.id, thing.id, { kind: "repository" }, ctx, facts), ...inSource(thing.id, ctx)],
         [
           { id: "copy-name", label: "Copy name", hint: name, act: { do: "copy", text: name, said: `Copied ${name}` } },
           fullPath("", facts),
@@ -274,7 +285,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
     case "branch":
       return grouped(
         [...open(thing.hash, ctx), ...fromSheet("branch", thing.id, title, ctx)],
-        [...openIn(thing.id, null, { kind: "repository" }, ctx, facts), inSource(thing.id, ctx)],
+        [...openIn(thing.id, null, { kind: "repository" }, ctx, facts), ...inSource(thing.id, ctx)],
         [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied the branch name" } }, copyLink()],
       );
     case "branch-name":
@@ -300,7 +311,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         thing.repoId !== null && sha !== null && ctx.checkout?.(thing.repoId) === true
           ? [{ id: "compare-working", label: "Compare with working tree", act: { do: "go", hash: diffHash(thing.repoId, sha, WORKING_TREE) } }]
           : [];
-      return grouped([...open(thing.hash, ctx), ...working], [...code, inSource(thing.id, ctx)], [...copies, copyLink()]);
+      return grouped([...open(thing.hash, ctx), ...working], [...code, ...inSource(thing.id, ctx)], [...copies, copyLink()]);
     }
     case "run":
       return grouped(
@@ -332,7 +343,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
               ]
             : []),
         ],
-        [inSource(thing.id, ctx)],
+        inSource(thing.id, ctx),
         [copyLink()],
       );
     case "pipeline":
@@ -343,7 +354,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
           // Every failed run of it, older ones too (ux18), with *Undo* on the toast.
           ...(ctx.runs !== undefined ? [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item] : []),
         ],
-        [inSource(thing.id, ctx)],
+        inSource(thing.id, ctx),
         [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied the name" } }, copyLink()],
       );
     case "monitor":
@@ -355,7 +366,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       const sheetKind = SHEET_KIND[thing.kind];
       const own = sheetKind === undefined ? [] : fromSheet(sheetKind, thing.id, title, ctx);
       const ack: Item[] = thing.kind === "monitor" && thing.alerting === true ? [{ id: "ack", label: "Acknowledge", act: { do: "ack", monitorId: thing.id, ...(thing.ack ? { own: thing.ack } : {}) } }] : [];
-      const web = thing.kind === "set" || thing.kind === "note" ? [] : [inSource(thing.id, ctx)];
+      const web = thing.kind === "set" || thing.kind === "note" ? [] : inSource(thing.id, ctx);
       const copies: Item[] = [
         { id: "copy-title", label: thing.kind === "page" || thing.kind === "note" ? "Copy title" : "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied" } },
         ...(web.length > 0 ? [copyLink()] : []),

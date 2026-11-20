@@ -4166,6 +4166,7 @@ dependencies = [
  "knobas-mockd",
  "knobas-search",
  "knobas-secrets",
+ "knobas-site",
  "knobas-source",
  "knobas-source-confluence",
  "knobas-source-gitea",
@@ -4367,6 +4368,34 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "windows-native-keyring-store",
+]
+
+[[package]]
+name = "knobas-site"
+version = "3.2.8"
+dependencies = [
+ "block2",
+ "dpi",
+ "futures-util",
+ "knobas-site",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tao",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "url",
+ "webview2-com",
+ "windows",
+ "windows-core 0.61.2",
+ "wry",
 ]
 
 [[package]]

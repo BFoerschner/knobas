@@ -86,6 +86,18 @@ export const EVENTS = {
    * Settings › Search reads its status again.
    */
   codeFiles: "code:files",
+  /** `SiteStatus` — a live site's state changed (ADR-0048). */
+  siteStatus: "site:status",
+  /** `SiteKey` — a key knobas took from a site, by name. */
+  siteKey: "site:key",
+  /** `SiteRouted` — a navigation a site may not show went to the browser, another site, or nowhere. */
+  siteRouted: "site:routed",
+  /** `SiteDownload` — a site's download started, saved or failed. */
+  siteDownload: "site:download",
+  /** `SiteClosed` — a site's view closed, and why. */
+  siteClosed: "site:closed",
+  /** `SiteStatus[]` — knobas was asked to quit and these sites hold changes. */
+  siteQuit: "site:quit",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

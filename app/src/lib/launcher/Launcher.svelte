@@ -96,7 +96,7 @@
   } from "../ipc";
   import { listSources, type CredentialHealth, type KindStateColours } from "../ipc/sources";
   import type { HealthPhase } from "../shell/health.svelte";
-  import { openExternal as realOpenExternal } from "../shell/open-external";
+  import { routeWeb as realOpenExternal, webPlaceName } from "../shell/open-web";
   import { entityAddress } from "../tf/address";
   import { arrival, arrivalOf } from "../tf/arrival.svelte";
   import { fileHash, lineHash } from "../tf/repo/repo";
@@ -909,7 +909,7 @@
    */
   async function openTheMiss(url: string) {
     try {
-      await acknowledged(openingWords("the browser"), () => openExternal(url));
+      await acknowledged(openingWords(webPlaceName(url)), () => openExternal(url));
       close();
     } catch (cause) {
       session.error = ipcErrorMessage(cause);

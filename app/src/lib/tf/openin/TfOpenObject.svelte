@@ -24,7 +24,7 @@
 -->
 <script module lang="ts">
   import { diffTool, entityCheckout, objectPage, openDiffTool, type CheckoutView, type OpenObject } from "../../ipc/entity";
-  import { openExternal } from "../../shell/open-external";
+  import { openExternal } from "../../shell/open-external"; // browser on purpose: the menu's *Browser*
 
   /** What the menu reads and the one thing it hands the OS. */
   export interface OpenObjectPorts {

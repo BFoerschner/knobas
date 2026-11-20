@@ -125,6 +125,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/scoped.svelte.ts#before": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
+  "tf/page-open.svelte.ts#pageOpen": async () => (await import("../tf/page-open.svelte")).pageOpen.reset(),
+  "tf/site/site.svelte.ts#siteStore": async () => (await import("../tf/site/site.svelte")).siteStore.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),
   "tf/openin/clones.svelte.ts#clones": async () => (await import("../tf/openin/clones.svelte")).clones.reset(),
   // *Clone all*'s run and its listener (PR #2479).

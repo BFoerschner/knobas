@@ -118,7 +118,7 @@
   import { drawn } from "../../detail/relations";
   import type { PipelinePorts } from "../builds/pipeline-ports";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
-  import { openExternal as realOpenExternal } from "../../shell/open-external";
+  import { routeWeb as realOpenExternal, webPlaceName } from "../../shell/open-web";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { dismiss, push, undoable } from "../../shell/toasts.svelte";
@@ -1521,7 +1521,7 @@
 
   async function open(url: string): Promise<void> {
     try {
-      await acknowledged(openingWords("the browser"), () => io.openExternal(url));
+      await acknowledged(openingWords(webPlaceName(url)), () => io.openExternal(url));
     } catch (cause) {
       push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

@@ -59,6 +59,7 @@ pub mod renderers;
 pub mod run_presets;
 pub mod search_settings;
 pub mod settings;
+pub mod site;
 mod slug;
 pub mod sources;
 pub mod standup;
@@ -135,6 +136,21 @@ pub mod events {
     /// renderer's run on a folder moved (queued, copying, running) or ended
     /// (ADR-0044): the page showing that folder asks again. Broadcast.
     pub const FOLDER_RENDER: &str = "folder-render:moved";
+    /// Payload: `SiteStatus` -- a live site's state changed (ADR-0048). To
+    /// the main window by label, as every site event.
+    pub const SITE_STATUS: &str = "site:status";
+    /// Payload: `SiteKey` -- a key knobas took from a site, by name.
+    pub const SITE_KEY: &str = "site:key";
+    /// Payload: `SiteRouted` -- a navigation a site may not show went to the
+    /// browser, to another source's site, or nowhere.
+    pub const SITE_ROUTED: &str = "site:routed";
+    /// Payload: `SiteDownload` -- a site's download started, saved or failed.
+    pub const SITE_DOWNLOAD: &str = "site:download";
+    /// Payload: `SiteClosed` -- a site's view closed, and why.
+    pub const SITE_CLOSED: &str = "site:closed";
+    /// Payload: `SiteStatus[]` -- knobas was asked to quit and these sites
+    /// hold changes: the page asks the person.
+    pub const SITE_QUIT: &str = "site:quit";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -340,6 +356,10 @@ pub fn run() {
                     // it cost.
                     let started = std::time::Instant::now();
                     bundle::open_main_window(app, &bundle)?;
+                    // The sites ride on the main window (ADR-0048).
+                    if let Some(profile) = app.try_state::<Profile>() {
+                        site::start(app, &profile);
+                    }
                     tracing::info!(
                         ms = started.elapsed().as_millis(),
                         "the main window is made"
@@ -887,6 +907,27 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The page filters' ranking (the fuzzy-search pass, 2026-11-19),
         // appended at the foot: the list is append-only (§10.8).
         commands::search::fuzzy_rank,
+        // A source's own website inside knobas (ADR-0048), appended at the
+        // foot (§10.8).
+        commands::site::site_settings,
+        commands::site::set_site_open_inside,
+        commands::site::site_allow,
+        commands::site::site_disallow,
+        commands::site::site_suggest,
+        commands::site::site_forget,
+        commands::site::site_open,
+        commands::site::site_show,
+        commands::site::site_hide,
+        commands::site::site_do,
+        commands::site::site_answer,
+        commands::site::site_close,
+        commands::site::sites,
+        commands::site::sites_unsaved,
+        commands::site::site_quit,
+        commands::site::site_zoom,
+        commands::site::site_reveal_download,
+        commands::site::sites_kept,
+        commands::site::set_sites_kept,
     ]
 }
 
@@ -908,6 +949,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
 /// Blocks: it runs from the event loop's exit handler, which is not async.
 /// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
 fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // Every site's view first, on the main thread the exit handler runs on
+    // (ADR-0048).
+    site::shutdown(app);
     // A folder renderer still running dies with everything it started
     // (ADR-0044).
     folder_render::runs::kill_all();
@@ -1811,6 +1855,12 @@ mod tests {
             super::events::CLONE_ALL,
             super::events::FOLDER_RENDER,
             super::events::CODE_FILES,
+            super::events::SITE_STATUS,
+            super::events::SITE_KEY,
+            super::events::SITE_ROUTED,
+            super::events::SITE_DOWNLOAD,
+            super::events::SITE_CLOSED,
+            super::events::SITE_QUIT,
         ];
         names.sort_unstable();
         declared.sort_unstable();

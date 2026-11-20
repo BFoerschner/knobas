@@ -21,8 +21,8 @@
 -->
 <script lang="ts">
   import { objectPage, setClonesRoot, type CheckoutApplication, type CheckoutView } from "../../ipc/entity";
-  import { openInBrowser } from "../../shell/external-links";
-  import { openExternal } from "../../shell/open-external";
+  import { openInBrowser } from "../../shell/external-links"; // browser on purpose: the menu's *Browser*
+  import { openExternal } from "../../shell/open-external"; // browser on purpose: the menu's *Browser*
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
   import TfPath from "../TfPath.svelte";

@@ -95,6 +95,7 @@ export function thingOfHash(hash: string): Thing | null {
       return { kind: "note", id: route.id, hash };
     case "tickets":
     case "unknown":
+    case "site":
       return null;
     case "full":
       break;
