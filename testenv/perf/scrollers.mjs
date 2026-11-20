@@ -48,6 +48,7 @@ const STOPS = [
   ["time", "#/time", ""],
   ["standup", "#/standup", ""],
   ["settings", "#/settings", ""],
+  ["settings search", "#/settings/search", ""],
   ["a ticket", "#/tickets", `await __a.click(/^List$/); __a.vis("main a[href*='/ticket/'], main a[href^='#/job/']")[0]?.click(); await __a.sleep(2500)`],
   // The asset tree: a long column (the fixture's bulk rack, `?fake-assets=<n>`; the perf estate's first VM on a real
   // database), and an asset whose routes draw wires from the pane to the columns (the fixture's notebook).

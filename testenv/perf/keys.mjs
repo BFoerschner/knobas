@@ -305,10 +305,11 @@ const CASES = [
   // the rows the letter before already drew, are the key before them here.
   // A repository found by its files (the everything-search decisions, D14): the last letter of a word only files hold
   // (a copy of the scale home given files by `files_fill`), broad words many files hold, and words only bodies hold,
-  // so every row draws its evidence line.
+  // so every row draws its evidence line. Each last letter changes the list on that copy (a press that changes nothing
+  // is counted as no rows): `postmorte` and `postmortem` name the same rows, `estimat` and `estimate` do not.
   { name: "everything-file", presses: [["settlebridg", "e"], ["packetlin", "e"], ["synstructur", "e"], ["tinytemplat", "e"], ["dashma", "p"], ["hifijso", "n"], ["keyrin", "g"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-file-broad", presses: [["tes", "t"], ["confi", "g"], ["dat", "a"], ["serv", "e"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
-  { name: "everything-evidence", presses: [["postmorte", "m"], ["throughpu", "t"], ["benchmar", "k"], ["replic", "a"], ["estimat", "e"], ["fixtur", "e"], ["regressio", "n"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-evidence", presses: [["estimat", "e"], ["regressio", "n"], ["inciden", "t"], ["migratio", "n"], ["capacit", "y"], ["alertin", "g"], ["certificat", "e"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-part", presses: [["syste", "m"], ["chai", "n"], ["seede", "d"], ["stac", "k"], ["qual", "i"], ["regis", "t"], ["compi", "l"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-loose", presses: [["obssta", "c"], ["pays", "c"], ["authp", "r"], ["csvimp", "o"], ["idem", "k"], ["dnsaut", "o"], ["mapsv", "c"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   // With the mirror's words read (step 6 of the same pass) a whole swapped word is answered by the nearest written
