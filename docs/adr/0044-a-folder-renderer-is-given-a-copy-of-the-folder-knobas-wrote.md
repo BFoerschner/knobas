@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0046
 ---
 
 # A folder renderer is given a copy of the folder knobas wrote
+
+Amended by [ADR-0046](0046-a-folder-renderer-may-make-a-folder-of-files-knobas-keeps.md): a folder renderer may be given a third path, {outdir}, and make a folder of files.
 
 Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md) and [ADR-0033](0033-renderer-and-pipeline-commands-run-under-the-rules-of-open-in.md). Björn, on PR #2479 (ux17): "I want to be able to render a folder. Because I might want to build a tool that takes a path to the folder and outputs a png, a text, or anything. Because the lowcode tool takes a folder and its contents and generates something out of it." A file renderer reads one file on stdin; a folder is many files, and a tool like that takes a path. Decided 2026-11-16 (Fable, xhigh, under Björn's standing instruction; `docs/decisions/2026-11-16-a-folder-is-drawn-by-a-tool-of-your-own.md`): **a folder renderer is set up like a file renderer, and is given two paths knobas made: `{path}`, a copy of the folder that knobas wrote, and `{out}`, a file to write to.**
 

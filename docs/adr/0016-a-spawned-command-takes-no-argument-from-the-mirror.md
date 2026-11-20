@@ -1,10 +1,12 @@
 ---
-status: accepted, amended by ADR-0021, ADR-0023, ADR-0033, ADR-0034, ADR-0035 and ADR-0041
+status: accepted, amended by ADR-0021, ADR-0023, ADR-0033, ADR-0034, ADR-0035, ADR-0041 and ADR-0046
 ---
 
 # A spawned command takes no argument from the mirror
 
 Amended by [ADR-0044](0044-a-folder-renderer-is-given-a-copy-of-the-folder-knobas-wrote.md): a folder renderer is given two paths knobas made, `{path}` (a copy of the folder it wrote) and `{out}`, and nothing else.
+
+Amended by [ADR-0046](0046-a-folder-renderer-may-make-a-folder-of-files-knobas-keeps.md): a folder renderer may be given a third path, {outdir}, and make a folder of files.
 
 *Open in editor* and *open a terminal at the checkout* are the first features that run a program on the user's machine, and a repo entity is a mirrored item whose every field a remote system wrote. Decided 2026-09-07 (Björn, v1.5 grilling): **a program knobas spawns is built from a command template the user set in settings, and its arguments come only from what knobas found on the local disk or was told by hand, never from a mirrored item.**
 

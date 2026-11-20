@@ -304,8 +304,12 @@ The ordered steps between a file's bytes and its renderer (base64 decode, gunzip
 _Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq's word for one step), transform
 
 **Folder renderer**:
-One of the person's own programs that takes a folder of a repository and makes a picture, text, Markdown or a page out of it, saved in Settings › Renderers and drawn on the Code page in the file's place (ADR-0044, 2026-11-16). It is given `{path}`, a copy of the folder knobas wrote at the commit shown (from the clone's objects, else the forge), and may write `{out}`; it never runs in the checkout. Which folders it takes is two glob lists: a file the folder holds, and the folder's name or path. What it drew is kept by the folder's content, so a revisit draws at once. In code `folder_render`, `FolderRenderer`.
+One of the person's own programs that takes a folder of a repository and makes a picture, text, Markdown, a page or a folder of files out of it, saved in Settings › Renderers and drawn on the Code page in the file's place (ADR-0044, 2026-11-16). It is given `{path}`, a copy of the folder knobas wrote at the commit shown (from the clone's objects, else the forge), and may write `{out}`; it never runs in the checkout. Which folders it takes is two glob lists: a file the folder holds, and the folder's name or path. What it drew is kept by the folder's content, so a revisit draws at once. In code `folder_render`, `FolderRenderer`.
 _Avoid_: folder preview, folder plugin, renderer alone (a file's)
+
+**Generated folder**:
+The files a [folder renderer](#folder-renderer) whose command holds `{outdir}` wrote in one run, kept by knobas as plain files under `<clones root>/knobas-rendered/` and drawn on the Code page in the real folder's place, each by the file renderers (ADR-0046, 2026-11-20). Links, `.git` folders and names Windows does not take are left out and said. Kept by the folder's content, a folder per run, never rewritten. In code `Made`, `folder_render::keep`, `folder_render::store`.
+_Avoid_: output folder (the tool's own `{outdir}`, before it is kept), render cache, preview
 
 **Pipeline**:
 What a CI source runs: TeamCity's build configuration, a GitLab pipeline, a Jenkins job. The Builds view is drawn over pipelines and their [runs](#run); the source's own word appears once, in the view's header (ADR-0022).
