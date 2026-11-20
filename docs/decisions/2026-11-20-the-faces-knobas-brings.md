@@ -129,3 +129,11 @@ was looked at (no text clipped, cut or overlapping that was not before). New tes
 `SOURCE.md` hashes and licences, Inter's and Cascadia's axes, the ligature default and its kept *off*, the Cascadia
 migration (five kept names and sizes, run once), another kept face's size untouched, the licences' list and a text
 read when opened.
+
+Press trips with `--strict` (the Mac's lock) on 2244187b: 315 of 316 passing, `scroller-select-run` failing, which the
+600 headings fixed (above): on 6e6b9edc the three `scroller-select` trips pass, twice, and the one that failed fails on
+2244187b three times and passes on its parent. `just moves` (the fixture, 1x and 4x, three workers): 1440x868@1 on
+2244187b, 284 first opens and returns, nothing moved; 2560x1440@1.25 on 6e6b9edc, 360, nothing moved. The column check
+`moves.sh` runs after the moves was stopped at the lock's 30 minutes and did not report. Owed: the whole trip table
+again on 6e6b9edc (only `scroller-select` was run there), and on Windows a look at Inter and Cascadia Code at 100, 125
+and 150 % in knobas's own window, with the first window timed in WebView2.
