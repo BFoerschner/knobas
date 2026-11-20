@@ -48,12 +48,18 @@ no-worker rule and the plans the probes hold are unchanged. A query with no key 
 query with one asks one more statement, beside the others, on its own pooled connection. The projects are a
 sorted list of lowered keys, a few kilobytes on any mirror.
 
-## Left
+## Left, and done since (ux26, the same day)
 
-- A saved view's stored text is counted as before (`ticket_views::list` builds its searcher without the picker):
-  a view whose text is `pay123` counts nothing while its board draws the key.
-- The Tickets view marks the words typed in a card, read in the browser; `pay123` marks nothing in `PAY-123`.
-- Until the picker's first load after a start, no key is read.
+- A ticket view's stored text was counted without the picker, so a view whose text is `pay123` counted nothing
+  while its board drew the key. `ticket_views::list` takes the launcher's picker now, as `mini_board` does, and
+  counts what the board draws (`ticket_views_ipc.rs`).
+- The Tickets view marked only the words typed: `pay123` marked nothing in `PAY-123`, `pay 123` marked `PAY` and
+  `123` apart. The browser's needles (`tickets/needles.ts`) add the key after the words. The browser holds no
+  projects and needs none: the key's needle marks only text that spells the key.
+- Until the picker's first load after a start, no key was read. The picker now reads the projects on their own
+  first (`PROJECTS_SQL`, one statement over the ticket ids, the names' index), at the start of its first
+  reload, and a search that comes before even that reads them itself (`Picker::projects_read`), once; the
+  names' reload replaces them. A project the mirror gains before that reload arrives with it.
 
 ## Reversing it
 
