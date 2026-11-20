@@ -6,7 +6,13 @@
 //! cargo run --release -p knobas-app --example files_fill -- \
 //!   --db postgresql://postgres:<pass>@127.0.0.1:<port>/knobas --index <profile>/files-1 \
 //!   --from <folder> [--source <id>] [--kept-mb 2048]
+//! cargo run --release -p knobas-app --example files_fill -- \
+//!   --data-dir "$HOME/Library/Application Support/dev.knobas.desktop" --from <folder>
 //! ```
+//!
+//! With `--data-dir` (a copy of a demo home, as `headless_ipc` takes it) the
+//! profile's own database is started, migrated and stopped again, and the
+//! index is the profile's `files-1`.
 //!
 //! Each immediate subfolder of `<folder>` becomes the files of one of the
 //! source's mirrored repositories, in entity id order, the subfolders in name
@@ -276,9 +282,11 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     let (mut db, mut index, mut from, mut source, mut kept_mb) =
         (None, None, None, None, 2_048_u64);
+    let mut data_dir: Option<String> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--db" => db = args.next(),
+            "--data-dir" => data_dir = args.next(),
             "--index" => index = args.next(),
             "--from" => from = args.next(),
             "--source" => source = args.next(),
@@ -291,11 +299,38 @@ async fn main() {
             }
         }
     }
-    let (Some(db), Some(index), Some(from)) = (db, index, from) else {
-        eprintln!("--db, --index and --from are required");
+    let Some(from) = from else {
+        eprintln!("--from is required, with --db and --index or with --data-dir");
         std::process::exit(2);
     };
-    let pool = sqlx::PgPool::connect(&db).await.expect("the database");
+    // With `--data-dir`, the profile's own database, started, migrated and
+    // stopped again, and the profile's own index.
+    let mut server = None;
+    let (pool, index) = match (db, index, data_dir) {
+        (Some(db), Some(index), _) => (
+            sqlx::PgPool::connect(&db).await.expect("the database"),
+            index,
+        ),
+        (_, _, Some(data_dir)) => {
+            let profile = knobas_app::Profile::new(true, Path::new(&data_dir));
+            let started = knobas_db::EmbeddedDb::start(profile.db_config(None))
+                .await
+                .expect("the profile's database");
+            let pool = started.pool().clone();
+            knobas_db::migrate::run(&pool)
+                .await
+                .expect("the migrations");
+            server = Some(started);
+            (
+                pool,
+                profile.dir.join("files-1").to_string_lossy().into_owned(),
+            )
+        }
+        _ => {
+            eprintln!("--db and --index, or --data-dir");
+            std::process::exit(2);
+        }
+    };
     let source: String = match source {
         Some(source) => source,
         None => sqlx::query_scalar("select source_id from sync.item where kind = 'repo' group by source_id order by count(*) desc limit 1")
@@ -370,6 +405,10 @@ async fn main() {
             "passed": passed,
         })
     );
+    pool.close().await;
+    if let Some(server) = server {
+        server.stop().await.expect("the database stops");
+    }
 }
 
 fn roots_len(repositories: &[String], folders: &[PathBuf]) -> usize {

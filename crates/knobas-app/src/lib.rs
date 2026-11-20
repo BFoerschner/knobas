@@ -980,8 +980,6 @@ pub async fn bring_up<R: tauri::Runtime>(
     bring_up_app(handle, profile, db_url, registry).await;
 }
 
-/// The bring-up itself: start the server, migrate, sweep, start the engines,
-/// install the shared state, announce `Ready` -- or `Failed`.
 /// Open `<dir>/files-1` and compare it with the database (D7); the index
 /// stays [`knobas_files::FileIndex::none`] where it cannot be opened.
 pub(crate) async fn open_files(lifecycle: &Lifecycle, pool: &sqlx::PgPool, dir: &std::path::Path) {
@@ -1004,6 +1002,8 @@ pub(crate) async fn open_files(lifecycle: &Lifecycle, pool: &sqlx::PgPool, dir: 
     lifecycle.set_files(index);
 }
 
+/// The bring-up itself: start the server, migrate, sweep, start the engines,
+/// install the shared state, announce `Ready` -- or `Failed`.
 async fn bring_up_app<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     profile: &Profile,

@@ -206,7 +206,8 @@
           {#if !KEEPS.some(([mb]) => mb === now.kept_mb)}<option value={String(now.kept_mb)}>{formatBytes(now.kept_mb * 1024 * 1024)}</option>{/if}
           {#each KEEPS as [mb, label] (mb)}<option value={String(mb)}>{label}</option>{/each}
         </select>
-        <div class="tf-stg-meter" role="presentation"><i style:width="{filled}%"></i></div>
+        <!-- An SVG and not a styled width: no inline style under the CSP (house rules). -->
+        <svg class="tf-stg-meter" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect width={filled} height="6" /></svg>
         <p class="tf-stg-status" role="status">{status.line}<small>{status.under}</small></p>
       </div>
     </div>
