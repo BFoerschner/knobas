@@ -476,7 +476,7 @@ const PAGES = [
     { id: "list-pill", kind: "column-filter", strict: true, finding: "F-151", prep: [{ click: "button, a, [role=tab]", text: "List" }, { wait: 500 }], pill: { sel: ".tf-main button", text: "Bug" } },
   ] },
   { page: "A source", route: "settings/source/gitea", trips: [
-    { id: "syncing-undo", kind: "undo-stale", strict: true, finding: "F-648", changes: [{ sel: ".tf-main button[aria-checked]" }, { sel: ".tf-main button[aria-checked]" }], value: "document.querySelector('.tf-main button[aria-checked]')?.getAttribute('aria-checked') ?? null" },
+    { id: "syncing-undo", kind: "undo-stale", strict: true, finding: "F-648", changes: [{ sel: '.tf-main button[aria-label="Syncing"]' }, { sel: '.tf-main button[aria-label="Syncing"]' }], value: "document.querySelector('.tf-main button[aria-label=\"Syncing\"]')?.getAttribute('aria-checked') ?? null" },
     // Owners waits for its Save, and its draft stays on Esc by design, so it is swept and not typed into.
     { id: "source-fields", kind: "esc-sweep", finding: "F-641" },
   ] },
