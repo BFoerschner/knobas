@@ -36,6 +36,21 @@ cases. Eight mutants, each killed. The press trips' `cold-start` kind (`cold-no-
 page or *knobas does not hold this ticket* ever paints, or the first frame is not at All tickets. On the build before
 this change it fails `cold-no-job` and `cold-gone-job`.
 
+## What it costs the first window
+
+Headless Chrome on the WSL box (Ryzen 5600X), the perf build on the fixture at scale, medians of five cold loads, ms
+from navigation start:
+
+| | 1x | 4x | 6x |
+|---|---|---|---|
+| No job, before: the empty page / All tickets' cards (button pressed the frame it appeared) | 251 / 505 | 790 / 1745 | 1136 / 2662 |
+| No job, after: the first frame, All tickets' cards in it | 455 | 1668 | 2526 |
+| Chosen job, before / after: its card | 384 / 413 | 1415 / 1391 | 2092 / 2074 |
+
+The same at 2560x1440@1.25 within 40 ms of these. The first frame comes later than the empty page did, because it is
+the board rather than a sentence; the board itself arrives earlier than it could through the button, and nothing
+paints before it.
+
 ## Reversing it
 
 Make `homeOf(null)` return `#/job` and bring back `TfPage.svelte`'s empty branch, and drop the shell's
