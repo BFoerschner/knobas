@@ -60,6 +60,9 @@ function unsafe(): string[] {
 
 /** The lists drawn whole, each with why it stays small. Keyed `path  list` as `eaches` writes them. */
 const SMALL: Record<string, string> = {
+  "tf/site/TfSiteQuit.svelte  unsaved": "a handful by what it is: the live sites, at most Sites kept open (6) and the ones that held changes past it",
+  "tf/site/TfSiteSection.svelte  setting.allowed": "a handful by what it is: the sign-in hosts one source's site was allowed to show",
+  "tf/site/TfSiteSection.svelte  setting.suggested": "a handful by what it is: the hosts an Open in this source named this session",
   "shell/TimerPicker.svelte  assets": "capped where it is read or drawn: the launcher's search answers at most a page of hits",
   "shell/TimerPicker.svelte  candidates": "capped where it is read or drawn: the launcher's search answers at most a page of hits",
   "shell/WriteQueue.svelte  decisions": "what this session queued that the source does not hold yet: the writes waiting on the reader's decision: what they queued",

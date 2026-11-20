@@ -146,10 +146,10 @@ test("each Open in names its own source by its display name: two of one kind, an
   expect(item(run("tcoss"), "web").label).toBe("Open in TeamCity (OSS)");
   expect(item(run("acme"), "web").label).toBe("Open in Acme Pipelines");
   // Each opens its own item's page: the item's own web address, read as the menu opens.
-  expect(item(run("acme"), "web").act).toEqual({ do: "browser", url: { read: "web" } });
+  expect(item(run("acme"), "web").act).toEqual({ do: "web", url: { read: "web" }, source: "acme" });
   // A file's page on its code host names that host too, not the browser.
   const file = menuFor({ kind: "line", repoId: "fj:t/pay", path: "src/a.rs", line: 3 }, null, named);
-  expect(item(file, "forge")).toMatchObject({ label: "Open in Forgejo at home", act: { do: "browser", url: { read: "forge" } } });
+  expect(item(file, "forge")).toMatchObject({ label: "Open in Forgejo at home", act: { do: "web", url: { read: "forge" }, source: "fj" } });
   // A source the list does not know: the browser, which is what opens it.
   expect(item(menuFor({ kind: "folder", repoId: "gone:t/pay", path: "src" }, null, named), "forge").label).toBe("Open in browser");
 });
@@ -247,4 +247,19 @@ test("a pipeline offers Mark all as read among what it does (ux18)", () => {
   const entries = menuFor({ kind: "pipeline", id: "tc:Pay", hash: "#/builds/tc%3APay" }, null, ctx({ runs: { isRead: () => false } }));
   expect(item(entries, "read-all")).toMatchObject({ label: "Mark all as read", act: { do: "pipeline-read", id: "tc:Pay" } });
   expect(ids(entries).indexOf("read-all")).toBeLessThan(ids(entries).indexOf("|"));
+});
+
+test("a source whose pages open inside knobas offers Open in browser right after its Open in (ADR-0048)", () => {
+  const names: Record<string, string> = { jira: "Jira", fj: "Forgejo" };
+  const inside = ctx({ sourceName: (id) => names[id] ?? null, opensInside: (id) => id === "jira" || id === "fj" });
+  const ticket = menuFor({ kind: "ticket", id: "jira:PAY-1", hash: "#/ticket/jira%3APAY-1" }, null, inside);
+  const at = ids(ticket).indexOf("web");
+  expect(ids(ticket)[at + 1]).toBe("web-browser");
+  expect(item(ticket, "web").act).toEqual({ do: "web", url: { read: "web" }, source: "jira" });
+  expect(item(ticket, "web-browser")).toMatchObject({ label: "Open in browser", act: { do: "browser", url: { read: "web" } } });
+  const file = menuFor({ kind: "line", repoId: "fj:t/pay", path: "src/a.rs", line: 3 }, null, inside);
+  expect(ids(file)[ids(file).indexOf("forge") + 1]).toBe("forge-browser");
+  // With the switch off, Open in ⟨source⟩ alone, as before: both would do the same.
+  const off = menuFor({ kind: "ticket", id: "jira:PAY-1", hash: "#/ticket/jira%3APAY-1" }, null, ctx({ sourceName: (id) => names[id] ?? null }));
+  expect(ids(off)).not.toContain("web-browser");
 });

@@ -457,6 +457,9 @@ test("only the launcher resolves a pasted URL to an entity", () => {
     "lib/tf/context/TfContextMenu.svelte",
     "lib/tf/context/ports.ts",
     "lib/tf/pr/TfPr.svelte",
+    // Not a pasted text (ADR-0048): a site's page offers *Open in knobas* for the address it stands at, read from
+    // the mirror, and the items it stood on are refreshed when it is left. No text is rewritten.
+    "lib/tf/site/visits.ts",
   ]);
 });
 
