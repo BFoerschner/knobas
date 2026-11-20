@@ -93,6 +93,8 @@
   import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { loadEveryFace } from "../shell/faces";
   import { warmDiffView } from "./diff/warm";
+  import { warmDiagrams } from "../render/diagram";
+  import { renderPort } from "../render/port";
   import { warmDocs } from "./docs/warm";
   import { openAhead } from "./ahead";
   import { installFindKey } from "./filter-keys";
@@ -874,6 +876,8 @@
   onMount(() => loadEveryFace());
   // So a pull request's first *Files changed* runs warm code (the forge-rounds pass, 2026-11-15).
   onMount(() => warmDiffView());
+  // So a README's first diagram is drawn by warm code, inside the text's hold (#2510).
+  onMount(() => warmDiagrams(renderPort()));
   // So a Docs page kept hidden comes back laid out at Reading's new size (the ux18 Windows pass, Fable's ruling).
   onMount(() => warmDocs());
   // So a section's first press shows a page already built (the ux13-overs pass, 2026-11-15).

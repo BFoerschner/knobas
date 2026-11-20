@@ -3,7 +3,9 @@
   `.mermaid` drawn by Mermaid, `.d2` by D2 and `.dot`/`.gv` by Graphviz
   (#2259), sanitized, in a sandboxed frame sized to it,
   and drawn again on a theme switch (`render/diagram.ts`). A diagram that
-  does not parse shows the parser's error above its source.
+  does not parse shows the parser's error above its source. Nothing of the
+  file stands under it, so it takes its drawing's size whenever that lands
+  (no room to keep, #2510); one seen before stands at that size from the start.
 -->
 <script lang="ts">
   import { drawDiagram, type DiagramEngine } from "../../render/diagram";

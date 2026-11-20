@@ -34,7 +34,7 @@
 import DOMPurify, { type Config } from "dompurify";
 import MarkdownIt from "markdown-it";
 
-import { drawDiagram } from "./diagram";
+import { drawDiagram, type DiagramEngine, type DiagramRoom } from "./diagram";
 import type { LineTokens, RenderPort } from "./port";
 import { D2, GRAPHVIZ, MERMAID, renderersForFence } from "./registry";
 
@@ -326,6 +326,8 @@ function finish(root: DocumentFragment, links: MarkdownLinks, seen = new Map<str
     header.append(label, copy);
     const body = doc.createElement("div");
     body.className = "tf-fence-body";
+    // Kept beside the block: a diagram's drawing takes the `<pre>`'s place, and *Copy* still copies the source.
+    codes.set(block, pre.querySelector("code")?.textContent ?? "");
     pre.replaceWith(block);
     body.append(pre);
     block.append(header, body);
@@ -333,11 +335,18 @@ function finish(root: DocumentFragment, links: MarkdownLinks, seen = new Map<str
 }
 
 /**
+ * Holds what stands from `block` down in the text unseen until what is drawn into it has its size, at most the text's
+ * hold (`TfMarkdown`, as it holds what stands under an image of unknown size); answers how to end it.
+ */
+export type FenceHold = (block: HTMLElement) => () => void;
+
+/**
  * Draws a fence's code into `into` (its `.tf-fence-body`, holding the plain
  * `<pre>` until then); returns how to stop. The code is the fence's text as
  * written: a drawer that makes HTML or SVG of it sanitizes what it inserts.
+ * `hold`, where the text can hold what stands under the fence.
  */
-export type FenceDraw = (code: string, into: HTMLElement, port: RenderPort) => (() => void) | void;
+export type FenceDraw = (code: string, into: HTMLElement, port: RenderPort, hold?: FenceHold) => (() => void) | void;
 
 const fenceDraws = new Map<string, FenceDraw>();
 
@@ -350,9 +359,54 @@ export function registerFence(id: string, draw: FenceDraw): () => void {
   };
 }
 
-/** The fence's code as written. */
+/** Each fence's code as written, by its block. */
+const codes = new WeakMap<Element, string>();
+
+/** The fence's code as written, whatever is drawn in its place now. */
 export function fenceCode(fence: Element): string {
-  return fence.querySelector("pre code")?.textContent ?? "";
+  return codes.get(fence) ?? fence.querySelector("pre code")?.textContent ?? "";
+}
+
+/**
+ * A diagram fence's room, kept at `height` (a CSS length) since its drawing landed late (`diagram.ts`, #2510): the
+ * fence is the text's `at`-th, from 0, and holds `code`.
+ */
+export interface FenceRoom {
+  at: number;
+  code: string;
+  height: string;
+}
+
+/** The rooms the diagram fences under `root` are kept at now. */
+export function keptFenceRooms(root: Scope): FenceRoom[] {
+  const rooms: FenceRoom[] = [];
+  let at = 0;
+  for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
+    const body = block.querySelector<HTMLElement>(":scope > .tf-fence-body.tf-roomkept");
+    if (body !== null && body.style.height !== "") rooms.push({ at, code: fenceCode(block), height: body.style.height });
+    at += 1;
+  }
+  return rooms;
+}
+
+/**
+ * Gives each fence under `root` the room it was kept at, before it is drawn: the fence in the same place in the text
+ * that holds the same code, so a text drawn again (its read answered again) stands as it stood, and a text that
+ * changed there does not. `from`: how many of the text's fences came before `root` (a long text is drawn a piece at a
+ * time). Answers how many have come by its end.
+ */
+export function keepFenceRooms(root: Scope, rooms: readonly FenceRoom[], from = 0): number {
+  let at = from;
+  for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
+    const room = rooms.find((kept) => kept.at === at && kept.code === fenceCode(block));
+    const body = block.querySelector<HTMLElement>(":scope > .tf-fence-body");
+    if (room !== undefined && body !== null) {
+      body.style.height = room.height;
+      body.classList.add("tf-roomkept");
+    }
+    at += 1;
+  }
+  return at;
 }
 
 /** Where a drawing looks for what to draw: an element, a fragment, or the nodes one piece of a long text added. */
@@ -376,9 +430,10 @@ export function nodesScope(nodes: readonly Node[]): Scope {
 /**
  * Draws every `.tf-fence` under `root`: by the first renderer for its language
  * with a drawer, else highlighted (a fence with no language stays plain).
- * Returns how to stop every drawing still going.
+ * `hold`, where the text holds what stands under a fence whose drawing's size
+ * is not known yet. Returns how to stop every drawing still going.
  */
-export function drawFences(root: Scope, port: RenderPort): () => void {
+export function drawFences(root: Scope, port: RenderPort, hold?: FenceHold): () => void {
   const stops: (() => void)[] = [];
   for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
     const lang = block.dataset["lang"] ?? "";
@@ -389,7 +444,7 @@ export function drawFences(root: Scope, port: RenderPort): () => void {
       .map((renderer) => fenceDraws.get(renderer.id))
       .find((found) => found !== undefined);
     if (draw !== undefined) {
-      const stop = draw(code, body, port);
+      const stop = draw(code, body, port, hold);
       if (stop) stops.push(stop);
       continue;
     }
@@ -431,7 +486,17 @@ function highlightInto(into: Element, code: string, lang: string, port: RenderPo
   return () => job.cancel();
 }
 
+/** A fence's room for its diagram (#2510): the text goes on under it, and its header holds its actions. */
+function fenceRoom(into: HTMLElement, hold: FenceHold | undefined): DiagramRoom {
+  return { hold, actions: into.parentElement?.querySelector<HTMLElement>(":scope > header") ?? null };
+}
+
+const diagramFence =
+  (engine: DiagramEngine): FenceDraw =>
+  (code, into, port, hold) =>
+    drawDiagram(engine, code, into, port, fenceRoom(into, hold));
+
 // Mermaid's fences (#2258): the built-in diagram drawer, through the port's lazily loaded engine.
-registerFence(MERMAID.id, (code, into, port) => drawDiagram("mermaid", code, into, port));
-registerFence(D2.id, (code, into, port) => drawDiagram("d2", code, into, port));
-registerFence(GRAPHVIZ.id, (code, into, port) => drawDiagram("graphviz", code, into, port));
+registerFence(MERMAID.id, diagramFence("mermaid"));
+registerFence(D2.id, diagramFence("d2"));
+registerFence(GRAPHVIZ.id, diagramFence("graphviz"));

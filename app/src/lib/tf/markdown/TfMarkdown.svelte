@@ -27,6 +27,11 @@
     that open the preview; elsewhere the link is its text;
   - fences are drawn by the renderer registry, highlighted where no renderer
     claims them, and stopped when the text changes or the component goes;
+  - a diagram fence keeps its room (#2510, `render/diagram.ts`): one seen
+    before stands at the size it drew at; one never seen, its engine warm, has
+    what stands from it down held unseen as an image's is, for the same hold;
+    and a text drawn again gives a drawing fitted into its source's room that
+    room again;
   - a long text (over `LONG` characters) draws its first blocks, then a piece
     of `PIECE` characters a task while the end of what is drawn is near the
     view (`whileNear`), as a Docs page's body does; an in-page anchor draws the
@@ -40,6 +45,8 @@
   import {
     drawFences,
     fenceCode,
+    keepFenceRooms,
+    keptFenceRooms,
     markdownFragment,
     markdownPieces,
     nodesScope,
@@ -107,8 +114,12 @@
   function paint(node: HTMLElement) {
     const hold = holder(node);
     const stops: (() => void)[] = [hold.stop];
+    // A text drawn again keeps the rooms its late diagrams were fitted into, so nothing under them moves (#2510).
+    const rooms = keptFenceRooms(node);
+    let fences = 0;
     const wire = (scope: Scope) => {
-      stops.push(drawFences(scope, render));
+      fences = keepFenceRooms(scope, rooms, fences);
+      stops.push(drawFences(scope, render, hold.wait));
       holdDataImages(scope, hold);
       if (image !== null) stops.push(drawImages(scope, image, hold));
       if (attachments !== null) stops.push(drawAttachments(scope, attachments, hold));
@@ -154,18 +165,18 @@
   type Hold = ReturnType<typeof holder>;
 
   /**
-   * What stands from the first image of unknown size down, held unseen in its room (`tf-heldbelow`) until that size is
-   * in: `wait` holds for an image, at most `IMAGE_HOLD_MS`, and answers how to say its size is in.
+   * What stands from the first image or diagram of unknown size down, held unseen in its room (`tf-heldbelow`) until
+   * that size is in: `wait` holds for one, at most `IMAGE_HOLD_MS`, and answers how to say its size is in.
    */
   function holder(node: HTMLElement) {
-    const waiting = new Set<HTMLImageElement>();
+    const waiting = new Set<Element>();
     const timers = new Set<ReturnType<typeof setTimeout>>();
     let held: Element[] = [];
     let told = false;
     const refresh = () => {
       for (const el of held) el.classList.remove("tf-heldbelow");
       held = [];
-      let first: HTMLImageElement | null = null;
+      let first: Element | null = null;
       for (const img of waiting)
         if (img.isConnected && (first === null || first.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_PRECEDING)) first = img;
       let block: Element | null = first;
@@ -183,7 +194,7 @@
       }
     };
     return {
-      wait(img: HTMLImageElement): () => void {
+      wait(img: Element): () => void {
         let over = false;
         const done = () => {
           if (over) return;

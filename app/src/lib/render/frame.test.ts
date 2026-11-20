@@ -35,6 +35,21 @@ test("the sized image floats (align=left), so it makes no line box taller than t
   expect(img.getAttribute("align")).toBe("left");
 });
 
+test("a frame's document can draw the drawing at another size, and a drawing with no box of its own gets one so it scales (#2510)", () => {
+  const frame = svgFrame('<svg width="300" height="120"><rect width="300" height="120"/></svg>')!;
+  expect([frame.width, frame.height]).toEqual([300, 120]);
+  const at = (doc: string) => {
+    const img = new DOMParser().parseFromString(doc, "text/html").querySelector("img")!;
+    return [img.getAttribute("width"), img.getAttribute("height"), img.getAttribute("align")];
+  };
+  expect(at(frame.srcdoc)).toEqual(["300", "120", "left"]);
+  expect(at(frame.at(100, 40))).toEqual(["100", "40", "left"]);
+  // Without a `viewBox` an image of the drawing at another size would crop it.
+  expect(imageIn(frame.at(100, 40))).toContain('viewBox="0 0 300 120"');
+  // One that has a box keeps it.
+  expect(imageIn(svgFrame('<svg viewBox="10 20 200 80"><rect/></svg>')!.srcdoc)).toContain('viewBox="10 20 200 80"');
+});
+
 test("the SVG is sanitized first: no script, no handler, no javascript: link", () => {
   const svg = imageIn(svgFrame(HOSTILE)!.srcdoc);
   expect(svg).not.toMatch(/<script/i);

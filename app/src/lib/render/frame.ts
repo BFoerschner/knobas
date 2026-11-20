@@ -26,6 +26,8 @@ export interface SvgFrame {
   srcdoc: string;
   width: number;
   height: number;
+  /** The frame's document with the drawing at `width` by `height`: one fitted into a room smaller than it (#2510). */
+  at(width: number, height: number): string;
 }
 
 /**
@@ -40,9 +42,13 @@ export function svgFrame(markup: string, dark = false): SvgFrame | null {
   const [width, height] = sizeOf(svg);
   svg.setAttribute("width", String(width));
   svg.setAttribute("height", String(height));
+  // A drawing with no box of its own gets its size as one, so an image of it at another size scales rather than crops.
+  if (!hasBox(svg)) svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   // Mermaid's root carries `style="max-width: …"` beside `width="100%"`; the size is now in the attributes.
   svg.removeAttribute("style");
-  return { srcdoc: wrap(imageOf(svg, width, height), dark ? "dark" : "light"), width, height };
+  const source = sourceOf(svg);
+  const at = (w: number, h: number) => wrap(imageAt(source, w, h), dark ? "dark" : "light");
+  return { srcdoc: at(width, height), width, height, at };
 }
 
 /**
@@ -63,22 +69,38 @@ export function frameDocument(output: "svg" | "html", body: string): string {
   return wrap(imageOf(svg, null, null), null);
 }
 
-function sizeOf(svg: SVGSVGElement): [number, number] {
+/** The drawing's own box (`viewBox`), where it names a usable one. */
+function boxOf(svg: SVGSVGElement): number[] | null {
   const box = (svg.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
-  if (box.length === 4 && box.every(Number.isFinite) && box[2]! > 0 && box[3]! > 0) return [Math.ceil(box[2]!), Math.ceil(box[3]!)];
+  return box.length === 4 && box.every(Number.isFinite) && box[2]! > 0 && box[3]! > 0 ? box : null;
+}
+
+const hasBox = (svg: SVGSVGElement) => boxOf(svg) !== null;
+
+function sizeOf(svg: SVGSVGElement): [number, number] {
+  const box = boxOf(svg);
+  if (box !== null) return [Math.ceil(box[2]!), Math.ceil(box[3]!)];
   const width = parseFloat(svg.getAttribute("width") ?? "");
   const height = parseFloat(svg.getAttribute("height") ?? "");
   return [Number.isFinite(width) && width > 0 ? Math.ceil(width) : 300, Number.isFinite(height) && height > 0 ? Math.ceil(height) : 150];
 }
 
-function imageOf(svg: SVGSVGElement | null, width: number | null, height: number | null): string {
-  // XMLSerializer writes the SVG namespace an `<img>` needs.
+/** The drawing as the `data:` URL an `<img>` draws. XMLSerializer writes the SVG namespace it needs. */
+function sourceOf(svg: SVGSVGElement | null): string {
   const markup = svg === null ? "" : new XMLSerializer().serializeToString(svg);
+  return `data:image/svg+xml;base64,${base64Of(new TextEncoder().encode(markup))}`;
+}
+
+function imageOf(svg: SVGSVGElement | null, width: number | null, height: number | null): string {
+  return imageAt(sourceOf(svg), width, height);
+}
+
+function imageAt(source: string, width: number | null, height: number | null): string {
   // A sized drawing floats (`align`, presentational, so no CSP refuses it): an inline image sits on a text baseline,
   // its line box a few px taller than the frame sized to it, and the overflow puts scrollbars in the frame where the
   // platform draws them (WKWebView with classic macOS scrollbars), clipping the drawing.
   const size = width === null || height === null ? "" : ` align="left" width="${width}" height="${height}"`;
-  return `<img alt=""${size} src="data:image/svg+xml;base64,${base64Of(new TextEncoder().encode(markup))}">`;
+  return `<img alt=""${size} src="${source}">`;
 }
 
 /**

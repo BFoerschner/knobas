@@ -63,10 +63,9 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * `late`: on the fixture only, reads of the place's own that land later than the corpus's (`fake-late`'s form, added to
  * the address's), and `fake`, more of the fixture's switches (`fake-jar=oldjava`): a read the real backend answers
  * after the page draws, which the fixture answers at once (the ux19 gate, 2026-11-19). `forget`: `localStorage` keys
- * removed before the first open (the image sizes kept from an earlier place or run), so it is the first ever.
- * `noWorkers`: the page has no `Worker`, so the render port is its plain one and a diagram fence stays its source (a
- * diagram drawn late moves what stands under it, a mover of its own the case leaves out). `scroll`: a scroller pressed
- * with its end in view (the asset pane at 1440x868, whose lower sections are below the window otherwise).
+ * removed before the first open (the image and diagram sizes kept from an earlier place or run), so it is the first ever.
+ * `scroll`: a scroller pressed with its end in view (the asset pane at 1440x868, whose lower sections are below the
+ * window otherwise).
  */
 /** Where a run's answer lands and what says it did: the tree's generated rows (`answer` above). */
 const RUN_ANSWER = { in: `${shown} .tf-ftree`, changes: `${shown} .tf-ftree a[data-made]`, hold: '.tf-fdir[data-path="docs"], .tf-fband' };
@@ -94,9 +93,14 @@ const PLACES = [
   { name: "repo-checkout-late", fixture: true, late: "entity_view:0,entity_checkout:450", start: "#/code", go: "#/repo/mock%3Atidewater%2Fledger", hash: "#/repo/mock%3Atidewater%2Fledger", away: "Escape" },
   // A README whose images were never seen (the ux21 README-image pass, 2026-11-19): `payout-service`'s logo pushed the
   // text under it 15 px down when its bytes loaded after the text. The bytes 150 ms after the views, and no size kept.
-  // Its Mermaid fences stay source (`noWorkers`): a drawing landing ~400 ms after the text moves the fences under it 53 px
-  // at 2560 and 5120 wide, base and head alike, a mover of its own (Fable, 2026-11-19; #2510).
-  { name: "repo-readme-image", fixture: true, late: "entity_view:0,entity_file_bytes:150", forget: ["knobas.image-sizes"], noWorkers: true, start: "#/code", go: "#/repo/mock%3Atidewater%2Fpayout-service", hash: "#/repo/mock%3Atidewater%2Fpayout-service", away: "Escape" },
+  // Its two Mermaid fences were never seen either (#2510): their drawings moved the fences under them 53 px at 2560 and
+  // 5120 wide. The app warmed Mermaid while it stood idle before the press, so what stands under each is held for its
+  // drawing, and one that lands after the hold keeps its source's room (`docs/decisions/2026-11-20-a-diagram-keeps-its-room.md`).
+  { name: "repo-readme-image", fixture: true, late: "entity_view:0,entity_file_bytes:150", forget: ["knobas.image-sizes", "knobas.diagram-sizes"], start: "#/code", go: "#/repo/mock%3Atidewater%2Fpayout-service", hash: "#/repo/mock%3Atidewater%2Fpayout-service", away: "Escape" },
+  // The same README with every drawing 900 ms late, past the hold, as a cold engine or a large diagram lands (Fable's
+  // ruling of 2026-11-20): the page under each diagram draws with its source, and the drawing then stands inside the
+  // source's room. A return to the page kept in the session gives each the same room again.
+  { name: "repo-readme-diagram-late", fixture: true, late: "entity_view:0,entity_file_bytes:150", fake: "fake-diagram-late=900", forget: ["knobas.image-sizes", "knobas.diagram-sizes"], start: "#/code", go: "#/repo/mock%3Atidewater%2Fpayout-service", hash: "#/repo/mock%3Atidewater%2Fpayout-service", away: "Escape" },
   // A run's answer lands in one frame (2026-11-20, `docs/decisions/2026-11-20-a-runs-answer-lands-in-one-frame.md`): the
   // generated rows, in the tree; the folder's row and the band are held to their boxes in that frame too.
   // A folder's generated folder (ADR-0046, `?fake-rerender`'s *Low-code site* on `docs`): its glyph grafts the generated
@@ -168,8 +172,6 @@ const js = (code, timeout = 60000) => c.js(code, { timeout });
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(new URL("./moves-probe.js", import.meta.url), "utf8") });
-// A place's `noWorkers`, by its address, so a reconnect's replay of this script reaches no other place.
-await c.send("Page.addScriptToEvaluateOnNewDocument", { source: `if (new URLSearchParams(location.search).has("probe-no-workers")) delete window.Worker;` });
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await c.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
 await viewport(c, size);
@@ -180,9 +182,8 @@ async function quiet(q = 1200, limit = 20000) {
 }
 /** The app's address for a place: its own late reads joined to the corpus's (a later entry for a read wins), its switches added. */
 function addressFor(p) {
-  if (!p?.late && !p?.fake && !p?.noWorkers) return base;
+  if (!p?.late && !p?.fake) return base;
   const url = new URL(base);
-  if (p.noWorkers) url.searchParams.set("probe-no-workers", "");
   if (p.late) url.searchParams.set("fake-late", [url.searchParams.get("fake-late"), p.late].filter(Boolean).join(","));
   for (const [k, v] of new URLSearchParams(p.fake ?? "")) url.searchParams.set(k, v);
   // The fixture's switches are bare words (`?fake-ipc&fake-scale`), as `URLSearchParams` writes them with an `=`.

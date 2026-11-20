@@ -6,9 +6,11 @@
  * (headless Chrome witnesses it again against the dev server).
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { DiagramRequest, HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import { warmDiagrams } from "../../render/diagram";
+import { diagramKey, forgetDiagramSizes, keepDiagramSize } from "../../render/diagram-sizes";
+import type { DiagramAnswer, DiagramRequest, HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { register } from "../../render/registry";
 import { registerFence } from "../../render/markdown";
 import { installCommands } from "../../render/command";
@@ -22,6 +24,7 @@ let view: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
+  forgetDiagramSizes();
 });
 
 afterEach(() => {
@@ -573,6 +576,145 @@ test("where the port has no diagram engine the fence stays its source", async ()
   expect(md().querySelector("iframe")).toBeNull();
 });
 
+/** A diagram engine whose drawings land when the test says, in the order asked. */
+function heldDiagrams() {
+  const waiting: ((answer: DiagramAnswer) => void)[] = [];
+  const port: RenderPort = { ...keywordPort(), diagram: () => new Promise((resolve) => waiting.push(resolve)) };
+  const land = async (w: number, h: number) => {
+    waiting.shift()!({ svg: `<svg viewBox="0 0 ${w} ${h}"><text>drawn</text></svg>` });
+    await settle();
+  };
+  return {
+    port,
+    land,
+    /** The app's warm-up, run through: the engine has answered in this session. */
+    async warm() {
+      warmDiagrams(port, (go) => go());
+      await land(10, 10);
+      await land(10, 10);
+    },
+  };
+}
+
+/** Every fence's body laid out in view, 125 px high from 100 px down, and each paragraph under it, as jsdom lays nothing out. */
+function fencesInView() {
+  const at = (top: number, height: number) => ({ x: 0, y: top, top, left: 0, width: 900, height, right: 900, bottom: top + height, toJSON: () => ({}) }) as DOMRect;
+  return vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains("tf-fence-body")) return at(100, 125);
+    return this.tagName === "P" && this.previousElementSibling?.classList.contains("tf-fence") ? at(260, 24) : at(0, 0);
+  });
+}
+
+const DIAGRAM_README = "Intro\n\n```mermaid\nflowchart TB\n  a --> b\n```\n\nUnder it.";
+const heldBlocks = () => [...md().children].map((el) => el.classList.contains("tf-heldbelow"));
+const diagramFrame = () => md().querySelector<HTMLIFrameElement>(".tf-fence .tf-diagram iframe");
+
+test("a diagram never seen, its engine warm, holds what stands from it down unseen until its drawing is in (#2510)", async () => {
+  const engine = heldDiagrams();
+  await engine.warm();
+  const told: boolean[] = [];
+  const laid = fencesInView();
+  try {
+    draw(DIAGRAM_README, { render: engine.port, onheld: (held: boolean) => told.push(held) });
+    await settle();
+    expect(heldBlocks(), "the intro reads at once; the diagram's fence and what stands under it wait").toEqual([false, true, true]);
+    expect(md().hasAttribute("data-md-sizing")).toBe(true);
+    expect(told).toEqual([true]);
+    await engine.land(200, 226);
+    expect(heldBlocks()).toEqual([false, false, false]);
+    expect(told).toEqual([true, false]);
+    // It landed with nothing drawn under it: its own size, in a room of its own.
+    expect([diagramFrame()!.width, diagramFrame()!.height]).toEqual(["200", "226"]);
+    expect(md().querySelector<HTMLElement>(".tf-fence-body")!.style.height).toBe("");
+    expect(md().querySelector(".tf-dfull")).toBeNull();
+  } finally {
+    laid.mockRestore();
+  }
+});
+
+test("the hold for a diagram ends after IMAGE_HOLD_MS, and the drawing that lands later keeps its source's room (#2510)", async () => {
+  const engine = heldDiagrams();
+  await engine.warm();
+  const laid = fencesInView();
+  try {
+    draw(DIAGRAM_README, { render: engine.port });
+    await settle();
+    expect(heldBlocks()).toEqual([false, true, true]);
+    await new Promise((resolve) => setTimeout(resolve, IMAGE_HOLD_MS + 20));
+    expect(heldBlocks(), "the page under the diagram is drawn, with the diagram's source").toEqual([false, false, false]);
+    expect(md().querySelector(".tf-fence pre code")?.textContent).toBe("flowchart TB\n  a --> b");
+    await engine.land(200, 226);
+    const body = md().querySelector<HTMLElement>(".tf-fence-body")!;
+    expect(body.style.height, "the room the source had").toBe("125px");
+    expect([diagramFrame()!.width, diagramFrame()!.height], "whole, scaled to it").toEqual(["100", "113"]);
+    const full = md().querySelector<HTMLButtonElement>(".tf-fence > header .tf-dfull")!;
+    expect(text(full)).toBe("Show at full size");
+    full.click();
+    expect([diagramFrame()!.width, diagramFrame()!.height, body.style.height]).toEqual(["200", "226", ""]);
+  } finally {
+    laid.mockRestore();
+  }
+});
+
+test("a text drawn again keeps the room its late diagram was fitted into, and one shown at full size stays so (#2510)", async () => {
+  const engine = heldDiagrams();
+  const laid = fencesInView();
+  const two = "```mermaid\nflowchart TB\n  a --> b\n```\n\nBetween.\n\n```mermaid\nflowchart TB\n  c --> d\n```\n\nUnder it.";
+  const props = $state({ text: two, base: "", fileLink: null, render: engine.port });
+  try {
+    view = mount(TfMarkdown, { target, props });
+    flushSync();
+    await settle();
+    await engine.land(200, 226);
+    await engine.land(200, 226);
+    const bodies = () => [...md().querySelectorAll<HTMLElement>(".tf-fence-body")];
+    const frames = () => bodies().map((body) => { const frame = body.querySelector("iframe")!; return [frame.width, frame.height, body.style.height]; });
+    expect(frames()).toEqual([["100", "113", "125px"], ["100", "113", "125px"]]);
+    // The reader shows the first at full size; the second stays fitted.
+    md().querySelectorAll<HTMLButtonElement>(".tf-dfull")[0]!.click();
+    expect(frames()).toEqual([["200", "226", ""], ["100", "113", "125px"]]);
+    const before = bodies();
+    // Its read answers again: the same text, drawn again.
+    props.base = "docs";
+    flushSync();
+    expect(bodies()[0]).not.toBe(before[0]);
+    expect(frames(), "each stands as it stood, in the task the text is drawn in").toEqual([["200", "226", ""], ["100", "113", "125px"]]);
+    expect(md().querySelectorAll(".tf-dfull")).toHaveLength(1);
+  } finally {
+    laid.mockRestore();
+  }
+});
+
+test("a diagram whose engine is cold holds nothing: its drawing could not land inside the hold (#2510)", async () => {
+  const engine = heldDiagrams();
+  const told: boolean[] = [];
+  draw(DIAGRAM_README, { render: engine.port, onheld: (held: boolean) => told.push(held) });
+  await settle();
+  expect(heldBlocks()).toEqual([false, false, false]);
+  expect(told).toEqual([]);
+});
+
+test("a diagram seen before holds nothing and stands at the size it drew at from the first frame (#2510)", async () => {
+  const engine = heldDiagrams();
+  await engine.warm();
+  keepDiagramSize(diagramKey("mermaid", "flowchart TB\n  a --> b", ""), { w: 200, h: 226 });
+  draw(DIAGRAM_README, { render: engine.port });
+  expect(heldBlocks()).toEqual([false, false, false]);
+  expect([diagramFrame()!.width, diagramFrame()!.height, diagramFrame()!.hasAttribute("srcdoc")]).toEqual(["200", "226", false]);
+  await engine.land(200, 226);
+  expect(diagramFrame()!.srcdoc).toContain("<img");
+});
+
+test("Copy on a fence whose diagram is drawn copies the diagram's source", async () => {
+  const copied: string[] = [];
+  draw(MERMAID_MD, { render: diagramPort(), copy: async (code: string) => void copied.push(code) });
+  await settle();
+  expect(md().querySelector(".tf-fence pre")).toBeNull();
+  md().querySelector<HTMLButtonElement>(".tf-fence-copy")!.click();
+  await settle();
+  expect(copied).toEqual(["flowchart LR\n  a --> b"]);
+});
+
 /** A long text: `parts` sections of a heading, a paragraph of about 1,000 characters and a fence each. */
 function long(parts: number): string {
   const words = "rollback weekly trace region dashboard retries window payout index primary ".repeat(13);
@@ -610,6 +752,34 @@ test("a long text draws its first blocks, the rest a piece a task as its end nea
   expect(md().hasAttribute("data-md-held")).toBe(false);
   expect(asked.map((request) => request.text)).toEqual(Array.from({ length: 120 }, (_, i) => `const part${i} = ${i};`));
   expect(md().querySelectorAll(".tf-hl-kw").length).toBe(120);
+});
+
+test("a long text drawn again gives a fence of a later piece its kept room, counted across the pieces (#2510)", async () => {
+  const was = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = NearObserver as unknown as typeof IntersectionObserver;
+  try {
+    const props = $state({ text: long(40), base: "", fileLink: null, render: keywordPort() });
+    view = mount(TfMarkdown, { target, props });
+    flushSync();
+    const whole = async () => {
+      for (let round = 0; round < 40 && md().hasAttribute("data-md-held"); round += 1) await settle();
+      return [...md().querySelectorAll<HTMLElement>(".tf-fence-body")];
+    };
+    const bodies = await whole();
+    expect(bodies).toHaveLength(40);
+    // The last fence, in the text's last piece, stands in a kept room.
+    bodies[39]!.style.height = "125px";
+    bodies[39]!.classList.add("tf-roomkept");
+    props.base = "docs";
+    flushSync();
+    expect(md().querySelectorAll(".tf-fence").length, "its first piece only").toBeLessThan(40);
+    const again = await whole();
+    expect(again[39]).not.toBe(bodies[39]);
+    expect(again.map((body) => (body.classList.contains("tf-roomkept") ? body.style.height : "")).filter((height) => height !== "")).toEqual(["125px"]);
+    expect(again[39]!.style.height).toBe("125px");
+  } finally {
+    globalThis.IntersectionObserver = was;
+  }
 });
 
 test("a short text draws whole at once, and an anchor in a long one draws the rest before it scrolls", () => {

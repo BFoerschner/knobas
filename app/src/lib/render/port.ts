@@ -299,6 +299,26 @@ export const plainPort: RenderPort = {
 
 let shared: RenderPort | null = null;
 
+/** How many ms late the app's port asks its engines for a diagram: the fixture's `?fake-diagram-late`. */
+let diagramsLate = 0;
+
+/**
+ * The fixture's `?fake-diagram-late=<ms>` (`shell/dev/fake-tauri.ts`, #2510): every diagram the app's port draws is
+ * asked of its engine that much later, as a cold engine or a large diagram answers, so a probe can land a drawing after
+ * the text's hold.
+ */
+export function lateDiagrams(ms: number): void {
+  diagramsLate = ms;
+}
+
+/** `draw`, each diagram asked `ms()` later; at once where that is nothing. */
+export function lateBy(draw: (request: DiagramRequest) => Promise<DiagramAnswer>, ms: () => number): (request: DiagramRequest) => Promise<DiagramAnswer> {
+  return (request) => {
+    const late = ms();
+    return late > 0 ? new Promise<void>((resolve) => setTimeout(resolve, late)).then(() => draw(request)) : draw(request);
+  };
+}
+
 let wasm: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
 let d2: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
 
@@ -347,7 +367,7 @@ export function renderPort(): RenderPort {
       ? plainPort
       : {
           ...workerPort(() => new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module", name: "highlight" })),
-          diagram: engineDiagram,
+          diagram: lateBy(engineDiagram, () => diagramsLate),
           pdf: enginePdf,
         };
   return shared;

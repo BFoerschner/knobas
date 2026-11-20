@@ -576,10 +576,12 @@ more of the fixture's switches), for a read the real backend answers after the p
 and a Java too old to say why (the ux19 gate, `docs/decisions/2026-11-19-the-decompiler-line-keeps-its-room.md`);
 `repo-checkout-late` opens a repository not cloned with its views at once and its checkout 450 ms late, so *Clone*
 lands after the README drew (the ux21 pass, `docs/decisions/2026-11-19-what-the-ux21-moves-pass-held-still.md`);
-`repo-readme-image` opens `payout-service`, whose README's images were never seen, their bytes 150 ms after the views
-(`forget` removes the image sizes kept in `localStorage` first, and `noWorkers` keeps its Mermaid fences source, a mover
-of their own: `docs/decisions/2026-11-19-a-readme-image-keeps-its-room.md`). Such a place is the fixture's only;
-`--real` leaves it out.
+`repo-readme-image` opens `payout-service`, whose README's images and Mermaid diagrams were never seen, the images'
+bytes 150 ms after the views (`forget` removes the image and diagram sizes kept in `localStorage` first:
+`docs/decisions/2026-11-19-a-readme-image-keeps-its-room.md`); `repo-readme-diagram-late` opens the same README with
+every drawing 900 ms late (`?fake-diagram-late=<ms>`, the fixture's: the app's port asks its engine that much later),
+past the text's hold, so each drawing lands with the page under it drawn and must stay in its source's room
+(`docs/decisions/2026-11-20-a-diagram-keeps-its-room.md`). Such a place is the fixture's only; `--real` leaves it out.
 
 ```sh
 just moves                                   # the fixture, every read late, 1x and 4x, 1440x868@1 and 2560x1440@1.25

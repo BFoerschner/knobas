@@ -44,6 +44,20 @@
 .tf-md .tf-md-noimg.tf-md-attnone { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; }
 /* A diagram fence (#2258), as the mockup's `.fence .diagram`. */
 .tf-md .tf-fence .tf-diagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
+/* A diagram whose drawing landed after the page under it drew keeps the room its source had (#2510, `render/diagram.ts`,
+   Fable's ruling of 2026-11-20): the body stays that height and the drawing stands whole inside it, scaled down where
+   it is larger. A press on it, or on *Show at full size* beside *Copy*, gives it its own size. A drawing that whole
+   would be a speck (`tf-dcut`) stands at its own size from the room's top and fades out at the room's foot, with
+   *Show all*. A parser's error that landed late scrolls inside the room. */
+.tf-md .tf-fence-body.tf-roomkept { overflow: auto; background: var(--paper); }
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram { box-sizing: border-box; height: 100%; padding: 6px 18px; overflow: hidden; }
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram:is(.tf-dfit, .tf-dcut) { cursor: zoom-in; }
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram:is(.tf-dfit, .tf-dcut) > .tf-dframe { pointer-events: none; }
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram.tf-dcut { position: relative; place-items: start center; padding-bottom: 0; }
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram.tf-dcut > .tf-dframe { margin: 0 auto; }
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram.tf-dcut::after { content: ""; position: absolute; inset: auto 0 0; height: min(28px, 40%); background: linear-gradient(to bottom, transparent, var(--sheet)); pointer-events: none; }
+.tf-md .tf-fence > header .tf-dfull { margin-left: auto; }
+.tf-md .tf-fence > header .tf-dfull + .tf-fence-copy { margin-left: 0; }
 .tf-md .tf-fence .tf-stepfail pre { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 8px 10px; white-space: pre-wrap; }
 /* Markdown inside a panel or a comment (#2261, the mockup's `.cmt .md`): the holder pads it, and the type is the panel's. */
 .tf-prdesc .tf-md, .tf-msg-body .tf-md, .tf-item-textp .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); }

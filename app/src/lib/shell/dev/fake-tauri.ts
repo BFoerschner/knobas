@@ -55,6 +55,7 @@
  */
 import type { Answers } from "./fake-answers";
 import type { EntityDetail, EntityFilter, EntityPage, Reached } from "../../ipc/entity";
+import { lateDiagrams } from "../../render/port";
 import { expandScale, seedScale } from "./fake-scale";
 import { CORPUS } from "./fake/corpus";
 import { addFakeRuns } from "./fake/builds";
@@ -225,6 +226,9 @@ export function installIfRequested(): void {
   // `?fake-hooks` (the still-rows trips, 2026-11-11): a trip adds rows to the corpus and ends a run that changed
   // something, so a page reads again with rows it did not draw.
   // `emit` (the monitors-builds pass): any event, so a probe on a real backend, which emits none, can end a run.
+  // `?fake-diagram-late=<ms>` (#2510): every diagram answers that much later, so its drawing lands after the text's hold.
+  const diagramLate = Number(params.get("fake-diagram-late") ?? 0);
+  if (Number.isFinite(diagramLate) && diagramLate > 0) lateDiagrams(diagramLate);
   if (params.has("fake-hooks")) Object.assign(window, { __fake: { corpus: CORPUS, endRuns: endRunsChanged, inboxNew: () => addInboxItem(), runNew: () => addFakeRuns(), monitorDown: () => downFakeMonitor(), emit: (event: string, payload: unknown) => bridge.emit(event, payload) } });
 }
 

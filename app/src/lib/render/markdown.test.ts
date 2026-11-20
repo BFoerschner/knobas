@@ -1,7 +1,7 @@
 // A long text drawn a piece at a time (the render-cost pass, 2026-11-14) is the text drawn whole, cut between blocks.
 import { expect, test } from "vitest";
 
-import { markdownFragment, markdownPieces, type MarkdownLinks } from "./markdown";
+import { keepFenceRooms, keptFenceRooms, markdownFragment, markdownPieces, nodesScope, type MarkdownLinks } from "./markdown";
 
 const LINKS: MarkdownLinks = { base: "docs", fileLink: (path, line) => `#/repo/r/files/${path}${line === null ? "" : `@${line}`}` };
 
@@ -45,4 +45,43 @@ test("pieces of any size put together are the text drawn whole, heading ids coun
   expect(whole).toContain('href="https://example.com/guide"');
   expect(whole.match(/<ol>/g)).toHaveLength(1);
   expect(whole).toMatch(/<details><summary>More<\/summary><p>Inside the details.<\/p><\/details>/);
+});
+
+const fenced = (...codes: string[]) => codes.map((code) => `\`\`\`mermaid\n${code}\n\`\`\``).join("\n\nBetween.\n\n");
+const bodiesOf = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>(".tf-fence-body")];
+const roomsOf = (root: ParentNode) => bodiesOf(root).map((body) => (body.classList.contains("tf-roomkept") ? body.style.height : null));
+
+test("a text drawn again gives the fence in the same place with the same code the room it was kept at (#2510)", () => {
+  const text = fenced("flowchart LR\n  a --> b", "flowchart LR\n  a --> b", "sequenceDiagram\n  a->>b: c");
+  const drawn = document.createElement("div");
+  drawn.append(markdownFragment(text, LINKS));
+  expect(keptFenceRooms(drawn)).toEqual([]);
+  // The second of two fences of one code was fitted into its source's room, and the third.
+  for (const [at, height] of [[1, "125px"], [2, "146.4px"]] as const) {
+    bodiesOf(drawn)[at]!.style.height = height;
+    bodiesOf(drawn)[at]!.classList.add("tf-roomkept");
+  }
+  const rooms = keptFenceRooms(drawn);
+  expect(rooms).toEqual([
+    { at: 1, code: "flowchart LR\n  a --> b", height: "125px" },
+    { at: 2, code: "sequenceDiagram\n  a->>b: c", height: "146.4px" },
+  ]);
+
+  const again = markdownFragment(text, LINKS);
+  expect(keepFenceRooms(again, rooms)).toBe(3);
+  expect(roomsOf(again)).toEqual([null, "125px", "146.4px"]);
+
+  // A text that changed there keeps no room there: its second fence holds other code now.
+  const changed = markdownFragment(fenced("flowchart LR\n  a --> b", "flowchart TB\n  x --> y", "sequenceDiagram\n  a->>b: c"), LINKS);
+  keepFenceRooms(changed, rooms);
+  expect(roomsOf(changed)).toEqual([null, null, "146.4px"]);
+
+  // A long text is drawn a piece at a time: each piece counts on from the fences before it.
+  const pieces = document.createElement("div");
+  pieces.append(markdownFragment(text, LINKS));
+  const [first, ...rest] = [...pieces.querySelectorAll(".tf-fence")];
+  const from = keepFenceRooms(nodesScope([first!]), rooms);
+  expect([from, roomsOf(pieces)]).toEqual([1, [null, null, null]]);
+  expect(keepFenceRooms(nodesScope(rest), rooms, from)).toBe(3);
+  expect(roomsOf(pieces)).toEqual([null, "125px", "146.4px"]);
 });

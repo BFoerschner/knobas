@@ -61,6 +61,9 @@ return. **Fable decided** to leave it to its own ticket (a 300 ms hold would sti
 diagram size needs its own keys and proof, #2510): `repo-readme-image` draws with no `Worker` (`noWorkers`, so the fences stay
 source), and the same case with workers is that ticket's failing test.
 
+**Since 2026-11-20** a diagram keeps its room too (`2026-11-20-a-diagram-keeps-its-room.md`), and `repo-readme-image`
+draws with its workers.
+
 **Reversing it** is `render/image-size.ts` and `image-sizes.ts` back to the session's map, `TfMarkdown`'s holder and
 stand-in taken out, and the pages' `onheld`: a first load then moves the text under the image again, and a kept size
 draws as alt text until the bytes load.

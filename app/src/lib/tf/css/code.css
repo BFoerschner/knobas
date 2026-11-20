@@ -180,6 +180,9 @@
 /* The frame keeps the drawing's size (#2389): a wider drawing scrolls its holder, not the frame, and the auto margins
    centre it while it fits and start it at the left edge when it does not (`place-items: center` would cut its left off). */
 .tf-dframe { display: block; border: 0; background: transparent; margin: auto; }
+/* A frame with no drawing yet holds the room of a diagram seen before (#2510). It is not painted: an empty frame's
+   document is light, and in the dark theme the browser would back it with an opaque white box until the drawing lands. */
+.tf-dframe:not([srcdoc]) { visibility: hidden; }
 .tf-fdiagram > .tf-diagram { margin: auto; }
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: calc(14px * var(--fs)) system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
