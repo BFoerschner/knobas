@@ -1159,7 +1159,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     // **The ticket view arrived whole, its text exactly as saved** (#812): the
     // row as the far machine lists it is the row the sharer saved, and the
     // text the grammar cannot read is still that text, read as unreadable.
-    let views = knobas_app::ticket_views::list(there, &Registry::for_process())
+    let views = knobas_app::ticket_views::list(there, &Registry::for_process(), None)
         .await
         .expect("the colleague's ticket views");
     assert_eq!(views.len(), 1, "{views:?}");

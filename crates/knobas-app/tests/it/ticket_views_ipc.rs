@@ -88,7 +88,7 @@ fn draft(name: &str, query: &str) -> TicketViewDraft {
 
 /// The rows `ticket_views` answers for these ids, in its order.
 async fn listed(pool: &sqlx::PgPool, ids: &[&str]) -> Vec<TicketViewRow> {
-    ticket_views::list(pool, &Registry::for_process())
+    ticket_views::list(pool, &Registry::for_process(), None)
         .await
         .expect("ticket_views")
         .into_iter()
@@ -364,4 +364,53 @@ async fn a_views_show_every_ticket_is_stored_with_it_and_off_by_default() {
     .await
     .unwrap();
     assert!(!back.show_all);
+}
+
+/// **A view whose text is a key typed with no separator counts the key**
+/// (ux26): `vabc2` for `VABC-2`, with the launcher's picker as the command
+/// hands it, counts what the view's board draws with the same picker. With
+/// no picker no key is read, as before.
+#[tokio::test]
+async fn a_views_text_typed_as_a_key_with_no_separator_counts_what_its_board_draws() {
+    let pool = pool().await;
+    let p = project();
+    issue(&pool, &format!("{p}-1"), "To Do", "Retry failed payouts").await;
+    issue(&pool, &format!("{p}-2"), "In Progress", "Retry the ledger").await;
+    let text = format!("{}2", p.to_ascii_lowercase());
+    let saved = ticket_views::save(&pool, draft(&format!("Joined {p}"), &text))
+        .await
+        .expect("save");
+    let picker = knobas_search::picker::Picker::default();
+    picker.reload(&pool).await.unwrap();
+
+    let rows: Vec<TicketViewRow> =
+        ticket_views::list(&pool, &Registry::for_process(), Some(&picker))
+            .await
+            .expect("ticket_views")
+            .into_iter()
+            .filter(|row| row.view.id == saved.id)
+            .collect();
+    let board = knobas_app::commands::entity::mini_board_laned(
+        &pool,
+        &Registry::for_process(),
+        knobas_app::commands::entity::Room {
+            picker: Some(&picker),
+            ..knobas_app::commands::entity::Room::default()
+        },
+        None,
+        Some(&text),
+        None,
+    )
+    .await
+    .expect("mini_board");
+    let drawn: u32 = board.columns.iter().map(|column| column.total).sum();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].count, Some(1), "{rows:?}");
+    assert_eq!(rows[0].count, Some(u64::from(drawn)));
+    assert_eq!(
+        listed(&pool, &[&saved.id]).await[0].count,
+        Some(0),
+        "no picker, no key"
+    );
 }

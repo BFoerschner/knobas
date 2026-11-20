@@ -306,7 +306,12 @@ pub async fn bind_action_key(
 pub async fn ticket_views(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::ticket_views::TicketViewRow>, IpcError> {
-    crate::ticket_views::list(&lifecycle.pool()?, lifecycle.registry()).await
+    crate::ticket_views::list(
+        &lifecycle.pool()?,
+        lifecycle.registry(),
+        Some(lifecycle.picker()),
+    )
+    .await
 }
 
 /// Save a ticket view (#812): a new one, or over the view the draft names,

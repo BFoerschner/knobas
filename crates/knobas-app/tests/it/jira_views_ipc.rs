@@ -110,7 +110,7 @@ async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String
 }
 
 async fn listed(pool: &sqlx::PgPool, id: &str) -> Option<TicketViewRow> {
-    ticket_views::list(pool, &Registry::for_process())
+    ticket_views::list(pool, &Registry::for_process(), None)
         .await
         .expect("ticket_views")
         .into_iter()

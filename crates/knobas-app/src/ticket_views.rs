@@ -339,7 +339,10 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 }
 
 /// Every ticket view in list order, each with its count or the part its text
-/// the grammar could not read.
+/// the grammar could not read. With `picker` (the launcher's), a key typed
+/// with a space or none in a view's text (`pay123`, `pay 123`) counts what
+/// the key does, as the view's board draws it (ux25, ux26); `None` reads no
+/// key.
 ///
 /// # Errors
 ///
@@ -347,6 +350,7 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 pub async fn list(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    picker: Option<&knobas_search::picker::Picker>,
 ) -> Result<Vec<TicketViewRow>, IpcError> {
     // A Jira view whose item is not live is not listed: its source is turned
     // off, and it comes back with the source, or its source was deleted with
@@ -387,10 +391,13 @@ pub async fn list(
     let mut readings = if texts.is_empty() {
         Vec::new()
     } else {
-        crate::commands::search::searcher(pool, registry)
-            .await?
-            .readings(&texts, "ticket")
-            .await?
+        let searcher = crate::commands::search::searcher(pool, registry).await?;
+        match picker {
+            Some(picker) => searcher.with_picker(picker.clone()),
+            None => searcher,
+        }
+        .readings(&texts, "ticket")
+        .await?
     }
     .into_iter();
     Ok(views
