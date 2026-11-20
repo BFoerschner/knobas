@@ -151,8 +151,10 @@ const PLACES = [
   // suite. `knobas-jira-db` holds one thing and nothing links to it (the gate's shape); `knobas-teamcity` holds one and
   // an agent depends on it (a row above the fold). The pane's own read at once, the panel's 250 ms after it. The pane
   // keeps its scroll across a press, so it is pressed scrolled to its end, where the panel is in view at 1440x868 too.
-  { name: "asset-depends-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-jira-db"]`, hash: ["#/asset/asset%3Aknobas-jira-db", "#/asset/asset:knobas-jira-db"], away: "#/asset/asset%3Awsl-docker" },
-  { name: "asset-depends-links-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-teamcity"]`, hash: ["#/asset/asset%3Aknobas-teamcity", "#/asset/asset:knobas-teamcity"], away: "#/asset/asset%3Awsl-docker" },
+  // Drawn once the pressed asset's pane is (`ready`): the press's first frame can still hold the asset it came from,
+  // which the next frame replaces (WSL's Chrome at 4x).
+  { name: "asset-depends-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-jira-db"]`, hash: ["#/asset/asset%3Aknobas-jira-db", "#/asset/asset:knobas-jira-db"], ready: `${shown} .pane h2[title$="/ knobas-jira-db"]`, away: "#/asset/asset%3Awsl-docker" },
+  { name: "asset-depends-links-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-teamcity"]`, hash: ["#/asset/asset%3Aknobas-teamcity", "#/asset/asset:knobas-teamcity"], ready: `${shown} .pane h2[title$="/ knobas-teamcity"]`, away: "#/asset/asset%3Awsl-docker" },
   { name: "settings", start: "#/time", gear: true, hash: "#/settings", away: "Escape" },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
   { name: "settings-source", start: "#/settings/sources", press: `${shown} a[href^="#/settings/source/"]`, hash: "#/settings/source/", away: "Escape" },
