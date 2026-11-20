@@ -313,6 +313,15 @@ pub fn go(view: &WebView, go: Go) {
     };
 }
 
+/// A hidden site's memory level: low while hidden, normal when shown.
+pub fn memory(view: &WebView, visible: bool) {
+    let _ = view.set_memory_usage_level(if visible {
+        MemoryUsageLevel::Normal
+    } else {
+        MemoryUsageLevel::Low
+    });
+}
+
 /// A hidden site sleeps: low memory, then suspended; woken before it shows.
 pub fn sleep(view: &WebView, asleep: bool) {
     let core = view.webview();

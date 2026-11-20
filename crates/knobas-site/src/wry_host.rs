@@ -175,6 +175,9 @@ impl SiteView for WryView {
 
     fn set_visible(&self, visible: bool) {
         let _ = self.view.set_visible(visible);
+        // Windows: a hidden site holds less memory at once (decisions §14).
+        #[cfg(windows)]
+        crate::win::memory(&self.view, visible);
     }
 
     fn focus(&self) {
