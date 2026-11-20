@@ -315,6 +315,10 @@ _Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq
 One of the person's own programs that takes a folder of a repository and makes a picture, text, Markdown, a page or a folder of files out of it, saved in Settings › Renderers and drawn on the Code page in the file's place (ADR-0044, 2026-11-16). It is given `{path}`, a copy of the folder knobas wrote at the commit shown (from the clone's objects, else the forge), and may write `{out}`; it never runs in the checkout. Which folders it takes is two glob lists: a file the folder holds, and the folder's name or path. What it drew is kept by the folder's content, so a revisit draws at once. In code `folder_render`, `FolderRenderer`.
 _Avoid_: folder preview, folder plugin, renderer alone (a file's)
 
+**Pick** (a folder's):
+The [folder renderer](#folder-renderer) a person chose for one folder of one repository, kept for it (`render.folder_picks`, ux26): every place a folder's renderer is chosen writes it, and the folder gets it wherever it is drawn while that renderer is still saved and still takes the folder; else the first saved one that takes it. While several take a folder and none is picked, the Files tree's glyph asks which.
+_Avoid_: default (a file pattern's renderer, Settings › Renderers), preference
+
 **Generated folder**:
 The files a [folder renderer](#folder-renderer) whose command holds `{outdir}` wrote in one run, kept by knobas as plain files under `<clones root>/knobas-rendered/` and drawn on the Code page in the real folder's place, each by the file renderers (ADR-0046, 2026-11-20). Links, `.git` folders and names Windows does not take are left out and said. Kept by the folder's content, a folder per run, never rewritten. In code `Made`, `folder_render::keep`, `folder_render::store`.
 _Avoid_: output folder (the tool's own `{outdir}`, before it is kept), render cache, preview

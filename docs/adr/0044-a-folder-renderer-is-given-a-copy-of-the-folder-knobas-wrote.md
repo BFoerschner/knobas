@@ -1,8 +1,10 @@
 ---
-status: accepted, amended by ADR-0046
+status: accepted, amended by ADR-0046 and ADR-0049
 ---
 
 # A folder renderer is given a copy of the folder knobas wrote
+
+*Amended by [ADR-0049](0049-a-comparison-may-end-at-the-working-tree.md) (2026-11-20): a copy of a working folder, made of what git lists.*
 
 Amended by [ADR-0046](0046-a-folder-renderer-may-make-a-folder-of-files-knobas-keeps.md): a folder renderer may be given a third path, {outdir}, and make a folder of files.
 
