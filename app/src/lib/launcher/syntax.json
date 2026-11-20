@@ -167,6 +167,15 @@
     "words": true
   },
   {
+    "token": "pay 123",
+    "insert": "",
+    "summary": "a ticket key with a space or none — pay 123, pay123 find PAY-123",
+    "probe": "pay 123",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
     "token": "kind:",
     "insert": "kind:",
     "summary": "one kind of item — kind:pr, kind:build",

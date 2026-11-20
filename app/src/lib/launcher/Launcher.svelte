@@ -999,7 +999,8 @@
       return;
     }
     if (row.kind === "syntax") {
-      session.set(row.entry.insert);
+      // A row that only says how to type something (`pay 123`) inserts nothing and keeps the box.
+      if (row.entry.insert !== "") session.set(row.entry.insert);
       box?.focus();
       return;
     }

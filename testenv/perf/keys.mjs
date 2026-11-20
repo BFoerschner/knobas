@@ -306,6 +306,11 @@ const CASES = [
   // one, often a letter before its end, so these are the keys at which the answer arrives.
   { name: "everything-typo", presses: [["shcedule", "r"], ["wbehoo", "k"], ["inovi", "c"], ["timoe", "u"], ["parnt", "e"], ["rety", "r"], ["stagi", "g"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   { name: "everything-twenty", presses: [["payout scheduler re", "t"], ["idempotency keys au", "d"], ["auth proxy times ou", "t"], ["cache p99 latency d", "a"], ["investigate kafka c", "o"], ["backfill postgres p", "r"], ["harden the retry qu", "e"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  // A ticket key typed with a space or none (ux25, `docs/decisions/2026-11-20-a-key-typed-with-a-space-is-the-key.md`):
+  // the last digit of a scale project's key typed `sclpay 123`, and typed `sclpay123`, `sclops_41` or `sclweb.277`. The
+  // key is asked beside the words, so each press waits for both answers.
+  { name: "everything-key-space", presses: [["sclpay 12", "3"], ["sclops 4", "1"], ["sclweb 27", "7"], ["scldata 9", "9"], ["sclmob 3", "1"], ["sclsec 1", "5"], ["sclpay 40", "4"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
+  { name: "everything-key-joined", presses: [["sclpay12", "3"], ["sclops_4", "1"], ["sclweb.27", "7"], ["scldata9", "9"], ["sclmob_3", "1"], ["sclsec1", "5"], ["sclpay.40", "4"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
 ];
 const picked = CASES.filter((x) => !only || only.some((w) => x.name.includes(w)));
 

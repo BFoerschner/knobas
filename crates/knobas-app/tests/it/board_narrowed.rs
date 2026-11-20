@@ -541,3 +541,61 @@ async fn the_command_reads_a_filter_in_the_boards_scan() {
     .unwrap();
     assert!(none.columns.is_empty(), "a page is no ticket");
 }
+
+/// The cards of `sources` on the board `raw` narrows, by id, sorted.
+async fn keyed_board(
+    pool: &PgPool,
+    sources: &[String],
+    raw: &str,
+    picker: Option<&knobas_search::picker::Picker>,
+) -> Vec<String> {
+    let registry = Registry::for_process();
+    let board = knobas_app::commands::entity::mini_board_laned(
+        pool,
+        &registry,
+        knobas_app::commands::entity::Room {
+            picker,
+            ..knobas_app::commands::entity::Room::default()
+        },
+        None,
+        Some(raw),
+        None,
+    )
+    .await
+    .unwrap();
+    let mut ids: Vec<String> = board
+        .columns
+        .iter()
+        .flat_map(|column| column.cards.iter())
+        .filter(|card| sources.contains(&card.source_id))
+        .map(|card| card.entity_id.clone())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// **A key typed with a space or none narrows the board as the key does**
+/// (ux25): with the launcher's picker handed to the command, `pay1`,
+/// `pay_1` and `pay.1` draw what `PAY-1` draws, and `pay 1` what it drew
+/// before and that too. Without a picker no key is read.
+#[tokio::test]
+async fn a_key_typed_with_a_space_or_none_narrows_the_board_as_the_key_does() {
+    let pool = pool().await;
+    let (sources, _) = mirror(&pool).await;
+    let picker = knobas_search::picker::Picker::default();
+    picker.reload(&pool).await.unwrap();
+    let dashed = keyed_board(&pool, &sources, "PAY-1", Some(&picker)).await;
+    assert!(!dashed.is_empty());
+    for raw in ["pay1", "pay_1", "pay.1", "PAY1"] {
+        assert_eq!(
+            keyed_board(&pool, &sources, raw, Some(&picker)).await,
+            dashed,
+            "{raw}"
+        );
+    }
+    let spaced = keyed_board(&pool, &sources, "pay 1", Some(&picker)).await;
+    let before = keyed_board(&pool, &sources, "pay 1", None).await;
+    assert!(dashed.iter().all(|id| spaced.contains(id)), "{spaced:?}");
+    assert!(before.iter().all(|id| spaced.contains(id)), "{spaced:?}");
+    assert!(keyed_board(&pool, &sources, "pay1", None).await.is_empty());
+}

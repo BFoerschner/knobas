@@ -1018,6 +1018,7 @@ async fn a_jira_views_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
         None,
         None,
         Some(&doing),
+        None,
     )
     .await
     .unwrap();
@@ -1050,6 +1051,7 @@ async fn a_jira_views_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
         None,
         None,
         Some(&by_key),
+        None,
     )
     .await
     .unwrap();

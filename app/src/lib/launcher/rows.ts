@@ -201,10 +201,13 @@ export function holdsAnswer(rows: readonly LauncherRow[]): boolean {
 /**
  * What a query that looks like a key is after is a ticket: *PAY* or *PAY-23*
  * lists the tickets first, ahead of the saved views that happen to hold the
- * letters. Any other query keeps the engine's order.
+ * letters, and so does one the engine read as a key typed with a space or
+ * none (`pay 123`, `pay123`: `interpreted.keyed`, ux25). Any other query keeps
+ * the engine's order.
  */
 export function ticketsFirst(response: SearchResponse): SearchResponse["groups"] {
-  if (!/^[A-Z][A-Z0-9]*(-\d*)?$/i.test(response.interpreted.text.trim())) return response.groups;
+  const keyShaped = /^[A-Z][A-Z0-9]*(-\d*)?$/i.test(response.interpreted.text.trim());
+  if (!keyShaped && response.interpreted.keyed === undefined) return response.groups;
   return [...response.groups].sort((a, b) => Number(b.kind === "ticket") - Number(a.kind === "ticket"));
 }
 

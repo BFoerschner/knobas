@@ -820,6 +820,27 @@ struct Held {
     /// The words the mirror holds, sorted (D10): empty until the words'
     /// fill has marked them whole.
     words: Vec<String>,
+    /// The projects the tickets held are numbered under, read off their ids
+    /// (`crate::typed_key`): what makes `pay 123` the key `PAY-123`.
+    projects: crate::typed_key::Projects,
+}
+
+impl Held {
+    fn new(names: Names, words: Vec<String>) -> Self {
+        let projects = crate::typed_key::Projects::of_ids(
+            names
+                .ids
+                .iter()
+                .zip(&names.kind)
+                .filter(|(_, kind)| *names.kinds[usize::from(**kind)] == *"ticket")
+                .map(|(id, _)| id.as_str()),
+        );
+        Self {
+            names,
+            words,
+            projects,
+        }
+    }
 }
 
 /// What one reload read: logged as the fills log.
@@ -963,6 +984,13 @@ impl Picker {
         read_words(&self.held().words, text, last_growing)
     }
 
+    /// The projects the held tickets are numbered under: empty until the
+    /// first reload, and then as fresh as the names.
+    #[must_use]
+    pub fn projects(&self) -> crate::typed_key::Projects {
+        self.held().projects.clone()
+    }
+
     /// Whether the mirror's words are held (the list was whole at the last
     /// reload).
     #[must_use]
@@ -999,10 +1027,7 @@ impl Picker {
         for (id, kind, source, title) in rows {
             push_name(&mut names, &mut kinds, id, kind, source, title);
         }
-        *picker.held.write().expect("a new lock") = Arc::new(Held {
-            names,
-            words: Vec::new(),
-        });
+        *picker.held.write().expect("a new lock") = Arc::new(Held::new(names, Vec::new()));
         picker
     }
 }
@@ -1116,7 +1141,7 @@ async fn load(pool: &sqlx::PgPool) -> Result<Held, sqlx::Error> {
         names.source.push(source);
         names.titles.push(title);
     }
-    Ok(Held { names, words })
+    Ok(Held::new(names, words))
 }
 
 #[cfg(test)]

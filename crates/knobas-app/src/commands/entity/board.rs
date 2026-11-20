@@ -88,6 +88,7 @@ pub async fn mini_board(
             query.as_deref(),
             lanes,
             page.as_ref(),
+            Some(lifecycle.picker()),
         )
         .await;
     }
@@ -98,6 +99,7 @@ pub async fn mini_board(
             ctx_id: ctx_id.as_deref(),
             role: role.as_deref(),
             project: project.as_deref(),
+            picker: Some(lifecycle.picker()),
         },
         per_column,
         query.as_deref(),
@@ -115,6 +117,10 @@ pub struct Room<'a> {
     /// every source.
     pub role: Option<&'a str>,
     pub project: Option<&'a str>,
+    /// The names the launcher's picker holds, whose projects make a key
+    /// typed with a space or none (`pay 123`, `pay123`) the key in the
+    /// board's search (`knobas_search::typed_key`). `None` reads no key.
+    pub picker: Option<&'a knobas_search::picker::Picker>,
 }
 
 /// [`mini_board`], against a pool.
@@ -141,6 +147,7 @@ pub async fn mini_board_inner(
             ctx_id,
             role,
             project,
+            picker: None,
         },
         per_column,
         query,
@@ -183,6 +190,7 @@ pub async fn mini_board_paged(
         ctx_id,
         role,
         project,
+        picker,
     } = room;
     // The role's fillers (#1299). The core reads an empty source list as
     // every source, so a role nobody fills answers here, with nothing on it.
@@ -203,7 +211,7 @@ pub async fn mini_board_paged(
         None => Vec::new(),
     };
     let declarations = declared_paths(pool, registry).await?;
-    let (admits, identity) = tickets_admitted(pool, registry, query).await?;
+    let (admits, identity) = tickets_admitted(pool, registry, query, picker).await?;
     let scope = |only| knobas_core::mini_board::Scope {
         ctx_id,
         sources: &sources,
@@ -238,19 +246,35 @@ pub async fn mini_board_paged(
     })
 }
 
+/// `searcher` with `picker`'s names, when there is one: its projects make
+/// `pay 123` the key `PAY-123` in the board's search (ux25).
+fn picked(
+    searcher: knobas_search::Searcher,
+    picker: Option<&knobas_search::picker::Picker>,
+) -> knobas_search::Searcher {
+    match picker {
+        Some(picker) => searcher.with_picker(picker.clone()),
+        None => searcher,
+    }
+}
+
 /// What a board's search admits of the tickets (`Every`: no search, nothing
 /// narrowed) and the identity `@me` resolves to, from **one** vocabulary
 /// read, as [`tickets_matching`] reads them; the mirror is not asked for the
-/// ids.
+/// ids. With `picker`, a key typed with a space or none is read as the key.
 async fn tickets_admitted(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     query: Option<&str>,
+    picker: Option<&knobas_search::picker::Picker>,
 ) -> Result<(knobas_search::Admits, Vec<String>), IpcError> {
     let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
         return Ok((knobas_search::Admits::Every, identity_of(pool).await?));
     };
-    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    let searcher = picked(
+        crate::commands::search::searcher(pool, registry).await?,
+        picker,
+    );
     let vocabulary = searcher.vocabulary().await?;
     let admits = knobas_search::Searcher::admits_in(&vocabulary, query, "ticket")?;
     Ok((admits, vocabulary.identity))
@@ -260,16 +284,21 @@ async fn tickets_admitted(
 /// narrowed) and the identity `@me` resolves to, from **one** vocabulary read:
 /// the searcher loads it for the parse, and the board wants the identity out
 /// of the same load rather than a second one (#1659). Without a search the
-/// identity alone is read, and no searcher is built.
+/// identity alone is read, and no searcher is built. With `picker`, a key
+/// typed with a space or none is read as the key.
 async fn tickets_matching(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     query: Option<&str>,
+    picker: Option<&knobas_search::picker::Picker>,
 ) -> Result<(Option<Vec<String>>, Vec<String>), IpcError> {
     let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
         return Ok((None, identity_of(pool).await?));
     };
-    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    let searcher = picked(
+        crate::commands::search::searcher(pool, registry).await?,
+        picker,
+    );
     let vocabulary = searcher.vocabulary().await?;
     let only = searcher
         .matching_ids_in(&vocabulary, query, "ticket")
@@ -319,7 +348,7 @@ pub async fn saved_view_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    saved_view_board_paged(pool, registry, view, per_column, query, lanes, None).await
+    saved_view_board_paged(pool, registry, view, per_column, query, lanes, None, None).await
 }
 
 /// [`saved_view_board_laned`] past its first cards (ux18): see
@@ -328,9 +357,13 @@ pub async fn saved_view_board_laned(
 /// cards statement over the view's tickets, which sorts it as it sorts any
 /// board's.
 ///
+/// `picker` reads a key typed with a space or none in `query` as the key
+/// (ux25); `None` reads none.
+///
 /// # Errors
 ///
 /// See [`saved_view_board`].
+#[allow(clippy::too_many_arguments)]
 pub async fn saved_view_board_paged(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
@@ -339,6 +372,7 @@ pub async fn saved_view_board_paged(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
     page: Option<&knobas_core::mini_board::Page>,
+    picker: Option<&knobas_search::picker::Picker>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let Some(layout) = crate::ticket_views::saved_view_layout(pool, view).await? else {
         return Err(IpcError::not_found(format!(
@@ -346,7 +380,7 @@ pub async fn saved_view_board_paged(
         )));
     };
     let mut only = layout.members.clone();
-    let (matched, identity) = tickets_matching(pool, registry, query).await?;
+    let (matched, identity) = tickets_matching(pool, registry, query, picker).await?;
     if let Some(matched) = matched {
         let matched: std::collections::HashSet<String> = matched.into_iter().collect();
         only.retain(|id| matched.contains(id));

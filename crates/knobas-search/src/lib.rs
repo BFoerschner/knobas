@@ -52,6 +52,7 @@ pub(crate) mod suggest;
 /// The deterministic corpus the perf gate and the bench share.
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
+pub mod typed_key;
 pub mod types;
 pub(crate) mod under;
 pub mod vocab;
@@ -388,9 +389,13 @@ impl Searcher {
                 )
             })
             .collect();
-        Ok(Vocabulary::load(&self.pool, self.kinds.clone())
+        let mut vocab = Vocabulary::load(&self.pool, self.kinds.clone())
             .await?
-            .declaring(&templates))
+            .declaring(&templates);
+        if let Some(picker) = &self.picker {
+            vocab.projects = picker.projects();
+        }
+        Ok(vocab)
     }
 
     /// Read `raw` as a link-set pattern (#868, R-7.2) with this
@@ -514,6 +519,12 @@ impl Searcher {
             .as_ref()
             .and_then(|(typed, _)| query::bangs_as_minus(typed));
         let text = negated.as_deref().or(text);
+        // A ticket key typed with a space or none (`pay 123`, `pay123`), read
+        // as the key where the mirror's tickets are numbered under its
+        // project ([`typed_key`]): asked beside the words as typed, its
+        // answer leads, and the words' answer follows it.
+        let keyed = text.and_then(|typed| vocab.projects.read(typed));
+        interpreted.keyed.clone_from(&keyed);
 
         // An `under:` scoped to names with nothing admitted beneath any of
         // them answers with nothing, and the statement is not asked: to say
@@ -603,19 +614,29 @@ impl Searcher {
                 _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
             }
         };
-        // Each branch on the heap (the ux21 Windows pass, 2026-11-19): three
+        let keyed_answer = async {
+            match keyed.as_deref() {
+                Some(keyed) => ask(Some(keyed), parsed.prefix_last_term).await.map(Some),
+                None => Ok::<Option<Vec<RawHit>>, SearchError>(None),
+            }
+        };
+        // Each branch on the heap (the ux21 Windows pass, 2026-11-19): four
         // of them hold a whole `ask`, so inline they made this future 37 kB,
         // and Windows copies a command's future several times on the main
         // thread's 1 MB stack before it is spawned: the launcher's first
         // letter overflowed it (`0xc00000fd`). [`FUTURE_MOST`] holds it.
-        let (rows, parted, picked, corrected_rows) = tokio::join!(
+        let (rows, parted, picked, corrected_rows, keyed_rows) = tokio::join!(
             Box::pin(ask(text, parsed.prefix_last_term)),
             Box::pin(parts),
             Box::pin(names),
-            Box::pin(corrected)
+            Box::pin(corrected),
+            Box::pin(keyed_answer)
         );
         let mut rows = rows?;
         let corrected_rows = corrected_rows?;
+        // The key's answer, where it holds a row: the text found something,
+        // so no word of it is corrected.
+        let keyed_rows = keyed_rows?.filter(|keyed| keyed.iter().any(RawHit::is_hit));
         let mut needles = query::needles(&parsed.query.text);
         let mut needles_of = |asked: &str| {
             for needle in query::needles(asked) {
@@ -625,6 +646,7 @@ impl Searcher {
             }
         };
         if rows.is_empty()
+            && keyed_rows.is_none()
             && let (Some(corrected), Some(answer)) = (reading.corrected.as_deref(), corrected_rows)
         {
             rows = answer;
@@ -648,6 +670,10 @@ impl Searcher {
                 needles_of(asked);
             }
             rows = group::filled(rows, parted, PER_GROUP, query.limit);
+        }
+        if let (Some(keyed), Some(answer)) = (keyed.as_deref(), keyed_rows) {
+            needles_of(keyed);
+            rows = group::keyed_first(answer, rows, PER_GROUP, query.limit);
         }
         if let Some((_, typed)) = &picking {
             group::mark(&mut rows, typed);
@@ -882,7 +908,9 @@ impl Searcher {
     /// words are the view's: each must appear in the row's key, title,
     /// assignee or epic, a `-word` or `-"phrase"` must not, and `or`
     /// separates alternatives ([`query::word_alternatives`],
-    /// [`sql::ids_sql`], #1889). Over the live mirror. A prefix (`#`, `>`)
+    /// [`sql::ids_sql`], #1889). A key typed with a space or none (`pay
+    /// 123`, `pay123`) admits what the key admits too, where the searcher's
+    /// picker holds its project ([`typed_key::alternatives`]). Over the live mirror. A prefix (`#`, `>`)
     /// and `list:` mean nothing here and are not acted on.
     ///
     /// # Errors
@@ -936,7 +964,7 @@ impl Searcher {
         })?;
         let parsed = query::parse(&query.raw, vocab);
         let mut filters = query::merge(&parsed, &query.filters);
-        let alternatives = query::word_alternatives(&parsed.query.text);
+        let alternatives = typed_key::alternatives(&parsed.query.text, &vocab.projects);
         if alternatives.is_empty() && filters.is_empty() {
             return Ok(Admits::Every);
         }
@@ -1056,11 +1084,34 @@ impl Searcher {
             }
             _ => Vec::new(),
         };
-        let mut rows = if named.is_empty() {
-            self.rows_of(whole(), text).await?
-        } else {
-            named
+        // A key typed with a space or none, read as the key ([`typed_key`]):
+        // the pages that name it, asked beside the words and first.
+        let keyed = text.and_then(|typed| vocab.projects.read(typed));
+        let keyed_answer = async {
+            let Some(keyed) = keyed.as_deref() else {
+                return Ok::<Option<Vec<RawHit>>, sqlx::Error>(None);
+            };
+            let built = sql::search_sql(
+                &[stored.mirror],
+                Some(keyed),
+                parsed.prefix_last_term,
+                &filters,
+                query.limit,
+                query.limit,
+            );
+            self.rows_of(built, Some(keyed)).await.map(Some)
         };
+        let words = async {
+            if named.is_empty() {
+                self.rows_of(whole(), text).await
+            } else {
+                Ok(named)
+            }
+        };
+        // On the heap, as in [`Self::search_as`] (the ux21 Windows pass).
+        let (rows, keyed_rows) = tokio::join!(Box::pin(words), Box::pin(keyed_answer));
+        let mut rows = rows?;
+        let keyed_rows = keyed_rows?.filter(|keyed| keyed.iter().any(RawHit::is_hit));
         // The pages' names by the picker and the mirror's words, as the
         // launcher reads them (the fuzzy-search decisions, D12 step 3): a
         // word nobody wrote asked again where the text found nothing, the
@@ -1082,6 +1133,7 @@ impl Searcher {
                 }
             };
             if rows.is_empty()
+                && keyed_rows.is_none()
                 && let Some(corrected) = reading.corrected.as_deref()
             {
                 let built = sql::search_sql(
@@ -1139,6 +1191,14 @@ impl Searcher {
             if let Some(read) = &reads {
                 group::mark(&mut rows, read);
             }
+        }
+        if let (Some(keyed), Some(answer)) = (keyed.as_deref(), keyed_rows) {
+            for needle in query::needles(keyed) {
+                if !needles.contains(&needle) {
+                    needles.push(needle);
+                }
+            }
+            rows = group::keyed_first(answer, rows, query.limit, query.limit);
         }
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
@@ -1215,7 +1275,7 @@ impl Searcher {
                 continue;
             }
             filters.kinds = vec![kind.to_owned()];
-            let words = query::word_alternatives(&parsed.query.text);
+            let words = typed_key::alternatives(&parsed.query.text, &vocab.projects);
             pending.push((out.len(), words, filters));
             out.push(None);
         }

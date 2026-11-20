@@ -20,6 +20,14 @@ test("any other query keeps the engine's order", () => {
   }
 });
 
+test("a query the engine read as a key typed with a space or none lists the tickets first (ux25)", () => {
+  for (const [text, keyed] of [["pay 123", "PAY-123"], ["pay123", "PAY-123"], ["retry pay 12", "retry PAY-12"]] as const) {
+    const response = answer(text);
+    response.interpreted.keyed = keyed;
+    expect(ticketsFirst(response).map((one) => one.kind), text).toEqual(["ticket", "view", "set", "pr"]);
+  }
+});
+
 test("a ticket is a twin only where another ticket holds its key under another id (F-636)", () => {
   const item = (entity_id: string, kind = "ticket") => ({ kind, entity_id });
   const twins = twinItems([item("jira:PAY-231"), item("mock:PAY-231"), item("jira:PAY-228"), item("jira:PAY-228"), item("wiki:PAY-231", "page")]);

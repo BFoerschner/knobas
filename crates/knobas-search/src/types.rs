@@ -102,6 +102,14 @@ pub struct ParsedQuery {
     /// mirror both know them. Empty unless the launcher's answer is.
     #[serde(default)]
     pub left_out_tokens: Vec<String>,
+    /// The text with a ticket key typed with a space or no separator read as
+    /// the key (`pay 123` as `PAY-123`, [`crate::typed_key`]), whose answer
+    /// leads: the launcher then lists the tickets first, as it does for a
+    /// key typed with its `-`. Added to a frozen type (§10.8): optional on
+    /// the wire and left out when nothing was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub keyed: Option<String>,
 }
 
 /// The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and

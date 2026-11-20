@@ -527,6 +527,7 @@ impl Parsed {
                 filters: SearchFilters::default(),
                 unknown_tokens: Vec::new(),
                 left_out_tokens: Vec::new(),
+                keyed: None,
             },
             prefix_last_term: false,
             identity: vocab.identity.clone(),

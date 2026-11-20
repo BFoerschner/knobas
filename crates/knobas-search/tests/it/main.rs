@@ -42,6 +42,7 @@ mod state_chip;
 mod suggest;
 mod ticket_by_key;
 mod ticket_keys;
+mod typed_key;
 mod under;
 mod under_admits;
 mod under_confluence;

@@ -29,7 +29,7 @@ export type SyntaxExpectation = "recognised" | "reported";
 export interface SyntaxEntry {
   /** What is drawn in the key cell. */
   token: string;
-  /** What clicking the row puts in the box. */
+  /** What clicking the row puts in the box; empty for a row that only says how to type something, which keeps the box. */
   insert: string;
   summary: string;
   /** A query the parser must handle as `expect` says. Not shown. */

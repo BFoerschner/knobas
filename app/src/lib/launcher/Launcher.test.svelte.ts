@@ -874,6 +874,13 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
   rows[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
   expect(target.querySelector("input")!.value).toBe("#t ");
+
+  // The card says a key may be typed with a space or none (ux25); that row only says how, so it keeps the box.
+  const keyRow = rows[tokens.indexOf("pay 123")];
+  expect(keyRow?.querySelector(".tf-ln-s")?.textContent).toContain("PAY-123");
+  keyRow!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("#t ");
 });
 
 /**

@@ -205,7 +205,7 @@ pub(crate) fn filled(
 impl RawHit {
     /// Whether the row is a hit and not the header of a kind the page cut:
     /// the two columns [`hit`] asks for.
-    fn is_hit(&self) -> bool {
+    pub(crate) fn is_hit(&self) -> bool {
         self.entity_id.is_some() && self.synced_at.is_some()
     }
 
@@ -370,16 +370,30 @@ pub(crate) fn with_names(
         kind.rows = merged;
     }
 
-    // Dealt a row a kind at a time, the best of a round first.
+    deal(
+        kinds
+            .into_iter()
+            .map(|kind| (kind.name, kind.total, kind.rows))
+            .collect(),
+        limit,
+    )
+}
+
+/// `kinds`' rows (each `(kind, total, rows)`, its rows in their order)
+/// dealt as the statements deal a page: every kind's first row, then every
+/// kind's second, the best of a round first, up to `limit`. A kind with a
+/// total and no row on the page is a header; each row carries its kind's
+/// total.
+fn deal(kinds: Vec<(String, i64, Vec<RawHit>)>, limit: usize) -> Vec<RawHit> {
     let mut dealt: Vec<(usize, usize, usize)> = Vec::new();
-    for (index, kind) in kinds.iter().enumerate() {
-        for nth in 0..kind.rows.len() {
+    for (index, (_, _, rows)) in kinds.iter().enumerate() {
+        for nth in 0..rows.len() {
             dealt.push((nth, index, nth));
         }
     }
     dealt.sort_by(|a, b| {
         a.0.cmp(&b.0)
-            .then_with(|| best_first(&kinds[a.1].rows[a.2], &kinds[b.1].rows[b.2]))
+            .then_with(|| best_first(&kinds[a.1].2[a.2], &kinds[b.1].2[b.2]))
     });
     dealt.truncate(limit);
     let mut kept: Vec<usize> = vec![0; kinds.len()];
@@ -387,20 +401,68 @@ pub(crate) fn with_names(
         kept[*index] = kept[*index].max(nth + 1);
     }
     let mut page: Vec<RawHit> = Vec::new();
-    for (index, kind) in kinds.into_iter().enumerate() {
-        let total = kind.total;
+    for (index, (name, total, rows)) in kinds.into_iter().enumerate() {
         if kept[index] == 0 {
             if total > 0 {
-                page.push(RawHit::header(&kind.name, total));
+                page.push(RawHit::header(&name, total));
             }
             continue;
         }
-        for mut row in kind.rows.into_iter().take(kept[index]) {
+        for mut row in rows.into_iter().take(kept[index]) {
             row.kind_total = total;
             page.push(row);
         }
     }
     page
+}
+
+/// The page with **the answer to a key typed with a space or none leading**
+/// (ux25, [`crate::typed_key`]): `keyed` is the statements' answer to the
+/// text read as the key (`PAY-123` for `pay 123`), `text` their answer to the
+/// words as typed.
+///
+/// For each kind:
+///
+/// * **The key's rows first**, in their order: what typing `PAY-123` lists.
+/// * **Then the words' rows**, in theirs, each not already on the page.
+/// * **`per_group` at most**, and the kind's total the larger of the two
+///   answers' or the rows now held.
+///
+/// Then dealt as the statements deal a page ([`deal`]).
+#[must_use]
+pub(crate) fn keyed_first(
+    keyed: Vec<RawHit>,
+    text: Vec<RawHit>,
+    per_group: u32,
+    limit: u32,
+) -> Vec<RawHit> {
+    use std::collections::HashSet;
+
+    let per_group = usize::try_from(per_group).unwrap_or(usize::MAX);
+    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+    let mut kinds: Vec<(String, i64, Vec<RawHit>)> = Vec::new();
+    let mut held: HashSet<(String, String)> = HashSet::new();
+    for row in keyed.into_iter().chain(text) {
+        let index = match kinds.iter().position(|(name, ..)| *name == row.group_kind) {
+            Some(index) => index,
+            None => {
+                kinds.push((row.group_kind.clone(), 0, Vec::new()));
+                kinds.len() - 1
+            }
+        };
+        let (_, total, rows) = &mut kinds[index];
+        *total = (*total).max(row.kind_total);
+        let Some(id) = row.entity_id.as_ref().filter(|_| row.is_hit()) else {
+            continue;
+        };
+        if rows.len() < per_group && held.insert((row.group_kind.clone(), id.clone())) {
+            rows.push(row);
+        }
+    }
+    for (_, total, rows) in &mut kinds {
+        *total = (*total).max(i64::try_from(rows.len()).unwrap_or(i64::MAX));
+    }
+    deal(kinds, limit)
 }
 
 /// Mark each hit's title with the letters `typed` matched (D9): a loose
