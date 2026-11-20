@@ -94,6 +94,7 @@ mod run_reads_ipc;
 mod run_ticket_ipc;
 mod search_ipc;
 mod signals_ipc;
+mod site_ipc;
 mod sources_crud;
 mod sources_registry;
 mod standup_ipc;
