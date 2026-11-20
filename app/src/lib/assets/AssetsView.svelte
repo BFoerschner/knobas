@@ -144,6 +144,7 @@
   import { push, undoable } from "../shell/toasts.svelte";
   import { acknowledged, openingWords } from "../shell/ack.svelte";
   import { holdStillPress } from "../tf/still-press";
+  import { heldHead } from "../tf/held-head.svelte";
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
@@ -671,6 +672,22 @@
       },
     });
   });
+
+  /**
+   * *Depends on this* and every section under it wait unseen in their room
+   * until the panel's read has answered (the ux23 gate, 2026-11-20): its
+   * one-line *Reading…* gave way to the rows or the *Everything inside it*
+   * fold, and *Monitoring*, *Linked items* and *History* moved down 24 px or
+   * more after the pane drew. What depends on an asset by a link can't be
+   * known before the walk, so the section has no final height to keep; it
+   * shows once, whole, as a detail page's header does (`heldHead`, at most
+   * 500 ms). Declared after the read's effect, so a new asset is held from
+   * the frame its selection changes.
+   */
+  const dependsDrawn = heldHead(
+    () => selectedId,
+    () => dependsOn !== null || dependsFailure !== null,
+  );
 
   /**
    * Fetch every column the layout calls for and swap them in **together**.
@@ -2762,7 +2779,7 @@
           landing on the asset or inside it is already in *Reachable via* with
           one — a second copy of the same key would measure a wire twice.
         -->
-        <section class="grp breaks">
+        <section class="grp breaks" class:tf-heldbelow={!dependsDrawn.shown}>
           <h3 class="lab">
             Depends on this
             {#if dependsOn !== null}<span class="n tf-count">{dependsOn.assets.length}</span>{/if}
@@ -2858,7 +2875,7 @@
           nobody imported.
         -->
         {#if detail.monitoring.length > 0}
-          <section class="grp watch">
+          <section class="grp watch" class:tf-heldbelow={!dependsDrawn.shown}>
             <h3 class="lab">Monitoring</h3>
             <ul class="lst">
               {#each detail.monitoring as watch (watch.entity_id)}
@@ -2891,7 +2908,7 @@
         {/if}
 
         {#if namedAndWaiting.length > 0}
-          <section class="grp named">
+          <section class="grp named" class:tf-heldbelow={!dependsDrawn.shown}>
             <h3 class="lab">Named by the import, not in Kuma yet</h3>
             <ul class="lst">
               {#each namedAndWaiting as name (name)}
@@ -2918,7 +2935,7 @@
           anything, and *Sources* is where a Kuma is added.
         -->
         {#if detail.monitor_targets.length > 0}
-          <section class="grp mkmon">
+          <section class="grp mkmon" class:tf-heldbelow={!dependsDrawn.shown}>
             <button class="tf-btn tf-sm" onclick={() => (creatingMonitor = true)}>
               Create monitor for this asset…
             </button>
@@ -2933,7 +2950,7 @@
           `#/route/<id>` came for is the story of that one route.
         -->
         {#if routeDetail !== null && routeDetail.route.id === routeId}
-          <section class="grp">
+          <section class="grp" class:tf-heldbelow={!dependsDrawn.shown}>
             <h3 class="lab">{routeDetail.route.name} — history</h3>
             {#if routeDetail.history.length === 0}
               <p class="empty">Nothing recorded.</p>
@@ -2961,7 +2978,7 @@
           own encoder: an asset row lands in the Tree, because `#/asset/<id>`
           is what `hashFor` produces for the `asset` kind.
         -->
-        <section class="grp">
+        <section class="grp" class:tf-heldbelow={!dependsDrawn.shown}>
           <LinksPanel
             entityId={detail.asset.id}
             links={detail.links}
@@ -2970,7 +2987,7 @@
           />
         </section>
 
-        <section class="grp">
+        <section class="grp" class:tf-heldbelow={!dependsDrawn.shown}>
           <h3 class="lab">History</h3>
           {#if detail.history.length === 0}
             <p class="empty">Nothing recorded.</p>

@@ -354,6 +354,31 @@ test("selecting another asset asks again and never draws the last one's answer",
 });
 
 /**
+ * The ux23 gate (2026-11-20): *Reading…* gave way to the *Everything inside it* fold 24 px taller, and *Linked items*
+ * and *History* under it moved down after the pane drew. What depends on an asset by a link can't be known before the
+ * walk, so the panel and every section under it wait unseen in their room, and show once the walk has answered.
+ */
+test("the panel and the sections under it wait unseen until the walk answers, then show whole", async () => {
+  const { nav, ports } = render("#/asset/asset:knobas-gitea", { [GITEA.id]: NOTHING });
+  await waitFor(() => expect(count()).toBe("0"));
+  const held = () => [...target.querySelectorAll(".pane > section.grp")].filter((s) => s.classList.contains("tf-heldbelow")).map((s) => s.querySelector("h3")?.textContent?.trim() ?? "");
+  expect(held()).toEqual([]);
+
+  const release = ports.holdNext();
+  nav.go("#/asset/asset:hetzner-teamcity");
+  flushSync();
+  await waitFor(() => expect(ports.asked).toContain(TEAMCITY.id));
+  await waitFor(() => expect(text()).toContain("knobas-teamcity"));
+  expect(held()).toEqual(expect.arrayContaining([expect.stringContaining("Depends on this"), "History"]));
+  // What stands above the panel draws at once.
+  expect(target.querySelector(".pane > section.grp:not(.tf-heldbelow) h3")).not.toBeNull();
+
+  release({ assets: [{ asset: ENGINE, path: null, relation: null }], routes: [] });
+  await waitFor(() => expect(count()).toBe("1"));
+  expect(held()).toEqual([]);
+});
+
+/**
  * A refused read says so, rather than drawing the empty state.
  *
  * The two are different sentences — *nothing depends on this* and *knobas

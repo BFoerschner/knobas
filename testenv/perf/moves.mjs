@@ -122,6 +122,12 @@ const PLACES = [
   // By its nav entry (2026-11-19): an estate of one root lands on that root, so the address is an asset's.
   { name: "assets-nav", optional: true, start: "#/time", nav: "assets", hash: "#/asset", anywhere: true, away: "time" },
   { name: "asset", optional: true, start: "#/assets", press: `${shown} ol.col button.row:not(.on)`, hash: "#/asset/", anywhere: true, away: "#/assets" },
+  // *Depends on this* answered after the pane (the ux23 gate, 2026-11-20): its *Reading…* line gave way to the
+  // *Everything inside it* fold, and *Linked items*, *History* and the import line under it moved 24 px down on the live
+  // suite. `knobas-jira-db` holds one thing and nothing links to it (the gate's shape); `knobas-teamcity` holds one and
+  // an agent depends on it (a row above the fold). The pane's own read at once, the panel's 250 ms after it.
+  { name: "asset-depends-late", fixture: true, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-jira-db"]`, hash: ["#/asset/asset%3Aknobas-jira-db", "#/asset/asset:knobas-jira-db"], away: "#/asset/asset%3Awsl-docker" },
+  { name: "asset-depends-links-late", fixture: true, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-teamcity"]`, hash: ["#/asset/asset%3Aknobas-teamcity", "#/asset/asset:knobas-teamcity"], away: "#/asset/asset%3Awsl-docker" },
   { name: "settings", start: "#/time", gear: true, hash: "#/settings", away: "Escape" },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
   { name: "settings-source", start: "#/settings/sources", press: `${shown} a[href^="#/settings/source/"]`, hash: "#/settings/source/", away: "Escape" },
