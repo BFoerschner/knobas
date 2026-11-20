@@ -35,6 +35,14 @@ test("a run's state and its failures read as lines", () => {
   expect(failureLines({ why: "no_output_file", found: 2, stderr: "" }).line).toBe("The command wrote 2 files to {out}; knobas draws one.");
   expect(failureLines({ why: "timed_out", seconds: 30, stderr: "s" }).line).toContain("timeout of 30s");
   expect(failureLines({ why: "copy", reason: "../x climbs out of the folder" }).line).toBe("The folder could not be copied: ../x climbs out of the folder.");
+  // A folder of files (ADR-0046): keeping, and the three failures of its own.
+  expect(runningLine("Lc", { state: "keeping", done: 120, total: 2000 }, "clone")).toBe("Keeping 120 of 2,000 files…");
+  expect(runningLine("Lc", { state: "keeping", done: 0, total: 0 }, "clone")).toBe("Keeping what it made…");
+  expect(failureLines({ why: "no_output", stderr: "e" })).toEqual({ line: "The command ended without writing a file into {outdir}.", stderr: "e" });
+  expect(failureLines({ why: "output_too_big", files: 24310, bytes: 1.4 * 1024 ** 3, cap_files: 20000, cap_bytes: 1024 ** 3 }).line).toBe(
+    "The command made 24,310 files and 1.4 GB; knobas keeps up to 20,000 files and 1,024 MB.",
+  );
+  expect(failureLines({ why: "keep", reason: "D:\\code is gone" }).line).toBe("What it made could not be kept: D:\\code is gone.");
   expect(tookLabel(1234)).toBe("1.2s");
   expect(tookLabel(65_000)).toBe("1m 5s");
   expect(tookLabel(120_000)).toBe("2m");

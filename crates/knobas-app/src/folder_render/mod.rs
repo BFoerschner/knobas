@@ -16,25 +16,31 @@
 //! # What the program is given (ADR-0044, amending ADR-0016 and ADR-0033)
 //!
 //! - The program and its arguments are what the person typed, split by
-//!   [`knobas_core::checkout::open::words`], no shell. Two placeholders and
+//!   [`knobas_core::checkout::open::words`], no shell. Three placeholders and
 //!   no others: `{path}`, a copy knobas wrote of the folder at the commit the
-//!   page shows, and `{out}`, a path in an empty folder the program may write
-//!   its one output file to (text after it stays: `{out}.png`). Both are
-//!   paths knobas made; the copy's own name is the folder's when it passes
-//!   [`copy::copy_name`]'s grammar, else `folder`.
+//!   page shows; `{out}`, a path in an empty folder the program may write
+//!   its one output file to (text after it stays: `{out}.png`); or, instead
+//!   of `{out}`, `{outdir}`, an empty folder it writes a folder of files
+//!   into (ADR-0046, [`keep`]). All are paths knobas made; the copy's own
+//!   name is the folder's when it passes [`copy::copy_name`]'s grammar, else
+//!   `folder`.
 //! - It runs in an empty folder of its own (not the copy: on Windows a
 //!   program's children are looked for in the current directory before
 //!   `PATH`), with stdin closed, the parent environment less every `KNOBAS_*`
 //!   variable, and is killed with everything it started at its timeout.
 //! - The output is the file under `{out}`, or stdout when the command has no
-//!   `{out}`, capped at [`OUTPUT_CAP`].
+//!   `{out}`, capped at [`OUTPUT_CAP`]; or the files under `{outdir}`, kept
+//!   by [`keep`] in the [`store`].
 //!
 //! The copy, the run and the cache are [`copy`], [`run`] and [`runs`].
 
 pub mod copy;
+pub mod keep;
+pub mod made;
 pub mod resolve;
 pub mod run;
 pub mod runs;
+pub mod store;
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -57,6 +63,9 @@ pub const OUTPUT_CAP: usize = 64 * 1024 * 1024;
 pub const PATH: &str = "{path}";
 /// The placeholder for the output file's path.
 pub const OUT: &str = "{out}";
+/// The placeholder for an empty folder the program writes a folder of files
+/// into (ADR-0046): a command holding it makes [`FolderOutput::Folder`].
+pub const OUTDIR: &str = "{outdir}";
 
 /// What a folder renderer makes. `detect` reads it from the bytes (and the
 /// output file's extension, for Markdown).
@@ -72,6 +81,10 @@ pub enum FolderOutput {
     Markdown,
     /// Drawn sanitized in a frame that runs no script.
     Html,
+    /// A folder of files written into `{outdir}`, kept by knobas and browsed
+    /// on the Code page in the folder's place (ADR-0046). Set by the command
+    /// holding `{outdir}`, never by itself.
+    Folder,
 }
 
 /// One saved folder renderer, Settings › Renderers › *Folder renderers*.
@@ -82,7 +95,7 @@ pub struct FolderRenderer {
     pub id: String,
     pub name: String,
     /// The program and its arguments, as typed: quotes group words, no shell,
-    /// `{path}` and `{out}` the only placeholders.
+    /// `{path}` and one of `{out}` and `{outdir}` the only placeholders.
     pub command: String,
     /// File globs one of the folder's own files must match (`*.lcproj`);
     /// empty takes any folder.
@@ -162,6 +175,17 @@ pub fn settle(drafts: &[FolderRendererDraft]) -> Result<Vec<FolderRenderer>, Ipc
         }
         let command = crate::settings::checked_command(name, &draft.command)?;
         check_placeholders(command).map_err(|why| IpcError::invalid(format!("{name}: {why}")))?;
+        // `{outdir}` decides the kind, so the command and *It makes* cannot
+        // disagree.
+        let output = if placeholders(command).contains(&OUTDIR) {
+            FolderOutput::Folder
+        } else if draft.output == FolderOutput::Folder {
+            return Err(IpcError::invalid(format!(
+                "{name}: a folder of files needs {OUTDIR} where the tool takes its output folder"
+            )));
+        } else {
+            draft.output
+        };
         let taken: Vec<&str> = out.iter().map(|r| r.id.as_str()).collect();
         let id = crate::slug::settled_id(draft.id.as_deref(), name, "folder", &taken);
         let list = |items: &[String]| -> Vec<String> {
@@ -178,7 +202,7 @@ pub fn settle(drafts: &[FolderRendererDraft]) -> Result<Vec<FolderRenderer>, Ipc
             command: command.to_owned(),
             holds: list(&draft.holds),
             folders: list(&draft.folders),
-            output: draft.output,
+            output,
             timeout_secs: draft
                 .timeout_secs
                 .unwrap_or(DEFAULT_TIMEOUT_SECS)
@@ -249,19 +273,27 @@ fn placeholders(command: &str) -> Vec<&str> {
     found
 }
 
-/// `{path}` must be there, and nothing but `{path}` and `{out}`: a
-/// placeholder for a branch, a commit or a name would put a value from the
-/// mirror in an argument (ADR-0016).
+/// `{path}` must be there, and nothing but `{path}` and one of `{out}` and
+/// `{outdir}`: a placeholder for a branch, a commit or a name would put a
+/// value from the mirror in an argument (ADR-0016).
 ///
 /// # Errors
 ///
 /// What is wrong, in words.
 pub fn check_placeholders(command: &str) -> Result<(), String> {
     let found = placeholders(command);
-    if let Some(other) = found.iter().find(|p| **p != PATH && **p != OUT) {
+    if let Some(other) = found
+        .iter()
+        .find(|p| **p != PATH && **p != OUT && **p != OUTDIR)
+    {
         return Err(format!(
             "{other} is not something a folder renderer is given: it takes {PATH}, the folder, and {OUT}, \
-             a file to write to"
+             a file to write to, or {OUTDIR}, a folder to write files into"
+        ));
+    }
+    if found.contains(&OUT) && found.contains(&OUTDIR) {
+        return Err(format!(
+            "{OUT} is one file and {OUTDIR} is a folder of files: use one of them"
         ));
     }
     if !found.contains(&PATH) {
@@ -480,6 +512,62 @@ mod tests {
             ..r.clone()
         };
         assert!(any.applies("", std::iter::empty()));
+    }
+
+    /// `{outdir}` is a placeholder, and a command holding it is stored as a
+    /// folder kind whatever the draft said.
+    #[test]
+    fn outdir_is_a_placeholder_and_sets_the_kind() {
+        assert!(check_placeholders("lc docs {path} --out {outdir}/site").is_ok());
+        let settled = settle(&[FolderRendererDraft {
+            output: FolderOutput::Text,
+            ..draft("x", "lc docs {path} --out {outdir}")
+        }])
+        .unwrap();
+        assert_eq!(settled[0].output, FolderOutput::Folder);
+        // `{out}` is not `{outdir}`'s prefix in the check.
+        let plain = settle(&[draft("y", "lc {path} {out}.png")]).unwrap();
+        assert_eq!(plain[0].output, FolderOutput::Image);
+    }
+
+    #[test]
+    fn out_and_outdir_together_are_refused() {
+        let refused = check_placeholders("lc {path} {out} {outdir}").unwrap_err();
+        assert_eq!(
+            refused,
+            "{out} is one file and {outdir} is a folder of files: use one of them"
+        );
+        assert!(settle(&[draft("x", "lc {path} {out} {outdir}")]).is_err());
+    }
+
+    #[test]
+    fn a_folder_kind_without_outdir_is_refused() {
+        let error = settle(&[FolderRendererDraft {
+            output: FolderOutput::Folder,
+            ..draft("Docs", "lc {path} {out}")
+        }])
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Docs: a folder of files needs {outdir} where the tool takes its output folder"
+        );
+    }
+
+    /// A row saved before `{outdir}` (at `dc367839`) reads and settles to the
+    /// same value: no migration.
+    #[test]
+    fn a_stored_list_without_outdir_reads_as_before() {
+        let stored = r#"[{"id":"lc","name":"Low code","command":"lc {path} {out}.png","holds":["*.lcproj"],"folders":[],"output":"image","timeout_secs":60},
+                          {"id":"tree","name":"Tree","command":"tree {path}","holds":[],"folders":["flows"],"output":"detect","timeout_secs":30}]"#;
+        let read: Vec<FolderRenderer> = serde_json::from_str(stored).unwrap();
+        assert_eq!(read[0].output, FolderOutput::Image);
+        assert_eq!(read[1].output, FolderOutput::Detect);
+        let drafts: Vec<FolderRendererDraft> = serde_json::from_str(stored).unwrap();
+        assert_eq!(settle(&drafts).unwrap(), read);
+        // A draft that names no output is Detect, not Folder.
+        let bare: FolderRendererDraft =
+            serde_json::from_str(r#"{"name":"t","command":"t {path}"}"#).unwrap();
+        assert_eq!(bare.output, FolderOutput::Detect);
     }
 
     /// The tree's marks: each folder that holds a matching file of its own,

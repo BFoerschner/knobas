@@ -193,7 +193,7 @@ windows-core = "=0.61.2"
 # A user renderer (#2262, ADR-0033) runs in a process group of its own, and
 # the whole group is killed at its timeout: a wrapper script's children go
 # with it. The copy already in the lockfile.
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.

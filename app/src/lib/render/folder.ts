@@ -53,10 +53,17 @@ export function runningLine(name: string, state: FolderRunState, from: ReadFrom 
         : `Copying ${thousands(state.done)} of ${thousands(state.total)} files from ${where(from)}…`;
     case "running":
       return `Running ${name}…`;
+    case "keeping":
+      return state.total === 0 ? "Keeping what it made…" : `Keeping ${thousands(state.done)} of ${thousands(state.total)} files…`;
   }
 }
 
 const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+
+/** A size as the made bar says it: MB, or GB to one place from 1 GB. */
+export function sizeLabel(bytes: number): string {
+  return bytes >= 1024 * 1024 * 1024 ? `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB` : mib(bytes);
+}
 
 /** Why a run drew nothing, in a line, and the stderr to show under it. */
 export function failureLines(failure: FolderFailure): { line: string; stderr: string } {
@@ -93,6 +100,17 @@ export function failureLines(failure: FolderFailure): { line: string; stderr: st
       return { line: "There is no folder at this path at this commit.", stderr: "" };
     case "stopped":
       return { line: "Stopped.", stderr: "" };
+    case "no_output":
+      return { line: "The command ended without writing a file into {outdir}.", stderr: failure.stderr };
+    case "output_too_big":
+      return {
+        line:
+          `The command made ${thousands(failure.files)} files and ${sizeLabel(failure.bytes)}; ` +
+          `knobas keeps up to ${thousands(failure.cap_files)} files and ${thousands(Math.round(failure.cap_bytes / 1024 / 1024))} MB.`,
+        stderr: "",
+      };
+    case "keep":
+      return { line: `What it made could not be kept: ${failure.reason}.`, stderr: "" };
   }
 }
 

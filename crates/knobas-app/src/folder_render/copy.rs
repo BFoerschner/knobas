@@ -174,7 +174,8 @@ pub fn sweep(root: &Path) {
     }
 }
 
-/// One run's folders: `in/<name>` the copy, `out` empty for `{out}`, `cwd`
+/// One run's folders: `in/<name>` the copy, `out` empty for `{out}` (or
+/// `{outdir}`, under the store's staging when `out_root` was given), `cwd`
 /// empty for the program to start in. Removed when dropped.
 #[derive(Debug)]
 pub struct Scratch {
@@ -182,39 +183,53 @@ pub struct Scratch {
     pub copy: PathBuf,
     pub out: PathBuf,
     pub cwd: PathBuf,
+    /// The staging folder `out` is in, when it is not under `dir`.
+    pub staged: Option<PathBuf>,
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 impl Scratch {
-    /// Fresh folders under `root` for a copy named `name`.
+    /// Fresh folders under `root` for a copy named `name`; `out` under
+    /// `out_root` when given (a folder kind's `{outdir}`, in the store's
+    /// staging so keeping is a rename per file, ADR-0046).
     ///
     /// # Errors
     ///
     /// The file system's.
-    pub fn make(root: &Path, name: &str) -> std::io::Result<Self> {
+    pub fn make(root: &Path, name: &str, out_root: Option<&Path>) -> std::io::Result<Self> {
         std::fs::create_dir_all(root)?;
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = root.join(format!("{}-{n}", std::process::id()));
+        let leaf = format!("{}-{n}", std::process::id());
+        let dir = root.join(&leaf);
         let _ = std::fs::remove_dir_all(&dir);
-        let copy = dir.join("in").join(name);
-        let out = dir.join("out");
-        let cwd = dir.join("cwd");
-        for made in [&copy, &out, &cwd] {
-            std::fs::create_dir_all(made)?;
+        let staged = out_root.map(|at| at.join(&leaf));
+        if let Some(staged) = &staged {
+            let _ = std::fs::remove_dir_all(staged);
         }
-        Ok(Self {
+        let copy = dir.join("in").join(name);
+        let out = staged.as_ref().unwrap_or(&dir).join("out");
+        let cwd = dir.join("cwd");
+        let made = Self {
             dir,
             copy,
             out,
             cwd,
-        })
+            staged,
+        };
+        for at in [&made.copy, &made.out, &made.cwd] {
+            std::fs::create_dir_all(at)?;
+        }
+        Ok(made)
     }
 }
 
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
+        if let Some(staged) = &self.staged {
+            let _ = std::fs::remove_dir_all(staged);
+        }
     }
 }
 
@@ -415,7 +430,7 @@ mod tests {
     #[tokio::test]
     async fn the_copy_is_written_and_removed() {
         let root = std::env::temp_dir().join(format!("knobas-fr-test-{}", std::process::id()));
-        let scratch = Scratch::make(&root, "proj").unwrap();
+        let scratch = Scratch::make(&root, "proj", None).unwrap();
         let items = vec![
             Item {
                 rel: "a.txt".into(),
@@ -495,7 +510,7 @@ mod tests {
     #[tokio::test]
     async fn a_refused_name_writes_nothing() {
         let root = std::env::temp_dir().join(format!("knobas-fr-test2-{}", std::process::id()));
-        let scratch = Scratch::make(&root, "folder").unwrap();
+        let scratch = Scratch::make(&root, "folder", None).unwrap();
         let items = vec![
             Item {
                 rel: "ok.txt".into(),

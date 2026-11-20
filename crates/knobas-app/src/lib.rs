@@ -762,6 +762,12 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::app::folder_render_output,
         commands::app::folder_render_frame,
         commands::app::folder_render_marks,
+        commands::app::folder_render_tree,
+        commands::app::folder_render_file,
+        commands::app::folder_render_file_bytes,
+        commands::app::folder_render_store,
+        commands::app::set_folder_render_store,
+        commands::app::clear_folder_render_store,
         // #2263's default renderer per file pattern, appended at the foot.
         commands::app::renderer_defaults,
         commands::app::set_renderer_defaults,
@@ -1223,6 +1229,11 @@ async fn bring_up_app<R: tauri::Runtime>(
         .await
         {
             tracing::error!(%error, "the capture shortcut could not be read");
+        }
+        // Where generated folders are kept (ADR-0046): the setting, the
+        // clones root or the profile, read once there is a pool.
+        if let Some(profile) = handle.try_state::<Profile>() {
+            folder_render::made::place_store(&pool, &profile.dir).await;
         }
         // Smooth scrolling on 120 Hz displays (macOS): the window is built
         // before there is a pool to read the setting from, so it is set here.

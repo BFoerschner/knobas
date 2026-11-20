@@ -353,3 +353,127 @@ async fn a_repository_with_no_clone_and_no_listing_says_so() {
         "{unknown:?}"
     );
 }
+
+/// A folder renderer that makes a folder of files (ADR-0046) over a real
+/// clone: what it wrote into `{outdir}` is kept in the store, its tree and a
+/// file read back by the token, a link it wrote left out; a tool that then
+/// fails keeps nothing and the kept folder is still the answer.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
+    let pool = scratch("folder_render_made").await;
+    let clone = tempfile::tempdir().unwrap();
+    git(clone.path(), &["init", "-q", "-b", "main"]);
+    write(clone.path(), "flows/orders/orders.lcproj", "good\n");
+    let first = commit(clone.path(), "first");
+    let store = tempfile::tempdir().unwrap();
+    Runs::global().set_store(store.path().join("knobas-rendered"));
+
+    let tools = tempfile::tempdir().unwrap();
+    let script = tools.path().join("site.sh");
+    std::fs::write(
+        &script,
+        "[ \"$(cat \"$1/orders.lcproj\")\" = good ] || { echo bad project >&2; printf x > \"$2/half.md\"; exit 4; }\n\
+         mkdir -p \"$2/img\" && echo '# Orders' > \"$2/index.md\" && printf a > \"$2/img/a.txt\" && ln -s /etc/hosts \"$2/hosts\"\n",
+    )
+    .unwrap();
+    let saved = folder_render::save(
+        &pool,
+        &[FolderRendererDraft {
+            id: None,
+            name: "Site".to_owned(),
+            command: format!("sh {} {{path}} {{outdir}}", script.display()),
+            holds: vec!["*.lcproj".to_owned()],
+            folders: vec![],
+            output: FolderOutput::Detect,
+            timeout_secs: Some(20),
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        saved[0].output,
+        FolderOutput::Folder,
+        "{{outdir}} sets the kind"
+    );
+    let site = saved[0].id.clone();
+    let id = repo(&pool, clone.path(), &format!("made-{}", std::process::id())).await;
+
+    folder_render::ask(
+        &pool,
+        None,
+        &id,
+        &site,
+        "flows/orders",
+        Some(&first),
+        None,
+        Ask::Open,
+    )
+    .await
+    .unwrap();
+    let view = settled(&pool, &id, &site, "flows/orders", &first).await;
+    let token = view
+        .drawn
+        .as_ref()
+        .expect("a generated folder")
+        .token
+        .clone();
+    let tree = folder_render::made::tree(&token).unwrap();
+    let paths: Vec<&str> = tree.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["img/a.txt", "index.md"]);
+    assert_eq!(tree.left_out_total, 1);
+    assert!(tree.dir.starts_with(&*store.path().to_string_lossy()));
+    let block = folder_render::made::file(&token, "index.md").await.unwrap();
+    let knobas_source::view::Block::File {
+        text,
+        language,
+        commit: at,
+        ..
+    } = block
+    else {
+        panic!("a file block");
+    };
+    assert_eq!(text, "# Orders\n");
+    assert_eq!(language.as_deref(), Some("markdown"));
+    assert_eq!(at, None);
+    assert_eq!(
+        folder_render::made::file_bytes(&token, "img/a.txt")
+            .await
+            .unwrap(),
+        b"a"
+    );
+    assert!(folder_render::made::file(&token, "hosts").await.is_err());
+    assert!(Runs::global().output(&token).is_none());
+
+    // The project changes and the tool fails: nothing of it is kept.
+    write(clone.path(), "flows/orders/orders.lcproj", "broken\n");
+    let second = commit(clone.path(), "second");
+    folder_render::ask(
+        &pool,
+        None,
+        &id,
+        &site,
+        "flows/orders",
+        Some(&second),
+        None,
+        Ask::Open,
+    )
+    .await
+    .unwrap();
+    let failed = settled(&pool, &id, &site, "flows/orders", &second).await;
+    assert!(
+        matches!(
+            failed.failure,
+            Some(FolderFailure::Failed {
+                status: Some(4),
+                ..
+            })
+        ),
+        "{failed:?}"
+    );
+    assert_eq!(failed.drawn.map(|d| d.token), Some(token.clone()));
+    assert!(
+        folder_render::made::tree(&token).is_ok(),
+        "the kept folder stays"
+    );
+}

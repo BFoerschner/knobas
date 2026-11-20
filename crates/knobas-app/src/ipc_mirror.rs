@@ -52,6 +52,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::folder_render::runs::FolderRenderView::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderMoved::export_all(cfg)?;
     crate::folder_render::runs::Ask::export_all(cfg)?;
+    crate::folder_render::made::MadeTree::export_all(cfg)?;
+    crate::folder_render::store::MadeStore::export_all(cfg)?;
     crate::file_pipeline::saved::CommandStep::export_all(cfg)?;
     crate::file_pipeline::saved::CommandStepDraft::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;

@@ -745,6 +745,100 @@ pub fn folder_render_output(token: String) -> Result<tauri::ipc::Response, IpcEr
         })
 }
 
+/// A generated folder's whole tree, by its token (ADR-0046), files sorted by
+/// path bytes.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token not
+/// held in memory: the shell asks `folder_render` with `look`, then again.
+#[tauri::command]
+pub fn folder_render_tree(token: String) -> Result<crate::folder_render::made::MadeTree, IpcError> {
+    crate::folder_render::made::tree(&token)
+}
+
+/// A generated file as `entity_local_file` answers a file, `path` from the
+/// generated folder's top.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token not
+/// held or a path its manifest does not hold.
+#[tauri::command]
+pub async fn folder_render_file(
+    token: String,
+    path: String,
+) -> Result<knobas_source::view::Block, IpcError> {
+    crate::folder_render::made::file(&token, &path).await
+}
+
+/// A generated file's bytes, raw, refused past the view's byte cap.
+///
+/// # Errors
+///
+/// As [`folder_render_file`]; [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// past the cap.
+#[tauri::command]
+pub async fn folder_render_file_bytes(
+    token: String,
+    path: String,
+) -> Result<tauri::ipc::Response, IpcError> {
+    crate::folder_render::made::file_bytes(&token, &path)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
+fn profile_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<std::path::PathBuf, IpcError> {
+    app.try_state::<Profile>()
+        .map(|p| p.dir.clone())
+        .ok_or_else(|| IpcError::not_ready("knobas is still starting".to_owned()))
+}
+
+/// Where generated folders are kept, and how much (Settings › Renderers).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn folder_render_store<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::folder_render::store::MadeStore, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::made::store_view(&pool, &profile_dir(&app)?).await
+}
+
+/// Keep generated folders in `path` (`None`: beside the clones, or the
+/// profile). What was kept at the old place is removed.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a path that is
+/// not absolute, inside a checkout, or cannot be made, in words.
+#[tauri::command]
+pub async fn set_folder_render_store<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: Option<String>,
+) -> Result<crate::folder_render::store::MadeStore, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::made::set_store(&pool, &profile_dir(&app)?, path.as_deref()).await
+}
+
+/// Remove every generated folder, and answer the store as it is then.
+///
+/// # Errors
+///
+/// As [`folder_render_store`].
+#[tauri::command]
+pub async fn clear_folder_render_store<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::folder_render::store::MadeStore, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::made::clear_store(&pool, &profile_dir(&app)?).await
+}
+
 /// Keep the shell's sanitized document of a folder render's HTML and answer
 /// the token its frame loads it by (`knobas-render://localhost/folder.<token>`),
 /// served under the file renderers' policy, no script.

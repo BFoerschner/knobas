@@ -154,6 +154,19 @@ export const QUIET: ReadonlySet<string> = new Set([
   "entity_commit_diff",
   // A pipeline's older runs a page at a time as its list scrolls: a read of the mirror, never kept.
   "older_pipeline_runs",
+  // Folder renders (ADR-0044, ADR-0046): a run's state, its marks, its drawing, a generated folder's tree and files
+  // and where they are kept. Read past the mirror and changing none of it; unknown here, each press of a folder's
+  // render glyph dropped every kept answer of the page.
+  "folder_render",
+  "folder_render_stop",
+  "folder_render_leave",
+  "folder_render_output",
+  "folder_render_frame",
+  "folder_render_marks",
+  "folder_render_tree",
+  "folder_render_file",
+  "folder_render_file_bytes",
+  "folder_render_store",
   "docs_search",
   "search",
   "launcher_home",

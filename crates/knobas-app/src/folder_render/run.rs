@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-use super::{FolderOutput, OUT, OUTPUT_CAP, PATH};
+use super::{FolderOutput, OUT, OUTDIR, OUTPUT_CAP, PATH};
 use crate::renderers::{STDERR_CAP, read_capped, stop};
 
 /// What kind of output a run made, as the Code page draws it.
@@ -33,6 +33,13 @@ pub enum DrawnKind {
     Html,
     /// Bytes knobas cannot draw: their size is said.
     Undrawable,
+    /// A folder of files kept from `{outdir}` (ADR-0046): how many, their
+    /// bytes, and how many entries were left out.
+    Folder {
+        files: u32,
+        bytes: u64,
+        left_out: u32,
+    },
 }
 
 /// How a run ended.
@@ -57,10 +64,16 @@ pub enum Ran {
         found: usize,
         stderr: String,
     },
+    /// Exit 0 with `{outdir}` in the command: what it wrote there is read by
+    /// [`super::keep`], not here.
+    Wrote {
+        stderr: String,
+    },
     Stopped,
 }
 
-/// `command`'s words with `{path}` and `{out}` filled.
+/// `command`'s words with `{path}`, `{out}` and `{outdir}` filled: `{out}`
+/// is a file `output` in the folder `out`, `{outdir}` the folder itself.
 ///
 /// # Errors
 ///
@@ -68,11 +81,16 @@ pub enum Ran {
 pub fn argv(command: &str, copy: &Path, out: &Path) -> Result<Vec<String>, String> {
     let words = knobas_core::checkout::open::words(command).map_err(|e| e.to_string())?;
     let copy = copy.to_string_lossy();
+    let outdir = out.to_string_lossy();
     let out = out.join("output");
     let out = out.to_string_lossy();
     Ok(words
         .into_iter()
-        .map(|w| w.replace(PATH, &copy).replace(OUT, &out))
+        .map(|w| {
+            w.replace(OUTDIR, &outdir)
+                .replace(PATH, &copy)
+                .replace(OUT, &out)
+        })
         .collect())
 }
 
@@ -118,7 +136,8 @@ pub async fn run(
         return Ran::NotStarted("the program's streams could not be opened".to_owned());
     };
     let stderr_task = tokio::spawn(read_capped(stderr, STDERR_CAP, false));
-    let wants_file = command.contains(OUT);
+    let wants_folder = command.contains(OUTDIR);
+    let wants_file = wants_folder || command.contains(OUT);
     // A program that writes its output file prints what it likes: its stdout
     // is read and dropped past the cap, never refused.
     let collected = tokio::select! {
@@ -161,8 +180,15 @@ pub async fn run(
         Some(Ok(Some((stdout, status)))) => {
             let status = status.ok().and_then(|s| s.code());
             let stderr = take_stderr(stderr_task).await;
+            if wants_folder {
+                // What it started may still write: killed before `{outdir}`
+                // is read (ADR-0046).
+                kill_left(pid).await;
+            }
             if status != Some(0) {
                 Ran::Failed { status, stderr }
+            } else if wants_folder {
+                Ran::Wrote { stderr }
             } else if wants_file {
                 from_file(out, output, stderr).await
             } else {
@@ -178,6 +204,23 @@ pub async fn run(
         super::runs::ended(pid);
     }
     ran
+}
+
+/// Kill what a tool that has ended left running: its process group on Unix
+/// (the leader is reaped, so its id is the group's until the group is empty;
+/// "no such process" is the usual answer), `taskkill /T` on Windows, which
+/// finds no tree under a parent that has ended (ADR-0046 names the gap).
+async fn kill_left(pid: Option<u32>) {
+    let Some(pid) = pid else { return };
+    #[cfg(unix)]
+    if let Some(pid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    #[cfg(windows)]
+    crate::renderers::kill_tree(pid).await;
 }
 
 /// The one file a run wrote under `out`.
@@ -311,6 +354,8 @@ pub fn kind_of(bytes: &[u8], declared: FolderOutput, ext: Option<&str>) -> Drawn
             other => other,
         },
         FolderOutput::Html => DrawnKind::Html,
+        // A folder kind is kept as files, never drawn from bytes.
+        FolderOutput::Folder => DrawnKind::Undrawable,
         FolderOutput::Detect => {
             if let Some(mime) = image_type(bytes) {
                 return DrawnKind::Image {
@@ -355,6 +400,29 @@ mod tests {
                 "--out=/t/out/output.png",
                 "--name",
                 "/t/in/proj/x y"
+            ]
+        );
+    }
+
+    /// `{outdir}` is the folder itself, with no `output` file in it; text
+    /// after it stays.
+    #[test]
+    fn the_outdir_is_filled_as_a_folder() {
+        let words = argv(
+            "lc docs {path} --out {outdir} --site={outdir}/site",
+            Path::new("/t/in/proj"),
+            Path::new("/s/.staging/1-0/out"),
+        )
+        .unwrap();
+        assert_eq!(
+            words,
+            [
+                "lc",
+                "docs",
+                "/t/in/proj",
+                "--out",
+                "/s/.staging/1-0/out",
+                "--site=/s/.staging/1-0/out/site"
             ]
         );
     }

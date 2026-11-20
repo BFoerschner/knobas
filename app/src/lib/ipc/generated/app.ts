@@ -88,7 +88,7 @@ message: string, };
 /**
  * What kind of output a run made, as the Code page draws it.
  */
-export type DrawnKind = { "kind": "image", mime: string, } | { "kind": "text" } | { "kind": "markdown" } | { "kind": "html" } | { "kind": "undrawable" };
+export type DrawnKind = { "kind": "image", mime: string, } | { "kind": "text" } | { "kind": "markdown" } | { "kind": "html" } | { "kind": "undrawable" } | { "kind": "folder", files: number, bytes: number, left_out: number, };
 
 /**
  * What a run drew.
@@ -114,7 +114,7 @@ drawn_at: string, };
 /**
  * Why nothing was drawn. An answer the page draws, not an error.
  */
-export type FolderFailure = { "why": "failed", status: number | null, stderr: string, } | { "why": "timed_out", seconds: number, stderr: string, } | { "why": "too_large", cap_bytes: number, } | { "why": "not_started", reason: string, } | { "why": "no_output_file", found: number, stderr: string, } | { "why": "copy", reason: string, } | { "why": "too_big", files: number, bytes: number, cap_files: number, cap_bytes: number, from: ReadFrom, } | { "why": "no_folder" } | { "why": "stopped" };
+export type FolderFailure = { "why": "failed", status: number | null, stderr: string, } | { "why": "timed_out", seconds: number, stderr: string, } | { "why": "too_large", cap_bytes: number, } | { "why": "not_started", reason: string, } | { "why": "no_output_file", found: number, stderr: string, } | { "why": "copy", reason: string, } | { "why": "too_big", files: number, bytes: number, cap_files: number, cap_bytes: number, from: ReadFrom, } | { "why": "no_folder" } | { "why": "stopped" } | { "why": "no_output", stderr: string, } | { "why": "output_too_big", files: number, bytes: number, cap_files: number, cap_bytes: number, } | { "why": "keep", reason: string, };
 
 /**
  * The folders of a tree that a renderer holding globs takes, per renderer:
@@ -132,7 +132,7 @@ folders: Array<string>, };
  * What a folder renderer makes. `detect` reads it from the bytes (and the
  * output file's extension, for Markdown).
  */
-export type FolderOutput = "detect" | "image" | "text" | "markdown" | "html";
+export type FolderOutput = "detect" | "image" | "text" | "markdown" | "html" | "folder";
 
 /**
  * The event's payload: a slot's run moved; the page showing it asks again.
@@ -176,7 +176,7 @@ export type FolderRenderer = {
 id: string, name: string, 
 /**
  * The program and its arguments, as typed: quotes group words, no shell,
- * `{path}` and `{out}` the only placeholders.
+ * `{path}` and one of `{out}` and `{outdir}` the only placeholders.
  */
 command: string, 
 /**
@@ -203,7 +203,7 @@ export type FolderRendererDraft = { id: string | null, name: string, command: st
 /**
  * Where a run is.
  */
-export type FolderRunState = { "state": "queued" } | { "state": "copying", done: number, total: number, } | { "state": "running", elapsed_ms: number, };
+export type FolderRunState = { "state": "queued" } | { "state": "copying", done: number, total: number, } | { "state": "running", elapsed_ms: number, } | { "state": "keeping", done: number, total: number, };
 
 export type FoundJava = { path: string, 
 /**
@@ -277,6 +277,65 @@ reason: string | null,
  * The Java the person set in Settings, if any.
  */
 set_path: string | null, };
+
+/**
+ * One kept file: its path from the generated folder's top, and its size.
+ */
+export type MadeFile = { path: string, size: number, };
+
+/**
+ * One entry left out, its path made safe to show. `MadeLeftOut` in the
+ * shell, beside the search's own `LeftOut`.
+ */
+export type MadeLeftOut = { 
+/**
+ * Lossy, control characters replaced, [`LEFT_OUT_CHARS`] at most.
+ */
+path: string, why: MadeLeftOutWhy, };
+
+/**
+ * Why an entry the tool wrote was not kept.
+ */
+export type MadeLeftOutWhy = "link" | "special" | "git" | "name" | "not_utf8" | "case_twin" | "too_deep";
+
+/**
+ * Where the store's base came from, for Settings' small line.
+ */
+export type MadePlace = "set" | "clones" | "profile";
+
+/**
+ * The store, as Settings shows it.
+ */
+export type MadeStore = { 
+/**
+ * The store's folder (`…/knobas-rendered`).
+ */
+dir: string, 
+/**
+ * The folder the person chose, as stored.
+ */
+set: string | null, 
+/**
+ * The base used when nothing is set: the clones root, else the profile's.
+ */
+default_dir: string, place: MadePlace, 
+/**
+ * Generated folders kept, and their bytes.
+ */
+folders: number, bytes: number, cap_bytes: number, };
+
+/**
+ * A generated folder's whole tree, as `folder_render_tree` answers it.
+ */
+export type MadeTree = { 
+/**
+ * Where it is kept, absolute: what *Copy path* copies on the landing.
+ */
+dir: string, 
+/**
+ * Sorted by path bytes.
+ */
+files: Array<MadeFile>, bytes: number, left_out: Array<MadeLeftOut>, left_out_total: number, };
 
 /**
  * One named pipeline: steps a default per file pattern names by id.

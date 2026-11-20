@@ -1,7 +1,9 @@
 /**
  * `?fake-ipc`: folder renderers (ADR-0044). Answers `folder_renderers`, `set_folder_renderers`,
  * `folder_render`, `folder_render_stop`, `folder_render_leave`, `folder_render_output`,
- * `folder_render_frame` and `folder_render_marks`.
+ * `folder_render_frame` and `folder_render_marks`; for generated folders (ADR-0046) `folder_render_tree`,
+ * `folder_render_file`, `folder_render_file_bytes`, `folder_render_store`, `set_folder_render_store` and
+ * `clear_folder_render_store`.
  *
  * None is saved until one is, so every other page draws as it did; `?fake-folder-render` starts with one,
  * *Folder listing*, which takes every folder. The fake runs no program: a run is queued, copies, runs for
@@ -9,8 +11,17 @@
  * `folder-render:moved` as the backend tells it. A command holding `fail` fails with stderr, one holding
  * `png` draws a 1 × 1 PNG, and one holding `page` draws a long HTML page ({@link fakePage}). `?fake-folder-render=<command
  * words>` gives *Folder listing* that command (`?fake-folder-render=page+hidden` draws a page that hides its overflow).
+ *
+ * `?fake-rerender` (ADR-0046) adds *Low-code site*, a folder of files renderer taking the folders `docs` and `src/*`.
+ * Its generated folder ({@link madeFiles}) holds a README with a relative image, a link to `docs/steps.md` and a Mermaid
+ * fence, that page, a PNG, a PDF, an HTML page, an OpenAPI file and `bulk/` with 3,000 files, and leaves out two
+ * entries. *Run again* answers a second tree with `CHANGELOG.md` added and `docs/old.md` gone. With `?fake-long-paths`
+ * its name is 60 characters and the folder holds a 140-character path.
  */
-import type { FolderAsk, FolderDrawn, FolderRenderer, FolderRendererDraft, FolderRenderView } from "../../../ipc/app";
+import type { FolderAsk, FolderDrawn, FolderRenderer, FolderRendererDraft, FolderRenderView, MadeStore, MadeTree } from "../../../ipc/app";
+import type { ViewBlock } from "../../../ipc/generated/entity";
+import { SPEC_PDF } from "../../../render/pdf-fixture";
+import { PETS_30_YAML } from "../../../render/openapi-fixture";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 
@@ -21,7 +32,72 @@ const drawn = new Map<string, FolderDrawn>();
 const bytes = new Map<string, Uint8Array>();
 const failed = new Map<string, { status: number; stderr: string }>();
 const running = new Map<string, ReturnType<typeof setTimeout>>();
+/** Generated folders by token: each file's bytes, and the tree. */
+const made = new Map<string, { files: Map<string, Uint8Array>; tree: MadeTree }>();
+/** How many runs each slot of a folder kind has made: the second and later answer the re-run's tree. */
+const runsOf = new Map<string, number>();
 let tokens = 0;
+let storeSet: string | null = null;
+/** `?fake-long-paths` with `?fake-rerender`: the long renderer name and path. */
+let longMade = false;
+
+const enc = (text: string) => new TextEncoder().encode(text);
+
+/** The generated folder of run `n` (from 1) of *Low-code site* on `folder`: path to bytes. */
+export function madeFiles(folder: string, n: number, long: boolean): Map<string, Uint8Array> {
+  const files = new Map<string, Uint8Array>([
+    [
+      "README.md",
+      enc(
+        `# ${folder || "The top folder"}, generated\n\nMade by *Low-code site* from the folder's project.\n\n![The flow](img/flow.png)\n\n` +
+          "See [the steps](docs/steps.md), [the report](report.pdf) and [the repository's README](../README.md).\n\n" +
+          "```mermaid\ngraph LR\n  Order --> Payment --> Shipped\n```\n",
+      ),
+    ],
+    ["docs/steps.md", enc("# Steps\n\n1. Take the order.\n2. Take the payment.\n3. Ship it.\n\nBack to [the start](../README.md).\n")],
+    ["img/flow.png", PNG],
+    ["report.pdf", SPEC_PDF()],
+    ["page.html", enc(fakePage(folder, "page"))],
+    ["openapi.yaml", enc(PETS_30_YAML)],
+  ]);
+  if (n === 1) files.set("docs/old.md", enc("# Old\n\nThis page is gone after a re-run.\n"));
+  else files.set("CHANGELOG.md", enc(`# Changes\n\nRun ${n}.\n`));
+  for (let i = 1; i <= 3000; i++) files.set(`bulk/part-${String(i).padStart(4, "0")}.txt`, enc(`part ${i} of the bulk\n`));
+  if (long) files.set(`docs/${"a-very-long-generated-folder-name-for-the-long-paths-check/".repeat(2)}and-a-long-file-name-at-the-end.md`.slice(0, 140), enc("# Long\n"));
+  return files;
+}
+
+function madeTree(token: string, files: Map<string, Uint8Array>): MadeTree {
+  const sorted = [...files.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return {
+    dir: `/Users/someone/code/knobas-rendered/0123456789ab/folder.site.${token.slice(-8)}`,
+    files: sorted.map(([path, b]) => ({ path, size: b.length })),
+    bytes: sorted.reduce((sum, [, b]) => sum + b.length, 0),
+    left_out: [
+      { path: ".git", why: "git" },
+      { path: "latest -> ../site", why: "link" },
+    ],
+    left_out_total: 2,
+  };
+}
+
+function gone(): never {
+  throw { code: "not_found", message: "that generated folder is no longer kept: run the renderer again" };
+}
+
+function storeView(): MadeStore {
+  const folders = made.size;
+  const bytesKept = [...made.values()].reduce((sum, m) => sum + m.tree.bytes, 0);
+  return {
+    dir: `${storeSet ?? "/Users/someone/code"}/knobas-rendered`,
+    set: storeSet,
+    default_dir: "/Users/someone/code",
+    place: storeSet === null ? "clones" : "set",
+    folders,
+    bytes: bytesKept,
+    cap_bytes: 4 * 1024 * 1024 * 1024,
+  };
+}
 
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
 
@@ -57,16 +133,19 @@ function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {
     const name = d.name.trim();
     if (name === "") throw { code: "invalid", message: `folder renderer ${i + 1} has no name` };
     const command = d.command.trim();
-    const other = [...command.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[0]).find((p) => p !== "{path}" && p !== "{out}");
+    const other = [...command.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[0]).find((p) => p !== "{path}" && p !== "{out}" && p !== "{outdir}");
     if (other) throw { code: "invalid", message: `${name}: ${other} is not something a folder renderer is given` };
     if (!command.includes("{path}")) throw { code: "invalid", message: `${name}: the command needs {path} where the folder goes` };
+    const folderKind = command.includes("{outdir}");
+    if (folderKind && command.includes("{out}")) throw { code: "invalid", message: `${name}: {out} is one file and {outdir} is a folder of files: use one of them` };
+    if (!folderKind && d.output === "folder") throw { code: "invalid", message: `${name}: a folder of files needs {outdir} where the tool takes its output folder` };
     return {
       id: d.id ?? (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `folder-${i + 1}`),
       name,
       command,
       holds: d.holds.map((g) => g.trim()).filter(Boolean),
       folders: d.folders.map((g) => g.trim().replace(/^\/+|\/+$/g, "")).filter(Boolean),
-      output: d.output,
+      output: folderKind ? "folder" : d.output,
       timeout_secs: Math.min(600, Math.max(1, d.timeout_secs ?? 30)),
     };
   });
@@ -75,10 +154,10 @@ function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {
 /** The list the page's query started with. */
 let seeded: FolderRenderer[] = [];
 
-keepSeed(drawn, bytes, failed, running);
-const atLoad = seedOf({ bridge, saved, seeded, tokens });
+keepSeed(drawn, bytes, failed, running, made, runsOf);
+const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade });
 onFakeReset(() => {
-  ({ bridge, saved, seeded, tokens } = atLoad());
+  ({ bridge, saved, seeded, tokens, storeSet, longMade } = atLoad());
 });
 
 export function seed(params: URLSearchParams): void {
@@ -89,8 +168,21 @@ export function seed(params: URLSearchParams): void {
   // `?fake-long-paths` (the render-as pass, 2026-11-19): a folder renderer with a long name and a long Windows program,
   // which draws, and one on a Mac, which fails with its program on stderr.
   if (params.has("fake-long-paths")) seeded = [...seeded, ...LONG_FOLDER_RENDERERS];
+  longMade = params.has("fake-long-paths");
+  if (params.has("fake-rerender")) seeded = [...seeded, { ...SITE, name: longMade ? "Low-code site generator for the payments team's order flows" : SITE.name }];
   saved = seeded.map((r) => ({ ...r }));
 }
+
+/** `?fake-rerender`'s folder of files renderer. */
+const SITE: FolderRenderer = {
+  id: "site",
+  name: "Low-code site",
+  command: "lowcode site {path} --out {outdir}",
+  holds: [],
+  folders: ["docs", "src/*"],
+  output: "folder",
+  timeout_secs: 60,
+};
 
 const LONG_FOLDER_RENDERERS: FolderRenderer[] = [
   {
@@ -137,12 +229,29 @@ export function handlers(): Handlers {
       failed.delete(slot);
       setTimeout(() => tell(at, { state: "copying", done: 0, total: 3 }), 20);
       setTimeout(() => tell(at, { state: "running", elapsed_ms: 0 }), 60);
+      if (renderer.output === "folder") setTimeout(() => tell(at, { state: "keeping", done: 1200, total: 3008 }), 1200);
       running.set(
         slot,
         setTimeout(() => {
           running.delete(slot);
           if (renderer.command.includes("fail")) {
             failed.set(slot, { status: 2, stderr: `${/^"([^"]*)"|^(\S+)/.exec(renderer.command)?.slice(1).find((w) => w !== undefined) ?? ""}: no project file in ${at.folder || "the top folder"}\n` });
+          } else if (renderer.output === "folder") {
+            const token = `fake-made-${String(++tokens).padStart(8, "0")}`;
+            const n = (runsOf.get(slot) ?? 0) + 1;
+            runsOf.set(slot, n);
+            const files = madeFiles(at.folder, n, longMade);
+            const tree = madeTree(token, files);
+            made.set(token, { files, tree });
+            drawn.set(slot, {
+              token,
+              kind: { kind: "folder", files: tree.files.length, bytes: tree.bytes, left_out: tree.left_out_total },
+              size: tree.bytes,
+              commit: at.commit,
+              from: "clone",
+              took_ms: 3200,
+              drawn_at: new Date().toISOString(),
+            });
           } else {
             const token = `fake-${++tokens}`;
             const png = renderer.command.includes("png");
@@ -181,5 +290,40 @@ export function handlers(): Handlers {
     },
     folder_render_frame: () => `fake-frame-${++tokens}`,
     folder_render_marks: () => saved.filter((r) => r.holds.length > 0).map((r) => ({ renderer: r.id, folders: [] })),
+    folder_render_tree: (args) => made.get(String(args["token"]))?.tree ?? gone(),
+    folder_render_file: (args): ViewBlock => {
+      const kept = made.get(String(args["token"])) ?? gone();
+      const path = String(args["path"]);
+      const b = kept.files.get(path);
+      if (!b) throw { code: "not_found", message: `the generated folder holds no file ${path}` };
+      const binary = b.slice(0, 8000).includes(0) || /\.(png|pdf)$/.test(path);
+      const ext = path.slice(path.lastIndexOf(".") + 1);
+      const language = ({ md: "markdown", html: "html", yaml: "yaml", txt: null } as Record<string, string | null>)[ext] ?? null;
+      return { type: "file", trail: [], path, text: binary ? "" : new TextDecoder().decode(b), language, size: b.length, truncated: false, binary, url: null, sha: null, commit: null };
+    },
+    folder_render_file_bytes: (args) => {
+      const kept = made.get(String(args["token"])) ?? gone();
+      const b = kept.files.get(String(args["path"]));
+      if (!b) throw { code: "not_found", message: `the generated folder holds no file ${String(args["path"])}` };
+      return b;
+    },
+    folder_render_store: () => storeView(),
+    set_folder_render_store: (args) => {
+      const path = (args["path"] as string | null)?.trim() || null;
+      if (path !== null && /\/(code|src)\/[^/]+\/?/.test(path) && !path.endsWith("/code")) {
+        throw { code: "invalid", message: `${path} is inside the repository at ${path.replace(/(\/(code|src)\/[^/]+).*/, "$1")}: generated files there would show as untracked changes. Pick a folder outside every checkout.` };
+      }
+      if (path !== storeSet) {
+        made.clear();
+        drawn.clear();
+      }
+      storeSet = path;
+      return storeView();
+    },
+    clear_folder_render_store: () => {
+      made.clear();
+      for (const [slot, d] of drawn) if (d.kind.kind === "folder") drawn.delete(slot);
+      return storeView();
+    },
   };
 }

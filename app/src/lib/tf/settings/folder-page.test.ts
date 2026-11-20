@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { FolderRenderer } from "../../ipc/app";
-import { commandWhy, folderDraftFrom, folderPageHash, folderPagePlace, sameFolderDraft, takesLine, withFolderDraft } from "./folder-page";
+import { commandWhy, FOLDER_PLACEHOLDERS, folderDraftFrom, folderPageHash, folderPagePlace, sameFolderDraft, takesLine, withFolderDraft } from "./folder-page";
 import { settingsKnows } from "./settings";
 
 const SAVED: FolderRenderer = { id: "lc", name: "Low code", command: "lc {path} {out}.png", holds: ["*.lcproj"], folders: [], output: "image", timeout_secs: 60 };
@@ -34,6 +34,16 @@ test("the command needs {path} and takes no other placeholder, as the backend sa
   expect(commandWhy("lc . --out {out}")).toContain("{path}");
   expect(commandWhy("lc {path} {branch}")).toContain("{branch} is not something a folder renderer is given");
   expect(commandWhy("")).toBeNull();
+});
+
+test("{outdir} is the third placeholder, sets the kind, and is refused beside {out} (ADR-0046)", () => {
+  expect(FOLDER_PLACEHOLDERS.map((p) => p.name)).toEqual(["{path}", "{out}", "{outdir}"]);
+  expect(commandWhy("lc docs {path} --out {outdir}")).toBeNull();
+  expect(commandWhy("lc {path} {out} {outdir}")).toBe("{out} is one file and {outdir} is a folder of files: use one of them.");
+  expect(commandWhy("lc {path} {out}", "folder")).toBe("Put {outdir} where the tool takes its output folder.");
+  expect(commandWhy("lc {path} {outdir}", "folder")).toBeNull();
+  const draft = { ...folderDraftFrom(SAVED), command: "lc docs {path} {outdir}", output: "image" as const };
+  expect(withFolderDraft([], draft, null)[0]?.output).toBe("folder");
 });
 
 test("what a renderer takes, in words", () => {

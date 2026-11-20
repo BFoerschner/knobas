@@ -19,12 +19,19 @@ use super::*;
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
 /// fails.
 #[tauri::command]
-pub async fn set_clones_root(
+pub async fn set_clones_root<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     path: Option<String>,
 ) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::set_clones_root(&pool, path.as_deref()).await
+    crate::checkout::set_clones_root(&pool, path.as_deref()).await?;
+    // Generated folders are kept beside the clones unless a folder is set
+    // (ADR-0046): a new root moves them.
+    if let Some(profile) = tauri::Manager::try_state::<crate::profile::Profile>(&app) {
+        crate::folder_render::made::place_store(&pool, &profile.dir).await;
+    }
+    Ok(())
 }
 
 /// The checkout a repo or branch detail draws -- the override, else the scan,

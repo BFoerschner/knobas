@@ -33,6 +33,9 @@
 //!   folder per source, [`DISK_BYTES`] at most, the oldest dropped first.
 //!   Removing a source or changing its credential removes its folder
 //!   ([`forget_source`]). A backup dumps the database and never carries it.
+//! - A folder kind's generated folder (ADR-0046) is kept as files in the
+//!   [`store`](super::store), a folder per run, its manifest in memory for
+//!   the last [`MEMORY_FOLDERS`]; its file bytes are never held here.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -44,8 +47,10 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use super::copy::{self, Bytes, Item, Scratch};
+use super::keep::{self, KeepError, Made};
 use super::run::{DrawnKind, Ran};
-use super::{FolderRenderer, OUTPUT_CAP, hex};
+use super::store;
+use super::{FolderOutput, FolderRenderer, OUTPUT_CAP, hex};
 
 /// How many folder renderers run at the same time.
 pub const AT_ONCE: usize = 2;
@@ -53,6 +58,11 @@ pub const AT_ONCE: usize = 2;
 pub const MEMORY_BYTES: usize = 128 * 1024 * 1024;
 /// The most output kept on disk.
 pub const DISK_BYTES: u64 = 512 * 1024 * 1024;
+/// The most generated folders whose manifests are kept in memory.
+pub const MEMORY_FOLDERS: usize = 64;
+/// How often a shown generated folder's `.json` is touched, for the bound's
+/// least recently shown.
+const TOUCH_EVERY_SECS: u64 = 60;
 /// The fewest milliseconds between two progress events of one run.
 const PROGRESS_EVERY_MS: u128 = 150;
 
@@ -93,6 +103,8 @@ pub enum FolderRunState {
     Copying { done: u32, total: u32 },
     /// The tool is running, for this many milliseconds so far.
     Running { elapsed_ms: u64 },
+    /// Keeping what a folder kind wrote: files kept of the total.
+    Keeping { done: u32, total: u32 },
 }
 
 /// Why nothing was drawn. An answer the page draws, not an error.
@@ -137,6 +149,21 @@ pub enum FolderFailure {
     NoFolder,
     /// Stopped by the person.
     Stopped,
+    /// Exit 0 and not one regular file kept from `{outdir}`.
+    NoOutput {
+        stderr: String,
+    },
+    /// `{outdir}` held more than is kept: what it held, and the caps.
+    OutputTooBig {
+        files: u64,
+        bytes: u64,
+        cap_files: u64,
+        cap_bytes: u64,
+    },
+    /// The store, or a kept file, could not be written.
+    Keep {
+        reason: String,
+    },
 }
 
 /// The answer to a page's ask.
@@ -251,10 +278,25 @@ pub fn forge_key(renderer: &FolderRenderer, copy_name: &str, commit: &str, folde
     hex(&hash.finalize()[..16])
 }
 
-/// One drawing kept: what was drawn and its bytes.
+/// One drawing kept: what was drawn, and its bytes or its generated folder.
 struct Kept {
     drawn: FolderDrawn,
-    bytes: Arc<Vec<u8>>,
+    body: Body,
+}
+
+enum Body {
+    Bytes(Arc<Vec<u8>>),
+    Folder(Arc<Made>),
+}
+
+impl Kept {
+    /// The bytes it holds in memory: a folder's are on disk.
+    fn bytes_held(&self) -> usize {
+        match &self.body {
+            Body::Bytes(bytes) => bytes.len(),
+            Body::Folder(_) => 0,
+        }
+    }
 }
 
 /// A slot's run.
@@ -271,6 +313,9 @@ struct State {
     memory: HashMap<String, Arc<Kept>>,
     used: VecDeque<String>,
     memory_bytes: usize,
+    memory_folders: usize,
+    /// When a generated folder's `.json` was last touched, by key.
+    touched: HashMap<String, Instant>,
     /// The key each token names.
     tokens: HashMap<String, String>,
     failures: HashMap<String, FolderFailure>,
@@ -289,8 +334,11 @@ pub struct Runs {
     places: Arc<Semaphore>,
     listener: Mutex<Option<Listener>>,
     disk: Mutex<Option<PathBuf>>,
+    /// The store generated folders are kept in (ADR-0046).
+    store: Mutex<Option<PathBuf>>,
     root: PathBuf,
     swept: std::sync::Once,
+    staging_swept: std::sync::Once,
 }
 
 impl Runs {
@@ -302,8 +350,10 @@ impl Runs {
             places: Arc::new(Semaphore::new(AT_ONCE)),
             listener: Mutex::default(),
             disk: Mutex::default(),
+            store: Mutex::default(),
             root,
             swept: std::sync::Once::new(),
+            staging_swept: std::sync::Once::new(),
         }
     }
 
@@ -322,6 +372,68 @@ impl Runs {
     /// Keep drawings on disk under `dir` too.
     pub fn keep_on_disk(&self, dir: PathBuf) {
         *self.disk.lock().unwrap_or_else(PoisonError::into_inner) = Some(dir);
+    }
+
+    /// Keep generated folders under `store` (`…/knobas-rendered`). A store
+    /// that moved is removed whole at its old place, and what memory knows
+    /// of it forgotten; folders are made again when opened.
+    pub fn set_store(&self, store: PathBuf) {
+        let old = self
+            .store
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .replace(store.clone());
+        if let Some(old) = old
+            && old != store
+        {
+            self.forget_folders();
+            store::remove(&old);
+        }
+    }
+
+    /// The store, when set.
+    #[must_use]
+    pub fn store(&self) -> Option<PathBuf> {
+        self.store
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The store's folder for `source`, `unknown` hashed where the entity
+    /// names none.
+    fn store_dir(&self, source: Option<&str>) -> Option<PathBuf> {
+        Some(self.store()?.join(source_dir(source.unwrap_or("unknown"))))
+    }
+
+    /// Forget every generated folder in memory (the store moved or was
+    /// cleared); they are read from disk, or made again, when asked.
+    pub fn forget_folders(&self) {
+        let mut state = self.lock();
+        let keys: Vec<String> = state
+            .memory
+            .iter()
+            .filter(|(_, k)| matches!(k.body, Body::Folder(_)))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            if let Some(gone) = state.memory.remove(&key) {
+                state.tokens.remove(&gone.drawn.token);
+            }
+            state.used.retain(|k| k != &key);
+            state.latest.retain(|_, k| k != &key);
+        }
+        state.memory_folders = 0;
+        state.touched.clear();
+    }
+
+    /// Remove every generated folder, on disk and in memory: Settings'
+    /// *Clear*.
+    pub fn clear_store(&self) {
+        self.forget_folders();
+        if let Some(root) = self.store() {
+            store::clear(&root);
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -353,8 +465,9 @@ impl Runs {
         Some(root.join(source_dir(source?)))
     }
 
-    /// The kept drawing `key`, from memory or from disk (put back in memory).
-    fn kept(&self, key: &str, source: Option<&str>) -> Option<Arc<Kept>> {
+    /// The kept drawing `key`, from memory or from disk (put back in
+    /// memory): a generated folder from the store when `folder`.
+    fn kept(&self, key: &str, source: Option<&str>, folder: bool) -> Option<Arc<Kept>> {
         {
             let mut state = self.lock();
             if let Some(kept) = state.memory.get(key).cloned() {
@@ -362,13 +475,23 @@ impl Runs {
                 return Some(kept);
             }
         }
+        if folder {
+            let dir = self.store_dir(source)?;
+            let (meta, made) = store::read_meta(&dir, key)?;
+            let kept = Arc::new(Kept {
+                drawn: meta.drawn,
+                body: Body::Folder(Arc::new(made)),
+            });
+            self.remember(key, kept.clone());
+            return Some(kept);
+        }
         let dir = self.disk_dir(source)?;
         let meta = std::fs::read(dir.join(format!("{key}.json"))).ok()?;
         let drawn: FolderDrawn = serde_json::from_slice(&meta).ok()?;
         let bytes = std::fs::read(dir.join(format!("{key}.out"))).ok()?;
         let kept = Arc::new(Kept {
             drawn,
-            bytes: Arc::new(bytes),
+            body: Body::Bytes(Arc::new(bytes)),
         });
         self.remember(key, kept.clone());
         Some(kept)
@@ -379,28 +502,85 @@ impl Runs {
         state
             .tokens
             .insert(kept.drawn.token.clone(), key.to_owned());
-        state.memory_bytes += kept.bytes.len();
+        state.memory_bytes += kept.bytes_held();
+        state.memory_folders += usize::from(matches!(kept.body, Body::Folder(_)));
         if let Some(old) = state.memory.insert(key.to_owned(), kept) {
-            state.memory_bytes -= old.bytes.len();
+            state.memory_bytes -= old.bytes_held();
+            state.memory_folders -= usize::from(matches!(old.body, Body::Folder(_)));
+            // A re-run of one key: the old token names nothing now.
+            let new_token = state.memory.get(key).map(|k| k.drawn.token.clone());
+            if new_token.as_deref() != Some(old.drawn.token.as_str()) {
+                state.tokens.remove(&old.drawn.token);
+            }
         }
         touch(&mut state.used, key);
-        while state.memory_bytes > MEMORY_BYTES && state.used.len() > 1 {
-            let Some(oldest) = state.used.pop_front() else {
+        // The oldest of whichever kind is past its bound goes first; the one
+        // just remembered stays.
+        loop {
+            let bytes_over = state.memory_bytes > MEMORY_BYTES;
+            let folders_over = state.memory_folders > MEMORY_FOLDERS;
+            if !bytes_over && !folders_over {
+                break;
+            }
+            let oldest = state.used.iter().position(|k| {
+                k != key
+                    && state.memory.get(k).is_some_and(|kept| {
+                        if folders_over {
+                            matches!(kept.body, Body::Folder(_))
+                        } else {
+                            matches!(kept.body, Body::Bytes(_))
+                        }
+                    })
+            });
+            let Some(at) = oldest else { break };
+            let Some(gone_key) = state.used.remove(at) else {
                 break;
             };
-            if let Some(gone) = state.memory.remove(&oldest) {
-                state.memory_bytes -= gone.bytes.len();
+            if let Some(gone) = state.memory.remove(&gone_key) {
+                state.memory_bytes -= gone.bytes_held();
+                state.memory_folders -= usize::from(matches!(gone.body, Body::Folder(_)));
                 state.tokens.remove(&gone.drawn.token);
             }
         }
     }
 
-    /// The last key drawn for `slot`: in memory, else on disk.
-    fn latest(&self, slot: &Slot, source: Option<&str>) -> Option<String> {
+    /// Touch a shown generated folder's `.json`, at most once a minute: the
+    /// store's bound takes the least recently shown first.
+    fn touch_shown(&self, key: &str, source: Option<&str>, kept: &Kept) {
+        let Body::Folder(made) = &kept.body else {
+            return;
+        };
+        {
+            let mut state = self.lock();
+            if state
+                .touched
+                .get(key)
+                .is_some_and(|at| at.elapsed().as_secs() < TOUCH_EVERY_SECS)
+            {
+                return;
+            }
+            state.touched.insert(key.to_owned(), Instant::now());
+        }
+        let (Some(dir), Some(leaf)) = (self.store_dir(source), made.dir.file_name()) else {
+            return;
+        };
+        let json = dir.join(format!("{}.json", leaf.to_string_lossy()));
+        if let Ok(file) = std::fs::File::options().write(true).open(json) {
+            let _ = file.set_modified(std::time::SystemTime::now());
+        }
+    }
+
+    /// The last key drawn for `slot`: in memory, else on disk (the store's
+    /// slots for a folder kind).
+    fn latest(&self, slot: &Slot, source: Option<&str>, folder: bool) -> Option<String> {
         if let Some(key) = self.lock().latest.get(slot).cloned() {
             return Some(key);
         }
-        let dir = self.disk_dir(source)?;
+        let dir = if folder {
+            self.store_dir(source)?
+        } else {
+            self.disk_dir(source)?
+        };
         let key = std::fs::read_to_string(dir.join("slots").join(slot_file(slot))).ok()?;
         let key = key.trim().to_owned();
         (!key.is_empty()).then_some(key)
@@ -435,17 +615,20 @@ impl Runs {
             from,
             commit,
         };
+        let folder = renderer.output == FolderOutput::Folder;
         let kept_now = key
             .as_deref()
-            .and_then(|key| self.kept(key, source.as_deref()));
+            .and_then(|key| self.kept(key, source.as_deref(), folder));
         if let (Some(key), Some(kept)) = (&key, &kept_now) {
             self.lock().latest.insert(slot.clone(), key.clone());
             view.drawn = Some(kept.drawn.clone());
             view.current = true;
-        } else if let Some(last) = self.latest(slot, source.as_deref())
-            && let Some(kept) = self.kept(&last, source.as_deref())
+            self.touch_shown(key, source.as_deref(), kept);
+        } else if let Some(last) = self.latest(slot, source.as_deref(), folder)
+            && let Some(kept) = self.kept(&last, source.as_deref(), folder)
         {
             view.drawn = Some(kept.drawn.clone());
+            self.touch_shown(&last, source.as_deref(), &kept);
         }
         let resolved = match resolved {
             Ok(resolved) => resolved,
@@ -572,13 +755,18 @@ impl Runs {
         if self.set_state(&slot, &key, FolderRunState::Copying { done: 0, total }) {
             self.tell(&slot, Some(FolderRunState::Copying { done: 0, total }));
         }
+        let token = uuid::Uuid::new_v4().simple().to_string();
         let ended = self
             .copy_and_run(
                 &slot,
                 &renderer,
                 resolved_parts(&resolved),
-                resolved.items,
-                resolved.bytes,
+                (
+                    resolved.items,
+                    resolved.bytes,
+                    resolved.source_id.as_deref(),
+                ),
+                &token,
                 cancel.clone(),
             )
             .await;
@@ -595,12 +783,47 @@ impl Runs {
             }
         };
         if cancel.is_cancelled() || !still_ours {
+            if let Ok(Output::Folder(made)) = ended {
+                let dir = made.dir.clone();
+                let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(dir)).await;
+            }
             return;
         }
         match ended {
-            Ok((bytes, kind)) => {
+            Ok(Output::Folder(made)) => {
+                let manifest = &made.manifest;
                 let drawn = FolderDrawn {
-                    token: uuid::Uuid::new_v4().simple().to_string(),
+                    token,
+                    kind: DrawnKind::Folder {
+                        files: u32::try_from(manifest.files.len()).unwrap_or(u32::MAX),
+                        bytes: manifest.bytes,
+                        left_out: manifest.left_out_total,
+                    },
+                    size: manifest.bytes,
+                    commit: resolved.commit.clone(),
+                    from: resolved.from,
+                    took_ms,
+                    drawn_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                };
+                let source = resolved.source_id.clone();
+                let placed = self
+                    .place_folder(&slot, &key, source.as_deref(), drawn, made)
+                    .await;
+                match placed {
+                    Ok(kept) => {
+                        self.remember(&key, kept);
+                        self.lock().latest.insert(slot.clone(), key.clone());
+                    }
+                    Err(reason) => {
+                        self.lock()
+                            .failures
+                            .insert(key.clone(), FolderFailure::Keep { reason });
+                    }
+                }
+            }
+            Ok(Output::Bytes(bytes, kind)) => {
+                let drawn = FolderDrawn {
+                    token,
                     kind,
                     size: bytes.len() as u64,
                     commit: resolved.commit.clone(),
@@ -610,7 +833,7 @@ impl Runs {
                 };
                 let kept = Arc::new(Kept {
                     drawn,
-                    bytes: Arc::new(bytes),
+                    body: Body::Bytes(Arc::new(bytes)),
                 });
                 self.remember(&key, kept.clone());
                 self.lock().latest.insert(slot.clone(), key.clone());
@@ -637,20 +860,103 @@ impl Runs {
         self.tell(&slot, None);
     }
 
+    /// Move a kept folder from its `.tmp-` name to its leaf and write its
+    /// description, key and slot; the old leaf of the same key is removed,
+    /// and the store bounded. Answers what to remember.
+    async fn place_folder(
+        &self,
+        slot: &Slot,
+        key: &str,
+        source: Option<&str>,
+        drawn: FolderDrawn,
+        made: Made,
+    ) -> Result<Arc<Kept>, String> {
+        let (Some(root), Some(dir)) = (self.store(), self.store_dir(source)) else {
+            let _ = std::fs::remove_dir_all(&made.dir);
+            return Err("there is no folder to keep generated files in".to_owned());
+        };
+        let slot_name = slot_file(slot);
+        let key = key.to_owned();
+        let placed = tokio::task::spawn_blocking(move || -> Result<Kept, String> {
+            let leaf = made
+                .dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .and_then(|n| n.split_once(".tmp-").map(|(leaf, _)| leaf.to_owned()))
+                .ok_or_else(|| "the kept folder has no name".to_owned())?;
+            let at = dir.join(&leaf);
+            let tmp = made.dir.clone();
+            if let Err(error) = std::fs::rename(&tmp, &at) {
+                let _ = std::fs::remove_dir_all(&tmp);
+                return Err(format!("{} could not be written: {error}", at.display()));
+            }
+            let made = made.moved_to(at);
+            let before = std::fs::read_to_string(dir.join("keys").join(&key)).ok();
+            let meta = store::Meta {
+                bytes: made.manifest.bytes,
+                drawn,
+                key: key.clone(),
+            };
+            if let Err(error) = store::write_meta(&dir, &leaf, &meta, &made.manifest, &slot_name) {
+                store::remove_leaf(&dir, &leaf);
+                return Err(format!("{} could not be written: {error}", dir.display()));
+            }
+            // The old leaf of this key goes, best effort: a file open on
+            // Windows keeps it until the next bound.
+            if let Some(old) = before.map(|o| o.trim().to_owned())
+                && !old.is_empty()
+                && old != leaf
+                && !old.contains(['/', '\\'])
+            {
+                store::remove_leaf(&dir, &old);
+            }
+            store::bound(&root, store::STORE_BYTES, Some(&leaf));
+            Ok(Kept {
+                drawn: meta.drawn,
+                body: Body::Folder(Arc::new(made)),
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        Ok(Arc::new(placed))
+    }
+
     async fn copy_and_run(
         self: &Arc<Self>,
         slot: &Slot,
         renderer: &FolderRenderer,
         (key, copy_name): (String, String),
-        items: Vec<Item>,
-        bytes: Arc<dyn Bytes>,
+        (items, bytes, source): (Vec<Item>, Arc<dyn Bytes>, Option<&str>),
+        token: &str,
         cancel: CancellationToken,
-    ) -> Result<(Vec<u8>, DrawnKind), FolderFailure> {
+    ) -> Result<Output, FolderFailure> {
         let root = self.root.clone();
         self.swept.call_once(|| copy::sweep(&root));
+        // A folder kind writes under the store's staging, so keeping is a
+        // rename per file; a store that cannot be made fails the run before
+        // the copy is written (ADR-0046).
+        let folder = renderer.output == FolderOutput::Folder;
+        let staging = if folder {
+            let Some(store_root) = self.store() else {
+                return Err(FolderFailure::Keep {
+                    reason: "there is no folder to keep generated files in".to_owned(),
+                });
+            };
+            let staging = store_root.join(store::STAGING);
+            if let Err(error) = std::fs::create_dir_all(&staging) {
+                return Err(FolderFailure::Keep {
+                    reason: format!("{} could not be made: {error}", staging.display()),
+                });
+            }
+            self.staging_swept.call_once(|| copy::sweep(&staging));
+            Some(staging)
+        } else {
+            None
+        };
         let made = {
-            let (root, name) = (root.clone(), copy_name.clone());
-            tokio::task::spawn_blocking(move || Scratch::make(&root, &name)).await
+            let (root, name, staging) = (root.clone(), copy_name.clone(), staging.clone());
+            tokio::task::spawn_blocking(move || Scratch::make(&root, &name, staging.as_deref()))
+                .await
         };
         let scratch = match made {
             Ok(Ok(scratch)) => scratch,
@@ -696,13 +1002,29 @@ impl Runs {
             renderer.timeout_secs,
             (&scratch.copy, &scratch.out, &scratch.cwd),
             std::env::vars_os().collect(),
-            cancel,
+            cancel.clone(),
         )
         .await;
+        if let Ran::Wrote { stderr } = ran {
+            let kept = self
+                .keep_output(
+                    slot,
+                    &key,
+                    (&scratch.out, source),
+                    (&copy_name, &renderer.id, token),
+                    cancel,
+                    stderr,
+                )
+                .await;
+            // The staging goes with the scratch, whatever was left in it.
+            let _ = tokio::task::spawn_blocking(move || drop(scratch)).await;
+            return kept;
+        }
         // The folders go on the blocking pool: a big copy takes a while.
         let _ = tokio::task::spawn_blocking(move || drop(scratch)).await;
         match ran {
-            Ran::Made { bytes, kind } => Ok((bytes, kind)),
+            Ran::Wrote { .. } => unreachable!("kept above"),
+            Ran::Made { bytes, kind } => Ok(Output::Bytes(bytes, kind)),
             Ran::Failed { status, stderr } => Err(FolderFailure::Failed { status, stderr }),
             Ran::TimedOut { seconds, stderr } => Err(FolderFailure::TimedOut { seconds, stderr }),
             Ran::TooLarge => Err(FolderFailure::TooLarge {
@@ -717,12 +1039,85 @@ impl Runs {
         }
     }
 
-    /// The bytes a token names.
+    /// Keep what a folder kind wrote into `out`, into a `.tmp-` folder of
+    /// its leaf in the store, telling its progress as [`FolderRunState::Keeping`].
+    async fn keep_output(
+        self: &Arc<Self>,
+        slot: &Slot,
+        key: &str,
+        (out, source): (&Path, Option<&str>),
+        (copy_name, renderer, token): (&str, &str, &str),
+        cancel: CancellationToken,
+        stderr: String,
+    ) -> Result<Output, FolderFailure> {
+        let Some(dir) = self.store_dir(source) else {
+            return Err(FolderFailure::Keep {
+                reason: "there is no folder to keep generated files in".to_owned(),
+            });
+        };
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let leaf = store::leaf_name(copy_name, renderer, token);
+        let into = dir.join(format!("{leaf}.tmp-{}-{n}", std::process::id()));
+        if self.set_state(slot, key, FolderRunState::Keeping { done: 0, total: 0 }) {
+            self.tell(slot, Some(FolderRunState::Keeping { done: 0, total: 0 }));
+        }
+        let last = Arc::new(Mutex::new(
+            Instant::now() - std::time::Duration::from_secs(1),
+        ));
+        let (runs, told, k) = (Arc::clone(self), slot.clone(), key.to_owned());
+        let progress: keep::Progress = Arc::new(move |done, total| {
+            let state = FolderRunState::Keeping { done, total };
+            if !runs.set_state(&told, &k, state.clone()) {
+                return;
+            }
+            let mut at = last.lock().unwrap_or_else(PoisonError::into_inner);
+            if done == total || at.elapsed().as_millis() >= PROGRESS_EVERY_MS {
+                *at = Instant::now();
+                runs.tell(&told, Some(state));
+            }
+        });
+        let out = out.to_path_buf();
+        let kept = tokio::task::spawn_blocking(move || keep::keep(&out, &into, &progress, &cancel))
+            .await
+            .map_err(|e| FolderFailure::Keep {
+                reason: e.to_string(),
+            })?;
+        match kept {
+            Ok(made) => Ok(Output::Folder(made)),
+            Err(KeepError::Nothing) => Err(FolderFailure::NoOutput { stderr }),
+            Err(KeepError::TooBig { files, bytes }) => Err(FolderFailure::OutputTooBig {
+                files,
+                bytes,
+                cap_files: keep::OUT_FILES as u64,
+                cap_bytes: keep::OUT_BYTES,
+            }),
+            Err(KeepError::Stopped) => Err(FolderFailure::Stopped),
+            Err(KeepError::Io(reason)) => Err(FolderFailure::Keep { reason }),
+        }
+    }
+
+    /// The bytes a token names: a single-output drawing's only.
     #[must_use]
     pub fn output(&self, token: &str) -> Option<Arc<Vec<u8>>> {
         let state = self.lock();
         let key = state.tokens.get(token)?;
-        state.memory.get(key).map(|kept| kept.bytes.clone())
+        match &state.memory.get(key)?.body {
+            Body::Bytes(bytes) => Some(bytes.clone()),
+            Body::Folder(_) => None,
+        }
+    }
+
+    /// The generated folder a token names, while memory holds it. A token
+    /// it no longer holds is read back by a `look` (ADR-0046).
+    #[must_use]
+    pub fn made(&self, token: &str) -> Option<Arc<Made>> {
+        let state = self.lock();
+        let key = state.tokens.get(token)?;
+        match &state.memory.get(key)?.body {
+            Body::Folder(made) => Some(made.clone()),
+            Body::Bytes(_) => None,
+        }
     }
 
     /// Keep a sanitized HTML document for the frame and answer the token it
@@ -755,6 +1150,8 @@ impl Runs {
         state.memory.clear();
         state.used.clear();
         state.memory_bytes = 0;
+        state.memory_folders = 0;
+        state.touched.clear();
         state.tokens.clear();
         state.latest.clear();
         state.failures.clear();
@@ -767,7 +1164,17 @@ impl Runs {
         if let Some(dir) = self.disk_dir(Some(source_id)) {
             let _ = std::fs::remove_dir_all(dir);
         }
+        if let Some(dir) = self.store_dir(Some(source_id)) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
+}
+
+/// What a run made: a single output's bytes, or a generated folder kept in
+/// its `.tmp-` place.
+enum Output {
+    Bytes(Vec<u8>, DrawnKind),
+    Folder(Made),
 }
 
 fn resolved_parts(resolved: &Resolved) -> (String, String) {
@@ -807,6 +1214,9 @@ fn slot_file(slot: &Slot) -> String {
 }
 
 fn write_disk(dir: &Path, key: &str, slot_name: &str, kept: &Kept) {
+    let Body::Bytes(bytes) = &kept.body else {
+        return;
+    };
     let Ok(meta) = serde_json::to_vec(&kept.drawn) else {
         return;
     };
@@ -816,7 +1226,7 @@ fn write_disk(dir: &Path, key: &str, slot_name: &str, kept: &Kept) {
     }
     // The bytes first and the description last, so a half-written pair is
     // never read: a key is read by its `.json`.
-    let _ = std::fs::write(dir.join(format!("{key}.out")), kept.bytes.as_slice())
+    let _ = std::fs::write(dir.join(format!("{key}.out")), bytes.as_slice())
         .and_then(|()| std::fs::write(dir.join(format!("{key}.json")), meta))
         .and_then(|()| std::fs::write(slots.join(slot_name), key));
 }
@@ -947,7 +1357,38 @@ mod tests {
         fn runs(&self) -> Arc<Runs> {
             let runs = Arc::new(Runs::new(self.dir.join("root")));
             runs.keep_on_disk(self.dir.join("disk"));
+            runs.set_store(self.store());
             runs
+        }
+
+        fn store(&self) -> PathBuf {
+            self.dir.join("clones").join(store::STORE_NAME)
+        }
+
+        /// The leaves kept under the store, by name.
+        fn leaves(&self) -> Vec<String> {
+            let mut found = Vec::new();
+            for source in std::fs::read_dir(self.store())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if source.file_name().to_string_lossy().starts_with('.') {
+                    continue;
+                }
+                for entry in std::fs::read_dir(source.path())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if entry.path().is_dir() && name != "keys" && name != "slots" {
+                        found.push(name);
+                    }
+                }
+            }
+            found.sort();
+            found
         }
     }
 
@@ -1299,6 +1740,192 @@ mod tests {
         bound_disk(&place.dir.join("disk"), 200);
         assert!(!source.join("old.out").exists() && !source.join("old.json").exists());
         assert!(source.join("mid.out").exists() && source.join("new.out").exists());
+    }
+
+    fn folder_kind(command: String) -> FolderRenderer {
+        FolderRenderer {
+            id: "site".to_owned(),
+            ..renderer(command, FolderOutput::Folder, 10)
+        }
+    }
+
+    fn made_of(runs: &Runs, view: &FolderRenderView) -> Arc<Made> {
+        runs.made(&view.drawn.as_ref().expect("a drawing").token)
+            .expect("a generated folder")
+    }
+
+    /// A tool that writes a folder of files: they are kept under the store,
+    /// read back by the manifest, the staging is gone, and the bytes are not
+    /// `folder_render_output`'s.
+    #[tokio::test]
+    async fn a_folder_tool_writes_under_the_store_and_its_staging_goes() {
+        let place = Place::new("folder");
+        let script = place.script(
+            "site.sh",
+            "case \"$2\" in *.staging/*) ;; *) echo \"not staged: $2\" >&2; exit 9;; esac\n\
+             mkdir -p \"$2/img\" && cat \"$1/a.txt\" > \"$2/index.md\" && printf png > \"$2/img/a.png\"\n\
+             ln -s /etc/hosts \"$2/hosts\"\n",
+        );
+        let r = folder_kind(format!("sh {script} {{path}} {{outdir}}"));
+        let runs = place.runs();
+        let files = [("a.txt", "# made")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let view = settled(&runs, &r, &files).await;
+        assert!(view.current, "{view:?}");
+        let drawn = view.drawn.clone().unwrap();
+        assert_eq!(
+            drawn.kind,
+            DrawnKind::Folder {
+                files: 2,
+                bytes: 9,
+                left_out: 1
+            }
+        );
+        assert!(runs.output(&drawn.token).is_none());
+        let made = made_of(&runs, &view);
+        assert_eq!(keep::read(&made, "index.md", 100).unwrap(), b"# made");
+        assert!(made.dir.starts_with(place.store()));
+        assert_eq!(place.leaves(), [format!("app.site.{}", &drawn.token[..8])]);
+        let staging = place.store().join(store::STAGING);
+        assert!(
+            std::fs::read_dir(&staging).unwrap().next().is_none(),
+            "the staging is empty"
+        );
+    }
+
+    /// A tool that writes and then fails keeps nothing, and the folder kept
+    /// before is still the answer.
+    #[tokio::test]
+    async fn a_tool_that_fails_keeps_nothing_of_its_folder() {
+        let place = Place::new("folder-fail");
+        let script = place.script(
+            "site.sh",
+            "printf a > \"$2/a.md\"; printf b > \"$2/b.md\"; [ \"$(cat \"$1/a.txt\")\" = good ] || exit 3\n",
+        );
+        let r = folder_kind(format!("sh {script} {{path}} {{outdir}}"));
+        let runs = place.runs();
+        let good = [("a.txt", "good")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &good)), Ask::Open);
+        let first = settled(&runs, &r, &good).await;
+        let kept = place.leaves();
+        assert_eq!(kept.len(), 1);
+        let bad = [("a.txt", "bad")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &bad)), Ask::Open);
+        let failed = settled(&runs, &r, &bad).await;
+        assert_eq!(
+            failed.failure,
+            Some(FolderFailure::Failed {
+                status: Some(3),
+                stderr: String::new()
+            })
+        );
+        assert_eq!(place.leaves(), kept, "no leaf of the failed run");
+        assert_eq!(
+            failed.drawn.map(|d| d.token),
+            first.drawn.map(|d| d.token),
+            "the last kept folder is still answered"
+        );
+        assert!(!failed.current);
+    }
+
+    /// Exit 0 and nothing kept is no output, with what the tool said.
+    #[tokio::test]
+    async fn a_tool_that_writes_nothing_is_no_output() {
+        let place = Place::new("folder-none");
+        let script = place.script("none.sh", "echo forgot >&2; ln -s /etc \"$2/etc\"\n");
+        let r = folder_kind(format!("sh {script} {{path}} {{outdir}}"));
+        let runs = place.runs();
+        let files = [("a.txt", "A")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let view = settled(&runs, &r, &files).await;
+        assert_eq!(
+            view.failure,
+            Some(FolderFailure::NoOutput {
+                stderr: "forgot\n".to_owned()
+            })
+        );
+        assert!(place.leaves().is_empty());
+    }
+
+    /// *Run again* of one key writes a folder of its own, and the old one goes.
+    #[tokio::test]
+    async fn a_second_run_of_one_key_gets_a_folder_of_its_own() {
+        let place = Place::new("folder-again");
+        let script = place.script("site.sh", "date +%s%N > \"$2/at.txt\"\n");
+        let r = folder_kind(format!("sh {script} {{path}} {{outdir}}"));
+        let runs = place.runs();
+        let files = [("a.txt", "A")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let first = settled(&runs, &r, &files).await;
+        let first_dir = made_of(&runs, &first).dir.clone();
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Again);
+        let second = settled(&runs, &r, &files).await;
+        let second_dir = made_of(&runs, &second).dir.clone();
+        assert_ne!(first_dir, second_dir);
+        assert!(!first_dir.exists(), "the old leaf of the key goes");
+        assert_eq!(place.leaves().len(), 1);
+        let old_token = first.drawn.unwrap().token;
+        assert!(runs.made(&old_token).is_none());
+    }
+
+    /// A generated folder is read back from the store by a fresh app, under
+    /// the same token; the same content draws at once with no run; the
+    /// source's removal takes it away.
+    #[tokio::test]
+    async fn a_generated_folder_outlives_a_restart_and_goes_with_its_source() {
+        let place = Place::new("folder-disk");
+        let counter = place.dir.join("count");
+        let script = place.script(
+            "site.sh",
+            "echo x >> \"$3\"; cp \"$1/a.txt\" \"$2/index.md\"\n",
+        );
+        let r = folder_kind(format!(
+            "sh {script} {{path}} {{outdir}} {}",
+            counter.display()
+        ));
+        let files = [("a.txt", "kept")];
+        let token = {
+            let runs = place.runs();
+            runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+            settled(&runs, &r, &files).await.drawn.unwrap().token
+        };
+        let fresh = place.runs();
+        assert!(fresh.made(&token).is_none(), "not in memory yet");
+        let view = fresh.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        assert!(view.current && view.running.is_none(), "{view:?}");
+        assert_eq!(view.drawn.as_ref().unwrap().token, token);
+        assert_eq!(
+            keep::read(&made_of(&fresh, &view), "index.md", 100).unwrap(),
+            b"kept"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&counter).unwrap().lines().count(),
+            1,
+            "drawn at once, no second run"
+        );
+        fresh.forget_source("gitea-main");
+        assert!(place.leaves().is_empty());
+        let after = place.runs();
+        let gone = after.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Look);
+        assert!(gone.drawn.is_none(), "{gone:?}");
+    }
+
+    /// The store moved: the old one is removed whole, and memory forgets.
+    #[tokio::test]
+    async fn a_moved_store_forgets_its_folders() {
+        let place = Place::new("folder-move");
+        let script = place.script("site.sh", "printf x > \"$2/a.md\"\n");
+        let r = folder_kind(format!("sh {script} {{path}} {{outdir}}"));
+        let runs = place.runs();
+        let files = [("a.txt", "A")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let view = settled(&runs, &r, &files).await;
+        let token = view.drawn.unwrap().token;
+        runs.set_store(place.dir.join("elsewhere").join(store::STORE_NAME));
+        assert!(runs.made(&token).is_none());
+        assert!(!place.store().exists());
+        let again = runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Look);
+        assert!(again.drawn.is_none());
     }
 
     /// A run waiting for a place is dropped when its page leaves; at most

@@ -7,6 +7,7 @@
  * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "./invoke";
+import type { ViewBlock } from "./generated/entity";
 import type {
   AppStatus,
   CommandStep,
@@ -17,6 +18,8 @@ import type {
   FolderRenderView,
   Ask,
   InstalledFont,
+  MadeStore,
+  MadeTree,
   JavaRuntime,
   NamedPipeline,
   NamedPipelineDraft,
@@ -44,6 +47,12 @@ export type {
   FolderRenderMoved,
   FolderRenderView,
   FolderRunState,
+  MadeFile,
+  MadeLeftOut,
+  MadeLeftOutWhy,
+  MadePlace,
+  MadeStore,
+  MadeTree,
   ReadFrom,
   InstalledFont,
   JavaRuntime,
@@ -243,6 +252,37 @@ export function folderRenderFrame(document: string): Promise<string> {
 /** Which folders of a tree the folder renderers holding a file glob take, per renderer. */
 export function folderRenderMarks(entityId: string, commit: string | null, paths: string | null): Promise<FolderMarks[]> {
   return invoke<FolderMarks[]>("folder_render_marks", { entityId, commit, paths });
+}
+
+/** A generated folder's whole tree by its token (ADR-0046); `NotFound` for a token the backend no longer holds. */
+export function folderRenderTree(token: string): Promise<MadeTree> {
+  return invoke<MadeTree>("folder_render_tree", { token });
+}
+
+/** A generated file, as `entity_local_file` answers a file; `path` from the generated folder's top. */
+export function folderRenderFile(token: string, path: string): Promise<ViewBlock> {
+  return invoke<ViewBlock>("folder_render_file", { token, path });
+}
+
+/** A generated file's bytes, raw, as `entity_file_bytes` answers. */
+export async function folderRenderFileBytes(token: string, path: string): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("folder_render_file_bytes", { token, path });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** Where generated folders are kept, and how much. */
+export function folderRenderStore(): Promise<MadeStore> {
+  return invoke<MadeStore>("folder_render_store");
+}
+
+/** Keep generated folders in `path`, or `null` for the default; what was kept at the old place is removed. */
+export function setFolderRenderStore(path: string | null): Promise<MadeStore> {
+  return invoke<MadeStore>("set_folder_render_store", { path });
+}
+
+/** Remove every generated folder. */
+export function clearFolderRenderStore(): Promise<MadeStore> {
+  return invoke<MadeStore>("clear_folder_render_store");
 }
 
 /** The default renderer per file pattern (#2263), in order. */

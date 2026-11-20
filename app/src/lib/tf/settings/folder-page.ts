@@ -76,7 +76,8 @@ export function withFolderDraft(list: readonly FolderRenderer[], draft: FolderDr
     command: draft.command.trim(),
     holds: split(draft.holds),
     folders: split(draft.folders),
-    output: draft.output,
+    // `{outdir}` decides the kind, as the backend's `settle` does.
+    output: makesFolder(draft.command) ? "folder" : draft.output,
     timeout_secs: Number.isFinite(timeout) ? timeout : null,
   };
   const kept: FolderRendererDraft[] = list.map((r) => ({ ...r }));
@@ -90,20 +91,34 @@ export function withFolderDraft(list: readonly FolderRenderer[], draft: FolderDr
 export const FOLDER_PLACEHOLDERS = [
   { name: "{path}", says: "the folder: a copy knobas writes at the commit shown" },
   { name: "{out}", says: "a file to write the output to, instead of printing it" },
+  { name: "{outdir}", says: "an empty folder to write files into: they are browsed in the folder's place" },
 ] as const;
+
+const TAKEN = new Set(["{path}", "{out}", "{outdir}"]);
 
 /** Every `{word}` the command holds that knobas does not fill. */
 export function unknownPlaceholders(command: string): string[] {
-  return [...command.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[0]).filter((p) => p !== "{path}" && p !== "{out}");
+  return [...command.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[0]).filter((p) => !TAKEN.has(p));
 }
 
-/** What the command still needs, in words, or `null`. */
-export function commandWhy(command: string): string | null {
+/** Whether the command holds `{outdir}`, which makes it a folder of files (ADR-0046). */
+export function makesFolder(command: string): boolean {
+  return command.includes("{outdir}");
+}
+
+/**
+ * What the command still needs, in words, or `null`; in the backend's words
+ * (`folder_render::check_placeholders` and `settle`). `output` is *It makes*:
+ * a folder of files with no `{outdir}` is said.
+ */
+export function commandWhy(command: string, output?: FolderOutput): string | null {
   const trimmed = command.trim();
   if (trimmed === "") return null;
   const unknown = unknownPlaceholders(trimmed);
-  if (unknown.length > 0) return `${unknown[0]} is not something a folder renderer is given: it takes {path} and {out}.`;
+  if (unknown.length > 0) return `${unknown[0]} is not something a folder renderer is given: it takes {path}, and {out} or {outdir}.`;
+  if (trimmed.includes("{out}") && makesFolder(trimmed)) return "{out} is one file and {outdir} is a folder of files: use one of them.";
   if (!trimmed.includes("{path}")) return "Put {path} where the folder goes: the command runs in an empty folder of its own.";
+  if (output === "folder" && !makesFolder(trimmed)) return "Put {outdir} where the tool takes its output folder.";
   return null;
 }
 
