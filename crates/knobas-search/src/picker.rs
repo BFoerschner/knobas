@@ -860,6 +860,10 @@ pub struct Loaded {
 #[derive(Clone, Default)]
 pub struct Picker {
     held: Arc<RwLock<Arc<Held>>>,
+    /// The projects read on their own, ahead of the names (ux26): `None`
+    /// until [`Self::projects_read`] has read them. What [`Self::projects`]
+    /// answers until the first reload lands.
+    early: Arc<RwLock<Option<crate::typed_key::Projects>>>,
     /// A reload runs; a request meanwhile sets [`Self::again`].
     running: Arc<AtomicBool>,
     again: Arc<AtomicBool>,
@@ -917,6 +921,11 @@ impl Picker {
             return Ok(None);
         }
         let _running = Running(&self.running);
+        // The projects first, on their own (ux26): one short read, so a key
+        // typed as `pay123` reads as `PAY-123` from the first search after a
+        // start, not only once every name is read. Failing, the names' read
+        // below brings them.
+        let _ = self.projects_read(pool).await;
         let mut loaded = Loaded::default();
         while self.again.swap(false, Ordering::SeqCst) {
             let started = Instant::now();
@@ -984,11 +993,53 @@ impl Picker {
         read_words(&self.held().words, text, last_growing)
     }
 
-    /// The projects the held tickets are numbered under: empty until the
-    /// first reload, and then as fresh as the names.
+    /// The projects the held tickets are numbered under: as fresh as the
+    /// names once a reload has read them, before that what
+    /// [`Self::projects_read`] read on its own, else none.
     #[must_use]
     pub fn projects(&self) -> crate::typed_key::Projects {
-        self.held().projects.clone()
+        if self.holds_names() {
+            return self.held().projects.clone();
+        }
+        self.early().unwrap_or_default()
+    }
+
+    fn early(&self) -> Option<crate::typed_key::Projects> {
+        match self.early.read() {
+            Ok(early) => early.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// [`Self::projects`], read from the mirror first where neither the names
+    /// nor an earlier read hold them (ux26): the first reload asks it before
+    /// the names, and a search that comes before even that asks it itself, so
+    /// the first key typed after a start reads as the key. One statement
+    /// over the ticket ids ([`PROJECTS_SQL`]); once read, it is not asked again.
+    ///
+    /// # Errors
+    ///
+    /// [`sqlx::Error`] if the read fails; nothing is kept then.
+    pub async fn projects_read(
+        &self,
+        pool: &sqlx::PgPool,
+    ) -> Result<crate::typed_key::Projects, sqlx::Error> {
+        if self.holds_names() {
+            return Ok(self.held().projects.clone());
+        }
+        if let Some(early) = self.early() {
+            return Ok(early);
+        }
+        let mut tx = pool.begin().await?;
+        sqlx::query(LOAD_PLANNING).execute(&mut *tx).await?;
+        let keys: Vec<String> = sqlx::query_scalar(PROJECTS_SQL).fetch_all(&mut *tx).await?;
+        tx.commit().await?;
+        let projects = crate::typed_key::Projects::of_keys(keys.iter().map(String::as_str));
+        match self.early.write() {
+            Ok(mut slot) => *slot = Some(projects.clone()),
+            Err(poisoned) => *poisoned.into_inner() = Some(projects.clone()),
+        }
+        Ok(projects)
     }
 
     /// Whether the mirror's words are held (the list was whole at the last
@@ -1072,6 +1123,23 @@ macro_rules! names_sql {
     };
 }
 use names_sql;
+
+/// The projects' read on its own (ux26, [`Picker::projects_read`]): the key
+/// part of each ticket id (`jira:PAY-231` → `PAY`), as
+/// [`crate::typed_key::Projects::of_ids`] reads it, each once. Over the
+/// columns the names' read scans, so it scans the same index.
+pub const PROJECTS_SQL: &str = projects_sql!();
+
+macro_rules! projects_sql {
+    () => {
+        "select distinct p from (
+    select substring(i.entity_id from '^(?:[^:]*:)?([A-Za-z][A-Za-z0-9_]*)-[0-9]+$') as p
+      from sync.item i
+     where i.kind = 'ticket') k
+  where p is not null"
+    };
+}
+use projects_sql;
 
 /// The words' read (D10): every word of `sync.word` in its key's order, and
 /// none until `sync.word_whole` says every row's words were read.

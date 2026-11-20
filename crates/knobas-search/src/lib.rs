@@ -393,7 +393,13 @@ impl Searcher {
             .await?
             .declaring(&templates);
         if let Some(picker) = &self.picker {
-            vocab.projects = picker.projects();
+            // Read on their own where the names are not yet (ux26): the
+            // first key typed after a start reads as the key. A failed read
+            // reads no key, as before.
+            vocab.projects = match picker.projects_read(&self.pool).await {
+                Ok(projects) => projects,
+                Err(_) => picker.projects(),
+            };
         }
         Ok(vocab)
     }

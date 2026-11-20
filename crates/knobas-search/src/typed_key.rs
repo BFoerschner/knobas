@@ -58,6 +58,21 @@ impl Projects {
         Self(projects.into())
     }
 
+    /// The projects named in `keys` (`PAY`, `ops`), lowered: where they were
+    /// read off the ticket ids by the database ([`crate::picker::PROJECTS_SQL`])
+    /// rather than from the names held. A word not shaped as a project is left out.
+    #[must_use]
+    pub fn of_keys<'a>(keys: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut projects: Vec<String> = keys
+            .into_iter()
+            .filter(|key| project_shaped(key))
+            .map(str::to_ascii_lowercase)
+            .collect();
+        projects.sort_unstable();
+        projects.dedup();
+        Self(projects.into())
+    }
+
     /// How many projects are held.
     #[must_use]
     pub fn len(&self) -> usize {

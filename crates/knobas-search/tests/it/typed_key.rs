@@ -419,3 +419,52 @@ async fn a_key_that_answered_is_not_corrected() {
     let other = s.search(q("pqy124 ")).await.unwrap();
     assert!(holds(&other, "wiki:1"), "{:?}", other.groups);
 }
+
+/// **The first key typed after a start reads as the key** (ux26): a picker
+/// whose names are not read yet (its first reload still running at
+/// bring-up) reads the projects on their own for the first search, so
+/// `pay123` finds PAY-123 first then too; it keeps them, and reads no name.
+/// A reload reads them before the names.
+#[tokio::test]
+async fn a_key_reads_as_the_key_before_the_names_are_read() {
+    let pool = pool("typed-key-early").await;
+    sources(&pool).await;
+    ticket(&pool, "PAY-123", "Retry failed SEPA payouts", 40).await;
+    ticket(&pool, "PAY-7", "Pay the 123 invoices of the vendor run", 1).await;
+    // A page whose id is shaped as a key is no ticket: its key names no project.
+    row(&pool, "page", "wiki:TOP-1", "Quarterly notes", "top", 1).await;
+    let picker = Picker::default();
+    assert!(picker.projects().is_empty(), "nothing read yet");
+    let s = Searcher::new(pool.clone()).with_picker(picker.clone());
+
+    let r = s.search(q("pay123")).await.unwrap();
+    assert_eq!(
+        kind(&r, "ticket").first().map(String::as_str),
+        Some("jira:PAY-123"),
+        "{:?}",
+        r.groups
+    );
+    assert_eq!(r.interpreted.keyed.as_deref(), Some("PAY-123"));
+    assert!(!picker.holds_names(), "the projects alone were read");
+    assert!(picker.projects().holds("pay"));
+    assert!(
+        !picker.projects().holds("top"),
+        "a page's key names no project"
+    );
+    let sorted = |ids: Option<Vec<String>>| {
+        let mut ids = ids.expect("narrowed");
+        ids.sort();
+        ids
+    };
+    assert_eq!(
+        sorted(s.matching_ids("pay 123", "ticket").await.unwrap()),
+        ["jira:PAY-123", "jira:PAY-7"]
+    );
+
+    // Read once: a project the mirror gains later comes with the names.
+    ticket(&pool, "OPS-5", "Rotate the keys", 1).await;
+    assert!(!picker.projects_read(&pool).await.unwrap().holds("ops"));
+    picker.reload(&pool).await.unwrap();
+    assert!(picker.projects().holds("ops"));
+    assert!(picker.projects().holds("pay"));
+}
