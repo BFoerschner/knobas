@@ -160,7 +160,11 @@ export type FolderRenderMoved = { entity_id: string, renderer: string, folder: s
 /**
  * The run's state now; `None` once it ended.
  */
-running: FolderRunState | null, };
+running: FolderRunState | null, 
+/**
+ * The slot's lane (ux26): `""` for the Files tab and Settings, a side of a comparison otherwise.
+ */
+lane: string, };
 
 /**
  * The answer to a page's ask.
@@ -298,6 +302,34 @@ reason: string | null,
 set_path: string | null, };
 
 /**
+ * One generated file that differs.
+ */
+export type MadeChange = { path: string, change: MadeChangeKind, before_size: number | null, after_size: number | null, 
+/**
+ * A NUL in the first 8,000 bytes of either side, as git tells binary.
+ */
+binary: boolean, };
+
+/**
+ * How a generated file differs. No renames: a file that moved is one deleted and one added.
+ */
+export type MadeChangeKind = "added" | "deleted" | "modified";
+
+/**
+ * What two generated folders differ in (ux26, ADR-0049, ruling 7): the files only in one, and those in both whose bytes
+ * differ, sorted by path bytes, at most [`COMPARE_FILES`]; the rest counted.
+ */
+export type MadeCompare = { files: Array<MadeChange>, 
+/**
+ * In both, byte for byte the same.
+ */
+same: number, 
+/**
+ * In both, the same but for line endings (only where line endings are set aside).
+ */
+eol_only: number, before_files: number, after_files: number, };
+
+/**
  * One kept file: its path from the generated folder's top, and its size.
  */
 export type MadeFile = { path: string, size: number, };
@@ -373,7 +405,7 @@ export type NamedPipelineDraft = { id: string | null, name: string, steps: Array
 /**
  * Where the copy was written from.
  */
-export type ReadFrom = "clone" | "forge";
+export type ReadFrom = "clone" | "forge" | "working_tree";
 
 /**
  * What goes on stdin: text, or bytes in base64.

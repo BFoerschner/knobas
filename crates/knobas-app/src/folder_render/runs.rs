@@ -73,6 +73,8 @@ const PROGRESS_EVERY_MS: u128 = 150;
 pub enum ReadFrom {
     Clone,
     Forge,
+    /// The checkout's working tree (ux26, ADR-0049): what git lists there, changed and untracked files as on disk.
+    WorkingTree,
 }
 
 /// What a run drew.
@@ -195,6 +197,9 @@ pub struct FolderRenderMoved {
     pub folder: String,
     /// The run's state now; `None` once it ended.
     pub running: Option<FolderRunState>,
+    /// The slot's lane (ux26): `""` for the Files tab and Settings, a side of a comparison otherwise.
+    #[serde(default)]
+    pub lane: String,
 }
 
 /// What an ask may start.
@@ -220,12 +225,15 @@ pub struct Unresolved {
     pub source_id: Option<String>,
 }
 
-/// A folder and renderer on one repository or branch.
+/// A folder and renderer on one repository or branch, and the lane its run is in.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Slot {
     pub entity_id: String,
     pub renderer: String,
     pub folder: String,
+    /// `""` for the Files tab and Settings; a side of a comparison otherwise (ux26: `cmp:<sha>`, `cmp:~working-tree`), so
+    /// the two sides of one folder are two runs, side by side, and a comparison never stops the Files tab's run.
+    pub lane: String,
 }
 
 /// The folder resolved at its state now: what to copy and where from.
@@ -452,6 +460,7 @@ impl Runs {
                 renderer: slot.renderer.clone(),
                 folder: slot.folder.clone(),
                 running,
+                lane: slot.lane.clone(),
             });
         }
     }
@@ -1224,6 +1233,11 @@ fn slot_file(slot: &Slot) -> String {
         hash.update(part.as_bytes());
         hash.update([0]);
     }
+    // A comparison's lane has a pointer of its own; the plain slot's name is the one it always had.
+    if !slot.lane.is_empty() {
+        hash.update(slot.lane.as_bytes());
+        hash.update([0]);
+    }
     hex(&hash.finalize()[..12])
 }
 
@@ -1429,7 +1443,27 @@ mod tests {
             entity_id: "gitea:repo:o/r".to_owned(),
             renderer: "lister".to_owned(),
             folder: "flows/app".to_owned(),
+            lane: String::new(),
         }
+    }
+
+    #[test]
+    fn a_lane_is_a_slot_of_its_own_and_the_plain_slot_keeps_its_name() {
+        let plain = slot();
+        let side = Slot {
+            lane: "cmp:~working-tree".to_owned(),
+            ..slot()
+        };
+        assert_ne!(plain, side);
+        assert_ne!(slot_file(&plain), slot_file(&side));
+        // The name the Files tab's pointer was written under before lanes.
+        use sha2::Digest as _;
+        let mut hash = sha2::Sha256::new();
+        for part in ["gitea:repo:o/r", "lister", "flows/app"] {
+            hash.update(part.as_bytes());
+            hash.update([0]);
+        }
+        assert_eq!(slot_file(&plain), hex(&hash.finalize()[..12]));
     }
 
     fn file(rel: &str, blob: &str) -> Item {

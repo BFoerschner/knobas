@@ -10,7 +10,7 @@ async function settle() {
   flushSync();
 }
 
-function harness(start: boolean) {
+function harness(start: boolean, lane?: string) {
   const asked: FolderAsk[] = [];
   let heard: ((event: { payload: unknown }) => void) | null = null;
   const ports: FolderRenderPorts = {
@@ -27,13 +27,13 @@ function harness(start: boolean) {
       return Promise.resolve(() => {});
     },
   };
-  const at: FolderRunAt = $state({ entityId: "r", renderer: "site", command: "", folder: "flows", commit: null, paths: null, start });
+  const at: FolderRunAt = $state({ entityId: "r", renderer: "site", command: "", folder: "flows", commit: null, paths: null, start, ...(lane === undefined ? {} : { lane }) });
   let run!: FolderRun;
   const stop = $effect.root(() => {
     run = new FolderRun(() => at, ports);
   });
   flushSync();
-  const tell = (running: unknown, folder = "flows") => heard?.({ payload: { entity_id: "r", renderer: "site", folder, running } });
+  const tell = (running: unknown, folder = "flows", lane?: string) => heard?.({ payload: { entity_id: "r", renderer: "site", folder, running, ...(lane === undefined ? {} : { lane }) } });
   return { asked, at, run: () => run, stop, tell };
 }
 
@@ -64,6 +64,21 @@ test("progress is taken without an ask, and a run's end asks once", async () => 
   await settle();
   expect(h.asked.length, "another folder's move asks nothing").toBe(before);
   h.tell(null);
+  await settle();
+  expect(h.asked.slice(before).map((a) => a.ask)).toEqual(["look"]);
+  h.stop();
+});
+
+test("a comparison's side asks in its own lane, and another lane's move is not its own (ux26)", async () => {
+  const h = harness(true, "cmp:~working-tree");
+  await settle();
+  expect(h.asked.at(-1)?.lane).toBe("cmp:~working-tree");
+  const before = h.asked.length;
+  h.tell(null, "flows", "");
+  h.tell(null, "flows", "cmp:4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a");
+  await settle();
+  expect(h.asked.length, "the Files tab's and the other side's moves ask nothing").toBe(before);
+  h.tell(null, "flows", "cmp:~working-tree");
   await settle();
   expect(h.asked.slice(before).map((a) => a.ask)).toEqual(["look"]);
   h.stop();

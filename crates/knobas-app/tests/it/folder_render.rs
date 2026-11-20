@@ -103,6 +103,7 @@ async fn settled(
             Some(commit),
             None,
             Ask::Look,
+            "",
         )
         .await
         .unwrap();
@@ -190,6 +191,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
         Some(&first),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();
@@ -214,6 +216,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
         Some(&second),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();
@@ -235,6 +238,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
         Some(&third),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();
@@ -291,6 +295,7 @@ async fn a_name_that_is_no_plain_path_is_refused_before_anything_runs() {
         Some(&sha),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();
@@ -333,6 +338,7 @@ async fn a_repository_with_no_clone_and_no_listing_says_so() {
         Some(&"c".repeat(40)),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();
@@ -343,7 +349,7 @@ async fn a_repository_with_no_clone_and_no_listing_says_so() {
         }
         other => panic!("{other:?}"),
     }
-    let unknown = folder_render::ask(&pool, None, id, "gone", "x", None, None, Ask::Open)
+    let unknown = folder_render::ask(&pool, None, id, "gone", "x", None, None, Ask::Open, "")
         .await
         .unwrap_err();
     assert!(
@@ -408,6 +414,7 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
         Some(&first),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();
@@ -457,6 +464,7 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
         Some(&second),
         None,
         Ask::Open,
+        "",
     )
     .await
     .unwrap();

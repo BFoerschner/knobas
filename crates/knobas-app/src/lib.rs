@@ -767,6 +767,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::app::set_folder_renderers,
         commands::app::folder_render_picks,
         commands::app::set_folder_render_pick,
+        commands::app::folder_render_compare,
         commands::app::folder_render,
         commands::app::folder_render_stop,
         commands::app::folder_render_leave,

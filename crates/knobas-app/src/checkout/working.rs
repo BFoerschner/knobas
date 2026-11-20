@@ -442,6 +442,11 @@ async fn head_of(path: &Path) -> (Option<String>, Option<String>) {
     head
 }
 
+/// `HEAD`'s whole sha at the checkout, read in process; `None` before the first commit.
+pub async fn head(path: &Path) -> Option<String> {
+    head_of(path).await.0
+}
+
 /// Where the working tree stands, for an answer.
 async fn at_now(path: &Path, status: &Status) -> WorkingAt {
     let (head, branch) = head_of(path).await;

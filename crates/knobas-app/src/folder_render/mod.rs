@@ -287,13 +287,14 @@ pub fn settle(drafts: &[FolderRendererDraft]) -> Result<Vec<FolderRenderer>, Ipc
     Ok(out)
 }
 
-/// The slot a folder's render runs in.
+/// The slot a folder's render runs in, in `lane` (`""` for the Files tab).
 #[must_use]
-pub fn slot(entity_id: &str, renderer: &str, folder: &str) -> runs::Slot {
+pub fn slot(entity_id: &str, renderer: &str, folder: &str, lane: &str) -> runs::Slot {
     runs::Slot {
         entity_id: entity_id.to_owned(),
         renderer: renderer.to_owned(),
         folder: folder.trim_matches('/').to_owned(),
+        lane: lane.to_owned(),
     }
 }
 
@@ -317,6 +318,7 @@ pub async fn ask(
     commit: Option<&str>,
     paths: Option<&str>,
     ask: runs::Ask,
+    lane: &str,
 ) -> Result<runs::FolderRenderView, IpcError> {
     let saved = list(pool)
         .await?
@@ -328,7 +330,12 @@ pub async fn ask(
             ))
         })?;
     let resolved = resolve::resolve(pool, forge, &saved, entity_id, folder, commit, paths).await?;
-    Ok(runs::Runs::global().view(&slot(entity_id, renderer, folder), &saved, resolved, ask))
+    Ok(runs::Runs::global().view(
+        &slot(entity_id, renderer, folder, lane),
+        &saved,
+        resolved,
+        ask,
+    ))
 }
 
 /// Every `{word}` in `command`, in order: what [`check_placeholders`] holds

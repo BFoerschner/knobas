@@ -54,7 +54,7 @@ export function rendererFor(
   return (pick === null ? undefined : taking.find((r) => r.id === pick)) ?? taking[0];
 }
 
-const where = (from: ReadFrom | null) => (from === "forge" ? "the source" : "your clone");
+const where = (from: ReadFrom | null) => (from === "forge" ? "the source" : from === "working_tree" ? "your working tree" : "your clone");
 
 /** What a run is doing, in a line. */
 export function runningLine(name: string, state: FolderRunState, from: ReadFrom | null): string {

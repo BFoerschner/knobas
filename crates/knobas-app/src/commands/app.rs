@@ -713,6 +713,25 @@ pub async fn set_folder_render_pick<R: tauri::Runtime>(
     crate::folder_render::set_pick(&pool, &entity_id, &folder, renderer.as_deref()).await
 }
 
+/// Two generated folders compared, by their tokens (ux26): the generated files that differ, the rest counted; line
+/// endings set aside where a side is the working tree (`eol_aside`). `read` names the read for `cancel_read`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token no longer kept.
+#[tauri::command]
+pub async fn folder_render_compare(
+    before: Option<String>,
+    after: Option<String>,
+    eol_aside: bool,
+    read: Option<String>,
+) -> Result<crate::folder_render::made::MadeCompare, IpcError> {
+    crate::reads::run(read, async move {
+        crate::folder_render::made::compare(before.as_deref(), after.as_deref(), eol_aside).await
+    })
+    .await
+}
+
 /// The forge reads a folder render needs where there is no clone: `None`
 /// before the sources are up, when only a clone can be read.
 fn forge_of<R: tauri::Runtime>(
@@ -740,6 +759,10 @@ fn forge_of<R: tauri::Runtime>(
 /// is not saved, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for
 /// a query failure.
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command's arguments, one each"
+)]
 pub async fn folder_render<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     entity_id: String,
@@ -748,6 +771,7 @@ pub async fn folder_render<R: tauri::Runtime>(
     commit: Option<String>,
     paths: Option<String>,
     ask: crate::folder_render::runs::Ask,
+    lane: Option<String>,
 ) -> Result<crate::folder_render::runs::FolderRenderView, IpcError> {
     let pool = app.state::<Lifecycle>().pool()?;
     let forge = forge_of(&app);
@@ -760,23 +784,42 @@ pub async fn folder_render<R: tauri::Runtime>(
         commit.as_deref(),
         paths.as_deref(),
         ask,
+        lane.as_deref().unwrap_or(""),
     )
     .await
 }
 
-/// Stop the run of `renderer` on `folder` of `entity_id`, waiting or going.
+/// Stop the run of `renderer` on `folder` of `entity_id` in `lane` (absent: the Files tab's), waiting or going.
 #[tauri::command]
-pub fn folder_render_stop(entity_id: String, renderer: String, folder: String) {
-    crate::folder_render::runs::Runs::global()
-        .stop(&crate::folder_render::slot(&entity_id, &renderer, &folder));
+pub fn folder_render_stop(
+    entity_id: String,
+    renderer: String,
+    folder: String,
+    lane: Option<String>,
+) {
+    crate::folder_render::runs::Runs::global().stop(&crate::folder_render::slot(
+        &entity_id,
+        &renderer,
+        &folder,
+        lane.as_deref().unwrap_or(""),
+    ));
 }
 
 /// The page showing `folder`'s render left: a run still waiting for its
 /// place is dropped, one that started finishes into the cache.
 #[tauri::command]
-pub fn folder_render_leave(entity_id: String, renderer: String, folder: String) {
-    crate::folder_render::runs::Runs::global()
-        .leave(&crate::folder_render::slot(&entity_id, &renderer, &folder));
+pub fn folder_render_leave(
+    entity_id: String,
+    renderer: String,
+    folder: String,
+    lane: Option<String>,
+) {
+    crate::folder_render::runs::Runs::global().leave(&crate::folder_render::slot(
+        &entity_id,
+        &renderer,
+        &folder,
+        lane.as_deref().unwrap_or(""),
+    ));
 }
 
 /// The bytes a folder render drew, by its token, raw (an `ArrayBuffer` in the

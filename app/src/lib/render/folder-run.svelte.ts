@@ -29,8 +29,8 @@ import { PressHold } from "../tf/press-hold.svelte";
 /** What a folder render reaches the backend through: the IPC, a fake in tests. */
 export interface FolderRenderPorts {
   render(at: FolderAsk): Promise<FolderRenderView>;
-  stop(entityId: string, renderer: string, folder: string): Promise<void>;
-  leave(entityId: string, renderer: string, folder: string): Promise<void>;
+  stop(entityId: string, renderer: string, folder: string, lane?: string): Promise<void>;
+  leave(entityId: string, renderer: string, folder: string, lane?: string): Promise<void>;
   output(token: string): Promise<Uint8Array>;
   frame(document: string): Promise<string>;
   listen(event: string, handler: (event: { payload: unknown }) => void): Promise<() => void>;
@@ -56,6 +56,8 @@ export interface FolderRunAt {
   paths: string | null;
   /** Whether a run may start: the page is shown and a person opened it. */
   start: boolean;
+  /** The run's lane (ux26): absent for the Files tab; a side of a comparison. */
+  lane?: string;
 }
 
 export class FolderRun {
@@ -103,13 +105,13 @@ export class FolderRun {
     $effect(() => {
       const now = this.#at();
       if (now === null) return;
-      const slot = { entityId: now.entityId, renderer: now.renderer, folder: now.folder };
+      const slot = { entityId: now.entityId, renderer: now.renderer, folder: now.folder, lane: now.lane ?? "" };
       let live = true;
       let off: (() => void) | null = null;
       void this.#ports
         .listen(EVENTS.folderRender, ({ payload }) => {
           const moved = payload as FolderRenderMoved;
-          if (moved.entity_id !== slot.entityId || moved.renderer !== slot.renderer || moved.folder !== slot.folder) return;
+          if (moved.entity_id !== slot.entityId || moved.renderer !== slot.renderer || moved.folder !== slot.folder || (moved.lane ?? "") !== slot.lane) return;
           if (moved.running !== null && this.view !== null) {
             // Progress: the state alone, no ask.
             this.view = { ...this.view, running: moved.running };
@@ -124,7 +126,7 @@ export class FolderRun {
       return () => {
         live = false;
         off?.();
-        void this.#ports.leave(slot.entityId, slot.renderer, slot.folder).catch(() => {});
+        void this.#ports.leave(slot.entityId, slot.renderer, slot.folder, slot.lane || undefined).catch(() => {});
       };
     });
 
@@ -140,7 +142,7 @@ export class FolderRun {
     const now = this.#at();
     if (now === null) return;
     const asked = ++this.#askedAt;
-    this.#ports.render({ entityId: now.entityId, renderer: now.renderer, folder: now.folder, commit: now.commit, paths: now.paths, ask: kind }).then(
+    this.#ports.render({ entityId: now.entityId, renderer: now.renderer, folder: now.folder, commit: now.commit, paths: now.paths, ask: kind, ...(now.lane ? { lane: now.lane } : {}) }).then(
       (next) => {
         if (asked !== this.#askedAt) return;
         this.view = next;
@@ -166,7 +168,7 @@ export class FolderRun {
     // The press answers in its own frame; the backend's answer (and its events) replace this.
     if (this.view?.running) {
       this.view = { ...this.view, running: null };
-      void this.#ports.stop(now.entityId, now.renderer, now.folder);
+      void this.#ports.stop(now.entityId, now.renderer, now.folder, now.lane || undefined);
     } else {
       if (this.view !== null) this.view = { ...this.view, running: { state: "queued" }, failure: null };
       this.#answer("again");

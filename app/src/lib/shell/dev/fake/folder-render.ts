@@ -250,6 +250,8 @@ export function handlers(): Handlers {
     folder_renderers: () => saved,
     // The pick per folder (ux26): kept for the session, the repository named as the backend resolves it (a branch's id
     // names its repository).
+    // Two generated folders compared (ux26): nothing differs in the fixture's own runs.
+    folder_render_compare: () => ({ files: [], same: 0, eol_only: 0, before_files: 0, after_files: 0 }),
     folder_render_picks: () => picks,
     set_folder_render_pick: (args) => {
       const id = String(args["entityId"] ?? "");

@@ -14,6 +14,7 @@ import type {
   CommandStepDraft,
   FolderMarks,
   FolderPick,
+  MadeCompare,
   FolderRenderer,
   FolderRendererDraft,
   FolderRenderView,
@@ -44,6 +45,7 @@ export type {
   FolderMarks,
   FolderOutput,
   FolderPick,
+  MadeCompare,
   FolderRenderer,
   FolderRendererDraft,
   FolderRenderMoved,
@@ -219,6 +221,8 @@ export interface FolderAsk {
   /** The section the source lists every path in, for a repository with no clone. */
   paths: string | null;
   ask: Ask;
+  /** The run's lane (ux26): absent or `""` for the Files tab; a side of a comparison otherwise, so both sides run. */
+  lane?: string;
 }
 
 /**
@@ -234,17 +238,26 @@ export function folderRender(at: FolderAsk): Promise<FolderRenderView> {
     commit: at.commit,
     paths: at.paths,
     ask: at.ask,
+    lane: at.lane ?? null,
   });
 }
 
 /** Stop a folder render's run, waiting or going. */
-export function folderRenderStop(entityId: string, renderer: string, folder: string): Promise<void> {
-  return invoke<void>("folder_render_stop", { entityId, renderer, folder });
+export function folderRenderStop(entityId: string, renderer: string, folder: string, lane?: string): Promise<void> {
+  return invoke<void>("folder_render_stop", { entityId, renderer, folder, lane: lane ?? null });
 }
 
 /** The page showing a folder render left: a run still waiting for its place is dropped. */
-export function folderRenderLeave(entityId: string, renderer: string, folder: string): Promise<void> {
-  return invoke<void>("folder_render_leave", { entityId, renderer, folder });
+export function folderRenderLeave(entityId: string, renderer: string, folder: string, lane?: string): Promise<void> {
+  return invoke<void>("folder_render_leave", { entityId, renderer, folder, lane: lane ?? null });
+}
+
+/**
+ * Two generated folders compared by their tokens (ux26, `folder_render_compare`): the generated files that differ, the
+ * rest counted; line endings set aside where a side is the working tree. `null` for a side with no folder.
+ */
+export function folderRenderCompare(before: string | null, after: string | null, eolAside: boolean, read?: string): Promise<MadeCompare> {
+  return invoke<MadeCompare>("folder_render_compare", { before, after, eolAside, read: read ?? null });
 }
 
 /** What `folder_render_output` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
