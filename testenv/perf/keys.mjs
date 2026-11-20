@@ -290,7 +290,10 @@ const CASES = [
   // Second letters that change the ten offers on the perf estate and the test estate (a second letter that keeps them
   // draws nothing, which the probe cannot tell from no answer).
   { name: "assets-two-letters", presses: [["s", "e"], ["v", "a"], ["h", "v"], ["p", "c"], ["p", "e"], ["c", "o"], ["e", "n"]], setup: assetsFind, root: ".tf-kept:not([hidden]) .find", reads: [["search"]] },
-  { name: "docs-spaces-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
+  // Each letter is one some of the scale database's spaces hold and others don't (the ux23 gate, 2026-11-20): the rail
+  // filters names and keys, `Engineering ENG` and `Scale test: Engineering Handbook SCLENG`, `… Operations Runbooks
+  // SCLOPS`, `… Product Notes SCLPRD`, and `e`, `r` and `n`, which all four hold, kept every space where it was.
+  { name: "docs-spaces-letter", presses: [["", "a"], ["", "g"], ["", "o"], ["", "i"], ["", "s"], ["", "d"], ["", "p"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
   { name: "docs-spaces-two-letters", presses: [["o", "p"], ["e", "n"], ["r", "o"], ["a", "n"], ["p", "r"], ["n", "o"], ["e", "s"]], setup: docsSpaces, root: ".tf-rd-tree", reads: [["fuzzy_rank"]] },
   { name: "everything-word", presses: [["payou", "t"], ["confi", "g"], ["deplo", "y"], ["ledge", "r"], ["stagin", "g"], ["refun", "d"], ["webhoo", "k"]], setup: launcherHolding, root: "#launcher-results, [role=dialog] [role=listbox]", reads: [["search"]], everything: true },
   // The fuzzy-search pass (2026-11-19, `docs/decisions/2026-11-19-names-are-found-as-a-picker-finds-them.md`): the names
