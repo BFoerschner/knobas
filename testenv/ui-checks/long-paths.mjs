@@ -109,6 +109,11 @@ const SCREENS = [
   // deep pattern, and a Java deep under a profile (the renderers-columns pass).
   { id: "settings-folder-renderer-lists", route: "settings/renderers/folder/orchestra-flows" },
   { id: "settings-pipeline-edit", route: "settings/renderers", press: '[aria-label^="Edit Decode, unpack"]' },
+  // The launcher under *Everything* (the everything-search build, 2026-11-20): a repository its files found draws a file's path
+  // in its evidence line and in the pane, under `?fake-long-paths` each one deep in a folder with a long name.
+  { id: "launcher-file-rows", route: "tickets", launcher: "settlebridge" },
+  { id: "launcher-file-pane", route: "tickets", launcher: "#r settlebridge" },
+  { id: "launcher-file-names", route: "tickets", launcher: "#r deployment" },
 ];
 
 // Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables
@@ -147,7 +152,7 @@ const CHECK = String.raw`(() => {
   const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args"];
   // A renderer's long name: held to its boxes as a path is, but it may end in an ellipsis.
   const NAME = /payments team's/;
-  const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks")].filter(Boolean);
+  const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks"), document.querySelector(".tf-launch")].filter(Boolean);
   const name = (el) => el.tagName.toLowerCase() + [...el.classList].map((c) => "." + c).join("");
   const where = (el) => { const parts = []; for (let e = el; e && e !== document.body && parts.length < 4; e = e.parentElement) parts.unshift(name(e)); return parts.join(" > "); };
   const misses = [];
@@ -242,6 +247,23 @@ const PRESS = (words) => String.raw`(() => {
   return true;
 })()`;
 
+// Opens the launcher (⌘K) under *Everything* (⌘D when it is under *Titles*), types `words` and waits for the pane to follow the
+// first row. False when the launcher or its rows never come.
+const LAUNCHER = (words) => String.raw`(async () => {
+  const wait = async (test) => { for (let i = 0; i < 50; i++) { const v = test(); if (v) return v; await new Promise((r) => setTimeout(r, 100)); } return null; };
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+  const box = await wait(() => document.querySelector("[role=dialog] input"));
+  if (!box) return false;
+  if (localStorage.getItem("knobas.launcher.scope") !== "everything") box.dispatchEvent(new KeyboardEvent("keydown", { key: "d", metaKey: true, bubbles: true, cancelable: true }));
+  if (localStorage.getItem("knobas.launcher.scope") !== "everything") return false;
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  set.call(box, ${JSON.stringify(words)});
+  box.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  if (!(await wait(() => document.querySelector(".tf-launch [role=option] .tf-ln-why")))) return false;
+  await new Promise((r) => setTimeout(r, 600));
+  return true;
+})()`;
+
 // How long a press waits for its control to be drawn. The screen's settle sits out no timer over 900 ms (chrome.mjs), so it can
 // call a page quiet while the fixture's folder run (1.5 s) is still going: "2 left out" on a generated folder came after the
 // press in about half the reads, a different size failing each run (2026-11-20). A person presses what is shown, so a press
@@ -288,6 +310,7 @@ for (const screen of SCREENS) {
           return true;
         })()`);
       }
+      if (screen.launcher) stepped = await evaluate(LAUNCHER(screen.launcher));
       if (screen.focus) stepped = await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(screen.focus)}); if (!e) return false; e.focus(); return true; })()`);
       if (screen.hover) {
         const box = await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(screen.hover)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
@@ -303,7 +326,7 @@ for (const screen of SCREENS) {
       if (screen.toast) {
         stepped = stepped && (await evaluate(`(() => { const e = [...document.querySelectorAll(".tf-toast button")].find((b) => b.textContent.trim() === ${JSON.stringify(screen.toast)}); if (!e) return false; e.click(); return true; })()`));
       }
-      if (screen.press || screen.focus || screen.context) await opener.settleAfterChange();
+      if (screen.press || screen.focus || screen.context || screen.launcher) await opener.settleAfterChange();
       const tables = screen.tables ? JSON.parse(await evaluate(TABLES(screen.tables))) : null;
       return { stepped, tables, ...JSON.parse(await evaluate(CHECK)) };
     };
@@ -319,7 +342,7 @@ for (const screen of SCREENS) {
     await shoot(`${screen.id}-${size}`);
     const scrolls = long.scrolls.filter((box) => !short.scrolls.includes(box));
     const misses = [
-      ...(long.stepped ? [] : [{ kind: "step", at: [screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
+      ...(long.stepped ? [] : [{ kind: "step", at: [screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),

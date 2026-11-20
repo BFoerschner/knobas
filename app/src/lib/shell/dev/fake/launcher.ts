@@ -341,9 +341,12 @@ const EVERY_BOX: EverythingMatches = { ticket_text: true, pr_text: true, page_te
 let everything: EverythingMatches = EVERY_BOX;
 /** *Keep at most* (D13), in MB. */
 let kept = 2048;
+/** `?fake-long-paths`: the repositories' files under a deep folder with a long name (`long-paths.mjs`). */
+let longFiles = false;
 onFakeReset(() => {
   everything = EVERY_BOX;
   kept = 2048;
+  longFiles = false;
 });
 
 /**
@@ -377,6 +380,18 @@ export const FAKE_FILE_REPOS: readonly { entity_id: string; title: string; files
   },
 ];
 
+/**
+ * `?fake-long-paths` (the everything-search build, 2026-11-20): each file under a deep folder with a long name, so the
+ * evidence line and the pane hold a long path to its box. The folder holds none of the words, so the answers are the same.
+ */
+const LONG_FILE_FOLDER = "services/the-repository-name-that-is-long/modules/with/folders/nested/very/deep/inside/it/";
+
+/** The fixture's file repositories as the switches draw them. */
+function fileRepos(): typeof FAKE_FILE_REPOS {
+  if (!longFiles) return FAKE_FILE_REPOS;
+  return FAKE_FILE_REPOS.map((repo) => ({ ...repo, files: repo.files.map(([path, text]) => [LONG_FILE_FOLDER + path, text] as const) }));
+}
+
 /** An identifier's words as the engine reads them, cut down: lower-cased runs and their capital parts, each to the run's end. */
 function fileWords(text: string): string[] {
   const out: string[] = [];
@@ -396,7 +411,7 @@ export function fakeFilesFound(words: readonly string[]) {
     const said = fileWords(text);
     return asked.every((term) => said.some((word) => (term.length <= 3 ? word === term : word.startsWith(term))));
   };
-  return FAKE_FILE_REPOS.flatMap((repo) => {
+  return fileRepos().flatMap((repo) => {
     const byName = repo.files.filter(([path]) => holds(path));
     const byText = repo.files.filter(([, text]) => holds(text));
     const shown = [...byName, ...byText].sort((a, b) => Number(!byName.includes(a)) - Number(!byName.includes(b)) || a[0].length - b[0].length)[0];
@@ -455,7 +470,7 @@ export function fakeFileExcerpt(found: ReturnType<typeof fakeFilesFound>[number]
 function searchSettingsAnswer(): SearchSettings {
   const live = CORPUS.filter((entry) => entry.deleted_at === null);
   const count = (kind: string) => live.filter((entry) => entry.kind === kind).length;
-  const files = FAKE_FILE_REPOS.flatMap((repo) => repo.files);
+  const files = fileRepos().flatMap((repo) => repo.files);
   const textBytes = files.reduce((all, [, text]) => all + text.length, 0);
   return {
     everything,
@@ -619,7 +634,8 @@ export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { ind
   });
 }
 
-export function handlers(): Handlers {
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+  longFiles = params.has("fake-long-paths");
   return {
     fuzzy_rank: (args) => fakeFuzzyRank(String(args["text"] ?? ""), (args["haystacks"] as string[] | undefined) ?? []),
     // The launcher board (#504): the recent items alone since #2421 and
