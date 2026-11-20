@@ -235,7 +235,8 @@ const PRESS = (words) => String.raw`(() => {
   const words = ${JSON.stringify(words)};
   const root = document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main");
   const floats = document.querySelector(".tf-floats");
-  const shown = (e) => e.getBoundingClientRect().width > 0;
+  // What a person can press: drawn, and not disabled (a generated folder's *Open in…* is, until the run has made the folder).
+  const shown = (e) => e.getBoundingClientRect().width > 0 && !e.disabled;
   const all = [...root.querySelectorAll("button, a"), ...(floats ? floats.querySelectorAll("button, a") : [])];
   const found = /^[.#[]/.test(words)
     ? [...document.querySelectorAll(words)].find(shown)
@@ -266,8 +267,9 @@ const LAUNCHER = (words) => String.raw`(async () => {
 
 // How long a press waits for its control to be drawn. The screen's settle sits out no timer over 900 ms (chrome.mjs), so it can
 // call a page quiet while the fixture's folder run (1.5 s) is still going: "2 left out" on a generated folder came after the
-// press in about half the reads, a different size failing each run (2026-11-20). A person presses what is shown, so a press
-// waits for it, and still fails, saying it found nothing, when it never comes.
+// press in about half the reads, a different size failing each run, and *Open in…* on the made bar was pressed while still
+// disabled, so that screen shot no menu and passed with nothing to hold (2026-11-20). A person presses what is shown and
+// enabled, so a press waits for that, and still fails, saying it found nothing, when it never comes.
 const PRESS_WAIT_MS = 5000;
 
 const chrome = await launch("knobas-long-paths");
