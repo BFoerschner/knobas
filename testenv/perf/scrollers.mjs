@@ -207,7 +207,9 @@ for (const scheme of ["light", "dark"]) {
   for (const [name, hash, act] of STOPS) {
     try {
       await js(`(location.hash = ${JSON.stringify(hash)}, 1)`).catch(() => {});
-      if (app && !(await js("!!window.__a").catch(() => false))) {
+      // A page not on the app yet is loaded; one on it already (`--attach` to knobas's own window, the ux24 Windows pass)
+      // has just had its hash set, a same-document move that fires no load event, so navigating it again waited 60 s a stop.
+      if (app && !(await js("!!window.__a").catch(() => false)) && (await js(`location.href.replace(/#.*$/, "")`).catch(() => "")) !== app.replace(/#.*$/, "")) {
         const loaded = c.once("Page.loadEventFired");
         await c.send("Page.navigate", { url: app.replace(/#.*$/, "") + hash });
         await loaded;
