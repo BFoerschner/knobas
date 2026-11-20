@@ -184,6 +184,8 @@ export function thingAt(node: Element | null, hash: string = location.hash, orig
 }
 
 function thingAtOnly(node: Element | null, hash: string, origin: string): Found | null {
+  // A row of a generated folder (ADR-0046) is no file of the repository: nothing would act on the real one of its path.
+  if (node?.closest?.("[data-made]")) return null;
   for (let at: Element | null = node; at !== null; at = at.parentElement) {
     const tag = TAGS.get(at);
     if (tag?.claims) {

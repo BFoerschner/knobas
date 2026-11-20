@@ -91,10 +91,11 @@ export class FolderRun {
     });
 
     // A page shown again after it was kept hidden opens the render: a run starts where nothing is kept.
-    let wasShown = untrack(() => this.#at()?.start ?? false);
+    // Read first in the effect, not here: the component's own state may not be declared yet.
+    let wasShown: boolean | null = null;
     $effect(() => {
       const now = this.#at()?.start ?? false;
-      if (now && !wasShown) untrack(() => this.#answer("open"));
+      if (now && wasShown === false) untrack(() => this.#answer("open"));
       wasShown = now;
     });
 

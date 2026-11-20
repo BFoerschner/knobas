@@ -147,15 +147,31 @@
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
   import { layers } from "../layers.svelte";
-  import { checkoutListing, fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
+  import {
+    BAND,
+    bandFolder,
+    checkoutListing,
+    fileMeta,
+    goToFile,
+    graftedListings,
+    graftedPaths,
+    madeIndex,
+    treeKey,
+    treeRows,
+    underFolder,
+    type MadeIndex,
+  } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
   import TfFindBar from "../TfFindBar.svelte";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
   import TfHtmlPage from "../render/TfHtmlPage.svelte";
+  import TfMadeBar from "../render/TfMadeBar.svelte";
   import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
-  import { markSets, renderersFor } from "../../render/folder";
-  import { folderRenderMarks, type FolderMarks } from "../../ipc/app";
-  import { folderRenderHash, type FolderRenderAt } from "./repo";
+  import { failureLines, markSets, renderersFor } from "../../render/folder";
+  import { folderRenderMarks, type FolderMarks, type MadeTree } from "../../ipc/app";
+  import { ipcMadePorts, type MadePorts } from "../../render/made-ports";
+  import { folderRenderHash, pickMadeDefault, renderedHash, type FolderRenderAt } from "./repo";
+  import { FolderRun } from "../../render/folder-run.svelte";
   import { thousands } from "../counted";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
@@ -166,7 +182,7 @@
     repoId,
     at,
     branch,
-    path,
+    path: addressPath,
     line = null,
     place = null,
     changed,
@@ -186,9 +202,11 @@
     treeSections = null,
     ondrew,
     folderRender = null,
+    rendered: renderedAt = null,
     folders = appFolderRenderers,
     folderMarks = folderRenderMarks,
     folderPorts = ipcFolderRenderPorts,
+    madePorts = ipcMadePorts,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "archive" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -241,13 +259,23 @@
     ondrew?: () => void;
     /** A folder drawn by a folder renderer in the file's place (`render/<id>/<folder>`, ADR-0044); `null` for none. */
     folderRender?: FolderRenderAt | null;
+    /**
+     * Inside a folder's generated folder (`rendered/<id>/<folder>/…`, ADR-0046); `null` for none. With it, `path` is the
+     * generated file's, from the generated folder's top.
+     */
+    rendered?: FolderRenderAt | null;
     /** The folder renderers (ADR-0044): the app's copy, a fresh one in tests. */
     folders?: FolderRenderers;
     /** Which folders the renderers holding a file glob take: the IPC, a fake in tests. */
     folderMarks?: (entityId: string, commit: string | null, paths: string | null) => Promise<FolderMarks[]>;
     /** What the folder's pane reaches the backend through: the IPC, a fake in tests. */
     folderPorts?: FolderRenderPorts;
+    /** A generated folder's tree and files by its token (ADR-0046): the IPC, a fake in tests. */
+    madePorts?: MadePorts;
   } = $props();
+
+  /** The real file the address names; `null` inside a generated folder, whose path is its own (ADR-0046). */
+  const path = $derived(renderedAt === null ? addressPath : null);
 
   $effect(() => {
     if (listings[""] !== undefined || treeFailed !== null) untrack(() => ondrew?.());
@@ -312,6 +340,8 @@
    * A file read by its path alone may have changed by the next look, so that is read again, as before.
    */
   function keepFile(section: string, read: ViewSection | undefined, path: string) {
+    // A generated file never changes under its token (ADR-0046).
+    if (section.startsWith(MADE)) return void keepDrawnFile(at, section, read);
     if (section === GUESSED || section.startsWith(LOCAL) || section === MISSING) return;
     // Where the source declares no scheme there is no telling a listing's section from a read by path: none is kept.
     if (treeSections == null || section === `${treeSections.file}${path}`) return;
@@ -336,12 +366,13 @@
 
   /** The entry `full` names in its parent's listing, once that is read. */
   function entryOf(full: string): TreeEntry | undefined {
-    return listings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
+    return treeListings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
   }
 
   /** The section `section` names, read at `where`: a directory's listing or a file and its actions. */
   async function readSection(section: string, where = at): Promise<ViewSection | undefined> {
     if (section.startsWith(LOCAL)) return readLocalSection(section, where);
+    if (section.startsWith(MADE)) return readMadeSection(section);
     const view = await ports.entityView(where, section);
     const read = view?.sections[0];
     if (read !== undefined) {
@@ -581,7 +612,7 @@
   let resting: ReturnType<typeof setTimeout> | null = null;
   function restOn(full: string, section: string | null, kind: "file" | "dir") {
     unrest();
-    if (section === null || (section.startsWith(LOCAL) && kind === "file")) return;
+    if (section === null || (section.startsWith(LOCAL) && kind === "file") || section.startsWith(MADE)) return;
     const place = section.startsWith(LOCAL) ? localKey(dirKey(full)) : kind === "file" ? fileKey(full) : dirKey(full);
     if (early.has(place) || (kind === "dir" ? asked.has(full) || listings[full] !== undefined : hasDrawnFile(at, section) || full === shown)) return;
     resting = setTimeout(() => {
@@ -652,6 +683,8 @@
     movedNote = null;
     movedFrom = null;
     untrack(() => {
+      // Rule 3 (ADR-0046): a new branch clears every graft; the address's comes back by rule 1.
+      grafts.clear();
       readLocal(at, generation);
       readDir("", "files");
     });
@@ -690,8 +723,13 @@
   });
 
   // Folder renderers (ADR-0044): the saved list, once, and which folders of this tree those holding a file glob take.
+  /** The saved list has answered: a renderer it does not name is gone, not unread. */
+  let foldersRead = $state(false);
   $effect(() => {
-    void folders.ensure().catch(() => {});
+    void folders.ensure().then(
+      () => (foldersRead = true),
+      () => {},
+    );
   });
   /** The section the source lists every path in, where it is the source's (a clone's tree reads at the clone). */
   const sourcePaths = $derived(pathsSection !== null && !pathsSection.startsWith(LOCAL) ? pathsSection : null);
@@ -712,25 +750,318 @@
       live = false;
     };
   });
-  /** The first renderer that takes the folder at `full`: the tree row's link. */
-  const folderRendererOf = (full: string) => renderersFor(full, folders.list, marks)[0];
-  const renderedBy = $derived(folderRender === null ? null : (folders.list.find((r) => r.id === folderRender.renderer) ?? null));
+  /** The first renderer that takes the folder at `full`: the tree row's link. None inside a generated folder (ADR-0046). */
+  const folderRendererOf = (full: string) => (inGraft(full) ? undefined : renderersFor(full, folders.list, marks)[0]);
+  const savedRenderer = (id: string) => folders.list.find((r) => r.id === id) ?? null;
+  /** A folder's glyph and *Render with*: the generated folder's address for a folder kind, the drawing's for the rest. */
+  const renderLink = (by: { id: string; output: string }, folder: string) =>
+    by.output === "folder" ? renderedHash(repoId, by.id, folder) : folderRenderHash(repoId, by.id, folder);
+
+  // ---- Generated folders in the tree: a graft (ADR-0046) ----
+
+  /**
+   * The address's generated folder, normalised (no redirect, no history entry): a `render/` address whose renderer
+   * makes a folder of files is its `rendered` landing, and a `rendered/` one whose renderer does not is the drawing's.
+   * A renderer not read yet is taken as the address says; one the saved list no longer names is the drawing's, which
+   * says so.
+   */
+  const renderedNow = $derived.by((): FolderRenderAt | null => {
+    if (renderedAt !== null) {
+      const by = savedRenderer(renderedAt.renderer);
+      if (by !== null ? by.output !== "folder" : foldersRead) return null;
+      return renderedAt;
+    }
+    if (folderRender !== null) return savedRenderer(folderRender.renderer)?.output === "folder" ? folderRender : null;
+    return null;
+  });
+  /** The folder drawn in the file's place by a single-output renderer (ADR-0044), as before. */
+  const singleNow = $derived(renderedNow !== null ? null : (folderRender ?? renderedAt));
+  const renderedBy = $derived(singleNow === null ? null : savedRenderer(singleNow.renderer));
   /** The renderers the folder drawn offers to switch to: those that take it, and the one drawing it. */
   const folderChoices = $derived.by(() => {
-    if (folderRender === null || renderedBy === null) return [];
-    const taking = renderersFor(folderRender.folder, folders.list, marks);
+    if (singleNow === null || renderedBy === null) return [];
+    const taking = renderersFor(singleNow.folder, folders.list, marks);
     return taking.some((r) => r.id === renderedBy.id) ? taking : [renderedBy, ...taking];
   });
   // The folder drawn opens in the tree, with the folders above it.
   $effect(() => {
-    if (folderRender === null || folderRender.folder === "") return;
-    for (const dir of ancestors(folderRender.folder)) open.add(dir);
-    open.add(folderRender.folder);
+    if (singleNow === null || singleNow.folder === "") return;
+    for (const dir of ancestors(singleNow.folder)) open.add(dir);
+    open.add(singleNow.folder);
+  });
+
+  /** A real folder shown with a generated folder's rows in place of its own: tab state, by folder. */
+  interface Graft {
+    folder: string;
+    renderer: string;
+    token: string | null;
+    index: MadeIndex | null;
+    state: "made" | "running" | "none" | "failed";
+  }
+  const grafts = new SvelteMap<string, Graft>();
+  /** The generated folders this tab has read, by token (the last four), and the last token of each renderer and folder. */
+  const madeKept = new Map<string, MadeIndex>();
+  const lastMade = new Map<string, string>();
+  const graftKey = (renderer: string, folder: string) => `${renderer}\u0000${folder}`;
+  function keepMade(index: MadeIndex) {
+    madeKept.delete(index.token);
+    madeKept.set(index.token, index);
+    while (madeKept.size > 4) madeKept.delete(madeKept.keys().next().value!);
+  }
+  /** Whether `full` is inside a graft's generated rows (the grafted folder's own row is not). */
+  const inGraft = (full: string) => grafts.size > 0 && [...grafts.keys()].some((folder) => full !== folder && underFolder(full, folder));
+  /** The graft holding `full` and its path there, where its generated folder holds that file. */
+  function madeAt(full: string): { graft: Graft; rel: string } | null {
+    for (const graft of grafts.values()) {
+      if (graft.index === null || !underFolder(full, graft.folder) || full === graft.folder) continue;
+      const rel = graft.folder === "" ? full : full.slice(graft.folder.length + 1);
+      if (graft.index.has(rel)) return { graft, rel };
+    }
+    return null;
+  }
+  /** A file's address: the generated one where a graft holds it, else the repository's. */
+  const hrefOf = (full: string) => {
+    const made = grafts.size === 0 ? null : madeAt(full);
+    return made === null ? fileHash(repoId, full) : renderedHash(repoId, made.graft.renderer, made.graft.folder, made.rel);
+  };
+  const lineHrefOf = (full: string, n: number) => {
+    const made = grafts.size === 0 ? null : madeAt(full);
+    return made === null ? lineHash(repoId, full, n) : renderedHash(repoId, made.graft.renderer, made.graft.folder, made.rel, { line: n });
+  };
+  const placeHrefOf = (full: string, at: string) => {
+    const made = grafts.size === 0 ? null : madeAt(full);
+    return made === null ? placeHash(repoId, full, at) : renderedHash(repoId, made.graft.renderer, made.graft.folder, made.rel, { place: at });
+  };
+
+  // Rule 1: the address's generated folder turns its graft on, and opens it and the folders above it. Rule 3: a new
+  // branch clears every graft first (`at` is read here, after the new-branch effect). A graft never sits under another.
+  $effect(() => {
+    void at;
+    const now = renderedNow;
+    if (now === null) return;
+    untrack(() => {
+      for (const folder of [...grafts.keys()]) {
+        if (folder !== now.folder && (underFolder(folder, now.folder) || underFolder(now.folder, folder))) grafts.delete(folder);
+      }
+      const had = grafts.get(now.folder);
+      if (had === undefined || had.renderer !== now.renderer) {
+        const token = lastMade.get(graftKey(now.renderer, now.folder)) ?? null;
+        const index = token === null ? null : (madeKept.get(token) ?? null);
+        grafts.set(now.folder, { folder: now.folder, renderer: now.renderer, token, index, state: index === null ? "running" : "made" });
+      }
+      for (const dir of ancestors(now.folder)) open.add(dir);
+      if (now.folder !== "") open.add(now.folder);
+    });
+  });
+  // Rule 2: an address inside a grafted folder's real tree turns that graft off: a real file under it, or a rendering
+  // of a real folder under it.
+  $effect(() => {
+    const real = path;
+    const drawnFolder = singleNow?.folder ?? null;
+    untrack(() => {
+      for (const folder of [...grafts.keys()]) {
+        if ((real !== null && underFolder(real, folder)) || (drawnFolder !== null && underFolder(drawnFolder, folder))) grafts.delete(folder);
+      }
+    });
+  });
+  // A generated file's folders open, as a real file's do.
+  $effect(() => {
+    if (madePath !== null) for (const dir of ancestors(madePath)) open.add(dir);
+  });
+
+  /** The address's run (ADR-0046): asked while shown, as `TfFolderRender` asks for a drawing. */
+  const madeRun = new FolderRun(
+    () =>
+      renderedNow === null
+        ? null
+        : { entityId: at, renderer: renderedNow.renderer, command: "", folder: renderedNow.folder, commit: local?.commit ?? null, paths: sourcePaths, start: shownPage() },
+    untrack(() => folderPorts),
+  );
+  /** The address's run asked again with `look`, once: a token the backend no longer held is read back from its store. */
+  async function lookOnce(): Promise<void> {
+    const now = renderedNow;
+    if (now === null) return;
+    await folderPorts
+      .render({ entityId: at, renderer: now.renderer, folder: now.folder, commit: local?.commit ?? null, paths: sourcePaths, ask: "look" })
+      .catch(() => {});
+  }
+  const notHeld = (cause: unknown) => typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "not_found";
+
+  /** A generated folder's tree as the tab's index: kept by token, read once, and once more after a `look`. */
+  async function readMade(token: string): Promise<MadeIndex> {
+    const kept = madeKept.get(token);
+    if (kept !== undefined) return kept;
+    let tree: MadeTree;
+    try {
+      tree = await madePorts.tree(token);
+    } catch (cause) {
+      if (!notHeld(cause)) throw cause;
+      await lookOnce();
+      tree = await madePorts.tree(token);
+    }
+    const index = madeIndex(tree, token, (kind, rel) => madeId(token, kind, rel));
+    keepMade(index);
+    return index;
+  }
+
+  // The run answered: the graft takes its state, and a new generated folder's rows (read first, then swapped in one
+  // write with the scroll held on a row that stays, ADR-0046's re-run).
+  $effect(() => {
+    const view = madeRun.view;
+    const now = renderedNow;
+    if (now === null || view === null) return;
+    untrack(() => {
+      const graft = grafts.get(now.folder);
+      if (graft === undefined || graft.renderer !== now.renderer) return;
+      const drawn = view.drawn !== null && view.drawn.kind.kind === "folder" ? view.drawn : null;
+      const state: Graft["state"] = view.running !== null ? "running" : view.failure !== null && view.failure.why !== "stopped" ? "failed" : drawn !== null ? "made" : "none";
+      if (drawn === null) {
+        // Nothing kept any more (evicted, cleared): the rows go once no run is going.
+        const gone = view.running === null;
+        grafts.set(now.folder, { ...graft, state, ...(gone ? { token: null, index: null } : {}) });
+        return;
+      }
+      if (graft.token === drawn.token && graft.index !== null) {
+        if (graft.state !== state) grafts.set(now.folder, { ...graft, state });
+        return;
+      }
+      const folder = now.folder;
+      readMade(drawn.token).then(
+        (index) => {
+          const held = grafts.get(folder);
+          if (held === undefined || held.renderer !== now.renderer) return;
+          lastMade.set(graftKey(now.renderer, folder), index.token);
+          swapIn(folder, { ...held, token: index.token, index, state });
+        },
+        () => {
+          const held = grafts.get(folder);
+          if (held !== undefined && held.index === null) grafts.set(folder, { ...held, state: "none" });
+        },
+      );
+    });
+  });
+
+  /**
+   * Put `next` in the tree in one write. Where its folder drew rows already (a re-run), the first row in view outside
+   * the graft (else the first inside it the new tree holds, else the band) keeps its place: rows are keyed by path, so a
+   * file both runs made keeps its node, and the scroll is set so the anchor's top is where it was.
+   */
+  function swapIn(folder: string, next: Graft) {
+    const before = grafts.get(folder);
+    const box = tree;
+    if (before?.index == null || box === null || !box.isConnected) {
+      grafts.set(folder, next);
+      return;
+    }
+    const boxTop = box.getBoundingClientRect().top;
+    const drawnRows = [...box.querySelectorAll<HTMLElement>("[data-path]")].filter((el) => el.getBoundingClientRect().bottom > boxTop);
+    const inside = (p: string) => p !== folder && underFolder(p, folder);
+    const relOf = (p: string) => (folder === "" ? p : p.slice(folder.length + 1));
+    const pick =
+      drawnRows.find((el) => !inside(el.dataset["path"]!)) ??
+      drawnRows.find((el) => {
+        const p = el.dataset["path"]!;
+        return !p.endsWith(BAND) && (next.index!.has(relOf(p)) || next.index!.listingOf(relOf(p)) !== undefined);
+      }) ??
+      drawnRows.find((el) => el.dataset["path"] === `${folder}${BAND}`);
+    const anchor = pick === undefined ? null : { path: pick.dataset["path"]!, top: pick.getBoundingClientRect().top };
+    grafts.set(folder, next);
+    flushSync();
+    if (anchor === null) return;
+    const find = () => [...box.querySelectorAll<HTMLElement>("[data-path]")].find((el) => el.dataset["path"] === anchor.path);
+    let row = find();
+    if (row === undefined) {
+      treeWin.reveal(rows.findIndex((r) => r.path === anchor.path));
+      flushSync();
+      row = find();
+    }
+    if (row !== undefined) box.scrollTop += row.getBoundingClientRect().top - anchor.top;
+  }
+
+  /** *Real files*: the graft goes; at its own address, the folder's README or the repository's landing opens. */
+  function realFiles(folder: string) {
+    grafts.delete(folder);
+    const now = renderedNow;
+    if (now !== null && now.folder === folder) {
+      const readme = pickDefaultFile(listings[folder] ?? []);
+      location.hash = readme === null ? repoHash(repoId) : fileHash(repoId, join(folder, readme));
+    }
+    flushSync();
+    if (folder !== "") [...(tree?.querySelectorAll<HTMLElement>("[data-path]") ?? [])].find((el) => el.dataset["path"] === folder)?.focus();
+  }
+
+  /** A generated row's classes: the rail down the rows at its grafted folder's icon (`tf-mrtop` for the top folder). */
+  const madeClass = (made: number | undefined) => (made === undefined ? "" : `tf-made tf-mr${made < 0 ? "top" : Math.min(made, 8)}`);
+
+  /** The grafts as the tree reads them: a graft whose run has made nothing yet holds no rows, its band alone. */
+  const grafted = $derived(
+    [...grafts.values()].map((graft) => ({
+      folder: graft.folder,
+      dirs: graft.index?.dirs ?? [""],
+      listingOf: (dir: string) => (graft.index === null ? (dir === "" ? [] : undefined) : graft.index.listingOf(dir)),
+      files: graft.index?.files ?? [],
+    })),
+  );
+  /** The listings the tree draws: the real ones, with each graft's rows in its folder's place. */
+  const treeListings = $derived(grafts.size === 0 ? listings : graftedListings(listings, grafted));
+  const bands = $derived(grafts.size === 0 ? undefined : new Set(grafts.keys()));
+
+  // ---- A generated file (ADR-0046) ----
+
+  /** What begins every section id the tab makes for a generated folder: as `LOCAL`, a control character. */
+  const MADE = "\u0001made\u0000";
+  const madeId = (token: string, kind: "dir" | "file", rel: string) => `${MADE}${token}\u0000${kind}\u0000${rel}`;
+  function parseMade(section: string): { token: string; kind: string; rel: string } | null {
+    const [token, kind, rel] = section.slice(MADE.length).split("\u0000");
+    return token === undefined || kind === undefined || rel === undefined ? null : { token, kind, rel };
+  }
+  /** The generated file a section names, read by its token; its path in the block is the tree's, so its links resolve there. */
+  async function readMadeSection(section: string): Promise<ViewSection | undefined> {
+    const named = parseMade(section);
+    if (named === null || named.kind !== "file") return undefined;
+    const graft = [...grafts.values()].find((g) => g.token === named.token);
+    const full = graft === undefined ? named.rel : join(graft.folder, named.rel);
+    let block: ViewBlock;
+    try {
+      block = await madePorts.file(named.token, named.rel);
+    } catch (cause) {
+      if (!notHeld(cause)) throw cause;
+      await lookOnce();
+      block = await madePorts.file(named.token, named.rel);
+    }
+    const placed = block.type === "file" ? { ...block, path: full } : block;
+    return { id: section, title: "Files", count: null, deferred: false, blocks: [placed] };
+  }
+  /** The generated file drawn: its token, its graft's folder and its path there; `null` for a repository's file. */
+  let fileMade = $state<{ token: string; folder: string; rel: string } | null>(null);
+  const madePath = $derived(renderedNow !== null && addressPath !== null ? join(renderedNow.folder, addressPath) : null);
+  /** The address's generated folder in the made bar: its maker's name, the renderers that take the folder. */
+  const madeName = $derived(renderedNow === null ? "" : (savedRenderer(renderedNow.renderer)?.name ?? renderedNow.renderer));
+  const madeChoices = $derived.by(() => {
+    if (renderedNow === null) return [];
+    const by = savedRenderer(renderedNow.renderer);
+    const taking = renderersFor(renderedNow.folder, folders.list, marks);
+    return by === null || taking.some((r) => r.id === by.id) ? taking : [by, ...taking];
+  });
+  const madeShown = $derived(renderedNow === null ? null : (grafts.get(renderedNow.folder)?.index ?? null));
+  /** A page in a generated folder opens as one, after the person's own defaults (ADR-0046). */
+  const MADE_DEFAULTS = [
+    { pattern: "*.html", renderer: "html", pipeline: null },
+    { pattern: "*.htm", renderer: "html", pipeline: null },
+  ];
+  /** The landing's file: a README, an index page, the only file (`pickMadeDefault`). */
+  const madeDefault = $derived.by(() => {
+    if (renderedNow === null) return null;
+    const top = grafts.get(renderedNow.folder)?.index?.listingOf("");
+    const pick = top === undefined ? null : pickMadeDefault(top);
+    return pick === null ? null : join(renderedNow.folder, pick);
   });
 
   // Every open directory is read once its parent is.
   $effect(() => {
     for (const dir of open) {
+      // A generated folder's listings are in its index: nothing is read (ADR-0046).
+      if (inGraft(dir)) continue;
       const entry = entryOf(dir);
       if (entry?.kind === "dir" && entry.section !== null) readDir(dir, entry.section);
     }
@@ -792,7 +1123,7 @@
   const LANDING_GUESS = LANDING_README;
   $effect(() => {
     const declared = treeSections;
-    if (path !== null) return;
+    if (path !== null || renderedNow !== null) return;
     if (listings[""] !== undefined) {
       // The listing names its own default: a guess it did not take goes, so no later open of that file takes a read from now.
       untrack(() => {
@@ -810,7 +1141,7 @@
     });
   });
 
-  const shown = $derived(path ?? pickDefaultFile(listings[""] ?? []));
+  const shown = $derived(renderedNow !== null ? (madePath ?? madeDefault) : (path ?? pickDefaultFile(listings[""] ?? [])));
 
   const MISSING = "\u0000missing";
 
@@ -822,9 +1153,9 @@
     if (shown === null) return null;
     // A directory on the way that its parent's listing does not hold: the file cannot be there, and its own listing never comes.
     for (const dir of ancestors(shown)) {
-      if (dir !== "" && guessGone && listings[dir] === undefined && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
+      if (dir !== "" && guessGone && treeListings[dir] === undefined && treeListings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
     }
-    if (listings[parentOf(shown)] === undefined) return null;
+    if (treeListings[parentOf(shown)] === undefined) return null;
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
@@ -844,6 +1175,9 @@
         : null;
     drawnSection = section;
     drawnRead = read;
+    const made = section.startsWith(MADE) ? parseMade(section) : null;
+    const madeIn = made === null ? undefined : [...grafts.values()].find((g) => g.token === made.token);
+    fileMade = made === null || madeIn === undefined ? null : { token: made.token, folder: madeIn.folder, rel: made.rel };
     if (file !== null) keepFile(section, read, file.path);
     fileReading = false;
     fileBehind = null;
@@ -905,7 +1239,9 @@
       typeof before.commit === "string" &&
       treeAt !== null &&
       before.commit !== treeAt;
-    fileReading = showing && !behind;
+    // A re-run's new generated folder (ADR-0046): the file drawn stays, undimmed, until its new read replaces it in place.
+    const madeAgain = section !== null && section.startsWith(MADE) && (untrack(() => drawnSection)?.startsWith(MADE) ?? false) && before?.path === untrack(() => shown);
+    fileReading = showing && !behind && !madeAgain;
     // The clone answers in a few milliseconds: only a read of the source is said to be waited on.
     fileBehind = behind && !section.startsWith(LOCAL) ? { heldAt: (drawnRead && readAtOf.get(drawnRead)) ?? new Date().toISOString(), failed: null } : null;
     if (!showing) {
@@ -973,7 +1309,7 @@
    * The named pipeline the file's pattern opens it through (#2265, `defaultPipeline`), read from the app's copy
    * each time: an edit in Settings changes what runs. Edited in the bar, the edit (in `pipes`) stands instead.
    */
-  const fromDefault = $derived(file === null || editing ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
+  const fromDefault = $derived(file === null || editing || fileMade !== null ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
   const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? fromDefault?.pipeline.steps ?? null));
   /** What a closed bar held, by path: *Pipeline* brings the steps back, as the reader built them. */
   const closedPipes = new SvelteMap<string, PipeStep[]>();
@@ -1030,7 +1366,7 @@
     };
   });
   const suggested = $derived.by(() => {
-    if (file === null || editing || steps !== null || ports.piped === undefined || notNow.has(file.path)) return null;
+    if (file === null || editing || fileMade !== null || steps !== null || ports.piped === undefined || notNow.has(file.path)) return null;
     const head = file.binary && sniffed !== null && sniffed.key === bytesAt ? sniffed.head : null;
     return suggestion(file, head);
   });
@@ -1077,18 +1413,22 @@
    * windowed viewer draws all of it. Until the bytes answer, or where they cannot be read, the cut stands and says so.
    */
   const wholeAt = $derived(
-    file === null || file.binary || !file.truncated || file.size > BYTES_CAP || ports.fileBytes === undefined
+    file === null || file.binary || !file.truncated || file.size > BYTES_CAP || (ports.fileBytes === undefined && fileMade === null)
       ? null
-      : JSON.stringify([at, file.path, file.commit ?? null]),
+      : fileMade !== null
+        ? JSON.stringify(["made", fileMade.token, fileMade.rel])
+        : JSON.stringify([at, file.path, file.commit ?? null]),
   );
   let whole = $state<{ key: string; text: string } | null>(null);
   $effect(() => {
     const key = wholeAt;
     const read = ports.fileBytes;
-    if (key === null || read === undefined || untrack(() => whole?.key) === key) return;
+    if (key === null || untrack(() => whole?.key) === key) return;
     const [entityId, path, commit] = JSON.parse(key) as [string, string, string | null];
+    const reading = entityId === "made" ? madePorts.fileBytes(path, commit ?? "") : read === undefined ? null : read(entityId, path, commit);
+    if (reading === null) return;
     let live = true;
-    read(entityId, path, commit).then(
+    reading.then(
       (bytes) => {
         if (live) whole = { key, text: new TextDecoder().decode(bytes) };
       },
@@ -1123,7 +1463,15 @@
   let rendered = $state<HTMLElement | null>(null);
 
   /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
-  const opened = $derived(drawn === null ? null : openWith(drawn, allRenderers(), defaults.list));
+  const opened = $derived.by(() => {
+    if (drawn === null) return null;
+    if (fileMade === null) return openWith(drawn, allRenderers(), defaults.list);
+    // A generated file (ADR-0046): a page opens as one after the person's own defaults; no JAR view, which reads a
+    // repository's file in the backend (a v1 limit).
+    const made = openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
+    const offered = made.offered.filter((r) => r.id !== "jar");
+    return { ...made, offered, renderer: made.renderer?.id === "jar" ? (offered[0] ?? null) : made.renderer };
+  });
   /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
   const picks = new SvelteMap<string, string>();
   /** What draws the file now: the one picked, else the default. */
@@ -1326,7 +1674,7 @@
 
   /** The file's commit echo, while the file read is still the blob it was made against. */
   const queued = $derived.by(() => {
-    if (file === null || branch === null) return null;
+    if (file === null || branch === null || fileMade !== null) return null;
     const echo = echoOn(repoId, commitKind(branch, file.path));
     return echo !== null && echo.base === file.sha ? echo : null;
   });
@@ -1354,8 +1702,8 @@
     // run's end, and a page opened meanwhile waited on it (the WSL block, 2026-11-14: 0.2 to 2.2 s on Gitea).
     if (hasDrawnFile(where, section)) return Promise.resolve();
     // Nor can the clone's file at its commit (the hover-lag pass, 2026-11-16): read again on every run's end and every
-    // return, it was drawn again whole, its lines coloured again and a README's every image read again.
-    if (section.startsWith(LOCAL)) return Promise.resolve();
+    // return, it was drawn again whole, its lines coloured again and a README's every image read again. Nor a generated one.
+    if (section.startsWith(LOCAL) || section.startsWith(MADE)) return Promise.resolve();
     forgetDrawnFiles(where);
     return readSection(section, where).then(
       (read) => {
@@ -1466,7 +1814,7 @@
     const reads: Promise<unknown>[] = [rereadLocal(), rereadTop()];
     const byPath: Promise<readonly [string, TreeEntry[]] | null>[] = [];
     for (const dir of Object.keys(listings)) {
-      if (dir === "") continue;
+      if (dir === "" || inGraft(dir)) continue;
       const section = entryOf(dir)?.section;
       if (section == null || standsAt(section, dir)) continue;
       byPath.push(
@@ -1496,6 +1844,14 @@
     const read = ports.fileBytes;
     const entityId = at;
     const commit = file?.commit ?? null;
+    // A generated file's images: its siblings' bytes by the token, else the repository's (ADR-0046).
+    if (fileMade !== null) {
+      return (path: string) => {
+        const made = madeAt(path);
+        if (made !== null && made.graft.token !== null) return madePorts.fileBytes(made.graft.token, made.rel);
+        return read === undefined ? Promise.reject(new Error(`${path} cannot be read`)) : read(entityId, path, commit);
+      };
+    }
     return read === undefined ? null : (path: string) => read(entityId, path, commit);
   });
   /**
@@ -1505,10 +1861,18 @@
    * renderer the same function and it reads nothing again.
    */
   const bytesAt = $derived(
-    file === null || !(file.binary || renderer?.input === "bytes") ? null : JSON.stringify([at, file.path, file.commit ?? null]),
+    file === null || !(file.binary || renderer?.input === "bytes")
+      ? null
+      : fileMade !== null
+        ? JSON.stringify(["made", fileMade.token, fileMade.rel])
+        : JSON.stringify([at, file.path, file.commit ?? null]),
   );
   const bytesRead = $derived.by(() => {
     const read = ports.fileBytes;
+    if (bytesAt !== null && fileMade !== null) {
+      const [, token, rel] = JSON.parse(bytesAt) as [string, string, string];
+      return () => madePorts.fileBytes(token, rel);
+    }
     if (bytesAt === null || read === undefined) return null;
     const [entityId, path, commit] = JSON.parse(bytesAt) as [string, string, string | null];
     return () => read(entityId, path, commit);
@@ -1525,13 +1889,13 @@
     return { ...reads, open: () => reads.open(entityId, path, commit) };
   });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
-  const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
+  const fileLink = (to: string, at: number | null) => (at === null ? hrefOf(to) : lineHrefOf(to, at));
   /** A file of the repository at a place inside it (ux18): where an OpenAPI spec's ref into another file opens. */
-  const placeLink = (to: string, at: string | null) => (at === null ? fileHash(repoId, to) : placeHash(repoId, to, at));
+  const placeLink = (to: string, at: string | null) => (at === null ? hrefOf(to) : placeHrefOf(to, at));
   /** *Copy link* on an operation of a spec (ux18): the address that opens the file at it. */
   async function copyPlace(path: string, at: string, label: string) {
     try {
-      await navigator.clipboard.writeText(placeHash(repoId, path, at));
+      await navigator.clipboard.writeText(placeHrefOf(path, at));
       push({ text: `Copied link to ${label}`, subject: "copy-place" });
     } catch (cause) {
       push({ text: `Could not copy: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -1586,12 +1950,15 @@
     Object.entries(listings).flatMap(([dir, entries]) => entries.filter((entry) => entry.kind !== "dir" && entry.section !== null).map((entry) => join(dir, entry.name))),
   );
   const searched = $derived(every !== null && every.section === pathsSection ? every : null);
-  const goFound = $derived(goToFile(searched?.paths ?? known, goTyped));
+  const goFound = $derived.by(() => {
+    const paths = searched?.paths ?? known;
+    return goToFile(grafts.size === 0 ? paths : graftedPaths(paths, grafted), goTyped);
+  });
   const going = $derived(goTyped.trim() !== "");
 
   function openPath(full: string) {
     goTyped = "";
-    location.hash = fileHash(repoId, full);
+    location.hash = hrefOf(full);
   }
 
   function goKeys(event: KeyboardEvent) {
@@ -1640,7 +2007,7 @@
    * (the big-folder pass, 2026-11-13): the rows in view and a screenful each side, the rest room above and below, so
    * a folder of ten thousand entries opens in a frame. A row is 24 px (`code.css`, `.tf-ftree a`).
    */
-  const rows = $derived(treeRows(listings, open));
+  const rows = $derived(treeRows(treeListings, open, bands));
   const treeWin = new Windowed<string>({ count: () => (going ? 0 : rows.length), key: (i) => rows[i]!.path, estimate: 24, from: TREE_WINDOW_FROM });
   /** The row that last had focus, while focus is in the tree. */
   let focusedPath: string | null = null;
@@ -1702,38 +2069,61 @@
       {#if row.kind === "dir"}
         <button
           type="button"
-          class="tf-fdir tf-d{Math.min(row.depth, 8)}"
+          class="tf-fdir tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}"
           data-path={full}
+          data-made={row.made === undefined ? undefined : ""}
           aria-expanded={row.open}
           onpointerenter={() => restOn(full, row.section, "dir")}
           onpointerleave={unrest}
           class:tf-frmarked={folderRendererOf(full) !== undefined}
-          aria-current={folderRender?.folder === full ? "true" : undefined}
+          aria-current={(singleNow ?? renderedNow)?.folder === full ? "true" : undefined}
           onclick={() => toggle(full)}
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >
         {#each [folderRendererOf(full)].filter((one) => one !== undefined) as by (by.id)}
-          <!-- A folder a folder renderer takes (ADR-0044): its drawing, a link of its own beside the row. -->
+          <!-- A folder a folder renderer takes (ADR-0044): its drawing, or its generated folder (ADR-0046), a link of its own beside the row. -->
           <span class="tf-frmark"
-            ><a href={folderRenderHash(repoId, by.id, full)} title="Render with {by.name}" aria-label="Render {row.name} with {by.name}"
+            ><a
+              href={renderLink(by, full)}
+              title="Render with {by.name}"
+              aria-label="Render {row.name} with {by.name}"
+              class:tf-on={by.output === "folder" && grafts.get(full)?.renderer === by.id}
               ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg></a
             ></span
           >
         {/each}
       {:else if row.kind === "file"}
         <a
-          href={fileHash(repoId, full)}
+          href={row.made === undefined ? fileHash(repoId, full) : hrefOf(full)}
           data-path={full}
-          class="tf-d{Math.min(row.depth, 8)}"
-          class:tf-changed={changed.has(full)}
-          aria-current={full === shown && folderRender === null ? "true" : undefined}
+          data-made={row.made === undefined ? undefined : ""}
+          class="tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}"
+          class:tf-changed={row.made === undefined && changed.has(full)}
+          aria-current={full === shown && singleNow === null ? "true" : undefined}
           onpointerenter={() => restOn(full, row.section, "file")}
           onpointerleave={unrest}
           title={changed.has(full) ? "Changed in your checkout" : undefined}
           {@attach treeRow(full)}>{@render icon("file")}{row.name}</a
         >
+      {:else if row.kind === "band"}
+        {@const folder = bandFolder(full)}
+        {@const graft = grafts.get(folder)}
+        {@const by = graft === undefined ? null : savedRenderer(graft.renderer)}
+        {@const name = by?.name ?? graft?.renderer ?? ""}
+        <!-- A generated folder's band (ADR-0046): who made the rows below, and the way back to the real ones. One button. -->
+        <button
+          type="button"
+          class="tf-fband"
+          data-path={full}
+          title="Show the real files of {folder || title || 'the top folder'}"
+          onclick={() => realFiles(folder)}
+          {@attach treeRow(full)}
+          ><span title={name}
+            >{#if graft?.index != null}Made by {name}{:else if graft?.state === "running"}{name} is running…{:else}{name} made nothing{/if}</span
+          ><span>Real files</span></button
+        >
       {:else}
-        <span class="tf-fsub tf-d{Math.min(row.depth, 8)}" data-path={full} tabindex="-1" {@attach treeRow(full)}>{@render icon("file")}{row.name}</span>
+        <span class="tf-fsub tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}" data-path={full} tabindex="-1" {@attach treeRow(full)}>{@render icon("file")}{row.name}</span>
       {/if}
     {/each}
   </div>
@@ -1774,7 +2164,7 @@
         <!-- Go to file's answer in the rows' place (#2311): every path at the commit that holds what is typed. -->
         {#each goFound as found (found)}
           {@const cut = found.lastIndexOf("/") + 1}
-          <a class="tf-gotof" href={fileHash(repoId, found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
+          <a class="tf-gotof" href={hrefOf(found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
             >{@render icon("file")}<span>{#if cut > 0}<span class="tf-pdir">{found.slice(0, cut)}</span>{/if}{found.slice(cut)}</span></a
           >
         {/each}
@@ -1825,30 +2215,69 @@
     {/if}
   </aside>
   <div class="tf-fcol">
-  {#if path === null && folderRender === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
-  {#if folderRender !== null}
+  {#if path === null && singleNow === null && renderedNow === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
+  {#if singleNow !== null}
     {#if renderedBy !== null}
       <TfFolderRender
         entityId={at}
         renderer={renderedBy}
         renderers={folderChoices}
-        folder={folderRender.folder}
+        folder={singleNow.folder}
         commit={local?.commit ?? null}
         paths={sourcePaths}
         start={shownPage()}
-        changedInside={[...changed].some((p) => folderRender.folder === "" || p.startsWith(`${folderRender.folder}/`))}
-        switchTo={(id) => folderRenderHash(repoId, id, folderRender.folder)}
+        changedInside={[...changed].some((p) => singleNow.folder === "" || p.startsWith(`${singleNow.folder}/`))}
+        switchTo={(id) => renderLink(savedRenderer(id) ?? { id, output: "text" }, singleNow.folder)}
         {fileLink}
         {title}
         ports={folderPorts}
         {render}
       />
     {:else if folders.list.length > 0 || listings[""] !== undefined}
-      <TfNothingHere message="There is no folder renderer named “{folderRender.renderer}”." href={repoHash(repoId)} action="All files" />
+      <TfNothingHere message="There is no folder renderer named “{singleNow.renderer}”." href={repoHash(repoId)} action="All files" />
     {/if}
   {:else}
   <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
-    {#if file !== null && editing && editable && branch !== null && !fileReading}
+    {#if renderedNow !== null}
+      {@const graftFolder = renderedNow.folder}
+      <TfMadeBar
+        folder={graftFolder}
+        {title}
+        renderer={renderedNow.renderer}
+        name={madeName}
+        renderers={madeChoices}
+        switchTo={(id) => renderLink(savedRenderer(id) ?? { id, output: "folder" }, graftFolder)}
+        view={madeRun.view}
+        refused={madeRun.refused}
+        elapsed={madeRun.elapsed}
+        made={madeShown === null ? null : { files: madeShown.files.length, bytes: madeShown.bytes, leftOut: madeShown.leftOut, leftOutTotal: madeShown.leftOutTotal }}
+        changedInside={[...changed].some((p) => underFolder(p, graftFolder))}
+        onpress={() => madeRun.press()}
+        onreal={() => realFiles(graftFolder)}
+      />
+    {/if}
+    {#if renderedNow !== null && madeShown === null}
+      {@const view = madeRun.view}
+      {@const fault = view?.failure ?? null}
+      <!-- No generated folder to show yet (ADR-0046): the run's wait, its failure, or a way to start it. -->
+      {#if view === null || view.running !== null}
+        <div class="tf-empty"><p>Its files show here and in the tree when it ends.</p></div>
+      {:else if fault !== null && fault.why !== "stopped"}
+        {@const said = failureLines(fault)}
+        <div class="tf-fpad">
+          <div class="tf-stepfail" role="alert">
+            <b>{madeName} could not make this folder.</b>
+            <span>{said.line}</span>
+            {#if said.stderr !== ""}<pre>{said.stderr}</pre>{/if}
+          </div>
+        </div>
+      {:else}
+        <div class="tf-empty">
+          <p>{fault?.why === "stopped" ? `${madeName} was stopped.` : `${madeName} has not made this folder yet.`}</p>
+          <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => madeRun.press()}>Run {madeName}</button>
+        </div>
+      {/if}
+    {:else if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-chip tf-warn">Editing on <span class="tf-mono">{branch}</span></span>
@@ -1872,6 +2301,12 @@
       </div>
     {:else if shown === null && listings[""] !== undefined}
       <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+    {:else if fileSection === MISSING && renderedNow !== null}
+      <TfNothingHere
+        message="{savedRenderer(renderedNow.renderer)?.name ?? renderedNow.renderer} made no file at this path."
+        href={renderedHash(repoId, renderedNow.renderer, renderedNow.folder)}
+        action="The folder"
+      />
     {:else if fileSection === MISSING}
       <TfNothingHere message="{branch ?? 'This branch'} has no file at this path." href={repoHash(repoId)} action="All files" />
     {:else}
@@ -1897,12 +2332,14 @@
               onmakedefault={(r) => void makeDefault(at, r)}
             />
           {/if}
-          {#if steps === null && ports.piped !== undefined && suggested === null}
+          {#if steps === null && ports.piped !== undefined && suggested === null && fileMade === null}
             {@const at = file.path}
             <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
-          <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} />
-          <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
+          {#if fileMade === null}
+            <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} />
+            <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
+          {/if}
         </span>
       </header>
       {#if queued !== null}
@@ -1913,7 +2350,7 @@
       {#if movedNote !== null}
         <div class="tf-banner tf-info" role="status">{movedNote}</div>
       {/if}
-      {#if changed.has(file.path)}
+      {#if fileMade === null && changed.has(file.path)}
         <div class="tf-banner tf-warn">
           Your checkout has an uncommitted change to this file.
           <span class="tf-trail"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>

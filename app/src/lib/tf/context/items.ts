@@ -22,7 +22,7 @@ import { keyOf } from "../../time/format";
 import { shaOfCommit } from "../diff/address";
 import { appPageHash } from "../openin/app-page";
 import { menuOrder, objectMenu, repoName } from "../openin/openin";
-import { fileHash, folderRenderHash, lineHash, repoHash } from "../repo/repo";
+import { fileHash, folderRenderHash, lineHash, renderedHash, repoHash } from "../repo/repo";
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
@@ -112,7 +112,7 @@ export interface MenuContext {
   /** The page's own thing: drawn without *Open*, since that is where the reader stands. */
   own?: boolean;
   /** The folder renderers that take a folder of a repository (ADR-0044), in the person's order; absent, none. */
-  renders?: (repoId: string, path: string) => readonly { id: string; name: string }[];
+  renders?: (repoId: string, path: string) => readonly { id: string; name: string; output?: string }[];
   /** Where Docs opens and the spaces it hides (`docs-choices.svelte.ts`); absent, no Docs item is offered. */
   docs?: { isHome(kind: "space" | "page", id: string): boolean; hidden: ReadonlySet<string> };
   /** Whether a failed run is marked read (`runs-read.svelte.ts`, ux18); absent, no mark is offered. */
@@ -371,7 +371,12 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
           // A folder a folder renderer takes: its drawing, by each that takes it (ADR-0044).
           ...(thing.kind === "folder"
             ? (ctx.renders?.(thing.repoId, thing.path) ?? []).map(
-                (r): Item => ({ id: `render-${r.id}`, label: `Render with ${r.name}`, act: { do: "go", hash: folderRenderHash(thing.repoId, r.id, thing.path) } }),
+                (r): Item => ({ id: `render-${r.id}`, label: `Render with ${r.name}`, act: {
+                    do: "go",
+                    // A folder of files is browsed in the folder's place (ADR-0046); the rest are drawn in the file's.
+                    hash: r.output === "folder" ? renderedHash(thing.repoId, r.id, thing.path) : folderRenderHash(thing.repoId, r.id, thing.path),
+                  },
+                }),
               )
             : []),
         ],

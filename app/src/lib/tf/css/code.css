@@ -587,3 +587,39 @@
 }
 .tf-ftree .tf-frmark > a:hover { background: var(--rule-2); color: var(--ink); }
 .tf-ftree .tf-frmark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+/* A generated folder in the tree (ADR-0046): a band under its row, a rail down its rows, one info tint for both and the
+   made bar. The rail is an indent guide at the grafted folder's icon centre, not the current row's left inset. */
+.tf-ftree .tf-made { position: relative; }
+.tf-ftree .tf-fband {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 6px; border: 0; border-radius: 4px;
+  background: var(--info-bg); color: var(--info); cursor: pointer; text-align: left; white-space: nowrap;
+  --fs: var(--size-ui); font: 400 calc(var(--t-xs) * var(--fs)) var(--sans);
+}
+.tf-ftree .tf-fband > :first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-ftree .tf-fband > :last-child { flex: none; text-decoration: underline; text-underline-offset: 2px; }
+.tf-ftree .tf-fband:hover { box-shadow: inset 0 0 0 1px var(--info); }
+.tf-ftree .tf-fband:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-ftree .tf-made::before { content: ""; position: absolute; top: 0; bottom: 0; left: var(--tf-rail); width: 2px; background: var(--info); }
+.tf-ftree .tf-mrtop { --tf-rail: 1px; } .tf-ftree .tf-mr0 { --tf-rail: 12px; } .tf-ftree .tf-mr1 { --tf-rail: 30px; } .tf-ftree .tf-mr2 { --tf-rail: 44px; }
+.tf-ftree .tf-mr3 { --tf-rail: 58px; } .tf-ftree .tf-mr4 { --tf-rail: 72px; } .tf-ftree .tf-mr5 { --tf-rail: 86px; } .tf-ftree .tf-mr6 { --tf-rail: 100px; }
+.tf-ftree .tf-mr7 { --tf-rail: 114px; } .tf-ftree .tf-mr8 { --tf-rail: 128px; }
+.tf-ftree .tf-frmark > a.tf-on { background: var(--info-bg); color: var(--info); }
+/* The made bar (ADR-0046): one row from the first frame at a `rendered` address; its colour changes, its box does not. */
+.tf-madebar {
+  display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 8px 4px 12px; flex-wrap: nowrap;
+  border-bottom: 1px solid var(--rule); background: var(--info-bg); color: var(--info); font-size: calc(var(--t-sm) * var(--fs));
+}
+.tf-madebar.tf-warn { background: var(--warn-bg); color: var(--warn); }
+.tf-madebar.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-madebar .tf-p { color: var(--ink); flex: 0 1 auto; min-width: 0; max-width: 40%; }
+.tf-madebar [role="status"] { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tf-madebar .tf-trail { flex: none; }
+.tf-madebar .tf-madebar-as { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.tf-madebar .tf-madebar-as .tf-select { max-width: 14rem; text-overflow: ellipsis; }
+.tf-madebar .tf-madebar-open { display: flex; min-width: 92px; }
+.tf-madebar .tf-madebar-run { min-width: 84px; justify-content: center; }
+.tf-madebar-more { padding: 10px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); }
+.tf-madebar-left { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
+.tf-madebar-left > li { display: contents; }
+.tf-madebar-left > li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-madebar-left > li > :last-child { color: var(--ink-2); }

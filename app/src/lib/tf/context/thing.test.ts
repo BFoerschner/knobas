@@ -129,3 +129,13 @@ test("a run the page draws as failed says so, on its row or its heading (ux18); 
   expect(thingAt(root.querySelector(".act"), "#/builds", ORIGIN)?.thing).toEqual({ kind: "run", id: "r1", pipelineId: "p", hash: "#/build/p/r1", failed: true });
   expect(thingAt(root.querySelector('a[href="#/build/p/r2"]'), "#/builds", ORIGIN)?.thing).toEqual({ kind: "run", id: "r2", pipelineId: "p", hash: "#/build/p/r2" });
 });
+
+test("a row of a generated folder is no thing: nothing acts on the real file of its path (ADR-0046)", () => {
+  const root = page(
+    `<button class="tf-fdir tf-made" data-path="apps/flow/docs" data-made="">docs</button>` +
+      `<a class="tf-made" data-made="" data-path="apps/flow/README.md" href="#/repo/r/files/apps/flow/README.md"><span class="n">README.md</span></a>`,
+  );
+  const hash = "#/repo/r/rendered/site/apps%2Fflow";
+  expect(thingAt(root.querySelector(".tf-fdir"), hash, ORIGIN)).toBeNull();
+  expect(thingAt(root.querySelector(".n"), hash, ORIGIN)).toBeNull();
+});

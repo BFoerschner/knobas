@@ -3,6 +3,7 @@
  * every path at the commit, which row the arrow keys go to, and what the file
  * header and the last-commit strip say.
  */
+import type { MadeFile, MadeLeftOut, MadeTree } from "../../ipc/app";
 import type { LocalEntry, TreeEntry, ViewRow } from "../../ipc/entity";
 import { sized } from "../../render/pipeline";
 
@@ -61,37 +62,182 @@ export function checkoutListing(
     );
 }
 
-/** One row of the tree as drawn: a directory (folded or not), a file, or what opens nothing (a submodule). */
+/**
+ * One row of the tree as drawn: a directory (folded or not), a file, what opens nothing (a submodule), or the band under
+ * a grafted folder's row (ADR-0046).
+ */
 export interface TreeRow {
   path: string;
   /** The entry's name, as its row reads. */
   name: string;
-  kind: "dir" | "file" | "other";
+  kind: "dir" | "file" | "other" | "band";
   depth: number;
   /** A directory drawn unfolded. */
   open: boolean;
   /** The section that opens it, as its listing named it; `null` for what opens nothing. */
   section: string | null;
+  /** A row of a generated folder (ADR-0046): the depth of the grafted folder's row, `-1` for the top folder. */
+  made?: number;
 }
+
+/** What follows a grafted folder's path in its band's row path: no name holds it. */
+export const BAND = "\u0000band";
 
 /**
  * The rows the tree draws, in order: each listing read, an open directory's entries after it. The tree draws this
  * flat list through a windowed list (the big-folder pass, 2026-11-13), so a folder of ten thousand entries mounts the
  * rows in view, not ten thousand.
+ *
+ * `bands` names the grafted folders (ADR-0046): an open one's row is followed by its band, and every row under it is
+ * marked `made` with the folder row's depth. The top folder grafted puts its band first.
  */
-export function treeRows(listings: Readonly<Record<string, readonly TreeEntry[]>>, open: ReadonlySet<string>): TreeRow[] {
+export function treeRows(listings: Readonly<Record<string, readonly TreeEntry[]>>, open: ReadonlySet<string>, bands?: ReadonlySet<string>): TreeRow[] {
   const rows: TreeRow[] = [];
-  const walk = (dir: string, depth: number) => {
+  const walk = (dir: string, depth: number, made: number | undefined) => {
     for (const entry of listings[dir] ?? []) {
       const path = dir === "" ? entry.name : `${dir}/${entry.name}`;
       const kind = entry.kind === "dir" ? "dir" : entry.section === null ? "other" : "file";
       const unfolded = kind === "dir" && open.has(path);
-      rows.push({ path, name: entry.name, kind, depth, open: unfolded, section: entry.section });
-      if (unfolded) walk(path, depth + 1);
+      const row: TreeRow = { path, name: entry.name, kind, depth, open: unfolded, section: entry.section };
+      if (made !== undefined) row.made = made;
+      rows.push(row);
+      if (!unfolded) continue;
+      const grafted = made === undefined && bands !== undefined && bands.has(path);
+      if (grafted) rows.push({ path: `${path}${BAND}`, name: "", kind: "band", depth: depth + 1, open: false, section: null });
+      walk(path, depth + 1, grafted ? depth : made);
     }
   };
-  walk("", 0);
+  if (bands?.has("")) {
+    rows.push({ path: BAND, name: "", kind: "band", depth: 0, open: false, section: null });
+    walk("", 0, -1);
+  } else walk("", 0, undefined);
   return rows;
+}
+
+/** The grafted folder a band's row path names. */
+export const bandFolder = (path: string) => path.slice(0, path.length - BAND.length);
+
+// ---- A generated folder in the tree (ADR-0046) ----
+
+/** A generated folder's tree, grouped by folder and sorted a folder at a time, the first time each is asked for. */
+export interface MadeIndex {
+  token: string;
+  /** Where it is kept on disk. */
+  dir: string;
+  files: readonly MadeFile[];
+  bytes: number;
+  /** What the run wrote that was not kept: the first fifty, and how many in all. */
+  leftOut: readonly MadeLeftOut[];
+  leftOutTotal: number;
+  /** Every folder it holds, from its top (`""` the top itself). */
+  dirs: readonly string[];
+  /** A folder's entries as a listing (folders first, then by name, case aside), its paths from the generated folder's top. */
+  listingOf(dir: string): readonly TreeEntry[] | undefined;
+  /** Whether it holds a file at `path`, from its top. */
+  has(path: string): boolean;
+}
+
+/** The entries' order a checkout's listing has (`checkoutListing`): folders first, then by name, case aside. */
+function byListing(a: TreeEntry, b: TreeEntry): number {
+  return (
+    Number(b.kind === "dir") - Number(a.kind === "dir") ||
+    a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
+    (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+  );
+}
+
+/**
+ * `tree` (the manifest `folder_render_tree` answers) as the tree's index, in one pass over its files. Sorting twenty
+ * thousand names up front would cost the press: a folder's entries are sorted the first time it is asked for, then kept.
+ * `compare` counts in tests.
+ */
+export function madeIndex(
+  tree: MadeTree,
+  token: string,
+  sectionOf: (kind: "dir" | "file", path: string) => string,
+  compare: (a: TreeEntry, b: TreeEntry) => number = byListing,
+): MadeIndex {
+  const subdirs = new Map<string, Set<string>>([["", new Set()]]);
+  const filesIn = new Map<string, MadeFile[]>();
+  const held = new Set<string>();
+  for (const file of tree.files) {
+    held.add(file.path);
+    const cut = file.path.lastIndexOf("/");
+    const dir = cut === -1 ? "" : file.path.slice(0, cut);
+    const list = filesIn.get(dir);
+    if (list === undefined) filesIn.set(dir, [file]);
+    else list.push(file);
+    // Each folder on the way, in its parent's names.
+    let at = dir;
+    while (at !== "" && !subdirs.has(at)) {
+      subdirs.set(at, new Set());
+      const up = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "";
+      if (!subdirs.has(up)) subdirs.set(up, new Set());
+      subdirs.get(up)!.add(at.slice(at.lastIndexOf("/") + 1));
+      at = up;
+    }
+  }
+  const sorted = new Map<string, readonly TreeEntry[]>();
+  const join = (dir: string, name: string) => (dir === "" ? name : `${dir}/${name}`);
+  return {
+    token,
+    dir: tree.dir,
+    files: tree.files,
+    bytes: tree.bytes,
+    leftOut: tree.left_out,
+    leftOutTotal: tree.left_out_total,
+    dirs: [...subdirs.keys()],
+    has: (path) => held.has(path),
+    listingOf(dir) {
+      const kept = sorted.get(dir);
+      if (kept !== undefined) return kept;
+      const names = subdirs.get(dir);
+      if (names === undefined) return undefined;
+      const entries: TreeEntry[] = [
+        ...[...names].map((name): TreeEntry => ({ name, kind: "dir", size: null, section: sectionOf("dir", join(dir, name)) })),
+        ...(filesIn.get(dir) ?? []).map((file): TreeEntry => {
+          const name = file.path.slice(file.path.lastIndexOf("/") + 1);
+          return { name, kind: "file", size: file.size, section: sectionOf("file", file.path) };
+        }),
+      ].sort(compare);
+      sorted.set(dir, entries);
+      return entries;
+    },
+  };
+}
+
+/** Whether `path` is the folder `folder` or under it (`""` the top holds every path). */
+export const underFolder = (path: string, folder: string) => folder === "" || path === folder || path.startsWith(`${folder}/`);
+
+/** A generated folder in the tree, as `graftedListings` and `graftedPaths` take it. */
+export interface Grafted {
+  folder: string;
+  dirs: readonly string[];
+  listingOf(dir: string): readonly TreeEntry[] | undefined;
+}
+
+/**
+ * The listings the tree draws with grafts on (ADR-0046): the real listings less every key at or under a grafted
+ * folder, plus each graft's folders keyed by their tree paths (`folder`, `folder/sub`), each read from the graft's index
+ * when first asked for. The real listings are never written to, so switching back draws from what is already read.
+ */
+export function graftedListings(real: Readonly<Record<string, readonly TreeEntry[]>>, grafts: readonly Grafted[]): Record<string, readonly TreeEntry[]> {
+  const out: Record<string, readonly TreeEntry[]> = {};
+  for (const [key, entries] of Object.entries(real)) if (!grafts.some((g) => underFolder(key, g.folder))) out[key] = entries;
+  for (const graft of grafts) {
+    for (const dir of graft.dirs) {
+      const key = graft.folder === "" ? dir : dir === "" ? graft.folder : `${graft.folder}/${dir}`;
+      Object.defineProperty(out, key, { get: () => graft.listingOf(dir), enumerable: true, configurable: true });
+    }
+  }
+  return out;
+}
+
+/** *Go to file* with grafts on (ADR-0046): the real paths less those under a graft, plus each graft's as tree paths. */
+export function graftedPaths(real: readonly string[], grafts: readonly { folder: string; files: readonly { path: string }[] }[]): string[] {
+  const kept = real.filter((path) => !grafts.some((g) => underFolder(path, g.folder)));
+  for (const graft of grafts) for (const file of graft.files) kept.push(graft.folder === "" ? file.path : `${graft.folder}/${file.path}`);
+  return kept;
 }
 
 /** What an arrow key does in the tree: focus a row, or fold or unfold a directory. */
@@ -120,6 +266,8 @@ export function treeKey(rows: readonly TreeRow[], at: string | null, key: string
     case "ArrowLeft": {
       if (here === undefined) return null;
       if (here.kind === "dir" && here.open) return { fold: here.path };
+      // A band steps out to its folder's row; the top folder's band has none.
+      if (here.kind === "band") return here.path === BAND ? null : { focus: bandFolder(here.path) };
       const up = here.path.includes("/") ? here.path.slice(0, here.path.lastIndexOf("/")) : null;
       return up === null ? null : { focus: up };
     }

@@ -1348,6 +1348,7 @@
                   line={placeOf(one).line}
                   place={placeOf(one).place ?? null}
                   folderRender={placeOf(one).render ?? null}
+                  rendered={placeOf(one).rendered ?? null}
                   {changed}
                   editing={placeOf(one).tab === "edit"}
                   {job}

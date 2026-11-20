@@ -411,6 +411,7 @@ const TfDecompilerSetting = (await import("../tf/settings/TfDecompilerSetting.sv
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfHtmlPage = (await import("../tf/render/TfHtmlPage.svelte")).default;
+const TfMadeBar = (await import("../tf/render/TfMadeBar.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
@@ -1729,6 +1730,17 @@ const CASES: Case[] = [
           room: ".tf-fileview",
           bridge: { isTauri: () => true, convertFileSrc: (path: string, scheme: string) => `${scheme}://localhost/${path}` },
         },
+      }),
+    }),
+  },
+  {
+    /** The made bar (ADR-0046): its panel's effect closes what a new answer no longer has. */
+    name: "TfMadeBar",
+    source: "lib/tf/render/TfMadeBar.svelte",
+    open: (target) => ({
+      app: mount(TfMadeBar, {
+        target,
+        props: { folder: "src", renderer: "site", name: "Site", view: null, onpress: () => {}, onreal: () => {} },
       }),
     }),
   },
