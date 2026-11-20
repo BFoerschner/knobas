@@ -102,7 +102,7 @@ repos_for() { # source word
     '{cmd: "search", args: {query: {raw: $w, limit: 40, titles: false,
       filters: {sources: [$s], kinds: [], updated_within_days: null, mine: false}}}}')" |
     jq -r '.groups[] | select(.kind == "repo") | .hits[] |
-      [.row.title, (.excerpts[0].file.path // ""), (.files.by_text // 0 | tostring)] | @tsv'
+      [.title, (.excerpts[0].file.path // ""), (.files.by_text // 0 | tostring)] | @tsv'
 }
 
 until invoke '{"cmd": "list_sources", "args": {}}' >/dev/null 2>&1; do
