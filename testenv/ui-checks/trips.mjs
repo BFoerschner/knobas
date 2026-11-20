@@ -430,7 +430,7 @@ const PAGES = [
     { id: "monitoring-fields", kind: "esc-sweep", finding: "F-641", typed: ["#tf-mon-slow", "#tf-mon-keep"] },
   ] },
   { page: "Settings, Performance", route: "settings/performance", trips: [
-    { id: "performance-fields", kind: "esc-sweep", finding: "F-641", typed: ["#tf-perf-kept"] },
+    { id: "performance-fields", kind: "esc-sweep", finding: "F-641", typed: ["#tf-perf-kept", "#tf-perf-sites"] },
   ] },
   { page: "Settings, Backup", route: "settings/backup", trips: [
     { id: "backup-fields", kind: "esc-sweep", finding: "F-641", typed: ["#tf-bak-keep"] },
