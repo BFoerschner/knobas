@@ -157,6 +157,9 @@ const PLACES = [
   // Everything's answer to words its rows' text holds (the everything-search decisions, D10): rows of one and two
   // lines, the evidence line drawn with the answer, and nothing moving after.
   { name: "launcher-everything", start: "#/tickets", store: { "knobas.launcher.scope": "everything" }, setupKey: CMD_K, fill: { into: "[role=dialog] input", text: real ? "partner even" : "retr" }, type: { into: "[role=dialog] input", key: real ? "t" : "y" }, hash: null, ready: "[role=dialog] .tf-ln-why", anywhere: true, away: "clear" },
+  // A repository its files found, alone under `#r` (D11): the pane draws the answer's file at once and the repository's
+  // other files under it when `search_files` lands, so nothing drawn moves.
+  { name: "launcher-file-pane", start: "#/tickets", store: { "knobas.launcher.scope": "everything" }, setupKey: CMD_K, fill: { into: "[role=dialog] input", text: real ? "#r packetlin" : "#r settlebridg" }, type: { into: "[role=dialog] input", key: "e" }, hash: null, ready: "[role=dialog] .tf-ln-file", anywhere: true, away: "clear" },
   { name: "ticket-menu", start: "#/tickets", right: `${shown} .tf-tcard`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "create-monitor", optional: true, start: "#/monitors/unmonitored", press: `${shown} button`, text: "Create monitor", starts: true, hash: null, ready: "[role=dialog]", away: "Escape" },
   { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setupOnce: true, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },
