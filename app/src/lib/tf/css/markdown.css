@@ -50,7 +50,8 @@
    would be a speck (`tf-dcut`) stands at its own size from the room's top and fades out at the room's foot, with
    *Show all*. A parser's error that landed late scrolls inside the room. */
 .tf-md .tf-fence-body.tf-roomkept { overflow: auto; background: var(--paper); }
-.tf-md .tf-fence-body.tf-roomkept > .tf-diagram { box-sizing: border-box; height: 100%; padding: 6px 18px; overflow: hidden; }
+/* No margin of its own: a surface that spaces a text's boxes (the file view) would make the fixed room scroll by it. */
+.tf-md .tf-fence-body.tf-roomkept > .tf-diagram { box-sizing: border-box; height: 100%; margin: 0; padding: 6px 18px; overflow: hidden; }
 .tf-md .tf-fence-body.tf-roomkept > .tf-diagram:is(.tf-dfit, .tf-dcut) { cursor: zoom-in; }
 .tf-md .tf-fence-body.tf-roomkept > .tf-diagram:is(.tf-dfit, .tf-dcut) > .tf-dframe { pointer-events: none; }
 .tf-md .tf-fence-body.tf-roomkept > .tf-diagram.tf-dcut { position: relative; place-items: start center; padding-bottom: 0; }

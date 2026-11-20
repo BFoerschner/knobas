@@ -114,18 +114,22 @@ source is now kept beside its block (`fenceCode`).
 
 ## Proof
 
-- **Tests**: 32 new (`diagram.test.ts`, `diagram-sizes.test.ts`, and in `frame`, `port`, `markdown` and `TfMarkdown`'s),
-  which fail on 87 mutants. Among them: no stand-in for a kept size, a hold for a cold engine, a hold never ended, a
+- **Tests**: 33 new (`diagram.test.ts`, `diagram-sizes.test.ts`, and in `frame`, `port`, `markdown` and `TfMarkdown`'s),
+  which fail on 94 mutants. Among them: no stand-in for a kept size, a hold for a cold engine, a hold never ended, a
   late drawing that takes its own size, a fitted drawing scaled by one side only, the room not kept to the pixel, no
   *Show at full size* or one after *Copy*, a press that leaves the room locked, what is held unseen or stands beside
   the fence counted as under it, what stands outside its scroller counted, the fitted size kept in place of the
   drawing's, a size kept per theme, a stale engine version, the store never written or never read, a drawing nobody
-  waits for thrown away, a text drawn again forgetting its rooms or handing one to the wrong fence, the warm-up asking
-  for everything at once or warming D2, and *Copy* reading the drawn block.
+  waits for thrown away, a text drawn again forgetting its rooms or handing one to the wrong fence, a speck standing
+  whole, a readable drawing cut, the warm-up asking for everything at once or warming D2, and *Copy* reading the drawn
+  block.
 - **The failing test** (`moves.mjs --only repo-readme --throttle 1,4,6 --check`: `repo-readme-image` with its workers,
   and `repo-readme-diagram-late`, first open and return, 12 opens a size; headless Chrome on the WSL box). On the base
   `dbe1087a`: 11 of 12 opens moved at 2560x1440@1.25 and 10 of 12 at 5120x1440@1, the fences' *Copy* 54 and 56 px down.
-  After: nothing moved in 36 opens, 12 at each of 1440x868@1, 2560x1440@1.25 and 5120x1440@1.
+  After, on the pushed `83210bd3`, a browser at a time: nothing moved in 36 opens, 12 at each of 1440x868@1,
+  2560x1440@1.25 and 5120x1440@1, and the same again with the margin fix below.
+- **The pages this touches** (`moves.mjs --only repo,ticket,pull-request`, 1x, 4x and 6x, on this change before its
+  last two rebases): nothing moved in 228 opens, 114 at each of 1440x868@1 and 2560x1440@1.25.
 - **What a reader waits for** (a probe of the README's first open after the app stood idle, 2560x1440@1.25, ms after the
   press, base then this change):
 
@@ -148,6 +152,17 @@ source is now kept beside its block (`fenceCode`).
   after load) and two more at 4x (70 and 88 ms). Mermaid's chunks are in 0.4 s after load at 1x.
 - **The dark theme**: a new session with both sizes kept and the drawings held back 2 s stands with two empty rooms of
   678x142 and 450x316 on the sheet colour, the frames unpainted, no white box.
+- **Press trips** `--strict` on `83210bd3`: 317 of 319 pass. `scroller-select-run` fails and `folders-list-return`
+  cannot run, both the same on the parent commit.
+- **`pixel-same.py`**, eight screens shot on the parent `d859dad5` and on `83210bd3` at 1440x868@1, 2560x1440@1.25 and
+  5120x1440@1 (the README's first open and return, a diagram file, a broken one, Code, Tickets, a Markdown file with a
+  D2 and a Graphviz fence, a pull request's conversation): 18 of 24 pairs the same or under the 600 px line. The six
+  that changed are the two the ruling changes, at each size. The D2 fence, whose engine is cold and whose drawing is
+  six times its source's height, shows its top with *Show all*, and the Graphviz graph under it stands at its own
+  size in its source's room. The pull request comment's flowchart is fitted, since the comment box stands under it.
+- **Found by those screenshots**: in the file view a diagram's holder carries the 12 px bottom margin that spaces a
+  text's boxes, which a room of fixed height turned into 12 px of scroll and a scrollbar. A kept room's holder has no
+  margin now; the fence's body measured 103 px with 103 px to scroll after it, from 115.
 
 **Reversing it** is `drawDiagram` without its `room` (the drawing takes its size whenever it lands, as before),
 `diagram-sizes.ts`, the warm-up in `TfShell`, `TfMarkdown`'s `hold.wait` handed to `drawFences`, and `noWorkers` back
