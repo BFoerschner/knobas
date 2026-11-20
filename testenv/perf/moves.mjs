@@ -119,6 +119,11 @@ const PLACES = [
   // the stage, so nothing outside it moves (before, a late side's `Reading…` gave way to the document and pushed every
   // card under it down).
   { name: "diff-rendered-late", fixture: true, fake: "fake-rendered-diff", late: "entity_file_bytes:400", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, press: `${shown} .tf-diff[data-file="README.md"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-diff[data-file="README.md"] .tf-rstage`, away: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2` },
+  // Compare with the working tree as *From* (ux26): the form's short shape from the address, the names first (60 ms
+  // late, the PC's 63 ms for 300 changed files) and the counts behind (300 ms late), filling the rows in place.
+  { name: "repo-compare-working", fixture: true, late: "entity_range_names:60,entity_range_files:300", start: `#/repo/${REPO}`, go: `#/repo/${REPO}/compare/~working-tree`, hash: `#/repo/${REPO}/compare/`, away: `#/repo/${REPO}` },
+  // Local changes' Markdown file pressed *Rendered* (ux26): the index and the working tree read 400 ms late, inside the stage.
+  { name: "repo-local-rendered", fixture: true, late: "entity_file_bytes:400", start: `#/repo/${REPO}/local`, press: `${shown} .tf-diff[data-file="docs/retry.md (modified, not staged)"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-rstage`, away: `#/repo/${REPO}/local` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "app-add", optional: "real", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
   { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "Escape", tabs: true },

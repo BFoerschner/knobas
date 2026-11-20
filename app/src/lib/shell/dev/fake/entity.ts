@@ -6,6 +6,7 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
+import { fakeWorkingBytes } from "./checkouts";
 import { CORPUS, bodyShown, fakeEpicEntry, fakePersonName, mirrorRow } from "./corpus";
 import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
@@ -596,6 +597,9 @@ export function handlers(): Handlers {
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
     entity_file_bytes: (args) => {
+      // The fixture's working tree and the base it is compared with (ux26).
+      const working = fakeWorkingBytes(String(args["path"]), (args["commit"] as string | null | undefined) ?? null);
+      if (working !== undefined) return working;
       const read = repoFileBytes(String(args["entityId"]), String(args["path"]));
       if (read === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
       return read;

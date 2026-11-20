@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { clonedHere } from "../repo/cloned-here.svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, EntityDetail } from "../../ipc/entity";
@@ -105,6 +106,7 @@
             renders: (repoId, path) => renderersFor(path, folderRenderers.list, marksOf(repoId)),
             docs: { isHome: (kind, id) => docsChoices.isHome(kind, id), hidden: docsChoices.hidden },
             runs: { isRead: (id) => runsRead.read?.has(id) ?? false },
+            checkout: clonedHere,
           },
           facts,
         ),

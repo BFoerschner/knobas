@@ -139,6 +139,7 @@
     sideNames = null,
     frame = undefined,
     rendering = diffRendered,
+    epoch = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -198,6 +199,13 @@
     frame?: ((document: string) => Promise<string>) | undefined;
     /** The band's *Rendered*: the app's one choice, kept across a restart; a fake in tests. */
     rendering?: DiffRenderedChoice;
+    /**
+     * Where the working tree stood when `files` were read (ux26: the checkout's stamp), for a diff with an end there.
+     * The same epoch lays nothing down again; a new one reads again what was read of the old: each rendered side and
+     * pipeline run in place (what was drawn stays until its answer lands), the first page of the files near the view,
+     * and nothing of the files away from it until they come near. None: the files never move under the view.
+     */
+    epoch?: string | null;
   } = $props();
 
   let filter = $state("");
@@ -336,6 +344,7 @@
     });
   }
   $effect(() => {
+    void sideEpoch;
     // The files drawn: a change of thousands runs the pipelines of those near the view.
     for (const file of fileWin.slice(drawn)) {
       const pipe = pipes.get(keyOf(file));
@@ -525,6 +534,31 @@
       .then((side) => (got = { ...got, [name]: side }));
   }
   const sideOf = (file: DrawnFile, side: Side): SideGot | undefined => got[`${side}\n${keyOf(file)}`];
+
+  /** Counts the epochs seen: a rendered stage reads its sides again at each (`TfDiffRendered`'s `epoch`). */
+  let sideEpoch = $state(0);
+  let seenEpoch: string | null | undefined = undefined;
+  $effect.pre(() => {
+    const now = epoch;
+    untrack(() => {
+      const moved = seenEpoch !== undefined && now !== seenEpoch;
+      seenEpoch = now;
+      if (!moved) return;
+      // What was read of the old tree is asked again; what it drew stays until each answer lands.
+      asked.clear();
+      reads.clear();
+      running.clear();
+      wholes = {};
+      sideEpoch += 1;
+      if (fill === null) return;
+      const near = new Set(fileWin.slice(drawn).map(keyOf));
+      const kept: typeof lined = {};
+      for (const [key, had] of Object.entries(lined)) if (near.has(key)) kept[key] = had;
+      lined = kept;
+      for (const key of Object.keys(kept)) ask(key, 0, false);
+      pump();
+    });
+  });
 
   /**
    * Collapsed by hand (`true`) or opened by hand (`false`); otherwise viewed, lock and generated files start
@@ -1351,7 +1385,7 @@
             {@const file = row.file}
             {@const done = isViewed(file.path)}
             {@const badge = badgeOf(file)}
-            {@const how = /, (not staged|staged)\)$/.exec(row.name)?.[1] ?? null}
+            {@const how = / \((?:[^()]*, )?(not staged|staged|untracked)\)$/.exec(row.name)?.[1] ?? null}
             <button
               type="button"
               class:tf-viewed={done}
@@ -1415,6 +1449,7 @@
         onmode={(mode) => (modes = { ...modes, [key]: mode })}
         sideOf={(side) => sideOf(file, side)}
         load={(side) => loadSide(file, side)}
+        epoch={sideEpoch}
         ends={sideNames?.(file) ?? null}
         choices={planned?.choices ?? []}
         opened={planned?.opened ?? null}

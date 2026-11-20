@@ -19,10 +19,10 @@ import { sheetActions, type SheetAction, type SheetContext } from "../../launche
 import type { CheckoutSettings, CheckoutView, EntityDetail } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
 import { keyOf } from "../../time/format";
-import { shaOfCommit } from "../diff/address";
+import { diffHash, shaOfCommit, WORKING_TREE } from "../diff/address";
 import { appPageHash } from "../openin/app-page";
 import { menuOrder, objectMenu, repoName } from "../openin/openin";
-import { fileHash, folderRenderHash, lineHash, renderedHash, repoHash } from "../repo/repo";
+import { compareHash, fileHash, folderRenderHash, lineHash, renderedHash, repoHash } from "../repo/repo";
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
@@ -117,6 +117,8 @@ export interface MenuContext {
   docs?: { isHome(kind: "space" | "page", id: string): boolean; hidden: ReadonlySet<string> };
   /** Whether a failed run is marked read (`runs-read.svelte.ts`, ux18); absent, no mark is offered. */
   runs?: { isRead(runId: string): boolean };
+  /** Whether a repository is known to be cloned here (ux26): a commit offers *Compare with working tree* only then. */
+  checkout?: (repoId: string) => boolean;
 }
 
 const RULE: Entry = { rule: true };
@@ -277,6 +279,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       return grouped(
         [
           { id: "compare", label: "Compare", act: { do: "go", hash: repoHash(thing.repoId, "compare", encodeURIComponent(thing.name)) } },
+          { id: "compare-working", label: "Compare with working tree", act: { do: "go", hash: compareHash(thing.repoId, WORKING_TREE, thing.name) } },
           { id: "builds", label: "Builds", act: { do: "go", hash: repoHash(thing.repoId, "builds", encodeURIComponent(thing.name)) } },
         ],
         [{ id: "copy-name", label: "Copy name", hint: thing.name, act: { do: "copy", text: thing.name, said: `Copied ${thing.name}` } }],
@@ -290,7 +293,12 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
           ]
         : [];
       const code = thing.repoId !== null && sha !== null ? openIn(thing.repoId, thing.repoId, { kind: "commit", sha }, ctx, facts) : [];
-      return grouped(open(thing.hash, ctx), [...code, inSource(thing.id, ctx)], [...copies, copyLink()]);
+      // The working tree against this commit (ux26), where the repository is known to be cloned here.
+      const working: Item[] =
+        thing.repoId !== null && sha !== null && ctx.checkout?.(thing.repoId) === true
+          ? [{ id: "compare-working", label: "Compare with working tree", act: { do: "go", hash: diffHash(thing.repoId, sha, WORKING_TREE) } }]
+          : [];
+      return grouped([...open(thing.hash, ctx), ...working], [...code, inSource(thing.id, ctx)], [...copies, copyLink()]);
     }
     case "run":
       return grouped(

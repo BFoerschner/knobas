@@ -16,6 +16,20 @@
 import type { RangeDiff, SourceView } from "../../ipc/entity";
 import { isSha } from "./sha";
 
+/**
+ * The working tree as an end of a comparison (ux26, ADR-0048): the checkout's files as they stand on disk, uncommitted
+ * changes and untracked files git does not ignore included. A name git refuses for a ref, so no branch can carry it, and
+ * one `encodeURIComponent` leaves alone. A head only.
+ */
+export const WORKING_TREE = "~working-tree";
+/** The index, as an end of a byte read (Local changes' halves); never in an address. */
+export const INDEX = "~index";
+
+/** Whether `end` is the working tree's token (and not a branch that merely starts with `~`: git refuses those too). */
+export function isWorkingTree(end: string | null | undefined): boolean {
+  return end === WORKING_TREE;
+}
+
 /** What `#/diff/...` names. */
 export interface DiffAddress {
   repoId: string;

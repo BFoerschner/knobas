@@ -4070,7 +4070,13 @@ read_at: DiffReadAt,
  * diff between two shas, and for every source read. Absent on the wire
  * when `None`.
  */
-predicted_at?: string, };
+predicted_at?: string, 
+/**
+ * Where the working tree stood when this was read, where the head is
+ * the working tree ([`END`](working::END), ux26): the page's
+ * epoch. Absent on every other answer.
+ */
+working?: WorkingAt, };
 
 /**
  * One file [`range_file_pages`] is asked for: as the list named it.
@@ -4145,7 +4151,13 @@ held_at?: string,
  * read. Absent on every other answer (a checkout's list holds no text):
  * the page asks for the lines as before.
  */
-first_pages?: Array<RangeFilePage>, };
+first_pages?: Array<RangeFilePage>, 
+/**
+ * Where the working tree stood when this was read, where the head is
+ * the working tree ([`END`](super::working::END), ux26): the page's
+ * epoch. Absent on every other answer.
+ */
+working?: WorkingAt, };
 
 /**
  * The names of the files a range changes, without their counts (the
@@ -4187,9 +4199,15 @@ truncated: boolean,
 range: DiffRange, 
 /**
  * As [`RangeFiles::predicted_at`]: when the mirror last stored the two
- * tips the names were read between.
+ * tips the names were read between; empty for the working tree.
  */
-predicted_at: string, };
+predicted_at: string, 
+/**
+ * Where the working tree stood when this was read, where the head is
+ * the working tree ([`END`](super::working::END), ux26): the page's
+ * epoch. Absent on every other answer.
+ */
+working?: WorkingAt, };
 
 /**
  * Where a reached entity's path came from.
@@ -4974,7 +4992,13 @@ untracked: Array<string>,
  * More than [`MAX_UNTRACKED`] paths were untracked; the rest are not
  * listed.
  */
-untracked_truncated: boolean, };
+untracked_truncated: boolean, 
+/**
+ * The checkout's stamp this was read at, as hex (ux26): the page's
+ * epoch, so a re-read on focus that brings a new one reads its rendered
+ * sides again. Absent where the stamp could not read the checkout.
+ */
+stamp?: string, };
 
 /**
  * Why knobas could not fill a [`DocBlock::Include`] when the reader was read.
@@ -5322,6 +5346,32 @@ count: number | null,
  * Whether `blocks` is read on first open rather than with the view.
  */
 deferred: boolean, blocks: Array<ViewBlock>, };
+
+/**
+ * Where the working tree stood when an answer was read: what the page keeps
+ * as its epoch, and what Compare's line says about the checkout.
+ */
+export type WorkingAt = { 
+/**
+ * The checkout's stamp, as hex: the same while nothing in it changed.
+ */
+stamp: string, 
+/**
+ * `HEAD`'s whole sha; `None` before the first commit.
+ */
+head: string | null, 
+/**
+ * The branch `HEAD` is on; `None` for a detached head.
+ */
+branch: string | null, 
+/**
+ * The listed files that are untracked.
+ */
+untracked: Array<string>, 
+/**
+ * More files were untracked than knobas lists ([`MAX_UNTRACKED`]).
+ */
+untracked_truncated: boolean, };
 
 /**
  * What a checkout's working tree is doing right now.

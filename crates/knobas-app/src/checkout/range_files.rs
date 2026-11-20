@@ -39,7 +39,7 @@ use sqlx::PgPool;
 
 use super::reader::{Form, Reader};
 use super::uncommitted::{READ_BYTES, READ_LINES};
-use super::{DiffReadAt, RangeDiff, branch_tip, repo_of, resolve};
+use super::{DiffReadAt, RangeDiff, branch_tip, repo_of, resolve, working};
 use crate::IpcError;
 
 /// The most lines one answer of [`range_file`] carries.
@@ -83,6 +83,12 @@ pub struct RangeFiles {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub first_pages: Option<Vec<RangeFilePage>>,
+    /// Where the working tree stood when this was read, where the head is
+    /// the working tree ([`END`](super::working::END), ux26): the page's
+    /// epoch. Absent on every other answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub working: Option<super::working::WorkingAt>,
 }
 
 /// The names of the files a range changes, without their counts (the
@@ -112,8 +118,14 @@ pub struct RangeNames {
     /// and the head, as [`RangeFiles::range`] names them.
     pub range: knobas_source::view::DiffRange,
     /// As [`RangeFiles::predicted_at`]: when the mirror last stored the two
-    /// tips the names were read between.
+    /// tips the names were read between; empty for the working tree.
     pub predicted_at: String,
+    /// Where the working tree stood when this was read, where the head is
+    /// the working tree ([`END`](super::working::END), ux26): the page's
+    /// epoch. Absent on every other answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub working: Option<super::working::WorkingAt>,
 }
 
 impl RangeNames {
@@ -131,6 +143,7 @@ impl RangeNames {
             truncated,
             range,
             predicted_at,
+            working: None,
         };
         for (at, file) in files.iter().enumerate() {
             let at = u32::try_from(at).unwrap_or(u32::MAX);
@@ -190,6 +203,9 @@ pub async fn range_files(
     head: &str,
     ignore_whitespace: bool,
 ) -> Result<RangeFiles, IpcError> {
+    if working::is_end(head) {
+        return working_files(pool, registry.as_ref(), entity_id, base, ignore_whitespace).await;
+    }
     if let Some(path) = checkout_path(pool, entity_id).await
         && let Some(local) = stat(&path, base, head, ignore_whitespace).await
     {
@@ -315,6 +331,7 @@ async fn held_list(
         _ => None,
     };
     Some(RangeFiles {
+        working: None,
         files: held.files,
         truncated: held.truncated,
         range: held.range,
@@ -397,6 +414,7 @@ async fn held_diff(
         .await?;
     let held: HeldDiff = serde_json::from_value(answer).ok()?;
     Some(Arc::new(RangeDiff {
+        working: None,
         files: held.files,
         truncated: held.truncated,
         range: None,
@@ -474,6 +492,7 @@ fn keep(entity_id: &str, base: &str, head: &str, diff: RangeDiff) -> (RangeFiles
         kept().put(entity_id, &range.base, &range.head, &diff);
     }
     let answer = RangeFiles {
+        working: None,
         files: diff.files.iter().map(listed).collect(),
         truncated: diff.truncated,
         range: diff.range.clone(),
@@ -614,6 +633,18 @@ pub async fn range_names(
     base: &str,
     head: &str,
 ) -> Option<RangeNames> {
+    if working::is_end(head) {
+        let (repo, path, base) = working_at(pool, registry, entity_id, base).await.ok()?;
+        let (files, cut, at) = working::names(&path, &base.git).await.ok()?;
+        let mut names = RangeNames::of(
+            &files,
+            cut,
+            working_range(repo, &base, Vec::new()),
+            String::new(),
+        );
+        names.working = Some(at);
+        return Some(names);
+    }
     let repo = repo_of(pool, entity_id).await.ok()?.entity_id?;
     let path = resolve(pool, &repo).await.ok()?.path?;
     let (base_tip, head_tip) = tokio::join!(
@@ -744,6 +775,7 @@ pub struct LocalStat {
 impl LocalStat {
     fn answer(self, repository: &str, predicted_at: Option<String>) -> RangeFiles {
         RangeFiles {
+            working: None,
             files: self.files,
             truncated: self.truncated,
             range: self.base.map(|base| knobas_source::view::DiffRange {
@@ -1172,6 +1204,129 @@ fn file_of(raw: Raw, added: Option<u32>, deleted: Option<u32>) -> DiffFile {
     }
 }
 
+// -- the working tree as the head (ux26) -----------------------------------------
+
+/// The repository of `entity_id`, its checkout, and `base` resolved there for
+/// a read of the working tree ([`working`]): a sha as the checkout holds it,
+/// a branch name as the merge base of the tip the mirror holds for it and
+/// `HEAD`. A branch tip the checkout lacks is fetched behind the refusal
+/// (ADR-0041); a sha nobody names never is.
+async fn working_at(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+) -> Result<(String, std::path::PathBuf, working::Base), IpcError> {
+    let repo = repo_of(pool, entity_id).await?.entity_id.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "{entity_id} belongs to no repository in the mirror"
+        ))
+    })?;
+    let path = checkout_path(pool, &repo).await.ok_or_else(|| {
+        IpcError::not_found(
+            "This repository is not cloned on this computer, so it has no working tree here.",
+        )
+    })?;
+    if working::is_end(base) {
+        return Err(IpcError::invalid(
+            "A diff can end at the working tree, not start from it.",
+        ));
+    }
+    let stem = base.strip_suffix('^').unwrap_or(base);
+    let resolved = if is_sha(stem) {
+        working::sha_base(&path, base).await
+    } else {
+        let tip = branch_tip(pool, registry, &repo, base)
+            .await?
+            .ok_or_else(|| {
+                IpcError::not_found(format!("{repo} has no branch {base} in the mirror"))
+            })?;
+        let resolved = working::branch_base(&path, base, &tip.commit).await;
+        if matches!(resolved, Err(working::Refused::Missing(_))) {
+            let path = path.to_string_lossy().into_owned();
+            super::fetch::Fetches::global()
+                .behind(pool, registry, &repo, &path, &tip.commit)
+                .await;
+        }
+        resolved
+    };
+    let base = resolved.map_err(|refused| refused.to_ipc())?;
+    Ok((repo, path, base))
+}
+
+/// The range a working-tree answer names: its base the resolved sha (the
+/// empty tree's base as asked, `<root>^`), its head [`working::END`].
+fn working_range(
+    repository: String,
+    base: &working::Base,
+    commits: Vec<knobas_source::view::RangeCommit>,
+) -> knobas_source::view::DiffRange {
+    knobas_source::view::DiffRange {
+        repository,
+        base: base.sha.clone().unwrap_or_else(|| base.git.clone()),
+        head: working::END.to_owned(),
+        commits,
+        reviewed: None,
+    }
+}
+
+/// [`range_files`] for the working tree: git's names and counts at the
+/// checkout and the untracked files' line counts, with the commits `HEAD`
+/// has that the base lacks.
+async fn working_files(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    ignore_whitespace: bool,
+) -> Result<RangeFiles, IpcError> {
+    let (repo, path, base) = working_at(pool, registry, entity_id, base).await?;
+    let (files, truncated, at) = working::counted(&path, &base.git, ignore_whitespace)
+        .await
+        .map_err(|refused| refused.to_ipc())?;
+    let commits = match (&base.sha, &at.head) {
+        (Some(from), Some(head)) => log(&Reader::at(&path), Some(from), head).await,
+        _ => Vec::new(),
+    };
+    Ok(RangeFiles {
+        files,
+        truncated,
+        range: Some(working_range(repo, &base, commits)),
+        read_at: DiffReadAt::Checkout,
+        predicted_at: None,
+        held_at: None,
+        first_pages: None,
+        working: Some(at),
+    })
+}
+
+/// [`range_diff`](super::range_diff) for the working tree: the whole patch at
+/// the checkout, capped as the uncommitted diff is, with the untracked files.
+///
+/// # Errors
+///
+/// As [`working_at`] and [`working::Refused`].
+pub async fn working_diff(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+    base: &str,
+    ignore_whitespace: bool,
+) -> Result<RangeDiff, IpcError> {
+    let (repo, path, base) = working_at(pool, registry, entity_id, base).await?;
+    let (files, truncated, at) = working::whole(&path, &base.git, ignore_whitespace)
+        .await
+        .map_err(|refused| refused.to_ipc())?;
+    Ok(RangeDiff {
+        files,
+        truncated,
+        range: Some(working_range(repo, &base, Vec::new())),
+        read_at: DiffReadAt::Checkout,
+        predicted_at: None,
+        working: Some(at),
+    })
+}
+
 // -- one file ------------------------------------------------------------------
 
 /// Page `from` of the file at `path` (moved from `old_path`) in `base`...`head`
@@ -1204,6 +1359,22 @@ pub async fn range_file(
             "the diff from {base} to {head} changes no file {path}"
         ))
     };
+    if working::is_end(head) {
+        let (_, at, base) = working_at(pool, registry.as_ref(), entity_id, base).await?;
+        let ask = [RangeFileAsk {
+            path: path.to_owned(),
+            old_path: old_path.map(str::to_owned),
+        }];
+        let found = working::files(&at, &base.git, &ask, ignore_whitespace)
+            .await
+            .map_err(|r| r.to_ipc())?;
+        return found
+            .into_iter()
+            .next()
+            .flatten()
+            .map(|file| page(&file, from))
+            .ok_or_else(missing);
+    }
     if let Some(repo) = checkout_of(pool, entity_id).await
         && let Some(file) = file(&repo, base, head, path, old_path, ignore_whitespace).await
     {
@@ -1301,6 +1472,16 @@ pub async fn range_file_pages(
     }
     if files.is_empty() {
         return Ok(Vec::new());
+    }
+    if working::is_end(head) {
+        let (_, at, base) = working_at(pool, registry.as_ref(), entity_id, base).await?;
+        let found = working::files(&at, &base.git, files, ignore_whitespace)
+            .await
+            .map_err(|r| r.to_ipc())?;
+        return Ok(found
+            .iter()
+            .map(|file| file.as_ref().map(|f| page(f, 0)))
+            .collect());
     }
     if let Some(repo) = checkout_of(pool, entity_id).await
         && let Some(found) = files_at(&repo, base, head, files, ignore_whitespace).await
@@ -2007,6 +2188,7 @@ mod tests {
         let (dir, base, head) = repo();
         let files = whole(dir.path(), &base, &head);
         let diff = RangeDiff {
+            working: None,
             files: files.clone(),
             truncated: false,
             range: Some(range_of(&base, &head)),
@@ -2041,6 +2223,7 @@ mod tests {
             "the list itself still carries no lines"
         );
         let by_name = RangeDiff {
+            working: None,
             files,
             truncated: false,
             range: Some(range_of("main", &head)),
@@ -2114,6 +2297,7 @@ mod tests {
         let k = Kept(Mutex::new(VecDeque::new()));
         let diff = |n: usize| {
             Arc::new(RangeDiff {
+                working: None,
                 files: Vec::new(),
                 truncated: n.is_multiple_of(2),
                 range: None,

@@ -100,7 +100,9 @@
   import TfDiffView from "./TfDiffView.svelte";
   import TfWhitespaceBox from "./TfWhitespaceBox.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
-  import { compareSection } from "./address";
+  import { compareSection, diffHash, isWorkingTree, WORKING_TREE } from "./address";
+  import { onFocusWhileShown } from "../while-shown.svelte";
+  import type { WorkingAt } from "../../ipc/entity";
   import { rangeContext } from "./context";
 
   let {
@@ -139,6 +141,12 @@
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
 
   const section = $derived(compareSection(base, head));
+  /** The head is the working tree (ux26): read at the checkout, again on focus, never kept between visits. */
+  const working = $derived(isWorkingTree(head));
+  /** The working tree asked as the base: a diff can end there, not start from it. */
+  const backwards = $derived(isWorkingTree(base));
+  /** Where the working tree stood when the drawn list was read: the view's epoch. */
+  let workingAt = $state.raw<WorkingAt | null>(null);
   const crumbs = $derived<Crumb[]>([
     { name: "Code", href: "#/code" },
     title === null ? { name: "Repository", href: repoHash(repoId) } : { name: title, href: repoHash(repoId), code: true },
@@ -165,7 +173,7 @@
   });
 
   $effect(() => {
-    if (!ready) return;
+    if (!ready || backwards) return;
     const id = repoId;
     const [from, to] = [base, head];
     const ws = ignoreWhitespace;
@@ -179,9 +187,21 @@
     };
   });
 
+  // The working tree read again on the window's focus too: a person comes back from their editor (ux26).
+  onFocusWhileShown(
+    () => visible,
+    () => {
+      if (!working || files === null) return;
+      const id = repoId;
+      const [from, to] = [base, head];
+      const ws = ignoreWhitespace;
+      read(id, from, to, ws, () => repoId === id && base === from && head === to && ignoreWhitespace === ws, true);
+    },
+  );
   onShownAgain(
     () => visible,
     () => {
+      if (backwards) return;
       const id = repoId;
       const [from, to] = [base, head];
       const ws = ignoreWhitespace;
@@ -206,7 +226,7 @@
     // *Open as diff* of a compare drawn this session (the big-compare pass, 2026-11-16): the list it drew between these two
     // commits, and its files' lines kept, drawn in this page's first frame, read no second time. Two whole shas name a
     // diff that never changes, so there is nothing to read again behind it, on a return either.
-    const drew = listing !== undefined && ports.rangeFile !== undefined && !ws ? keptList(id, from, to) : undefined;
+    const drew = listing !== undefined && ports.rangeFile !== undefined && !ws && !isWorkingTree(to) ? keptList(id, from, to) : undefined;
     if (drew !== undefined) {
       reading = false;
       fill = rangeFill(ports.rangeFile!, id, fillEnds(drew, from, to), ws, stopRead, ports.rangeFilePages, drew.read_at === "checkout");
@@ -216,17 +236,26 @@
       readAt = drew.read_at;
       return Promise.resolve();
     }
-    reading = true;
+    // Read again behind what is drawn (shown again, the window's focus), the diff stays live and undimmed.
+    if (!again) reading = true;
     const answer: Promise<RangeDiff> = listing !== undefined && ports.rangeFile !== undefined ? listing(id, from, to, ws, name) : ports.rangeDiff(id, from, to, ws);
     return answer.then(
       (answered) => {
         if (!alive()) return;
+        // The working tree as it stood: nothing is laid down again.
+        if (again && answered.working !== undefined && workingAt !== null && answered.working.stamp === workingAt.stamp) return;
+        workingAt = answered.working ?? null;
         // The first files' lines the list came with, kept for the fill's first asks (Fable's ruling, the ux18 pass).
         const diff = listing !== undefined && ports.rangeFile !== undefined ? seedPages(id, answered as RangeFiles) : answered;
         reading = false;
+        // Nothing read ahead in a working tree: each batch is a start of git, and the tree may move under it.
+        const ahead = diff.read_at === "checkout" && !isWorkingTree(to);
+        const sameFill = again && fill !== null && isWorkingTree(to);
         fill =
           listing !== undefined && ports.rangeFile !== undefined
-            ? rangeFill(ports.rangeFile, id, fillEnds(diff, from, to), ws, stopRead, ports.rangeFilePages, diff.read_at === "checkout")
+            ? sameFill
+              ? fill
+              : rangeFill(ports.rangeFile, id, fillEnds(diff, from, to), ws, stopRead, ports.rangeFilePages, ahead)
             : null;
         files = diff.files;
         cut = diff.truncated;
@@ -277,12 +306,21 @@
       <h1 class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</h1>
       <div class="tf-sub">In <a class="tf-mono" href={repoHash(repoId, "commits")}>{title ?? repoId}</a></div>
     </div>
-    <div class="tf-acts"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} size="md" /></div>
+    <div class="tf-acts"><TfOpenObject entityId={repoId} object={working || backwards ? { kind: "repository" } : { kind: "range", base, head }} size="md" /></div>
   </header>
   <div class="tf-cbody">
   <!-- With no diff drawn there is no toolbar, and a tick that left nothing to draw must still come off. -->
   {#if readAt !== null && ignoreWhitespace && (files === null || files.length === 0)}
     <div class="tf-diffws">{@render whitespace()}</div>
+  {/if}
+  {#if backwards}
+    <div class="tf-empty">
+      <p>A diff can end at the working tree, not start from it.</p>
+      <a class="tf-btn tf-sm" href={diffHash(repoId, head, WORKING_TREE)}>Compare {shown(head)} with the working tree</a>
+    </div>
+  {:else}
+  {#if working && failed !== null && /not cloned on this computer/.test(failed)}
+    <p class="tf-cnote">This repository is not cloned on this computer, so it has no working tree here. <a href={repoHash(repoId, "local")}>Local changes</a></p>
   {/if}
   <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
     {#if files !== null && files.length === 0}
@@ -292,9 +330,19 @@
         <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
       {/if}
       {#key `${section}\n${range?.base}\n${range?.head}\n${ignoreWhitespace}`}
-        <TfDiffView {files} {cut} {context} {fill} sideNames={range === null ? null : () => ({ old: endWords(range!.base), new: endWords(range!.head) })} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
+        <TfDiffView
+          {files}
+          {cut}
+          {context}
+          {fill}
+          epoch={workingAt?.stamp ?? null}
+          sideNames={range === null ? null : () => ({ old: endWords(range!.base), new: working ? "working tree" : endWords(range!.head) })}
+          openAt={{ entityId: repoId, at: working ? null : head }}
+          tools={readAt === null ? null : whitespace}
+        />
       {/key}
     {/if}
   </TfWaiting>
+  {/if}
   </div>
 </div>

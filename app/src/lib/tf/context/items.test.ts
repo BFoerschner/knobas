@@ -115,6 +115,21 @@ test("a commit: its applications are the ones with a commit command, and both ha
   expect(item(entries, "copy-short")).toMatchObject({ hint: "c90d11e", act: { text: "c90d11e" } });
 });
 
+test("a commit of a repository cloned here offers Compare with working tree after Open; elsewhere none (ux26)", () => {
+  const sha = "c90d11e4a7b2c90d11e4a7b2c90d11e4a7b2c90d";
+  const thing = { kind: "commit", id: `gitea:t/pay@${sha}`, repoId: "gitea:t/pay", hash: "#/x" } as const;
+  const cloned = menuFor(thing, null, ctx({ checkout: (id) => id === "gitea:t/pay" }));
+  expect(ids(cloned).slice(0, 3)).toEqual(["open", "compare-working", "|"]);
+  expect(item(cloned, "compare-working").act).toEqual({ do: "go", hash: `#/diff/gitea%3At%2Fpay/${sha}/~working-tree` });
+  expect(ids(menuFor(thing, null, ctx({ checkout: () => false })))).not.toContain("compare-working");
+  expect(ids(menuFor(thing, null, ctx()))).not.toContain("compare-working");
+});
+
+test("a branch name offers Compare with working tree, the branch as Into (ux26)", () => {
+  const entries = menuFor({ kind: "branch-name", repoId: "gitea:t/pay", name: "main" } as never, null, ctx());
+  expect(item(entries, "compare-working").act).toEqual({ do: "go", hash: "#/repo/gitea%3At%2Fpay/compare/main...~working-tree" });
+});
+
 test("a run: its log and tests, Re-run queued, its page on TeamCity", () => {
   const entries = menuFor({ kind: "run", id: "tc:9", pipelineId: "tc:Pay", hash: "#/build/tc%3APay/tc%3A9" }, null, ctx());
   expect(ids(entries)).toEqual(["open", "log", "tests", "rerun", "|", "web", "|", "copy-link"]);

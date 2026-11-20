@@ -718,6 +718,12 @@ pub async fn entity_file_bytes_inner(
     commit: Option<&str>,
 ) -> Result<Vec<u8>, IpcError> {
     use knobas_source::view::{BYTES_CAP, FileBytes};
+    // The working tree's or the index's file (ux26): read at the checkout, never the source.
+    if let Some(end) = commit
+        .filter(|c| *c == crate::checkout::working::END || *c == crate::checkout::working::INDEX)
+    {
+        return working_bytes(pool, entity_id, end, path).await;
+    }
     // A file at a sha the checkout holds is read there (ADR-0041): a README's
     // images, a PDF, with no request to the source.
     if let Some(commit) = commit {
@@ -810,6 +816,28 @@ pub async fn entity_file_piped_inner(
     steps: &[crate::file_pipeline::PipeStep],
 ) -> Result<crate::file_pipeline::PipeRun, IpcError> {
     use crate::file_pipeline::{Limits, Piped, run_on_file};
+    // A pipeline over the working tree's or the index's file (ux26): its bytes from the checkout, run here.
+    if let Some(end) = commit
+        .filter(|c| *c == crate::checkout::working::END || *c == crate::checkout::working::INDEX)
+    {
+        let bytes = working_bytes(pool, entity_id, end, path).await?;
+        let commands = if steps
+            .iter()
+            .any(|step| matches!(step, crate::file_pipeline::PipeStep::Command { .. }))
+        {
+            crate::file_pipeline::saved::command_steps(pool).await?
+        } else {
+            Vec::new()
+        };
+        return Ok(crate::file_pipeline::run_bytes_with(
+            steps,
+            &commands,
+            bytes,
+            path,
+            Limits::default(),
+        )
+        .await);
+    }
     let piped = run_on_file(
         pool,
         secrets,
@@ -832,6 +860,34 @@ pub async fn entity_file_piped_inner(
         ))),
         Piped::NoBytes => Err(IpcError::invalid(format!(
             "{entity_id}'s source reads no file bytes"
+        ))),
+    }
+}
+
+/// The bytes of `path` at the working tree or the index of `entity_id`'s
+/// checkout, as [`entity_file_bytes_inner`] answers them.
+async fn working_bytes(
+    pool: &PgPool,
+    entity_id: &str,
+    end: &str,
+    path: &str,
+) -> Result<Vec<u8>, IpcError> {
+    use crate::checkout::working::Bytes;
+    let cap = knobas_source::view::BYTES_CAP;
+    match crate::checkout::working_file_bytes(pool, entity_id, end, path, cap).await? {
+        Bytes::Read(bytes) => Ok(bytes),
+        Bytes::TooLarge(size) => Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads a file's bytes up to {}",
+            mebibytes(size),
+            mebibytes(cap)
+        ))),
+        Bytes::NotThere => Err(IpcError::not_found(format!(
+            "git lists no file {path} in {}",
+            if end == crate::checkout::working::INDEX {
+                "the index"
+            } else {
+                "the working tree"
+            }
         ))),
     }
 }

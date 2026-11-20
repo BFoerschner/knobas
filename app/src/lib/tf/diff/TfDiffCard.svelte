@@ -115,6 +115,7 @@
     onpick = () => {},
     onmakedefault = () => {},
     frame = undefined,
+    epoch = 0,
     openAt = null,
     repository = null,
     pipeline = null,
@@ -165,6 +166,8 @@
     onmakedefault?: (renderer: Renderer) => void;
     /** Keeps a page's sanitized document for its frame: the IPC by default. */
     frame?: ((document: string) => Promise<string>) | undefined;
+    /** Counts the working tree's states seen (`TfDiffView`'s `epoch`): a new one reads the rendered sides again. */
+    epoch?: number;
     /** The repository an outdated thread's commit is in (#2318): its *at <sha>* links that commit's diff. */
     repository?: string | null;
     /** *Open in…* in the header, on the file at its first changed line; never on a deleted file. */
@@ -387,7 +390,7 @@
   }
   const old = $derived(file.old_path && file.old_path !== file.path ? file.old_path : null);
   /** A local change's label says how it stands (*modified, not staged*): words, so not in the path's mono. */
-  const shownHow = $derived(/ \(([^()]*(?:not staged|staged))\)$/.exec(keyOf(file))?.[1] ?? null);
+  const shownHow = $derived(/ \(([^()]*(?:not staged|staged|untracked))\)$/.exec(keyOf(file))?.[1] ?? null);
   const shownPath = $derived(shownHow === null ? keyOf(file) : keyOf(file).slice(0, keyOf(file).lastIndexOf(" (")));
   const badge = $derived(badgeOf(file));
   const chip = $derived(isLock(file.path) ? "lock file" : isGenerated(file.path) ? "generated" : null);
@@ -594,7 +597,7 @@
       <div class="tf-banner tf-warn tf-coarse">Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.</div>
     {/if}
     {#if rendered !== null && shows !== "lines"}
-      <TfDiffRendered plan={rendered} path={file.path} {sides} {sideOf} {load} {ends} {choices} {opened} {pattern} {onpick} {onmakedefault} {render} {commands} {...frame ? { frame } : {}} />
+      <TfDiffRendered plan={rendered} path={file.path} {sides} {sideOf} {load} {ends} {choices} {opened} {pattern} {onpick} {onmakedefault} {epoch} {render} {commands} {...frame ? { frame } : {}} />
     {:else if file.change === "binary"}
       <div class="tf-dfwhy">A binary file: no lines to draw.</div>
     {:else if !drawsLines}

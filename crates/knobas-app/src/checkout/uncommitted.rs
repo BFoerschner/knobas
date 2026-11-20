@@ -103,6 +103,12 @@ pub struct UncommittedDiff {
     /// More than [`MAX_UNTRACKED`] paths were untracked; the rest are not
     /// listed.
     pub untracked_truncated: bool,
+    /// The checkout's stamp this was read at, as hex (ux26): the page's
+    /// epoch, so a re-read on focus that brings a new one reads its rendered
+    /// sides again. Absent where the stamp could not read the checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stamp: Option<String>,
 }
 
 /// The answer the *Local changes* tab draws: the diff, or why there is none.
@@ -174,7 +180,10 @@ async fn read_known_with(path: &Path, read: impl AsyncFnOnce(&Path) -> DiffRead)
     {
         return diff;
     }
-    let diff = read(path).await;
+    let mut diff = read(path).await;
+    if let (Some(stamp), DiffRead::Read(read)) = (stamp, &mut diff) {
+        read.stamp = Some(format!("{stamp:016x}"));
+    }
     let mut known = known();
     known.retain(|(kept, _, _)| kept != path);
     if let (Some(stamp), DiffRead::Read(_)) = (stamp, &diff) {
@@ -235,6 +244,7 @@ async fn read_guarded(search: &OsStr, path: &Path, timeout: Duration, caps: Read
             staged,
             untracked,
             untracked_truncated,
+            stamp: None,
         })
     };
     match tokio::time::timeout(timeout, all).await {

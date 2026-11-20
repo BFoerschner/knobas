@@ -73,7 +73,7 @@
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
-  import type { DiffFile, DiffRange, RangeCommit, RangeDiff, RangeFiles } from "../../ipc/entity";
+  import type { CheckoutView, DiffFile, DiffRange, RangeCommit, RangeDiff, RangeFiles } from "../../ipc/entity";
   import type { DiffFill } from "../diff/diff";
   import { fillEnds, keepList, namesList, rangeFill, seedPages } from "../diff/fill";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
@@ -83,7 +83,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
-  import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
+  import { compareSection, diffHash, rangeDiffVia, WORKING_TREE } from "../diff/address";
   import { endWords } from "../diff/rendered";
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
@@ -131,6 +131,7 @@
     guessed = null,
     pulls = "failed",
     onNewBranch = () => {},
+    checkout = undefined,
   }: {
     ports: Pick<RepoPorts, "entityView" | "behindView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "sourceRangeDiff" | "rangeFiles" | "rangeFile" | "rangeFilePages" | "sourceRangeFiles" | "cancelRead" | "rangeNames" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -159,6 +160,11 @@
     pulls?: readonly BranchPull[] | "failed" | null;
     /** Opens *New branch…*, which is what a repository of one branch can do here. */
     onNewBranch?: () => void;
+    /**
+     * The repository's checkout (ux26): *From* offers the working tree first, drawn disabled with why where the
+     * repository is not cloned here, and plain while `entity_checkout` has not answered (`undefined`).
+     */
+    checkout?: CheckoutView | undefined;
   } = $props();
 
   /** One branch or none, and the address names no other: there is nothing to compare. */
@@ -734,6 +740,11 @@
    * to the default branch once *From* leaves it. The address names *Into* wherever it is not the default branch.
    */
   function pickFrom(value: string) {
+    // The working tree (ux26): *Into* stays, the default branch unnamed.
+    if (value === WORKING_TREE) {
+      location.hash = compareHash(repoId, WORKING_TREE, base === defaultBranch ? null : base);
+      return;
+    }
     let next = base;
     if (value === defaultBranch && base === value) {
       const came = head !== null && head !== value && branches.some((option) => option.name === head) ? head : null;
@@ -920,6 +931,9 @@
           value={head ?? ""}
           onchange={(event) => pickFrom((event.currentTarget as HTMLSelectElement).value)}
         >
+          <option value={WORKING_TREE} disabled={checkout !== undefined && checkout.path === null}
+            >{checkout !== undefined && checkout.path === null ? "Working tree: not cloned on this computer" : "Working tree"}</option
+          >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
         {#if !openPr && sentFrom === undefined}

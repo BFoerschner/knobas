@@ -3,8 +3,9 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-long-paths`, `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, WorkingAt } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
+import { lineDiff } from "../../../tf/diff/line-diff";
 import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
@@ -113,10 +114,82 @@ function fakeRangeFiles(entityId: string, base: string, head: string, diff: Rang
 
 /** `entity_range_file`: one file of the fake compare, whole in one page (the fake has no file long enough to page). */
 function fakeRangeFile(entityId: string, base: string, head: string, path: string, from: number, ignoreWhitespace: boolean): RangeFilePage {
-  const diff = listedDiffs.get(`${entityId}\n${base}\n${head}`) ?? fakeRangeDiff(entityId, base, head, ignoreWhitespace);
+  const diff = listedDiffs.get(`${entityId}\n${base}\n${head}`) ?? (head === WORKING ? fakeWorking(entityId).diff : fakeRangeDiff(entityId, base, head, ignoreWhitespace));
   const file = diff.files.find((one) => one.path === path);
   if (file === undefined) throw { code: "not_found", message: `the diff changes no file ${path}`, source_id: null };
   return { file, from, continues: false, next: null };
+}
+
+/** The working tree's token (ux26, `tf/diff/address.ts`). */
+const WORKING = "~working-tree";
+
+/**
+ * The fixture's working tree against any base (ux26, ADR-0048): what its one uncommitted change, a Markdown file, a
+ * drawing and a new untracked note make, each file's text before and after, so a rendered side reads the same words
+ * `entity_file_bytes` hands it for `~working-tree` and for the base's sha.
+ */
+const WORKING_FILES: Record<string, [before: string | null, after: string]> = {
+  "docs/retry.md": [
+    "# Retrying a payout\n\nA payout that fails with a transient code is sent again.\n\n## Steps\n\n- Validate the mandate\n- Submit the debit\n- Retry once after 24 h\n",
+    "# Retrying a payout\n\nA payout that fails with a transient code is sent again with exponential backoff.\n\n## Steps\n\n- Validate the mandate\n- Submit the debit\n- Retry three times, 24 h, 48 h and 96 h apart\n- Alert the payments channel when the last retry fails\n",
+  ],
+  "docs/flow.mmd": ["flowchart LR\n  validate --> submit\n", "flowchart LR\n  validate --> submit\n  submit -->|transient| retry\n  retry --> submit\n"],
+  "notes/new-idea.md": [null, "# A new idea\n\nKeep the retry count in the ledger, not in memory.\n"],
+};
+const WORKING_BASE = "4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a";
+/** `?fake-touched`: every ask finds the tree touched since the last (a new stamp each time). */
+let workingAsks = 0;
+const touched = () => new URLSearchParams(globalThis.location?.search).has("fake-touched");
+
+/** The fixture's working tree as `entity_range_files` answers it for `~working-tree`; refused with no checkout. */
+function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } {
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) throw { code: "not_found", message: "This repository is not cloned on this computer, so it has no working tree here.", source_id: null };
+  const local = fakeCheckoutDiff(entityId);
+  const tracked = local.status === "read" ? local.unstaged.files.filter((file) => WORKING_FILES[file.path] === undefined) : [];
+  const made = Object.entries(WORKING_FILES).map(([path, [before, after]]) => {
+    const file = lineDiff(path, before ?? "", after);
+    return { ...file, change: before === null ? "added" : file.change } as DiffFile;
+  });
+  const files = [...tracked, ...made].sort((a, b) => (a.path < b.path ? -1 : 1));
+  const tree = checkout.tree?.status === "read" ? checkout.tree : null;
+  workingAsks += 1;
+  return {
+    diff: { files, truncated: false, range: { repository: entityId, base: WORKING_BASE, head: WORKING, commits: [] }, read_at: "checkout" },
+    working: {
+      stamp: touched() ? `touched-${workingAsks}` : "fixed",
+      head: tree?.head ?? "9c1d2aa0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a",
+      branch: tree?.branch ?? null,
+      untracked: ["notes/new-idea.md"],
+      untracked_truncated: false,
+    },
+  };
+}
+
+/** A working-tree file's bytes at `~working-tree` (after) or any other end (before); `undefined` for a file it does not hold. */
+export function fakeWorkingBytes(path: string, commit: string | null): Uint8Array | undefined {
+  const sides = WORKING_FILES[path];
+  // Only the working tree's own ends: every other commit reads the fixture's files as before.
+  if (sides === undefined || (commit !== WORKING && commit !== "~index" && commit !== WORKING_BASE)) return undefined;
+  const text = commit === WORKING ? sides[1] : sides[0];
+  if (text === null) throw { code: "not_found", message: `no file ${path} there`, source_id: null };
+  return new TextEncoder().encode(text);
+}
+
+/** The names `entity_range_names` answers for the working tree: the list less its counts. */
+function fakeWorkingNames(entityId: string): RangeNames {
+  const { diff, working } = fakeWorking(entityId);
+  const letter = { added: "A", deleted: "D", renamed: "R", modified: "M", binary: "M" } as const;
+  return {
+    paths: diff.files.map((f) => f.path),
+    changes: diff.files.map((f) => letter[f.change]).join(""),
+    renamed: [],
+    modes: [],
+    truncated: false,
+    range: diff.range!,
+    predicted_at: "",
+    working,
+  };
 }
 
 /**
@@ -226,6 +299,8 @@ function fakeCheckoutDiff(entityId: string): DiffRead {
           truncated: false,
           threads: [],
         },
+        // A Markdown file edited too (ux26): Local changes draws it rendered, the index against the working tree.
+        { ...lineDiff("docs/retry.md", WORKING_FILES["docs/retry.md"]![0]!, WORKING_FILES["docs/retry.md"]![1]), change: "modified" } as DiffFile,
       ],
       truncated: false,
     },
@@ -634,7 +709,9 @@ export function handlers(): Handlers {
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
     entity_range_diff: (args) =>
-      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
+      String(args["head"] ?? "") === WORKING
+        ? { ...fakeWorking(String(args["entityId"] ?? "")).diff, working: fakeWorking(String(args["entityId"] ?? "")).working }
+        : fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
     entity_commit_diff: (args) =>
       fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
@@ -647,10 +724,14 @@ export function handlers(): Handlers {
       fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),
     entity_range_files: (args) => {
       const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      if (head === WORKING) {
+        const { diff, working } = fakeWorking(id);
+        return { ...fakeRangeFiles(id, base, head, diff), working };
+      }
       return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, args["ignoreWhitespace"] === true));
     },
-    // The fake checkouts list their compares whole: Compare reads the list as before.
-    entity_range_names: () => null,
+    // The fake checkouts list their compares whole: Compare reads the list as before. The working tree's names come first.
+    entity_range_names: (args) => (String(args["head"] ?? "") === WORKING ? fakeWorkingNames(String(args["entityId"] ?? "")) : null),
     entity_source_range_files: (args) => {
       const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
       return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, false));

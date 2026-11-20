@@ -62,6 +62,7 @@
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import { codeFacts, entityBriefs, entityCheckouts, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
+  import { heardCheckout } from "../repo/cloned-here.svelte";
   import { listSources } from "../../ipc/sources";
   import { CODE_HOST } from "../roles.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -426,7 +427,11 @@
           const ids = queue.splice(0, CHECKOUT_BATCH);
           try {
             const answers = await ports.entityCheckouts(ids);
-            if (alive()) for (const answer of answers) checkouts[answer.entity_id] = answer.checkout;
+            if (alive())
+              for (const answer of answers) {
+                checkouts[answer.entity_id] = answer.checkout;
+                heardCheckout(answer.entity_id, answer.checkout.path);
+              }
           } catch {
             // An unreadable checkout leaves the cell empty rather than claiming one.
           }

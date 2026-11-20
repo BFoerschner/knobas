@@ -114,6 +114,8 @@ export interface DiffReview {
  */
 export type DrawnFile = DiffFile & {
   label?: string;
+  /** Which of *Local changes*' halves it is in (ux26): staged is `HEAD` against the index, not staged the index against the working tree. */
+  half?: "staged" | "unstaged";
   /** Worked out here (`lineDiff`) with a changed middle too long to match line by line: drawn removed whole, then added whole. */
   coarse?: true;
 };

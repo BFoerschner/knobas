@@ -295,6 +295,9 @@
   import TfNewBranch from "./TfNewBranch.svelte";
   import TfRepoBranches from "./TfRepoBranches.svelte";
   import TfRepoCompare from "./TfRepoCompare.svelte";
+  import TfRepoCompareWorking from "./TfRepoCompareWorking.svelte";
+  import { heardCheckout } from "./cloned-here.svelte";
+  import { isWorkingTree } from "../diff/address";
   import TfRepoPrs from "./TfRepoPrs.svelte";
   import TfRepoBuilds from "./TfRepoBuilds.svelte";
   import { latestOn, yoursOf } from "./repo-builds";
@@ -848,6 +851,7 @@
         if (!alive()) return;
         checkout = view;
         checkoutAnswered = true;
+        heardCheckout(id, view.path);
         const tree = view.tree;
         if (tree?.status !== "read" || tree.changed + tree.untracked === 0) {
           local = null;
@@ -1441,7 +1445,7 @@
           {@const refreshed = held.reads[one] ?? 0}
           {#if one === "local"}
             <TfRepoTab shown={one === slot}>
-              <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
+              <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} fileBytes={ports.fileBytes ?? null} piped={ports.piped ?? null} />
             </TfRepoTab>
           {:else if at !== null && (branchName !== null || filesAtOnce(one))}
             <!-- The rest wait for the branch every tab reads at: the mirror's default, or the list's (#2243). Files
@@ -1475,9 +1479,21 @@
                 <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
               {:else if one === "branches"}
                 <TfRepoBranches {ports} {repoId} {source} {refreshed} {builds} />
+              {:else if one === "compare" && known !== null && isWorkingTree(placeOf(one).branch)}
+                <!-- *From* the working tree (ux26): its own page, so no branch read starts for a name that is no branch. -->
+                <TfRepoCompareWorking
+                  {ports}
+                  {repoId}
+                  branches={known}
+                  base={placeOf(one).base}
+                  defaultBranch={defaultBranch?.name ?? null}
+                  {checkout}
+                  {refreshed}
+                />
               {:else if one === "compare" && known !== null}
                 {#key compareGen}
                 <TfRepoCompare
+                  {checkout}
                   {ports}
                   {repoId}
                   {source}

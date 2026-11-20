@@ -13,7 +13,8 @@
  */
 import { isIpcError } from "../../ipc";
 import type { DiffFile, DiffRange, PipeRun, PipeStep, SourceView } from "../../ipc/entity";
-import type { DiffContext } from "./diff";
+import { INDEX, isWorkingTree, WORKING_TREE } from "./address";
+import type { DiffContext, DrawnFile } from "./diff";
 
 type Read = (entityId: string, section: string | null) => Promise<SourceView | null>;
 /** The byte read (#2256): a file's bytes at an entity; `commit` `null` is a commit entity's own sha. */
@@ -98,7 +99,48 @@ export function rangeContext(read: Read, range: DiffRange, bytes?: ReadBytes, pi
       : {}),
     async text(file, side) {
       const { sha, path } = at(file, side);
+      // No source holds the working tree: its side is its bytes, decoded (ux26).
+      if (isWorkingTree(sha) && bytes) {
+        const got = await bytes(range.repository, path, sha).catch((cause) => {
+          if (isIpcError(cause) && cause.code === "not_found") return null;
+          throw cause;
+        });
+        return got === null ? null : new TextDecoder().decode(got);
+      }
       return wholeFileText(await read(range.repository, fileAtSection(sha, path)));
+    },
+  };
+}
+
+/**
+ * The reader for *Local changes*' two halves (ux26): a file not staged is the index against the working tree, a staged
+ * one `HEAD` (`head`, its whole sha) against the index; each side read at the checkout (`entity_file_bytes` with the
+ * end's token), never the source. Its text is its bytes, decoded. `head` `null` (no commit yet): a staged file has no
+ * side before.
+ */
+export function localContext(bytes: ReadBytes, repoId: string, head: string | null, piped?: ReadPiped): DiffContext {
+  const at = (file: DrawnFile, side: "old" | "new") => {
+    const staged = file.half === "staged";
+    const end = side === "new" ? (staged ? INDEX : WORKING_TREE) : staged ? head : INDEX;
+    return { end, path: side === "old" ? (file.old_path ?? file.path) : file.path };
+  };
+  async function atSide<T>(file: DrawnFile, side: "old" | "new", ask: (path: string, end: string) => Promise<T>): Promise<T | null> {
+    const { end, path } = at(file, side);
+    if (end === null) return null;
+    try {
+      return await ask(path, end);
+    } catch (cause) {
+      if (isIpcError(cause) && cause.code === "not_found") return null;
+      throw cause;
+    }
+  }
+  const read = (file: DrawnFile, side: "old" | "new") => atSide(file, side, (path, end) => bytes(repoId, path, end));
+  return {
+    bytes: read,
+    ...(piped ? { piped: (file: DiffFile, side: "old" | "new", steps: PipeStep[]) => atSide(file, side, (path, end) => piped(repoId, path, end, steps)) } : {}),
+    async text(file, side) {
+      const got = await read(file, side);
+      return got === null ? null : new TextDecoder().decode(got);
     },
   };
 }

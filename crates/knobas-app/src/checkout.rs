@@ -60,6 +60,7 @@ pub mod range_files;
 pub mod reader;
 pub mod stamp;
 pub mod uncommitted;
+pub mod working;
 pub mod working_tree;
 pub mod worktree;
 
@@ -431,6 +432,12 @@ pub struct RangeDiff {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub predicted_at: Option<String>,
+    /// Where the working tree stood when this was read, where the head is
+    /// the working tree ([`END`](working::END), ux26): the page's
+    /// epoch. Absent on every other answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub working: Option<working::WorkingAt>,
 }
 
 /// The diff from `base` to `head` of the repository `entity_id` (#2272,
@@ -459,6 +466,17 @@ pub async fn range_diff(
     head: &str,
     ignore_whitespace: bool,
 ) -> Result<RangeDiff, IpcError> {
+    // The working tree as the head (ux26): git's own diff at the checkout, never the source.
+    if working::is_end(head) {
+        return range_files::working_diff(
+            pool,
+            registry.as_ref(),
+            entity_id,
+            base,
+            ignore_whitespace,
+        )
+        .await;
+    }
     if let Some(local) = local_diff(pool, entity_id, base, head, ignore_whitespace).await {
         return Ok(local);
     }
@@ -667,6 +685,7 @@ async fn predicted_diff(
         (a, b) => a.or(b),
     };
     Some(RangeDiff {
+        working: None,
         files: local.files,
         truncated: local.truncated,
         range: local.base.map(|base| knobas_source::view::DiffRange {
@@ -694,6 +713,7 @@ async fn local_diff(
     let path = resolve(pool, entity_id).await.ok().and_then(|c| c.path)?;
     let local = range::read(Path::new(&path), base, head, ignore_whitespace).await?;
     Some(RangeDiff {
+        working: None,
         files: local.files,
         truncated: local.truncated,
         range: local.base.map(|base| knobas_source::view::DiffRange {
@@ -738,6 +758,7 @@ fn diff_of(view: Option<knobas_source::view::SourceView>) -> Option<RangeDiff> {
                     range,
                     ..
                 } => Some(RangeDiff {
+                    working: None,
                     files,
                     truncated,
                     range,
@@ -1012,6 +1033,39 @@ pub async fn local_file_bytes(
     }
     let path = resolve(pool, entity_id).await.ok()?.path?;
     local::file_bytes(Path::new(&path), commit, file, cap).await
+}
+
+/// The bytes of `file` in the working tree ([`working::END`]) or the index
+/// ([`working::INDEX`]) of `entity_id`'s checkout (ux26): only where git
+/// lists the file there, never through a link, up to `cap`.
+///
+/// # Errors
+///
+/// [`NotFound`](crate::IpcErrorCode::NotFound) with no checkout here; as
+/// [`working::Refused`] otherwise.
+pub async fn working_file_bytes(
+    pool: &PgPool,
+    entity_id: &str,
+    end: &str,
+    file: &str,
+    cap: u64,
+) -> Result<working::Bytes, IpcError> {
+    let repo = repo_of(pool, entity_id)
+        .await?
+        .entity_id
+        .unwrap_or_else(|| entity_id.to_owned());
+    let path = resolve(pool, &repo).await?.path.ok_or_else(|| {
+        IpcError::not_found(
+            "This repository is not cloned on this computer, so it has no working tree here.",
+        )
+    })?;
+    let path = Path::new(&path);
+    let read = if end == working::INDEX {
+        working::index_bytes(path, file, cap).await
+    } else {
+        working::file_bytes(path, file, cap).await
+    };
+    read.map_err(|refused| refused.to_ipc())
 }
 
 /// [`view`] without the working tree read: where the checkout is, and no git.

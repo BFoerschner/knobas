@@ -25,7 +25,8 @@
   import TfDiffView from "../diff/TfDiffView.svelte";
   import TfWhitespaceBox from "../diff/TfWhitespaceBox.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
-  import { shaOfCommit } from "../diff/address";
+  import { diffHash, shaOfCommit, WORKING_TREE } from "../diff/address";
+  import { clonedHere } from "./cloned-here.svelte";
   import { endWords } from "../diff/rendered";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
@@ -215,6 +216,11 @@
         aria-disabled={start.disabled !== null ? "true" : undefined}
         title={start.disabled ?? undefined}
         onclick={branchHere}>New branch from here…</button>
+    {/if}
+    {#if whole !== null && clonedHere(repoId)}
+      <!-- The working tree against this commit (ux26): only where the repository is cloned here. The trail ends at the
+           row's right, so it grows to the left and moves nothing drawn beside it. -->
+      <a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, whole, WORKING_TREE)}>Compare with working tree</a>
     {/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>All commits</a>
     {#if whole !== null}<TfOpenObject entityId={repoId} object={{ kind: "commit", sha: whole }} />{/if}

@@ -7,7 +7,10 @@
     diff (`entity_checkout_diff`, ADR-0026), each file marked "modified, not
     staged" or "modified, staged", drawn by the pull request's diff block
     (`TfDiffView`); untracked files listed by name. Read when the tab opens and
-    when the window gets focus.
+    when the window gets focus. Each file can be drawn rendered (ux26): a file
+    not staged is the index against the working tree, a staged one `HEAD`
+    against the index, each side read at the checkout (`localContext`); a
+    re-read at a new stamp (`epoch`) reads its rendered sides again.
   - **Not on this machine**: *Clone*, and *It is already cloned somewhere
     else…*, which sets the path by hand (`set_checkout_override`).
 -->
@@ -23,7 +26,12 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPath from "../TfPath.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { localFiles } from "./repo";
+  import { compareHash, localFiles } from "./repo";
+  import { WORKING_TREE } from "../diff/address";
+  import { localContext } from "../diff/context";
+  import { endWords } from "../diff/rendered";
+  import type { DrawnFile } from "../diff/diff";
+  import type { PipeRun, PipeStep } from "../../ipc/entity";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import { thousands } from "../counted";
@@ -34,6 +42,8 @@
     checkout,
     readDiff,
     setPath,
+    fileBytes = null,
+    piped = null,
   }: {
     repoId: string;
     /** `owner/name`. */
@@ -44,6 +54,10 @@
     readDiff: (entityId: string) => Promise<DiffRead>;
     /** `set_checkout_override`; answers the fresh view. */
     setPath: (path: string) => Promise<void>;
+    /** `entity_file_bytes`, for a file's rendered sides at the index and the working tree; none, no rendered sides. */
+    fileBytes?: ((entityId: string, path: string, commit: string | null) => Promise<Uint8Array>) | null;
+    /** `entity_file_piped`, for a file's pipeline on both sides. */
+    piped?: ((entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>) | null;
   } = $props();
 
   let read = $state<DiffRead | null>(null);
@@ -59,6 +73,12 @@
   const files = $derived(localFiles(read));
   const untracked = $derived(read?.status === "read" ? read.untracked : []);
   const name = $derived(repoName(title));
+  const head = $derived(tree?.head ?? null);
+  const context = $derived(fileBytes === null ? null : localContext(fileBytes, repoId, head, piped ?? undefined));
+  /** A rendered file's caption: where each half's two sides are read. */
+  const sideNames = (file: DrawnFile) =>
+    file.half === "staged" ? { old: head === null ? "no commit yet" : `HEAD at ${endWords(head)}`, new: "the index" } : { old: "the index", new: "working tree" };
+  const epoch = $derived(read?.status === "read" ? (read.stamp ?? null) : null);
 
   async function load() {
     if (path === null) return;
@@ -97,7 +117,9 @@
     <TfPath {path} />
     {#if tree !== null}<span>on <span class="tf-mono">{tree.branch ?? "a detached head"}</span></span>{/if}
     {#if where !== null}<span>{where}</span>{/if}
-    <span class="tf-trail"><TfOpenIn entityId={repoId} {title} {checkout} /></span>
+    <span class="tf-trail"
+      ><a class="tf-btn tf-sm tf-ghost" href={compareHash(repoId, WORKING_TREE)}>Compare with a branch</a><TfOpenIn entityId={repoId} {title} {checkout} /></span
+    >
   </div>
   <p class="tf-dim tf-local-note">
     Read with read-only git, when you open this tab and when the window gets focus. knobas never commits, stashes or pushes
@@ -120,7 +142,7 @@
   {:else if files.length === 0 && untracked.length === 0}
     <div class="tf-empty">Working tree clean.</div>
   {:else}
-    <TfDiffView {files} />
+    <TfDiffView {files} {context} {sideNames} {epoch} openAt={{ entityId: repoId, at: null }} />
     {#if read.unstaged.truncated || read.staged.truncated}
       <p class="tf-dim tf-local-note">
         The diff is cut here: it is over knobas's ceiling of {thousands(DIFF_CEILING)} lines. Your editor has all of it.

@@ -53,6 +53,7 @@
     render = renderPort(),
     commands = ipcCommands,
     frame = folderRenderFrame,
+    epoch = 0,
   }: {
     plan: RenderedPlan;
     path: string;
@@ -76,9 +77,12 @@
     commands?: CommandPort;
     /** Keeps a page's sanitized document for its frame (`TfHtmlPage`): the IPC, a fake in tests. */
     frame?: (document: string) => Promise<string>;
+    /** Counts the working tree's states seen: each new one asks the sides again; what is drawn stays until they land. */
+    epoch?: number;
   } = $props();
 
   $effect(() => {
+    void epoch;
     for (const side of plan.sides) load(side);
   });
 

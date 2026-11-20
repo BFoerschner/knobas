@@ -2071,6 +2071,7 @@ const CASES: Case[] = [
       ["TfRepoPrs", "lib/tf/repo/TfRepoPrs.svelte", ["prs"]],
       ["TfRepoBranches", "lib/tf/repo/TfRepoBranches.svelte", ["branches"]],
       ["TfRepoCompare", "lib/tf/repo/TfRepoCompare.svelte", ["compare", "feature", "PAY-231-x"]],
+      ["TfRepoCompareWorking", "lib/tf/repo/TfRepoCompareWorking.svelte", ["compare", "~working-tree"]],
       ["TfRepoBuilds", "lib/tf/repo/TfRepoBuilds.svelte", ["builds"]],
     ] as const
   ).map(

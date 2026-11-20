@@ -48,6 +48,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
   // The band's *Rendered* and an image's mode in a rendered diff (ux26): off and side by side again.
   "tf/diff/diff-rendered.svelte.ts#diffRendered": async () => (await import("../tf/diff/diff-rendered.svelte")).diffRendered.reset(),
+  "tf/repo/cloned-here.svelte.ts#known": async () => (await import("../tf/repo/cloned-here.svelte")).forgetCheckouts(),
   "tf/diff/image-mode.svelte.ts#imageMode": async () => (await import("../tf/diff/image-mode.svelte")).imageMode.set("sides"),
   // Each role's face and size, and code's ligatures (2026-11-16, 2026-11-18), stored in `localStorage` and written on
   // <html>: each test starts on the bundled faces at 100 % with no ligatures, and reads the installed fonts afresh.

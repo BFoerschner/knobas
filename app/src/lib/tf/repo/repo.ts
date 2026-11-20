@@ -32,6 +32,7 @@ import type { WriteSource } from "../../shell/queued-toast";
 import { clockLabel } from "../../time/format";
 import { checkoutLine, prNumber } from "../code/code";
 import type { DrawnFile } from "../diff/diff";
+import { WORKING_TREE } from "../diff/address";
 import { matchesAll } from "../filter/filter";
 
 /**
@@ -175,6 +176,8 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const tail = rest.slice(2).join("/") || null;
   const cut = tab === "compare" && tail !== null ? tail.indexOf(BASE_HEAD) : -1;
   const compared = cut > 0 ? { branch: tail!.slice(cut + BASE_HEAD.length) || null, base: tail!.slice(0, cut) } : { branch: tail, base: null };
+  // The working tree is a head only (ux26): as a base it reads as no base, *Into* the default branch.
+  const base = compared.base === WORKING_TREE ? null : compared.base;
   return {
     repoId,
     tab,
@@ -183,7 +186,7 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
     commit: tab === "commits" ? (rest[2] ?? null) : null,
     // Builds' branch and pipeline are each one segment, encoded whole (`buildsHash`).
     branch: tab === "compare" ? compared.branch : tab === "builds" ? (rest[2] ?? null) : null,
-    base: tab === "compare" ? compared.base : null,
+    base: tab === "compare" ? base : null,
     pipeline: tab === "builds" ? (rest[3] ?? null) : null,
   };
 }
@@ -426,9 +429,10 @@ const CHANGE_WORD: Record<DiffFile["change"], string> = {
 export function localFiles(read: DiffRead | null): DrawnFile[] {
   if (read === null || read.status !== "read") return [];
   // A label, not the path: the path's name picks the highlighting's language.
-  const marked = (file: DiffFile, how: string): DrawnFile => ({
+  const marked = (file: DiffFile, how: "not staged" | "staged"): DrawnFile => ({
     ...file,
     label: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
+    half: how === "staged" ? "staged" : "unstaged",
   });
   return [
     ...read.unstaged.files.map((file) => marked(file, "not staged")),

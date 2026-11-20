@@ -291,6 +291,7 @@ export type {
   RangeFilePage,
   RangeFiles,
   RangeNames,
+  WorkingAt,
   ReachOrigin,
   Reached,
   RefusedWrite,

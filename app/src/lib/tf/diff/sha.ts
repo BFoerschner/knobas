@@ -20,8 +20,9 @@ export function caretOf(end: string): [stem: string, caret: string] {
   return end.endsWith("^") ? [end.slice(0, -1), "^"] : [end, ""];
 }
 
-/** A diff end shortened as the source shortens a whole sha (10 digits), its caret kept; anything else as written. */
+/** A diff end shortened as the source shortens a whole sha (10 digits), its caret kept; the working tree in words (ux26); anything else as written. */
 export function shortEnd(end: string): string {
+  if (end === "~working-tree") return "working tree";
   const [stem, caret] = caretOf(end);
   return isFullSha(stem) ? `${stem.slice(0, 10)}${caret}` : end;
 }
