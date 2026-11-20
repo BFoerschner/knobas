@@ -21,7 +21,9 @@ before.
 
 **Held by** `moves.mjs`' `asset-depends-late` (an asset holding one thing that nothing links to, the gate's shape) and
 `asset-depends-links-late` (one that also has a dependent by a link), on the fixture with the walk 250 ms after the
-pane, pressed with the pane scrolled to its end (`scroll`, which puts the panel in view at 1440x868). Before, at 1x
+pane, pressed with the pane scrolled to its end (`scroll`, which puts the panel in view at 1440x868), and drawn once
+the pressed asset's heading is (`ready`: on WSL's Chrome at 4x the press's first frame can still hold the asset it came
+from). Before, at 1x
 and 4x, first open and return: 8 of 8 opens moved at 1440x868@1 and 8 of 8 at 2560x1440@1.25 (4 px on the first, 56 px
 on the second). After: nothing moved in 16.
 
@@ -50,5 +52,20 @@ now, each held by some spaces and not others.
 Attached to a window (knobas's WebView2 window) with no `--check`, `keys.mjs` wrote its results and never exited, and
 the window kept the probe's 1440x868 size override while it lived. It now puts the CPU back, clears the size and focus
 emulation, closes its socket and exits.
+
+## Two tests that failed under the suite's load
+
+- `folder_render::runs`' tests waited for a run with a 20 s clock and then answered whatever was drawn, so a slow second
+  run read as the first one's drawing (`a_second_run_of_one_key_gets_a_folder_of_its_own`). They now wait on the run's
+  told events. The wait also showed a race in the product: a printed drawing's run, and a failed one, left the slot
+  before the drawing was remembered and written or the failure recorded, so an ask between saw neither a run nor its
+  answer, and `a_drawing_outlives_a_restart_and_goes_with_its_source` read the disk too early (2 of 20 loaded runs). A
+  run now ends once its answer is kept, as a generated folder's already did.
+- The archive spool was one folder, `$TMPDIR/knobas-archives`, emptied by each process at its first use and filled with
+  files numbered per process, so two knobas on one machine overwrote each other's spool files ("the archive is
+  corrupt"; 14 of 40 loaded runs). Each process now spools under `knobas-archive-spool/<pid>-<nanos>`, and folders there
+  untouched for twelve hours are swept at first use, as the folder renders' scratch is.
+
+40 runs of `knobas-app`'s lib suite, four at once (load 39 to 47), after both: every run passed.
 
 **Reversing** the first is `dependsDrawn`'s `answered` returning `true`.
