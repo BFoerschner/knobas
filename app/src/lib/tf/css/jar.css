@@ -26,7 +26,7 @@
 .tf-jar-head { max-width: 980px; margin-bottom: 14px; }
 .tf-jar-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0; line-height: 1.2; }
 .tf-jar-name {
-  --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 700;
+  --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600;
   font-variation-settings: "wdth" 85; font-stretch: 85%; overflow-wrap: anywhere;
 }
 .tf-jar-ver, .tf-jar-vers {

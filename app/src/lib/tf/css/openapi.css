@@ -25,7 +25,7 @@
 
 /* The head: the API's name is the page's one title. */
 .tf-oas-head { max-width: 920px; margin-bottom: 14px; }
-.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; overflow-wrap: anywhere; }
+.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; overflow-wrap: anywhere; }
 .tf-oas-vers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 0; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-hdesc { margin-top: 10px; }
 /* A spec's Markdown (its description, an operation's) sits in the view's column at body size, not as a README's page. */
@@ -55,7 +55,7 @@
 .tf-oas-list > [data-k] { scroll-margin-top: 52px; }
 
 .tf-oas-group { display: flex; align-items: baseline; gap: 10px; padding: 18px 6px 6px; border-bottom: 1px solid var(--rule); min-width: 0; }
-.tf-oas-group h3 { margin: 0; flex: none; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-oas-group h3 { margin: 0; flex: none; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-oas-group h3.tf-oas-gcode { --fs: var(--size-code); font: 600 calc(var(--t-md) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-oas-gdesc { flex: 1; min-width: 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-oas-gcount { margin-left: auto; flex: none; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }

@@ -55,6 +55,14 @@ did for a face that cannot narrow. Archivo's opened word spacing (`--ui-letter`,
 type scale and line heights stay: Inter at 13 px / 1.45 in the shell, Docs at 17.5 px / 1.65, where Inter's lower case
 is a step taller than Source Serif's and its lines in the 730 px column run about as long as before.
 
+**Headings are 600, not 700.** The press trips found it (`scroller-select-run`): a drag across a run's title,
+*Payout_IntegrationTests #1187*, selected nothing in Chrome. Narrowed down on the Mac: Inter at weight 700 and
+heavier, from 17 px up, with its kerning on, keeps a drag across the letters "t_I" from starting a selection, whatever
+the optical size (`Payout_J…`, `Payoux_I…` and `Payout_i…` select; kerning off, or weight 600 at any size from 13 to
+64 px, selects). Every rule that draws a heading at 700 now draws it at 600, Inter's semibold, and bold in a Docs page
+(17.5 px) is 600 too; the 800 figures (job keys, counts, durations, the zoom level, a JAR's version, an HTTP method)
+hold keys and numbers, never that run, and keep their weight. Kerning stays on everywhere.
+
 The shots: `shots/fonts/before-*`, `dirA-*`, `dirB-*`, `dirC-*` and `after-*` in the orchestrator's scratch folder.
 
 ## Licences

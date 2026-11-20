@@ -84,7 +84,7 @@
   .boot-b h1 {
     font-size: calc(var(--t-3xl) * var(--fs));
     line-height: 1.15;
-    font-weight: 700;
+    font-weight: 600;
     --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%;
   }
 

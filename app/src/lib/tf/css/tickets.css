@@ -36,7 +36,7 @@
 .tf-col { position: relative; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
-.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 6px 0 8px; }
+.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 6px 0 8px; }
 /* A lane's head stays in reach while the lanes scroll sideways together. */
 .tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
 /* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go

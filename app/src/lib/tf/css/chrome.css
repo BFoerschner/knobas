@@ -170,7 +170,7 @@
    Chromium restyle every row of a table on each row a scroll drew (`style-cost.test.ts`). */
 .tf-heldbelow { visibility: hidden; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
-.tf-fhead h1 { font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; }
+.tf-fhead h1 { font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
 .tf .tf-fhead h1.tf-mono { font-size: calc(var(--t-2xl) * var(--fs)); }
 /* A chip beside the title stays a chip, not a block the title's line height. */

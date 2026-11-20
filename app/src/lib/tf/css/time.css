@@ -5,7 +5,7 @@
 .tf-navchev { width: 16px; height: 16px; flex: none; }
 /* The first chevron's glyph starts on the page's edge: its button's padding hangs out to the left. */
 .tf-tm-nav { display: flex; align-items: center; gap: 6px; margin: 0 0 14px -9px; }
-.tf-tm-nav h2 { font-size: calc(var(--t-lg) * var(--fs)); margin: 0 6px; font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-tm-nav h2 { font-size: calc(var(--t-lg) * var(--fs)); margin: 0 6px; font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
 .tf-tm-sum div { display: flex; flex-direction: column; }
 .tf-tm-sum b {

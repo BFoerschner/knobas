@@ -4,10 +4,10 @@
 .tf-md > :where(:not(:first-child)) { margin-top: 12px; }
 .tf-md > :first-child { margin-top: 0; }
 /* A file's headings sit under the page's own title, so they are a step below it. */
-.tf-md h1 { font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
-.tf-md h2 { font-size: calc(var(--t-xl) * var(--fs)); font-weight: 700; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
-.tf-md h3 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; margin-top: 20px; }
-.tf-md h4, .tf-md h5, .tf-md h6 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 700; margin-top: 16px; }
+.tf-md h1 { font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h2 { font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h3 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; margin-top: 20px; }
+.tf-md h4, .tf-md h5, .tf-md h6 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; margin-top: 16px; }
 .tf-md a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
 .tf-md a.tf-ext::after { content: " ↗"; font-size: calc(var(--t-2xs) * var(--fs)); }
 .tf-md code { --fs: var(--size-code); font: calc(.88em * var(--size-code) / var(--size-ui)) var(--mono); font-size: round(calc(.88em * var(--size-code) / var(--size-ui)), 1px); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
