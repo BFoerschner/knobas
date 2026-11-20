@@ -494,6 +494,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::search::search,
         commands::search::search_settings,
         commands::search::search_files,
+        commands::search::set_search_files_kept,
+        commands::search::reread_files,
         commands::search::set_search_everything,
         commands::search::launcher_home,
         commands::search::smart_lists,

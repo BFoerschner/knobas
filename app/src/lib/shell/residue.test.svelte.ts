@@ -626,6 +626,13 @@ function sectionPorts() {
         pull_requests: 2,
         pages: 1,
         pipelines: 1,
+        files: 4,
+        text_files: 3,
+        kept_mb: 2048,
+        text_bytes: 1024,
+        repositories_read: 1,
+        repositories: 2,
+        left_out: {},
       }),
     setMonitoringSettings: (settings: { sample_retention_days: number; response_time_warn_ms: number }) => deferred(settings),
     backupStatus: () =>

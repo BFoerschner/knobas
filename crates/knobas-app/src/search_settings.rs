@@ -31,6 +31,23 @@ pub struct SearchSettings {
     pub pages: u32,
     /// The pipelines whose last finished run's log the fourth covers.
     pub pipelines: u32,
+    /// The files the index holds, found by their names.
+    pub files: u32,
+    /// The files whose text it holds.
+    pub text_files: u32,
+    /// *Keep at most*: the file text kept on this computer, in MB; `0` is
+    /// *None* (`knobas_sync::code_files::FILES_KEPT_KEY`).
+    pub kept_mb: u32,
+    /// The file text kept now, in bytes.
+    #[ts(type = "number")]
+    pub text_bytes: u64,
+    /// The mirrored repositories whose files stand at their head.
+    pub repositories_read: u32,
+    /// The mirrored repositories.
+    pub repositories: u32,
+    /// The files whose text is not read, by rule (`LeftOut::word`), over
+    /// every repository.
+    pub left_out: std::collections::BTreeMap<String, u32>,
 }
 
 /// What every command's searcher is built with, in one read of
@@ -101,14 +118,125 @@ pub async fn settings(pool: &PgPool) -> Result<SearchSettings, IpcError> {
             .fetch_one(pool)
             .await
             .map_err(IpcError::internal)?;
+    let (files, text_files, text_bytes, read, repositories, left_out): (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        serde_json::Value,
+    ) = sqlx::query_as(FILES_SQL)
+        .fetch_one(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let kept = knobas_sync::code_files::kept_bytes(pool)
+        .await
+        .map_err(IpcError::internal)?;
     let count = |n: i64| u32::try_from(n).unwrap_or(u32::MAX);
+    let left_out = left_out
+        .as_object()
+        .map(|by| {
+            by.iter()
+                .map(|(word, n)| {
+                    (
+                        word.clone(),
+                        n.as_u64().and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(SearchSettings {
         everything,
         tickets: count(tickets),
         pull_requests: count(pull_requests),
         pages: count(pages),
         pipelines: count(pipelines),
+        files: count(files),
+        text_files: count(text_files),
+        kept_mb: u32::try_from(kept >> 20).unwrap_or(u32::MAX),
+        text_bytes: u64::try_from(text_bytes).unwrap_or(0),
+        repositories_read: count(read),
+        repositories: count(repositories),
+        left_out,
     })
+}
+
+/// What the files half of the page says (D13): the index's files and text,
+/// the repositories read of the mirror's, and the files left out by rule.
+/// Read when Settings › Search opens, never on a key.
+pub const FILES_SQL: &str = "\
+select coalesce(sum(files), 0)::bigint,
+       coalesce(sum(text_files), 0)::bigint,
+       coalesce(sum(text_bytes), 0)::bigint,
+       count(*) filter (where commit_sha is not null),
+       (select count(*) from sync.item i
+          join knobas.entity e on e.id = i.entity_id and e.deleted_at is null
+         where i.kind = 'repo'),
+       coalesce((select jsonb_object_agg(word, n)
+                   from (select l.key as word, sum(l.value::bigint) as n
+                           from sync.code_repo r, jsonb_each_text(r.left_out) l
+                          group by l.key) w), '{}'::jsonb)
+  from sync.code_repo";
+
+/// Store *Keep at most* (D13), `mb` of file text, `0` for *None*. Lowering
+/// it changes nothing at once: the next pass rewrites the largest
+/// repositories with names only until what is kept fits. Raising it reads
+/// again the repositories the bound left with names only.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_files_kept(pool: &PgPool, mb: u32) -> Result<(), IpcError> {
+    let before = knobas_sync::code_files::kept_bytes(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    crate::settings::write(
+        pool,
+        knobas_sync::code_files::FILES_KEPT_KEY,
+        Some(&mb.to_string()),
+    )
+    .await?;
+    if (u64::from(mb) << 20) > before {
+        sqlx::query(
+            "with again as (
+               update sync.code_repo set commit_sha = null where left_out ? 'bound' returning repository_id
+             )
+             delete from sync.code_file where repository_id in (select repository_id from again)",
+        )
+        .execute(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    }
+    Ok(())
+}
+
+/// *Read every repository again* (D13): every repository's documents owed a
+/// removal and every row read whole by the next pass.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn reread_files(pool: &PgPool) -> Result<(), IpcError> {
+    let mut tx = pool.begin().await.map_err(IpcError::internal)?;
+    sqlx::query(
+        "insert into sync.code_gone (no) select no from sync.code_repo on conflict do nothing",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(IpcError::internal)?;
+    sqlx::query("delete from sync.code_file")
+        .execute(&mut *tx)
+        .await
+        .map_err(IpcError::internal)?;
+    sqlx::query(
+        "update sync.code_repo
+            set commit_sha = null, files = 0, text_files = 0, text_bytes = 0, left_out = '{}'",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(IpcError::internal)?;
+    tx.commit().await.map_err(IpcError::internal)
 }
 
 /// What each box covers: the mirror's live rows of the three kinds, and its

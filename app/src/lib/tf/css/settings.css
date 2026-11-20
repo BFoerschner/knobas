@@ -330,3 +330,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 }
 .tf-stg-box small { display: block; margin-top: 1px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-stg-held { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+/* *File contents kept on this computer* (D13): the bound's meter, its status and the line under it. No new token. */
+.tf-stg-meter { height: 6px; border-radius: 3px; background: var(--muted-bg); margin: 8px 0 6px; overflow: hidden; max-width: 420px; }
+.tf-stg-meter > i { display: block; height: 100%; background: var(--ink-2); }
+.tf-stg-status { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink); }
+.tf-stg-status small { display: block; margin-top: 2px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }

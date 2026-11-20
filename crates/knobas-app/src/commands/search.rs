@@ -182,6 +182,39 @@ pub async fn set_search_everything(
     crate::search_settings::settings(&pool).await
 }
 
+/// Store *Keep at most* (the everything-search decisions, D13), `mb` of file
+/// text kept on this computer, `0` for *None*, and answer the page.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the write or a read
+/// fails.
+#[tauri::command]
+pub async fn set_search_files_kept(
+    lifecycle: State<'_, Lifecycle>,
+    mb: u32,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::search_settings::set_files_kept(&pool, mb).await?;
+    crate::search_settings::settings(&pool).await
+}
+
+/// *Read every repository again* (D13): every repository's files are read
+/// whole by the next files pass. Answers the page.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the write or a read
+/// fails.
+#[tauri::command]
+pub async fn reread_files(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::search_settings::reread_files(&pool).await?;
+    crate::search_settings::settings(&pool).await
+}
+
 /// What the launcher shows before anything is typed: the newest items, and
 /// the health of every configured source.
 ///

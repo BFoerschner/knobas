@@ -339,8 +339,11 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
 /** Settings › Search's boxes (the everything-search decisions, D13), as the fixture keeps them: every one on until set. */
 const EVERY_BOX: EverythingMatches = { ticket_text: true, pr_text: true, page_text: true, build_logs: true, file_names: true, file_text: true };
 let everything: EverythingMatches = EVERY_BOX;
+/** *Keep at most* (D13), in MB. */
+let kept = 2048;
 onFakeReset(() => {
   everything = EVERY_BOX;
+  kept = 2048;
 });
 
 /**
@@ -452,7 +455,22 @@ export function fakeFileExcerpt(found: ReturnType<typeof fakeFilesFound>[number]
 function searchSettingsAnswer(): SearchSettings {
   const live = CORPUS.filter((entry) => entry.deleted_at === null);
   const count = (kind: string) => live.filter((entry) => entry.kind === kind).length;
-  return { everything, tickets: count("ticket"), pull_requests: count("pr"), pages: count("page"), pipelines: fakePipelines().length };
+  const files = FAKE_FILE_REPOS.flatMap((repo) => repo.files);
+  const textBytes = files.reduce((all, [, text]) => all + text.length, 0);
+  return {
+    everything,
+    tickets: count("ticket"),
+    pull_requests: count("pr"),
+    pages: count("page"),
+    pipelines: fakePipelines().length,
+    files: files.length,
+    text_files: kept === 0 ? 0 : files.length,
+    kept_mb: kept,
+    text_bytes: kept === 0 ? 0 : textBytes,
+    repositories_read: FAKE_FILE_REPOS.length,
+    repositories: live.filter((entry) => entry.kind === "repo").length + FAKE_FILE_REPOS.length,
+    left_out: { lock_file: 1, binary: 2 },
+  };
 }
 
 /** Whether a cleared box leaves `kind` to its names (D13). */
@@ -653,6 +671,11 @@ export function handlers(): Handlers {
     },
     // Settings › Search (D13): the boxes, kept for the session, which the word search above honours.
     search_settings: () => searchSettingsAnswer(),
+    set_search_files_kept: (args) => {
+      kept = Number(args["mb"]);
+      return searchSettingsAnswer();
+    },
+    reread_files: () => searchSettingsAnswer(),
     set_search_everything: (args) => {
       everything = { ...everything, ...(args["matches"] as Partial<EverythingMatches>) };
       return searchSettingsAnswer();

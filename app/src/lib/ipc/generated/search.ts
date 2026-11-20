@@ -828,7 +828,37 @@ pages: number,
 /**
  * The pipelines whose last finished run's log the fourth covers.
  */
-pipelines: number, };
+pipelines: number, 
+/**
+ * The files the index holds, found by their names.
+ */
+files: number, 
+/**
+ * The files whose text it holds.
+ */
+text_files: number, 
+/**
+ * *Keep at most*: the file text kept on this computer, in MB; `0` is
+ * *None* (`knobas_sync::code_files::FILES_KEPT_KEY`).
+ */
+kept_mb: number, 
+/**
+ * The file text kept now, in bytes.
+ */
+text_bytes: number, 
+/**
+ * The mirrored repositories whose files stand at their head.
+ */
+repositories_read: number, 
+/**
+ * The mirrored repositories.
+ */
+repositories: number, 
+/**
+ * The files whose text is not read, by rule (`LeftOut::word`), over
+ * every repository.
+ */
+left_out: { [key in string]: number }, };
 
 /**
  * A run of excerpt text, and whether it is part of the match.

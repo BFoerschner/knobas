@@ -81,6 +81,11 @@ export const EVENTS = {
    * (ADR-0044): the page showing that folder asks again.
    */
   folderRender: "folder-render:moved",
+  /**
+   * `FilesProgress` — the files pass's progress, at each repository's end (the everything-search decisions, D7):
+   * Settings › Search reads its status again.
+   */
+  codeFiles: "code:files",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

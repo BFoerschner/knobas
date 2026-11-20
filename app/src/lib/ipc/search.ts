@@ -96,6 +96,16 @@ export function searchFiles(repository: string, raw: string): Promise<FilesInRep
   return invoke<FilesInRepo>("search_files", { repository, raw });
 }
 
+/** Store *Keep at most*, the file text kept in MB, `0` for none (D13); answers the page. */
+export function setSearchFilesKept(mb: number): Promise<SearchSettings> {
+  return invoke<SearchSettings>("set_search_files_kept", { mb });
+}
+
+/** *Read every repository again* (D13): the next files pass reads every repository whole. */
+export function rereadFiles(): Promise<SearchSettings> {
+  return invoke<SearchSettings>("reread_files");
+}
+
 /** Answer one launcher query. */
 export function search(query: SearchQuery): Promise<SearchResponse> {
   return invoke<SearchResponse>("search", { query });
