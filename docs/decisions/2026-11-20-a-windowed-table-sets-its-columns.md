@@ -71,6 +71,41 @@ So it is the dialog's clip to its rounded corners. The launcher's dialog no long
 square), and its footer rounds its own fill; `tf-css.test.ts` holds both. Other dialogs keep their clip: their bodies
 are short and none of them is a list a person scrolls through.
 
+## Tickets' views rail, where text is drawn for LCD
+
+`scrollers.mjs --strict` in Chrome on the WSL box named three lists on Tickets: the views rail (`div.tf-vlist`) on the
+board, the list and a ticket, each wheel notch's hit test posted to the main thread, on the fixture. The Mac passed it,
+because macOS draws no LCD text, and only with LCD text does Chromium refuse to composite a scroller it cannot paint
+opaque for it. With `--enable-lcd-text` the Mac shows it too, and parts taken away one at a time:
+
+| Variant | Notches hit-tested on the main thread |
+|---|---|
+| as it was | 8 of 8 |
+| `scrollbar-gutter: auto` | 0 |
+| `overflow-y: scroll`, no gutter | 0 |
+| `background-attachment: local` | 1 |
+| no row menus, no menu transform, rows static, no counts, no radii, no find box, no sidebar edge, no *New view…* | 8 |
+
+So it was the list's kept gutter (`scrollbar-gutter: stable`, there so the counts keep one edge whether a filter
+leaves anything to scroll). `overflow-y: scroll` keeps the same 8 px for the bar, its track unpainted, so nothing shows
+while there is nothing to scroll. `tf-css.test.ts` holds it, and `scrollers.mjs` now launches Chrome with LCD text, so
+the Mac sees what Windows and Linux do. Builds' main column keeps its gutter: its painted clip already takes it back
+(2026-11-15, `builds.css`).
+
+## Measured on the head
+
+- The scroll case, every list, fixture and scale database, 1x and 4x, at 1440x868@1, 2560x1440@1.25 and 5120x1440@1:
+  no column moved.
+- `scrollers.mjs --strict` in Chrome on the WSL box, fixture and scale database: 0 transparent, 0 layers, 0 lists
+  hit-tested on the main thread.
+- `moves.mjs` on Code and its tabs, the launcher and a pull request with its tabs, fixture and scale database, 1x and
+  4x at 1440x868@1: 40 opens each, nothing moved.
+- Press trips `--strict`: 323 of 323 passing. The desktop witness test: 305 checks ok.
+- `frame-budget` scroll lines for Code's repositories and pull requests and Tickets' board and list on the scale
+  database, 1x, 4x and 6x at 1440x868@1 and 2560x1440@1.25: 25 within, 0 over at each size (Code's repositories 60
+  fps at 6x, its longest task 4.8 ms).
+- Owed on Windows: the same in WebView2 on Björn's PC (the views rail's wheel, Code's columns as its reads land).
+
 ## The guards
 
 - `app/src/lib/tf/windowed-columns.test.ts`: every table whose body is windowed (`{@attach <win>.list}` on its
