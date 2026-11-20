@@ -3,7 +3,7 @@
  * over `mini_board`, the filter bar sending its query to the server, the
  * outlined selected card, and no preview beside them (ux18).
  */
-import { needles } from "./needles";
+import { wordAlternatives } from "./needles";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 
@@ -211,8 +211,9 @@ function harness(
       },
       board: (perColumn, query, _savedView, lanes) => {
         reads.push(lanes ? { perColumn, query, lanes } : { perColumn, query });
-        // Grammar keys narrow nothing here; the reads record them. The words are the needles, a phrase whole.
-        const words = needles(query ?? "");
+        // Grammar keys narrow nothing here; the reads record them. The words are what the filter holds, a phrase whole:
+        // not the needles, which add the key a key typed with a space spells, to mark, never to narrow (ux26).
+        const words = wordAlternatives(query ?? "").flatMap((alternative) => alternative.holds);
         const kept = corpus.filter(({ card }) =>
           words.every((word) => `${card.key} ${card.title}`.toLowerCase().includes(word)),
         );
@@ -1015,6 +1016,20 @@ test("the marks are what the server read: a phrase whole, never an or, a -word o
   await settle();
   const marked = [...target.querySelectorAll(".tf-tcard mark")].map((m) => m.textContent);
   expect(marked).toEqual(["failed SEPA"]);
+});
+
+test("a key typed with a space marks the card's key whole, as PAY-7 typed with its - does (ux26)", async () => {
+  const h = harness();
+  await open(h);
+  for (const typed of ["pay 7", "PAY-7"]) {
+    const input = field();
+    input.value = "";
+    type(input, typed);
+    await settle();
+    const keyed = [...target.querySelectorAll<HTMLElement>(".tf-tcard")].find((card) => card.querySelector(".tf-k")?.textContent === "PAY-7");
+    expect(keyed, typed).toBeDefined();
+    expect([...keyed!.querySelectorAll(".tf-k mark")].map((mark) => mark.textContent), typed).toEqual(["PAY-7"]);
+  }
 });
 
 test("Find a view narrows the pane by name and by query, and marks the name", async () => {

@@ -27,6 +27,23 @@ describe("needles", () => {
   it("says each once, lowercased, without edge punctuation", () => {
     expect(needles("Sepa, sepa (SEPA)")).toEqual(["sepa"]);
   });
+  it("adds the key a key typed with a space or none spells, after its words (ux26)", () => {
+    expect(needles("pay123")).toEqual(["pay123", "pay-123", "pay1-23", "pay12-3"]);
+    expect(needles("PAY_123")).toEqual(["pay_123", "pay-123"]);
+    expect(needles("pay.123 retry")).toEqual(["pay.123", "retry", "pay-123"]);
+    expect(needles("pay 123")).toEqual(["pay", "123", "pay-123"]);
+    // A key with its `-` is the key already; a word, digits alone, or digits first spell none.
+    expect(needles("pay-123")).toEqual(["pay-123"]);
+    expect(needles("retry 2 123 1pay")).toEqual(["retry", "2", "123", "1pay", "retry-2"]);
+    // Left out stays left out: a negated or `!` word spells no key.
+    expect(needles("-pay123 !ops 5")).toEqual(["5"]);
+  });
+  it("marks PAY-123 whole for pay123, pay_123 and pay 123, as for PAY-123 (ux26)", () => {
+    for (const typed of ["pay123", "pay_123", "pay.123", "pay 123", "PAY-123"]) {
+      expect(markNeedles("PAY-123", needles(typed)), typed).toEqual([{ text: "PAY-123", hit: true }]);
+    }
+    expect(markNeedles("PAY-7", needles("pay123")).some((run) => run.hit), "another key").toBe(false);
+  });
 });
 
 describe("markNeedles", () => {
