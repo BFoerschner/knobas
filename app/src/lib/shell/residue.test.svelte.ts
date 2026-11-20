@@ -410,6 +410,7 @@ const TfJarCode = (await import("../tf/render/TfJarCode.svelte")).default;
 const TfDecompilerSetting = (await import("../tf/settings/TfDecompilerSetting.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
+const TfHtmlPage = (await import("../tf/render/TfHtmlPage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
@@ -1712,6 +1713,23 @@ const CASES: Case[] = [
     source: "lib/tf/render/TfBytesImage.svelte",
     open: (target) => ({
       app: mount(TfBytesImage, { target, props: { read: () => deferred(new Uint8Array([0x89, 0x50])), path: "logo.png", size: 2 } }),
+    }),
+  },
+  {
+    /** A page (ADR-0046): its frame's token is asked of the backend, and the answer lands after the page left. */
+    name: "TfHtmlPage",
+    source: "lib/tf/render/TfHtmlPage.svelte",
+    open: (target) => ({
+      app: mount(TfHtmlPage, {
+        target,
+        props: {
+          html: "<h1>Made</h1>",
+          title: "index.html, drawn as a page",
+          frame: () => deferred("t"),
+          room: ".tf-fileview",
+          bridge: { isTauri: () => true, convertFileSrc: (path: string, scheme: string) => `${scheme}://localhost/${path}` },
+        },
+      }),
     }),
   },
   {
