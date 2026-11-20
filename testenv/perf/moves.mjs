@@ -117,7 +117,7 @@ const PLACES = [
   // caption, the stage at its final height and the foot in the press's frame; each side's bytes 400 ms later land inside
   // the stage, so nothing outside it moves (before, a late side's `Reading…` gave way to the document and pushed every
   // card under it down).
-  { name: "diff-rendered-late", fixture: true, fake: "fake-rendered-diff", late: "entity_file_bytes:400", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, press: `${shown} .tf-diff[data-file="README.md"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-diff[data-file="README.md"] .tf-rstage`, away: `#/repo/${REPO}` },
+  { name: "diff-rendered-late", fixture: true, fake: "fake-rendered-diff", late: "entity_file_bytes:400", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, press: `${shown} .tf-diff[data-file="README.md"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-diff[data-file="README.md"] .tf-rstage`, away: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "app-add", optional: "real", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
   { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "Escape", tabs: true },
