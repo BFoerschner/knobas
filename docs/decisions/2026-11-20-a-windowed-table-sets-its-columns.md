@@ -5,18 +5,22 @@
 ## Why they jumped
 
 Code's *Repositories* table was the one long table in the app left to the browser's automatic table layout. Each
-column was as wide as the longest value in the rows drawn, so anything that changed what the rows hold changed every
-column's width and every column after it moved:
+column was as wide as the longest value in its rows, so anything that changed what the rows hold changed every
+column's width, and every column after it moved.
 
-- **A window of rows.** The list windows from 300 repositories (`shell/windowed.svelte.ts`), and then draws only the
-  rows near the screen. A window holding a repository with a long name, two teams or *Jupyter Notebook* made the
-  columns wider; scrolling on past them made them narrow again.
-- **A value landing in a drawn row.** A repository's team and language (`code_facts`), its checkout (a path, then the
-  branch and where it stands once its tree is read) and *Last push* (*3 minutes ago*, then *4 minutes ago*) each
-  widen or narrow their column when they change, and a sync's end reads them again.
+On the saved scale database (65 repositories) and the fixture (131) the list never windows: Code's repositories
+window from 300. What moved them there is **a value landing in a drawn row**: a repository's team and language
+(`code_facts`) and its checkout land after the rows draw, and each widened or narrowed its column. Measured in
+headless Chrome, column widths before and after the reads landed:
 
-The table beside it, *Pull requests*, had its own widths since 2026-11-10 (`colgroup`, `table-layout: fixed`). So did
-Tickets' list, a pipeline's runs, a repository's branches, pull requests and builds.
+| Size | Before the reads | After them |
+|---|---|---|
+| 1440x868@1 | name 601, Team 99, Language 149, Open PRs 151, checkout 207 | 550, 142, 149, 138, 244 |
+| 2560x1440@1.25 | name 1040, Team 171, Language 257 | 992, 255, 269 |
+
+A sync's end reads them again, *Last push* changes its words as time passes (*3 minutes ago*, *4 minutes ago*), and
+on an estate of more than 300 repositories each window of rows brings its own longest values: each did the same. The
+list does not have to window for it, and the reader is usually scrolling when it happens.
 
 ## What holds them now
 
@@ -32,7 +36,40 @@ Tickets' list, a pipeline's runs, a repository's branches, pull requests and bui
 
 ## Every windowed list, checked
 
-RESULTS
+The scroll case below, on the fixture (every read late) and the saved scale database, at 1440x868@1:
+
+| List | Columns | Before | After |
+|---|---|---|---|
+| Code's repositories | automatic | 276 cells moved on the fixture at 1x and 4x, 144 on the scale database at 4x (the name column 24 px narrower when the facts landed) | none |
+| Code's pull requests | fixed since 2026-11-10 | none | none |
+| Tickets' list | fixed, widths from its head | none | none |
+| The Inbox, a Docs space | each row its own box | none | none |
+| Builds' pipelines and runs, a pipeline's runs | rows; each day a fixed table | none | none |
+| Monitors | one grid template for every row | none | none |
+| A repository's branches, pull requests, builds | fixed | none | none |
+| A pull request's commits | automatic | not windowed on either corpus (one commit on the fixture's first pull request) | fixed |
+| A repository's commits, Compare's files and commits | drawn whole, or rows | none | none |
+
+An asset column needs `?fake-assets`, and a repository's tabs, a pull request's commits and Compare need the live
+forge on the saved scale database: there the case says so and goes on.
+
+## The launcher's list, on the way
+
+`scrollers.mjs --strict` on the saved scale database, at all three sizes, found one list whose wheel Chromium
+hit-tests on the main thread: the launcher's (`div.tf-ln-list`, every point). In the page with the launcher open,
+eight wheel notches over the list, each variant set on the element by hand:
+
+| Variant | Notches hit-tested on the main thread |
+|---|---|
+| as it was | 8 of 8 |
+| the dialog `overflow: visible` | 0 |
+| the dialog without its `border-radius` | 0 |
+| the body `overflow: visible` | 8 |
+| no shadow, no scrim | 8 |
+
+So it is the dialog's clip to its rounded corners. The launcher's dialog no longer clips (its body still clips
+square), and its footer rounds its own fill; `tf-css.test.ts` holds both. Other dialogs keep their clip: their bodies
+are short and none of them is a list a person scrolls through.
 
 ## The guards
 

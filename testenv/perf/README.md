@@ -598,10 +598,12 @@ end and back as real input: Code's repositories and pull requests, Tickets' list
 pipeline's runs, a Docs space, Monitors, an asset column, a repository's branches, commits, pull requests and builds, a
 pull request's commits and Compare's files and commits. Every frame it records the box of each header cell and of each
 cell of every row drawn; a cell whose left edge or width differs by more than `--px` (1) from when its row first drew,
-or a header cell from its first frame, is a mover (`MOVED … cols-<list>`). A table sized to its rows takes new widths
-from each window of rows, which is what it catches; `windowed-columns.test.ts` refuses the same shape in the source.
-A list too short to window cannot move this way and passes. `--only cols-code` picks lists by name;
-`--no-columns` leaves the case out.
+or a header cell from its first frame, is a mover (`MOVED … cols-<list>`). A list opened by its address is recorded
+from the frame its first row draws (armed by `?columns-list=` in the address), so a value a late read brings into a drawn
+row while the reader scrolls counts too: a table sized to its rows took new widths from the repositories' team,
+language and checkout as they landed, and would from each window of rows (`cols-code-repos-many`, 500 more
+repositories on the fixture). `windowed-columns.test.ts` refuses the same shape in the source. `--only cols-code`
+picks lists by name; `--no-columns` leaves the case out.
 
 `--workers 3` (the default) runs three browsers, each a share of the places: a move is the order of frames, not their
 time. `--trace <selector>` on `moves.mjs` prints what a box's children are each frame they change, which names a mover's
