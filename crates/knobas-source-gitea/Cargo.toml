@@ -34,6 +34,12 @@ tracing = "0.1"
 # these versions.
 sha1 = { version = "0.11", default-features = false }
 sha2 = { version = "0.11", default-features = false }
+# A repository's archive for the files pass (the everything-search decisions,
+# D3): spooled to an anonymous temporary file, then ungzipped and untarred.
+# All three already in the tree; MIT or Apache-2.0.
+flate2 = "1"
+tar = "0.4"
+tempfile = "3"
 
 [dev-dependencies]
 serde_json.workspace = true

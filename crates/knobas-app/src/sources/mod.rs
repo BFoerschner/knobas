@@ -700,7 +700,12 @@ pub async fn bring_up<R: tauri::Runtime>(
                         .filter(knobas_files::FileIndex::is_open)
                         .map(|index| knobas_sync::code_files::Files {
                             index,
-                            clones: None,
+                            // A blob from a checkout here before the forge (D3).
+                            clones: Some(Arc::new(
+                                crate::checkout::files_from_clones::FromClones::new(
+                                    deps.pool.clone(),
+                                ),
+                            )),
                         })
                 },
                 {

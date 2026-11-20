@@ -781,6 +781,18 @@ impl Source for GiteaSource {
         crate::view::read_blob(self, repository, commit, path, cap).await
     }
 
+    async fn read_archive(
+        &self,
+        repository: &str,
+        commit: &str,
+        wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+        each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+    ) -> Result<Option<u32>, SourceError> {
+        crate::view::read_archive(self, repository, commit, wanted, each)
+            .await
+            .map(Some)
+    }
+
     fn tip_branch(
         &self,
         entity: &str,

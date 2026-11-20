@@ -52,6 +52,7 @@ use crate::IpcError;
 pub mod clone;
 pub mod clone_all;
 pub mod fetch;
+pub mod files_from_clones;
 pub mod local;
 pub mod open;
 pub mod range;

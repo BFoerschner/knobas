@@ -135,8 +135,11 @@ impl Clones for Checkouts {
         let found = self.blobs.lock().unwrap().get(sha).cloned();
         Box::pin(async move { found })
     }
-    fn holds(&self, _repository: &str) -> bool {
-        true
+    fn holds<'a>(
+        &'a self,
+        _repository: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        Box::pin(async { true })
     }
 }
 

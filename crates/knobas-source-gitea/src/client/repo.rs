@@ -7,6 +7,9 @@ use knobas_source::SourceError;
 
 use super::{API_ROOT, GiteaClient, page_params, segment};
 
+/// The most bytes of one repository's archive spooled: past it the read stops.
+pub(crate) const ARCHIVE_STOP: u64 = 4 << 30;
+
 /// Generic over the record, so each view keeps its own partial projection
 /// beside the code that reads it.
 impl GiteaClient {
@@ -584,6 +587,49 @@ impl GiteaClient {
     /// The same read for a file wanted whole or not at all (#2256): an
     /// answer whose length is already over `cap` is cut before any of its
     /// body is read, so a refused file costs its headers.
+    /// The `.tar.gz` of `repo`'s tree at `commit`, written to `spool` as it
+    /// arrives (the everything-search decisions, 2026-11-20, D3): one
+    /// request, never held in memory. Stops past [`ARCHIVE_STOP`] bytes.
+    ///
+    /// # Errors
+    ///
+    /// What Gitea's answer maps to; a protocol error past the stop or where
+    /// the spool cannot be written.
+    pub(crate) async fn archive_to(
+        &self,
+        owner: &str,
+        repo: &str,
+        commit: &str,
+        spool: &mut std::fs::File,
+    ) -> Result<u64, SourceError> {
+        use std::io::Write as _;
+        let path = format!(
+            "{API_ROOT}/repos/{}/{}/archive/{}.tar.gz",
+            segment(owner)?,
+            segment(repo)?,
+            segment(commit)?
+        );
+        let request = self.http.request(Method::GET, &path);
+        let mut response = self.http.send(request).await?;
+        let mut written = 0_u64;
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            SourceError::protocol(format!(
+                "gitea: {path} answered an unreadable body: {error}"
+            ))
+        })? {
+            written += chunk.len() as u64;
+            if written > ARCHIVE_STOP {
+                return Err(SourceError::protocol(format!(
+                    "gitea: {path} is larger than {ARCHIVE_STOP} bytes"
+                )));
+            }
+            spool.write_all(&chunk).map_err(|error| {
+                SourceError::protocol(format!("gitea: {path} could not be spooled: {error}"))
+            })?;
+        }
+        Ok(written)
+    }
+
     pub(crate) async fn raw_whole(
         &self,
         owner: &str,

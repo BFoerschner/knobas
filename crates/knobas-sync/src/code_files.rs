@@ -85,7 +85,7 @@ pub trait Clones: Send + Sync {
 
     /// Whether a checkout of `repository` is on this machine: such a
     /// repository is read before the others, from it.
-    fn holds(&self, repository: &str) -> bool;
+    fn holds<'a>(&'a self, repository: &'a str) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 }
 
 /// What the app hands the pass: the index and the checkouts' reader.
@@ -312,12 +312,15 @@ pub async fn refresh_within(
     .bind(shape.repository)
     .fetch_all(pool)
     .await?;
-    let cloned = |repository: &str| {
-        files
-            .clones
-            .as_ref()
-            .is_some_and(|clones| clones.holds(repository))
-    };
+    let mut held_here: HashSet<String> = HashSet::new();
+    if let Some(clones) = &files.clones {
+        for repository in &owed {
+            if clones.holds(&repository.repository_id).await {
+                held_here.insert(repository.repository_id.clone());
+            }
+        }
+    }
+    let cloned = |repository: &str| held_here.contains(repository);
     owed.sort_by(|a, b| {
         b.favourite
             .cmp(&a.favourite)

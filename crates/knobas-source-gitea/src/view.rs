@@ -195,6 +195,90 @@ pub(crate) async fn read_blob(
     Ok((!raw.cut).then_some(raw.bytes))
 }
 
+/// Every file of `repository`'s tree at `commit` that `wanted` names, from
+/// one archive (the everything-search decisions, 2026-11-20, D3): spooled to
+/// an anonymous temporary file, then read entry by entry. An entry's path
+/// loses its first component, the archive's folder; one larger than
+/// `code_text::SIZE_CAP`, or not a regular file, is skipped unread. Answers
+/// the requests sent: one.
+///
+/// # Errors
+///
+/// What Gitea's answer maps to; a protocol error for an archive that cannot
+/// be read.
+pub(crate) async fn read_archive(
+    source: &GiteaSource,
+    repository: &str,
+    commit: &str,
+    wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+    each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+) -> Result<u32, SourceError> {
+    let GiteaKey::Repo { owner, repo } = source.key_of(repository)? else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {repository:?} is not a repository"
+        )));
+    };
+    if !is_full_sha(commit) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {commit:?} is not a whole commit id"
+        )));
+    }
+    let mut spool = tempfile::tempfile().map_err(|error| {
+        SourceError::protocol(format!("gitea: no spool for an archive: {error}"))
+    })?;
+    source
+        .client
+        .archive_to(&owner, &repo, commit, &mut spool)
+        .await?;
+    let unpack = move || unpack_archive(spool, wanted, each);
+    match tokio::runtime::Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(unpack)?,
+        _ => unpack()?,
+    }
+    Ok(1)
+}
+
+/// [`read_archive`]'s reading of the spooled `.tar.gz`.
+pub(crate) fn unpack_archive(
+    mut spool: std::fs::File,
+    wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+    each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+) -> Result<(), SourceError> {
+    use std::io::{Read as _, Seek as _};
+    let unreadable = |error: std::io::Error| {
+        SourceError::protocol(format!("gitea: an unreadable archive: {error}"))
+    };
+    spool
+        .seek(std::io::SeekFrom::Start(0))
+        .map_err(unreadable)?;
+    let mut archive =
+        tar::Archive::new(flate2::read::GzDecoder::new(std::io::BufReader::new(spool)));
+    for entry in archive.entries().map_err(unreadable)? {
+        let mut entry = entry.map_err(unreadable)?;
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+        let path = entry
+            .path()
+            .map_err(unreadable)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let Some((_, path)) = path.split_once('/') else {
+            continue;
+        };
+        if path.is_empty() || !wanted(path) {
+            continue;
+        }
+        if entry.header().size().map_err(unreadable)? > knobas_core::code_text::SIZE_CAP {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).map_err(unreadable)?;
+        each(path.to_owned(), bytes);
+    }
+    Ok(())
+}
+
 /// The branch whose head a branch's or repository's tree section that names
 /// no commit reads (the forge-rounds pass, 2026-11-15): see
 /// [`files::tip_branch`].
@@ -728,5 +812,58 @@ mod tests {
         ] {
             assert_eq!(ago(at(then), now), said, "{then}");
         }
+    }
+
+    /// D3: an archive's entries, the first component (the archive's folder)
+    /// stripped, `wanted` obeyed, an entry past the size cap and a link
+    /// skipped unread.
+    #[test]
+    fn an_archive_hands_over_the_wanted_files_by_their_path_in_the_tree() {
+        use std::io::Write as _;
+        let mut spool = tempfile::tempfile().unwrap();
+        {
+            let gz = flate2::write::GzEncoder::new(&mut spool, flate2::Compression::fast());
+            let mut builder = tar::Builder::new(gz);
+            let mut add = |path: &str, bytes: &[u8]| {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(bytes.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, path, bytes).unwrap();
+            };
+            add(
+                "ledger-gateway/src/SettleBridgeServer.java",
+                b"class SettleBridgeServer {}",
+            );
+            add("ledger-gateway/README.md", b"The ledger gateway.");
+            add(
+                "ledger-gateway/big.json",
+                &vec![b'x'; usize::try_from(knobas_core::code_text::SIZE_CAP).unwrap() + 1],
+            );
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_cksum();
+            builder
+                .append_link(&mut link, "ledger-gateway/link", "README.md")
+                .unwrap();
+            builder
+                .into_inner()
+                .unwrap()
+                .finish()
+                .unwrap()
+                .flush()
+                .unwrap();
+        }
+        let mut got: Vec<(String, Vec<u8>)> = Vec::new();
+        let wanted = |path: &str| path != "README.md";
+        unpack_archive(spool, &wanted, &mut |path, bytes| got.push((path, bytes))).unwrap();
+        assert_eq!(
+            got,
+            [(
+                "src/SettleBridgeServer.java".to_owned(),
+                b"class SettleBridgeServer {}".to_vec()
+            )]
+        );
     }
 }

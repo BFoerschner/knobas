@@ -7995,3 +7995,66 @@ async fn a_pull_request_goes_from_the_default_branch_into_another() {
         "one pull request open, head the default branch and base the other"
     );
 }
+
+/// The files pass's archive (the everything-search decisions, 2026-11-20,
+/// D3): every file of the seeded repository's default branch, as one
+/// archive hands it over, is the blob the tree names, by git's own sha of
+/// it, and no file is missing or extra. ADR-0013: the real instance is the
+/// witness.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_archive_hands_over_every_blob_of_the_tree() {
+    use sha1::Digest as _;
+    let env = env();
+    let source = env.one_repo();
+    let repo = format!("gitea:{}", env.full_name());
+    let meta = api_json(&env, &format!("repos/{}", env.full_name())).await;
+    let default = meta["default_branch"].as_str().expect("a default branch");
+    let branch = api_json(
+        &env,
+        &format!("repos/{}/branches/{default}", env.full_name()),
+    )
+    .await;
+    let commit = branch["commit"]["id"].as_str().expect("a head").to_owned();
+    let tree = api_json(
+        &env,
+        &format!(
+            "repos/{}/git/trees/{commit}?recursive=true&per_page=10000",
+            env.full_name()
+        ),
+    )
+    .await;
+    let blobs: std::collections::BTreeMap<String, String> = tree["tree"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .filter(|entry| entry["type"] == "blob" && entry["mode"] != "120000")
+        .filter(|entry| {
+            entry["size"]
+                .as_u64()
+                .is_some_and(|size| size <= knobas_core::code_text::SIZE_CAP)
+        })
+        .map(|entry| {
+            (
+                entry["path"].as_str().unwrap().to_owned(),
+                entry["sha"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let mut handed: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let requests = source
+        .read_archive(&repo, &commit, &|_| true, &mut |path, bytes| {
+            let mut sha = sha1::Sha1::new();
+            sha.update(format!("blob {}\0", bytes.len()).as_bytes());
+            sha.update(&bytes);
+            let hex: String = sha.finalize().iter().map(|b| format!("{b:02x}")).collect();
+            handed.insert(path, hex);
+        })
+        .await
+        .expect("the archive")
+        .expect("Gitea has archives");
+    println!("{} files in {requests} request of {commit}", handed.len());
+    assert_eq!(requests, 1);
+    assert!(!blobs.is_empty());
+    assert_eq!(handed, blobs);
+}
