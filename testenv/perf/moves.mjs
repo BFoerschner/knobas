@@ -138,6 +138,12 @@ const PLACES = [
   { name: "create-monitor", optional: true, start: "#/monitors/unmonitored", press: `${shown} button`, text: "Create monitor", starts: true, hash: null, ready: "[role=dialog]", away: "Escape" },
   { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setupOnce: true, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },
   { name: "add-source", start: "#/settings/sources", press: `${shown} button, ${shown} a`, text: "Add a source", starts: true, hash: null, away: "Escape" },
+  // A source's site (ADR-0048) on the dev bridge's fake: its page at rest, the view made and shown (the bar's address
+  // arrives in place), the bar asking in its row, and the veil under the launcher. Nothing in the bar may move.
+  { name: "site", fixture: true, start: "#/time", go: "#/site/confluence", hash: "#/site/confluence", away: "#/time" },
+  { name: "site-open", fixture: true, start: "#/site/confluence", press: `${shown} .tf-veil button`, text: "Open Tidewater Confluence", hash: null, ready: ".tf-sitebar .tf-site-host", away: "#/time" },
+  { name: "site-asks", fixture: true, fake: "fake-site-dirty", start: "#/site/confluence", setup: `${shown} .tf-veil button`, setupOnce: true, press: `${shown} .tf-sitebar button[aria-label^="Close"]`, hash: null, ready: ".tf-sitebar.tf-asks", away: "Escape" },
+  { name: "site-veiled", fixture: true, start: "#/site/confluence", setup: `${shown} .tf-veil button`, setupOnce: true, key: CMD_K, hash: null, ready: "[role=dialog] [role=option]", anywhere: true, away: "Escape" },
 ];
 const picked = (p) => !(p.fixture && real) && (!only || only.some((w) => p.name === w || p.name.startsWith(w))) && !skip.some((w) => p.name === w || p.name.startsWith(w));
 
