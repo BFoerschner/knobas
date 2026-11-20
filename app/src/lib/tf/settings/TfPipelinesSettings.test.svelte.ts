@@ -132,3 +132,27 @@ test("a named pipeline is listed with the patterns that use it, and an edit keep
   expect(s.defaultSaves).toEqual([]);
   expect(s.pipelines.list[0]?.steps).toEqual([{ step: "gunzip" }]);
 });
+
+test("a command step's command and a pipeline's steps and patterns keep to one line, each whole in its title (the renderers-columns pass)", async () => {
+  const command = String.raw`"C:\Program Files\Some Vendor\bin\orchestra-decode.exe" --profile "C:\Users\some one\default.json"`;
+  const step: CommandStep = { id: "decode", name: "Orchestra decode", command, timeout_secs: 10 };
+  const pipe: NamedPipeline = { id: "orc", name: "Decode and prettify the orchestra scores", steps: [{ step: "base64_decode" }, { step: "gunzip" }, { step: "command", id: "decode" }, { step: "pretty", format: "json" }] };
+  const patterns = ["*.orc.b64", "*.orc.gz", "*.score.b64", "scores/**/*.b64", "docs/*.gz"];
+  const s = stores([pipe], [step], patterns.map((pattern) => ({ pattern, renderer: "", pipeline: "orc" })));
+  app = mount(TfPipelinesSettings, { target, props: s });
+  await settle();
+
+  const steps = target.querySelector(".tf-rnd-steps")!;
+  expect(steps.classList).toContain("tf-rnd-tbl");
+  expect(steps.querySelector(".tf-wrapall")).toBeNull();
+  expect(steps.querySelector(".tf-cmd")?.getAttribute("title")).toBe(command);
+  expect(steps.querySelector(".tf-cmd-file")?.textContent).toBe('orchestra-decode.exe"');
+
+  const pipes = target.querySelector(".tf-rnd-pipes")!;
+  expect(pipes.classList).toContain("tf-rnd-tbl");
+  const [name, chain, used] = [...pipes.querySelectorAll("tbody td")];
+  expect(name!.querySelector(".tf-cut")?.getAttribute("title")).toBe(pipe.name);
+  expect(chain!.querySelector(".tf-cut")?.getAttribute("title")).toBe("base64 decode → gunzip → Orchestra decode → pretty-print JSON");
+  expect(used!.querySelector(".tf-words")?.getAttribute("title")).toBe(patterns.join(" "));
+  expect(used!.querySelector(".tf-words-more")?.textContent).toBe("+2");
+});

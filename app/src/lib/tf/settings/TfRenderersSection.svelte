@@ -60,6 +60,9 @@
   import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import { commandSteps, namedPipelines, type CommandSteps, type NamedPipelines } from "../../render/pipelines.svelte";
   import TfDialog from "./TfDialog.svelte";
+  import TfCommand from "../TfCommand.svelte";
+  import TfPath from "../TfPath.svelte";
+  import TfWords from "../TfWords.svelte";
   import { needsWords, secondsWhy } from "./form-words";
   import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
   import TfFolderRenderersTable from "./TfFolderRenderersTable.svelte";
@@ -333,16 +336,16 @@
     {#if saved.length === 0}
       <p class="tf-dim">No command renderers yet.</p>
     {:else}
-      <table class="tf-tbl tf-rnd-own">
+      <table class="tf-tbl tf-rnd-tbl tf-rnd-own">
         <thead><tr><th>Renderer</th><th>Command</th><th>Files</th><th>Fences</th><th>Reads → writes</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each saved as r, at (r.id)}
             <tr>
-              <td><b>{r.name}</b></td>
-              <td class="tf-small tf-wrapall"><span class="tf-mono">{r.command}</span></td>
-              <td class="tf-small tf-mono">{r.patterns.join(" ")}</td>
-              <td class="tf-small tf-mono">{r.fences.join(" ")}</td>
-              <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {secondsLabel(r.timeout_secs)}</td>
+              <td><b class="tf-cut" title={r.name}>{r.name}</b></td>
+              <td class="tf-small"><TfCommand command={r.command} /></td>
+              <td class="tf-small"><TfWords words={r.patterns} /></td>
+              <td class="tf-small"><TfWords words={r.fences} /></td>
+              <td class="tf-small tf-nowrap">{r.input} → {r.output.toUpperCase()}, {secondsLabel(r.timeout_secs)}</td>
               <td class="tf-right">
                 <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {r.name}…" onclick={() => edit(at)}>Edit…</button>
                 <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {r.name}" onclick={() => void remove(at)}>Remove</button>
@@ -421,16 +424,17 @@
     {#if defaults.list.length === 0}
       <p class="tf-dim">No defaults yet: every file opens with the first renderer that accepts it.</p>
     {:else}
-      <table class="tf-tbl tf-rnd-defaults">
+      <table class="tf-tbl tf-rnd-tbl tf-rnd-defaults">
         <thead><tr><th>Files</th><th>Through</th><th>Open with</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each defaults.list as d, at (d.pattern)}
             <tr>
-              <td class="tf-mono">{d.pattern}</td>
+              <td><TfPath path={d.pattern} /></td>
               <td>
                 <select
                   class="tf-select"
                   aria-label="Open {d.pattern} through"
+                  title={d.pipeline === null ? "No pipeline" : (pipelines.list.find((p) => p.id === d.pipeline)?.name ?? d.pipeline)}
                   value={d.pipeline ?? ""}
                   onchange={(event) =>
                     void storeDefaults(
@@ -446,6 +450,7 @@
                 <select
                   class="tf-select"
                   aria-label="Open {d.pattern} with"
+                  title={d.renderer === "" ? "The output's own" : (nameOf(d.renderer) ?? d.renderer)}
                   value={d.renderer}
                   onchange={(event) => void storeDefaults(defaults.list.map((row, i) => (i === at ? { ...row, renderer: event.currentTarget.value } : row)))}
                 >
@@ -453,7 +458,7 @@
                   {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
                   {#if d.renderer !== "" && nameOf(d.renderer) === null}<option value={d.renderer}>{d.renderer}</option>{/if}
                 </select>
-                {#if d.renderer !== "" && nameOf(d.renderer) === null}<span class="tf-small tf-dim">Not installed: the built-in default applies.</span>{/if}
+                {#if d.renderer !== "" && nameOf(d.renderer) === null}<span class="tf-small tf-dim tf-cut" title="Not installed: the built-in default applies.">Not installed: the built-in default applies.</span>{/if}
               </td>
               <td class="tf-right">
                 <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove the default for {d.pattern}" onclick={() => void removeDefault(at)}>Remove</button>

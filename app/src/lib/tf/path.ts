@@ -28,3 +28,29 @@ export function programOf(command: string): string {
   }
   return word;
 }
+
+/**
+ * A command line split where `TfCommand` draws it: its first word as typed, quotes kept, cut as `pathParts` cuts a path, and
+ * the rest after it, spaces at its start dropped. All of it is drawn, so a selection copies the command as typed (the
+ * renderers-columns pass, 2026-11-20).
+ */
+export function commandParts(command: string): { head: string; tail: string; rest: string } {
+  const text = command.trim();
+  let quote: string | null = null;
+  let at = 0;
+  for (const ch of text) {
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (/\s/.test(ch)) break;
+    at += ch.length;
+  }
+  return { ...pathParts(text.slice(0, at)), rest: text.slice(at).trimStart() };
+}
+
+/**
+ * A list drawn on one line (`TfWords`): its first `shown` entries, and how many more there are, which the line says as "+N".
+ */
+export function wordsShown(list: readonly string[], shown = 3): { shown: string[]; more: number } {
+  return { shown: list.slice(0, shown), more: Math.max(0, list.length - shown) };
+}

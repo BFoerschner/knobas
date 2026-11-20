@@ -100,6 +100,17 @@ test("a late answer brings nothing above the path row: the line and the reason s
   const room = target.querySelector(".tf-dec-st")!;
   expect(room.querySelector(".tf-dec-line")?.getAttribute("title")).toBe("Java 11.0.21 at /opt/jdk11/bin/java, with Vineflower 1.12.0 (bundled).");
   expect(room.querySelector(".tf-dec-why")?.getAttribute("title")).toBe("Java 11 found; Decompile needs Java 17");
-  // With a reason on the second line, the Java's line takes one.
-  expect(room.querySelector(".tf-dec-line")?.classList.contains("tf-dec-one")).toBe(true);
+  // A Java found is one line, its path cut in the middle, so the reason has the second (the renderers-columns pass).
+  expect(room.querySelector(".tf-dec-line")?.classList.contains("tf-dec-at")).toBe(true);
+});
+
+test("a Java's deep path is a path cut in its middle, so java.exe stays in view (the renderers-columns pass)", async () => {
+  const path = String.raw`C:\Users\some one\AppData\Local\Programs\Eclipse Adoptium\jdk-21.0.4.7-hotspot\bin\java.exe`;
+  draw([{ ...FOUND, java: { ...FOUND.java!, path } }]);
+  await settle();
+  const line = target.querySelector(".tf-dec-line")!;
+  expect(line.classList.contains("tf-dec-at")).toBe(true);
+  expect(line.querySelector(".tf-path")?.getAttribute("title")).toBe(`Java 21.0.4 at ${path}, with Vineflower 1.12.0 (bundled).`);
+  expect(line.querySelector(".tf-path-tail")?.textContent).toBe("java.exe");
+  expect(text(".tf-dec-line")).toBe(`Java 21.0.4 at ${path}, with Vineflower 1.12.0 (bundled).`);
 });

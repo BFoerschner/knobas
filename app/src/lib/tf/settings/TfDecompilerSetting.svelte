@@ -27,6 +27,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
+  import TfPath from "../TfPath.svelte";
 
   let { ports = realDecompilerPorts }: { ports?: DecompilerPorts } = $props();
 
@@ -82,9 +83,9 @@
     }
   }
 
+  const tool = $derived(rt === null || rt.decompiler === null ? "no decompiler in this build" : `${rt.decompiler} (bundled)`);
   const line = $derived.by(() => {
     if (rt === null) return looking ? "Looking for a Java…" : unread === null ? "" : `Could not tell which Java is here: ${unread}`;
-    const tool = rt.decompiler === null ? "no decompiler in this build" : `${rt.decompiler} (bundled)`;
     if (rt.java === null) return `No Java found on this machine, so the JAR view shows outlines only; ${tool}.`;
     return `Java ${rt.java.version} at ${rt.java.path}, with ${tool}.`;
   });
@@ -99,7 +100,14 @@
   >
   <div class="tf-stg-c tf-dec-c">
     <div class="tf-dec-st">
-      <p class="tf-dec-line" class:tf-dec-one={rt !== null && rt.reason !== null} role="status" title={line}>{line}</p>
+      <!-- A Java's path is a `TfPath` in a line of its own, so a deep one gives up its middle and keeps java.exe (the renderers-columns pass). -->
+      {#if rt !== null && rt.java !== null}
+        <p class="tf-dec-line tf-dec-at" role="status" title={line}
+          ><span>Java {rt.java.version} at{" "}</span><TfPath path={rt.java.path} title={line} /><span>, with {tool}.</span></p
+        >
+      {:else}
+        <p class="tf-dec-line" class:tf-dec-one={rt !== null && rt.reason !== null} role="status" title={line}>{line}</p>
+      {/if}
       {#if rt !== null && rt.reason !== null}<p class="tf-dec-why" title={rt.reason}>{rt.reason}</p>{/if}
     </div>
     <div class="tf-stg-c tf-stg-row1 tf-dec-path">

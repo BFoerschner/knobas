@@ -451,5 +451,59 @@ test("the sections draw once the folder renderers have answered too, so their ta
   answer();
   await settle();
   expect(headings()).toEqual(expect.arrayContaining(["Command renderers", "Folder renderers", "Default renderers"]));
-  expect(target.querySelector(".tf-rnd-own"), "the folder renderers' table with them").not.toBeNull();
+  expect(target.querySelector(".tf-rnd-folders"), "the folder renderers' table with them").not.toBeNull();
+});
+
+// -- One line a cell (the renderers-columns pass, 2026-11-20) -------------------------
+
+const LONG_COMMAND = String.raw`"C:\Program Files\Some Vendor\Orchestra 2026\bin\orchestra-render.exe" --profile "C:\Users\some one\AppData\Roaming\Orchestra\default.json" --format svg`;
+const TEN = ["*.rs", "*.orc", "*.orc.json", "*.score.yaml", "docs/sequence/*.seq", "*.puml", "*.mscgen", "*.msc", "flows/**/*.flow", "*.orchestra"];
+
+test("a renderer's row is one line a cell: its command a program cut in the middle, its lists three and +N, each whole in its title", async () => {
+  const long: UserRenderer = { id: "orc", name: "Orchestra score renderer for the payments team", command: LONG_COMMAND, patterns: TEN, fences: ["orchestra", "msc"], input: "text", output: "svg", timeout_secs: 10, diff: false };
+  app = mount(TfRenderersSection, { target, props: { ports: backend([long]).ports, defaults: storedDefaults([{ pattern: "docs/architecture/payments team/**/*.orc.json", renderer: "command:orc", pipeline: null }]).store } });
+  await settle();
+  const table = target.querySelector(".tf-rnd-own")!;
+  expect(table.classList, "its columns are set by the table, not by what the rows hold").toContain("tf-rnd-tbl");
+  expect(table.querySelector(".tf-wrapall"), "nothing in it wraps").toBeNull();
+  const [name, command, files, fences] = [...table.querySelectorAll("tbody td")];
+
+  expect(name!.querySelector(".tf-cut")?.getAttribute("title")).toBe(long.name);
+
+  const cmd = command!.querySelector(".tf-cmd")!;
+  expect(cmd.getAttribute("title")).toBe(LONG_COMMAND);
+  expect(cmd.textContent, "all of it in the text, quotes too, so a selection copies it as typed").toBe(LONG_COMMAND);
+  expect(cmd.querySelector(".tf-cmd-head")?.textContent).toBe('"C:\\Program Files\\Some Vendor\\Orchestra 2026\\bin\\');
+  expect(cmd.querySelector(".tf-cmd-file")?.textContent, "the program's file is what stays").toBe('orchestra-render.exe"');
+  expect(cmd.querySelector(".tf-cmd-args")?.textContent).toBe(String.raw` --profile "C:\Users\some one\AppData\Roaming\Orchestra\default.json" --format svg`);
+
+  const words = files!.querySelector(".tf-words")!;
+  expect(words.getAttribute("title")).toBe(TEN.join(" "));
+  expect(words.querySelector(".tf-words-shown")?.textContent).toBe("*.rs *.orc *.orc.json");
+  expect(words.querySelector(".tf-words-more")?.textContent).toBe("+7");
+  expect(words.querySelector(".tf-sr")?.textContent?.trim(), "a screen reader and a selection have the rest").toBe(TEN.slice(3).join(" "));
+  expect(fences!.querySelector(".tf-words-more"), "two fences need no +N").toBeNull();
+  expect(fences!.textContent).toBe("orchestra msc");
+
+  const pattern = target.querySelector(".tf-rnd-defaults tbody td .tf-path")!;
+  expect(pattern.getAttribute("title")).toBe("docs/architecture/payments team/**/*.orc.json");
+  expect(pattern.querySelector(".tf-path-tail")?.textContent, "a default's pattern keeps its end").toBe("*.orc.json");
+});
+
+test("a folder renderer's row is one line a cell too: its command cut as a renderer's, what it takes ending in an ellipsis", async () => {
+  const command = String.raw`"C:\Program Files\Some Vendor\bin\orchestra-site.exe" build --source "{path}" --out {outdir}`;
+  const folders = createFolderRenderers({
+    read: async () => [{ id: "site", name: "Orchestra flows site", command, holds: ["*.orcproj", "orchestra.lock"], folders: ["flows", "apps/*/flows"], output: "folder", timeout_secs: 120 }] as never,
+    save: async (list) => list as never,
+  });
+  app = mount(TfRenderersSection, { target, props: { ports: backend().ports, defaults: storedDefaults().store, folders } });
+  await settle();
+  const table = target.querySelector(".tf-rnd-folders")!;
+  expect(table.classList).toContain("tf-rnd-tbl");
+  expect(table.querySelector(".tf-wrapall")).toBeNull();
+  const [name, cmd, takes] = [...table.querySelectorAll("tbody td")];
+  expect(name!.querySelector(".tf-cut")?.getAttribute("title")).toBe("Orchestra flows site");
+  expect(cmd!.querySelector(".tf-cmd")?.getAttribute("title")).toBe(command);
+  expect(cmd!.querySelector(".tf-cmd-file")?.textContent).toBe('orchestra-site.exe"');
+  expect(takes!.querySelector(".tf-cut")?.getAttribute("title")).toBe("Folders named flows or apps/*/flows, holding *.orcproj or orchestra.lock");
 });

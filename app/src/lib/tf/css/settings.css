@@ -135,9 +135,32 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-apps .tf-chip { white-space: nowrap; }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
-/* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line. */
-.tf-stg-body .tf-tbl :is(td.tf-mono, td .tf-mono) { white-space: normal; overflow-wrap: anywhere; }
+/* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line.
+   Renderers' tables hold each cell to one line instead (below). */
+.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono) { white-space: normal; overflow-wrap: anywhere; }
 .tf-stg-body .tf-tbl td.tf-right { white-space: nowrap; }
+/* Settings › Renderers' tables (the renderers-columns pass, 2026-11-20; Björn: "the command, the files, and so on completely
+   explode the columns"): each cell is one line, as Code's *Local checkout* column is. A command is a `TfCommand`, a list a
+   `TfWords`, a pattern a `TfPath`, a name or a line of words `.tf-cut`, each whole in its title. The columns are set here,
+   not by what the rows hold, so a long value cuts itself and moves no column, and the table is never wider than the page.
+   What says a short fact (reads → writes, a timeout, the actions) has a width that holds it at every UI size. */
+.tf-tbl.tf-rnd-tbl { table-layout: fixed; }
+.tf-rnd-tbl th:last-child { width: calc(136px * var(--size-ui)); }
+.tf-rnd-own th:nth-child(1) { width: 18%; }
+.tf-rnd-own th:nth-child(3) { width: 15%; }
+.tf-rnd-own th:nth-child(4) { width: 11%; }
+.tf-rnd-own th:nth-child(5) { width: calc(132px * var(--size-ui)); }
+.tf-rnd-folders th:nth-child(1) { width: 20%; }
+.tf-rnd-folders th:nth-child(3) { width: 22%; }
+.tf-rnd-folders th:nth-child(4) { width: calc(110px * var(--size-ui)); }
+.tf-rnd-folders th:last-child { width: calc(64px * var(--size-ui)); }
+.tf-rnd-steps th:nth-child(1) { width: 22%; }
+.tf-rnd-steps th:nth-child(3) { width: calc(80px * var(--size-ui)); }
+.tf-rnd-pipes th:nth-child(1) { width: 24%; }
+.tf-rnd-pipes th:nth-child(3) { width: 24%; }
+.tf-rnd-defaults th:nth-child(2), .tf-rnd-defaults th:nth-child(3) { width: 24%; }
+.tf-rnd-defaults th:last-child { width: calc(100px * var(--size-ui)); }
+.tf-rnd-defaults .tf-select { max-width: 100%; }
 .tf-select { height: var(--control-h-sm); padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
 /* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */
@@ -292,6 +315,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-dec-st { font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; height: 3em; overflow: hidden; }
 .tf-dec-line { margin: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .tf-dec-line.tf-dec-one { -webkit-line-clamp: 1; line-clamp: 1; }
+/* A Java found: one line, its path a `TfPath` that gives up its middle, the words around it whole. */
+.tf-dec-line.tf-dec-at { display: flex; white-space: nowrap; overflow: clip; }
+.tf-dec-at > span { flex: none; white-space: pre; }
 .tf-dec-why { margin: 0; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-dec-path { margin-top: 8px; }
 .tf-dec-path .tf-btn { flex: none; }

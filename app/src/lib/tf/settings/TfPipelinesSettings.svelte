@@ -21,6 +21,8 @@
   import { putBack, removalToast } from "./removed";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import TfDialog from "./TfDialog.svelte";
+  import TfCommand from "../TfCommand.svelte";
+  import TfWords from "../TfWords.svelte";
   import { needsWords, secondsWhy } from "./form-words";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
@@ -160,14 +162,14 @@
   {#if stepCommands.list.length === 0}
     <p class="tf-dim">No command steps yet.</p>
   {:else}
-    <table class="tf-tbl tf-rnd-steps">
+    <table class="tf-tbl tf-rnd-tbl tf-rnd-steps">
       <thead><tr><th>Step</th><th>Command</th><th>Timeout</th><th><span class="tf-sr">Actions</span></th></tr></thead>
       <tbody>
         {#each stepCommands.list as s, at (s.id)}
           <tr>
-            <td><b>{s.name}</b></td>
-            <td class="tf-small tf-wrapall"><span class="tf-mono">{s.command}</span></td>
-            <td class="tf-small">{secondsLabel(s.timeout_secs)}</td>
+            <td><b class="tf-cut" title={s.name}>{s.name}</b></td>
+            <td class="tf-small"><TfCommand command={s.command} /></td>
+            <td class="tf-small tf-nowrap">{secondsLabel(s.timeout_secs)}</td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {s.name}…" onclick={() => editStep(at)}>Edit…</button>
               <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {s.name}" onclick={() => void removeStep(at)}
@@ -192,14 +194,15 @@
   {#if pipelines.list.length === 0}
     <p class="tf-dim">No pipelines yet: open a file, add a pipeline and save it as a default.</p>
   {:else}
-    <table class="tf-tbl tf-rnd-pipes">
+    <table class="tf-tbl tf-rnd-tbl tf-rnd-pipes">
       <thead><tr><th>Pipeline</th><th>Steps</th><th>Default for</th><th><span class="tf-sr">Actions</span></th></tr></thead>
       <tbody>
         {#each pipelines.list as p, at (p.id)}
+          {@const steps = p.steps.map((s) => stepName(s, stepCommands.list)).join(" → ")}
           <tr>
-            <td><b>{p.name}</b></td>
-            <td class="tf-small">{p.steps.map((s) => stepName(s, stepCommands.list)).join(" → ")}</td>
-            <td class="tf-small tf-mono">{usedBy(p.id).join(" ")}</td>
+            <td><b class="tf-cut" title={p.name}>{p.name}</b></td>
+            <td class="tf-small"><span class="tf-cut" title={steps}>{steps}</span></td>
+            <td class="tf-small"><TfWords words={usedBy(p.id)} /></td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {p.name}…" onclick={() => editPipe(at)}>Edit…</button>
               <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {p.name}" onclick={() => void removePipe(at)}

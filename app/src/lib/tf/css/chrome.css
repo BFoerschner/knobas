@@ -383,6 +383,20 @@
 .tf-path { display: inline-flex; min-width: 0; max-width: 100%; vertical-align: bottom; white-space: nowrap; }
 .tf-path-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-path-tail { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* A command on one line (`TfCommand`, design system, Paths): the program's start takes only the room its file and the
+   arguments leave (a basis of 0, growing to its own width at most), so it gives way first and whole; then the arguments
+   shrink, cut at their end; the program's file never shrinks, and ends in an ellipsis only when it alone is wider than the box. No share
+   of a shrink falls on what still fits, so no ellipsis shows on a run that is whole. */
+.tf-cmd { display: flex; min-width: 0; max-width: 100%; overflow: clip; white-space: nowrap; }
+.tf-cmd-head { flex: 1 1 0; min-width: 0; max-width: max-content; overflow: hidden; text-overflow: ellipsis; }
+.tf-cmd-file { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tf-cmd-args { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); white-space: pre; }
+/* A list on one line (`TfWords`): its first entries, cut at their end, and "+N" for the rest, never cut. */
+.tf-words { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; white-space: nowrap; }
+.tf-words-shown { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-words-more { flex: none; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); font-variant-numeric: tabular-nums; }
+/* One line ending in an ellipsis, its whole in its title: a name or a line of words in a table's cell. */
+.tf-cut { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A path that wraps whole, alone or inside a sentence, anywhere rather than run past its box; over the code face's
    one-line rule (`tokens.css`). */
 .tf-wrapall, .tf-wrapall .tf-mono { overflow-wrap: anywhere; }
