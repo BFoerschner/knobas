@@ -84,6 +84,7 @@ const PLACES = [
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },
   // Compare pressed once the landing has been looked at (its tab above, built ahead while the reader is still), and
   // pressed 300 ms after the landing's tree drew, before it is built ahead (Fable's ruling, the compare-first-open pass).
+  { name: "repo-compare", start: `#/repo/${REPO}`, press: `${shown} .tf-tabs a[href="#/repo/${REPO}/compare"]`, hash: `#/repo/${REPO}/compare`, away: `#/repo/${REPO}` },
   // The fixture's mirror lists no branch's pull request by default, so only the branch's standing, read 350 ms late here,
   // says #142 is open from the branch Compare proposes, and the form shrank from *New pull request* to *Open PR #142*, on
   // the code before this pass too. With `fake-branch-pulls` the mirror answers as the real one does.
