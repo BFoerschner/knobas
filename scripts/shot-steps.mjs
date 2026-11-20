@@ -173,7 +173,7 @@ const keyPress = (combo) => {
   const typing = (modifiers & ~MODIFIERS.Shift) === 0;
   return { key, code, windowsVirtualKeyCode: keyCode, modifiers, ...(typing && text ? { text, unmodifiedText: text } : {}) };
 };
-const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
+const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--use-mock-keychain", "--password-store=basic", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
 if (theme === "dark") flags.push("--blink-settings=preferredColorScheme=0");
 if (theme === "light") flags.push("--blink-settings=preferredColorScheme=1");
 if (pinnedAt !== null) flags.push("--force-color-profile=srgb", "--font-render-hinting=none", "--disable-lcd-text");

@@ -18,7 +18,8 @@ for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130], ["SIGHUP", 129]
 
 export async function launch(prefix) {
   const profile = mkdtempSync(join(tmpdir(), `${prefix}-`));
-  const chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", ...FLAGS, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--window-size=1440,900", "about:blank"], { stdio: "ignore", detached: true });
+  // No macOS keychain or Linux keyring for a scratch profile: on 2026-11-20 secd burned a core for an hour answering them.
+  const chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--use-mock-keychain", "--password-store=basic", ...FLAGS, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--window-size=1440,900", "about:blank"], { stdio: "ignore", detached: true });
   let stopped = false;
   const stop = () => {
     if (stopped) return;

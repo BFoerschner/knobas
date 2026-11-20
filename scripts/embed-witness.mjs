@@ -86,7 +86,7 @@ for (let i = 0; ; i++) {
 // -- Chrome over the DevTools protocol ---------------------------------------------
 const chrome = spawn(
   chromePath(),
-  ["--headless=new", "--disable-gpu", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, "about:blank"],
+  ["--headless=new", "--disable-gpu", "--use-mock-keychain", "--password-store=basic", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, "about:blank"],
   { stdio: "ignore", detached: true },
 );
 children.push(chrome);

@@ -40,7 +40,7 @@ if (!chromePath) {
   console.error("keep-alive: no Chrome found (the macOS app, or google-chrome or chromium on PATH); set SHOT_CHROME");
   process.exit(1);
 }
-const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, "--window-size=1440,900", "--js-flags=--expose-gc"];
+const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--use-mock-keychain", "--password-store=basic", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, "--window-size=1440,900", "--js-flags=--expose-gc"];
 const chrome = spawn(chromePath, [...flags, "about:blank"], { stdio: "ignore", detached: true });
 const closeChrome = () => {
   try {

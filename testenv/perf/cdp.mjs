@@ -127,7 +127,9 @@ export async function launch({ size = DEFAULT_SIZE, flags = [] } = {}) {
     // A headless window keeps about 90 px of its height for a browser frame it does not draw: the window is that much
     // taller than the page, so the page's override never reaches past the surface.
     const [width, height] = size.name === DEFAULT_SIZE.name ? [1440, 900] : [size.width, size.height + 100];
-    const chrome = spawn(CHROME, ["--headless=new", `--force-device-scale-factor=${size.scale}`, `--window-size=${width},${height}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", ...extra, ...flags, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", detached: true });
+    // A fresh profile reaches for the macOS keychain (and a Linux keyring) unless told not to: secd burned a core for an
+    // hour on 2026-11-20 with every probe's Chrome asking it.
+    const chrome = spawn(CHROME, ["--headless=new", `--force-device-scale-factor=${size.scale}`, `--window-size=${width},${height}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--use-mock-keychain", "--password-store=basic", ...extra, ...flags, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", detached: true });
     let exited = false;
     chrome.on("exit", () => { exited = true; });
     chrome.on("error", () => { exited = true; });
