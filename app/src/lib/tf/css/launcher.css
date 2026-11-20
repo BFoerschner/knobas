@@ -71,6 +71,24 @@
 .tf-ln-ex-at { display: block; margin-bottom: 2px; font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); }
 .tf-ln-ex-t { white-space: normal; overflow-wrap: anywhere; }
 .tf-ln-ex mark { background: var(--mark); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+/* A repository its files found (the everything-search decisions, 2026-11-20, D11): a count line under its name, then
+   each file, its path in mono with the file's name in ink and its line at the right, then up to three lines around the
+   match, the neighbours quiet. A line too long for the pane ends in an ellipsis; nothing wraps. */
+.tf-ln-pv-n { padding: 0 18px 8px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
+.tf-ln-ex.tf-ln-file { display: grid; gap: 3px; }
+.tf-ln-file-at {
+  display: flex; align-items: baseline; gap: 12px; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2);
+}
+.tf-ln-file-path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: ltr; }
+.tf-ln-file-name { color: var(--ink); font-weight: 600; }
+.tf-ln-file-line { flex: none; white-space: nowrap; }
+.tf-ln-file-code {
+  display: grid; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.5; color: var(--ink);
+}
+.tf-ln-file-code > span { min-width: 0; overflow: hidden; white-space: pre; text-overflow: ellipsis; }
+.tf-ln-file-code > .tf-ln-file-near { color: var(--ink-2); }
 
 /* A group heading: sticky over its rows, a label and nothing else (#2421). */
 .tf-ln-h {
@@ -196,7 +214,7 @@
 /* The keys the box answers, at the bottom of the ⌘? overlay. */
 .tf-ln-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-top: 1px solid var(--rule); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* A sentence under the keys (D17): what Everything reads besides the names, as quiet as the keys. */
-.tf-ln-note { padding: 0 18px 8px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-ln-note { padding: 8px 18px 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* A token the parser reports rather than honours, drawn as the chip bar draws one. */
 .tf-ln-greyed .tf-ln-tok { color: var(--ink-2); border-style: dashed; }
 /* The colour legend at the card's foot (#2421): per kind, each tone's monogram and the words that give it. */

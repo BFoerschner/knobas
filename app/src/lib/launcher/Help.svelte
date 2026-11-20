@@ -69,13 +69,13 @@
   {/each}
 </div>
 {#if keys.length > 0}
+  <!-- What Everything reads besides the names (the everything-search decisions, D17): one line, above the keys, which end the card. -->
+  <p class="tf-ln-note">Everything looks in files too: their names and their text. Three letters are read as a whole word.</p>
   <div class="tf-ln-keys" aria-label="Keys">
     {#each keys as [key, what] (key)}
       <span><kbd>{keyHint(key)}</kbd> {what}</span>
     {/each}
   </div>
-  <!-- What Everything reads besides the names (the everything-search decisions, D17): one line, under the keys. -->
-  <p class="tf-ln-note">Everything looks in files too: their names and their text. Three letters are read as a whole word.</p>
 {/if}
 
 {#if legend.length > 0}

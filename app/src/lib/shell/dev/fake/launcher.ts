@@ -380,7 +380,7 @@ function fileWords(text: string): string[] {
   for (const run of text.match(/[\p{L}\p{N}_-]+/gu) ?? []) {
     const bare = run.replace(/[_-]/g, "");
     out.push(bare.toLowerCase());
-    for (const at of [...bare.matchAll(/(?<=[a-z0-9])[A-Z]|(?<=[A-Z])[A-Z](?=[a-z])/g)].map((m) => m.index ?? 0)) out.push(bare.slice(at).toLowerCase());
+    for (const at of [...bare.matchAll(/(?<=[a-z0-9])[A-Z]|(?<=[A-Z])[A-Z](?=[a-z])/g)].map((m) => m.index)) out.push(bare.slice(at).toLowerCase());
   }
   return out;
 }
@@ -511,7 +511,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
         rank: one.byName > 0 ? 0.5 : -2,
         snippet: [],
         excerpts: [fakeFileExcerpt(one, words)],
-        files: { by_text: one.byText, by_name: one.byName },
+        files: { by_text: one.byText, by_name: one.byName, branch: "main" },
       });
       byKind.set("repo", hits);
     }
@@ -633,6 +633,24 @@ export function handlers(): Handlers {
     // everything with assets would make a QA pass over the launcher look like
     // it worked.
     search: (args) => estateSearch(args),
+    // The pane's files of a repository the fixture's files found (D11).
+    search_files: (args) => {
+      const words = String(args["raw"] ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+      const found = fakeFilesFound(words).find((one) => one.repo.entity_id === args["repository"]);
+      if (!found) return { files: [], by_text: 0, by_name: 0, more: false, branch: "main" };
+      const files = found.repo.files.flatMap(([path]) => {
+        const one = fakeFilesFound(words).find((each) => each.repo === found.repo);
+        return one ? [{ ...one, path, lines: (found.repo.files.find(([p]) => p === path)?.[1] ?? "").split("\n") }] : [];
+      });
+      const shown = files
+        .map((one) => {
+          const at = one.lines.findIndex((line) => words.some((word) => line.toLowerCase().replace(/[_-]/g, "").includes(word)));
+          const named = words.some((word) => one.path.toLowerCase().replace(/[_-]/g, "").includes(word));
+          return at < 0 && !named ? null : fakeFileExcerpt({ ...one, line: at < 0 ? null : at }, words);
+        })
+        .filter((one) => one !== null);
+      return { files: shown.slice(0, 8), by_text: found.byText, by_name: found.byName, more: shown.length > 8, branch: "main" };
+    },
     // Settings › Search (D13): the boxes, kept for the session, which the word search above honours.
     search_settings: () => searchSettingsAnswer(),
     set_search_everything: (args) => {
