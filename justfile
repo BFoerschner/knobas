@@ -1458,6 +1458,15 @@ live-sources app="":
 live-sources-remove app="":
     testenv/live-sources.sh remove {{ quote(app) }}
 
+# *Everything* finds a repository by its files on the live Gitea and Forgejo
+# (the everything-search decisions, D16): a scratch profile's first fill
+# finds `tidewater/ledger-gateway` by `settlebridge`, then a pushed word is
+# found and a changed one gone after a sync, each step timed.
+# testenv/README.md *Live products as sources*.
+# Witness the files index against the live forges.
+live-everything *args:
+    testenv/live-everything.sh {{ args }}
+
 # `just demo` with every live product as a source already in place.
 live-demo: (live-sources "")
     just demo

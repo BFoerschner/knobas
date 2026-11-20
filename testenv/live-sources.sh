@@ -35,6 +35,10 @@
 # only where the product holds it. Without it the sources sync the seed alone,
 # as they always have. KNOBAS_LIVE_SCALE (a space-separated list of gitea,
 # forgejo, jira, confluence; all four when unset) narrows which ones widen.
+#
+# KNOBAS_LIVE_SOURCES (a space-separated list of gitea, forgejo, jira,
+# confluence, teamcity, kuma; all six when unset) narrows which products are
+# added: `live-everything.sh` adds the two forges alone.
 
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -120,7 +124,9 @@ answers() { [ "$(curl -s -k -o /dev/null -m 5 -w '%{http_code}' "$1" || true)" !
 sources=()
 # add <product> <url> <json>: the source if its product answers, else a line.
 add() {
-    if [ -z "$2" ]; then
+    if [[ " ${KNOBAS_LIVE_SOURCES:-gitea forgejo jira confluence teamcity kuma} " != *" $1 "* ]]; then
+        say "$1: left out (KNOBAS_LIVE_SOURCES)"
+    elif [ -z "$2" ]; then
         say "$1: skipped, not seeded (just live-up $1)"
     elif ! answers "$2"; then
         say "$1: skipped, nothing answers at $2 (just live-status)"

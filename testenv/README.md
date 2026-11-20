@@ -858,6 +858,32 @@ a comment, one with `Priority/Medium` and nobody assigned, and one closed. Knoba
 as tickets (`gitea:tidewater/ledger-api/issues/<n>`). The closed `(reserved)` index
 placeholders above are issues too, so they come back as closed tickets.
 
+**The fixture repositories' files (the everything-search decisions, D16).**
+`fixtures/tidewater/files/<owner>/<repo>/` holds about twenty small files the
+seed pushes onto each repository's `main` (section 4c), one commit a
+repository, of the files missing or different by git's blob sha, so a re-run
+writes nothing. `tidewater/ledger-gateway` is Björn's renamed repository: its
+name, README and pom say nothing of `SettleBridge`, and its classes, package
+and image do. `ledger-api` imports it and has two files that say
+`RetryQueue`; `payout-service` has five, and one file for each rule the files
+pass leaves out (a lock file, a NUL, a 3,000-byte line, a generated head,
+`node_modules/`) and a Latin-1 file it keeps. The mock source answers the same
+files as trees, blobs and archives (`knobas-source-mock`'s `files`), with
+git's own blob and tree shas; the commit a default branch stands at is the
+mock's own, so the live forge's commits and the mock's never match. On a
+volume seeded before the files existed, `main` gains them after the branches,
+so a seeded branch is behind `main` by that commit; its own commits and its
+pull request's diff are unchanged.
+
+`testenv/live-everything.sh` (`just live-everything`) is the live witness:
+the two forges as sources on a scratch profile, the backend with no window
+syncing them, and the launcher's `search` asked. It times the first fill until
+`settlebridge` finds `tidewater/ledger-gateway` by its class on each forge,
+then on each forge writes `LIVE-EVERYTHING.md` with a fresh word, syncs, and
+waits for the word; changes it to another word, syncs, waits for the new word
+and checks the old one gone; deletes it, syncs, and waits for it to be gone.
+The repository's files end as the seed left them, with three commits more.
+
 The real TeamCity (`./seed --teamcity`) has the same class of gap, in its own
 places:
 

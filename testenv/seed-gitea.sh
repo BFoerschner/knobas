@@ -192,6 +192,61 @@ jqf '.repos[] | [.name, .lang] | @tsv' | while IFS="$(printf '\t')" read -r repo
 done
 
 # --------------------------------------------------------------------------
+# 4c. The fixture repositories' files (the everything-search decisions,
+#    2026-11-20, D16): fixtures/tidewater/files/<owner>/<repo>/... onto each
+#    repository's main, so *Everything* finds `tidewater/ledger-gateway` by
+#    the old name its code still holds. One commit a repository, of the files
+#    that are missing or differ, compared by git's blob sha (`git
+#    hash-object`), so a re-run writes nothing and a changed fixture file is
+#    pushed again. A file the forge holds that the fixture does not is left
+#    alone (auto_init's README, 4a's source file). Before section 5, so on a
+#    fresh volume every branch cut afterwards already holds the files and no
+#    pull request's own commits or diff change. FIXTURE_FILES may name another
+#    folder of the same shape.
+# --------------------------------------------------------------------------
+FILES_DIR=${FIXTURE_FILES:-../fixtures/tidewater/files}
+if [ -d "$FILES_DIR/$ORG" ]; then
+  for dir in "$FILES_DIR/$ORG"/*/; do
+    repo=$(basename "$dir")
+    api "$ADMIN" GET "/repos/$ORG/$repo"
+    expect "read repo $repo for its fixture files" 200
+    changes=$(mktemp)
+    printf '[' >"$changes"
+    sep=''
+    # Every regular file, by its path in the repository; `find` is sorted so
+    # the commit lists them in one order on every machine.
+    ( cd "$dir" && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) >"$changes.list"
+    while IFS= read -r path; do
+      want=$(git hash-object --no-filters "$dir$path")
+      api "$ADMIN" GET "/repos/$ORG/$repo/contents/$(printf '%s' "$path" | jq -sRr @uri | sed 's|%2F|/|g')?ref=main"
+      case "$API_STATUS" in
+        200) have=$(printf '%s' "$API_BODY" | jq -r '.sha // empty')
+             [ "$have" = "$want" ] && continue
+             op=update ;;
+        404) have=''; op=create ;;
+        *)   expect "read $repo:main $path" 200 404 ;;
+      esac
+      jq -n --arg op "$op" --arg p "$path" --arg sha "$have" \
+            --arg c "$(base64 <"$dir$path" | tr -d '\n')" \
+            '{operation:$op, path:$p, content:$c} + (if $sha == "" then {} else {sha:$sha} end)' >"$changes.one"
+      printf '%s' "$sep" >>"$changes"
+      cat "$changes.one" >>"$changes"
+      sep=','
+    done <"$changes.list"
+    printf ']' >>"$changes"
+    n=$(jq 'length' "$changes")
+    if [ "$n" -gt 0 ]; then
+      body=$(jq -n --slurpfile f "$changes" --arg m "Add the fixture's files ($n)" \
+             '{branch:"main", message:$m, files:$f[0]}')
+      api "$ADMIN" POST "/repos/$ORG/$repo/contents" "$body"
+      expect "commit $repo:main the fixture's files" 201
+      say "committed $n fixture file(s) to $repo:main"
+    fi
+    rm -f "$changes" "$changes.list" "$changes.one"
+  done
+fi
+
+# --------------------------------------------------------------------------
 # Helpers used by the content sections below.
 # --------------------------------------------------------------------------
 ensure_branch() {  # ensure_branch <repo> <branch>
