@@ -943,14 +943,14 @@
   });
 
   /**
-   * Put `next` in the tree in one write. Where its folder drew rows already (a re-run), the first row in view outside
-   * the graft (else the first inside it the new tree holds, else the band) keeps its place: rows are keyed by path, so a
-   * file both runs made keeps its node, and the scroll is set so the anchor's top is where it was.
+   * Put `next` in the tree in one write. The first row in view outside the graft (else the first inside it the new tree
+   * holds, else the band) keeps its place, on a first landing as on a re-run (Fable, 2026-11-20: rows above the band
+   * never move, and with the band scrolled above the view nothing in view does): rows are keyed by path, so a file both
+   * runs made keeps its node, and the scroll is set so the anchor's top is where it was.
    */
   function swapIn(folder: string, next: Graft) {
-    const before = grafts.get(folder);
     const box = tree;
-    if (before?.index == null || box === null || !box.isConnected) {
+    if (box === null || !box.isConnected) {
       grafts.set(folder, next);
       return;
     }

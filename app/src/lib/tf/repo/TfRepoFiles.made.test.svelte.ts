@@ -368,3 +368,121 @@ test("a generated folder of 3,000 files mounts fewer than 200 rows", async () =>
   expect(target.querySelectorAll(".tf-ftree [data-path]").length).toBeLessThan(200);
   delete MADE["C"];
 });
+
+/** Ports whose first answer is a run going, and whose run ends when `end()` is called (Fable's ruling, 2026-11-20). */
+function runningPorts() {
+  let ended = false;
+  let heard: ((event: { payload: unknown }) => void) | null = null;
+  const base = folderPorts().ports;
+  const ports: FolderRenderPorts = {
+    ...base,
+    render: (at) =>
+      base.render(at).then((view) => (ended ? view : { ...view, drawn: null, current: false, running: { state: "running", elapsed_ms: 0 } })),
+    listen: (_event, handler) => {
+      heard = handler;
+      return Promise.resolve(() => {});
+    },
+  };
+  const end = () => {
+    ended = true;
+    heard?.({ payload: { entity_id: REPO, renderer: "site", folder: "flows/orders", running: null } });
+  };
+  return { ports, end };
+}
+
+test("the first rows land in one write: the band and the real rows keep their nodes, and the bar's busy clears with them", async () => {
+  const run = runningPorts();
+  const place: Place = $state({ at: REPO, path: null, rendered: RENDERED, folderRender: null, changed: new Set<string>() });
+  app = mount(TfRepoFiles, {
+    target,
+    context: pageContext(() => true),
+    props: {
+      ports: { entityView, submitWrite: async () => ({}) as never },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: null,
+      get rendered() {
+        return place.rendered;
+      },
+      changed: new Set<string>(),
+      defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
+      folders: createFolderRenderers({ read: async () => [SITE], save: async () => [] }),
+      folderMarks: () => Promise.resolve([]),
+      folderPorts: run.ports,
+      madePorts,
+    },
+  });
+  await settle();
+  const bandNode = band();
+  const below = target.querySelector('.tf-ftree a[data-path="README.md"]');
+  expect(bandNode?.textContent).toContain("is running");
+  expect(target.querySelector(".tf-madebar")?.getAttribute("aria-busy")).toBe("true");
+  // In every state the DOM reaches, a generated row and a busy bar never stand together, nor a free bar and no rows.
+  const seen: string[] = [];
+  const watch = new MutationObserver(() => {
+    const rows = target.querySelector(".tf-ftree [data-made]") !== null;
+    const busy = target.querySelector(".tf-madebar")?.getAttribute("aria-busy") === "true";
+    if (rows === busy) seen.push(`rows ${rows}, busy ${busy}`);
+  });
+  watch.observe(target, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-busy"] });
+  run.end();
+  await settle();
+  watch.disconnect();
+  expect(seen).toEqual([]);
+  expect(target.querySelector(".tf-ftree [data-made]")).not.toBeNull();
+  expect(band(), "the band keeps its node").toBe(bandNode);
+  expect(target.querySelector('.tf-ftree a[data-path="README.md"]'), "a real row below keeps its node").toBe(below);
+});
+
+test("the first rows keep the view when the band is scrolled above it", async () => {
+  const run = runningPorts();
+  // Layout for jsdom: each tree row 24 px down in the tree's order, less the tree's scroll; the tree's top at 0.
+  const rect = Element.prototype.getBoundingClientRect;
+  let scrolled = 0;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const box = this.closest(".tf-ftree");
+    if (box !== null && this !== box && (this as HTMLElement).dataset?.["path"] !== undefined) {
+      const at = [...box.querySelectorAll("[data-path]")].indexOf(this);
+      const top = at * 24 - scrolled;
+      return { top, bottom: top + 24, left: 0, right: 200, width: 200, height: 24, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    }
+    return rect.call(this);
+  };
+  try {
+    const place: Place = $state({ at: REPO, path: null, rendered: RENDERED, folderRender: null, changed: new Set<string>() });
+    app = mount(TfRepoFiles, {
+      target,
+      context: pageContext(() => true),
+      props: {
+        ports: { entityView, submitWrite: async () => ({}) as never },
+        repoId: REPO,
+        at: REPO,
+        branch: "main",
+        path: null,
+        get rendered() {
+          return place.rendered;
+        },
+        changed: new Set<string>(),
+        defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
+        folders: createFolderRenderers({ read: async () => [SITE], save: async () => [] }),
+        folderMarks: () => Promise.resolve([]),
+        folderPorts: run.ports,
+        madePorts,
+      },
+    });
+    await settle();
+    const tree = target.querySelector<HTMLElement>(".tf-ftree")!;
+    Object.defineProperty(tree, "scrollTop", { get: () => scrolled, set: (v: number) => (scrolled = v), configurable: true });
+    // The band is the third row; scrolled so the first row in view is the one after it, a real row below the graft.
+    scrolled = 3 * 24 + 1;
+    const anchor = [...tree.querySelectorAll<HTMLElement>("[data-path]")][3]!;
+    const topBefore = anchor.getBoundingClientRect().top;
+    run.end();
+    await settle();
+    expect(anchor.isConnected).toBe(true);
+    expect(anchor.getBoundingClientRect().top, "the row in view stays where it was").toBe(topBefore);
+  } finally {
+    Element.prototype.getBoundingClientRect = rect;
+  }
+});

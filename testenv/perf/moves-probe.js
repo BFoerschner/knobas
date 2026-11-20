@@ -134,6 +134,12 @@
     const came = [];
     const grew = [];
     const moved = [];
+    // A run's answer (2026-11-20, `docs/decisions/2026-11-20-a-runs-answer-lands-in-one-frame.md`): in the one frame the
+    // words of `answer.changes` first differ from those at arm, the boxes inside `answer.in` are taken anew, not
+    // compared, but for those of `answer.hold`; everything else in that frame, and every box before and after it, is.
+    const answering = r.answer !== null && r.answered === null && words(r.answer.changes) !== r.answerFrom;
+    if (answering) r.answered = t;
+    const anew = (e) => answering && !!e.closest(r.answer.in) && !(r.answer.hold && e.matches(r.answer.hold));
     const keysNow = new Map();
     for (const x of list) {
       const k = keyOf(x.e);
@@ -146,7 +152,7 @@
         const k = keyOf(x.e);
         const gone = keysNow.get(k) === 1 ? r.departed.get(k) : undefined;
         r.boxes.set(x.e, { x: x.x, y: x.y, w: x.w, h: x.h, at: t, words: x.words });
-        if (gone && t - gone.t < 1000) {
+        if (gone && t - gone.t < 1000 && !anew(x.e)) {
           const dx = x.x - gone.x, dy = x.y - gone.y, dw = x.w - gone.w, dh = x.h - gone.h;
           if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dw), Math.abs(dh)) > r.px) moved.push({ x, was: gone, dx, dy, dw, dh, redrawn: true });
         }
@@ -154,7 +160,7 @@
         continue;
       }
       const dx = x.x - was.x, dy = x.y - was.y, dw = x.w - was.w, dh = x.h - was.h;
-      if (Math.max(Math.abs(dx), Math.abs(dy)) > r.px || Math.max(Math.abs(dw), Math.abs(dh)) > r.px) {
+      if (!anew(x.e) && (Math.max(Math.abs(dx), Math.abs(dy)) > r.px || Math.max(Math.abs(dw), Math.abs(dh)) > r.px)) {
         if (Math.abs(dh) > r.px || Math.abs(dw) > r.px) grew.push({ x, was });
         moved.push({ x, was, dx, dy, dw, dh, relabel: x.words !== was.words });
       }
@@ -228,10 +234,10 @@
      * `px`: what counts as a move; `ready`: a selector that says the place is drawn (an overlay); `anywhere`: the whole
      * document, not the shown page and overlays.
      */
-    arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, still = null, changes = null, trace = null } = {}) {
+    arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, still = null, changes = null, trace = null, answer = null } = {}) {
       const expectHash = hash !== null && ![].concat(hash).some((h) => location.hash.startsWith(h));
       const stillBoxes = new Map(still === null ? [] : inView(still).map((x) => [x.e, x]));
-      run = { hash, ms, px, ready, anywhere, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
+      run = { hash, ms, px, ready, anywhere, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), answer, answerFrom: answer === null ? null : words(answer.changes), answered: null, trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
       requestAnimationFrame(frame);
       return 1;
     },
@@ -258,6 +264,7 @@
         drawnMs: r.drawn === null ? null : Math.round(r.drawn - p),
         ...(r.changes !== null ? { changedFrom: r.changedFrom, changedTo: r.changedTo ?? null } : {}),
         usefulMs: r.useful === null ? null : Math.round(r.useful - p),
+        ...(r.answer !== null ? { answerMs: r.answered === null ? null : Math.round(r.answered - p) } : {}),
         frames: r.frames,
         animated: r.animated,
         caused: r.caused,

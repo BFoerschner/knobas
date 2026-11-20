@@ -567,6 +567,8 @@ a letter typed into Tickets' filter as real key input. Its place is drawn when t
 frame; until then the cards on screen before the key are held to their boxes, and one that comes in, goes, moves or
 resizes is a mover (*before its answer drew*). Its return clears the filter and types the letter again.
 
+A run's answer is a place's too (`rerender-graft`, `rerender-again`; `docs/decisions/2026-11-20-a-runs-answer-lands-in-one-frame.md`). A press that starts a tool draws its wait at once and its files when the tool ends. The place names where they land and what says they did (`answer`). In that one frame the boxes there are taken anew, but for those it holds (`answer.hold`: the folder's row and the band). Before it, after it, and everywhere else in it, a box that moves is a mover. A first open whose answer never landed fails.
+
 A place may land reads of its own late on the fixture (`late`, in `fake-late`'s form, joined to the corpus's, and `fake`,
 more of the fixture's switches), for a read the real backend answers after the page draws and the fixture at once:
 `settings-renderers-java-late` opens Settings › Renderers with the Decompiler's Java read 900 ms late, past any hold,

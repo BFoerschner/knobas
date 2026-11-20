@@ -67,6 +67,9 @@ const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "m
  * `noWorkers`: the page has no `Worker`, so the render port is its plain one and a diagram fence stays its source (a
  * diagram drawn late moves what stands under it, a mover of its own the case leaves out).
  */
+/** Where a run's answer lands and what says it did: the tree's generated rows (`answer` above). */
+const RUN_ANSWER = { in: `${shown} .tf-ftree`, changes: `${shown} .tf-ftree a[data-made]`, hold: '.tf-fdir[data-path="docs"], .tf-fband' };
+
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
   { name: "tickets-list", start: "#/tickets", press: `${shown} button, ${shown} [role=tab]`, text: "List", hash: "#/tickets", away: "time", returnBy: { nav: "tickets" } },
@@ -87,12 +90,14 @@ const PLACES = [
   // Its Mermaid fences stay source (`noWorkers`): a drawing landing ~400 ms after the text moves the fences under it 53 px
   // at 2560 and 5120 wide, base and head alike, a mover of its own (Fable, 2026-11-19; #2510).
   { name: "repo-readme-image", fixture: true, late: "entity_view:0,entity_file_bytes:150", forget: ["knobas.image-sizes"], noWorkers: true, start: "#/code", go: "#/repo/mock%3Atidewater%2Fpayout-service", hash: "#/repo/mock%3Atidewater%2Fpayout-service", away: "Escape" },
+  // A run's answer lands in one frame (2026-11-20, `docs/decisions/2026-11-20-a-runs-answer-lands-in-one-frame.md`): the
+  // generated rows, in the tree; the folder's row and the band are held to their boxes in that frame too.
   // A folder's generated folder (ADR-0046, `?fake-rerender`'s *Low-code site* on `docs`): its glyph grafts the generated
   // rows in the folder's place under a band, the made bar over the pane; a generated file opens in the file view; *Run
   // again* swaps the tree in one frame. The bar is busy until the generated rows are in the tree.
-  { name: "rerender-graft", fixture: true, fake: "fake-rerender", start: `#/repo/${REPO}`, press: `${shown} .tf-fdir[data-path="docs"] + .tf-frmark a`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}` },
+  { name: "rerender-graft", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}`, press: `${shown} .tf-fdir[data-path="docs"] + .tf-frmark a`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}` },
   { name: "rerender-file", fixture: true, fake: "fake-rerender", start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-ftree a[data-made][href$="/files/page.html"]`, hash: `#/repo/${REPO}/rendered/site/docs/files/`, away: `#/repo/${REPO}/rendered/site/docs` },
-  { name: "rerender-again", fixture: true, fake: "fake-rerender", start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-madebar-run`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}/rendered/site/docs` },
+  { name: "rerender-again", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-madebar-run`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}/rendered/site/docs` },
   { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },
   { name: "repo-commit", optional: "real", start: `#/repo/${REPO}/commits`, press: `${shown} .tf-rcommits tbody tr`, hash: `#/repo/${REPO}/commits/`, away: `#/repo/${REPO}/commits` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
@@ -227,7 +232,7 @@ async function leave(p) {
   else { await press(await find(away === "settings" ? GEAR : nav(away))); await quiet(1200); }
 }
 async function record(p) {
-  await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!(p.key || p.type), still: p.still ?? null, changes: p.changes ?? null, trace })})`);
+  await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!(p.key || p.type), still: p.still ?? null, changes: p.changes ?? null, answer: p.answer ?? null, trace })})`);
   const pressed = await act(p);
   let ticker = null;
   if (sync) ticker = setInterval(() => { js(SYNCED).catch(() => {}); }, 1500);
@@ -268,6 +273,8 @@ async function measure(p, rate) {
       await cpu(rate);
       if (rounds.includes("first")) {
         entry.first = await record(p);
+        // A place whose answer is a run's (`answer`): a first open whose answer never landed fails.
+        if (p.answer && entry.first.answerMs == null) entry.first.moves = [...(entry.first.moves ?? []), { t: 0, sinceDrawn: 0, what: "its answer never landed", dx: 0, dy: 0, dw: 0, dh: 0, inner: false }];
         console.log(`${rate}x ${p.name} first (${entry.first.pressed}): ${say(entry.first)}`);
         await quiet(800);
       } else {
