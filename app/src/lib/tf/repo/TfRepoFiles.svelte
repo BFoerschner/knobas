@@ -166,6 +166,7 @@
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
   import TfHtmlPage from "../render/TfHtmlPage.svelte";
   import TfMadeBar from "../render/TfMadeBar.svelte";
+  import TfMadeOpenIn from "../openin/TfMadeOpenIn.svelte";
   import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
   import { failureLines, markSets, renderersFor } from "../../render/folder";
   import { folderRenderMarks, type FolderMarks, type MadeTree } from "../../ipc/app";
@@ -2254,7 +2255,16 @@
         changedInside={[...changed].some((p) => underFolder(p, graftFolder))}
         onpress={() => madeRun.press()}
         onreal={() => realFiles(graftFolder)}
-      />
+      >
+        {#snippet openIn()}
+          <TfMadeOpenIn
+            token={madeShown?.token ?? null}
+            dir={madeShown?.dir ?? null}
+            file={fileMade !== null && fileMade.token === madeShown?.token ? fileMade.rel : null}
+            line={fileMade !== null ? line : null}
+          />
+        {/snippet}
+      </TfMadeBar>
     {/if}
     {#if renderedNow !== null && madeShown === null}
       {@const view = madeRun.view}

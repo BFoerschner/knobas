@@ -307,6 +307,12 @@ export function handlers(): Handlers {
       if (!b) throw { code: "not_found", message: `the generated folder holds no file ${String(args["path"])}` };
       return b;
     },
+    folder_render_open: (args) => {
+      const kept = made.get(String(args["token"])) ?? gone();
+      const file = (args["file"] as string | null) ?? null;
+      if (file !== null && !kept.files.has(file)) throw { code: "invalid", message: `the generated folder holds no file ${file}` };
+      return ["code", file === null ? kept.tree.dir : `${kept.tree.dir}/${file}`];
+    },
     folder_render_store: () => storeView(),
     set_folder_render_store: (args) => {
       const path = (args["path"] as string | null)?.trim() || null;

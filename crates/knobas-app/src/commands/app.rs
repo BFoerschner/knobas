@@ -788,6 +788,29 @@ pub async fn folder_render_file_bytes(
         .map(tauri::ipc::Response::new)
 }
 
+/// Run a saved *Open in…* application on a generated folder, or a file in it
+/// (ADR-0046); the default when `application` is `None`. Answers the argument
+/// vector started.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token not
+/// held; [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) as
+/// `checkout::open::open_made` says.
+#[tauri::command]
+pub async fn folder_render_open<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    application: Option<String>,
+    token: String,
+    file: Option<String>,
+    line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let made = crate::folder_render::made::made(&token)?;
+    crate::checkout::open::open_made(&pool, application.as_deref(), &made, file.as_deref(), line)
+        .await
+}
+
 fn profile_dir<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<std::path::PathBuf, IpcError> {

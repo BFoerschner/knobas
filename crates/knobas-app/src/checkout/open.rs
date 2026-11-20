@@ -361,6 +361,104 @@ pub async fn open_folder(
     .await
 }
 
+/// Run a saved application on a generated folder (ADR-0046), or a file in it:
+/// the application's command, filled by the same code [`run_at`] uses, with
+/// the kept folder in the checkout's place. `{path}` is the kept folder,
+/// `{file}` the absolute path of a file its manifest holds (else the folder),
+/// `{line}` the line, `{name}` the leaf's name. Answers the argument vector it
+/// started. Works with no checkout.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an unknown application, a
+/// file the manifest does not hold, a command holding `{url}` (a generated
+/// folder has no page on the source), one that cannot be run, or a program
+/// that would not start; [`Internal`](crate::IpcErrorCode::Internal) for a
+/// query failure.
+pub async fn open_made(
+    pool: &PgPool,
+    application: Option<&str>,
+    made: &crate::folder_render::keep::Made,
+    file: Option<&str>,
+    line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    let stored = load(pool).await?;
+    let wanted = application
+        .map(str::to_owned)
+        .or_else(|| stored.default.clone());
+    let app = wanted
+        .as_deref()
+        .and_then(|id| stored.by_id(id))
+        .ok_or_else(|| match &wanted {
+            Some(id) => IpcError::invalid(format!(
+                "'{id}' is not one of your applications: see Settings › Checkouts"
+            )),
+            None => IpcError::invalid(
+                "there is no application to open a folder with: add one in Settings › Checkouts",
+            ),
+        })?;
+    let argv = made_argv(app, made, file, line)?;
+    let to_run = argv.clone();
+    tokio::task::spawn_blocking(move || spawn(&to_run))
+        .await
+        .map_err(IpcError::internal)?
+        .map_err(|error| IpcError::invalid(format!("{} could not be run: {error}", app.name)))?;
+    Ok(argv)
+}
+
+/// [`open_made`]'s argument vector: every argument a path knobas made, or a
+/// name inside it the manifest holds, passed absolute (ADR-0016).
+///
+/// # Errors
+///
+/// As [`open_made`].
+pub fn made_argv(
+    app: &Application,
+    made: &crate::folder_render::keep::Made,
+    file: Option<&str>,
+    line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    let file = file.map(str::trim).filter(|file| !file.is_empty());
+    let on_disk = match file {
+        Some(rel) => Some(made.path_of(rel).ok_or_else(|| {
+            IpcError::invalid(format!("the generated folder holds no file {rel}"))
+        })?),
+        None => None,
+    };
+    let object = match file {
+        Some(rel) => Object::File {
+            path: rel.to_owned(),
+            line,
+            at: None,
+        },
+        None => Object::Repository,
+    };
+    let kind = object.kind();
+    let template = app
+        .command_for(kind)
+        .ok_or_else(|| IpcError::invalid(format!("{} opens no folder", app.name)))?
+        .to_owned();
+    if template.contains("{url}") {
+        return Err(IpcError::invalid(format!(
+            "{}'s command needs a page on the source, and a generated folder has none",
+            app.name
+        )));
+    }
+    rules::check_for(&template, kind)
+        .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
+    let code = Code::of(&object, None);
+    rules::fill(
+        &template,
+        &Fill {
+            checkout: &made.dir,
+            file: on_disk.as_deref(),
+            line,
+            code: &code,
+        },
+    )
+    .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))
+}
+
 /// The one runner: `object` at the checkout, or at `folder` inside it.
 async fn run_at(
     pool: &PgPool,
@@ -679,6 +777,78 @@ fn scrubbed_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app(command: &str, file_command: Option<&str>) -> Application {
+        Application {
+            id: "ed".to_owned(),
+            name: "Editor".to_owned(),
+            command: command.to_owned(),
+            file_command: file_command.map(str::to_owned),
+            commit_command: None,
+            range_command: None,
+            pull_request_command: None,
+        }
+    }
+
+    fn made() -> (tempfile::TempDir, crate::folder_render::keep::Made) {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(out.join("docs")).unwrap();
+        std::fs::write(out.join("docs").join("index.md"), "# i").unwrap();
+        let progress: crate::folder_render::keep::Progress = std::sync::Arc::new(|_, _| {});
+        let kept = crate::folder_render::keep::keep(
+            &out,
+            &dir.path().join("flows.site.0123abcd"),
+            &progress,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .unwrap();
+        (dir, kept)
+    }
+
+    /// A generated folder opens with its own path: `{path}` the kept folder,
+    /// `{file}` a file its manifest holds, absolute, `{name}` the leaf's.
+    #[test]
+    fn a_generated_folder_opens_with_its_own_path() {
+        let (_dir, made) = made();
+        let folder = made.dir.to_string_lossy().into_owned();
+        let editor = app("ed {path} --title {name}", Some("ed {file}:{line}"));
+        let argv = made_argv(&editor, &made, None, None).unwrap();
+        assert_eq!(argv, ["ed", &folder, "--title", "flows.site.0123abcd"]);
+        let argv = made_argv(&editor, &made, Some("docs/index.md"), Some(3)).unwrap();
+        let file = made.dir.join("docs").join("index.md");
+        assert_eq!(argv, ["ed".to_owned(), format!("{}:3", file.display())]);
+        // An application with no file command opens the folder's command on a file.
+        let plain = app("ed {path}", None);
+        assert_eq!(
+            made_argv(&plain, &made, Some("docs/index.md"), None).unwrap(),
+            ["ed", &folder]
+        );
+    }
+
+    #[test]
+    fn a_file_the_manifest_does_not_hold_is_refused() {
+        let (_dir, made) = made();
+        let editor = app("ed {path}", Some("ed {file}"));
+        for outside in ["../secret", "docs", "/etc/hosts", "docs/../docs/index.md"] {
+            let error = made_argv(&editor, &made, Some(outside), None).unwrap_err();
+            assert!(
+                error.message.contains("holds no file"),
+                "{outside}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_with_url_is_refused() {
+        let (_dir, made) = made();
+        let browser = app("open {url}", None);
+        let error = made_argv(&browser, &made, None, None).unwrap_err();
+        assert_eq!(
+            error.message,
+            "Editor's command needs a page on the source, and a generated folder has none"
+        );
+    }
 
     /// A default that names no entry is the first one, and an empty list has
     /// none.

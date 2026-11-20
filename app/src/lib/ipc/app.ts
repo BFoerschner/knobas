@@ -270,6 +270,11 @@ export async function folderRenderFileBytes(token: string, path: string): Promis
   return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
 }
 
+/** Run an *Open in…* application on a generated folder, or a file in it; `null` the default. Answers the arguments run. */
+export function folderRenderOpen(application: string | null, token: string, file: string | null, line: number | null): Promise<string[]> {
+  return invoke<string[]>("folder_render_open", { application, token, file, line });
+}
+
 /** Where generated folders are kept, and how much. */
 export function folderRenderStore(): Promise<MadeStore> {
   return invoke<MadeStore>("folder_render_store");

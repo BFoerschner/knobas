@@ -167,6 +167,7 @@ export const QUIET: ReadonlySet<string> = new Set([
   "folder_render_file",
   "folder_render_file_bytes",
   "folder_render_store",
+  "folder_render_open",
   "docs_search",
   "search",
   "launcher_home",

@@ -393,6 +393,7 @@ const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfMadeOpenIn = (await import("../tf/openin/TfMadeOpenIn.svelte")).default;
 const TfCloneSign = (await import("../tf/repo/TfCloneSign.svelte")).default;
 const TfAppPage = (await import("../tf/openin/TfAppPage.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
@@ -1358,6 +1359,20 @@ const CASES: Case[] = [
           clones: createClones(undefined, residueApps()),
           layers: createLayers(),
         },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /** *Open in…* on a generated folder (ADR-0046): it reads the applications, and its menu registers a layer. */
+    name: "TfMadeOpenIn",
+    source: "lib/tf/openin/TfMadeOpenIn.svelte",
+    open: (target) => ({
+      app: mount(TfMadeOpenIn, {
+        target,
+        props: { token: "t", dir: "/s/knobas-rendered/x/flows.site.0123abcd", apps: residueApps(), run: () => deferred([]), layers: createLayers() },
       }),
     }),
     exercise: (target) => {
