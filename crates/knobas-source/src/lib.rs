@@ -2321,6 +2321,26 @@ pub trait Source: Send + Sync {
         let _ = (repository, commit, path, cap);
         Ok(None)
     }
+    /// Every file of `repository`'s tree at `commit` that `wanted` names,
+    /// handed to `each` as it is read (the everything-search decisions,
+    /// 2026-11-20, D3: the files pass reads a repository's files for
+    /// *Everything*): one request where the source has an archive of a
+    /// commit. A file `wanted` refuses is skipped unread. Answers the
+    /// requests it sent.
+    ///
+    /// `Ok(None)` is **this source has no archive**, and is the default: the
+    /// pass then reads the files one at a time through
+    /// [`read_blob`](Source::read_blob).
+    async fn read_archive(
+        &self,
+        repository: &str,
+        commit: &str,
+        wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+        each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+    ) -> Result<Option<u32>, SourceError> {
+        let _ = (repository, commit, wanted, each);
+        Ok(None)
+    }
     /// The entity id of the branch whose head `section` of `entity`'s view
     /// reads, where the section reads a branch's head and names no commit
     /// (the forge-rounds pass, 2026-11-15): a branch's or repository's tree

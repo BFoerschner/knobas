@@ -1,0 +1,24 @@
+[package]
+name = "knobas-files"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# A repository's files as Everything finds them (the everything-search
+# decisions, 2026-11-20, D6 and D8; ADR-0047): one document a file in a
+# tantivy index in the profile, asked by a typed word's start, counted by
+# repository. No other crate names a tantivy type.
+
+[dependencies]
+# The rules of which files are read, their words and the line shown
+# (`knobas_core::code_text`): the index writes and asks by them.
+knobas-core = { path = "../knobas-core" }
+# The index. Pinned: its on-disk format is its own, and a version that changes
+# it gets a new folder name and a fill. No default features: the file mapping
+# and the doc store's lz4, no C code (no zstd, no stemmer). MIT.
+tantivy = { version = "=0.27.0", default-features = false, features = ["mmap", "lz4-compression"] }
+thiserror.workspace = true
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -12,6 +12,7 @@ mod alerts;
 mod analyze;
 mod attach;
 mod backfill;
+mod code_files;
 mod config;
 mod cursor;
 mod dedicated;

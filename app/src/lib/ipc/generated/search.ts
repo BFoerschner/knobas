@@ -94,6 +94,24 @@ value: string,
 detail: string, };
 
 /**
+ * The progress the pass reports at each repository's end, as `code:files`
+ * carries it.
+ */
+export type FilesProgress = { source_id: string, 
+/**
+ * Repositories of the source whose files stand at their head.
+ */
+done: number, 
+/**
+ * Repositories of the source still owed a read.
+ */
+owed: number, 
+/**
+ * The file text kept, over every source, in bytes.
+ */
+text_bytes: number, };
+
+/**
  * Whether a source's corpus can answer a filter at all.
  *
  * **These two are the whole of issue #141**: collapsing them is the defect

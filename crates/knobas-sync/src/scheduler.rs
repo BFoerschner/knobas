@@ -355,6 +355,16 @@ pub trait SyncEvents: Send + Sync + 'static {
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         None
     }
+    /// The files index and the checkouts' reader the files pass writes
+    /// through after each run (the everything-search decisions, 2026-11-20,
+    /// D7; [`crate::code_files`]). `None`, the default: no pass, as for every
+    /// scheduler but the app's.
+    fn files(&self) -> Option<crate::code_files::Files> {
+        None
+    }
+    /// `code:files`, at each repository's end of a files pass: how far the
+    /// source's repositories are read. The default hears nothing.
+    fn code_files(&self, _progress: &crate::code_files::FilesProgress) {}
 }
 
 /// The payload of the shell's `item:refreshed` event: a refresh of one item
@@ -2765,6 +2775,24 @@ impl Inner {
                 stored = crate::stored_trees::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
                     if let Err(error) = stored {
                         tracing::warn!(source_id, %error, "storing the branches' trees failed");
+                    }
+                }
+            }
+            // Every repository's files, on its default branch's head, into
+            // the files index (the everything-search decisions, D7): after
+            // the trees, which say which files changed, in the same lane,
+            // bounded (`code_files::BUDGET`); the quit cuts it.
+            if let Some(files) = self.deps.events.files() {
+                let events = Arc::clone(&self.deps.events);
+                let report =
+                    move |progress: crate::code_files::FilesProgress| events.code_files(&progress);
+                tokio::select! {
+                    biased;
+                    () = self.cancel.cancelled() => {}
+                    passed = crate::code_files::refresh(&self.deps.pool, &source_id, adapter.as_ref(), &files, &report) => {
+                        if let Err(error) = passed {
+                            tracing::warn!(source_id, %error, "reading the repositories' files failed");
+                        }
                     }
                 }
             }

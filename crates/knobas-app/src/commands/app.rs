@@ -118,6 +118,10 @@ pub struct Lifecycle {
     /// the launcher's and the Docs search's searchers. Holds nothing before
     /// the first load, and a searcher given it answers as before then.
     picker: knobas_search::picker::Picker,
+    /// The files index (the everything-search decisions, 2026-11-20, D6):
+    /// [`knobas_files::FileIndex::none`] until bring-up opens the profile's
+    /// `files-1/`, and a searcher given that answers as before.
+    files: Mutex<knobas_files::FileIndex>,
 }
 
 impl Default for Lifecycle {
@@ -149,6 +153,7 @@ impl Lifecycle {
             restart_gate: tokio::sync::Mutex::new(()),
             seen_words: crate::sources::state_colours::SeenCounter::new(Arc::clone(&registry)),
             picker: knobas_search::picker::Picker::default(),
+            files: Mutex::new(knobas_files::FileIndex::none()),
             registry,
         }
     }
@@ -169,6 +174,20 @@ impl Lifecycle {
     #[must_use]
     pub fn picker(&self) -> &knobas_search::picker::Picker {
         &self.picker
+    }
+
+    /// The files index ([`knobas_files::FileIndex`]): one index, cheap to clone.
+    #[must_use]
+    pub fn files(&self) -> knobas_files::FileIndex {
+        self.files
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The files index bring-up opened.
+    pub fn set_files(&self, index: knobas_files::FileIndex) {
+        *self.files.lock().unwrap_or_else(PoisonError::into_inner) = index;
     }
 
     /// Where bring-up has got to.

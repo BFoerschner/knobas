@@ -45,6 +45,7 @@ pub mod alerts;
 pub mod analyze;
 pub mod attach;
 pub mod background;
+pub mod code_files;
 pub mod config;
 pub mod health;
 pub mod held_read;

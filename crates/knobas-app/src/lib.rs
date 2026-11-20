@@ -120,6 +120,9 @@ pub mod events {
     /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
     /// every page showing that view reads it again.
     pub const VIEW_FRESH: &str = "view:fresh";
+    /// The files pass's progress (the everything-search decisions, D7), at
+    /// each repository's end: `knobas_sync::code_files::FilesProgress`.
+    pub const CODE_FILES: &str = "code:files";
     /// Payload: `checkout::fetch::Fetched` -- a branch's tip, fetched into
     /// its checkout behind a read that found it missing, landed (ADR-0041):
     /// the page showing that tree reads it again at the checkout. Broadcast.
@@ -976,6 +979,28 @@ pub async fn bring_up<R: tauri::Runtime>(
 
 /// The bring-up itself: start the server, migrate, sweep, start the engines,
 /// install the shared state, announce `Ready` -- or `Failed`.
+/// Open `<dir>/files-1` and compare it with the database (D7); the index
+/// stays [`knobas_files::FileIndex::none`] where it cannot be opened.
+pub(crate) async fn open_files(lifecycle: &Lifecycle, pool: &sqlx::PgPool, dir: &std::path::Path) {
+    let folder = dir.join("files-1");
+    let opened = tokio::task::spawn_blocking(move || knobas_files::FileIndex::open(&folder)).await;
+    let index = match opened {
+        Ok(Ok(index)) => index,
+        Ok(Err(error)) => {
+            tracing::error!(%error, "the files index could not be opened");
+            return;
+        }
+        Err(error) => {
+            tracing::error!(%error, "opening the files index panicked");
+            return;
+        }
+    };
+    if let Err(error) = knobas_sync::code_files::reconcile(pool, &index).await {
+        tracing::warn!(%error, "the files index could not be compared with the database");
+    }
+    lifecycle.set_files(index);
+}
+
 async fn bring_up_app<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     profile: &Profile,
@@ -1210,6 +1235,13 @@ async fn bring_up_app<R: tauri::Runtime>(
             std::sync::Arc::new(sources::DbConnections(connector.clone())),
             suggestion_pass::PASS_STATEMENT_TIMEOUT,
         );
+        step("opening the files index");
+        // The files Everything finds a repository by (the everything-search
+        // decisions, D6 and D7): opened off the runtime, compared with what
+        // the database says it holds, and handed to the launcher and the
+        // sync's files pass. A folder that cannot be opened is no reason not
+        // to start: the launcher then answers as before.
+        open_files(&lifecycle, &pool, &profile.dir).await;
         step("starting the sync engine");
         sources::start(handle, &pool, &connector, profile, registry, suggestions).await?;
         // Beside the sync scheduler, not inside it: a backup is not a
