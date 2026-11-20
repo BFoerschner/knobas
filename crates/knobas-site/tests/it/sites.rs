@@ -749,3 +749,35 @@ async fn the_keyboard_asked_for_before_the_first_commit_goes_to_the_site_when_it
     let focus_at = calls.iter().position(|c| c == "focus").unwrap();
     assert!(show_at < focus_at, "shown, then focused: {calls:?}");
 }
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn leave_anyway_answers_the_pages_own_leave_dialog_and_nothing_else_does() {
+    let w = world();
+    open_live(&w, "jira", "https://jira.example/").await;
+    let view = w.host.view("jira");
+    // Clean: no question, and the page's own dialog is not pre-answered.
+    w.sites
+        .open("jira", Some("https://jira.example/a".into()), INSETS, false)
+        .await
+        .unwrap();
+    w.sites.act("jira", SiteAct::Reload, false).await.unwrap();
+    assert!(!view.borrow().calls.contains(&"leave freely".to_owned()));
+    // The person said "anyway": answered once, before the load and before the reload.
+    w.sites
+        .open("jira", Some("https://jira.example/b".into()), INSETS, true)
+        .await
+        .unwrap();
+    w.sites.act("jira", SiteAct::Reload, true).await.unwrap();
+    let calls = view.borrow().calls.clone();
+    let at = |what: &str| calls.iter().position(|c| c == what).unwrap();
+    assert!(
+        at("leave freely") < at("load https://jira.example/b"),
+        "{calls:?}"
+    );
+    assert_eq!(
+        calls.iter().filter(|c| *c == "leave freely").count(),
+        2,
+        "{calls:?}"
+    );
+    assert_eq!(calls.last().map(String::as_str), Some("reload"));
+}

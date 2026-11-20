@@ -18,20 +18,23 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU, COREWEBVIEW2_KEY_EVENT_KIND,
     COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
     COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_PHYSICAL_KEY_STATUS,
-    COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL,
-    COREWEBVIEW2_WEB_ERROR_STATUS, ICoreWebView2, ICoreWebView2_3, ICoreWebView2_11,
-    ICoreWebView2_14, ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Settings4,
+    COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_SCRIPT_DIALOG_KIND,
+    COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD,
+    COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL, COREWEBVIEW2_WEB_ERROR_STATUS,
+    ICoreWebView2, ICoreWebView2_3, ICoreWebView2_11, ICoreWebView2_14,
+    ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Settings4,
 };
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
     HistoryChangedEventHandler, NavigationCompletedEventHandler, PermissionRequestedEventHandler,
-    ProcessFailedEventHandler, ServerCertificateErrorDetectedEventHandler,
-    SourceChangedEventHandler, TrySuspendCompletedHandler,
+    ProcessFailedEventHandler, ScriptDialogOpeningEventHandler,
+    ServerCertificateErrorDetectedEventHandler, SourceChangedEventHandler,
+    TrySuspendCompletedHandler,
 };
 use windows_core::{BOOL, Interface, PWSTR};
 use wry::{MemoryUsageLevel, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
-use crate::host::{Hooks, ViewEvent};
+use crate::host::{Hooks, LeaveFreely, ViewEvent};
 use crate::keys::{Key, Press};
 use crate::state::SiteFailure;
 
@@ -83,7 +86,7 @@ fn key_of(virtual_key: u32) -> Key {
 pub struct Hardened;
 
 /// Set the controller's settings and add knobas's handlers.
-pub fn harden(view: &WebView, hooks: &Hooks) -> Hardened {
+pub fn harden(view: &WebView, hooks: &Hooks, leaving: &LeaveFreely) -> Hardened {
     let controller = view.controller();
     let core = view.webview();
     let key_hook = Rc::clone(&hooks.key);
@@ -160,7 +163,11 @@ pub fn harden(view: &WebView, hooks: &Hooks) -> Hardened {
                 )?;
             }
             core.add_NavigationCompleted(
-                &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+                &NavigationCompletedEventHandler::create(Box::new(move |webview, args| {
+                    // A navigation that asked nothing ends the "leave anyway" too.
+                    if let Some(webview) = &webview {
+                        set_own_dialogs(webview, true);
+                    }
                     let Some(args) = args else { return Ok(()) };
                     let mut ok = BOOL::default();
                     args.IsSuccess(&mut ok)?;
@@ -202,6 +209,24 @@ pub fn harden(view: &WebView, hooks: &Hooks) -> Hardened {
                     if kind.0 == 0 || kind.0 == 1 {
                         ended_hook(ViewEvent::Ended);
                     }
+                    Ok(())
+                })),
+                &raw mut token,
+            )?;
+            // With WebView2's own dialogs off (only while the person's "leave anyway" stands), a page's "Leave
+            // site?" is answered yes here; any other dialog in that moment is dismissed.
+            let dialog_leaving = leaving.clone();
+            let dialog_core = core.clone();
+            core.add_ScriptDialogOpening(
+                &ScriptDialogOpeningEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let mut kind = COREWEBVIEW2_SCRIPT_DIALOG_KIND::default();
+                    args.Kind(&mut kind)?;
+                    if kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD && dialog_leaving.take()
+                    {
+                        args.Accept()?;
+                    }
+                    set_own_dialogs(&dialog_core, true);
                     Ok(())
                 })),
                 &raw mut token,
@@ -311,6 +336,21 @@ pub fn go(view: &WebView, go: Go) {
             Go::Stop => core.Stop(),
         }
     };
+}
+
+/// WebView2's own script dialogs on or off.
+fn set_own_dialogs(core: &ICoreWebView2, on: bool) {
+    // SAFETY: WebView2 COM on the main thread.
+    unsafe {
+        if let Ok(settings) = core.Settings() {
+            let _ = settings.SetAreDefaultScriptDialogsEnabled(on);
+        }
+    }
+}
+
+/// WebView2's own script dialogs for `view`, on or off.
+pub fn own_dialogs(view: &WebView, on: bool) {
+    set_own_dialogs(&view.webview(), on);
 }
 
 /// A hidden site's memory level: low while hidden, normal when shown.
