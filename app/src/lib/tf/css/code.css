@@ -64,8 +64,12 @@
 /* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */
 .tf-ftreebox {
   background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; position: sticky; top: 12px;
-  display: flex; flex-direction: column; max-height: calc(100vh - 230px); overflow: hidden;
+  display: flex; flex-direction: column; max-height: calc(100vh - 230px);
 }
+/* The box does not clip (2026-11-20): a rounded clip around the tree's scroller made Chromium post every wheel's hit
+   test over a long tree to the main thread (the scrollers' audit, on a generated folder of 3,000 files). Its children
+   share its background, so its corners look the same; the tree itself scrolls in its room. */
+.tf-ftreebox > .tf-ftree { min-height: 0; }
 .tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--rule-2); }
 /* Go to file (#2311, mockups/code-area `.tree > header .tf-minif`): the head's field, `T` beside it. */
 /* An input in a row of buttons takes the row's height, here the small one (#2238). */

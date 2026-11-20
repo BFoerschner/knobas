@@ -77,7 +77,7 @@ const SCREENS = [
   // A generated folder (ADR-0046): the band and the made bar with a 60-character renderer name, a generated file's
   // 140-character path, what was left out, and *Open in…* on the kept folder.
   { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
-  { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: "2 left out" },
+  { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 4500, press: "2 left out" },
   { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open button" },
   { id: "settings-renderers", route: "settings/renderers" },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
