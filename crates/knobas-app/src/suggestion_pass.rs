@@ -363,6 +363,14 @@ impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
         self.owe();
         self.inner.refresh_ended(ended);
     }
+    // The files pass's index and progress, passed on wherever this wrapper
+    // sits in the stack (`tests/it/files_on_sync.rs`).
+    fn files(&self) -> Option<knobas_sync::code_files::Files> {
+        self.inner.files()
+    }
+    fn code_files(&self, progress: &knobas_sync::code_files::FilesProgress) {
+        self.inner.code_files(progress);
+    }
 }
 
 impl Inner {

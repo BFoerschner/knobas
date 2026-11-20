@@ -305,6 +305,14 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
     }
+    // The files pass's index and progress, passed on wherever this wrapper
+    // sits in the stack (`tests/it/files_on_sync.rs`).
+    fn files(&self) -> Option<knobas_sync::code_files::Files> {
+        self.inner.files()
+    }
+    fn code_files(&self, progress: &knobas_sync::code_files::FilesProgress) {
+        self.inner.code_files(progress);
+    }
 }
 
 /// Whether `payload` may carry a link on arrival to `ticket` (#984): a
@@ -1088,6 +1096,17 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
+    }
+    // The files pass's index and its progress (the everything-search
+    // decisions, D7), from `FilesOnSync` inside. This wrapper is the
+    // outermost the scheduler holds, and a method it leaves out answers the
+    // trait's default: the pass never ran in the app until these two were
+    // passed on (the ux26 boot check, `tests/it/files_on_sync.rs`).
+    fn files(&self) -> Option<knobas_sync::code_files::Files> {
+        self.inner.files()
+    }
+    fn code_files(&self, progress: &knobas_sync::code_files::FilesProgress) {
+        self.inner.code_files(progress);
     }
 }
 
