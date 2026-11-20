@@ -544,13 +544,18 @@ fn steps(sites: Sites, proxy: EventLoopProxy<Task>, second: bool) {
     sleep(2000);
     for (what, key, gap) in [
         ("x", post::X, 600),
-        ("esc", post::ESC, 120),
+        ("esc", post::ESC, 250),
         ("esc-again", post::ESC, 800),
         ("claimed", post::CLAIMED, 800),
     ] {
         log("post-key", json!({ "key": what }));
         on_main(&proxy, move || post::key(key.0, key.1, key.2));
-        sleep(gap);
+        // A posted event waits for the event loop's next turn: wake it, so the key is handled now and not with the next.
+        for _ in 0..3 {
+            sleep(15);
+            on_main(&proxy, || {});
+        }
+        sleep(gap - 45);
     }
     let _ = open("a", url("perms"), true);
     sleep(14000);
