@@ -34,6 +34,9 @@
 /* A branch's name is a code value, in the select as anywhere. */
 .tf-compare select.tf-cbranch { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-compare .tf-cexists { font-size: calc(var(--t-sm) * var(--fs)); }
+/* The working tree's line (ux26): a flex item may shrink below its words, so the checkout's path in it is held to the line
+   and gives up its start (long-paths.mjs: at 1100 px it ran 492 px past the form). */
+.tf-compare .tf-cworkline { min-width: 0; }
 .tf-compare .tf-cnone { padding-top: 10px; }
 .tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .tf-compare .tf-cdiff { grid-column: 1 / -1; min-width: 0; }
