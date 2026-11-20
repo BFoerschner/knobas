@@ -2974,6 +2974,12 @@ It writes `trips.json` and `trips.md` to the out folder and exits 1 if a trip fa
 Chromes (2), and `--strict` adds the trips marked strict, which is how the loop ran it. `KNOBAS_CHROME` names another
 Chrome. `with-built.sh` serves the folder on 127.0.0.1 for the length of the command and refuses a port already taken.
 
+Each trip has a time limit, `--trip-limit` seconds (180; the longest real trips take about 80 s on a loaded Mac). A trip
+past it fails by name, its Chrome is stopped, and a fresh one takes the rest of the queue (`trip-runner.mjs`, tested by
+`trip-runner-test.sh` in `just witness-unit`). Every line also goes to `trips.log` in the out folder as it happens, with a
+progress line each minute naming each worker's trip and how long it has been on it: a full `--strict` run takes about 26
+minutes on the Mac, and piped through `tail` it shows nothing until it ends, so read `trips.log` to see it going.
+
 **Rows that hold still** (`rows-still` in `trips.mjs`, PR #2479, 2026-11-11): a recorder of every visible row's box, each
 frame, from a list's first draw to settled, that fails if a drawn row moves, grows, leaves, or has one come in above it. It
 runs a page five ways: the first visit, a return, a return after a sync, a sync while shown, and arriving by the launcher.

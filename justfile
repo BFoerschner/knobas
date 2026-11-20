@@ -500,6 +500,7 @@ shell:
 # the run is refused, and a release's commit lands on a branch that moved under it,
 # against a local bare repository, about 6 s. And the README diagrams': a d2 with no
 # bundled TALA, a watermark or a failed render replaces nothing, against a stub `d2`.
+# And the press trips' time limit: a stuck trip fails by name and the run goes on.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
@@ -522,6 +523,7 @@ witness-unit:
     testenv/live-lock-test.sh
     testenv/seed-teamcity-builds-test.sh
     testenv/perf/watchdog-test.sh
+    testenv/ui-checks/trip-runner-test.sh
 
 # The step before every `just check` (issue #736): the mechanical misses that
 # failed gates in the #701 wave, found in about a minute instead of a gate's.

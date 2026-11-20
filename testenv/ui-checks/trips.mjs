@@ -8,10 +8,13 @@
 //   --only a,b      only trips whose id, kind, finding, page or route contains one of these
 //   --workers n     parallel Chromes (default 2)
 //   --gap n         ms between the two presses of a trip with `leaves` or `returns`, to prove one fails once its hold has let go
+//   --trip-limit s  the most one trip may take (default 180; the longest real ones took 77 s on the loaded Mac). A trip past it
+//                   fails by name, its Chrome is stopped and a fresh one takes the rest (`trip-runner.mjs`).
 //   --strict        also run the trips marked `strict`, and hold esc-sweep to the scroller rule. They fail on a head without Round 14's
 //                   fixes, so a plain run leaves them out and gives the same trips and verdicts as before. The whole-round check runs both.
 //
-// Writes <out dir>/trips.json and trips.md. Exits 1 if a trip fails or can't run: a trip that no longer finds its control says so.
+// Writes <out dir>/trips.json and trips.md, and trips.log as it goes: each trip's line, and a progress line every minute naming
+// what each worker is on. Exits 1 if a trip fails or can't run: a trip that no longer finds its control says so.
 //
 // Kinds, and what fails:
 //   enter-twice   focus a control, press Enter twice with real key events. Fails if the second Enter changes the address, opens a
@@ -177,9 +180,10 @@
 //
 // A first Enter that changes nothing can't run: the trip would pass without having pressed anything.
 // Writes are counted by wrapping window.__TAURI_INTERNALS__.invoke, which @tauri-apps/api looks up on every call (shell/dev/fake-tauri.ts).
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { launch, screenOpener, sleep } from "./chrome.mjs";
+import { runQueue } from "./trip-runner.mjs";
 
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 /** In the page: why the menu `sel` doesn't fit (out of the window, or a row of it wider than it), or null. */
@@ -1144,13 +1148,23 @@ const workers = Number(flag("workers", 2));
 const only = flag("only", "").split(",").filter(Boolean);
 const gapFlag = flag("gap", null);
 const strict = argv.includes("--strict");
+const tripLimit = Number(flag("trip-limit", 180));
 mkdirSync(outDir, { recursive: true });
+// Every line also goes to <out dir>/trips.log as it happens: a run piped through `tail` shows nothing until it ends, and
+// twice on 2026-11-20 a 26-minute run that way looked hung to the machine's watch.
+const logFile = join(outDir, "trips.log");
+writeFileSync(logFile, "");
+const log = (line) => {
+  console.log(line);
+  try { appendFileSync(logFile, `${line}\n`); } catch {}
+};
 
 const table = PAGES.flatMap((p) => p.trips.map((t) => ({ ...t, page: p.page, route: p.route })));
 const every = table.filter((t) => strict || !t.strict);
 const wanted = (t) => !only.length || only.some((o) => [t.id, t.kind, t.finding, t.page, t.route].some((v) => v?.includes(o)));
 
-async function worker(queue, results) {
+/** One browser for the runner (`trip-runner.mjs`): a fresh headless Chrome and the trips' kinds bound to it. */
+async function startBrowser() {
   const chrome = await launch("knobas-trips");
   const { send, evaluate, key, stop } = chrome;
   const opener = screenOpener(chrome, port);
@@ -3602,19 +3616,7 @@ async function worker(queue, results) {
   }
 
   const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
-  for (let t = queue.shift(); t; t = queue.shift()) {
-    const began = Date.now();
-    const base = { id: t.id, kind: t.kind, finding: t.finding, page: t.page, route: t.route };
-    try {
-      const { reasons, note } = await KINDS[t.kind](t);
-      results.push({ ...base, status: reasons.length ? "fail" : "pass", reasons, note, took: Date.now() - began });
-    } catch (err) {
-      results.push({ ...base, status: "can't run", reasons: [String(err?.message ?? err).split("\n")[0]], note: "", took: Date.now() - began });
-    }
-    const last = results.at(-1);
-    console.log(`${last.status.padEnd(9)} ${t.kind} ${t.id} ${(last.took / 1000).toFixed(1)} s`);
-  }
-  stop();
+  return { run: (t) => KINDS[t.kind](t), stop };
 }
 
 const queue = every.filter(wanted);
@@ -3623,12 +3625,12 @@ if (!queue.length) {
   process.exit(2);
 }
 const total = queue.length;
-console.log(`${total} trips with ${workers} workers`);
+log(`${total} trips with ${workers} workers, each trip at most ${tripLimit} s`);
 const leftOut = strict ? 0 : table.filter((t) => t.strict && wanted(t)).length;
-if (leftOut) console.log(`${leftOut} strict trips left out. --strict runs them, and they fail until Round 14's fixes are in`);
+if (leftOut) log(`${leftOut} strict trips left out. --strict runs them, and they fail until Round 14's fixes are in`);
 const results = [];
 const startedAt = Date.now();
-await Promise.all(Array.from({ length: workers }, () => worker(queue, results)));
+await runQueue({ queue, results, workers, limitMs: tripLimit * 1000, startBrowser, log });
 const took = (Date.now() - startedAt) / 1000;
 const order = every.map((t) => t.id);
 results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
@@ -3657,5 +3659,5 @@ const md = [
   ``,
 ].join("\n");
 writeFileSync(join(outDir, "trips.md"), md);
-console.log(`${total} trips in ${took.toFixed(0)} s: ${fails.length} failing, ${cant.length} can't run, ${passes.length} passing. See ${join(outDir, "trips.md")}`);
+log(`${total} trips in ${took.toFixed(0)} s: ${fails.length} failing, ${cant.length} can't run, ${passes.length} passing. See ${join(outDir, "trips.md")}`);
 process.exit(fails.length || cant.length ? 1 : 0);
