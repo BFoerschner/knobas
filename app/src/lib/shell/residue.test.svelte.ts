@@ -376,6 +376,26 @@ const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
 const TfContextMenu = (await import("../tf/context/TfContextMenu.svelte")).default;
 const { realMenuPorts } = await import("../tf/context/ports");
 const TfZoomLevel = (await import("../tf/TfZoomLevel.svelte")).default;
+const TfSite = (await import("../tf/site/TfSite.svelte")).default;
+const TfSiteBar = (await import("../tf/site/TfSiteBar.svelte")).default;
+const TfSiteVeil = (await import("../tf/site/TfSiteVeil.svelte")).default;
+const { createSiteStore } = await import("../tf/site/site.svelte");
+const SITE_STATUS = {
+  source: "wiki",
+  phase: "live",
+  url: "https://wiki.example/x",
+  title: "x",
+  own: true,
+  loading: false,
+  can_back: true,
+  can_forward: false,
+  shown: false,
+  keyboard: "site",
+  asks_origin: null,
+  failure: null,
+  esc_again_ms: 500,
+} as const;
+const siteResidueStore = createSiteStore();
 const TfAck = (await import("../tf/TfAck.svelte")).default;
 const { acknowledge } = await import("./ack.svelte");
 const { createZoom } = await import("../tf/zoom.svelte");
@@ -2637,6 +2657,48 @@ const CASES: Case[] = [
       acknowledge("Opening in VS Code").settle();
       flushSync();
     },
+  },
+  {
+    /** A source's site (ADR-0048): shown and hidden under a layer; its observer and its ⌘R go with the page. */
+    name: "TfSite",
+    source: "lib/tf/site/TfSite.svelte",
+    open: (target) => {
+      siteResidueStore.update({ ...SITE_STATUS });
+      const layers = createLayers();
+      const ports = { show: () => {}, hide: () => {}, open: () => {}, browse: () => {}, answer: () => Promise.resolve(null), measure: () => ({ top: 93, right: 0, bottom: 28, left: 0 }) };
+      return { app: mount(TfSite, { target, props: { source: "wiki", visible: true, back: null, layers, ports, store: siteResidueStore } }) };
+    },
+    exercise: () => {
+      siteResidueStore.update({ ...SITE_STATUS, title: "y", loading: true });
+      flushSync();
+    },
+  },
+  {
+    /** A site's bar: the first Esc's cap, and the question's focus, gone with it. */
+    name: "TfSiteBar",
+    source: "lib/tf/site/TfSiteBar.svelte",
+    open: (target) => {
+      siteResidueStore.update({ ...SITE_STATUS });
+      return { app: mount(TfSiteBar, { target, props: { source: "wiki", name: "Wiki", status: { ...SITE_STATUS }, setting: undefined, back: { hash: "#/inbox", name: "Inbox", opened: true }, store: siteResidueStore } }) };
+    },
+    exercise: () => {
+      siteResidueStore.ask("wiki", { kind: "close" });
+      flushSync();
+      siteResidueStore.ask("wiki", null);
+      flushSync();
+    },
+  },
+  {
+    /** What a site's rectangle says; the question's focus goes with it. */
+    name: "TfSiteVeil",
+    source: "lib/tf/site/TfSiteVeil.svelte",
+    open: (target) => ({
+      app: mount(TfSiteVeil, {
+        target,
+        props: { name: "Wiki", status: { ...SITE_STATUS, phase: "asks", asks_origin: "https://idp.example" }, setting: undefined, covered: false, onopen: () => {}, onbrowse: () => {}, oncontinue: () => {}, ondecline: () => {}, onreload: () => {} },
+      }),
+    }),
+    exercise: () => flushSync(),
   },
   {
     /** The zoom's level as it changes (2026-11-16): a step shows it, and its timer to hide it goes with the plate. */

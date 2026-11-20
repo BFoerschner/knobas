@@ -9,12 +9,32 @@ import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBacku
 import type { acceptSuggestion, actionItemTicket, cardReads, entityBriefs, artifactBytes, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneAll, cloneAllPlan, cloneAllState, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsChoices, docsCreatePage, docsEditSection, setDocsHome, setDocsSpaceHidden, docsExportMarkdown, docsNodes, docsOutline, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCheckouts, entityCommitDiff, entityFileBytes, entityFilePiped, entityLocalDir, entityLocalFile, entityLocalPaths, entityLocalTree, entityRangeDiff, entitySourceRangeDiff, entityThread, entityHead, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, inboxShelves, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openFolder, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, publishStandupProtocolAgain, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, readRuns, markRunsRead, markRunsUnread, unreadFailingBuilds, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity, repoPipelines, repoBranchPulls, commitRepositories, entityRangeFile, entityRangeFilePages, entityRangeFiles, entitySourceRangeFiles, entityRangeNames, cancelRead, archiveOpen, archiveNested, archiveEntry, archiveClass, archiveDecompile, archiveDownload } from "../../ipc/entity";
 import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, fuzzyRank, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, search, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, clearToneOverrides, setToneOverride, stateColours, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
+import type { setSiteOpenInside, setSitesKept, siteAllow, siteAnswer, siteClose, siteDisallow, siteDo, siteForget, siteHide, siteOpen, siteQuit, siteRevealDownload, siteSettings, siteShow, siteSuggest, siteZoom, sites, sitesKept, sitesUnsaved } from "../../ipc/site";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
 
 type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnType<F>>;
 
 /** Command name to the shape its barrel function resolves to. */
 export interface Answers {
+  site_settings: Answer<typeof siteSettings>;
+  set_site_open_inside: Answer<typeof setSiteOpenInside>;
+  site_allow: Answer<typeof siteAllow>;
+  site_disallow: Answer<typeof siteDisallow>;
+  site_suggest: Answer<typeof siteSuggest>;
+  site_forget: Answer<typeof siteForget>;
+  site_open: Answer<typeof siteOpen>;
+  site_show: Answer<typeof siteShow>;
+  site_hide: Answer<typeof siteHide>;
+  site_do: Answer<typeof siteDo>;
+  site_answer: Answer<typeof siteAnswer>;
+  site_close: Answer<typeof siteClose>;
+  sites: Answer<typeof sites>;
+  sites_unsaved: Answer<typeof sitesUnsaved>;
+  site_quit: Answer<typeof siteQuit>;
+  site_zoom: Answer<typeof siteZoom>;
+  site_reveal_download: Answer<typeof siteRevealDownload>;
+  sites_kept: Answer<typeof sitesKept>;
+  set_sites_kept: Answer<typeof setSitesKept>;
   accept_suggestion: Answer<typeof acceptSuggestion>;
   ack_alert: Answer<typeof ackAlert>;
   fuzzy_rank: Answer<typeof fuzzyRank>;

@@ -30,6 +30,7 @@
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import { openLink } from "../../shell/external-links";
+  import { openKey } from "../page-open.svelte";
   import { DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
 
   /** The page's two reads, the write queue its actions queue through, and its *Refresh* (#2107). */
@@ -265,7 +266,7 @@
         <div class="tf-acts">
           {@render buttonsOf(headerActions, false)}
           {#if detail.web_url !== null}
-            <a class="tf-btn tf-ghost" href={detail.web_url} title="Open in {detail.source.display_name}" onclick={openLink}><span class="tf-cut">Open in {detail.source.display_name}</span></a>
+            <a class="tf-btn tf-ghost" href={detail.web_url} title="Open in {detail.source.display_name} (O)" onclick={openLink} {@attach openKey(() => ({ url: detail?.web_url ?? null, source: detail?.source.id ?? null }))}><span class="tf-cut">Open in {detail.source.display_name}</span></a>
           {/if}
           <TfDetailRefresh {detail} {refresh} {reread} page />
         </div>

@@ -6,8 +6,9 @@
  * The window is a WebView: a plain `<a>` to a web page pressed in it
  * navigates the WebView itself to that page, where there is no way back and no
  * address bar, and `target="_blank"` opens a bare WebView window on Windows.
- * So every press on a link to another origin goes through {@link openExternal}
- * (http and https only), with a toast when it refuses:
+ * So every press on a link to another origin goes through `openWeb` (`open-web.ts`): its source's site inside
+ * knobas when that source's pages open there (ADR-0048), else {@link openExternal} (http and https only), with a toast
+ * when it refuses:
  *
  * - **{@link openLink}** is a link's own `onclick`, for a link the app draws
  *   to a source's page (*The rest on the source*, a cut file's source);
@@ -25,6 +26,7 @@
 import { ipcErrorMessage } from "../ipc";
 import { acknowledged, openingWords } from "./ack.svelte";
 import { openExternal } from "./open-external";
+import { openWeb, pressElsewhere } from "./open-web";
 import { push } from "./toasts.svelte";
 
 /**
@@ -54,20 +56,24 @@ export function openInBrowser(url: string, open: (url: string) => Promise<void> 
   });
 }
 
-/** A link's `onclick`: its page opens in the browser, and the window stays where it is. */
+/**
+ * A link's `onclick`: its page opens where it belongs (`open-web.ts`): its source's site inside knobas when that
+ * source's pages open there, else the browser; a middle press or ⌘ or Ctrl held asks for the browser. The window stays
+ * where it is.
+ */
 export function openLink(event: MouseEvent): void {
   const link = event.currentTarget instanceof HTMLAnchorElement ? event.currentTarget : null;
   const url = link === null ? null : externalUrl(link.getAttribute("href"), location.origin);
   if (url === null) return;
   event.preventDefault();
-  openInBrowser(url);
+  openWeb(url, { elsewhere: pressElsewhere(event) });
 }
 
 /**
  * Send every unhandled press on a link to another origin to the browser.
  * Answers the uninstaller.
  */
-export function installExternalLinks(target: Window = window, open: (url: string) => Promise<void> = openExternal): () => void {
+export function installExternalLinks(target: Window = window, open?: (url: string) => Promise<void>): () => void {
   const onPress = (event: MouseEvent) => {
     if (event.defaultPrevented) return;
     // A middle press opens a window of its own; a right press is the context menu's.
@@ -77,7 +83,9 @@ export function installExternalLinks(target: Window = window, open: (url: string
     const url = externalUrl(link.getAttribute("href"), target.location.origin);
     if (url === null) return;
     event.preventDefault();
-    openInBrowser(url, open);
+    // A test hands its own opening; the window's is `openWeb`, which picks the site or the browser.
+    if (open !== undefined) openInBrowser(url, open);
+    else openWeb(url, { elsewhere: pressElsewhere(event) });
   };
   target.addEventListener("click", onPress);
   target.addEventListener("auxclick", onPress);

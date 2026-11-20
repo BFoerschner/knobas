@@ -139,6 +139,13 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["V", "A diff", "Mark the file viewed"],
   ["C", "A diff", "Comment on the line"],
   ["S", "A diff", "Split or unified"],
+  ["O", "A page with Open in ⟨source⟩", "Open it in its source: its site here, or the browser"],
+  ["Shift O", "A page with Open in ⟨source⟩", "Open it in the browser"],
+  ["Esc Esc", "A site", "Back to where you opened it from; one Esc is the site's"],
+  ["⌘W", "A site", "Close it"],
+  ["⌘R", "A site", "Reload it"],
+  ["⌘[ ⌘]", "A site", "Back and forward in the site, then in knobas"],
+  ["⌘L", "A site", "The keyboard to knobas's bar, and back"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];
 

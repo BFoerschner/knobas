@@ -305,6 +305,7 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-mockd` | Deprecated and frozen (ADR-0013). An HTTP mock of Jira and TeamCity, kept as a dev-dependency for older tests until the live suites cover them. |
 | `knobas-live-cleanup` | Dev-dependency only. The one runner every live suite's `Drop` guard hands its cleanup to: a thread and runtime of its own, a bound on the whole sequence, and a report that cannot abort a test that is already unwinding (#1913). |
 | `knobas-secrets` | The OS-keychain credential store behind a trait, with an in-memory store for tests. No secret reaches Postgres or crosses the bridge. |
+| `knobas-site` | A source's own website shown inside knobas (ADR-0048): which addresses a site may show, the keys knobas takes from it and Esc twice, a site's states and lifetime, its session's place, the one script knobas runs in it, and the native view itself, made with raw wry as a child of the main window and given no IPC, scheme or script. Pure parts tested everywhere; the view on macOS and Windows. |
 | `knobas-search` | The launcher's read side: full-text search over the mirror in the `SearchQuery` to `SearchResponse` shape. |
 | `knobas-sync` | The sync engine and scheduler: one run per transaction, cursors, backoff, credential health, the run log, and the write queue. |
 | `knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles and the IPC commands. |

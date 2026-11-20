@@ -1,0 +1,286 @@
+/**
+ * `?fake-ipc`: a source's own website inside knobas (ADR-0048, decisions §24). The site commands answered and
+ * `site:status` emitted as the native side would, so `just dev`, the budgets, the press trips and `just moves` draw a
+ * site's page. Where the native view would be, a grey block stands over the rectangle (a fixed element of the
+ * document, as the native view is above the page), shown and hidden as the view would be.
+ *
+ * Tidewater Jira's and Tidewater Confluence's pages open inside knobas; the others open the browser.
+ * `?fake-site=off` turns them all off. `?fake-site-dirty` makes every page hold changes, so a close, a reload and
+ * another address ask. A view commits its page 250 ms after it is made, as a fast local site would.
+ */
+import type { SiteInsets, SiteSetting, SiteStatus } from "../../../ipc/site";
+import { onFakeReset } from "../fake-seed";
+import type { FakeBridge, Handlers } from "../fake-tauri";
+
+let bridge: FakeBridge | null = null;
+// The bridge is the installed one's, not a value a handler changes; a reset leaves no grey block behind.
+onFakeReset(() => {
+  bridge = null;
+  if (typeof document !== "undefined") for (const el of document.querySelectorAll("[data-fake-site]")) el.remove();
+});
+
+/** Hold the installed bridge: the site's status is an event. */
+export function attach(installed: FakeBridge): void {
+  bridge = installed;
+}
+
+const BASES: Record<string, string> = {
+  jira: "https://jira.tidewater.example",
+  confluence: "https://wiki.tidewater.example",
+  gitea: "https://git.tidewater.example",
+  teamcity: "https://ci.tidewater.example",
+  kuma: "https://status.tidewater.example",
+  mock: "https://mock.tidewater.example",
+  kestrel: "https://kestrel.tidewater.example",
+};
+
+const TITLES: Record<string, string> = {
+  jira: "PAY-231 Payout CSV export – Tidewater Jira",
+  confluence: "SEPA payout retry design – Payments – Tidewater Confluence",
+};
+
+interface FakeSite {
+  status: SiteStatus;
+  insets: SiteInsets | null;
+  wanted: boolean;
+  history: string[];
+  at: number;
+}
+
+function blank(source: string): SiteStatus {
+  return {
+    source,
+    phase: "opening",
+    url: null,
+    title: "",
+    own: false,
+    loading: true,
+    can_back: false,
+    can_forward: false,
+    shown: false,
+    keyboard: "shell",
+    asks_origin: null,
+    failure: null,
+    esc_again_ms: 500,
+  };
+}
+
+/** The grey block where the native view would be. */
+function block(source: string): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  let el = document.querySelector<HTMLElement>(`[data-fake-site="${source}"]`);
+  if (el === null) {
+    el = document.createElement("div");
+    el.dataset["fakeSite"] = source;
+    el.className = "tf-fake-site";
+    el.textContent = "The site's own page, drawn by the site";
+    el.setAttribute("aria-hidden", "true");
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function place(site: FakeSite): void {
+  const el = block(site.status.source);
+  if (el === null) return;
+  const on = site.status.shown && site.insets !== null;
+  el.hidden = !on;
+  if (!on || site.insets === null) return;
+  const level = Number.parseFloat(getComputedStyle(document.documentElement).zoom || "1") || 1;
+  const px = (v: number) => `${v / level}px`;
+  Object.assign(el.style, {
+    position: "fixed",
+    top: px(site.insets.top),
+    left: px(site.insets.left),
+    right: px(site.insets.right),
+    bottom: px(site.insets.bottom),
+    background: "#d5d9de",
+    color: "#4b5663",
+    display: "grid",
+    placeItems: "center",
+    font: "13px system-ui, sans-serif",
+    zIndex: "30",
+  });
+}
+
+/** This feature's commands. */
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+  const off = params.get("fake-site") === "off";
+  const dirty = params.has("fake-site-dirty");
+  const settings = new Map<string, SiteSetting>(
+    Object.entries(BASES).map(([source, base]) => [
+      source,
+      {
+        source,
+        open_inside: !off && (source === "jira" || source === "confluence"),
+        base,
+        own: base,
+        allowed: [],
+        suggested: [],
+        kept_since: source === "confluence" ? "2026-11-12T09:30:00Z" : null,
+        offered: true,
+        persists: true,
+      },
+    ]),
+  );
+  const sites = new Map<string, FakeSite>();
+  let kept = 2;
+
+  const emit = (site: FakeSite) => {
+    site.status = { ...site.status, shown: site.wanted && site.status.phase === "live" };
+    place(site);
+    bridge?.emit("site:status", { ...site.status });
+  };
+
+  const commit = (site: FakeSite, url: string) => {
+    const own = url.startsWith(BASES[site.status.source] ?? "\u0000");
+    site.status = {
+      ...site.status,
+      phase: "live",
+      url,
+      own,
+      title: TITLES[site.status.source] ?? new URL(url).host,
+      loading: false,
+      can_back: site.history.length > 1,
+    };
+    emit(site);
+  };
+
+  const load = (site: FakeSite, url: string) => {
+    site.history.push(url);
+    site.at = site.history.length - 1;
+    site.status = { ...site.status, loading: true };
+    emit(site);
+    setTimeout(() => commit(site, url), 250);
+  };
+
+  const asked = (source: string, force: boolean) => !force && dirty && sites.get(source)?.status.phase === "live";
+
+  return {
+    site_settings: () => [...settings.values()],
+    set_site_open_inside: (args) => {
+      const id = String(args["id"]);
+      const one = { ...settings.get(id)!, open_inside: args["on"] === true };
+      settings.set(id, one);
+      return one;
+    },
+    site_allow: (args) => {
+      const id = String(args["id"]);
+      const origin = String(args["origin"]);
+      const was = settings.get(id)!;
+      const one = { ...was, allowed: [...was.allowed.filter((o) => o !== origin), origin], suggested: was.suggested.filter((o) => o !== origin) };
+      settings.set(id, one);
+      return one;
+    },
+    site_disallow: (args) => {
+      const id = String(args["id"]);
+      const was = settings.get(id)!;
+      const one = { ...was, allowed: was.allowed.filter((o) => o !== String(args["origin"])) };
+      settings.set(id, one);
+      return one;
+    },
+    site_suggest: (args) => {
+      const id = String(args["id"]);
+      const was = settings.get(id);
+      if (was && !was.suggested.includes(String(args["origin"]))) settings.set(id, { ...was, suggested: [...was.suggested, String(args["origin"])] });
+      return null;
+    },
+    site_forget: (args) => {
+      const id = String(args["id"]);
+      if (asked(id, args["force"] === true)) return { done: false, asks: "unsaved" };
+      sites.delete(id);
+      block(id)?.remove();
+      bridge?.emit("site:closed", { source: id, why: "forgot" });
+      const was = settings.get(id);
+      if (was) settings.set(id, { ...was, kept_since: null });
+      return { done: true, asks: null };
+    },
+    site_open: (args) => {
+      const source = String(args["source"]);
+      const url = (args["url"] as string | null) ?? null;
+      const base = BASES[source];
+      if (base === undefined || settings.get(source)?.open_inside !== true) throw { code: "invalid", message: "this source's pages do not open inside knobas" };
+      const existing = sites.get(source);
+      if (existing !== undefined) {
+        if (url === null) return { done: true, asks: null };
+        if (asked(source, args["force"] === true)) return { done: false, asks: "unsaved" };
+        load(existing, url);
+        return { done: true, asks: null };
+      }
+      const site: FakeSite = { status: blank(source), insets: (args["insets"] as SiteInsets) ?? null, wanted: false, history: [], at: 0 };
+      sites.set(source, site);
+      emit(site);
+      load(site, url ?? `${base}/`);
+      return { done: true, asks: null };
+    },
+    site_show: (args) => {
+      const site = sites.get(String(args["source"]));
+      if (site === undefined) return null;
+      site.insets = args["insets"] as SiteInsets;
+      site.wanted = true;
+      if (args["focus"] === true) site.status = { ...site.status, keyboard: "site" };
+      emit(site);
+      return null;
+    },
+    site_hide: (args) => {
+      const site = sites.get(String(args["source"]));
+      if (site === undefined) return null;
+      site.wanted = false;
+      site.status = { ...site.status, keyboard: "shell" };
+      emit(site);
+      return null;
+    },
+    site_do: (args) => {
+      const source = String(args["source"]);
+      const site = sites.get(source);
+      if (site === undefined) throw { code: "not_found", message: "the site is not open" };
+      const act = String(args["act"]);
+      if (act === "reload") {
+        if (asked(source, args["force"] === true)) return { done: false, asks: "unsaved" };
+        site.status = { ...site.status, loading: true };
+        emit(site);
+        setTimeout(() => commit(site, site.status.url ?? `${BASES[source]}/`), 250);
+      } else if (act === "back" && site.at > 0) {
+        site.at -= 1;
+        commit(site, site.history[site.at]!);
+        site.status = { ...site.status, can_back: site.at > 0, can_forward: true };
+        emit(site);
+      } else if (act === "forward" && site.at < site.history.length - 1) {
+        site.at += 1;
+        commit(site, site.history[site.at]!);
+        site.status = { ...site.status, can_back: true, can_forward: site.at < site.history.length - 1 };
+        emit(site);
+      } else if (act === "focus" || act === "focus-shell") {
+        site.status = { ...site.status, keyboard: act === "focus" ? "site" : "shell" };
+        emit(site);
+      }
+      return { done: true, asks: null };
+    },
+    site_answer: (args) => {
+      const site = sites.get(String(args["source"]));
+      if (site === undefined) throw { code: "not_found", message: "the site is not open" };
+      site.status = { ...site.status, phase: "live", asks_origin: null };
+      emit(site);
+      return null;
+    },
+    site_close: (args) => {
+      const source = String(args["source"]);
+      if (!sites.has(source)) throw { code: "not_found", message: "the site is not open" };
+      if (asked(source, args["force"] === true)) return { done: false, asks: "unsaved" };
+      sites.delete(source);
+      block(source)?.remove();
+      bridge?.emit("site:closed", { source, why: "asked" });
+      return { done: true, asks: null };
+    },
+    sites: () => [...sites.values()].map((site) => site.status),
+    sites_unsaved: () => (dirty ? [...sites.values()].map((site) => site.status) : []),
+    site_quit: () => null,
+    site_zoom: () => null,
+    site_reveal_download: () => null,
+    sites_kept: () => kept,
+    set_sites_kept: (args) => {
+      kept = Math.min(6, Math.max(1, Math.round(Number(args["count"]))));
+      return kept;
+    },
+  };
+}

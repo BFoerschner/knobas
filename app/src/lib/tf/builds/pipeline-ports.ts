@@ -56,7 +56,7 @@ import {
 import { EVENTS } from "../../ipc";
 import { writeFollower, type WriteFollower } from "../../shell/follow-write";
 import type { RefusedWritesPort } from "../../shell/refused-writes";
-import { openExternal } from "../../shell/open-external";
+import { routeWeb } from "../../shell/open-web";
 import { isEntityId, resolveTicket } from "../job/job";
 import { branchOptions } from "../repo/repo";
 import type { DetailRefreshPorts } from "../refresh.svelte";
@@ -152,7 +152,7 @@ export const BRIDGE: PipelinePorts = {
   syncStatus: () => syncStatus(),
   jobBranches: (job) => readJobBranches(job),
   submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
-  openExternal: (url) => openExternal(url),
+  openExternal: (url) => routeWeb(url),
   presets: (pipelineId) => runPresets(pipelineId),
   savePreset: (preset) => saveRunPreset(preset),
   deletePreset: (pipelineId, name) => deleteRunPreset(pipelineId, name),

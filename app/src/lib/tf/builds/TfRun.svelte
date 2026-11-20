@@ -54,6 +54,7 @@
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { acknowledged, openingWords } from "../../shell/ack.svelte";
+  import { webPlaceName } from "../../shell/open-web";
   import { settleEchoes } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { heldHead } from "../held-head.svelte";
@@ -551,7 +552,7 @@
 
   function openExternal(url: string | null) {
     if (url === null) return;
-    void acknowledged(openingWords("the browser"), () => ports.openExternal(url)).catch((cause: unknown) => {
+    void acknowledged(openingWords(webPlaceName(url)), () => ports.openExternal(url)).catch((cause: unknown) => {
       push({ text: `Could not open ${pipeline.source_name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }

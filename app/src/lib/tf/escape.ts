@@ -67,6 +67,8 @@ export interface EscState {
   visiting?: boolean;
   /** The place the page says it sits under (`page-name.svelte.ts`), where the address cannot say it. */
   parent?: EscTarget | null;
+  /** On a site's page: a first `Esc` is down and the second still counts (ADR-0048, decisions §9). */
+  armed?: boolean;
 }
 
 /** What one press does. */
@@ -76,6 +78,8 @@ export type EscStep =
   | { do: "blur" }
   /** `opened`: the target is the entry's opener, which the shell may reach by stepping back. */
   | { do: "go"; hash: string; opened: boolean }
+  /** On a site's page, the first `Esc`: the second within half a second goes back (decisions §9). */
+  | { do: "arm" }
   | { do: "nothing" };
 
 /** Where `Esc` goes once nothing is open, and what the breadcrumb calls it. */
@@ -99,6 +103,8 @@ export function escStep(state: EscState): EscStep {
   const panel = state.layers.map((layer) => layer.kind).lastIndexOf("panel");
   if (panel !== -1) return { do: "close", index: panel };
   const target = escTarget(state.route, state.opener, state.visiting, state.parent);
+  // A site's page goes back on the second `Esc` only, one rule wherever the keyboard is (decisions §9).
+  if (state.route.view === "site" && target !== null && state.armed !== true) return { do: "arm" };
   if (target !== null) return { do: "go", hash: target.hash, opened: target.opened };
   // An empty filter on a page `Esc` doesn't leave: out of the box, so the page's keys answer again.
   return state.field ? { do: "blur" } : { do: "nothing" };
@@ -201,6 +207,8 @@ export function openerName(route: TfRoute, own: string | null): string {
     return kind !== undefined && own.startsWith("#") ? `${kind} ${own}` : own;
   }
   if (route.view === "item" || route.view === "note") return own || (route.view === "item" ? "Item" : "Note");
+  // A site names itself by its page's title, else its source.
+  if (route.view === "site") return own || route.source;
   // A ticket page (spec #2227) is named by its ticket's key, as its breadcrumb names it.
   if (route.view === "ticket") return own || segmentKey(route.id);
   // Home draws the chosen job's page (spec #2396), which names itself by its key.

@@ -87,6 +87,7 @@
   import { goBackTo, goWithoutOpener, leftName, noteArrival, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
+  import { onOpenKey } from "./page-open.svelte";
   import { PAGES } from "./pages";
   import { capturePlace, pressOpens, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
@@ -127,6 +128,13 @@
   import TfZoomLevel from "./TfZoomLevel.svelte";
   import { installZoomInput, zoom as sharedZoom, zoomKey, type Zoom } from "./zoom.svelte";
   import { noteScrolls } from "./scrolled";
+  import { siteAllow, siteDo, siteRevealDownload, siteSettings, sitesKept, siteZoom, type SiteDownload, type SiteKey, type SiteRouted, type SiteStatus } from "../ipc/site";
+  import { siteStore } from "./site/site.svelte";
+  import { closeSite, reloadSite, siteBack, siteForward } from "./site/actions";
+  import TfSiteQuit from "./site/TfSiteQuit.svelte";
+  import { ackBand } from "../shell/ack.svelte";
+  import { openInBrowser } from "../shell/external-links"; // browser on purpose: a site's link to an address it may not show
+  import { openWeb } from "../shell/open-web";
   import "./tf.css";
 
   let {
@@ -632,6 +640,10 @@
   onReady(ready, () => ports.docsChoices, (choices) => heldDocsChoices.hold(choices));
   // The runs marked read (ux18): until they answer, every failed run asks, as before there were marks.
   onReady(ready, () => () => runsRead.load(), () => {});
+  // Which sources' pages open inside knobas (ADR-0048): until they answer, every address opens the browser, as before.
+  onReady(ready, () => siteSettings, (list) => siteStore.hold(list));
+  // *Sites kept open*, which the native side holds once read.
+  onReady(ready, () => sitesKept, () => {});
 
   $effect(() => {
     if (!lifecycle.ready) return;
@@ -644,6 +656,8 @@
       .then((rows) => {
         if (dead) return;
         sources = rows;
+        // The sites' nameplates (ADR-0048).
+        siteStore.nameAll(rows);
         // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
         sourceRoles.take(rows);
       })
@@ -688,6 +702,14 @@
         if (recolours(payload)) recoloured += 1;
       }),
     );
+    // A source's site (ADR-0048): its state, the keys it gave knobas, where its links went, its downloads, its close,
+    // and the quit that asks about it.
+    hold(ports.listen(EVENTS.siteStatus, ({ payload }) => siteStore.update(payload as SiteStatus)));
+    hold(ports.listen(EVENTS.siteClosed, ({ payload }) => siteStore.closed((payload as { source: string }).source)));
+    hold(ports.listen(EVENTS.siteKey, ({ payload }) => siteKey(payload as SiteKey)));
+    hold(ports.listen(EVENTS.siteRouted, ({ payload }) => siteRouted(payload as SiteRouted)));
+    hold(ports.listen(EVENTS.siteDownload, ({ payload }) => siteDownload(payload as SiteDownload)));
+    hold(ports.listen(EVENTS.siteQuit, ({ payload }) => (quitting = payload as SiteStatus[])));
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);
 
@@ -722,9 +744,13 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    // On a site's page a key between two `Esc`s is a new start (decisions §9).
+    if (route.view === "site" && event.key !== "Escape") siteStore.disarm(route.source);
     // ⌘R presses the page's *Refresh* or *Sync now* (#2156), and the webview
     // never reloads; an overlay owns the keyboard, as it does history's keys.
     if (onRefreshKey(event, dialogOpen())) return;
+    // `O` presses the page's *Open in ⟨source⟩*, `⇧O` opens the browser (ADR-0048).
+    if (onOpenKey(event, dialogOpen())) return;
     // ⌘+ / ⌘− / ⌘0 zoom the window from anywhere, a field and a dialog too, as a browser's do: the window's, not a page's.
     const zooming = zoomKey(event);
     if (zooming !== null) {
@@ -737,11 +763,27 @@
     if (travel !== null) {
       event.preventDefault();
       if (dialogOpen()) return;
+      // On a site's page, back and forward in the site first, then in knobas (decisions §8).
+      if (route.view === "site" && (travel === "back" ? siteBack(route.source) : siteForward(route.source))) return;
       if (travel === "back") nav.back();
       else nav.forward();
       return;
     }
     const mod = event.metaKey || event.ctrlKey;
+    // ⌘W closes the site, through its question; ⌘L gives the site the keyboard back (decisions §8).
+    if (route.view === "site" && mod && !event.shiftKey && !event.altKey && !dialogOpen()) {
+      const key = event.key.toLowerCase();
+      if (key === "w") {
+        event.preventDefault();
+        void closeSite(route.source);
+        return;
+      }
+      if (key === "l") {
+        event.preventDefault();
+        void siteDo(route.source, "focus", false).catch(() => {});
+        return;
+      }
+    }
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
       onsearch("");
@@ -798,8 +840,14 @@
       opener: here.opener,
       visiting,
       parent: shownPage.parent,
+      armed: route.view === "site" && siteStore.armed.has(route.source),
     });
     if (step.do === "nothing") return;
+    if (step.do === "arm") {
+      event.preventDefault();
+      if (route.view === "site") siteStore.arm(route.source, siteStore.status.get(route.source)?.esc_again_ms ?? 500);
+      return;
+    }
     event.preventDefault();
     if (step.do === "close") layers.open[step.index]?.close();
     else if (step.do === "clear-filter" && field instanceof HTMLInputElement) {
@@ -811,7 +859,113 @@
       field?.blur();
       holder?.focus({ preventScroll: true });
     }
-    else if (step.do === "go") leave(step.hash, step.opened);
+    else if (step.do === "go") {
+      if (route.view === "site") siteStore.disarm(route.source);
+      leave(step.hash, step.opened);
+    }
+  }
+
+  // ---- a source's site (ADR-0048) ----
+  /** The sites that hold changes, while knobas asks before it quits. */
+  let quitting = $state<SiteStatus[] | null>(null);
+  /** A site's native view covers the page: the floats stand out of its rectangle (decisions §7). */
+  const siteShown = $derived(route.view === "site" && siteStore.status.get(route.source)?.shown === true);
+  $effect(() => {
+    ackBand.site = siteShown;
+  });
+  // A site is drawn at the window's zoom (decisions §14).
+  $effect(() => {
+    const level = zoom.level;
+    if (lifecycle.ready) void siteZoom(level).catch(() => {});
+  });
+
+  /** A key knobas took from a site (decisions §8): the same function its own key runs with the keyboard in knobas. */
+  function siteKey({ source, key }: SiteKey) {
+    switch (key) {
+      case "search":
+        return onsearch("");
+      case "settings":
+        return onnav("settings", navHref("settings"));
+      case "timer":
+        return ontimer?.();
+      case "reload":
+        return void reloadSite(source);
+      case "back":
+        if (!siteBack(source)) nav.back();
+        return;
+      case "forward":
+        if (!siteForward(source)) nav.forward();
+        return;
+      case "zoom-in":
+        return zoom.step(1);
+      case "zoom-out":
+        return zoom.step(-1);
+      case "zoom-reset":
+        return zoom.reset();
+      case "close":
+        return void closeSite(source);
+      case "bar":
+        void siteDo(source, "focus-shell", false).catch(() => {});
+        document.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-site-at")?.focus({ preventScroll: true });
+        return;
+      case "esc-armed":
+        return siteStore.arm(source, siteStore.status.get(source)?.esc_again_ms ?? 500);
+      case "esc-leave":
+        siteStore.disarm(source);
+        if (route.view === "site" && route.source === source && back !== null) leave(back.hash, back.opened);
+        return;
+    }
+  }
+
+  /** Where a link a site may not show went (decisions §6): the bar says so for six seconds. */
+  function siteRouted(routed: SiteRouted) {
+    const name = siteStore.name(routed.source);
+    if (routed.to === "site" && routed.other !== null) {
+      openWeb(routed.url, { source: routed.other });
+      return;
+    }
+    if (routed.to === "refused") {
+      siteStore.say(routed.source, { text: `${routed.host} links do not open from a site.` });
+      return;
+    }
+    openInBrowser(routed.url);
+    let origin: string | null = null;
+    try {
+      origin = new URL(routed.url).origin;
+    } catch {
+      origin = null;
+    }
+    const text = `Opened ${routed.host} in your browser. It is not one of ${name}'s addresses.`;
+    if (origin === null) {
+      siteStore.say(routed.source, { text });
+      return;
+    }
+    const allowed = origin;
+    siteStore.say(routed.source, {
+      text,
+      action: {
+        label: "Allow it here",
+        run: () =>
+          void siteAllow(routed.source, allowed)
+            .then((setting) => {
+              siteStore.holdOne(setting);
+              siteStore.say(routed.source, null);
+            })
+            .catch(() => {}),
+      },
+    });
+  }
+
+  /** A site's download (decisions §11): said in its bar, never a toast over the site. */
+  function siteDownload(download: SiteDownload) {
+    if (download.state === "saved") {
+      siteStore.say(download.source, {
+        text: `Saved ${download.name} to Downloads.`,
+        action: { label: "Show in folder", run: () => void siteRevealDownload(download.id).catch(() => {}) },
+      });
+    } else if (download.state === "failed") {
+      siteStore.say(download.source, { text: `Could not save ${download.name}.` });
+    }
   }
 
   /** `Esc`'s step to `hash` (rungs 5 to 8), `opened` when it is the entry's opener. */
@@ -885,7 +1039,7 @@
   });
 </script>
 
-<div class="tf">
+<div class="tf" class:tf-site-shown={siteShown}>
   <TfTopBar
     current={sectionOf(route)}
     {inbox}
@@ -928,6 +1082,9 @@
   {@render dialogs?.(sync)}
   {#if writeQueuePanel.open}
     <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
+  {/if}
+  {#if quitting !== null && quitting.length > 0}
+    <TfSiteQuit unsaved={quitting} onclose={() => (quitting = null)} {layers} />
   {/if}
   {#if secretPrompt.source !== null}
     <TfSecretPromptHost sourceId={secretPrompt.source} {layers} ports={secretPorts} />

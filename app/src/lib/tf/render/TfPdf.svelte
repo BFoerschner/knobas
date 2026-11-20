@@ -16,7 +16,7 @@
   import { deviceScale } from "../../shell/device-scale.svelte";
   import { renderPort, type PdfDocument, type PdfLink, type RenderPort } from "../../render/port";
   import { BYTES_CAP } from "../../render/registry";
-  import { openExternal as realOpenExternal } from "../../shell/open-external";
+  import { routeWeb as realOpenExternal } from "../../shell/open-web";
   import { push } from "../../shell/toasts.svelte";
 
   let {

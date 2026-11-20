@@ -59,6 +59,16 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
     crate::archive::java::JavaRuntime::export_all(cfg)?;
+    // site.ts
+    crate::site::SiteSetting::export_all(cfg)?;
+    knobas_site::state::SiteStatus::export_all(cfg)?;
+    knobas_site::sites::SiteInsets::export_all(cfg)?;
+    knobas_site::sites::SiteAsked::export_all(cfg)?;
+    knobas_site::sites::SiteAct::export_all(cfg)?;
+    knobas_site::sites::SiteRouted::export_all(cfg)?;
+    knobas_site::sites::SiteDownload::export_all(cfg)?;
+    knobas_site::sites::SiteClosed::export_all(cfg)?;
+    knobas_site::sites::SiteKey::export_all(cfg)?;
     // entity.ts
     knobas_jar::ArchiveIndex::export_all(cfg)?;
     knobas_jar::ClassOutline::export_all(cfg)?;

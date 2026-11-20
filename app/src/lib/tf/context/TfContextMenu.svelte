@@ -17,7 +17,7 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, EntityDetail } from "../../ipc/entity";
-  import { openInBrowser } from "../../shell/external-links";
+  import { openInBrowser } from "../../shell/external-links"; // browser on purpose: the menu's *Open in browser*
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { keyOf } from "../../time/format";
@@ -31,6 +31,7 @@
   import { folderRenderers, marksOf } from "../../render/folders.svelte";
   import { renderersFor } from "../../render/folder";
   import { realMenuPorts, type MenuPorts } from "./ports";
+  import { siteStore } from "../site/site.svelte";
   import { docsChoices } from "../docs/docs-choices.svelte";
   import { runsRead } from "../builds/runs-read.svelte";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
@@ -101,6 +102,10 @@
             apps: apps.settings,
             sourceName: (id) => sources.find((one) => one.id === id)?.name ?? null,
             mirrored: (url) => sources.some((one) => one.base !== "" && url.startsWith(one.base)),
+            opensInside: (id) => {
+              const setting = siteStore.settings.get(id);
+              return setting !== undefined && setting.open_inside && setting.offered;
+            },
             own: shown.found?.own ?? false,
             renders: (repoId, path) => renderersFor(path, folderRenderers.list, marksOf(repoId)),
             docs: { isHome: (kind, id) => docsChoices.isHome(kind, id), hidden: docsChoices.hidden },
@@ -410,13 +415,22 @@
         return onsearch(act.text);
       case "browser": {
         const value = now(act.url);
+        // browser on purpose: the item is *Open in browser*
         if (value !== undefined) return value === null ? void push({ text: NO_PAGE, tone: "err" }) : openInBrowser(value, ports.openExternal);
+        // browser on purpose: the item is *Open in browser*
         return void later(act.url, from).then((url) => (url === null ? push({ text: NO_PAGE, tone: "err" }) : openInBrowser(url, ports.openExternal)));
+      }
+      case "web": {
+        // *Open in ⟨source⟩*: its site when its pages open inside knobas, else the browser (ADR-0048).
+        const value = now(act.url);
+        if (value !== undefined) return value === null ? void push({ text: NO_PAGE, tone: "err" }) : ports.openWeb(value, { source: act.source });
+        return void later(act.url, from).then((url) => (url === null ? push({ text: NO_PAGE, tone: "err" }) : ports.openWeb(url, { source: act.source })));
       }
       case "in-knobas":
         return void ports.resolveUrl(act.url).then(
           (match) => {
             if (match !== null) return ports.go(entityAddress(match.kind, match.entity_id));
+            // browser on purpose: the toast's *Open in browser*
             push({ text: "knobas holds nothing at that address yet.", action: { label: "Open in browser", run: () => openInBrowser(act.url, ports.openExternal) } });
           },
           failed("Could not read that address"),

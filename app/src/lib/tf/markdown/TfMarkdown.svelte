@@ -55,7 +55,7 @@
   import { ATTACHMENT_MAX_H, IMAGE_HOLD_MS, holdDataImageRoom, holdImageRoom, showImage, sizeImageRoom } from "./image-sizes";
   import { renderPort, type RenderPort } from "../../render/port";
   import { ipcErrorMessage } from "../../ipc";
-  import { openExternal as realOpenExternal } from "../../shell/open-external";
+  import { routeWeb as realOpenExternal } from "../../shell/open-web";
   import { push } from "../../shell/toasts.svelte";
 
   let {

@@ -44,7 +44,8 @@
   import { push } from "../../shell/toasts.svelte";
   import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { ipcErrorMessage } from "../../ipc";
-  import { openExternal } from "../../shell/open-external";
+  import { routeWeb as openExternal, webPlaceName } from "../../shell/open-web";
+  import { openKey } from "../page-open.svelte";
   import type { CardTable } from "./card-sections";
   import TfCardRows from "./TfCardRows.svelte";
   import { ticketHash } from "../route";
@@ -164,7 +165,7 @@
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
-    acknowledged(openingWords("the browser"), () => open(url)).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+    acknowledged(openingWords(webPlaceName(url, { source: detail.source.id })), () => open(url)).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
   }
 </script>
 
@@ -256,7 +257,7 @@
   <div class="tf-tktable tf-tkacts" class:tf-hidden={!rowsHeld.shown} inert={!rowsHeld.shown}>
     {#if detail.web_url}
       {@const url = detail.web_url}
-      <a href={url} title="Open in {detail.source.display_name}" onclick={(event) => openWeb(event, url)}
+      <a href={url} title="Open in {detail.source.display_name} (O)" onclick={(event) => openWeb(event, url)} {@attach openKey(() => ({ url, source: detail.source.id, item: key }))}
         ><span>Open in {detail.source.display_name}</span><span class="tf-chev" aria-hidden="true">›</span></a
       >
     {/if}

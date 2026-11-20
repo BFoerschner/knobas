@@ -713,3 +713,33 @@ test("no module splits an entity id into its key in place", () => {
     "an entity id's key is keyOf from lib/time/format.ts",
   ).toEqual([]);
 });
+
+/**
+ * Where a web address opens is decided in one place (ADR-0048, decisions §12): `open-web.ts`. A module that takes the
+ * browser's own opener (`openExternal`, or `openInBrowser`) opens the browser whatever the source's *Open its pages
+ * inside knobas* says, so only `open-web.ts` and the two modules it stands in front of may import them, and an import
+ * marked `// browser on purpose` (an item named *Open in browser* or *Browser*), which says why on its line.
+ */
+const BROWSER_OPENERS = /import\s*\{[^}]*\b(openExternal|openInBrowser)\b[^}]*\}\s*from\s*"[^"]*(open-external|external-links)"/;
+const MAY_OPEN_THE_BROWSER = ["shell/open-web.ts", "shell/open-external.ts", "shell/external-links.ts"];
+
+function browserOpenersIn(files: readonly { path: string; text: string }[]): string[] {
+  const found: string[] = [];
+  for (const { path, text } of files) {
+    if (MAY_OPEN_THE_BROWSER.some((allowed) => path.endsWith(allowed)) || /\.test\.(svelte\.)?ts$/.test(path)) continue;
+    for (const line of text.split("\n")) {
+      if (BROWSER_OPENERS.test(line) && !line.includes("browser on purpose")) found.push(`${path.slice(ROOT.length)}: ${line.trim()}`);
+    }
+  }
+  return found;
+}
+
+test("only open-web.ts decides that a web address opens the browser", () => {
+  const files = sources().map((path) => ({ path, text: readFileSync(path, "utf8") }));
+  expect(browserOpenersIn(files)).toEqual([]);
+  // The rule's own witness: a new component that takes the browser's opener is refused, a marked one passes.
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openExternal } from "../../shell/open-external";` }])).toHaveLength(1);
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openInBrowser, openLink } from "../../shell/external-links";` }])).toHaveLength(1);
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openLink } from "../../shell/external-links";` }])).toHaveLength(0);
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openExternal } from "../../shell/open-external"; // browser on purpose: *Browser*` }])).toHaveLength(0);
+});

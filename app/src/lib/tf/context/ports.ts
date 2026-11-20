@@ -19,7 +19,8 @@ import {
 import { listSources, type QueuedWrite, type SourceSummary, type WriteOpPayload } from "../../ipc/sources";
 import { inbox } from "../../inbox/inbox.svelte";
 import { realSheetPorts } from "../../launcher/sheet-ports";
-import { openExternal } from "../../shell/open-external";
+import { openExternal } from "../../shell/open-external"; // browser on purpose: the menu's *Open in browser*
+import { openWeb, type WebHow } from "../../shell/open-web";
 
 export interface MenuPorts {
   head: (entityId: string) => Promise<EntityDetail>;
@@ -37,7 +38,10 @@ export interface MenuPorts {
   copyLater: (text: Promise<string>) => Promise<void>;
   /** The document's own copy of the selection, so a page's `copy` handler shapes what lands (the file view's lines). */
   copySelection: () => boolean;
+  /** The browser, on purpose: an item named *Open in browser*. */
   openExternal: (url: string) => Promise<void>;
+  /** *Open in ⟨source⟩*: its site inside knobas when its pages open there, else the browser (ADR-0048). */
+  openWeb: (url: string, how: WebHow) => void;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   ackAlert: (monitorId: string) => Promise<unknown>;
   unackAlert: (monitorId: string) => Promise<unknown>;
@@ -64,7 +68,8 @@ export const realMenuPorts: MenuPorts = {
     await navigator.clipboard.writeText(await text);
   },
   copySelection: () => document.execCommand("copy"),
-  openExternal: (url) => openExternal(url),
+  openExternal: (url) => openExternal(url), // browser on purpose: the menu's *Open in browser*
+  openWeb: (url, how) => openWeb(url, how),
   submitWrite: (payload) => submitWrite(payload),
   ackAlert: (monitorId) => ackAlert(monitorId),
   unackAlert: (monitorId) => unackAlert(monitorId),

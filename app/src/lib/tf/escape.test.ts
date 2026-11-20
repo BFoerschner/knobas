@@ -160,3 +160,28 @@ test("Esc in a field in a section inside the scroller still lands on that sectio
   expect(escHolder(document.querySelector("input")!)).toBe(document.querySelector(".inner"));
   document.body.replaceChildren();
 });
+
+describe("a site's page (ADR-0048, decisions §9)", () => {
+  const site = { view: "site", source: "wiki" } as const;
+  const opener = { hash: "#/ticket/jira%3APAY-231", name: "PAY-231" };
+
+  test("the first Esc arms, the second goes back to the opener", () => {
+    expect(escStep({ layers: [], field: null, route: site, opener })).toEqual({ do: "arm" });
+    expect(escStep({ layers: [], field: null, route: site, opener, armed: true })).toEqual({ do: "go", hash: opener.hash, opened: true });
+  });
+
+  test("with no opener Esc is the site's alone: nothing, armed or not", () => {
+    expect(escStep({ layers: [], field: null, route: site, opener: null })).toEqual({ do: "nothing" });
+    expect(escStep({ layers: [], field: null, route: site, opener: null, armed: true })).toEqual({ do: "nothing" });
+  });
+
+  test("a layer closes first and arms nothing", () => {
+    expect(escStep({ layers: [{ kind: "dialog" }], field: null, route: site, opener })).toEqual({ do: "close", index: 0 });
+  });
+
+  test("a site's page has no parent and lights no nav entry", () => {
+    expect(escTarget(site, null)).toBeNull();
+    expect(parseTfHash("#/site/wiki")).toEqual(site);
+    expect(parseTfHash("#/site")).toEqual({ view: "unknown", hash: "#/site" });
+  });
+});

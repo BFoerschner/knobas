@@ -18,11 +18,19 @@
   import type { SectionPorts } from "./ports";
   import { SavedWord, savedField } from "./saved-field.svelte";
   import { boundedNumber, clampNote } from "./sections";
+  import { setSitesKept, sitesKept } from "../../ipc/site";
+
+  /** *Sites kept open* (ADR-0048): 1 to 6, 2 until set. */
+  const SITES_MIN = 1;
+  const SITES_MAX = 6;
 
   let {
     ports,
     kept = keptPages,
+    sitePorts = { kept: sitesKept, setKept: setSitesKept },
   }: {
+    /** *Sites kept open*'s read and write; the bridge's when omitted. */
+    sitePorts?: { kept: () => Promise<number>; setKept: (count: number) => Promise<number> };
     ports: Pick<SectionPorts, "pagesKeptOpen" | "setPagesKeptOpen" | "smoothScrolling" | "setSmoothScrolling">;
     /** The page host's setting; the window's when omitted. */
     kept?: Pick<KeptPagesSetting, "set">;
@@ -69,6 +77,34 @@
 
   const said = new SavedWord();
 
+  /** *Sites kept open*, `null` until the read answers. */
+  let sitesStored = $state<number | null>(null);
+  let sitesWhy = $state<string | null>(null);
+  const sitesSaid = new SavedWord();
+  $effect(() => {
+    void sitePorts
+      .kept()
+      .then((read) => (sitesStored = read))
+      .catch(() => {});
+  });
+
+  async function saveSites(input: HTMLInputElement): Promise<boolean> {
+    if (sitesStored === null) return false;
+    let done = false;
+    const value = boundedNumber(input.value, SITES_MIN, SITES_MAX, sitesStored);
+    sitesWhy = clampNote(input.value, SITES_MIN, SITES_MAX, value);
+    if (value !== sitesStored) {
+      try {
+        sitesStored = await sitePorts.setKept(value);
+        done = true;
+      } catch (cause) {
+        push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
+      }
+    }
+    input.value = String(sitesStored);
+    return done;
+  }
+
   /** Whether a new value was stored. */
   async function save(input: HTMLInputElement): Promise<boolean> {
     if (stored === null) return false;
@@ -114,6 +150,32 @@
       <span>pages</span>
       <small class="tf-stg-saved" role="status">{said.shown ? "Saved" : ""}</small>
       {#if why !== null}<small class="tf-stg-why" id="tf-perf-kept-why" role="alert">{why}</small>{/if}
+    </div>
+  </div>
+{/if}
+{#if sitesStored !== null}
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-perf-sites"
+      >Sites kept open<small
+        >How many sites stay alive when you look elsewhere. One past this closes the one you left longest ago, unless it
+        holds unsaved changes.</small
+      ></label
+    >
+    <div class="tf-stg-c tf-stg-inl">
+      <input
+        id="tf-perf-sites"
+        type="number"
+        min={SITES_MIN}
+        max={SITES_MAX}
+        class="tf-stg-in tf-stg-n70"
+        value={sitesStored}
+        aria-invalid={sitesWhy !== null ? "true" : undefined}
+        aria-describedby={sitesWhy !== null ? "tf-perf-sites-why" : undefined}
+        {@attach savedField({ saved: () => String(sitesStored ?? ""), save: saveSites, word: sitesSaid, restored: () => (sitesWhy = null) })}
+      />
+      <span>sites</span>
+      <small class="tf-stg-saved" role="status">{sitesSaid.shown ? "Saved" : ""}</small>
+      {#if sitesWhy !== null}<small class="tf-stg-why" id="tf-perf-sites-why" role="alert">{sitesWhy}</small>{/if}
     </div>
   </div>
 {/if}

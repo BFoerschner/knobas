@@ -147,7 +147,7 @@
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
-  import { openExternal as realOpenExternal } from "../shell/open-external";
+  import { routeWeb as realOpenExternal, webPlaceName } from "../shell/open-web";
   import CreateDialog from "./CreateDialog.svelte";
   import ImportDialog from "./ImportDialog.svelte";
   import MonitorDialog from "./MonitorDialog.svelte";
@@ -224,7 +224,7 @@
      * A port like the rest, and for the rest's reason: a test must be able to
      * press the button without a Tauri backend behind it.
      */
-    openExternal: typeof realOpenExternal;
+    openExternal: (url: string) => Promise<void>;
     /**
      * Withdrawing a link from the pane's *Linked* panel.
      *
@@ -1818,7 +1818,7 @@
    */
   async function openInBrowser(url: string) {
     try {
-      await acknowledged(openingWords("the browser"), () => io.openExternal(url));
+      await acknowledged(openingWords(webPlaceName(url)), () => io.openExternal(url));
     } catch (rejection) {
       writeFailure = `Could not open the link: ${ipcErrorMessage(rejection)}`;
     }

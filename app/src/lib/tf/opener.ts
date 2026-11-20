@@ -231,6 +231,8 @@ export function pageOf(route: TfRoute): string {
       return `${route.view}/${route.id}`;
     case "unknown":
       return route.hash;
+    case "site":
+      return `site/${route.source}`;
     case "full": {
       if (route.head === "sets" && route.rest[0]) return `sets/${route.rest[0]}`;
       if (route.head === "docs" && route.rest[0] === "space") return `docs/space/${route.rest[1] ?? ""}`;

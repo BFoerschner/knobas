@@ -34,6 +34,7 @@ pub mod assets;
 pub mod backup;
 pub mod entity;
 pub mod search;
+pub mod site;
 pub mod sources;
 pub mod time;
 

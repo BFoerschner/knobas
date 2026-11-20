@@ -150,6 +150,8 @@ export type TfRoute =
     }
   | { view: "item"; id: string }
   | { view: "note"; id: string }
+  /** A source's own website inside knobas (ADR-0048): `#/site/<source id>`. No nav entry, no parent. */
+  | { view: "site"; source: string }
   | { view: "unknown"; hash: string };
 
 /** Read an address. Total: every string is some route. */
@@ -160,6 +162,7 @@ export function parseTfHash(hash: string): TfRoute {
   if (head === "") return { view: "tickets", rest: [] };
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
   if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
+  if (head === "site" && segments[1]) return { view: "site", source: segments[1] };
   // A ticket's own page (spec #2227); with no id it is Tickets, so a cut-off address still lands.
   if (head === "ticket") {
     return segments[1] ? { view: "ticket", id: segments[1], tab: segments[2] || null } : { view: "tickets", rest: [] };

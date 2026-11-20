@@ -88,7 +88,8 @@ export function notePress(event: PointerEvent | KeyboardEvent, now = Date.now())
  * control a key pressed, below either when there is no room above, and hung to the left of its point when the right
  * edge is near. With no fresh press, where a toast stands. Computed before it draws, so it never moves once drawn.
  */
-export function placeFor(press: Press | null, width: number, height: number, now = Date.now()): AckPlace {
+export function placeFor(press: Press | null, width: number, height: number, now = Date.now(), band = false): AckPlace {
+  if (band) return bandPlace(press, width, now);
   if (press === null || now - press.at > PRESS_FRESH_MS) return { centre: true, bottom: 44 };
   const { box } = press;
   let across: AckPlace;
@@ -99,6 +100,28 @@ export function placeFor(press: Press | null, width: number, height: number, now
   const gap = box === null ? POINTER_GAP : CONTROL_GAP;
   return top >= ROOM_ABOVE ? { ...across, bottom: height - top + gap } : { ...across, top: bottom + gap };
 }
+
+/** The top bar's height: while a site is shown, the one band of knobas's own pixels a chip can stand in (ADR-0048). */
+export const TOP_BAND = 53;
+/** A chip's height, near enough to keep it inside the band. */
+const ACK_H = 26;
+
+/**
+ * Where a chip stands while a site's native view covers the page (decisions §7): above its control, clamped to the
+ * top bar's band, never below, since below is the site's rectangle, which nothing knobas draws can stand over.
+ */
+export function bandPlace(press: Press | null, width: number, now = Date.now()): AckPlace {
+  if (press === null || now - press.at > PRESS_FRESH_MS) return { centre: true, top: Math.round((TOP_BAND - ACK_H) / 2) };
+  const { box } = press;
+  const left = box === null ? press.x : box.left;
+  const right = box === null ? press.x : box.right;
+  const across: AckPlace = left + ACK_MAX_W <= width ? { left: Math.max(8, left) } : { right: Math.max(8, width - right) };
+  const top = box === null ? press.y : box.top;
+  return { ...across, top: Math.max(4, Math.min(top - CONTROL_GAP - ACK_H, TOP_BAND - ACK_H - 2)) };
+}
+
+/** Whether a site's view covers the page now, or is about to: chips stand in the top bar's band. Set by the shell. */
+export const ackBand = { site: false };
 
 /** `text` at most `max` characters, its middle given up for `…`: the end says which one it is, so it keeps more of it. */
 export function cutMiddle(text: string, max: number): string {
@@ -141,12 +164,12 @@ function leave(id: number, after: number) {
  * Say an opening was taken, where the press was. Call it in the press, before the program is asked, so the chip is the
  * press's answer; then `settle` or `fail` it when the program answers.
  */
-export function acknowledge(text: string, now = Date.now()): Ack {
+export function acknowledge(text: string, now = Date.now(), band = ackBand.site): Ack {
   clearTimers();
   const id = ++nextId;
   const width = typeof window === "undefined" ? 1440 : window.innerWidth;
   const height = typeof window === "undefined" ? 900 : window.innerHeight;
-  acks.item = { id, text, place: placeFor(last, width, height, now), leaving: false };
+  acks.item = { id, text, place: placeFor(last, width, height, now, band), leaving: false };
   const shown = now;
   let answered = false;
   timers.push(setTimeout(() => !answered && leave(id, 0), ACK_GIVE_UP_MS));
@@ -166,8 +189,8 @@ export function acknowledge(text: string, now = Date.now()): Ack {
 }
 
 /** Run `open`, acknowledged: the chip at once, gone on a refusal, which `open`'s caller still sees. */
-export async function acknowledged<T>(text: string, open: () => Promise<T>): Promise<T> {
-  const ack = acknowledge(text);
+export async function acknowledged<T>(text: string, open: () => Promise<T>, band = ackBand.site): Promise<T> {
+  const ack = acknowledge(text, Date.now(), band);
   try {
     const value = await open();
     ack.settle();

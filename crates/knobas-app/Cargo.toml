@@ -51,6 +51,9 @@ knobas-http = { path = "../knobas-http" }
 knobas-jar = { path = "../knobas-jar" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
+# A source's own website inside knobas (ADR-0048): the rules, the controller
+# and the native view, made with raw wry as a child of the main window.
+knobas-site = { path = "../knobas-site" }
 # The credential store, behind its trait. The concrete `KeyringStore` is picked
 # in `sources::start`; every test gets `MemoryStore` (interfaces §3).
 knobas-secrets = { path = "../knobas-secrets" }
@@ -221,6 +224,8 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # free (`knobas_search::sql::explain_with_workers_free`), for
 # `tests/it/read_plans.rs`' workers check (the workers pass, 2026-11-16).
 knobas-search = { path = "../knobas-search", features = ["test-util"] }
+# The fake platform the site commands are tested on, on every platform.
+knobas-site = { path = "../knobas-site", features = ["test-util"] }
 # `tauri::test`: the mock runtime `tests/it/ipc.rs` invokes commands through, so
 # ruling P3's decode question is answered by the real IPC pipeline rather than
 # by reading documentation. Feature-unified with the `[dependencies]` entry
