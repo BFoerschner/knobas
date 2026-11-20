@@ -207,7 +207,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         load(existing, url);
         return { done: true, asks: null };
       }
-      const site: FakeSite = { status: blank(source), insets: (args["insets"] as SiteInsets) ?? null, wanted: false, history: [], at: 0 };
+      const site: FakeSite = { status: blank(source), insets: (args["insets"] as SiteInsets | undefined) ?? null, wanted: false, history: [], at: 0 };
       sites.set(source, site);
       emit(site);
       load(site, url ?? `${base}/`);

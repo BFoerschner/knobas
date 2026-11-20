@@ -209,9 +209,13 @@ function inSource(id: string, ctx: MenuContext): Item[] {
  * A file's, a folder's or a line's page on its repository's code host: *Open in ⟨source⟩* where the source is known,
  * as `inSource` names an item's (the build-header pass, 2026-11-20: it said *Open in browser* while the source was known).
  */
-function inForge(repoId: string, ctx: MenuContext): Item {
-  const name = ctx.sourceName(sourceOf(repoId));
-  return { id: "forge", label: name ? `Open in ${name}` : "Open in browser", act: { do: "browser", url: { read: "forge" } } };
+function inForge(repoId: string, ctx: MenuContext): Item[] {
+  const source = sourceOf(repoId);
+  const name = ctx.sourceName(source);
+  if (!name) return [{ id: "forge", label: "Open in browser", act: { do: "browser", url: { read: "forge" } } }];
+  // Its site inside knobas when the source's pages open there (ADR-0048), with the browser one press away after it.
+  const web: Item = { id: "forge", label: `Open in ${name}`, act: { do: "web", url: { read: "forge" }, source } };
+  return ctx.opensInside?.(source) === true ? [web, { id: "forge-browser", label: "Open in browser", act: { do: "browser", url: { read: "forge" } } }] : [web];
 }
 
 /** The copy of the item's page at its source. */
@@ -402,7 +406,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         ],
         [
           ...openIn(thing.repoId, thing.repoId, at, ctx, facts),
-          inForge(thing.repoId, ctx),
+          ...inForge(thing.repoId, ctx),
         ],
         [
           {
