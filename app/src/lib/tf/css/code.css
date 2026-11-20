@@ -68,15 +68,14 @@
 }
 /* The box does not clip (2026-11-20): a rounded clip around the tree's scroller made Chromium post every wheel's hit
    test over a long tree to the main thread (the scrollers' audit, on a generated folder of 3,000 files). Its children
-   share its background, so its corners look the same; the tree itself scrolls in its room. */
-.tf-ftreebox > .tf-ftree { min-height: 0; }
+   share its background, so its corners look the same; the tree itself scrolls in its room (`min-height: 0` on it). */
 .tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--rule-2); }
 /* Go to file (#2311, mockups/code-area `.tree > header .tf-minif`): the head's field, `T` beside it. */
 /* An input in a row of buttons takes the row's height, here the small one (#2238). */
 .tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: var(--control-h-sm); }
 .tf-gotofile kbd { flex: none; }
 .tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.tf-ftree { overflow: auto; background: var(--sheet); padding: 4px 6px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-ftree { overflow: auto; min-height: 0; background: var(--sheet); padding: 4px 6px; font-size: calc(var(--t-sm) * var(--fs)); }
 /* Focus rests on the tree itself only while the row that had it is scrolled out of the window (the big-folder pass,
    2026-11-13): no ring of its own, the next arrow key draws that row back with its ring. */
 .tf .tf-ftree:focus-visible { outline: none; }

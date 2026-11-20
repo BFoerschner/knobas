@@ -483,7 +483,11 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
   const scrolls = (selector: string, body: string) =>
     INNER[selector] === undefined
       ? /overflow(-y)?:\s*auto/.test(body)
-      : /overflow:\s*hidden/.test(body) && /display:\s*flex/.test(body) && /overflow(-y)?:\s*auto/.test(block(code, INNER[selector]!));
+      : // The column clips, or (the file tree's, 2026-11-20: a rounded clip around its scroller put every wheel's hit test on
+        // the main thread) lets its inner box shrink to the room left (`min-height: 0`), which bounds it as well.
+        (/overflow:\s*hidden/.test(body) || /min-height:\s*0/.test(block(code, INNER[selector]!))) &&
+        /display:\s*flex/.test(body) &&
+        /overflow(-y)?:\s*auto/.test(block(code, INNER[selector]!));
   const unbounded = columns
     .filter(([selector, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !scrolls(selector, body))
     .map(([selector]) => selector);
