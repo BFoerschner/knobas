@@ -129,6 +129,28 @@ pub async fn search(
     .await
 }
 
+/// The files of `repository` that `raw`'s words find (the everything-search
+/// decisions, 2026-11-20, D11): what the pane lists under the file the
+/// answer carried, asked once the selection rests on a repository the files
+/// found. `raw` is the box's text, parsed as `search` parses it.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn search_files(
+    lifecycle: State<'_, Lifecycle>,
+    repository: String,
+    raw: String,
+) -> Result<knobas_search::FilesInRepo, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(searcher(&pool, lifecycle.registry())
+        .await?
+        .with_files(lifecycle.files())
+        .files_in_repo(&repository, &raw)
+        .await?)
+}
+
 /// Settings › Search (the everything-search decisions, 2026-11-20, D13):
 /// what *Everything* matches beyond names and keys, and how much of the
 /// mirror each box covers.

@@ -493,6 +493,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::remove_pull_request_worktree,
         commands::search::search,
         commands::search::search_settings,
+        commands::search::search_files,
         commands::search::set_search_everything,
         commands::search::launcher_home,
         commands::search::smart_lists,

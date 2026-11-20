@@ -110,6 +110,8 @@ export const QUIET: ReadonlySet<string> = new Set([
   "pages_kept_open",
   // Settings › Search's page (D13): the boxes and the mirror's counts, read when it opens.
   "search_settings",
+  // The pane's files of one repository (D11): a read of the index, which no kept answer reads.
+  "search_files",
   "refused_writes",
   "notification_kinds",
   "diff_pipelines",

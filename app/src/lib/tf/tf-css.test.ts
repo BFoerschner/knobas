@@ -354,9 +354,9 @@ test("the launcher's rules are a part of tf.css, and its components have no styl
   }
 });
 
-test("the launcher sets mono on a ticket's key cell and a log's evidence line, and nowhere else (#1422, #2421, D10)", () => {
+test("the launcher sets mono on a ticket's key cell, a code evidence line and the pane's files, and nowhere else (#1422, #2421, D10, D11)", () => {
   const mono = launcherRules.filter(([, body]) => /var\(--mono\)/.test(body)).map(([selector]) => selector);
-  expect(mono).toEqual([".tf-ln-k.tf-ln-mono", ".tf-ln-why.tf-ln-code .tf-ln-why-t"]);
+  expect(mono).toEqual([".tf-ln-file-at", ".tf-ln-file-code", ".tf-ln-k.tf-ln-mono", ".tf-ln-why.tf-ln-code .tf-ln-why-t"]);
   // The key cell is drawn by the row, and only there.
   const row = LAUNCHER[6]!;
   // A forge's issue key is cut to its repository and number there, the whole in its title (the live run, 2026-11-09).

@@ -99,6 +99,19 @@ pub struct FileHit {
     pub line: Option<Line>,
 }
 
+/// The files of one repository a text finds ([`FileIndex::in_repo_counted`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InRepoFiles {
+    /// The first files, those the path found first, then the shortest path.
+    pub files: Vec<FileHit>,
+    /// Its files whose text holds the words.
+    pub by_text: u32,
+    /// Its files whose path holds them.
+    pub by_name: u32,
+    /// The files either found.
+    pub total: u32,
+}
+
 /// What the index knows of one repository beside its number, read from the
 /// database (`sync.code_repo`, `knobas.favourite`, `sync.item`), so a key
 /// asks the database nothing to learn which repository a number is.
@@ -112,6 +125,9 @@ pub struct Repo {
     pub favourite: bool,
     /// When it changed last, in seconds: the newer first among equals.
     pub updated: i64,
+    /// The branch its files are read on, its default: what the pane names
+    /// (D11). Empty where it is not known.
+    pub branch: String,
 }
 
 /// The repositories the index knows, by number.
@@ -334,12 +350,20 @@ impl FileIndex {
     /// many it finds in all (D11).
     #[must_use]
     pub fn in_repo(&self, no: u64, typed: &str, reads: Reads, most: usize) -> (Vec<FileHit>, u32) {
+        let found = self.in_repo_counted(no, typed, reads, most);
+        (found.files, found.total)
+    }
+
+    /// [`Self::in_repo`], with how many files the text and the paths found
+    /// apart: what the pane's count line says (D11).
+    #[must_use]
+    pub fn in_repo_counted(&self, no: u64, typed: &str, reads: Reads, most: usize) -> InRepoFiles {
         let Some(inner) = &self.inner else {
-            return (Vec::new(), 0);
+            return InRepoFiles::default();
         };
         let asked = code_text::query(typed);
         if asked.is_empty() || reads.none() {
-            return (Vec::new(), 0);
+            return InRepoFiles::default();
         }
         match read::in_repo(
             &inner.reader.searcher(),
@@ -353,7 +377,7 @@ impl FileIndex {
             Ok(found) => found,
             Err(error) => {
                 tracing::warn!(%error, "the files index could not be read");
-                (Vec::new(), 0)
+                InRepoFiles::default()
             }
         }
     }

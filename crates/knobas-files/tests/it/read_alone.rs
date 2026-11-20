@@ -40,6 +40,7 @@ fn the_files_read_alone() {
                         source_id: "corpus".to_owned(),
                         favourite: false,
                         updated: 0,
+                        branch: "main".to_owned(),
                     },
                 )
             })

@@ -355,6 +355,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_search::FilterSuggestions::export_all(cfg)?;
     // Settings › Search (the everything-search decisions, D13).
     crate::search_settings::SearchSettings::export_all(cfg)?;
+    // What `search_files` answers (D11).
+    knobas_search::FilesInRepo::export_all(cfg)?;
     // `code:files`'s payload, the files pass's progress (D7).
     knobas_sync::code_files::FilesProgress::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;

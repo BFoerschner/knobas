@@ -840,6 +840,7 @@ type RepoRow = (
     String,
     bool,
     Option<chrono::DateTime<chrono::Utc>>,
+    Option<String>,
 );
 
 /// The repositories the index knows, from the database: each number's
@@ -852,7 +853,10 @@ pub async fn load_repos(pool: &PgPool) -> Result<Repos, sqlx::Error> {
     let rows: Vec<RepoRow> = sqlx::query_as(
         "select cr.no, cr.repository_id, cr.source_id,
                 exists (select 1 from knobas.favourite f where f.entity_id = cr.repository_id),
-                i.item_updated_at
+                i.item_updated_at,
+                (select bt.branch from sync.branch_tree bt
+                  where bt.repository_id = cr.repository_id and bt.commit_sha = cr.commit_sha
+                  order by bt.branch = 'main' desc, bt.branch limit 1)
            from sync.code_repo cr
            join sync.item i on i.entity_id = cr.repository_id",
     )
@@ -860,7 +864,7 @@ pub async fn load_repos(pool: &PgPool) -> Result<Repos, sqlx::Error> {
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(no, entity_id, source_id, favourite, updated)| {
+        .map(|(no, entity_id, source_id, favourite, updated, branch)| {
             (
                 u64::try_from(no).unwrap_or(0),
                 Repo {
@@ -868,6 +872,7 @@ pub async fn load_repos(pool: &PgPool) -> Result<Repos, sqlx::Error> {
                     source_id,
                     favourite,
                     updated: updated.map_or(0, |at| at.timestamp()),
+                    branch: branch.unwrap_or_default(),
                 },
             )
         })

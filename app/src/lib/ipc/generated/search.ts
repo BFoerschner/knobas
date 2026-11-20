@@ -133,7 +133,31 @@ by_text: number,
 /**
  * Files whose path holds them.
  */
-by_name: number, };
+by_name: number, 
+/**
+ * The branch they are read on, the repository's default: what the pane
+ * names (D11). Empty where it is not known.
+ */
+branch: string, };
+
+/**
+ * What the pane draws of the repository it shows (D11, `search_files`):
+ * the first files the words find, each an excerpt as the answer's first is,
+ * and how many there are.
+ */
+export type FilesInRepo = { 
+/**
+ * Up to eight: those the path found first, then the shortest path.
+ */
+files: Array<Excerpt>, by_text: number, by_name: number, 
+/**
+ * More files than `files` hold the words.
+ */
+more: boolean, 
+/**
+ * The branch, as [`FilesFound::branch`].
+ */
+branch: string, };
 
 /**
  * The progress the pass reports at each repository's end, as `code:files`

@@ -74,8 +74,8 @@ pub use query::{
 pub use saved::{Refusal, SavedList, SmartListSummary};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, EverythingMatches, Excerpt, FieldSuggestion, FileAt, FilesFound, FilterAnswer,
-    FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion, PageSearch,
+    EntityRow, EverythingMatches, Excerpt, FieldSuggestion, FileAt, FilesFound, FilesInRepo,
+    FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion, PageSearch,
     ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
     SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
@@ -237,6 +237,55 @@ impl Searcher {
     pub fn with_files(mut self, files: knobas_files::FileIndex) -> Self {
         self.files = Some(files);
         self
+    }
+
+    /// The files of `repository` that `raw`'s words find (the
+    /// everything-search decisions, D11): what the pane lists under the
+    /// file the answer carried, eight at most, each with its line. Nothing
+    /// where the searcher has no files index, the boxes ask no file, or the
+    /// index knows no such repository.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the vocabulary cannot be read.
+    pub async fn files_in_repo(
+        &self,
+        repository: &str,
+        raw: &str,
+    ) -> Result<FilesInRepo, SearchError> {
+        let Some(index) = self.files.clone() else {
+            return Ok(FilesInRepo::default());
+        };
+        let reads = knobas_files::Reads {
+            names: self.everything.file_names,
+            text: self.everything.file_text,
+        };
+        let repos = index.repos();
+        let Some((no, repo)) = repos.iter().find(|(_, repo)| repo.entity_id == repository) else {
+            return Ok(FilesInRepo::default());
+        };
+        if reads.none() {
+            return Ok(FilesInRepo::default());
+        }
+        let vocab = self.vocabulary().await?;
+        let typed = query::parse(raw, &vocab).query.text;
+        let terms = knobas_core::code_text::query(&typed).terms;
+        let no = *no;
+        let found =
+            tokio::task::spawn_blocking(move || index.in_repo_counted(no, &typed, reads, 8))
+                .await
+                .unwrap_or_default();
+        Ok(FilesInRepo {
+            more: usize::try_from(found.total).unwrap_or(usize::MAX) > found.files.len(),
+            files: found
+                .files
+                .iter()
+                .map(|hit| files::excerpt(hit, &terms))
+                .collect(),
+            by_text: found.by_text,
+            by_name: found.by_name,
+            branch: repo.branch.clone(),
+        })
     }
 
     /// The same searcher, *Everything* matching what `matches` says beyond
@@ -897,6 +946,7 @@ impl Searcher {
                         found: types::FilesFound {
                             by_text: hit.by_text,
                             by_name: hit.by_name,
+                            branch: repo.branch.clone(),
                         },
                         excerpt: files::excerpt(&hit.best, &terms),
                     },

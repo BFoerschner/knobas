@@ -395,13 +395,32 @@ pub struct SearchHit {
 }
 
 /// How many of a repository's files hold the words (D10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 pub struct FilesFound {
     /// Files whose text holds them.
     pub by_text: u32,
     /// Files whose path holds them.
     pub by_name: u32,
+    /// The branch they are read on, the repository's default: what the pane
+    /// names (D11). Empty where it is not known.
+    pub branch: String,
+}
+
+/// What the pane draws of the repository it shows (D11, `search_files`):
+/// the first files the words find, each an excerpt as the answer's first is,
+/// and how many there are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FilesInRepo {
+    /// Up to eight: those the path found first, then the shortest path.
+    pub files: Vec<Excerpt>,
+    pub by_text: u32,
+    pub by_name: u32,
+    /// More files than `files` hold the words.
+    pub more: bool,
+    /// The branch, as [`FilesFound::branch`].
+    pub branch: String,
 }
 
 /// The file an excerpt quotes (D10, D11): its path in the repository, and

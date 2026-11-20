@@ -337,7 +337,7 @@ pub(crate) fn in_repo(
     reads: Reads,
     most: usize,
     bound: u32,
-) -> Result<(Vec<FileHit>, u32), FilesError> {
+) -> Result<crate::InRepoFiles, FilesError> {
     let every = usize::MAX;
     let named: Vec<At> = if reads.names {
         let bits = matched(searcher, fields.ptok, &asked.terms, bound)?;
@@ -366,6 +366,8 @@ pub(crate) fn in_repo(
             .map(|at| (*at, false)),
     );
     let total = u32::try_from(files.len()).unwrap_or(u32::MAX);
+    let by_name = u32::try_from(named.len()).unwrap_or(u32::MAX);
+    let by_text = u32::try_from(texted.len()).unwrap_or(u32::MAX);
     let mut out = Vec::with_capacity(most.min(files.len()));
     for (at, in_name) in files {
         if out.len() >= most {
@@ -375,5 +377,10 @@ pub(crate) fn in_repo(
             out.push(hit);
         }
     }
-    Ok((out, total))
+    Ok(crate::InRepoFiles {
+        files: out,
+        by_text,
+        by_name,
+        total,
+    })
 }

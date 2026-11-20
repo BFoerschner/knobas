@@ -58,14 +58,15 @@ pub(crate) fn marked(text: &str, terms: &[String]) -> Vec<Segment> {
     out
 }
 
-/// The excerpt a file is shown by (D10): its line, its indent dropped, under
+/// The excerpt a file is shown by (D10): its line, its indent kept so the
+/// pane can drop what it shares with the lines around it, under
 /// `<path>:<line>`; or, where its name alone found it, its path.
 #[must_use]
 pub(crate) fn excerpt(hit: &FileHit, terms: &[String]) -> Excerpt {
     match &hit.line {
         Some(line) => Excerpt {
             place: Some(format!("{}:{}", hit.path, line.number)),
-            segments: marked(line.text.trim(), terms),
+            segments: marked(line.text.trim_end(), terms),
             file: Some(FileAt {
                 path: hit.path.clone(),
                 line: Some(line.number),
@@ -126,7 +127,7 @@ mod tests {
         );
         assert_eq!(
             flat(&excerpt.segments),
-            "public final class [ADProxy]Server {"
+            "    public final class [ADProxy]Server {"
         );
         assert_eq!(excerpt.file.as_ref().unwrap().line, Some(7));
         let named = FileHit {

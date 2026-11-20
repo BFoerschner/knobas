@@ -1,3 +1,4 @@
+import type { FilesInRepo } from "../ipc";
 /**
  * The launcher's state machine: debounce, sequencing, selection.
  *
@@ -83,6 +84,8 @@ export interface SessionPorts {
    * draws the two outcomes.
    */
   resolveUrl?(url: string): Promise<UrlMatch | null>;
+  /** The files of a repository the words find, for the pane (the everything-search decisions, D11); none when omitted. */
+  searchFiles?(repository: string, raw: string): Promise<FilesInRepo>;
   /**
    * Save the box's current query as a list, and the two writes that keep the
    * lists tidy afterwards — `create_smart_list`, `rename_smart_list`,

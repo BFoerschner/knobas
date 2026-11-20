@@ -160,7 +160,10 @@ function fileWhy(excerpt: Excerpt, file: NonNullable<Excerpt["file"]>, files: Fi
   const name = file.path.slice(file.path.lastIndexOf("/") + 1);
   if (file.line != null) {
     const by = files?.by_text ?? 0;
-    return { place: `${name}:${file.line}`, segments: cutLead(excerpt.segments), code: true, count: by > 0 ? counted(by, "file", "files") : null, excerpt };
+    // The line's indent is the pane's to share with the lines around it; the row starts at its first letter.
+    const [first, ...rest] = excerpt.segments;
+    const segments = first && !first.hit ? [{ text: first.text.trimStart(), hit: false }, ...rest].filter((seg) => seg.text !== "") : [...excerpt.segments];
+    return { place: `${name}:${file.line}`, segments: cutLead(segments), code: true, count: by > 0 ? counted(by, "file", "files") : null, excerpt };
   }
   const by = files?.by_name ?? 0;
   return { place: null, segments: excerpt.segments.map((seg) => ({ ...seg })), code: true, count: by > 0 ? counted(by, "file name", "file names") : null, excerpt };

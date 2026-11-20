@@ -87,6 +87,7 @@ async fn world(repositories: &[Repository], favourites: &[&str]) -> World {
                 source_id: source.clone(),
                 favourite: favourites.contains(short),
                 updated: at(*minutes).timestamp(),
+                branch: "main".to_owned(),
             },
         );
         ids.insert(*short, id);
@@ -235,7 +236,7 @@ async fn the_renamed_repository_is_found_by_its_files_alone_and_shown_by_its_cla
     assert_eq!(w.repos(&w.ask("settle bridge").await), ["gateway"]);
     let answer = w.ask("settlebridge").await;
     let gateway = w.hit(&answer, "gateway");
-    let files = gateway.files.expect("its files found it");
+    let files = gateway.files.as_ref().expect("its files found it");
     // Three classes and the image `settle-bridge` by text, the three classes by name.
     assert_eq!((files.by_text, files.by_name), (4, 3));
     let first = &gateway.excerpts[0];
@@ -248,7 +249,10 @@ async fn the_renamed_repository_is_found_by_its_files_alone_and_shown_by_its_cla
         "public final class [SettleBridge]Server {"
     );
     let api = w.hit(&answer, "api");
-    assert_eq!(api.files.map(|f| (f.by_text, f.by_name)), Some((2, 0)));
+    assert_eq!(
+        api.files.as_ref().map(|f| (f.by_text, f.by_name)),
+        Some((2, 0))
+    );
     assert_eq!(
         flat(&api.excerpts[0].segments),
         "import com.tidewater.[settlebridge].client.Batch;"
@@ -284,7 +288,10 @@ async fn titles_another_kind_and_cleared_boxes_say_what_the_files_answer() {
         .ask_with("settlebridge", false, Some(w.files.clone()), no_names)
         .await;
     assert_eq!(w.repos(&by_text), ["gateway", "api"]);
-    assert_eq!(w.hit(&by_text, "gateway").files.map(|f| f.by_name), Some(0));
+    assert_eq!(
+        w.hit(&by_text, "gateway").files.as_ref().map(|f| f.by_name),
+        Some(0)
+    );
     let none = EverythingMatches {
         file_names: false,
         file_text: false,
@@ -572,4 +579,49 @@ async fn a_loose_name_comes_before_a_files_text() {
     )
     .await;
     assert_eq!(w.repos(&w.ask("obsstack").await), ["loose", "said"]);
+}
+
+/// D11: the pane's read of one repository's files, name matches first, each
+/// with its line, and the counts the count line says.
+#[tokio::test]
+async fn the_pane_reads_a_repositorys_files_name_matches_first() {
+    let w = world(&[GATEWAY, API], &[]).await;
+    let searcher = Searcher::new(w.pool.clone()).with_files(w.files.clone());
+    let found = searcher
+        .files_in_repo(&w.ids["gateway"], "settlebridge")
+        .await
+        .unwrap();
+    assert_eq!((found.by_text, found.by_name, found.more), (4, 3, false));
+    assert_eq!(found.branch, "main");
+    let paths: Vec<&str> = found
+        .files
+        .iter()
+        .map(|e| e.file.as_ref().unwrap().path.as_str())
+        .collect();
+    assert_eq!(paths.len(), 4);
+    assert!(
+        paths[..3]
+            .iter()
+            .all(|path| path.contains("/settlebridge/")),
+        "{paths:?}"
+    );
+    assert_eq!(paths[3], "deploy/k8s/deployment.yaml");
+    assert_eq!(found.files[0].file.as_ref().unwrap().line, Some(6));
+    // A repository the index does not know, and no index at all, list nothing.
+    assert!(
+        searcher
+            .files_in_repo("nowhere", "settlebridge")
+            .await
+            .unwrap()
+            .files
+            .is_empty()
+    );
+    let none = Searcher::new(w.pool.clone());
+    assert!(
+        none.files_in_repo(&w.ids["gateway"], "settlebridge")
+            .await
+            .unwrap()
+            .files
+            .is_empty()
+    );
 }

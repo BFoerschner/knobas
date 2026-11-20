@@ -12,7 +12,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { LauncherHome, SearchHit, SearchQuery, SearchResponse } from "../ipc";
+import type { FilesInRepo, LauncherHome, SearchHit, SearchQuery, SearchResponse } from "../ipc";
 import { arrival } from "../tf/arrival.svelte";
 import Launcher from "./Launcher.svelte";
 import { PREVIEW_DEBOUNCE_MS } from "./Preview.svelte";
@@ -62,13 +62,13 @@ const GATEWAY = {
       file: { path: "src/RetryServer.java", line: 7, before: "", after: "" },
     },
   ]),
-  files: { by_text: 4, by_name: 3 },
+  files: { by_text: 4, by_name: 3, branch: "main" },
 };
 const CHARTS = {
   ...hit("gitea:tidewater/charts", "repo", "tidewater/charts", [
     { place: null, segments: [{ text: "charts/", hit: false }, { text: "retry", hit: true }, { text: "/values.yaml", hit: false }], file: { path: "charts/retry/values.yaml", line: null, before: "", after: "" } },
   ]),
-  files: { by_text: 0, by_name: 1 },
+  files: { by_text: 0, by_name: 1, branch: "main" },
 };
 
 /** Whether the answer holds the repositories the files found (the tests at the end). */
@@ -108,7 +108,7 @@ function storage(value: string | null) {
 }
 
 /** Mounts the launcher open under `mode`; answers what each port was asked. */
-function open(mode: "everything" | "titles") {
+function open(mode: "everything" | "titles", more: { searchFiles?: (repository: string, raw: string) => Promise<FilesInRepo> } = {}) {
   const kept = storage(mode);
   const searched: SearchQuery[] = [];
   const onnavigate = vi.fn();
@@ -125,6 +125,7 @@ function open(mode: "everything" | "titles") {
         search: async (query: SearchQuery) => (searched.push(query), response(query.raw)),
         launcherHome: async () => HOME,
         entityView,
+        searchFiles: more.searchFiles ?? (async () => ({ files: [], by_text: 0, by_name: 0, more: false, branch: "main" })),
       },
     },
   });
@@ -377,4 +378,44 @@ test("a repository found by a file's name opens that file", async () => {
   charts.click();
   flushSync();
   expect(String(onnavigate.mock.calls[0]![0])).toBe("#/repo/gitea%3Atidewater%2Fcharts/files/charts/retry/values.yaml");
+});
+
+test("the pane lists a repository's files: the answer's first at once, the others under it when they land, a stale answer dropped (D11)", async () => {
+  withRepos = true;
+  let land: (found: FilesInRepo) => void = () => {};
+  const searchFiles = vi.fn(() => new Promise<FilesInRepo>((done) => (land = done)));
+  open("everything", { searchFiles });
+  await settle();
+  await type("retry");
+  // Down to the repositories, after the ticket, the pipeline and the page.
+  for (let i = 0; i < 3; i++) press("ArrowDown");
+  await paused();
+  expect(pane()!.querySelector(".tf-ln-pv-n")!.textContent).toBe("In 4 files of main, 3 of them by name.");
+  const first = () => [...pane()!.querySelectorAll(".tf-ln-file .tf-ln-file-path")].map((path) => path.textContent);
+  expect(first()).toEqual(["src/RetryServer.java"]);
+  expect(searchFiles).toHaveBeenCalledWith("gitea:tidewater/ledger-gateway", "retry");
+  const file = (path: string, line: number) => ({
+    place: `${path}:${line}`,
+    segments: [{ text: "class ", hit: false }, { text: "Retry", hit: true }],
+    file: { path, line, before: "", after: "" },
+  });
+  land({ files: [file("src/RetryServer.java", 7), file("src/RetryQueue.java", 3)], by_text: 4, by_name: 3, more: false, branch: "main" });
+  await settle();
+  expect(first()).toEqual(["src/RetryServer.java", "src/RetryQueue.java"]);
+});
+
+test("a files answer for a repository no longer selected draws nothing", async () => {
+  withRepos = true;
+  let land: (found: FilesInRepo) => void = () => {};
+  const searchFiles = vi.fn(() => new Promise<FilesInRepo>((done) => (land = done)));
+  open("everything", { searchFiles });
+  await settle();
+  await type("retry");
+  for (let i = 0; i < 3; i++) press("ArrowDown");
+  await paused();
+  press("ArrowUp");
+  await paused();
+  land({ files: [{ place: "x:1", segments: [{ text: "Retry", hit: true }], file: { path: "x", line: 1, before: "", after: "" } }], by_text: 4, by_name: 3, more: false, branch: "main" });
+  await settle();
+  expect(pane()!.querySelectorAll(".tf-ln-file")).toHaveLength(0);
 });

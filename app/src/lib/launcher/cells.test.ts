@@ -141,22 +141,22 @@ describe("whyOf for a repository its files found (D10)", () => {
   };
 
   it("names the file and its line, quotes the line in mono, and closes with the files by text", () => {
-    const why = whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3 } })!;
+    const why = whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3, branch: "main" } })!;
     expect(why.place).toBe("ADProxyServer.java:7");
     expect(why.code).toBe(true);
     expect(why.count).toBe("4 files");
     expect(why.segments.find((s) => s.hit)!.text).toBe("ADProxy");
-    expect(whyOf({ excerpts: [line], files: { by_text: 1, by_name: 0 } })!.count).toBe("1 file");
+    expect(whyOf({ excerpts: [line], files: { by_text: 1, by_name: 0, branch: "main" } })!.count).toBe("1 file");
   });
 
   it("draws a file its name found as its path, marked, and the files by name", () => {
-    const why = whyOf({ excerpts: [named], files: { by_text: 0, by_name: 3 } })!;
+    const why = whyOf({ excerpts: [named], files: { by_text: 0, by_name: 3, branch: "main" } })!;
     expect(why.place).toBeNull();
     expect(why.segments.map((s) => (s.hit ? `[${s.text}]` : s.text)).join("")).toBe("charts/[ad-proxy]/values.yaml");
     expect(why.count).toBe("3 file names");
   });
 
   it("is no line where the repository's name explains it", () => {
-    expect(whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3 }, marks: [0, 3] })).toBeNull();
+    expect(whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3, branch: "main" }, marks: [0, 3] })).toBeNull();
   });
 });

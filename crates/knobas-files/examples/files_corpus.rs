@@ -103,6 +103,7 @@ pub fn known(index: &FileIndex) {
                         source_id: "corpus".to_owned(),
                         favourite: false,
                         updated: 0,
+                        branch: "main".to_owned(),
                     },
                 )
             })

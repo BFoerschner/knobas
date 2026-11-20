@@ -91,6 +91,7 @@
     renameSmartList as defaultRenameSmartList,
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
+    searchFiles as defaultSearchFiles,
     EVENTS,
   } from "../ipc";
   import { listSources, type CredentialHealth, type KindStateColours } from "../ipc/sources";
@@ -100,7 +101,7 @@
   import { arrival, arrivalOf } from "../tf/arrival.svelte";
   import { fileHash, lineHash } from "../tf/repo/repo";
   import { cellsOf, whyOf } from "./cells";
-  import type { Excerpt } from "../ipc";
+  import type { Excerpt, FilesInRepo } from "../ipc";
   import TfDialog from "../tf/settings/TfDialog.svelte";
   import { docsSearchHash } from "../tf/docs/docs";
   import { aimed, watchPointer } from "./aim";
@@ -491,6 +492,27 @@
     return () => clearTimeout(timer);
   });
   const previewRow = $derived(previewed === null ? null : (session.rows.find((row) => row.id === previewed) ?? null));
+
+  /**
+   * The pane's other files of a repository its files found (the everything-search decisions, D11): asked once the
+   * selection rests on it, behind the pane's own pause, and drawn under the file the answer carried. An answer for a
+   * row no longer shown is dropped.
+   */
+  let filesIn = $state.raw<{ id: string; words: string; found: FilesInRepo } | null>(null);
+  $effect(() => {
+    const row = previewRow;
+    const words = session.response?.interpreted.text ?? "";
+    if (row?.kind !== "hit" || row.hit.kind !== "repo" || !row.hit.files) return;
+    const id = row.hit.entity_id;
+    if (filesIn?.id === id && filesIn.words === words) return;
+    const ask = ports?.searchFiles ?? defaultSearchFiles;
+    void ask(id, words).then(
+      (found) => {
+        if (previewRow?.kind === "hit" && previewRow.hit.entity_id === id && (session.response?.interpreted.text ?? "") === words) filesIn = { id, words, found };
+      },
+      () => {},
+    );
+  });
 
   /**
    * A close ends the mode: the launcher stays mounted, so without this the
@@ -1423,6 +1445,8 @@
         <Preview
           title={previewRow?.kind === "hit" ? previewRow.hit.title : null}
           excerpts={previewRow?.kind === "hit" ? previewRow.hit.excerpts : []}
+          files={previewRow?.kind === "hit" ? (previewRow.hit.files ?? null) : null}
+          more={previewRow?.kind === "hit" && filesIn?.id === previewRow.hit.entity_id ? filesIn.found : null}
           onopen={(excerpt) => previewRow && activate(previewRow, excerpt)}
         />
       {/if}

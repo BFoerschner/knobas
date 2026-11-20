@@ -26,6 +26,7 @@ pub fn repos(favourites: &[u64]) -> Repos {
                     source_id: "gitea".to_owned(),
                     favourite: favourites.contains(&no),
                     updated: i64::try_from(no).unwrap(),
+                    branch: "main".to_owned(),
                 },
             )
         })

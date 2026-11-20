@@ -20,6 +20,7 @@ import type {
   SearchQuery,
   SearchResponse,
   SearchSettings,
+  FilesInRepo,
   SmartListSummary,
   TicketView,
   TicketViewDraft,
@@ -30,6 +31,7 @@ export type {
   EverythingMatches,
   FileAt,
   FilesFound,
+  FilesInRepo,
   FilesProgress,
   SearchSettings,
   ActionKey,
@@ -87,6 +89,11 @@ export function searchSettings(): Promise<SearchSettings> {
 /** Store what *Everything* matches; answers the page as it now stands. */
 export function setSearchEverything(matches: EverythingMatches): Promise<SearchSettings> {
   return invoke<SearchSettings>("set_search_everything", { matches });
+}
+
+/** The files of `repository` the box's words find (D11): what the pane lists under the answer's first. */
+export function searchFiles(repository: string, raw: string): Promise<FilesInRepo> {
+  return invoke<FilesInRepo>("search_files", { repository, raw });
 }
 
 /** Answer one launcher query. */
