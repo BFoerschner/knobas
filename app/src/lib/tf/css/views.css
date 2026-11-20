@@ -3,7 +3,11 @@
 .tf-vfind input {
   width: 100%; height: var(--control-h-sm); border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 0 8px; color: var(--ink);
 }
-.tf-vfind + .tf-vlist { padding-top: 4px; padding-right: 2px; scrollbar-gutter: stable; }
+/* The list keeps its scrollbar's room whether a filter leaves it anything to scroll, so the counts keep one edge. By
+   `overflow-y: scroll`, not `scrollbar-gutter: stable`: where text is drawn for LCD (Windows, Linux) a kept gutter made
+   Chromium hit-test every wheel over the list on the main thread (all eight notches; none by this rule; the
+   code-list-columns pass, 2026-11-20). The bar's track is unpainted (`tokens.css`), so an empty one shows nothing. */
+.tf-vfind + .tf-vlist { padding-top: 4px; padding-right: 2px; overflow-y: scroll; background: var(--sheet); }
 .tf-vw-row { position: relative; }
 /* The row's `…` draws over its count on hover, so the name keeps the room and every count ends on one edge. */
 .tf-vw-row:is(:hover, :has(.tf-vw-more:is(:focus-visible, [aria-expanded="true"]))):has(.tf-vw-more) .tf-count { visibility: hidden; }

@@ -492,7 +492,10 @@ test("no page's scroller reserves room for its bar: the page is as wide as the w
   const gutters = [...code.matchAll(/([^{}]*)\{[^}]*scrollbar-gutter[^}]*\}/g)].map(([, selector]) => selector!.trim().split("\n").at(-1)!.trim());
   // Builds' scroller keeps a gutter only to take it back with its clip (builds at 6x, 2026-11-15): the page keeps no
   // room for its bar, and its host is no size container.
-  expect(gutters).toEqual([".tf-vfind + .tf-vlist", ".tf-shost > .tf-bmain"]);
+  expect(gutters).toEqual([".tf-shost > .tf-bmain"]);
+  // Tickets' views list keeps its bar's room by scrolling always, not by a kept gutter: with LCD text (Windows, Linux)
+  // the gutter made Chromium hit-test each wheel over it on the main thread (`scrollers.mjs --strict`, 2026-11-20).
+  expect(block(code, ".tf-vfind + .tf-vlist")).toMatch(/overflow-y:\s*scroll/);
   expect(code).toMatch(/\.tf-shost > \.tf-bmain > \.tf-sclip \{\s*margin-right:\s*-8px;\s*\}/);
   expect(block(code, ".tf-main")).toMatch(/overflow:\s*hidden auto/);
   expect(block(code, ".tf-sbody")).toMatch(/width:\s*100cqw/);

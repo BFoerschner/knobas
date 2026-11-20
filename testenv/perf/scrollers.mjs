@@ -19,7 +19,10 @@ const opt = (name, fallback = null) => { const i = args.indexOf(name); return i 
 const app = opt("--app");
 const attachPort = opt("--attach");
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 15 * 60000).unref();
-const browser = attachPort ? null : await launch({ size });
+// LCD text as Windows and Linux draw it (`--enable-lcd-text`): the Mac draws none, and there Chromium composites a
+// scroller whatever its gutter or background, so a list that scrolls on the main thread in WebView2 passed here (the
+// views rail's kept gutter, 2026-11-20: 8 of 8 notches on the main thread with it, none without).
+const browser = attachPort ? null : await launch({ size, flags: ["--enable-lcd-text"] });
 const c = await attach(attachPort ? Number(attachPort) : browser.port);
 const js = (code) => c.js(code);
 await c.send("Page.enable");
