@@ -142,6 +142,48 @@
      "moved": 0
     }
    },
+   "everything-file": {
+    "1": {
+     "rowsMs": 70,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "6": {
+     "rowsMs": 130,
+     "moved": 0
+    }
+   },
+   "everything-file-broad": {
+    "1": {
+     "rowsMs": 70,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "6": {
+     "rowsMs": 130,
+     "moved": 0
+    }
+   },
+   "everything-evidence": {
+    "1": {
+     "rowsMs": 70,
+     "moved": 0
+    },
+    "4": {
+     "rowsMs": 100,
+     "moved": 0
+    },
+    "6": {
+     "rowsMs": 130,
+     "moved": 0
+    }
+   },
    "tickets-expanded-letter": {
     "1": {
      "rowsMs": 115,
