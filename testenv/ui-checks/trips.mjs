@@ -377,8 +377,8 @@ const PAGES = [
     ] },
     { id: "folders-list-return", kind: "list-return", strict: true, finding: "apps-page", query: "&fake-folder-render", list: "settings/renderers", steps: [
       { name: "add", open: { sel: ".tf-stg-acts a", row: "Add a folder renderer" }, fill: [["#tf-frp-name", "Tree"], ["#tf-frp-cmd", "tree {path}"]], press: "Add folder renderer", lands: "Tree" },
-      { name: "save", open: { sel: ".tf-rnd-own a", row: "Folder listing" }, press: "Save", lands: "Folder listing" },
-      { name: "remove", open: { sel: ".tf-rnd-own a", row: "Tree" }, press: "Remove", lands: "Folder listing" },
+      { name: "save", open: { sel: ".tf-rnd-folders a", row: "Folder listing" }, press: "Save", lands: "Folder listing" },
+      { name: "remove", open: { sel: ".tf-rnd-folders a", row: "Tree" }, press: "Remove", lands: "Folder listing" },
     ] },
   ] },
   // *Render as* with a renderer whose name and program are long (the render-as pass, 2026-11-19; Björn: "the render as orchestra,
