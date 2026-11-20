@@ -1807,6 +1807,7 @@ mod tests {
             super::events::CHECKOUT_FETCHED,
             super::events::CLONE_ALL,
             super::events::FOLDER_RENDER,
+            super::events::CODE_FILES,
         ];
         names.sort_unstable();
         declared.sort_unstable();
