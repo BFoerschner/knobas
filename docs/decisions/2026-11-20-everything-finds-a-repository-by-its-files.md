@@ -82,9 +82,21 @@ As built, on the Mac (M-series, niced neighbours under the machine queue):
   files hold 27 ms at 1x, 36 at 4x, 46 to 50 at 6x; a broad file word 36, 72 to 75, 70 to 87; a word only bodies hold
   43, 64 to 73, 88 to 90; at 1440x868 and 2560x1440 at 125 %, nothing moved.
 
-Owed on Windows (the WSL box and his PC were his for the evening): the same index built on NTFS and its keys, keys
-typed while another index fills, a write beside a reader that holds the segments mapped, and an index under a path
-past 260 characters. The first fill against the live forge and a push's update on it are owed with the live script.
+On his PC (`files_corpus.exe`, a scratch folder in his Temp on NTFS, through WSL's interop, nothing installed):
+
+- **The scale copy's files** (65 folders, 5,546 files, 10 MB of text): built in 1.2 s to 6 MB; 50 keys 0.41 ms at
+  the median, 1.44 at the worst.
+- **The WSL box's registry crates** (705 repositories, 32,454 files, 208 MB of text, unpacked by Windows' own
+  `tar.exe`): the first build 163 s, the files just written and read cold under the virus scanner; the same build
+  again 12.8 s. 89 MB on disk. 163 keys 0.51 ms at the median, 2.79 at the 90th, 6.19 at the worst.
+- **Keys while another index fills beside them:** 0.50, 2.86 and 6.16 ms: the fill does not reach the read.
+- **A write beside a reader that holds the segments mapped** (NTFS will not delete a mapped file): both exit 0, the
+  index answers after, and the folder holds 19 files, no stray segments.
+- **An index under a path of 319 characters:** built and read as any other.
+- **Gitea's archive**, live (`the_archive_hands_over_every_blob_of_the_tree` against the WSL box's Gitea): the tree's
+  2 files in 1 request.
+
+The first fill against the live forge and a push's update on it are owed with the live script.
 
 From the spike, on a corpus of 1,849 repositories, 194,653 files and 1,473 MB of text: the index 573 MB, built in
 40 s on the Mac and 39 s on his PC. A key 1.5 ms at the median and 9.5 at the worst of 163 on his PC. A push of 100
