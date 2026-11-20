@@ -158,7 +158,7 @@
 .tf-tbl .tf-sub { font-weight: 400; }
 /* A row's title (design system, *Type*): the name you scan a list by. */
 .tf-tbl .tf-rowt { font-size: calc(var(--t-md) * var(--fs)); font-weight: 500; }
-.tf .tf-tbl td:first-child > a.tf-mono { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 500; }
+.tf .tf-tbl td:first-child > a.tf-mono, .tf .tf-tbl td:first-child > .tf-crname > a.tf-mono { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 500; }
 .tf-list { container-type: inline-size; }
 /* A narrow pane keeps the columns you scan by; the ticket's page has the priority and the assignee. */
 @container (max-width: 760px) { .tf-tbl :is(.tf-c-priority, .tf-c-assignee) { display: none; } }

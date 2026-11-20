@@ -1245,15 +1245,23 @@ export const CODE_FACTS: ((ids: ReadonlySet<string>) => CodeFacts[])[] = [];
 /**
  * `?fake-code-rows=<n>` (perf audit, #2200's class): `n` more pull requests
  * over `n / 10` more repositories, one in ten open, the rest merged. Added at
- * load, so they are part of the seed.
+ * load, so they are part of the seed. The repositories last pushed on four of
+ * the days have long names, two teams and a long language, so they stand
+ * together in the list by last push, as a real estate's long ones do: a table
+ * that sized its columns to the rows drawn took new widths as a window of
+ * them scrolled in (the code-list-columns pass, 2026-11-20, `columns.mjs`).
  */
 function bulkCode(n: number): (typeof CORPUS)[number][] {
   if (n <= 0) return [];
   const repos = Math.ceil(n / 10);
-  const name = (r: number) => `tidewater/bulk-${String(r).padStart(4, "0")}`;
+  const long = (r: number) => r % 28 >= 18 && r % 28 < 22;
+  const name = (r: number) => `tidewater/bulk-${String(r).padStart(4, "0")}${long(r) ? "-ledger-reconciliation-exporter" : ""}`;
   return [
     ...Array.from({ length: repos }, (_, r) =>
-      row(`mock:${name(r)}`, "repo", name(r), `2026-07-${String(1 + (r % 28)).padStart(2, "0")}T10:00:00Z`, "jonas", { teams: [`Team ${r % 12}`], language: r % 2 ? "Rust" : "Go" }),
+      row(`mock:${name(r)}`, "repo", name(r), `2026-07-${String(1 + (r % 28)).padStart(2, "0")}T10:00:00Z`, "jonas", {
+        teams: long(r) ? ["Payments platform", "Ledger reliability"] : [`Team ${r % 12}`],
+        language: long(r) ? "Jupyter Notebook" : r % 2 ? "Rust" : "Go",
+      }),
     ),
     ...Array.from({ length: n }, (_, i) =>
       row(`mock:bulk-${i % repos}#${i}`, "pr", `Bulk change ${i}`, `2026-0${1 + (i % 8)}-${String(1 + (i % 28)).padStart(2, "0")}T09:00:00Z`, i % 3 ? "jonas" : "mara", {

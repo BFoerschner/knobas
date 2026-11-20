@@ -671,7 +671,14 @@
   {#if tab === "repos"}
     <TfWaiting phase={waitPhase({ drawn: reposOrdered, reading: repoReading, failed: failed !== null })} error={failed} columns={7}>
     {#if placedRepos.rows.length > 0}
-      <table class="tf-tbl">
+      <table class="tf-tbl tf-crepos">
+        <!-- Its own widths, set before any row draws: a table that sized its columns to the rows it holds took new ones
+             from each window of rows as it scrolled (the code-list-columns pass, 2026-11-20). -->
+        <colgroup
+          ><col /><col class="tf-cr-team" /><col class="tf-cr-lang" /><col class="tf-cr-prs" /><col class="tf-cr-local" /><col
+            class="tf-cr-at"
+          /><col class="tf-cr-acts" /></colgroup
+        >
         <thead>
           <tr
             ><th>Repository</th><th>Team</th><th>Language</th><th>Open PRs</th><th>Local checkout</th><th>Last push</th><th
@@ -685,17 +692,21 @@
             {@const count = openCount(openCounts, row)}
             {@const local = checkoutLine(checkouts[row.entity_id])}
             {@const fact = known.get(row.entity_id)}
+            {@const teams = fact?.teams.join(", ") ?? ""}
+            {@const isPath = local !== null && local.text === checkouts[row.entity_id]?.path}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach repoWin.row(row.entity_id)}>
               <td
-                ><a class="tf-mono" href={itemHash(row)}
-                  ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} /></span
-                  ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} from={row.title.lastIndexOf("/") + 1} /></a
-                >{#if twinRepos.has(row.entity_id)}{" "}<span class="tf-dim">on {sourceName(row.source_id)}</span>{/if}{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</td
+                ><span class="tf-crname"
+                  ><a class="tf-mono" href={itemHash(row)} title={row.title}
+                    ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} /></span
+                    ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} from={row.title.lastIndexOf("/") + 1} /></a
+                  >{#if twinRepos.has(row.entity_id)}{" "}<span class="tf-dim">on {sourceName(row.source_id)}</span>{/if}{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</span
+                ></td
               >
-              <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
-              <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
+              <td title={teams || undefined}><Marked text={teams} typed={repoFilter.text} /></td>
+              <td title={fact?.language || undefined}><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
-              <td class:tf-dim={local?.dim}>{#if local !== null && local.text === checkouts[row.entity_id]?.path}<TfPath path={local.text} />{:else}{local?.text ?? ""}{/if}</td>
+              <td class:tf-dim={local?.dim} title={isPath ? undefined : local?.text || undefined}>{#if isPath}<TfPath path={local!.text} />{:else}{local?.text ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</span></td>
               <td class="tf-nowrap tf-right"><span class="tf-rowend"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></span></td>
             </tr>

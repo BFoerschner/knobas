@@ -103,6 +103,8 @@ const SCROLL = [
   { name: "tickets-list", setup: `await __s.list(); await __s.click(/^Show \\d+ more$/); await __s.until(() => __fr.pick(".tf-board-wrap").scrollHeight > 200000, 30000); await __fr.sleep(800); return ".tf-board-wrap";` },
   { name: "inbox", setup: `await __s.go("#/inbox"); return null;` },
   { name: "code-prs", setup: `await __s.go("#/code/prs", 2500); return null;` },
+  // Code's repositories (the code-list-columns pass, 2026-11-20): a table of set columns, every repository of the source.
+  { name: "code-repos", setup: `await __s.go("#/code/repos", 2500); return null;` },
   { name: "docs-space", setup: `await __s.go("#/docs/space/SCLENG", 2500); return ".tf-rd-main";` },
   { name: "docs-page", setup: `await __s.go("#/page/live-confluence%3A362334", 3000); return ".tf-rd-main";` },
   { name: "builds-main", setup: `await __s.go("#/builds", 2000); return ".tf-bmain";` },

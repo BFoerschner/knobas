@@ -5,17 +5,21 @@
 # drawn moves or changes size by more than 2 px in the 5 s after the place's first useful frame.
 #
 #   testenv/perf/moves.sh [--real <port>] [--fixture-only] [--throttle 1,4] [--sizes "1440x868@1 2560x1440@1.25"]
-#                         [--sync] [--only a,b] [--workers 3] [--attach <debug port>] [--out <dir>]
+#                         [--sync] [--only a,b] [--workers 3] [--attach <debug port>] [--out <dir>] [--no-columns]
 #
 # By default the fixture (`?fake-scale`, each read landing late with `fake-late`, so a late read shows as a move) at 1x
 # and 4x at both sizes. `--real <port>` adds the windowless backend on the saved scale database
 # (examples/headless_ipc.rs), the same throttles and sizes. `--sync`: every source ends a run that changed something
 # every 1.5 s while each place records. `--workers` runs that many browsers at once, each a share of the places (a
 # move is a frame order, not a time, so the share does not change what moves).
+#
+# Then the scroll case (`columns.mjs`, the code-list-columns pass, 2026-11-20): each windowed list wheeled to its end
+# and back, failing when a column's left edge or width changes while it scrolls. `--only` picks its lists too (their
+# names start `cols-`); `--no-columns` leaves it out.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4" sizes="1440x868@1 2560x1440@1.25" sync="" only="" workers=3 out="" fixture=1 attach=""
+real="" throttle="1,4" sizes="1440x868@1 2560x1440@1.25" sync="" only="" workers=3 out="" fixture=1 attach="" columns=1
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
@@ -28,7 +32,8 @@ while [ $# -gt 0 ]; do
     --workers) workers=$2; shift 2 ;;
     --attach) attach=$2; workers=1; shift 2 ;;
     --out) out=$2; shift 2 ;;
-    *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    --no-columns) columns=""; shift ;;
+    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
 out=${out:-$(mktemp -d "${TMPDIR:-/tmp}/knobas-moves.XXXXXX")}
@@ -59,6 +64,11 @@ for corpus in "${corpora[@]}"; do
     done
     for pid in "${pids[@]}"; do wait "$pid" || status=1; done
     grep -hE "^(MOVED|ERROR)" "$out/$name-$size-"*.log
+    if [ -n "$columns" ]; then
+      node "$here/columns.mjs" --app "$url" --out "$out/$name-$size-columns.json" --size "$size" --throttle "$throttle" \
+        ${only:+--only "$only"} ${attach:+--attach "$attach"} --check > "$out/$name-$size-columns.log" 2>&1 || status=1
+      grep -hE "^(MOVED|ERROR|FAILED)" "$out/$name-$size-columns.log"
+    fi
   done
 done
 echo "moves: results in $out"

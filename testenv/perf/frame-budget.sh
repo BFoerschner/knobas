@@ -24,7 +24,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 real="" throttle="1,4,6" out="" sizes="1920x1080@2 2560x1440@1.25"
-only="monitors,code-prs,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings,drag-"
+only="monitors,code-prs,code-repos,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings,drag-"
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;

@@ -11,6 +11,23 @@
 .tf-cprs .tf-cp-state { width: 110px; }
 .tf-cprs .tf-cp-job { width: 100px; }
 .tf-cprs .tf-cp-at { width: 150px; }
+/* The repositories' columns are set before a row draws (the code-list-columns pass, 2026-11-20): sized to their rows,
+   they took new widths from each window of rows as the list scrolled. The name takes the rest; a word column is its
+   width times the interface's size, the checkout a share of a wide window. A value longer than its column ends in an
+   ellipsis with the whole of it in its title; a path gives up its middle (`TfPath`), and the job's chip is never cut. */
+.tf-crepos { table-layout: fixed; }
+.tf-crepos .tf-cr-team { width: calc(150px * var(--size-ui)); }
+.tf-crepos .tf-cr-lang { width: calc(112px * var(--size-ui)); }
+.tf-crepos .tf-cr-prs { width: calc(88px * var(--size-ui)); }
+.tf-crepos .tf-cr-local { width: 24%; }
+.tf-crepos .tf-cr-at { width: calc(120px * var(--size-ui)); }
+/* The row's actions hang left of it over *Last push* (`.tf-rowend`, chrome.css): the column holds only its padding. */
+.tf-crepos .tf-cr-acts { width: 21px; }
+.tf-crepos tbody td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-crepos tbody td.tf-right { overflow: visible; }
+.tf-crname { display: flex; align-items: center; gap: .3em; min-width: 0; }
+.tf-crname > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-crname > :not(a) { flex: none; }
 .tf-cfail { color: var(--err); font-size: calc(var(--t-sm) * var(--fs)); }
 @media (max-width: 900px) {
   .tf-cbody { padding-left: 16px; padding-right: 16px; overflow-x: auto; background: var(--paper); }
@@ -195,6 +212,14 @@
 /* The last value: *Open in…* stands in its place on hover, so it is at least as wide. */
 .tf-rcommits td.tf-nowrap .tf-rowval { display: inline-block; min-width: 96px; }
 .tf-rcommits td.tf-ropen { width: 1%; padding-top: 0; padding-bottom: 0; text-align: right; white-space: nowrap; }
+/* A pull request's commits (`TfPrCommitRows`): windowed, so its columns are set before a row draws (the
+   code-list-columns pass, 2026-11-20). The message takes the rest and wraps; who and when ends in an ellipsis past its
+   column, with the whole of it in its title. */
+.tf-prcommits { table-layout: fixed; }
+.tf-prcommits .tf-pc-sha { width: calc(110px * var(--size-code) + 20px); }
+.tf-prcommits .tf-pc-line { width: calc(210px * var(--size-ui)); }
+.tf-prcommits td.tf-nowrap { width: auto; overflow: hidden; text-overflow: ellipsis; }
+.tf-prcommits td { overflow-wrap: anywhere; }
 /* A commit picked for *Diff selected* (#2271). */
 .tf-rcommits tr.tf-picked td { background: var(--info-bg); }
 .tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }

@@ -28,17 +28,21 @@
   const win = new Windowed({ count: () => commits.length, key: (i) => i, estimate: 37 });
 </script>
 
-<table class="tf-tbl tf-rcommits">
+<!-- Its own widths, set before any row draws: sized to its rows, the who-and-when column took new widths from each
+     window of rows as a long list scrolled (the code-list-columns pass, 2026-11-20). -->
+<table class="tf-tbl tf-rcommits tf-prcommits">
+  <colgroup><col class="tf-pc-sha" /><col /><col class="tf-pc-line" /></colgroup>
   <tbody {@attach win.list}>
     {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="3" {@attach win.room("before")}></td></tr>{/if}
     {#each win.slice(commits) as row, n (win.start + n)}
       {@const opens = row.entity_id !== null && repoId !== null}
+      {@const line = commitLine(row, row.entity_id !== null && mine.has(row.entity_id))}
       <tr class:tf-row={opens} onclick={(event) => onopen(event, row)} {@attach win.row(win.start + n)}>
         <td class="tf-mono"
           >{#if opens}<a href={commitHash(repoId!, row.entity_id!)}>{row.chip ?? ""}</a>{:else}{row.chip ?? ""}{/if}</td
         >
         <td class:tf-dim={row.chip === null}>{row.title}</td>
-        <td class="tf-dim tf-nowrap">{commitLine(row, row.entity_id !== null && mine.has(row.entity_id))}</td>
+        <td class="tf-dim tf-nowrap" title={line || undefined}>{line}</td>
       </tr>
     {/each}
     {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="3" {@attach win.room("after")}></td></tr>{/if}

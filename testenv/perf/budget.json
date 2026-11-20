@@ -71,6 +71,20 @@
      "longestTask": 60
     }
    },
+   "code-repos": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
    "docs-space": {
     "1": {
      "fps": 58,
@@ -525,6 +539,20 @@
     }
    },
    "code-prs": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-repos": {
     "1": {
      "fps": 58,
      "styleElements": 700
