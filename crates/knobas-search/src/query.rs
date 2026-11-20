@@ -267,6 +267,19 @@ pub struct EffectiveFilters {
     /// runs, commits and a Jira view's mirror row. Set by the launcher's
     /// search alone; empty leaves nothing out.
     pub hidden_kinds: Vec<String>,
+    /// The kinds *Everything* matches by their names and keys alone (the
+    /// everything-search decisions, 2026-11-20, D13): a box of Settings ›
+    /// Search cleared (`ticket`, `pr`, `page`). Beside the whole vector's
+    /// match, a row of one of them must match by its title too, as under
+    /// *Titles*; a broad word's walk of the newest rows skips them. Set by
+    /// the launcher's search alone, so a saved list's count and the Docs
+    /// search are other questions.
+    pub names_only_kinds: Vec<String>,
+    /// Whether a run log is left out of what *Everything* matches and
+    /// quotes (D13, *Build logs* cleared): the log's corpus is not searched
+    /// and a pipeline's excerpt reads its body. Set by the launcher's search
+    /// alone.
+    pub no_logs: bool,
 }
 
 impl EffectiveFilters {
@@ -515,6 +528,9 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
         // The launcher's search sets these from the declarations (#2422).
         pipeline_kinds: Vec::new(),
         hidden_kinds: Vec::new(),
+        // So does Settings › Search (D13).
+        names_only_kinds: Vec::new(),
+        no_logs: false,
     }
 }
 

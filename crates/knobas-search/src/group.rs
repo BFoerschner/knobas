@@ -483,21 +483,30 @@ pub(crate) fn mark(rows: &mut [RawHit], typed: &crate::picker::Typed) {
 /// the statement's ordering and only the *groups* are re-sorted here.
 #[must_use]
 pub fn group(rows: Vec<RawHit>, kinds: &KindCatalog) -> Vec<ResultGroup> {
-    grouped(rows, kinds, &[])
+    grouped(rows, kinds, &[], &[])
 }
 
 /// [`group`], each hit carrying the places in its text that hold one of
 /// `needles` (#2431, [`crate::excerpt`]).
 #[must_use]
+///
+/// A kind of `names_only` (D13, a box of Settings › Search cleared) is
+/// matched by its names alone, so its rows quote nothing.
 pub fn with_excerpts(
     rows: Vec<RawHit>,
     kinds: &KindCatalog,
     needles: &[String],
+    names_only: &[String],
 ) -> Vec<ResultGroup> {
-    grouped(rows, kinds, needles)
+    grouped(rows, kinds, needles, names_only)
 }
 
-fn grouped(rows: Vec<RawHit>, kinds: &KindCatalog, needles: &[String]) -> Vec<ResultGroup> {
+fn grouped(
+    rows: Vec<RawHit>,
+    kinds: &KindCatalog,
+    needles: &[String],
+    names_only: &[String],
+) -> Vec<ResultGroup> {
     let mut groups: Vec<ResultGroup> = Vec::new();
     for row in rows {
         let index = match groups.iter().position(|g| g.kind == row.group_kind) {
@@ -515,7 +524,12 @@ fn grouped(rows: Vec<RawHit>, kinds: &KindCatalog, needles: &[String]) -> Vec<Re
                 groups.len() - 1
             }
         };
-        if let Some(hit) = hit(row, needles) {
+        let quoted = if names_only.contains(&row.group_kind) {
+            &[][..]
+        } else {
+            needles
+        };
+        if let Some(hit) = hit(row, quoted) {
             groups[index].hits.push(hit);
         }
     }

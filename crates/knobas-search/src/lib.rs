@@ -72,10 +72,10 @@ pub use query::{
 pub use saved::{Refusal, SavedList, SmartListSummary};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, Excerpt, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension,
-    FilterSuggestions, KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix,
-    ResultGroup, SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
-    SourceSuggestion,
+    EntityRow, EverythingMatches, Excerpt, FieldSuggestion, FilterAnswer, FilterCoverage,
+    FilterDimension, FilterSuggestions, KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery,
+    Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment,
+    SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -176,6 +176,10 @@ pub struct Searcher {
     /// ([`Self::with_picker`]). `None`, and a picker that holds no name yet,
     /// answer exactly as before it.
     picker: Option<picker::Picker>,
+    /// What *Everything* matches beyond names and keys (Settings › Search,
+    /// the everything-search decisions, D13): every box on unless
+    /// [`Self::with_everything`] says otherwise.
+    everything: EverythingMatches,
 }
 
 impl Searcher {
@@ -194,6 +198,7 @@ impl Searcher {
             bounds: (sql::RANKED_WHOLE, sql::WALK),
             windows: cfg!(windows),
             picker: None,
+            everything: EverythingMatches::default(),
         }
     }
 
@@ -214,6 +219,15 @@ impl Searcher {
     #[must_use]
     pub fn planned_as_windows(mut self, windows: bool) -> Self {
         self.windows = windows;
+        self
+    }
+
+    /// The same searcher, *Everything* matching what `matches` says beyond
+    /// names and keys (Settings › Search, D13). A new searcher matches
+    /// everything.
+    #[must_use]
+    pub fn with_everything(mut self, matches: EverythingMatches) -> Self {
+        self.everything = matches;
         self
     }
 
@@ -257,6 +271,7 @@ impl Searcher {
             bounds: (sql::RANKED_WHOLE, sql::WALK),
             windows: cfg!(windows),
             picker: None,
+            everything: EverythingMatches::default(),
         }
     }
 
@@ -478,11 +493,20 @@ impl Searcher {
         // says which known names have nothing the launcher admits beneath
         // them, the left-out kinds being what it leaves out (#2495).
         let known_under = under::report_unknown(&self.pool, &mut parsed, &frames.left_out).await?;
+        // Settings › Search (D13): under *Everything*, what a cleared box
+        // leaves to names and keys, bound only where words are matched.
+        let everything = if query.titles {
+            EverythingMatches::default()
+        } else {
+            self.everything
+        };
         let filters = EffectiveFilters {
             titles: query.titles,
             excerpts: !query.titles,
             pipeline_kinds: frames.pipelines,
             hidden_kinds: frames.left_out,
+            names_only_kinds: everything.names_only_kinds(),
+            no_logs: !everything.build_logs,
             ..query::merge(&parsed, &query.filters)
         };
         let mut interpreted = ParsedQuery {
@@ -558,7 +582,7 @@ impl Searcher {
                     // once every copy holds what the stage reads (migration
                     // `0084`).
                     let corpora = corpus::with_mirror(
-                        corpus::searched(self.corpora(), filters.titles),
+                        corpus::searched(self.corpora(), filters.titles, !filters.no_logs),
                         stored.mirror,
                     );
                     let rows = self
@@ -688,7 +712,7 @@ impl Searcher {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
         }
         let mut groups = if filters.excerpts {
-            group::with_excerpts(rows, &vocab.kinds, &needles)
+            group::with_excerpts(rows, &vocab.kinds, &needles, &filters.names_only_kinds)
         } else {
             group::group(rows, &vocab.kinds)
         };
@@ -785,7 +809,7 @@ impl Searcher {
             return Ok(Named::NotAsked);
         };
         // Names, so no run log: a log is never one (`corpus::searched`).
-        let corpora = corpus::searched(self.corpora(), true);
+        let corpora = corpus::searched(self.corpora(), true, true);
         let Some(built) = sql::letter_sql(&corpora, typed, filters, PER_GROUP, limit) else {
             return Ok(Named::NotAsked);
         };

@@ -2,9 +2,10 @@
  * `?fake-ipc`: The launcher (#504): its home board, the Tree's search box (#430), the
  * `>` palette (#1417) and the query box's suggestions (#601).
  */
-import type { SearchResponse } from "../../../ipc/search";
+import type { EverythingMatches, SearchResponse, SearchSettings } from "../../../ipc/search";
 import { SYNTAX } from "../../../launcher/syntax";
 import type { Handlers } from "../fake-tauri";
+import { onFakeReset } from "../fake-seed";
 import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
@@ -335,6 +336,23 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
  * `#` word that is no filter is the word, hash dropped (#2420). Any other
  * prefix or a `:` token is not answered here.
  */
+/** Settings › Search's boxes (the everything-search decisions, D13), as the fixture keeps them: every one on until set. */
+const EVERY_BOX: EverythingMatches = { ticket_text: true, pr_text: true, page_text: true, build_logs: true, file_names: true, file_text: true };
+let everything: EverythingMatches = EVERY_BOX;
+onFakeReset(() => {
+  everything = EVERY_BOX;
+});
+
+/** What a box covers, read off the fixture as the backend counts the mirror. */
+function searchSettingsAnswer(): SearchSettings {
+  const live = CORPUS.filter((entry) => entry.deleted_at === null);
+  const count = (kind: string) => live.filter((entry) => entry.kind === kind).length;
+  return { everything, tickets: count("ticket"), pull_requests: count("pr"), pages: count("page"), pipelines: fakePipelines().length };
+}
+
+/** Whether a cleared box leaves `kind` to its names (D13). */
+const namesOnly = (kind: string) => (kind === "ticket" && !everything.ticket_text) || (kind === "pr" && !everything.pr_text) || (kind === "page" && !everything.page_text);
+
 function wordSearch(raw: string, titles: boolean): SearchResponse | null {
   const typed = raw.trim();
   const named = /^#([a-z]+)(?:\s+(.*))?$/i.exec(typed);
@@ -350,8 +368,8 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
   const wanted = (kind: string) => filter === null || kinds.includes(kind);
   for (const { haystack, hit, log } of launcherKindHits()) {
     if (!wanted(hit.kind)) continue;
-    // Everything (#2431): a pipeline is found by its newest run's log too.
-    const body = titles ? "" : (log ?? "");
+    // Everything (#2431): a pipeline is found by its newest run's log too, while *Build logs* is set (D13).
+    const body = titles || !everything.build_logs ? "" : (log ?? "");
     if (!words.every((word) => `${haystack} ${body}`.toLowerCase().includes(word))) continue;
     const hits = byKind.get(hit.kind) ?? [];
     hits.push({ ...hit, rank: 1 - hits.length / 100, excerpts: titles ? [] : fixtureExcerpts("", body, words, 1) });
@@ -360,7 +378,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
   for (const entry of CORPUS) {
     if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind) || !wanted(entry.kind)) continue;
     const row = mirrorRow(entry);
-    const body = titles ? "" : entry.body_text;
+    const body = titles || namesOnly(entry.kind) ? "" : entry.body_text;
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
     const hits = byKind.get(entry.kind) ?? [];
@@ -487,6 +505,12 @@ export function handlers(): Handlers {
     // everything with assets would make a QA pass over the launcher look like
     // it worked.
     search: (args) => estateSearch(args),
+    // Settings › Search (D13): the boxes, kept for the session, which the word search above honours.
+    search_settings: () => searchSettingsAnswer(),
+    set_search_everything: (args) => {
+      everything = { ...everything, ...(args["matches"] as Partial<EverythingMatches>) };
+      return searchSettingsAnswer();
+    },
     // The query box's suggestions (#601). **Fixture-only**: the kinds the
     // corpus holds and the configured sources, so `kind:` and `source:` can be
     // looked at under `?fake-ipc`; no parents, because this corpus declares

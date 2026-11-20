@@ -384,6 +384,61 @@ pub struct SearchHit {
     pub marks: Vec<u32>,
 }
 
+/// **What *Everything* matches** beyond names and keys, a box each in
+/// Settings › Search (the everything-search decisions, 2026-11-20, D13).
+/// *Titles* matches names and keys whatever this says. A box filters what
+/// the next key matches and changes nothing kept: everything stays synced
+/// and indexed. A field left out on the wire is `true`, so every box starts
+/// on and a later box reads as on from an older setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(default)]
+#[ts(export_to = "search.ts")]
+#[allow(clippy::struct_excessive_bools)]
+pub struct EverythingMatches {
+    /// A ticket's description and comments.
+    pub ticket_text: bool,
+    /// A pull request's description and comments.
+    pub pr_text: bool,
+    /// A Docs page's text and comments.
+    pub page_text: bool,
+    /// The end of each pipeline's last finished run's log.
+    pub build_logs: bool,
+    /// The names of a repository's files.
+    pub file_names: bool,
+    /// The text of a repository's files.
+    pub file_text: bool,
+}
+
+impl Default for EverythingMatches {
+    fn default() -> Self {
+        Self {
+            ticket_text: true,
+            pr_text: true,
+            page_text: true,
+            build_logs: true,
+            file_names: true,
+            file_text: true,
+        }
+    }
+}
+
+impl EverythingMatches {
+    /// The kinds a cleared box leaves to their names and keys
+    /// ([`crate::query::EffectiveFilters::names_only_kinds`]).
+    #[must_use]
+    pub fn names_only_kinds(&self) -> Vec<String> {
+        [
+            (self.ticket_text, "ticket"),
+            (self.pr_text, "pr"),
+            (self.page_text, "page"),
+        ]
+        .into_iter()
+        .filter(|(on, _)| !on)
+        .map(|(_, kind)| kind.to_owned())
+        .collect()
+    }
+}
+
 /// One place the words appear in a hit's text (#2431).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]

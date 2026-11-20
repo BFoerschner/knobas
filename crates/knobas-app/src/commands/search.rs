@@ -128,6 +128,37 @@ pub async fn search(
     .await
 }
 
+/// Settings › Search (the everything-search decisions, 2026-11-20, D13):
+/// what *Everything* matches beyond names and keys, and how much of the
+/// mirror each box covers.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn search_settings(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    crate::search_settings::settings(&lifecycle.pool()?).await
+}
+
+/// Store what *Everything* matches, and answer the page as it now stands:
+/// the next key matches what was set. Nothing kept changes.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the write or a read
+/// fails.
+#[tauri::command]
+pub async fn set_search_everything(
+    lifecycle: State<'_, Lifecycle>,
+    matches: knobas_search::EverythingMatches,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::search_settings::set_everything(&pool, matches).await?;
+    crate::search_settings::settings(&pool).await
+}
+
 /// What the launcher shows before anything is typed: the newest items, and
 /// the health of every configured source.
 ///
@@ -460,11 +491,14 @@ pub async fn searcher(
     // (#940, R-13a.6, D10): the one primary-key read of `knobas.setting` that
     // every command's searcher makes, so the launcher, the lists and the
     // suggestions all agree. The notes stay in the database.
-    let notes_shown = crate::capture::shown(pool).await?;
+    // The same read says what *Everything* matches (Settings › Search, the
+    // everything-search decisions, D13): one statement by the table's key.
+    let (notes_shown, everything) = crate::search_settings::for_searcher(pool).await?;
     Ok(
         knobas_search::Searcher::declaring(pool.clone(), registry.descriptors())
             .await?
             .with_notes_shown(notes_shown)
+            .with_everything(everything)
             .planned_as_windows(knobas_db::embedded::plans_as_windows()),
     )
 }

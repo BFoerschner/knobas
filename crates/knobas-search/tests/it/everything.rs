@@ -423,3 +423,144 @@ async fn under_titles_a_hit_carries_no_excerpt() {
     let everything = search(&pool, &t, false).await;
     assert_eq!(the_hit(&everything, &id).excerpts.len(), 1);
 }
+
+// -- Settings › Search (the everything-search decisions, 2026-11-20, D13) --
+
+async fn search_with(
+    pool: &sqlx::PgPool,
+    raw: &str,
+    titles: bool,
+    matches: knobas_search::EverythingMatches,
+) -> SearchResponse {
+    searcher(pool)
+        .await
+        .with_everything(matches)
+        .search(SearchQuery {
+            titles,
+            raw: raw.to_owned(),
+            limit: 50,
+            filters: SearchFilters::default(),
+        })
+        .await
+        .unwrap()
+}
+
+fn holds(response: &SearchResponse, id: &str) -> bool {
+    all_hits(response).iter().any(|hit| hit.row.entity_id == id)
+}
+
+/// A cleared box leaves its kind to its names: a word only its text holds
+/// finds nothing, a word its title holds still finds the row, and with the
+/// box set again the text answers at once. *Titles* is the same whatever is
+/// set.
+#[tokio::test]
+async fn a_cleared_box_leaves_a_ticket_or_a_page_to_its_names() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let body = token();
+    let named = token();
+    let key = token();
+    let ticket = item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{}-1", key.to_uppercase()),
+        &format!("Payout {named}"),
+        &format!(
+            "Payout {named}\n\nThe batch fails.\n\u{1f}Priya\nThe {body} cap holds for {named}."
+        ),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+    let page = item(
+        &pool,
+        "confluence",
+        "page",
+        &format!("{key}-page"),
+        &format!("Runbook {named}"),
+        &format!("Runbook {named}\n\u{1e}Backoff\nWait for the {body} window."),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+    let all = knobas_search::EverythingMatches::default();
+    assert!(holds(&search_with(&pool, &body, false, all).await, &ticket));
+    assert!(holds(&search_with(&pool, &body, false, all).await, &page));
+
+    let no_tickets = knobas_search::EverythingMatches {
+        ticket_text: false,
+        ..all
+    };
+    let found = search_with(&pool, &body, false, no_tickets).await;
+    assert!(!holds(&found, &ticket), "{found:#?}");
+    assert!(holds(&found, &page), "the page's box is still set");
+    let by_name = search_with(&pool, &named, false, no_tickets).await;
+    assert!(holds(&by_name, &ticket));
+    // Matched by its name alone: nothing of its text is quoted, though a
+    // comment says the word too.
+    assert!(the_hit(&by_name, &ticket).excerpts.is_empty());
+    assert!(
+        !the_hit(&search_with(&pool, &named, false, all).await, &ticket)
+            .excerpts
+            .is_empty()
+    );
+
+    let no_pages = knobas_search::EverythingMatches {
+        page_text: false,
+        ..all
+    };
+    let found = search_with(&pool, &body, false, no_pages).await;
+    assert!(!holds(&found, &page), "{found:#?}");
+    assert!(holds(&found, &ticket));
+    assert!(holds(
+        &search_with(&pool, &named, false, no_pages).await,
+        &page
+    ));
+
+    // *Titles* matches names and keys whatever is set.
+    let none = knobas_search::EverythingMatches {
+        ticket_text: false,
+        pr_text: false,
+        page_text: false,
+        build_logs: false,
+        file_names: false,
+        file_text: false,
+    };
+    let titled = search_with(&pool, &named, true, none).await;
+    assert!(holds(&titled, &ticket) && holds(&titled, &page));
+}
+
+/// *Build logs* cleared: a word only a run log holds finds no pipeline, and a
+/// pipeline found by its name quotes no log line.
+#[tokio::test]
+async fn a_cleared_build_logs_box_leaves_the_log_out() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let (id, run) = pipeline(&pool, &t, &format!("Deploy {t}")).await;
+    let word = token();
+    log(
+        &pool,
+        &id,
+        &run,
+        1,
+        &format!("step one\n{word} {t} refused\nstep three"),
+    )
+    .await;
+    let all = knobas_search::EverythingMatches::default();
+    assert!(holds(&search_with(&pool, &word, false, all).await, &id));
+    let no_logs = knobas_search::EverythingMatches {
+        build_logs: false,
+        ..all
+    };
+    let found = search_with(&pool, &word, false, no_logs).await;
+    assert!(!holds(&found, &id), "{found:#?}");
+    let by_name = search_with(&pool, &t, false, no_logs).await;
+    assert!(holds(&by_name, &id), "{by_name:#?}");
+    assert!(
+        the_hit(&by_name, &id).excerpts.is_empty(),
+        "{:?}",
+        the_hit(&by_name, &id).excerpts
+    );
+}

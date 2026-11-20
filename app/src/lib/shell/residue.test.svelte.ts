@@ -619,6 +619,14 @@ function sectionPorts() {
     listAdapters: () => deferred([]),
     monitoringSettings: () => deferred({ sample_retention_days: 30, response_time_warn_ms: 2000 }),
     docsOutline: () => deferred({ spaces: [{ source_id: "confluence", source_name: "Confluence", key: "ENG", name: "Engineering", pages: [] }], last_read: null, for_you: [] }),
+    searchSettings: () =>
+      deferred({
+        everything: { ticket_text: true, pr_text: true, page_text: true, build_logs: true, file_names: true, file_text: true },
+        tickets: 3,
+        pull_requests: 2,
+        pages: 1,
+        pipelines: 1,
+      }),
     setMonitoringSettings: (settings: { sample_retention_days: number; response_time_warn_ms: number }) => deferred(settings),
     backupStatus: () =>
       deferred({
@@ -2628,6 +2636,8 @@ const CASES: Case[] = [
   sectionCase("TfMonitoringSection", "monitoring"),
   // Settings › Docs (PR #2479, 2026-11-17): its spaces' read lands late.
   sectionCase("TfDocsSection", "docs"),
+  // Settings › Search (the everything-search decisions, D13): its read lands late.
+  sectionCase("TfSearchSection", "search"),
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
   sectionCase("TfPerformanceSection", "performance"),

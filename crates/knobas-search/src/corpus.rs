@@ -1837,16 +1837,23 @@ pub const WITHOUT_NOTES: &[&Corpus] = &[
 
 /// The corpora a launcher search unions: `corpora`, less [`PIPELINE_LOG`]
 /// under *Titles* (#2431), where a run log, never on screen, can match
-/// nothing and would only cost the statement a branch. Compared by relation:
-/// a `const` has no one address, so `std::ptr::eq` would miss it.
+/// nothing and would only cost the statement a branch, and where *Build
+/// logs* is cleared in Settings › Search (`logs` false; the everything-search
+/// decisions, D13). Compared by relation: a `const` has no one address, so
+/// `std::ptr::eq` would miss it.
 #[must_use]
-pub fn searched(corpora: &[&'static Corpus], titles: bool) -> Vec<&'static Corpus> {
+pub fn searched(corpora: &[&'static Corpus], titles: bool, logs: bool) -> Vec<&'static Corpus> {
     corpora
         .iter()
         .copied()
-        .filter(|c| !(titles && c.relation == PIPELINE_LOG.relation))
+        .filter(|c| !((titles || !logs) && c.relation == PIPELINE_LOG.relation))
         .collect()
 }
+
+/// What a mirror row's excerpt reads where no run log is (D13): its body,
+/// the Docs marks kept for the places, as [`LIVE_ITEM`]'s excerpt reads it
+/// for every row but a pipeline.
+pub const LIVE_ITEM_BODY: &str = "i.body_text";
 
 /// `corpora` with the mirror read as `mirror` reads it ([`mirror`]'s
 /// answer): [`LIVE_ITEM`]'s place taken by it, every other corpus as it is.
@@ -1888,7 +1895,7 @@ mod tests {
         assert_eq!(LIVE_ITEM_FILLED.relation, LIVE_ITEM.relation);
         // Only the mirror's own corpus is swapped, never the run logs, which
         // join the same view.
-        let swapped = with_mirror(searched(ALL, false), &LIVE_ITEM_FILLED);
+        let swapped = with_mirror(searched(ALL, false, true), &LIVE_ITEM_FILLED);
         assert_eq!(swapped.len(), ALL.len());
         assert_eq!(swapped.iter().filter(|c| c.matched.is_some()).count(), 1);
         assert!(swapped[0].matched.is_some());
@@ -1898,11 +1905,14 @@ mod tests {
     fn titles_leaves_the_run_logs_out_and_everything_keeps_them() {
         let has_logs =
             |corpora: &[&Corpus]| corpora.iter().any(|c| c.relation == PIPELINE_LOG.relation);
-        assert!(has_logs(&searched(ALL, false)));
-        assert!(has_logs(&searched(WITHOUT_NOTES, false)));
-        assert!(!has_logs(&searched(ALL, true)));
-        assert!(!has_logs(&searched(WITHOUT_NOTES, true)));
-        assert_eq!(searched(ALL, true).len(), ALL.len() - 1);
+        assert!(has_logs(&searched(ALL, false, true)));
+        assert!(has_logs(&searched(WITHOUT_NOTES, false, true)));
+        assert!(!has_logs(&searched(ALL, true, true)));
+        assert!(!has_logs(&searched(WITHOUT_NOTES, true, true)));
+        assert_eq!(searched(ALL, true, true).len(), ALL.len() - 1);
+        // *Build logs* cleared (D13): the log is left out under Everything too.
+        assert!(!has_logs(&searched(ALL, false, false)));
+        assert_eq!(searched(ALL, false, false).len(), ALL.len() - 1);
     }
 
     /// `sql::parent_positions` decides whether the launcher runs its statement

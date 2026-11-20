@@ -884,11 +884,20 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
     let pool = pool().await;
     let s = seed_scale_words(&pool, 300).await;
     let corpora = [&LIVE_ITEM_FILLED];
-    for titles in [false, true] {
+    // Settings › Search's cleared boxes (the everything-search decisions,
+    // D13 and D15): the same statements, one predicate more.
+    for (titles, names_only) in [(false, false), (true, false), (false, true)] {
         let asked = EffectiveFilters {
             titles,
+            names_only_kinds: if names_only {
+                vec!["ticket".to_owned(), "page".to_owned()]
+            } else {
+                Vec::new()
+            },
+            no_logs: names_only,
             ..filters(&s)
         };
+        let titles = (titles, names_only);
         let mut kept = vec![
             ("the count", probe_sql("payout", true, &asked, 5).unwrap()),
             (
@@ -923,7 +932,7 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
                     .unwrap();
                 assert!(
                     !plan.contains("Gather") && !plan.contains("Workers"),
-                    "{what}, titles {titles}:\n{plan}"
+                    "{what}, titles and names alone {titles:?}:\n{plan}"
                 );
             }
         }
@@ -931,7 +940,7 @@ async fn no_statement_a_key_is_held_to_plans_a_parallel_worker() {
         let plan = explain_named_at_any_size(&pool, letters).await.unwrap();
         assert!(
             !plan.contains("Gather") && !plan.contains("Workers"),
-            "a word's first characters, titles {titles}:\n{plan}"
+            "a word's first characters, titles and names alone {titles:?}:\n{plan}"
         );
     }
     // The picker's load, which nobody waits on, all the same: planned as it

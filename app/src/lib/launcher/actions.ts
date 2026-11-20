@@ -45,6 +45,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   standup: "Where the standup protocol is published",
   monitoring: "How Uptime Kuma data is read",
   docs: "Where Docs opens and the spaces it hides",
+  search: "What Everything looks through",
   notes: "Notes and how you capture them",
   backup: "Export and restore what knobas keeps",
   appearance: "Theme, zoom and state colours",

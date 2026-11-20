@@ -216,6 +216,8 @@ export interface SectionPorts {
   monitoringSettings: () => Promise<MonitoringSettings>;
   /** Settings › Docs' spaces (PR #2479, 2026-11-17); the IPC read when omitted. */
   docsOutline?: () => Promise<import("../../ipc/entity").DocsTree>;
+  /** Settings › Search's read (the everything-search decisions, D13); the IPC read when omitted. */
+  searchSettings?: () => Promise<import("../../ipc/search").SearchSettings>;
   setMonitoringSettings: (settings: MonitoringSettings) => Promise<MonitoringSettings>;
   backupStatus: () => Promise<BackupStatus>;
   backupNow: () => Promise<BackupRecord>;

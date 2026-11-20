@@ -57,6 +57,7 @@ pub mod protocol;
 pub mod reads;
 pub mod renderers;
 pub mod run_presets;
+pub mod search_settings;
 pub mod settings;
 mod slug;
 pub mod sources;
@@ -488,6 +489,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::pull_request_worktrees,
         commands::entity::remove_pull_request_worktree,
         commands::search::search,
+        commands::search::search_settings,
+        commands::search::set_search_everything,
         commands::search::launcher_home,
         commands::search::smart_lists,
         commands::search::create_smart_list,

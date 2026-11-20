@@ -825,6 +825,11 @@ fn build_with(
     // and in order, which `placeholders_are_numbered_in_bind_order` pins.
     let tsquery = text.map(|raw| builder.param(Bind::Text(raw.to_owned())));
     let mut bound = bind_filters(&mut builder, filters);
+    // The kinds matched by their names alone (D13), where words are matched
+    // and the statement reads more than names: last of the filters, as
+    // [`corpus_predicates`] reads it last.
+    bound.names_only = (text.is_some() && !by_letter && !filters.names_only_kinds.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.names_only_kinds.clone())));
     // How many of a kind's newest rows a word many rows hold is looked for
     // in (`broad_sql`), read by its walk alone, which is the first stage to
     // read a limit.
@@ -985,6 +990,11 @@ fn build_with(
             let mut kinds = vec!["k.kind is not null".to_owned()];
             if let Some(hidden) = &bound.hidden {
                 kinds.push(format!("k.kind <> all({hidden})"));
+            }
+            // No walk of a kind matched by its names alone (D13): its text
+            // finds nothing.
+            if let Some(names_only) = &bound.names_only {
+                kinds.push(format!("k.kind <> all({names_only})"));
             }
             if let Some(asked) = &bound.kinds {
                 kinds.push(format!("k.kind = any({asked})"));
@@ -1256,7 +1266,13 @@ fn build_with(
         // The text excerpts are read from (#2431): only under *Everything*
         // with words, and only for the page, as the headline.
         let (excerpt, excerpt_line) = if filters.excerpts && text.is_some() {
-            (corpus.excerpt, corpus.excerpt_line)
+            // *Build logs* cleared (D13): a pipeline quotes its body, and no
+            // run log is read.
+            if filters.no_logs && corpus.excerpt == crate::corpus::LIVE_ITEM.excerpt {
+                (crate::corpus::LIVE_ITEM_BODY, "null::bigint")
+            } else {
+                (corpus.excerpt, corpus.excerpt_line)
+            }
         } else {
             ("null::text", "null::bigint")
         };
@@ -1833,6 +1849,11 @@ struct BoundFilters {
     pipelines: Option<String>,
     /// [`EffectiveFilters::hidden_kinds`]' placeholder (#2422).
     hidden: Option<String>,
+    /// [`EffectiveFilters::names_only_kinds`]' placeholder (D13): bound by
+    /// [`build_with`] alone, and only where words are matched, so no
+    /// statement binds what it never reads. Read last of a corpus's
+    /// predicates, which keeps the placeholders in bind order.
+    names_only: Option<String>,
     /// Whether the statement joins each row's stored card as `crd`
     /// ([`narrow`]): a key the card answers is then read off it
     /// (`Corpus::fields_carded`).
@@ -1983,6 +2004,7 @@ fn bind_dimensions(
         titles: filters.titles,
         pipelines,
         hidden,
+        names_only: None,
         carded: false,
     }
 }
@@ -2113,6 +2135,20 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         ));
     }
     predicates.extend(field_predicates(corpus, bound));
+    // A kind *Everything* matches by its names alone (D13, Settings ›
+    // Search): beside the whole vector's match, its title's, as *Titles*
+    // reads it. Under *Titles* it holds of every row the words matched, and
+    // it is read there all the same, so it is numbered where it is bound.
+    if let (Some(fts), Some(names_only)) = (fts, &bound.names_only) {
+        let title = match corpus.title_fts {
+            Some(stored) => format!("{stored} @@ {fts}"),
+            None => format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts),
+        };
+        predicates.push(format!(
+            "({} <> all({names_only}) or coalesce({title}, false))",
+            corpus.kind
+        ));
+    }
     predicates
 }
 
@@ -3544,6 +3580,8 @@ mod tests {
         let hostile = EffectiveFilters {
             pipeline_kinds: vec![evil.to_owned()],
             hidden_kinds: vec![evil.to_owned()],
+            // Names alone: a letter's statement reads no text to leave out.
+            names_only_kinds: vec![evil.to_owned()],
             ..filters(&[evil], &[evil], Some(7), &[])
         };
         let built = letter_sql(&[&LIVE_ITEM], evil, &hostile, 10, 40).expect("names answer it");
@@ -3636,6 +3674,9 @@ mod tests {
             titles,
             pipeline_kinds: vec![evil.to_owned()],
             hidden_kinds: vec![evil.to_owned()],
+            // Settings › Search's cleared boxes (D13): bound, never spelled.
+            names_only_kinds: vec![evil.to_owned()],
+            no_logs: true,
             ..filters(&[evil], &[evil], Some(7), &[])
         };
         let corpora = [&crate::corpus::LIVE_ITEM_FILLED];
@@ -3728,12 +3769,14 @@ mod tests {
         );
         assert!(!walk.contains("and sx.fts @@ q.tsq"), "{walk}");
         assert!(!walk.contains("ts_rank"), "{walk}");
-        // A kind the query hides or does not ask for is not walked, and
-        // nor is one the names fill: its rows would be read to be cut.
+        // A kind the query hides, leaves to its names (D13) or does not ask
+        // for is not walked, and nor is one the names fill: its rows would be
+        // read to be cut.
         assert!(
             walk.contains(
-                "where k.kind is not null\n     and k.kind <> all($3)\n     and k.kind = any($5)\n     \
-                 and coalesce((select nk.held from named_kinds nk where nk.raw = k.kind), 0) < $8"
+                "where k.kind is not null\n     and k.kind <> all($3)\n     and k.kind <> all($7)\n     \
+                 and k.kind = any($5)\n     \
+                 and coalesce((select nk.held from named_kinds nk where nk.raw = k.kind), 0) < $9"
             ),
             "{walk}"
         );
@@ -3777,7 +3820,7 @@ mod tests {
         assert!(
             ranked
                 .sql
-                .contains("select kind, least(count(*), $8) as kind_total from m group by kind"),
+                .contains("select kind, least(count(*), $9) as kind_total from m group by kind"),
             "{}",
             ranked.sql
         );
@@ -3956,6 +3999,79 @@ mod tests {
                 .contains("knobas.entity e where e.id = i.entity_id")
         );
         assert!(!built.sql.contains("websearch_to_tsquery"));
+    }
+
+    /// Settings › Search's cleared boxes (D13): a kind matched by its names
+    /// alone reads its title beside the whole vector, bound once and last of
+    /// the filters, and only by a statement that matches words.
+    #[test]
+    fn a_kind_matched_by_its_names_alone_must_match_by_its_title() {
+        let asked = EffectiveFilters {
+            names_only_kinds: vec!["pr".to_owned()],
+            ..filters(&["jira"], &["ticket"], Some(7), &["mara"])
+        };
+        let names_only = Bind::Texts(vec!["pr".to_owned()]);
+        let built = search_sql(&[&LIVE_ITEM], Some("sepa"), true, &asked, 10, 50);
+        assert_eq!(
+            placeholders(&built.sql),
+            (1..=built.bind_count()).collect::<Vec<_>>(),
+            "{}",
+            built.sql
+        );
+        let at = built
+            .binds
+            .iter()
+            .position(|b| *b == names_only)
+            .expect("bound")
+            + 1;
+        assert_eq!(built.binds.iter().filter(|b| **b == names_only).count(), 1);
+        let title = LIVE_ITEM.title_fts.expect("a stored title vector");
+        assert!(
+            built.sql.contains(&format!(
+                "({} <> all(${at}) or coalesce({title} @@ q.tsq, false))",
+                LIVE_ITEM.kind
+            )),
+            "{}",
+            built.sql
+        );
+        // No words, nothing to leave out: a browse and the picker's rows bind none.
+        let browse = search_sql(&[&LIVE_ITEM], None, false, &asked, 10, 50);
+        assert!(!browse.binds.contains(&names_only), "{}", browse.sql);
+        let picked = picked_sql(&["jira:PAY-1".to_owned()], &[1.0], &asked, 10, 50);
+        assert!(!picked.binds.contains(&names_only), "{}", picked.sql);
+        // A word many rows hold walks no such kind.
+        let narrow = EffectiveFilters {
+            names_only_kinds: vec!["pr".to_owned()],
+            ..filters(&["jira"], &["ticket"], Some(7), &[])
+        };
+        let broad = broad_sql(
+            &[&crate::corpus::LIVE_ITEM_FILLED],
+            "sepa",
+            true,
+            &narrow,
+            10,
+            40,
+            Names::Newest,
+            500,
+        )
+        .expect("narrow");
+        let at = broad
+            .binds
+            .iter()
+            .position(|b| *b == names_only)
+            .expect("bound")
+            + 1;
+        assert!(
+            broad.sql.contains(&format!("k.kind <> all(${at})")),
+            "{}",
+            broad.sql
+        );
+        assert_eq!(
+            placeholders(&broad.sql),
+            (1..=broad.bind_count()).collect::<Vec<_>>(),
+            "{}",
+            broad.sql
+        );
     }
 
     #[test]

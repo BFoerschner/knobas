@@ -125,7 +125,7 @@ async fn statement_admits(
         hidden_kinds: hidden.iter().map(|k| (*k).to_owned()).collect(),
         ..EffectiveFilters::default()
     };
-    let corpora = corpus::searched(corpus::ALL, false);
+    let corpora = corpus::searched(corpus::ALL, false, true);
     let built = sql::search_sql(&corpora, None, false, &filters, 1, 1);
     let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(pool).await.unwrap();
     !rows.is_empty()
@@ -443,7 +443,7 @@ async fn statement_rows(pool: &sqlx::PgPool, vocab: &Vocabulary, raw: &str) -> u
         ..query::merge(&parsed, &SearchFilters::default())
     };
     let text = (!parsed.query.text.is_empty()).then_some(parsed.query.text.as_str());
-    let corpora = corpus::searched(corpus::ALL, false);
+    let corpora = corpus::searched(corpus::ALL, false, true);
     let built = sql::search_sql(&corpora, text, parsed.prefix_last_term, &filters, 50, 50);
     let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(pool).await.unwrap();
     u32::try_from(rows.len()).unwrap()

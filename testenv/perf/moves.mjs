@@ -50,7 +50,7 @@ const CMD_K = { key: "k", code: "KeyK", modifiers: process.platform === "darwin"
 /** A repository with a checkout and pipelines on each corpus. */
 const REPO = real ? "live-gitea%3Ascale-data%2Fbi-dashboards" : "mock%3Atidewater%2Fpayout-service";
 const SPACE = real ? "SCLENG" : "ENG";
-const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "monitoring", "docs", "notes", "backup", "appearance", "performance", "renderers", "keyboard", "logs"];
+const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "monitoring", "docs", "search", "notes", "backup", "appearance", "performance", "renderers", "keyboard", "logs"];
 
 /**
  * The places. `start`: the address a first open starts at; one of `nav` (a section's entry), `gear`, `press` (the first

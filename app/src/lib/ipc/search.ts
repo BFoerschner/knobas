@@ -9,6 +9,7 @@
 import { invoke } from "./invoke";
 import type { EntityRow } from "./generated/entity";
 import type {
+  EverythingMatches,
   FavouriteTarget,
   FilterSuggestions,
   FuzzyRanked,
@@ -18,6 +19,7 @@ import type {
   SearchFilters,
   SearchQuery,
   SearchResponse,
+  SearchSettings,
   SmartListSummary,
   TicketView,
   TicketViewDraft,
@@ -25,6 +27,8 @@ import type {
 } from "./generated/search";
 
 export type {
+  EverythingMatches,
+  SearchSettings,
   ActionKey,
   FuzzyRanked,
   CardField,
@@ -70,6 +74,16 @@ export type {
 /** No filters — what the box sends until the chips exist. */
 export function noFilters(): SearchFilters {
   return { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] };
+}
+
+/** Settings › Search (the everything-search decisions, D13): what *Everything* matches, and what each box covers. */
+export function searchSettings(): Promise<SearchSettings> {
+  return invoke<SearchSettings>("search_settings");
+}
+
+/** Store what *Everything* matches; answers the page as it now stands. */
+export function setSearchEverything(matches: EverythingMatches): Promise<SearchSettings> {
+  return invoke<SearchSettings>("set_search_everything", { matches });
 }
 
 /** Answer one launcher query. */

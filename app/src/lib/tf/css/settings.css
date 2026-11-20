@@ -321,3 +321,12 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-dec-why { margin: 0; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-dec-path { margin-top: 8px; }
 .tf-dec-path .tf-btn { flex: none; }
+/* Settings › Search (the everything-search decisions, 2026-11-20, D13): a box a line, what it matches with a line of help
+   under it where the words need one, and how much of the mirror it covers at the right, in figures that line up. */
+.tf-stg-boxes { border-top: 1px solid var(--rule-2); }
+.tf-stg-box {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; align-items: first baseline;
+  padding: 8px 0; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-md) * var(--fs));
+}
+.tf-stg-box small { display: block; margin-top: 1px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-stg-held { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }

@@ -14,6 +14,40 @@ export type ActionKey = { kind: string, chord: string, action_id: string, };
 export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | "labels";
 
 /**
+ * **What *Everything* matches** beyond names and keys, a box each in
+ * Settings › Search (the everything-search decisions, 2026-11-20, D13).
+ * *Titles* matches names and keys whatever this says. A box filters what
+ * the next key matches and changes nothing kept: everything stays synced
+ * and indexed. A field left out on the wire is `true`, so every box starts
+ * on and a later box reads as on from an older setting.
+ */
+export type EverythingMatches = { 
+/**
+ * A ticket's description and comments.
+ */
+ticket_text: boolean, 
+/**
+ * A pull request's description and comments.
+ */
+pr_text: boolean, 
+/**
+ * A Docs page's text and comments.
+ */
+page_text: boolean, 
+/**
+ * The end of each pipeline's last finished run's log.
+ */
+build_logs: boolean, 
+/**
+ * The names of a repository's files.
+ */
+file_names: boolean, 
+/**
+ * The text of a repository's files.
+ */
+file_text: boolean, };
+
+/**
  * One place the words appear in a hit's text (#2431).
  */
 export type Excerpt = { 
@@ -675,6 +709,32 @@ total: number, took_ms: number,
  * and the backend always sends it.
  */
 coverage: Array<FilterCoverage>, };
+
+/**
+ * What Settings › Search draws: the boxes, and beside each how much of the
+ * mirror it covers.
+ */
+export type SearchSettings = { 
+/**
+ * The boxes.
+ */
+everything: EverythingMatches, 
+/**
+ * The tickets whose description and comments the first box covers.
+ */
+tickets: number, 
+/**
+ * The pull requests the second covers.
+ */
+pull_requests: number, 
+/**
+ * The Docs pages the third covers.
+ */
+pages: number, 
+/**
+ * The pipelines whose last finished run's log the fourth covers.
+ */
+pipelines: number, };
 
 /**
  * A run of excerpt text, and whether it is part of the match.

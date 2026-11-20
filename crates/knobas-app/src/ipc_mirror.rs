@@ -353,6 +353,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     // What `keys` answers (#2429).
     knobas_search::Keys::export_all(cfg)?;
     knobas_search::FilterSuggestions::export_all(cfg)?;
+    // Settings › Search (the everything-search decisions, D13).
+    crate::search_settings::SearchSettings::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;
     crate::ticket_views::TicketView::export_all(cfg)?;
     crate::commands::search::FuzzyRanked::export_all(cfg)?;
