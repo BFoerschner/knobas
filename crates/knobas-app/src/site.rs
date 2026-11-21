@@ -624,6 +624,77 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 mod tests {
     use super::*;
 
+    fn store_with(secret: Option<knobas_secrets::Secret>) -> Arc<dyn SecretStore> {
+        let store: Arc<dyn SecretStore> = Arc::new(knobas_secrets::MemoryStore::new());
+        if let Some(secret) = secret {
+            store
+                .put(&KeychainAccount::source("wiki"), &secret)
+                .unwrap();
+        }
+        store
+    }
+
+    fn web(username: &str, password: &str) -> WebSignIn {
+        WebSignIn {
+            username: username.into(),
+            password: password.into(),
+        }
+    }
+
+    /// A saved sign-in rides in the source's item and leaves its credential
+    /// as it was; removing it removes it alone.
+    #[tokio::test]
+    async fn a_sign_in_is_kept_beside_the_credential_and_removed_alone() {
+        let store = store_with(Some(knobas_secrets::Secret::just(
+            knobas_source::AuthMethod::Pat,
+            "token",
+        )));
+        write_sign_in(&store, "wiki", Some(web("bjorn", "pw")))
+            .await
+            .unwrap();
+        let kept = store
+            .get(&KeychainAccount::source("wiki"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.value, "token");
+        assert_eq!(
+            read_sign_in(&store, "wiki").await.unwrap(),
+            Some(web("bjorn", "pw"))
+        );
+        write_sign_in(&store, "wiki", None).await.unwrap();
+        let kept = store
+            .get(&KeychainAccount::source("wiki"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.value, "token", "the credential stays");
+        assert!(kept.web.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_empty_field_or_a_source_with_no_credential_is_refused() {
+        let store = store_with(Some(knobas_secrets::Secret::just(
+            knobas_source::AuthMethod::Pat,
+            "token",
+        )));
+        for (user, pass) in [("", "pw"), ("  ", "pw"), ("bjorn", "")] {
+            let error = write_sign_in(&store, "wiki", Some(web(user, pass)))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                crate::IpcErrorCode::Invalid,
+                "{user:?} {pass:?}"
+            );
+        }
+        let empty = store_with(None);
+        let error = write_sign_in(&empty, "wiki", Some(web("bjorn", "pw")))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
+        // Removing what is not there is no error.
+        write_sign_in(&empty, "wiki", None).await.unwrap();
+    }
+
     #[test]
     fn the_keys_are_per_source() {
         assert_eq!(open_inside_key("jira"), "site.open_inside.jira");
