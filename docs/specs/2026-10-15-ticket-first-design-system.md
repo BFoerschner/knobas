@@ -53,6 +53,37 @@ The ticket page's card has two moods and one markup (spec #2396). While the tick
 
 A label has one look on every page, `.tf-lab`: outlined with `--rule`, `--t-xs`, weight 400. Tone is for state only, so a label never takes a chip's fill (F-060, F-253, amended 2026-11-06). On the yellow card its border and ink are the card's, because `--rule` and `--ink-2` go faint there.
 
+### Code's colours
+
+Amended 2026-11-21 (ADR-0051, `docs/decisions/2026-11-21-a-theme-is-yours-and-code-is-coloured-by-two-engines.md`). A
+token of code carries one of seventeen syntax roles, drawn by `.tf-hl-<role>` in `--hl-<role>`, which reads the *While
+light* slot's theme (`--hl-<role>-light`, written on `<html>`) in light and the *While dark* slot's in dark, and falls back
+to knobas's own pair below. A role in ink is `--ink`. Two shapes take no colour: Markdown source's bold (700) and italic.
+A comment slants (`--hl-com-style`) unless its theme says not; a heading is 600. Neither changes a glyph's advance in
+the code face, and no role sets a size, a family, spacing or a box (`code-face.test.ts`, (m)).
+
+| Role | Light | Dark | |
+|---|---|---|---|
+| `com` comment | `--muted` | `--muted` | on a diff's tinted line `--ink-2` |
+| `kw` keyword, `head` heading | `#7A3EB1` | `#C79BF2` | |
+| `str` string | `--ok` | `--ok` | |
+| `esc` escape, `num` number, `con` constant, `attr` attribute | `--warn` | `--warn` | |
+| `fn` function, `link` link | `--info` | `--info` | |
+| `ty` type, `key` key, `tag` tag | `#A2461B` | `#F0A274` | |
+| `prop`, `var`, `op`, `punct` | `--ink` | `--ink` | |
+
+A diff's own colours are tokens a theme may set: `--diff-add` and `--diff-del` (the added and removed lines' tints,
+`--ok-bg` and `--err-bg` until set) and `--add-word`, `--del-word` (a changed word's mark, its token drawn in ink). A
+diff's unchanged lines are quiet by default: a token keeps 40 % of its colour mixed in OKLab into `--ink-2`, its plain text
+`--ink-2`; *Grey* takes none, *Full colour* all (`data-diff-unchanged` on `<html>`). A mix of two colours that pass 4.5:1
+passes, and every built-in's does on `--sheet`.
+
+Every role colour is held to 4.5:1 on each surface code is drawn on: `--sheet`, `--sheet-2`, `--paper`, `--ok-bg` and
+`--err-bg` (a comment on neither of the last two). Settings › Appearance › Code colours shows each role's lowest ratio and,
+under 4.5:1, names the surface and offers a fix that moves the colour's lightness in OKLCH, hue kept. Its preview draws a
+theme of the other side on that side's surfaces (`.tf-as-light`, `.tf-as-dark`, which re-declare the surface and ink
+tokens above as `tokens.css` writes them).
+
 ### Contrast, measured
 
 I computed WCAG ratios for every text pair the prototype uses. All text passes 4.5:1 in both themes. The tightest are light `--muted` on `--paper` at 4.53 and on `--muted-bg` at 4.58, so no lighter grey may be added for text.
@@ -462,6 +493,14 @@ An Inbox row leads with its subject (*knobas-jira is down*, *Payout CSV export: 
 A row of the Connections drawer draws its state's dot and word, as the ticket card's rows do, and its action stands in that place on hover and focus. A row a mouse press took away keeps its words in `--muted`, with no controls, until the pointer leaves it. A monitor in a set's editor draws the same word beside its dot, since a grey dot alone says nothing (F-540). A filter that leaves a group empty hides the group, heading and all, until a row of it matches (F-563). A row knobas holds no entity for reads by its key, without the source's prefix, as *Save as a link set…* offered it and the set's editor draws it (F-561).
 
 The ticket page is two columns that each scroll on their own (spec #2396): the card at `--tk-side` (320 px by default, 240 to 720 px by its handle) and the reading column, at most 880 px wide and centred in the space beside the card. Below 900 px they stack.
+
+### Settings' nav
+
+Amended 2026-11-21 (`docs/decisions/2026-11-21-settings-has-subtrees.md`). The nav is a tree fixed in code: a parent is a
+section with a page of its own, its children indented 14 px under it, its chevron in the row's own left padding, so no
+title stands anywhere but where a leaf's would. Appearance holds Code colours and Fonts. A click opens a parent's page and
+fold and never closes it; a second on the open parent toggles; the chevron folds alone. A folded parent holding the open
+page carries the open row's fill as a 2 px edge, as Docs' tree does. The nav is one Tab stop and walks by arrow keys.
 
 ## Motion
 

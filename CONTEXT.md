@@ -35,6 +35,17 @@ _Avoid_: git status (the command, not the fact), dirty/clean as the whole state,
 The files of a repository's [checkout](#checkout) as they stand on disk, uncommitted changes and the untracked files git does not ignore included, as one end of a comparison: written `~working-tree`, a name git refuses for a branch (ux26, ADR-0049). A head only, against a commit the checkout holds or a branch (then the merge base of its tip and `HEAD`). Always git's own answer, read again when the page is shown, on the window's focus and on a refresh, kept by the checkout's stamp so an untouched tree starts no git; never watched or polled. Ignored files are never listed, read or copied.
 _Avoid_: local changes (the tab's two halves, against the index and `HEAD`), worktree (one more checkout), workspace
 
+**Syntax role**:
+What a run of code is to a reader (a keyword, a string, a key, a type), one of seventeen, carried by every token a highlighter answers and drawn by a class whose colour a [theme](#theme) sets (ADR-0051; `Role` in `render/roles.ts`). Never a colour and never an engine's own name for it.
+_Avoid_: role alone (that is a source's [role](#role)), scope, token type, kind (that is an entity's)
+
+**Theme**:
+A name, a side (light or dark) and a colour for some [syntax roles](#syntax-role), with the diff's colours if it sets them; a role it leaves out draws in ink. Seven come with knobas; a person's own is a copy, kept on this computer (Settings › Appearance › Code colours). Colours code and diffs only, so far.
+_Avoid_: colour scheme, palette
+
+**Slot**:
+Which [theme](#theme) draws while the window is light, and which while it is dark: *While light*, *While dark*. A theme only fills the slot of its side.
+
 ## Sync
 
 **Source**:
