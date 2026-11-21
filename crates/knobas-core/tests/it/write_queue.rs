@@ -102,7 +102,7 @@ async fn queue_op(
         shape,
         &payload,
         wq::target_of(pool, entity).await.unwrap().as_ref(),
-        &[],
+        None,
     );
     wq::queue(pool, &entity.namespace, entity, op, payload, snapshot)
         .await
@@ -142,7 +142,7 @@ async fn a_queued_write_survives_a_restart() {
             Projection::WHOLE,
             &found.payload,
             wq::target_of(&restarted, &ticket).await.unwrap().as_ref(),
-            &[]
+            None
         ),
         "and it is the target as the mirror still records it"
     );
@@ -478,7 +478,7 @@ async fn a_write_survives_its_target_being_withdrawn() {
         Projection::DeclaredState,
         &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
-        &[],
+        None,
     );
     assert_ne!(
         now, write.target_snapshot,
@@ -536,7 +536,7 @@ async fn a_write_against_a_disabled_source_says_so_until_the_source_is_back() {
             Projection::DeclaredState,
             &serde_json::Value::Null,
             None,
-            &[],
+            None,
         ),
     )
     .await
@@ -585,7 +585,7 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
         Projection::WHOLE,
         &write.payload,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
-        &[],
+        None,
     );
     assert_ne!(moved, write.target_snapshot);
     wq::hold(&pool, write.id, moved).await.unwrap().unwrap();

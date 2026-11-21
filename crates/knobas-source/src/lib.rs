@@ -1663,9 +1663,12 @@ impl WriteOp {
                 can_leave_unclaimed: false,
                 ..conservative
             },
-            // A judgement on the target's current state; a second arrival is
-            // a second move.
+            // A judgement on the target's current status, so only the status
+            // moving holds it (ADR-0054): a comment does not, and neither does
+            // a status an earlier open move of the same ticket was going to
+            // set. A second arrival is a second move.
             WriteOp::Transition { .. } => Delivery {
+                projection: Projection::Status,
                 can_leave_unclaimed: false,
                 ..conservative
             },
@@ -3592,6 +3595,30 @@ mod tests {
         // The word a view's action fixes is the word the wire carries.
         for state in [PullRequestState::Open, PullRequestState::Closed] {
             assert_eq!(serde_json::to_value(state).unwrap(), state.as_str());
+        }
+    }
+
+    /// Every op's delivery table, by the projection a hold compares: a
+    /// `transition` compares the ticket's declared status (ADR-0054), and is
+    /// the only op that does.
+    #[test]
+    fn only_a_transition_compares_on_the_status() {
+        use knobas_spi_types::delivery::Projection;
+        for op in every_write_op() {
+            let status = op.delivery().projection == Projection::Status;
+            assert_eq!(
+                status,
+                op.identifier() == "transition",
+                "{}: projection {:?}",
+                op.identifier(),
+                op.delivery().projection
+            );
+            assert_eq!(
+                op.delivery().projection.reads_declared_status(),
+                status,
+                "{}",
+                op.identifier()
+            );
         }
     }
 

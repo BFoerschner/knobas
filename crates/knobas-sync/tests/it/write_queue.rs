@@ -78,6 +78,10 @@ enum Interrupt {
     /// refuse is in flight (#1628): the 401 that comes back is about the
     /// credential that was replaced.
     NewCredential,
+    /// A move landed and the refresh after it reached the mirror before the
+    /// next write is tried (ADR-0054): the ticket's mirrored status becomes
+    /// the move's own, or the one named, as a colleague's move would leave it.
+    Lands(Option<&'static str>),
 }
 
 /// How long a wait for a state that correct code reaches in milliseconds may
@@ -275,6 +279,18 @@ impl Source for Fake {
                         .await
                         .unwrap();
                 }
+                Some(Interrupt::Lands(status)) => {
+                    let status = status.map(str::to_owned).or_else(|| match &op {
+                        WriteOp::Transition { status, .. } => Some(status.clone()),
+                        _ => None,
+                    });
+                    set_status(
+                        &self.pool,
+                        op.target(),
+                        status.as_deref().unwrap_or_default(),
+                    )
+                    .await;
+                }
                 Some(Interrupt::NewCredential) | None => {}
             }
             self.written.lock().unwrap().push(op);
@@ -468,6 +484,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
             "create_ticket",
             "edit_pull_request",
             "source_action",
+            "transition",
             "update_page",
         ]
         .map(str::to_owned)
@@ -481,19 +498,29 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
             refreshes: true,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
-        payload_paths: vec![KindPaths {
-            kind: "pr".to_owned(),
-            state: vec![StatePath {
-                at: PayloadPath::of(["state"]),
-                open: false,
-                text_at: None,
-                values: vec![
-                    StateValue::of("open", Tone::Info),
-                    StateValue::of("closed", Tone::Muted),
-                ],
-            }],
-            ..KindPaths::default()
-        }],
+        payload_paths: vec![
+            // A ticket's status where Jira keeps it: what a move holds on
+            // (ADR-0054). A ticket mirrored with no status (`Harness::mirror`'s
+            // `{}`) resolves nothing, and a move on it compares the whole record.
+            KindPaths {
+                kind: "ticket".to_owned(),
+                status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+                ..KindPaths::default()
+            },
+            KindPaths {
+                kind: "pr".to_owned(),
+                state: vec![StatePath {
+                    at: PayloadPath::of(["state"]),
+                    open: false,
+                    text_at: None,
+                    values: vec![
+                        StateValue::of("open", Tone::Info),
+                        StateValue::of("closed", Tone::Muted),
+                    ],
+                }],
+                ..KindPaths::default()
+            },
+        ],
     }
 }
 
@@ -677,6 +704,8 @@ impl Harness {
                 WriteOp::SourceAction { id, fields, .. } => {
                     format!("{id}: {}", fields.get("label").map_or("", String::as_str))
                 }
+                // A move by the status it sets (ADR-0054).
+                WriteOp::Transition { status, .. } => format!("move: {status}"),
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -1276,9 +1305,9 @@ async fn an_op_the_source_does_not_declare_is_refused_without_reaching_it() {
     let transition = flusher::submit(
         &h.deps,
         &h.source,
-        WriteOp::Transition {
+        WriteOp::Approve {
             entity: ticket.to_string(),
-            status: "Done".to_owned(),
+            body: "looks right".to_owned(),
         },
     )
     .await
@@ -1301,7 +1330,7 @@ async fn an_op_the_source_does_not_declare_is_refused_without_reaching_it() {
         transition.detail.as_deref(),
         Some(
             format!(
-                "protocol: source {:?} does not declare the write \"transition\", so it was not \
+                "protocol: source {:?} does not declare the write \"approve\", so it was not \
                  sent",
                 h.source
             )
@@ -1333,25 +1362,27 @@ async fn an_op_the_source_does_not_declare_is_refused_without_reaching_it() {
 /// #1950, the ordering: an undeclared op on a target that has also moved is
 /// refused, not held. No change to the target makes it declared, and a held
 /// row's *Send again* would only be refused, so the reader is not asked to
-/// resolve it. A transition holds on the whole target, so a move it does not
+/// resolve it. A merge holds on the whole target, so a change it does not
 /// survive is one that would hold a declared op.
 #[tokio::test]
 async fn an_undeclared_op_on_a_moved_target_is_refused_rather_than_held() {
     let h = harness().await;
-    let ticket = h.mirror("PAY-1952", "a payout fails").await;
+    let pull = mirror_pull(&h, "o/r#1952", "Bound the retry jitter", "open").await;
     let queued = flusher::queue(
         &h.deps,
         &h.source,
-        WriteOp::Transition {
-            entity: ticket.to_string(),
-            status: "Done".to_owned(),
+        WriteOp::MergePullRequest {
+            entity: pull.to_string(),
+            style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
+            message: None,
         },
     )
     .await
     .unwrap();
 
-    // Somebody edits the ticket before the flush.
-    h.mirror("PAY-1952", "a payout fails twice").await;
+    // Somebody retitles the pull request before the flush.
+    mirror_pull(&h, "o/r#1952", "Bound the retry jitter twice", "open").await;
     h.answer(Answer::Accept);
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
 
@@ -1361,8 +1392,8 @@ async fn an_undeclared_op_on_a_moved_target_is_refused_rather_than_held() {
         row.detail.as_deref(),
         Some(
             format!(
-                "protocol: source {:?} does not declare the write \"transition\", so it was not \
-                 sent",
+                "protocol: source {:?} does not declare the write \"merge_pull_request\", so it \
+                 was not sent",
                 h.source
             )
             .as_str()
@@ -3102,4 +3133,231 @@ async fn a_status_less_refusal_with_no_quota_behind_it_is_refused() {
         refused.detail.as_deref(),
         Some("protocol: this fake cannot spell a comment for this ticket")
     );
+}
+
+// -- moves (ADR-0054): a move compares the ticket's status ---------------------
+
+/// A ticket in the mirror as a Jira sync writes it: its status at
+/// `fields.status.name`, its comments in `body_text`.
+async fn mirror_ticket(h: &Harness, key: &str, status: &str, body: &str) -> EntityRef {
+    let entity = EntityRef::new(&h.source, key);
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1,'ticket','a ticket')
+         on conflict (id) do nothing",
+    )
+    .bind(entity.to_string())
+    .execute(h.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,$2,'ticket','a ticket',$3,$4)
+         on conflict (entity_id) do update
+            set body_text = excluded.body_text, payload = excluded.payload",
+    )
+    .bind(entity.to_string())
+    .bind(&h.source)
+    .bind(body)
+    .bind(serde_json::json!({ "fields": { "status": { "name": status }, "comment": body } }))
+    .execute(h.pool())
+    .await
+    .unwrap();
+    entity
+}
+
+/// The mirrored ticket's status, as a refresh after a move writes it.
+async fn set_status(pool: &sqlx::PgPool, entity: &str, status: &str) {
+    sqlx::query(
+        "update sync.item
+            set payload = jsonb_set(payload, '{fields,status,name}', to_jsonb($2::text))
+          where entity_id = $1",
+    )
+    .bind(entity)
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn move_to(h: &Harness, ticket: &EntityRef, status: &str) -> store::QueuedWrite {
+    flusher::queue(
+        &h.deps,
+        &h.source,
+        WriteOp::Transition {
+            entity: ticket.to_string(),
+            status: status.to_owned(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// A colleague's comment synced between the queue and the flush does not
+/// hold a move: it compares the status alone (ADR-0054). Under the whole
+/// record (#43) it held.
+#[tokio::test]
+async fn a_comment_synced_before_the_flush_does_not_hold_a_move() {
+    let h = harness().await;
+    let ticket = mirror_ticket(&h, "PAY-60", "To Do", "it fails").await;
+    let queued = move_to(&h, &ticket, "In Progress").await;
+    assert_eq!(queued.target_snapshot["text"], "To Do");
+
+    mirror_ticket(&h, "PAY-60", "To Do", "it fails\n\njonas: me too").await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(h.delivered(), vec!["move: In Progress".to_owned()]);
+    assert_eq!(h.reload(queued.id).await.state, WriteState::Sent);
+}
+
+/// Somebody else moving the ticket holds the move, with both statuses as
+/// the two sides the queue panel draws.
+#[tokio::test]
+async fn a_status_moved_by_a_sync_holds_a_move_with_both_statuses() {
+    let h = harness().await;
+    let ticket = mirror_ticket(&h, "PAY-61", "To Do", "").await;
+    let queued = move_to(&h, &ticket, "In Progress").await;
+
+    set_status(h.pool(), &ticket.to_string(), "Done").await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    let held = h.reload(queued.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    assert_eq!(held.target_snapshot["text"], "To Do");
+    assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "Done");
+    assert!(h.delivered().is_empty());
+}
+
+/// Two moves of one ticket queued while the source is away both go when it
+/// is back, though the first one's refresh reaches the mirror before the
+/// second is sent: the second carries the first's status as `after`.
+#[tokio::test]
+async fn two_moves_queued_while_the_source_is_away_both_go() {
+    let h = harness().await;
+    let ticket = mirror_ticket(&h, "PAY-62", "To Do", "").await;
+    h.answer(Answer::Unreachable);
+    let first = move_to(&h, &ticket, "In Progress").await;
+    let second = move_to(&h, &ticket, "In Review").await;
+    assert_eq!(first.target_snapshot.get("after"), None);
+    assert_eq!(
+        second.target_snapshot["after"],
+        serde_json::json!(["In Progress"])
+    );
+
+    h.answer(Answer::Accept);
+    *h.interrupt.lock().unwrap() = Some(Interrupt::Lands(None));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["move: In Progress".to_owned(), "move: In Review".to_owned()],
+        "both moves go, in order"
+    );
+    assert_eq!(h.reload(first.id).await.state, WriteState::Sent);
+    assert_eq!(h.reload(second.id).await.state, WriteState::Sent);
+}
+
+/// A move queued right after the person's earlier move was sent, before its
+/// refresh reached the mirror, is not held by that refresh either.
+#[tokio::test]
+async fn a_move_queued_behind_a_sent_one_is_not_held_by_its_refresh() {
+    let h = harness().await;
+    let ticket = mirror_ticket(&h, "PAY-64", "To Do", "").await;
+    h.answer(Answer::Accept);
+    let first = move_to(&h, &ticket, "In Progress").await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(first.id).await.state, WriteState::Sent);
+
+    let second = move_to(&h, &ticket, "In Review").await;
+    assert_eq!(
+        second.target_snapshot["text"], "To Do",
+        "the refresh has not landed"
+    );
+    set_status(h.pool(), &ticket.to_string(), "In Progress").await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(h.reload(second.id).await.state, WriteState::Sent);
+}
+
+/// The mirror says a third status at the second move's send, one neither
+/// the first move nor the ticket held: somebody else moved it, and the
+/// second move is held.
+#[tokio::test]
+async fn a_third_status_at_the_second_moves_send_holds_it() {
+    let h = harness().await;
+    let ticket = mirror_ticket(&h, "PAY-63", "To Do", "").await;
+    h.answer(Answer::Unreachable);
+    let first = move_to(&h, &ticket, "In Progress").await;
+    let second = move_to(&h, &ticket, "In Review").await;
+
+    h.answer(Answer::Accept);
+    *h.interrupt.lock().unwrap() = Some(Interrupt::Lands(Some("Blocked")));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(h.reload(first.id).await.state, WriteState::Sent);
+    let held = h.reload(second.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "Blocked");
+}
+
+/// A ticket whose declared status resolves nothing: the move compares the
+/// whole record (ADR-0007), so a comment holds it, as before ADR-0054.
+#[tokio::test]
+async fn a_move_on_a_ticket_with_no_status_holds_on_the_whole_record() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-65", "it fails").await;
+    let queued = move_to(&h, &ticket, "Done").await;
+    assert!(
+        queued.target_snapshot.get("payload").is_some(),
+        "the whole record"
+    );
+
+    h.mirror("PAY-65", "it fails\n\njonas: me too").await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(queued.id).await.state, WriteState::Held);
+}
+
+/// A move queued before ADR-0054 carries the whole record as its snapshot.
+/// Its status is read from that record: unchanged, it is sent though the
+/// ticket took a comment; changed, it is held.
+#[tokio::test]
+async fn a_move_queued_on_the_whole_record_is_compared_on_its_status() {
+    let h = harness().await;
+    let whole = |status: &str| {
+        serde_json::json!({
+            "op": "transition", "live": true, "title": "a ticket", "text": "",
+            "item_updated_at": null,
+            "payload": { "fields": { "status": { "name": status }, "comment": "" } },
+        })
+    };
+    let calm = mirror_ticket(&h, "PAY-66", "To Do", "").await;
+    let moved = mirror_ticket(&h, "PAY-67", "To Do", "").await;
+    let mut rows = Vec::new();
+    for ticket in [&calm, &moved] {
+        let op = WriteOp::Transition {
+            entity: ticket.to_string(),
+            status: "Done".to_owned(),
+        };
+        rows.push(
+            store::queue(
+                h.pool(),
+                &h.source,
+                ticket,
+                "transition",
+                serde_json::to_value(&op).unwrap(),
+                whole("To Do"),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    mirror_ticket(&h, "PAY-66", "To Do", "a comment later").await;
+    set_status(h.pool(), &moved.to_string(), "In Review").await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(rows[0].id).await.state, WriteState::Sent);
+    assert_eq!(h.reload(rows[1].id).await.state, WriteState::Held);
 }
