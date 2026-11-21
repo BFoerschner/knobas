@@ -25,8 +25,8 @@
 //! blocked in a release build while working perfectly in dev.
 //!
 //! Tauri sends the policy with `.html` assets only, so the module workers
-//! (Shiki, D2, Graphviz, pdf.js) run under no CSP at all and rely on it. A
-//! test below pins that and names the policy they would need (#2312).
+//! (the highlighters, Graphviz, pdf.js) run under no CSP at all and rely on
+//! it. A test below pins that and names the policy they would need (#2312).
 
 pub mod archive;
 pub mod assets;
@@ -1686,17 +1686,19 @@ mod tests {
     }
 
     /// The policy every module worker would need if Tauri sent it the CSP
-    /// (#2312). Shiki (`highlight.worker.ts`) and Graphviz
-    /// (`diagram.worker.ts`) need `'unsafe-eval'`; pdf.js's worker compiles
-    /// WASM and fetches its decoders, fonts, CMaps and ICC profile from
-    /// `/pdfjs/` (#2313). D2 left the workers for a frame of its own, under
-    /// a policy the backend sends itself (#2381, `renderers::ENGINE_CSP`).
+    /// (#2312). `highlight.worker.ts` imports the chosen highlighter (ADR-0051):
+    /// Pierre Highlights compiles WASM (`'wasm-unsafe-eval'`), while TanStack
+    /// Highlight and Shiki, on its JavaScript regex engine, need neither eval.
+    /// Graphviz (`diagram.worker.ts`) needs `'unsafe-eval'`; pdf.js's worker
+    /// compiles WASM and fetches its decoders, fonts, CMaps and ICC profile
+    /// from `/pdfjs/` (#2313). D2 left the workers for a frame of its own,
+    /// under a policy the backend sends itself (#2381, `renderers::ENGINE_CSP`).
     const WORKER_POLICY: &str =
         "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self'";
 
     /// Tauri sends `app.security.csp` with `.html` assets only, so every
-    /// module worker runs under no CSP at all, and D2, Graphviz, Shiki and
-    /// pdf.js depend on that (#2312). Pinned through Tauri's own asset
+    /// module worker runs under no CSP at all, and Pierre Highlights,
+    /// Graphviz and pdf.js depend on that (#2312). Pinned through Tauri's own asset
     /// resolver, the `get_asset` the `tauri://` protocol answers with, so a
     /// `tauri` upgrade that starts sending the policy with scripts fails here
     /// rather than as a broken diagram in a release build.
@@ -1773,8 +1775,8 @@ mod tests {
                 asset.csp_header(),
                 None,
                 "Tauri now sends the CSP with {worker}, so every module worker runs \
-                 under the document's policy and D2, Graphviz, Shiki and pdf.js's \
-                 decoders break in a release build (#2312). The workers need \
+                 under the document's policy and Pierre Highlights, Graphviz and \
+                 pdf.js's decoders break in a release build (#2312). The workers need \
                  `{WORKER_POLICY}`: widen `app.security.csp` in tauri.conf.json, or \
                  give the workers a policy of their own through \
                  `web_resource_request_handler`."

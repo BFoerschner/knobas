@@ -17,7 +17,7 @@
  * the worker's tokens, never markup from outside, so nothing needs the
  * sanitizer or the sandboxed frame that HTML and SVG output go through.
  *
- * The engines behind a renderer (Shiki, Mermaid, D2, Graphviz, pdf.js)
+ * The engines behind a renderer (the highlighters, Mermaid, D2, Graphviz, pdf.js)
  * sit behind the one renderer port (`port.ts`), so jsdom tests use a fake.
  * How to add one: `notes/renderer-registry.md` on the spec's branch, and
  * `register` below.
