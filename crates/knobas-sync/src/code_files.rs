@@ -85,6 +85,10 @@ pub const SHARE_FILES: usize = 20_000;
 /// A repository's share of text, in bytes.
 pub const SHARE_BYTES: u64 = 256 << 20;
 
+/// Held by a pass for its whole length: the index's one writer, taken in
+/// turn rather than refused.
+static PASSING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// `knobas.setting`'s key of *Keep at most* (Settings › Search, D13): the
 /// file text kept on this computer, in MB, as a number in a string; `0` is
 /// *None*. Absent, [`KEPT_MB`].
@@ -301,6 +305,11 @@ pub async fn refresh_within(
     let Some(shape) = source.tree_shape() else {
         return Ok(passed);
     };
+    // One pass at a time over the index, whichever source's run it follows:
+    // the index has one writer, and a second pass that found it busy read
+    // nothing until its source's next run (two forges' first runs end
+    // together). The wait is not the budget's.
+    let _one = PASSING.lock().await;
     let started = Instant::now();
     let deadline = started + bounds.budget;
 

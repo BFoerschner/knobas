@@ -205,7 +205,18 @@ async fn world(label: &str, forge: Forge) -> World {
 /// Repository `name` at `commit` holding `files`: its mirror row, its
 /// default branch's stored tree, and the forge's bytes.
 async fn push(world: &World, name: &str, commit: &str, files: &[(&str, &[u8])]) -> String {
-    let id = format!("{SOURCE}:{name}");
+    push_to(world, SOURCE, name, commit, files).await
+}
+
+/// [`push`] under another source's id.
+async fn push_to(
+    world: &World,
+    source: &str,
+    name: &str,
+    commit: &str,
+    files: &[(&str, &[u8])],
+) -> String {
+    let id = format!("{source}:{name}");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'repo', $2) on conflict do nothing")
         .bind(&id)
         .bind(name)
@@ -218,7 +229,7 @@ async fn push(world: &World, name: &str, commit: &str, files: &[(&str, &[u8])]) 
          on conflict (entity_id) do update set item_updated_at = now()",
     )
     .bind(&id)
-    .bind(SOURCE)
+    .bind(source)
     .bind(name)
     .execute(&world.pool)
     .await
@@ -271,7 +282,7 @@ async fn push(world: &World, name: &str, commit: &str, files: &[(&str, &[u8])]) 
             "insert into sync.git_tree (source_id, sha, names, modes, sizes, shas, total)
              values ($1, $2, $3, $4, $5, $6, $7) on conflict do nothing",
         )
-        .bind(SOURCE)
+        .bind(source)
         .bind(&level_sha)
         .bind(entries.iter().map(|e| e.0.clone()).collect::<Vec<_>>())
         .bind(entries.iter().map(|e| e.1).collect::<Vec<_>>())
@@ -294,7 +305,7 @@ async fn push(world: &World, name: &str, commit: &str, files: &[(&str, &[u8])]) 
          values ($1, $2, 'branch', 'main', '', '{}', now(), now()) on conflict do nothing",
     )
     .bind(&branch)
-    .bind(SOURCE)
+    .bind(source)
     .execute(&world.pool)
     .await
     .unwrap();
@@ -304,7 +315,7 @@ async fn push(world: &World, name: &str, commit: &str, files: &[(&str, &[u8])]) 
          on conflict (entity_id) do update set commit_sha = excluded.commit_sha, root = excluded.root",
     )
     .bind(&branch)
-    .bind(SOURCE)
+    .bind(source)
     .bind(&id)
     .bind(commit)
     .bind(&shas[""])
@@ -870,4 +881,37 @@ async fn the_flat_tree_reads_each_level_by_its_key() {
     assert_eq!(found.len(), 2, "{plan}");
     assert!(found.iter().all(|read| read.contains("sha =")), "{found:?}");
     tx.rollback().await.unwrap();
+}
+
+/// Two sources' passes at once on the one index: the second waits for the
+/// first rather than finding the writer busy and reading nothing until its
+/// next run. Gitea's and Forgejo's first runs end together; the live run of
+/// 2026-11-21 read Forgejo's files after its first run and Gitea's only
+/// after its second, five minutes later.
+#[tokio::test]
+async fn two_sources_passes_at_once_both_read() {
+    let world = world("code_files_two_sources", Forge::default()).await;
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('forge-two', 'gitea', 'Forge two', 'http://y', 'Pat')",
+    )
+    .execute(&world.pool)
+    .await
+    .unwrap();
+    push(&world, "acme/one", "c1", &[("a.txt", b"alpha")]).await;
+    push_to(&world, "forge-two", "acme/two", "c1", &[("b.txt", b"beta")]).await;
+    let run = |source: &'static str| {
+        code_files::refresh_within(
+            &world.pool,
+            source,
+            &world.forge,
+            &world.files,
+            Bounds::default(),
+            u64::MAX,
+            &|_| {},
+        )
+    };
+    let (one, two) = tokio::join!(run(SOURCE), run("forge-two"));
+    assert_eq!(one.unwrap().repositories, 1);
+    assert_eq!(two.unwrap().repositories, 1);
 }
