@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
-use tauri::{Assets, Context, Runtime};
+use tauri::{Assets, Context, Manager, Runtime};
 
 /// The response a webview's `tauri://` handler may rewrite.
 pub type AssetResponse = Response<Cow<'static, [u8]>>;
@@ -127,6 +127,8 @@ impl<R: Runtime> BundleAssets<R> {
 pub fn open_main_window<R: Runtime>(
     app: &tauri::App<R>,
     bundle: &BundleAssets<R>,
+    demo: bool,
+    default_theme: bool,
 ) -> tauri::Result<()> {
     let main = app
         .config()
@@ -136,16 +138,79 @@ pub fn open_main_window<R: Runtime>(
         .find(|window| window.label == "main")
         .expect("tauri.conf.json declares the main window")
         .clone();
-    let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
-        .on_web_resource_request(bundle.answer_missing_with_404())
-        .build()?;
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
+        .on_web_resource_request(bundle.answer_missing_with_404());
+    // `knobas --default-theme` (ADR-0055): the page reads it before anything it kept.
+    for script in crate::window_look::init_scripts(default_theme) {
+        builder = builder.initialization_script(script);
+    }
+    // The look the page last kept: the window is built hidden, takes the title bar's side and the page colour, and
+    // is shown, so the bare window is the theme's before the page paints. Without one, as before.
+    let look =
+        app.path().app_data_dir().ok().and_then(|data| {
+            crate::window_look::read(&crate::profile::Profile::new(demo, &data).dir)
+        });
+    let shown = look.is_some() && main.visible;
+    if let Some(look) = &look {
+        let (theme, colour) = look_for_window(look, false);
+        builder = builder.visible(false).theme(theme).background_color(colour);
+    }
+    let window = builder.build()?;
+    if let Some(look) = &look {
+        // Following the system, the side is known once the window exists: its colour is set again for that side.
+        if look.theme().is_none() {
+            let system_dark = matches!(window.theme(), Ok(tauri::Theme::Dark));
+            let _ = window.set_background_color(Some(look_for_window(look, system_dark).1));
+        }
+        if shown && let Err(failure) = window.show() {
+            tracing::warn!(%failure, "the main window would not show");
+        }
+    }
     crate::webview_menu::trim(&window);
     Ok(())
+}
+
+/// What a window is given from a kept look: the title bar's side (`None` follows the system) and the page colour of
+/// the side drawn, `system_dark` the system's side where the mode follows it.
+#[must_use]
+pub fn look_for_window(
+    look: &crate::window_look::WindowLook,
+    system_dark: bool,
+) -> (Option<tauri::Theme>, tauri::window::Color) {
+    (look.theme(), look.colour(system_dark))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With a kept look the window is given the title bar's side and the page colour; the mode decides the side.
+    #[test]
+    fn a_kept_look_gives_the_window_its_side_and_colour() {
+        let dark = crate::window_look::WindowLook::new("dark", "#E4E8EC", "#21222C").expect("look");
+        assert_eq!(
+            look_for_window(&dark, false),
+            (
+                Some(tauri::Theme::Dark),
+                tauri::window::Color(0x21, 0x22, 0x2C, 255)
+            )
+        );
+        let light =
+            crate::window_look::WindowLook::new("light", "#E4E8EC", "#21222C").expect("look");
+        assert_eq!(
+            look_for_window(&light, true),
+            (
+                Some(tauri::Theme::Light),
+                tauri::window::Color(0xE4, 0xE8, 0xEC, 255)
+            )
+        );
+        let system =
+            crate::window_look::WindowLook::new("system", "#E4E8EC", "#21222C").expect("look");
+        assert_eq!(
+            look_for_window(&system, true),
+            (None, tauri::window::Color(0x21, 0x22, 0x2C, 255))
+        );
+    }
 
     /// What the bundle holds in the test below.
     struct Dist;

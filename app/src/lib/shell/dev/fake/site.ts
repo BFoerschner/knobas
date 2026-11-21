@@ -286,6 +286,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     sites_unsaved: () => (dirty ? [...sites.values()].map((site) => site.status) : []),
     site_quit: () => null,
     site_zoom: () => null,
+    // The window's own look (ADR-0055): the browser has no bare window to colour.
+    window_look_set: () => null,
     site_reveal_download: () => null,
     sites_kept: () => kept,
     set_sites_kept: (args) => {

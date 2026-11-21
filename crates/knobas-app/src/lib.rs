@@ -70,6 +70,7 @@ pub mod ticket_views;
 pub mod time;
 pub mod update;
 pub mod webview_menu;
+pub mod window_look;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};
@@ -281,6 +282,13 @@ pub fn run() {
     // so a flag that changed in one place cannot leave the other keyed to the
     // old one.
     let demo = Profile::demo_in(std::env::args());
+    // `knobas --default-theme`: this run draws knobas's own themes (ADR-0055), read where `--demo` is.
+    let default_theme = window_look::default_theme_in(
+        std::env::args(),
+        std::env::var(window_look::DEFAULT_THEME_ENV)
+            .ok()
+            .as_deref(),
+    );
 
     // A command renderer's HTML frame is served from its own origin under its
     // own policy (#2304, `renderers::frame_response`), and so is D2's frame,
@@ -362,7 +370,7 @@ pub fn run() {
                     // pass, 2026-11-15). Timed, so a user's log says what
                     // it cost.
                     let started = std::time::Instant::now();
-                    bundle::open_main_window(app, &bundle)?;
+                    bundle::open_main_window(app, &bundle, demo, default_theme)?;
                     // The sites ride on the main window (ADR-0050).
                     if let Some(profile) = app.try_state::<Profile>() {
                         site::start(app, &profile);
@@ -950,6 +958,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::site::sites_unsaved,
         commands::site::site_quit,
         commands::site::site_zoom,
+        commands::window::window_look_set,
         commands::site::site_reveal_download,
         commands::site::sites_kept,
         commands::site::set_sites_kept,

@@ -38,6 +38,7 @@ pub mod site;
 pub mod sources;
 pub mod time;
 pub mod update;
+pub mod window;
 
 /// The most rows one list read hands the bridge, whatever limit the webview
 /// sends (#1643): a frontend arithmetic slip would otherwise serialise a whole

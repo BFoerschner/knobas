@@ -457,6 +457,20 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         Some(bundle) => builder.on_web_resource_request(bundle.answer_missing_with_404()),
         None => builder,
     };
+    // The bare window in the page colour the main window keeps (ADR-0055), so it does not flash the system's white.
+    let look = app
+        .try_state::<crate::Profile>()
+        .and_then(|profile| crate::window_look::read(&profile.dir));
+    let builder = match &look {
+        Some(look) => {
+            let system_dark = app
+                .get_webview_window("main")
+                .is_some_and(|main| matches!(main.theme(), Ok(tauri::Theme::Dark)));
+            let (theme, colour) = crate::bundle::look_for_window(look, system_dark);
+            builder.theme(theme).background_color(colour)
+        }
+        None => builder,
+    };
     let built = builder
         .title("Capture")
         .inner_size(560.0, 260.0)
