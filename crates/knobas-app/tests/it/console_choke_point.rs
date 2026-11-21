@@ -25,6 +25,9 @@ const MAY_NAME_IT: &[&str] = &[
     "knobas-db/src/console.rs",
     "knobas-app/src/checkout/open.rs",
     "knobas-db/src/test_util.rs",
+    // An update's installer (ADR-0052): a GUI program, started detached as knobas leaves, whose own progress window is
+    // the point, as an editor's is for `checkout/open.rs`.
+    "knobas-update/src/install/windows.rs",
 ];
 
 /// `source` without its test module and its comment lines.
