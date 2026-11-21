@@ -193,6 +193,13 @@
 //                 palette (⌘K on the page: the launcher's own rows). `prep` runs on the page first, for every way but first and launcher.
 //                 `tail` is how long past quiet it still records (600 ms): longer for a page that reads again a while after a run ends.
 //
+//   press-result  2026-11-21 (the themes follow-up: Settings › Appearance › Code colours). `store`: localStorage keys set and the page
+//                 loaded again, so it opens as a person who kept them would. `before` (a function, as text) is read in the page, then
+//                 each of `steps` by real input: { press } by real pointer at 15% of the control, with `file` the file chooser that press
+//                 opens answered with that file of `testenv/ui-checks/`; { key } a key; { type } words typed into what holds focus. Then
+//                 `check`, given what `before` read, must answer null within `within` ms (4000): until then it gives the reason it
+//                 fails. Also fails if the press moved the address or opened a dialog.
+//
 // A first Enter that changes nothing can't run: the trip would pass without having pressed anything.
 // Writes are counted by wrapping window.__TAURI_INTERNALS__.invoke, which @tauri-apps/api looks up on every call (shell/dev/fake-tauri.ts).
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
@@ -236,6 +243,100 @@ const GROW_FORGE = `window.__fake.corpus.push(
 
 // A ticket updated after every other, in the first status, as a sync brings one.
 const GROW_TICKET = `window.__fake.corpus.push({ entity_id: "mock:PAY-9001", kind: "ticket", title: "A ticket the sync brought", updated_at: "2026-12-01T00:00:00Z", body_text: "", author: "mara", web_url: null, deleted_at: null, payload: { key: "PAY-9001", fields: { project: { key: "PAY", name: "Payments Platform" } }, status: "To do", priority: "High", assignee: "mara", type: "Story", labels: [] } }), 1`;
+
+// Settings › Appearance › Code colours (the themes follow-up, 2026-11-21): what each press there must leave.
+const ENGINE_NAMES = { pierre: "Pierre Highlights", tanstack: "TanStack Highlight", shiki: "Shiki" };
+/** The preview's words, its lines' boxes and its colours, and from now on every job the port sends the worker, by engine. */
+const PREVIEW_BEFORE = String.raw`() => {
+  window.__opens = [];
+  if (!Worker.prototype.__tripOpens) {
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (m, ...rest) { if (m && m.type === "open") window.__opens.push(m.engine); return post.call(this, m, ...rest); };
+    Worker.prototype.__tripOpens = true;
+  }
+  const pre = document.querySelector(".tf-kept:not([hidden]) .tf-thm-pre");
+  return { text: pre.textContent, boxes: [...pre.querySelectorAll(".tf-l, .tf-ln")].map((l) => { const r = l.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round).join(); }).join(";"), sig: [...pre.querySelectorAll("[class^=tf-hl-]")].map((s) => s.className + ":" + s.textContent).join("|") };
+}`;
+/** A choice of highlighter recolours the preview in place: radio, kept value, every job asked again of it, words and lines still, colours new. */
+const ENGINE_CHECK = (engine) => String.raw`(b) => {
+  const pre = document.querySelector(".tf-kept:not([hidden]) .tf-thm-pre");
+  if (!document.querySelector('input[name=tf-thm-engine][value="${engine}"]')?.checked) return "${engine}'s radio is not checked";
+  const kept = localStorage.getItem("knobas.highlighter");
+  if (kept !== ${engine === "pierre" ? "null" : `"${engine}"`}) return "knobas.highlighter holds " + kept;
+  const asked = window.__opens.filter((e) => e === "${engine}").length;
+  if (asked < 5) return "the preview's five jobs were asked again of ${engine} " + asked + " times (" + (window.__opens.join(", ") || "none at all") + ")";
+  if (pre.textContent !== b.text) return "the preview's words changed";
+  const boxes = [...pre.querySelectorAll(".tf-l, .tf-ln")].map((l) => { const r = l.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round).join(); }).join(";");
+  if (boxes !== b.boxes) return "a line of the preview moved or changed size: " + b.boxes + " then " + boxes;
+  const sig = [...pre.querySelectorAll("[class^=tf-hl-]")].map((s) => s.className + ":" + s.textContent).join("|");
+  if (sig === b.sig) return "the preview still has the colours of before";
+  return null;
+}`;
+/** A person's own themes as kept, and the light slot. */
+const THEMES_BEFORE = String.raw`() => ({ own: JSON.parse(localStorage.getItem("knobas.themes") ?? "[]").length, light: localStorage.getItem("knobas.theme.light") })`;
+const DUPLICATE_CHECK = String.raw`(b) => {
+  const own = JSON.parse(localStorage.getItem("knobas.themes") ?? "[]");
+  if (own.length !== b.own + 1) return own.length + " themes of one's own are kept, " + b.own + " before";
+  const copy = own.at(-1);
+  if (copy.name !== "knobas Light copy" || copy.kind !== "light") return "the copy is " + copy.name + ", " + copy.kind;
+  if (localStorage.getItem("knobas.theme.light") !== copy.id) return "the light slot holds " + localStorage.getItem("knobas.theme.light") + ", not the copy";
+  const page = document.querySelector(".tf-kept:not([hidden])");
+  const h = page.querySelector(".tf-thm-edh h2")?.textContent.trim();
+  if (h !== "knobas Light copy") return "the editor shows " + h;
+  if (page.querySelector(".tf-thm-slot[data-slot=light] select").value !== copy.id) return "the light slot's select does not show the copy";
+  const swatches = page.querySelectorAll(".tf-thm-roles button.tf-thm-sw").length;
+  if (swatches !== 21) return swatches + " swatches are buttons, not the 21 of a theme one can change";
+  return null;
+}`;
+const IMPORT_CHECK = (names, toast, syntax) => String.raw`(b) => {
+  const own = JSON.parse(localStorage.getItem("knobas.themes") ?? "[]");
+  const want = ${JSON.stringify(names)};
+  const got = own.slice(b.own).map((t) => t.name);
+  if (got.join("|") !== want.join("|")) return "kept after the import: " + (got.join(", ") || "nothing");
+  const first = own[b.own];
+  for (const [role, colour] of Object.entries(${JSON.stringify(syntax)})) if (first.syntax[role] !== colour) return first.name + "'s " + role + " is " + first.syntax[role] + ", not " + colour;
+  const toasts = [...document.querySelectorAll(".tf-toast")].map((t) => t.textContent.replace(/\s+/g, " ").trim());
+  if (!toasts.some((t) => t.startsWith(${JSON.stringify(toast)}))) return "no toast says ${toast} (" + (toasts.join("; ") || "no toast") + ")";
+  const h = document.querySelector(".tf-kept:not([hidden]) .tf-thm-edh h2")?.textContent.trim();
+  if (h !== want[0]) return "the editor shows " + h + ", not " + want[0];
+  return null;
+}`;
+const SLOT_BEFORE = String.raw`() => ({ kw: getComputedStyle(document.documentElement).getPropertyValue("--hl-kw").trim() })`;
+const SLOT_CHECK = String.raw`(b) => {
+  const page = document.querySelector(".tf-kept:not([hidden])");
+  const select = page.querySelector(".tf-thm-slot[data-slot=light] select");
+  if (select.value !== "github-light") return "the light slot's select shows " + select.value;
+  if (localStorage.getItem("knobas.theme.light") !== "github-light") return "the light slot keeps " + localStorage.getItem("knobas.theme.light");
+  const kw = getComputedStyle(document.documentElement).getPropertyValue("--hl-kw").trim().toUpperCase();
+  if (kw !== "#C3243A") return "the window's keyword colour is " + kw + ", " + b.kw + " before";
+  const h = page.querySelector(".tf-thm-edh h2")?.textContent.trim();
+  if (h !== "GitHub Light") return "the editor shows " + h;
+  const chip = page.querySelector(".tf-thm-slot[data-slot=light] .tf-thm-chips i[title=Keyword]");
+  if (chip && getComputedStyle(chip).backgroundColor !== "rgb(195, 36, 58)") return "the slot's keyword chip is " + getComputedStyle(chip).backgroundColor;
+  return null;
+}`;
+/** A light theme of one's own in the light slot, its keyword the knobas purple. */
+const OWN_THEME_STORE = {
+  "knobas.themes": JSON.stringify([{ id: "own-tripswch", name: "Trip swatch", kind: "light", from: "knobas Light", syntax: { com: "#5F6975", kw: "#7A3EB1", str: "#1F7444", fn: "#2F55D4" } }]),
+  "knobas.theme.light": "own-tripswch",
+};
+const SWATCH_BEFORE = String.raw`() => ({ ratio: document.querySelector(".tf-kept:not([hidden]) .tf-thm-role[data-role=kw] .tf-thm-cr").textContent.trim() })`;
+/** #C8B6E2 on the light sheet is about 1.9:1: the row says so and offers the fix, the preview draws it, the theme keeps it. */
+const SWATCH_CHECK = String.raw`(b) => {
+  const page = document.querySelector(".tf-kept:not([hidden])");
+  const row = page.querySelector(".tf-thm-role[data-role=kw]");
+  const hex = row.querySelector(".tf-thm-hex").textContent.trim();
+  if (hex !== "#C8B6E2") return "the keyword row reads " + hex;
+  const ratio = row.querySelector(".tf-thm-cr").textContent.trim();
+  if (ratio === b.ratio) return "the keyword's contrast still reads " + ratio;
+  if (!(parseFloat(ratio) < 4.5)) return "the keyword's contrast reads " + ratio + ", not under 4.5:1";
+  if (!row.classList.contains("tf-low") || !row.querySelector(".tf-thm-why button")) return "the row draws no warning with its fix at " + ratio;
+  const kept = JSON.parse(localStorage.getItem("knobas.themes") ?? "[]").find((t) => t.id === "own-tripswch");
+  if (kept?.syntax.kw !== "#C8B6E2") return "the theme keeps " + kept?.syntax.kw;
+  const word = page.querySelector(".tf-thm-pre .tf-hl-kw");
+  if (word && getComputedStyle(word).color !== "rgb(200, 182, 226)") return "the preview's keyword draws " + getComputedStyle(word).color;
+  return null;
+}`;
 
 // By page. `press` finds the first visible control with those words; `prep` runs first: { click, text | starts }, { fill, text }, { eval } or { wait }.
 // The right-click menu's cases (2026-11-16): one per kind of thing a person right-clicks daily, a field, and nothing.
@@ -514,6 +615,19 @@ const PAGES = [
   { page: "Settings, the nav's tree", route: "settings/time", trips: [
     { id: "settings-tree-click", kind: "tree-click", strict: true, finding: "2026-11-21", size: [1440, 900], fold: "Appearance", rail: ".tf-stg-nav", folds: "details.tf-stg-fold", rowsOf: ".tf-stg-tree > a, .tf-stg-fold > summary, .tf-stg-fold > a", under: ":scope > a.tf-stg-child", chevronX: 5,
       prep: [{ wait: 300 }, { eval: "document.querySelector('.tf-stg-fold > summary').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })), 1" }, { wait: 200 }] },
+  ] },
+  { page: "Settings, Code colours", route: "settings/appearance/code-colours", trips: [
+    ...["tanstack", "shiki"].map((engine) => ({ id: `hl-radio-${engine}`, kind: "press-result", finding: "themes", before: PREVIEW_BEFORE, steps: [{ press: { sel: ".tf-thm-eng label", starts: ENGINE_NAMES[engine] } }], check: ENGINE_CHECK(engine) })),
+    { id: "hl-radio-pierre", kind: "press-result", finding: "themes", store: { "knobas.highlighter": "shiki" }, before: PREVIEW_BEFORE, steps: [{ press: { sel: ".tf-thm-eng label", starts: ENGINE_NAMES.pierre } }], check: ENGINE_CHECK("pierre") },
+    // An arrow key in the group chooses at once, as the re-ruling asks: Pierre Highlights to TanStack Highlight.
+    { id: "hl-radio-key", kind: "press-result", finding: "themes", before: `() => (document.querySelector("input[name=tf-thm-engine]:checked").focus(), (${PREVIEW_BEFORE})())`, steps: [{ key: "ArrowRight" }], check: ENGINE_CHECK("tanstack") },
+    { id: "theme-duplicate", kind: "press-result", finding: "themes", before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-edh button", text: "Duplicate and edit" } }], check: DUPLICATE_CHECK },
+    { id: "theme-import-vscode", kind: "press-result", finding: "themes", before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-top button", text: "Import…" }, file: "themes/vscode-fixture.json" }], check: IMPORT_CHECK(["Trip Harbour Light"], "Imported Trip Harbour Light as a light theme.", { kw: "#B3123B", str: "#0B5A2E" }) },
+    { id: "theme-import-zed", kind: "press-result", finding: "themes", before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-top button", text: "Import…" }, file: "themes/zed-fixture.json" }], check: IMPORT_CHECK(["Trip Lantern Light", "Trip Lantern Dark"], "Imported 2 themes.", { kw: "#7A3EB1", str: "#1F7444" }) },
+    // The light slot by its own select: pressed, then ↓ and Enter, knobas Light to GitHub Light.
+    { id: "theme-slot", kind: "press-result", finding: "themes", before: SLOT_BEFORE, steps: [{ press: { sel: ".tf-thm-slot[data-slot=light] select" } }, { key: "ArrowDown" }, { key: "Enter" }], check: SLOT_CHECK },
+    // A colour of one's own theme changed through its swatch's hex field, and its contrast row with it.
+    { id: "theme-swatch", kind: "press-result", finding: "themes", store: OWN_THEME_STORE, before: SWATCH_BEFORE, steps: [{ press: { sel: "button.tf-thm-sw[aria-label='Change Keyword']" } }, { press: { sel: "input[aria-label='Keyword as hex']" } }, { key: "Control+a" }, { type: "#C8B6E2" }], check: SWATCH_CHECK },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },
@@ -1236,7 +1350,7 @@ const wanted = (t) => !only.length || only.some((o) => [t.id, t.kind, t.finding,
 /** One browser for the runner (`trip-runner.mjs`): a fresh headless Chrome and the trips' kinds bound to it. */
 async function startBrowser() {
   const chrome = await launch("knobas-trips");
-  const { send, evaluate, key, stop } = chrome;
+  const { send, evaluate, key, stop, listen } = chrome;
   const opener = screenOpener(chrome, port);
   await opener.install();
   await send("Page.addScriptToEvaluateOnNewDocument", { source: LIB });
@@ -3848,7 +3962,68 @@ async function startBrowser() {
     return { reasons, note: `3 rounds of 24 right presses, resting on ${t.rest ?? "a row"}, then ${t.close}: menus ${notes.join(", ")}` };
   }
 
-  const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "right-spam": rightSpam, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  async function pressResult(t) {
+    await open(t);
+    if (t.store) {
+      await evaluate(`(Object.entries(${JSON.stringify(t.store)}).forEach(([k, v]) => localStorage.setItem(k, v)), 1)`);
+      await send("Page.reload", {});
+      await sleep(100);
+      for (let i = 0; i < 400 && !(await evaluate(`document.readyState === "complete" && !!document.querySelector(".tf")`).catch(() => false)); i++) await sleep(25);
+      await opener.settleAfterChange();
+      if (!(await evaluate(`window.__trip.wrap()`))) throw new Error("no __TAURI_INTERNALS__ to wrap after the reload");
+    }
+    const before = await evaluate(`JSON.stringify((${t.before ?? "() => null"})())`);
+    const first = await snap();
+    const did = [];
+    for (const s of t.steps) {
+      if (s.press) {
+        const raw = await evaluate(`window.__trip.point(${JSON.stringify(s.press)})`);
+        if (!raw) throw new Error(`can't find ${s.press.sel} ${s.press.text ?? s.press.starts ?? ""}`.trim());
+        const p = JSON.parse(raw);
+        if (!p.under) throw new Error(`something else is at 15% of "${p.words}"`);
+        let chosen = null;
+        let unlisten = () => {};
+        if (s.file) {
+          await send("Page.setInterceptFileChooserDialog", { enabled: true });
+          chosen = new Promise((resolve) => { unlisten = listen((m) => { if (m.method === "Page.fileChooserOpened") resolve(m.params); }); });
+        }
+        await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
+        await sleep(60);
+        await send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", clickCount: 1 });
+        await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", clickCount: 1 });
+        if (s.file) {
+          const opened = await Promise.race([chosen, sleep(3000).then(() => null)]);
+          unlisten();
+          await send("Page.setInterceptFileChooserDialog", { enabled: false });
+          if (!opened) throw new Error(`the press on "${p.words}" opened no file chooser`);
+          const path = new URL(s.file, import.meta.url).pathname;
+          await send("DOM.setFileInputFiles", { files: [path], backendNodeId: opened.backendNodeId });
+          did.push(`pressed "${p.words}" and chose ${s.file}`);
+        } else did.push(`pressed "${p.words.slice(0, 48)}"`);
+      } else if (s.key) {
+        await key(s.key);
+        did.push(s.key);
+      } else if (s.type) {
+        await send("Input.insertText", { text: s.type });
+        did.push(`typed ${s.type}`);
+      }
+      await sleep(s.wait ?? 150);
+    }
+    const until = Date.now() + (t.within ?? 4000);
+    let why;
+    for (;;) {
+      why = await evaluate(`(${t.check})(${before})`);
+      if (!why || Date.now() > until) break;
+      await sleep(100);
+    }
+    const after = await snap();
+    const reasons = why ? [why] : [];
+    if (after.hash !== first.hash) reasons.push(`the address moved to ${after.hash}`);
+    if (after.dialogs > first.dialogs) reasons.push(`a dialog opened: ${after.dialog}`);
+    return { reasons, note: `${did.join(", then ")}: ${why ? "not as asked" : "as asked"}` };
+  }
+
+  const KINDS = { "press-result": pressResult, "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "right-spam": rightSpam, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   return { run: (t) => KINDS[t.kind](t), stop };
 }
 

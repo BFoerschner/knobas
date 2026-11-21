@@ -1,0 +1,14 @@
+{
+  // A VS Code theme as VS Code writes one: comments and a trailing comma (JSONC).
+  "name": "Trip Harbour Light",
+  "type": "light",
+  "colors": { "editor.background": "#FFFFFF" },
+  "tokenColors": [
+    { "scope": "comment", "settings": { "foreground": "#6A737D", "fontStyle": "italic" } },
+    { "scope": ["keyword", "storage"], "settings": { "foreground": "#B3123B" } },
+    { "scope": "string", "settings": { "foreground": "#0B5A2E" } },
+    { "scope": "constant.numeric", "settings": { "foreground": "#8C4B00" } },
+    { "scope": "entity.name.function", "settings": { "foreground": "#4B2BA8" } },
+    { "scope": "entity.name.type", "settings": { "foreground": "#99410A" } },
+  ],
+}
