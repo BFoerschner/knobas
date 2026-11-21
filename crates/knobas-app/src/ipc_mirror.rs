@@ -61,6 +61,9 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
     crate::archive::java::JavaRuntime::export_all(cfg)?;
+    // update.ts
+    crate::update::UpdateState::export_all(cfg)?;
+    crate::update::UpdateNotes::export_all(cfg)?;
     // site.ts
     crate::site::SiteSetting::export_all(cfg)?;
     knobas_site::state::SiteStatus::export_all(cfg)?;

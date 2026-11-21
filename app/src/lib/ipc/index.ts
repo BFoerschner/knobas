@@ -98,6 +98,8 @@ export const EVENTS = {
   siteClosed: "site:closed",
   /** `SiteStatus[]` — knobas was asked to quit and these sites hold changes. */
   siteQuit: "site:quit",
+  /** `UpdateState` — what the updater knows changed: a check, a download's progress, an install's step (ADR-0052). */
+  updateState: "update:state",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

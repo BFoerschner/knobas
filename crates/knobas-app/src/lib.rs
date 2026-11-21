@@ -67,6 +67,7 @@ pub mod start_work;
 pub mod suggestion_pass;
 pub mod ticket_views;
 pub mod time;
+pub mod update;
 pub mod webview_menu;
 
 pub use commands::app::{DbState, Lifecycle};
@@ -151,6 +152,11 @@ pub mod events {
     /// Payload: `SiteStatus[]` -- knobas was asked to quit and these sites
     /// hold changes: the page asks the person.
     pub const SITE_QUIT: &str = "site:quit";
+    /// Payload: `update::UpdateState` -- what the updater knows changed: a
+    /// check, the channel, a download's progress (at most four a second), an
+    /// install's step (ADR-0052). Broadcast: the cog's dot and Settings ›
+    /// Updates draw it.
+    pub const UPDATE_STATE: &str = "update:state";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -371,20 +377,36 @@ pub fn run() {
         .invoke_handler(invoke_handler())
         .build(context)
         .expect("build the tauri application")
-        .run(|app, event| {
-            // Both, because they are different exits. Closing the last window
-            // raises `ExitRequested`; quitting the application (Cmd-Q on
-            // macOS) goes straight to `Exit` without ever raising it, and
-            // measurably leaves the server running if only the first is
-            // handled. `shutdown_database` takes the handle, so whichever
-            // arrives first does the work and the other is a no-op.
-            if matches!(
-                event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
-                shutdown_app(app);
-            }
-        });
+        .run(|app, event| on_run_event(app, &event));
+}
+
+/// The event loop's exit handler.
+///
+/// Both exits, because they are different. Closing the last window raises
+/// `ExitRequested`; quitting the application (Cmd-Q on macOS) goes straight
+/// to `Exit` without ever raising it, and measurably leaves the server
+/// running if only the first is handled. `shutdown_database` takes the
+/// handle, so whichever arrives first does the work and the other is a no-op.
+///
+/// On `Exit`, after that: the installer an update handed over (Windows,
+/// ADR-0052), which so starts only once PostgreSQL has stopped.
+fn on_run_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
+    if matches!(
+        event,
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+    ) {
+        shutdown_app(app);
+    }
+    if matches!(event, tauri::RunEvent::Exit) {
+        update::at_exit(app);
+    }
+}
+
+/// [`on_run_event`], for a test on a `tauri::test` mock app. **Tests only**,
+/// for [`shutdown`]'s reason.
+#[cfg(feature = "test-util")]
+pub fn run_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
+    on_run_event(app, event);
 }
 
 /// What `run`'s setup manages before anything can call in, over `profile`
@@ -928,6 +950,15 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::site::site_reveal_download,
         commands::site::sites_kept,
         commands::site::set_sites_kept,
+        // knobas updates itself (ADR-0052).
+        commands::update::update_state,
+        commands::update::update_check,
+        commands::update::update_set,
+        commands::update::update_download,
+        commands::update::update_cancel,
+        commands::update::update_install,
+        commands::update::update_later,
+        commands::update::update_notes,
     ]
 }
 
@@ -1585,6 +1616,9 @@ fn start_app(app: &tauri::App, demo: bool, log_sink: &logging::Sink) -> tauri::R
     // The desktop notification sender (#339) over the real backend.
     let backend: std::sync::Arc<dyn notify::Backend> = std::sync::Arc::new(notify::platform::show);
     manage_app_state(&handle, profile, backend);
+    // The updater needs no database: its settings are a file, so the start
+    // screen can offer an update when PostgreSQL will not start (ADR-0052).
+    update::start(&handle, demo);
 
     // And the database comes up on its own task. M0 blocked here,
     // which froze the event loop for the length of a first run -- then
@@ -1863,6 +1897,7 @@ mod tests {
             super::events::SITE_DOWNLOAD,
             super::events::SITE_CLOSED,
             super::events::SITE_QUIT,
+            super::events::UPDATE_STATE,
         ];
         names.sort_unstable();
         declared.sort_unstable();

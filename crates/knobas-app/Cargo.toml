@@ -74,6 +74,9 @@ knobas-sync = { path = "../knobas-sync" }
 # External adapters (ADR-0028): a WASM component is one more `Source` the
 # registry builds, beside the compiled-in rows above.
 knobas-wasm-host = { path = "../knobas-wasm-host" }
+# knobas updates itself (ADR-0052): the version order, the manifest, the
+# signature check, the download and the installers; `update.rs` wires them.
+knobas-update = { path = "../knobas-update" }
 # A user renderer's bytes in and its image out cross the bridge as base64
 # (#2262).
 base64 = "0.22"
