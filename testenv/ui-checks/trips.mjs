@@ -192,11 +192,17 @@
 //                 bar's *Show N new*: Builds' runs, which hold only under a resting pointer), launcher (from `via` by ⌘K and `words`),
 //                 palette (⌘K on the page: the launcher's own rows). `prep` runs on the page first, for every way but first and launcher.
 //                 `tail` is how long past quiet it still records (600 ms): longer for a page that reads again a while after a run ends.
+//                 `touch`: under Chrome's touch emulation, so `hover: none` matches and a row's actions stand in the row, as on a touch
+//                 screen or in headless Chrome on Linux (headless Chrome on macOS reports `hover: hover`).
 //
 //   press-result  2026-11-21 (the themes follow-up: Settings › Appearance › Code colours). `store`: localStorage keys set and the page
 //                 loaded again, so it opens as a person who kept them would. `before` (a function, as text) is read in the page, then
 //                 each of `steps` by real input: { press } by real pointer at 15% of the control, with `file` the file chooser that press
-//                 opens answered with that file of `testenv/ui-checks/`; { key } a key; { type } words typed into what holds focus. Then
+//                 opens answered with that file of `testenv/ui-checks/`; { key } a key; { type } words typed into what holds focus;
+//                 { focus } a selector focused without a press; { chars } letters pressed one key at a time, as a person types into a
+//                 focused <select> to choose by its first letters (an arrow key or a press opens macOS's native menu, which headless
+//                 Chrome can't drive); { selectAll } the platform's select-all, ⌘A on macOS and Ctrl+A elsewhere, sent with Chrome's
+//                 selectAll command, since a key event alone edits nothing on macOS. Then
 //                 `check`, given what `before` read, must answer null within `within` ms (4000): until then it gives the reason it
 //                 fails. Also fails if the press opened a dialog, or moved the address unless the trip `leaves`.
 //
@@ -413,6 +419,10 @@ const PAGES = [
     { id: "show-new-key", kind: "enter-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: GROW_FORGE }, { eval: "window.__fake.endRuns(), 1" }, { wait: 2500 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: "tbody tr.tf-row" },
     { id: "show-new-pointer", kind: "pointer-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: GROW_FORGE }, { eval: "window.__fake.endRuns(), 1" }, { wait: 2500 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: "tbody tr.tf-row" },
     { id: "code-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "code", rows: "tbody tr.tf-row", held: true, query: STILL_Q, grow: GROW_FORGE },
+    // Where nothing hovers (a touch screen, headless Chrome on Linux), a row's actions stand in the row: *Clone*, which the
+    // checkout read brings, grew a row from 34 to 41 px once it landed (the ux28 gate, 2026-11-21). Touch emulation gives
+    // `hover: none` on every machine, and the checkouts come 2 s late, after the rows have drawn.
+    { id: "code-rows-still-touch", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first"], touch: true, rows: "tbody tr.tf-row", query: STILL_Q.replace("entity_checkouts:900", "entity_checkouts:2000"), tail: 2600 },
   ] },
   { page: "Code, Pull requests", route: "code/prs", trips: [
     { id: "code-prs-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: "tbody tr.tf-row", held: true, query: STILL_Q, grow: GROW_FORGE },
@@ -635,10 +645,11 @@ const PAGES = [
     { id: "theme-duplicate", kind: "press-result", finding: "themes", before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-edh button", text: "Duplicate and edit" } }], check: DUPLICATE_CHECK },
     { id: "theme-import-vscode", kind: "press-result", finding: "themes", before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-top button", text: "Import…" }, file: "themes/vscode-fixture.json" }], check: IMPORT_CHECK(["Trip Harbour Light"], "Imported Trip Harbour Light as a light theme.", { kw: "#B3123B", str: "#0B5A2E" }) },
     { id: "theme-import-zed", kind: "press-result", finding: "themes", before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-top button", text: "Import…" }, file: "themes/zed-fixture.json" }], check: IMPORT_CHECK(["Trip Lantern Light", "Trip Lantern Dark"], "Imported 2 themes.", { kw: "#7A3EB1", str: "#1F7444" }) },
-    // The light slot by its own select: pressed, then ↓ and Enter, knobas Light to GitHub Light.
-    { id: "theme-slot", kind: "press-result", finding: "themes", before: SLOT_BEFORE, steps: [{ press: { sel: ".tf-thm-slot[data-slot=light] select" } }, { key: "ArrowDown" }, { key: "Enter" }], check: SLOT_CHECK },
+    // The light slot by its own select: focused, then "gi" typed, knobas Light to GitHub Light. Not a press and ↓: on macOS
+    // both open the native menu, which headless Chrome can't drive; typing a name's first letters chooses on every platform.
+    { id: "theme-slot", kind: "press-result", finding: "themes", before: SLOT_BEFORE, steps: [{ focus: ".tf-thm-slot[data-slot=light] select" }, { chars: "gi" }], check: SLOT_CHECK },
     // A colour of one's own theme changed through its swatch's hex field, and its contrast row with it.
-    { id: "theme-swatch", kind: "press-result", finding: "themes", store: OWN_THEME_STORE, before: SWATCH_BEFORE, steps: [{ press: { sel: "button.tf-thm-sw[aria-label='Change Keyword']" } }, { press: { sel: "input[aria-label='Keyword as hex']" } }, { key: "Control+a" }, { type: "#C8B6E2" }], check: SWATCH_CHECK },
+    { id: "theme-swatch", kind: "press-result", finding: "themes", store: OWN_THEME_STORE, before: SWATCH_BEFORE, steps: [{ press: { sel: "button.tf-thm-sw[aria-label='Change Keyword']" } }, { press: { sel: "input[aria-label='Keyword as hex']" } }, { selectAll: true }, { type: "#C8B6E2" }], check: SWATCH_CHECK },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },
@@ -3450,9 +3461,17 @@ async function startBrowser() {
   }
 
   async function rowsStill(t) {
+    const ways = t.ways ?? ["first", "return", "sync", "shown", "launcher"];
+    if (t.touch) {
+      await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+      try { return await rowsStillOn(t, ways); } finally { await send("Emulation.setTouchEmulationEnabled", { enabled: false }); }
+    }
+    return rowsStillOn(t, ways);
+  }
+
+  async function rowsStillOn(t, ways) {
     const reasons = [];
     const notes = [];
-    const ways = t.ways ?? ["first", "return", "sync", "shown", "launcher"];
     const prep = async () => {
       for (const s of t.prep ?? []) {
         if (s.wait) await sleep(s.wait);
@@ -4019,6 +4038,22 @@ async function startBrowser() {
       } else if (s.key) {
         await key(s.key);
         did.push(s.key);
+      } else if (s.focus) {
+        const found = await evaluate(`(() => { const e = document.querySelector(".tf-kept:not([hidden]) " + ${JSON.stringify(s.focus)}) ?? document.querySelector(${JSON.stringify(s.focus)}); e?.focus(); return !!e && document.activeElement === e; })()`);
+        if (!found) throw new Error(`can't focus ${s.focus}`);
+        did.push(`focused ${s.focus}`);
+      } else if (s.chars) {
+        for (const ch of s.chars) {
+          const code = /[a-z]/i.test(ch) ? `Key${ch.toUpperCase()}` : "";
+          await send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code, text: ch, unmodifiedText: ch, windowsVirtualKeyCode: ch.toUpperCase().charCodeAt(0) });
+          await send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code, windowsVirtualKeyCode: ch.toUpperCase().charCodeAt(0) });
+        }
+        did.push(`pressed ${s.chars}`);
+      } else if (s.selectAll) {
+        const modifiers = process.platform === "darwin" ? 4 : 2;
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers, commands: ["selectAll"] });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers });
+        did.push(process.platform === "darwin" ? "⌘A" : "Ctrl+A");
       } else if (s.type) {
         await send("Input.insertText", { text: s.type });
         did.push(`typed ${s.type}`);
