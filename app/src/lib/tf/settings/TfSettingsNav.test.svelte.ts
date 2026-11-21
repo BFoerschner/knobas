@@ -21,13 +21,13 @@ let view: ReturnType<typeof mount> | null = null;
 let storage: ReturnType<typeof memory>;
 let folds: SettingsFolds;
 const props = $state<{ current: SettingsSection | null }>({ current: "sources" });
-let onpage: ReturnType<typeof vi.fn>;
+let onpage: ReturnType<typeof vi.fn<() => void>>;
 
 function draw(current: SettingsSection | null, seed: Record<string, string> = {}): void {
   storage = memory(seed);
   folds = createSettingsFolds(() => storage);
   props.current = current;
-  onpage = vi.fn();
+  onpage = vi.fn<() => void>();
   view = mount(TfSettingsNav, {
     target,
     props: {
