@@ -26,6 +26,10 @@ struct Forge {
     reads: AtomicU32,
     /// Every read past this many fails as an unreachable forge would.
     fail_after: Option<u32>,
+    /// A repository whose archive takes this long: longer than a run's budget.
+    slow_archive: Option<(String, Duration)>,
+    /// The archives asked, by repository.
+    asked: Mutex<Vec<String>>,
 }
 
 #[async_trait::async_trait]
@@ -101,6 +105,12 @@ impl Source for Forge {
             return Ok(None);
         }
         self.archives.fetch_add(1, Ordering::SeqCst);
+        self.asked.lock().unwrap().push(repository.to_owned());
+        if let Some((slow, long)) = &self.slow_archive
+            && slow == repository
+        {
+            tokio::time::sleep(*long).await;
+        }
         let files = self
             .files
             .lock()
@@ -585,6 +595,50 @@ async fn the_bounds_cut_a_repository_and_the_next_pass_finishes_it() {
     .await;
     assert_eq!((rest.repositories, rest.reads), (1, 6), "{rest:?}");
     assert_eq!(row(&world, &id).await, (Some("c1".to_owned()), 10, 10));
+}
+
+// An archive the run's deadline cuts was asked again every run, first in
+// the queue, and held up every repository after it (the everything search
+// finish, 2026-11-21; the small-fixes sweep). Cut once, the repository is
+// read a file at a time and goes last, so the rest are read and it finishes.
+#[tokio::test]
+async fn an_archive_the_deadline_cuts_is_not_asked_again_and_holds_up_nothing() {
+    let forge = Forge {
+        archive: true,
+        slow_archive: Some(("forge:acme/huge".to_owned(), Duration::from_secs(30))),
+        ..Forge::default()
+    };
+    let world = world("code_files_archive_cut", forge).await;
+    let many: Vec<(String, Vec<u8>)> = (0..8)
+        .map(|n| {
+            (
+                format!("src/F{n}.java"),
+                format!("class F{n} {{}}").into_bytes(),
+            )
+        })
+        .collect();
+    let files: Vec<(&str, &[u8])> = many
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_slice()))
+        .collect();
+    let small = push(&world, "acme/small", "c1", &files).await;
+    // Pushed last, so it comes first: the newest repository.
+    let huge = push(&world, "acme/huge", "c1", &files).await;
+    let bounds = Bounds {
+        budget: Duration::from_millis(400),
+        ..Bounds::default()
+    };
+    let first = pass_within(&world, bounds, u64::MAX).await;
+    assert_eq!((first.repositories, first.owed), (0, 2), "{first:?}");
+    assert_eq!(*world.forge.asked.lock().unwrap(), vec![huge.clone()]);
+
+    // The next run reads the other repository first, and the cut one a file
+    // at a time: its archive is not asked again.
+    let second = pass_within(&world, bounds, u64::MAX).await;
+    assert_eq!(row(&world, &small).await, (Some("c1".to_owned()), 8, 8));
+    assert_eq!(*world.forge.asked.lock().unwrap(), [huge.clone(), small]);
+    assert_eq!((second.repositories, second.reads), (2, 8), "{second:?}");
+    assert_eq!(row(&world, &huge).await, (Some("c1".to_owned()), 8, 8));
 }
 
 #[tokio::test]

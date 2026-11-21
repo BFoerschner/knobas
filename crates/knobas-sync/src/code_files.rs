@@ -29,6 +29,13 @@
 //! [`READS_PER_RUN`] single reads. A repository the bounds cut keeps what it
 //! wrote: its row stays at the old commit, and the next run finds most of
 //! its files unchanged.
+//!
+//! **A cut goes last** (the small-fixes sweep, 2026-11-21): a repository the
+//! bounds cut is read after every other the next run, and one whose archive
+//! the deadline cut is read a file at a time from then on. A download is
+//! kept whole before it is read, so a cut archive kept nothing, was asked
+//! again every run, first in the queue, and held up every repository after
+//! it; single reads keep what each wrote.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -88,6 +95,17 @@ pub const SHARE_BYTES: u64 = 256 << 20;
 /// Held by a pass for its whole length: the index's one writer, taken in
 /// turn rather than refused.
 static PASSING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The repositories whose archive a run's deadline cut, read a file at a time
+/// from then on. The process's: after a restart such a repository is still
+/// read last (its row says its read was cut), and may ask its archive once
+/// more with what that run leaves.
+static ARCHIVE_CUT: std::sync::LazyLock<std::sync::Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+
+fn archive_cut(repository: &str) -> bool {
+    ARCHIVE_CUT.lock().is_ok_and(|cut| cut.contains(repository))
+}
 
 /// `knobas.setting`'s key of *Keep at most* (Settings › Search, D13): the
 /// file text kept on this computer, in MB, as a number in a string; `0` is
@@ -198,6 +216,8 @@ struct Owed {
     no: Option<i32>,
     favourite: bool,
     updated: Option<chrono::DateTime<chrono::Utc>>,
+    /// A read the bounds cut: begun (`read_at` set) and not at this commit.
+    cut: bool,
 }
 
 /// One file of a stored tree.
@@ -330,7 +350,8 @@ pub async fn refresh_within(
         "select r.entity_id as repository_id, bt.commit_sha as commit, bt.root,
                 cr.commit_sha as held, cr.no,
                 exists (select 1 from knobas.favourite f where f.entity_id = r.entity_id) as favourite,
-                r.item_updated_at as updated
+                r.item_updated_at as updated,
+                (cr.read_at is not null and cr.commit_sha is null) as cut
            from sync.item r
            join knobas.entity e on e.id = r.entity_id and e.deleted_at is null
            join sync.branch_tree bt on bt.repository_id = r.entity_id
@@ -353,9 +374,11 @@ pub async fn refresh_within(
         }
     }
     let cloned = |repository: &str| held_here.contains(repository);
+    let last = |repository: &Owed| repository.cut || archive_cut(&repository.repository_id);
     owed.sort_by(|a, b| {
-        b.favourite
-            .cmp(&a.favourite)
+        last(a)
+            .cmp(&last(b))
+            .then_with(|| b.favourite.cmp(&a.favourite))
             .then_with(|| cloned(&b.repository_id).cmp(&cloned(&a.repository_id)))
             .then_with(|| b.updated.cmp(&a.updated))
             .then_with(|| a.repository_id.cmp(&b.repository_id))
@@ -374,7 +397,8 @@ pub async fn refresh_within(
     .unwrap_or(0);
     for (index, repository) in owed.iter().enumerate() {
         if Instant::now() >= deadline {
-            passed.owed = total_owed - u32::try_from(index).unwrap_or(0);
+            // With the repositories this run cut before it, counted above.
+            passed.owed += total_owed - u32::try_from(index).unwrap_or(0);
             break;
         }
         let whole = read_repository(
@@ -658,7 +682,11 @@ async fn read_repository(
         .iter()
         .map(|file| u64::try_from(file.size).unwrap_or(0))
         .sum();
-    if by_archive(missing.len(), tree_bytes) && budget.0 > 0 && Instant::now() < deadline {
+    if by_archive(missing.len(), tree_bytes)
+        && budget.0 > 0
+        && Instant::now() < deadline
+        && !archive_cut(repository)
+    {
         let wanted: HashSet<String> = missing.iter().map(|file| file.path.clone()).collect();
         let wants = |path: &str| wanted.contains(path);
         let mut got: Vec<(String, Vec<u8>)> = Vec::new();
@@ -681,7 +709,18 @@ async fn read_repository(
                 passed.archives += 1;
                 tracing::debug!(source_id, repository, %error, "an archive was not read");
             }
-            Err(_) => complete = false,
+            // Cut by the deadline: nothing of it kept, and asked no more.
+            Err(_) => {
+                complete = false;
+                if let Ok(mut cut) = ARCHIVE_CUT.lock() {
+                    cut.insert(repository.to_owned());
+                }
+                tracing::info!(
+                    source_id,
+                    repository,
+                    "an archive the run's deadline cut: read a file at a time from now"
+                );
+            }
         }
     }
     for file in &need_text {

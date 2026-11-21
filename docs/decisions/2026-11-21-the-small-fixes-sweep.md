@@ -58,3 +58,21 @@ text is kept are mirrored in miniature (`fakeLeftOut`: a folder, a lock file, a 
 2,000 bytes, a generated head), so a left-out file is found by its name only and counted by its rule.
 `payout-service` is in the corpus too: its files' evidence joins its own row instead of drawing a second.
 `fake-files.test.ts` holds the fake's table to the folder on disk.
+
+## An archive the deadline cuts holds up nothing
+
+**Found (the Everything search finish).** The files pass reads a repository of many small files as one archive. Gitea's
+archive is downloaded whole into a spool before it is read, so one that the run's 120 s deadline cut kept nothing. Its
+repository stayed owed, came first again in the next run's queue, asked for the same archive and was cut again, and every
+repository after it waited. The 1 GiB cap on an archive narrowed that, and did not close it.
+
+**Taken.** A cut goes last. A repository whose archive the deadline cut is read a file at a time from then on
+(`ARCHIVE_CUT`, the process's), and single reads keep what each one wrote, so it finishes over the next runs. Any
+repository whose first read the bounds cut (its row read and at no commit) is read after every other the next run, so
+after a restart the cut one still waits for the rest; it may ask for its archive once more with what that run leaves.
+`an_archive_the_deadline_cuts_is_not_asked_again_and_holds_up_nothing`: the newest repository's archive outlasts the run.
+The next run reads the other one, then the cut one a file at a time. Before, the second run asked the same archive again
+and read nothing else.
+
+Also fixed: a run the deadline stopped counted as owed only the repositories it had not reached, dropping those it had
+cut on the way (`passed.owed` was set where it is added to).
