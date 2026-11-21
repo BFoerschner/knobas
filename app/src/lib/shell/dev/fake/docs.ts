@@ -69,6 +69,7 @@ import type {
   TableCell,
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
+import { ASCII_AFTER, asciiArt } from "../fake-ascii";
 import { CORPUS, fakeEmpty, fakeRoleScope } from "./corpus";
 import { linkedTickets } from "./entity";
 import { EMBEDS_OFF } from "./sources";
@@ -699,7 +700,9 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
   if (!found) throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   const [by, when] = META[found.title] ?? ["JB", "2026-08-10 09:00"];
   const written = BODIES[found.title] ?? generic(found, by);
-  const body = found.title === "SEPA payout retry design" ? lengthened(written, long) : written;
+  const sized = found.title === "SEPA payout retry design" ? lengthened(written, long) : written;
+  // `?fake-ascii`: the retry states drawn in a code block after the backoff policy (`fake-ascii.ts`).
+  const body = asciiArt() && found.title === "SEPA payout retry design" ? { ...sized, blocks: sized.blocks.flatMap((b) => ("code" in b && b.lang === "yaml" ? [b, { code: ASCII_AFTER.trimEnd(), lang: "text" }] : [b])) } : sized;
   return {
     entity_id: found.id,
     source_id: "confluence",

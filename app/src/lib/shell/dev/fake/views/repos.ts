@@ -16,6 +16,7 @@
  * divergence: the mock adapter draws no view for a repository at all.
  */
 import { JAR_FILES, jarSize } from "../jar";
+import { ASCII_AFTER, asciiArt } from "../../fake-ascii";
 import type { BranchPull, DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
 import { ago, agoStamp } from "../../../time";
@@ -456,6 +457,8 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
       ...(query.has("fake-openapi") ? openapiFiles() : {}),
+      // `?fake-ascii` (2026-11-21): ASCII art, box drawing and arrows, for the code face (`../../fake-ascii.ts`).
+      ...(asciiArt() ? { "docs/states.txt": ASCII_AFTER } : {}),
       // `?fake-jar` (ux19): a library JAR and a Spring Boot fat JAR; `fake/jar.ts` answers the archive reads.
       ...(query.has("fake-jar") ? Object.fromEntries(Object.keys(JAR_FILES).map((path) => [path, ""])) : {}),
       // `?fake-render-page=<words>` (2026-11-17): a long page the saved *Cat* renderer draws as HTML, shaped by the words

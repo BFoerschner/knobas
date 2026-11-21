@@ -9,6 +9,7 @@ import { lineDiff } from "../../../tf/diff/line-diff";
 import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
+import { ASCII_AFTER, ASCII_BEFORE, asciiArt } from "../fake-ascii";
 import { CORPUS } from "./corpus";
 
 /**
@@ -136,6 +137,10 @@ const WORKING_FILES: Record<string, [before: string | null, after: string]> = {
   "docs/flow.mmd": ["flowchart LR\n  validate --> submit\n", "flowchart LR\n  validate --> submit\n  submit -->|transient| retry\n  retry --> submit\n"],
   "notes/new-idea.md": [null, "# A new idea\n\nKeep the retry count in the ledger, not in memory.\n"],
 };
+/** The working tree's files, with `?fake-ascii`'s drawing among them (`fake-ascii.ts`). */
+function workingFiles(): Record<string, [before: string | null, after: string]> {
+  return asciiArt() ? { ...WORKING_FILES, "docs/states.txt": [ASCII_BEFORE, ASCII_AFTER] } : WORKING_FILES;
+}
 const WORKING_BASE = "4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a";
 /** `?fake-touched`: every ask finds the tree touched since the last (a new stamp each time). */
 let workingAsks = 0;
@@ -146,8 +151,8 @@ function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } 
   const checkout = fakeCheckout(entityId);
   if (checkout.path === null) throw { code: "not_found", message: "This repository is not cloned on this computer, so it has no working tree here.", source_id: null };
   const local = fakeCheckoutDiff(entityId);
-  const tracked = local.status === "read" ? local.unstaged.files.filter((file) => WORKING_FILES[file.path] === undefined) : [];
-  const made = Object.entries(WORKING_FILES).map(([path, [before, after]]) => {
+  const tracked = local.status === "read" ? local.unstaged.files.filter((file) => workingFiles()[file.path] === undefined) : [];
+  const made = Object.entries(workingFiles()).map(([path, [before, after]]) => {
     const file = lineDiff(path, before ?? "", after);
     return { ...file, change: before === null ? "added" : file.change } as DiffFile;
   });
@@ -168,7 +173,7 @@ function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } 
 
 /** A working-tree file's bytes at `~working-tree` (after) or any other end (before); `undefined` for a file it does not hold. */
 export function fakeWorkingBytes(path: string, commit: string | null): Uint8Array | undefined {
-  const sides = WORKING_FILES[path];
+  const sides = workingFiles()[path];
   // Only the working tree's own ends: every other commit reads the fixture's files as before.
   if (sides === undefined || (commit !== WORKING && commit !== "~index" && commit !== WORKING_BASE)) return undefined;
   const text = commit === WORKING ? sides[1] : sides[0];
