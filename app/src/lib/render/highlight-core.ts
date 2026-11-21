@@ -40,6 +40,8 @@ interface Job {
   cancelled: boolean;
   /** The lines in view the viewer last named, not yet sent. */
   focus: [from: number, to: number] | null;
+  /** The lines in view last named at all: what the next engine answers first when one throws. */
+  seen: [from: number, to: number] | null;
 }
 
 export interface HighlightCore {
@@ -94,6 +96,8 @@ export function createHighlightCore({
       const run = await engine(id);
       if (job.cancelled) return;
       if (run === null) continue;
+      // An engine that threw took the focus with it: the next one answers the lines in view first too.
+      job.focus ??= job.seen;
       try {
         await run.run(text, name, lang, {
           post: (from: number, lines: LineTokens[]) => {
@@ -132,7 +136,7 @@ export function createHighlightCore({
   return {
     handle(message) {
       if (message.type === "open") {
-        const job: Job = { id: message.id, cancelled: false, focus: message.focus ?? null };
+        const job: Job = { id: message.id, cancelled: false, focus: message.focus ?? null, seen: message.focus ?? null };
         jobs.set(job.id, job);
         const lang = message.lang !== undefined ? languageOfFence(message.lang) : languageOf(message.path ?? "");
         void run(job, message.text, lang, message.engine ?? "pierre");
@@ -141,7 +145,7 @@ export function createHighlightCore({
         void engine(message.engine);
       } else if (message.type === "focus") {
         const job = jobs.get(message.id);
-        if (job) job.focus = [message.from, message.to];
+        if (job) job.focus = job.seen = [message.from, message.to];
       } else {
         const job = jobs.get(message.id);
         if (job) job.cancelled = true;

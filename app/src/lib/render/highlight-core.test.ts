@@ -51,6 +51,25 @@ test("a Pierre that throws: TanStack answers Java, Shiki a language only it has,
   expect(all.replies).toEqual([{ type: "plain", id: 3 }]);
 });
 
+test("an engine that throws after taking the focus leaves it to the next, which answers the lines in view first", async () => {
+  const throwing: Engine = {
+    async run(_text, _name, _lang, ctx) {
+      ctx.takeFocus();
+      throw new Error("half way");
+    },
+  };
+  const firstOf: Engine = {
+    async run(text, _name, _lang, ctx) {
+      const focus = ctx.takeFocus();
+      ctx.post(focus?.[0] ?? 0, [[["x", "kw"]]]);
+    },
+  };
+  const c = core({ pierre: async () => throwing, tanstack: async () => firstOf });
+  c.handle({ type: "open", id: 1, path: "A.java", text: "x\n".repeat(5000), engine: "pierre", focus: [3000, 3040] });
+  await c.settle();
+  expect(c.replies[0]).toMatchObject({ type: "lines", from: 3000 });
+});
+
 test("an engine whose import fails is said once, and no later job imports it again", async () => {
   let tries = 0;
   const c = core({
