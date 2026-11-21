@@ -3653,7 +3653,7 @@
 
   .col.spine:focus-visible,
   .col :global(:focus-visible) {
-    outline-offset: -2px;
+    outline-offset: var(--focus-in);
   }
 
   .none {

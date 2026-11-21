@@ -30,6 +30,7 @@ import type { EntityRefresh } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { drawsReading } from "../../shell/test-witness";
 import { forgetCounts } from "./last-commit-counts";
+import { checkoutPorts } from "./checkout-ports.test-support";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -331,7 +332,9 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
   expect(tabs[1]!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/commits");
   const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
-  expect([...select.options].map((o) => o.textContent)).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  // Cloned here, the working tree is the first choice (2026-11-21); this checkout's tree has no commit, so it says why.
+  expect([...select.options].map((o) => o.textContent)).toEqual(["Working tree: no commit yet", "main", "feature/PAY-231-sepa-retry"]);
+  expect(select.options[0]!.disabled).toBe(true);
   expect(select.value).toBe("main");
   // #2238's order, as the mockup draws it: the primary, the others, Open in, Refresh last.
   const acts = [...target.querySelector(".tf-fhead > .tf-acts")!.children].flatMap((el) => (el.matches(".tf-repohold") ? [...el.children] : [el]));
@@ -1350,6 +1353,8 @@ function holdingBranches(fields: Partial<EntityDetail>) {
 }
 
 const branchSelect = () => target.querySelector<HTMLSelectElement>("select[aria-label='Branch']")!;
+/** The branches the box offers, the working tree before them left out. */
+const branchValues = () => [...branchSelect().options].map((option) => option.value).filter((value) => value !== "~working-tree");
 
 test("with the branch list held back, Files draws on the mirror's default branch, and the list fills the selector without reading the tab again", async () => {
   const { stand, release } = holdingBranches({ default_branch: "main" });
@@ -1357,7 +1362,10 @@ test("with the branch list held back, Files draws on the mirror's default branch
 
   expect(tree()).toContain("README.md");
   expect(target.querySelector(".tf-fileview header")).not.toBeNull();
-  expect(branchSelect().options.length).toBe(0);
+  // Before the list is read, the shown name is the box's one option, so the box is that name's width from its first
+  // draw and doesn't widen when the list lands (the branch box, 2026-11-21).
+  expect(branchValues()).toEqual(["main"]);
+  expect(branchSelect().value).toBe("main");
   expect(branchSelect().disabled).toBe(true);
   const tabReads = () => viewReads.filter(([id, sectionId]) => id === REPO && sectionId !== "branches").length;
   const before = tabReads();
@@ -1365,7 +1373,7 @@ test("with the branch list held back, Files draws on the mirror's default branch
 
   await release();
   await settle();
-  expect([...branchSelect().options].map((option) => option.value)).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  expect(branchValues()).toEqual(["main", "feature/PAY-231-sepa-retry"]);
   expect(branchSelect().value).toBe("main");
   expect(tabReads()).toBe(before);
   expect(tree()).toContain("README.md");
@@ -1392,7 +1400,7 @@ test("a repository whose detail declares no default branch draws its tree at onc
   await draw([REPO], stand);
   // Read at the repository, which is its default branch, before anything has named it (the ux12 Windows pass).
   expect(tree()).toContain("README.md");
-  expect(branchSelect().options.length).toBe(0);
+  expect(branchValues()).toHaveLength(0);
 
   await release();
   await settle();
@@ -1666,4 +1674,140 @@ test("Branches says each branch's builds, linking to the Builds tab at it; the t
   expect(failing.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/builds/${encodeURIComponent("feature/PAY-231-sepa-retry")}`);
   const tab = [...target.querySelectorAll(".tf-tabs a")].find((a) => a.textContent?.startsWith("Builds"))!;
   expect(text(tab)).toBe("Builds 1");
+});
+
+// ---- The working tree in the branch box (2026-11-21; Björn: "I would like to be able to select the current work tree in
+// the branch selection, not just the branches") ----
+
+const HEAD = "4".repeat(40);
+/** A clone at `HEAD` with `src/retry.rs` changed, `README.md` deleted and `notes/todo.md` untracked; the source is never asked for its files. */
+function onDiskPorts() {
+  const disk = checkoutPorts(() => ({
+    commit: HEAD,
+    as_of: null,
+    truncated: false,
+    entries: [
+      { path: "src", kind: "dir", size: null },
+      { path: "src/retry.rs", kind: "file", size: 10 },
+      { path: "README.md", kind: "file", size: 10 },
+      { path: "Cargo.toml", kind: "file", size: 10 },
+    ],
+  }));
+  const bytesRead: string[] = [];
+  const localFiles: string[] = [];
+  const stand = ports({
+    entityCheckout: async () => ({
+      ...checkout("/Users/mara/src/payout-service"),
+      tree: { status: "read", branch: "main", head: HEAD, upstream: null, ahead: 1, behind: 0, changed: 2, untracked: 1, conflicted: 0 },
+    }),
+    entityCheckoutDiff: async () => ({
+      ...LOCAL,
+      unstaged: {
+        files: [
+          { path: "src/retry.rs", old_path: null, change: "modified", additions: 1, deletions: 1, hunks: [], truncated: false, threads: [] },
+          { path: "README.md", old_path: null, change: "deleted", additions: 0, deletions: 3, hunks: [], truncated: false, threads: [] },
+        ],
+        truncated: false,
+      },
+      untracked: ["notes/todo.md"],
+      stamp: "s1",
+    }),
+    localDir: disk.localDir,
+    localPaths: disk.localPaths,
+    localFile: async (_at, commit, path) => (
+      localFiles.push(`${commit.slice(0, 7)}:${path}`),
+      { type: "file", trail: [], path, text: `// ${path} at HEAD\n`, language: null, size: 10, truncated: false, binary: false, url: null, sha: "b".repeat(40), commit }
+    ),
+    fileBytes: async (_id, path, commit) => (bytesRead.push(`${commit}:${path}`), new TextEncoder().encode(`// ${path} on disk\n`)),
+  });
+  return { stand, bytesRead, localFiles, dirReads: disk.dirReads };
+}
+
+async function chooseWorkingTree() {
+  const select = branchSelect();
+  select.value = "~working-tree";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+}
+
+test("cloned here, the working tree is the box's first choice; chosen, the box says so with the folder glyph", async () => {
+  const { stand } = onDiskPorts();
+  await draw([REPO], stand);
+  const first = branchSelect().options[0]!;
+  expect([first.value, first.textContent, first.disabled]).toEqual(["~working-tree", "Working tree", false]);
+  expect(branchValues()).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  await chooseWorkingTree();
+  expect(branchSelect().value).toBe("~working-tree");
+  expect(branchSelect().title).toBe("Working tree at /Users/mara/src/payout-service, on main");
+  expect(target.querySelector(".tf-bsel > svg path")!.getAttribute("d")).toBe("M1.75 3.75h4.5l1.5 1.5h6.5v7h-12.5z");
+  // Compare opens with the working tree as *From*, ADR-0049's page.
+  const compare = [...target.querySelectorAll<HTMLAnchorElement>(".tf-tabs a")].find((a) => text(a) === "Compare")!;
+  expect(compare.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/~working-tree");
+});
+
+test("the working tree's tree waits for git's list, so it draws once with its changes, and nothing moves when the list lands", async () => {
+  const { stand } = onDiskPorts();
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  await draw([REPO], { ...stand, entityCheckoutDiff: async (id) => (await late, stand.entityCheckoutDiff(id)) });
+  await chooseWorkingTree();
+  expect(tree()).toEqual([]);
+  answer();
+  await settle();
+  expect(tree()).toEqual(["notes", "src", "Cargo.toml", "README.md"]);
+});
+
+test("git's list failing does not hold the working tree's tree for ever: it draws HEAD with no marks", async () => {
+  const { stand } = onDiskPorts();
+  await draw([REPO], { ...stand, entityCheckoutDiff: async () => Promise.reject({ code: "io", message: "git failed" }) });
+  await chooseWorkingTree();
+  expect(tree()).toEqual(["src", "Cargo.toml", "README.md"]);
+});
+
+test("not cloned here, the box offers no working tree", async () => {
+  await draw([REPO], ports({}, false));
+  expect([...branchSelect().options].map((option) => option.value)).not.toContain("~working-tree");
+});
+
+test("Files on the working tree: HEAD's tree from the checkout, the changes laid over it, the source never asked", async () => {
+  const { stand, dirReads } = onDiskPorts();
+  await draw([REPO], stand);
+  const before = viewReads.filter(([, section]) => section?.startsWith("files")).length;
+  await chooseWorkingTree();
+  expect(tree()).toEqual(["notes", "src", "Cargo.toml", "README.md"]);
+  expect(dirReads).toContain(`${HEAD}:`);
+  const row = (name: string) => [...target.querySelectorAll<HTMLElement>(".tf-ftree a")].find((a) => text(a) === name)!;
+  expect(row("README.md").classList.contains("tf-deleted")).toBe(true);
+  expect(row("README.md").title).toBe("Deleted in your working tree");
+  expect(viewReads.filter(([, section]) => section?.startsWith("files")).length).toBe(before);
+  // The landing's line is the working tree's, in the last commit's room.
+  expect(text(target.querySelector(".tf-wtline"))).toBe("Working tree on main at 4444444, 1 ahead, 3 changed Local changes");
+});
+
+test("a changed file on the working tree is read from disk and says so; Edit is off; an unchanged one is HEAD's", async () => {
+  const { stand, bytesRead, localFiles } = onDiskPorts();
+  await draw([REPO, "files", "src", "retry.rs"], stand);
+  localFiles.length = 0;
+  await chooseWorkingTree();
+  expect(bytesRead).toEqual(["~working-tree:src/retry.rs"]);
+  expect(target.querySelector(".tf-fileview")!.textContent).toContain("// src/retry.rs on disk");
+  expect(text(target.querySelector(".tf-fileview .tf-banner.tf-info"))).toContain("Shown as it is on disk, with your uncommitted change.");
+  const tree = [...target.querySelectorAll<HTMLElement>(".tf-ftree a")];
+  expect(tree.find((a) => text(a) === "retry.rs")!.classList.contains("tf-changed")).toBe(true);
+  expect(localFiles).toEqual([]);
+});
+
+test("a held working tree whose checkout stops reading goes back to the default branch and says so once", async () => {
+  const { stand } = onDiskPorts();
+  let gone = false;
+  const going = { ...stand, entityCheckout: async (id: string) => (gone ? { ...checkout("/Users/mara/src/payout-service"), tree: { status: "no_git" as const } } : stand.entityCheckout(id)) };
+  view = mount(TfRepo, { target, props: { ready: true, rest: [REPO], job: null, ports: going, now: NOW, visible: true } });
+  await settle();
+  await chooseWorkingTree();
+  expect(branchSelect().value).toBe("~working-tree");
+  gone = true;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(branchSelect().value).toBe("main");
+  expect(toasts.items.some((toast) => toast.text === "The working tree can't be read any more: git was not found. Showing main.")).toBe(true);
 });

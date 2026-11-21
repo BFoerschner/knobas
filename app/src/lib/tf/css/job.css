@@ -250,7 +250,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); width: 100%; }
 /* The ring is the wrapper's: a second one on the input would draw a ring inside a ring. */
 .tf .tf-minif input:focus-visible { outline: none; }
-.tf-minif:focus-within { outline: 2px solid var(--focus); }
 /* Builds' stale-data warning, with its fix (R-4.7). */
 .tf-stale {
   margin: 0 12px 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--warn);

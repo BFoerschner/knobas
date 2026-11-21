@@ -810,3 +810,55 @@ export function commitPrefill(job: string | null, path: string): { message: stri
 export function sourceName(source: WriteSource | null | undefined): string {
   return source?.display_name || source?.id || "the code host";
 }
+
+// ---- The working tree in the branch box (2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`) ----
+
+/** How a path of the working tree differs from the checkout's `HEAD`: modified, added (or untracked), deleted. */
+export type WorkingMark = "M" | "A" | "D";
+
+/**
+ * Every path the checkout's uncommitted diff (ADR-0026) names, with how it stands against `HEAD`: the staged half first
+ * and the unstaged over it, so a file staged as added and then changed on disk is still added, and one staged and then
+ * deleted on disk is deleted. A rename is its old path deleted and its new one added; an untracked file is added. A
+ * folder git lists as untracked whole (`dir/`) holds files Files can't name one by one, so it is left out.
+ */
+export function workingChanges(read: DiffRead | null): Map<string, WorkingMark> {
+  const marks = new Map<string, WorkingMark>();
+  if (read === null || read.status !== "read") return marks;
+  const lay = (file: DiffFile) => {
+    if (file.change === "renamed") {
+      if (file.old_path !== null && file.old_path !== file.path) marks.set(file.old_path, "D");
+      marks.set(file.path, "A");
+      return;
+    }
+    const was = marks.get(file.path);
+    if (file.change === "deleted") marks.set(file.path, "D");
+    else if (file.change === "added") marks.set(file.path, "A");
+    else marks.set(file.path, was === "A" ? "A" : "M");
+  };
+  for (const file of read.staged.files) lay(file);
+  for (const file of read.unstaged.files) {
+    // A file staged as added and then deleted on disk is gone from the working tree, and `HEAD` never had it.
+    if (file.change === "deleted" && marks.get(file.path) === "A") {
+      marks.delete(file.path);
+      continue;
+    }
+    lay(file);
+  }
+  for (const path of read.untracked) if (!path.endsWith("/")) marks.set(path, "A");
+  return marks;
+}
+
+/**
+ * Why the working tree can't be chosen, or `null` where it can: the checkout's tree read, and a commit at `HEAD` for
+ * Files to lay the changes over.
+ */
+export function workingWhy(checkout: CheckoutView | undefined): string | null {
+  const tree = checkout?.tree;
+  if (checkout === undefined || checkout.path === null || tree == null) return "its checkout is being read";
+  if (tree.status === "no_git") return "git was not found";
+  if (tree.status === "not_a_repo") return "its folder is not a git checkout any more";
+  if (tree.status === "failed") return "git could not read it";
+  if (tree.head === null) return "no commit yet";
+  return null;
+}

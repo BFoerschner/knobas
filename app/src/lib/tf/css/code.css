@@ -37,20 +37,7 @@
 .tf-count.tf-warn { background: var(--warn-bg); color: var(--warn); }
 /* The tabs in two groups (#2257, mockups/code-area `.tf-tabs .grp`): the repository at a ref | work in flight. */
 .tf-tabs .tf-tabgrp { flex: none; align-self: center; width: 1px; height: 18px; background: var(--rule); margin: 0 8px; }
-/* The branch picker in the header, at the header's height (#2238 story 6; mockups/code-area `.tf-select`). */
-.tf-bsel {
-  display: inline-flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 4px 0 10px; border: 1px solid var(--rule);
-  background: var(--field); border-radius: 4px; color: var(--ink); white-space: nowrap;
-}
-.tf-bsel:hover { border-color: var(--ink-2); }
-.tf-bsel svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.tf-bsel select {
-  height: 100%; border: 0; background: none; color: inherit; cursor: pointer; min-width: 64px; max-width: 220px; padding-right: 6px;
-  --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures);
-}
-.tf-bsel select:focus-visible { outline: none; }
-.tf-bsel:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
-.tf-bsel:has(select:disabled) { opacity: .55; }
+/* The branch picker in the header is a control: chrome.css, *the branch box*. */
 /* *New pull request* and the branch picker sit in the header's row as its own items. On Compare they hold their room unseen, so the tabs under the header hold still (F-249). */
 .tf-repohold { display: contents; }
 /* A rendered file's words, for its find bar; it draws nothing of its own. */
@@ -108,10 +95,17 @@
 .tf-ftree a[aria-current="true"] .tf-ficon { stroke: var(--sheet); }
 .tf-ftree a.tf-changed::after { content: "M"; margin-left: auto; --fs: var(--size-ui); font: 700 calc(var(--t-2xs) * var(--fs)) var(--sans); color: var(--warn); }
 .tf-ftree a[aria-current="true"].tf-changed::after { color: inherit; }
+/* The working tree in the branch box (2026-11-21): a file added or untracked is `A`, one deleted keeps its row struck and dimmed, `D`. */
+.tf-ftree a.tf-added::after { content: "A"; margin-left: auto; --fs: var(--size-ui); font: 700 calc(var(--t-2xs) * var(--fs)) var(--sans); color: var(--ok); }
+.tf-ftree a.tf-deleted { color: var(--muted); text-decoration: line-through; }
+.tf-ftree a.tf-deleted::after { content: "D"; margin-left: auto; --fs: var(--size-ui); font: 700 calc(var(--t-2xs) * var(--fs)) var(--sans); color: var(--err); text-decoration: none; }
+.tf-ftree a[aria-current="true"]:is(.tf-added, .tf-deleted)::after { color: inherit; }
+/* The working tree's line in the last commit's room: the clone sign's folder, where it stands, *Local changes* where *N commits* stands. */
+.tf-wtline > svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; color: var(--ink-2); }
+.tf-wtwords { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-ftree .tf-d1 { padding-left: 24px; } .tf-ftree .tf-d2 { padding-left: 38px; } .tf-ftree .tf-d3 { padding-left: 52px; }
 .tf-ftree .tf-d4 { padding-left: 66px; } .tf-ftree .tf-d5 { padding-left: 80px; } .tf-ftree .tf-d6 { padding-left: 94px; }
 .tf-ftree .tf-d7 { padding-left: 108px; } .tf-ftree .tf-d8 { padding-left: 122px; }
-.tf-ftree a:focus-visible, .tf-ftree .tf-fdir:focus-visible, .tf-ftree .tf-fsub:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tf-ftree a.tf-gotof > span { overflow: hidden; text-overflow: ellipsis; }
 .tf-ftree .tf-pdir { color: var(--ink-2); }
 .tf-ftree a[aria-current="true"] .tf-pdir { color: inherit; opacity: .75; }
@@ -617,7 +611,7 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-pname { padding: 0 8px; font-weight: 600; white-space: nowrap; }
 .tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--field); --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 0 8px; color: var(--ink); }
 .tf-pfilter { min-width: 260px; }
-.tf-parg:focus-visible, .tf-pgrip:focus-visible, .tf-px:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-parg, .tf-pgrip, .tf-px { --focus-o: var(--focus-in); }
 .tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
 .tf-pstep.tf-pbad { border-color: var(--err); background: var(--err-bg); color: var(--err); }
 /* A grip's drag (`pointer-drag.ts`): the step lifts and follows the pointer; the step it would take the place of is outlined. */
@@ -698,7 +692,6 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-ftree .tf-fband > :first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-ftree .tf-fband > :last-child { flex: none; text-decoration: underline; text-underline-offset: 2px; }
 .tf-ftree .tf-fband:hover { box-shadow: inset 0 0 0 1px var(--info); }
-.tf-ftree .tf-fband:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* The rail is a background image, not a positioned box: a positioned descendant of the tree's scroller, which is no
    stacking context, put its wheel's hit test on the main thread (the scrollers' audit, 2026-11-20). */
 .tf-ftree .tf-made, .tf-ftree .tf-made:hover, .tf-ftree a.tf-made[aria-current="true"] {

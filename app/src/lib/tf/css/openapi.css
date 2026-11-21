@@ -68,7 +68,7 @@
 }
 .tf-oas-opbtn:hover { background: var(--sheet-2); }
 .tf-oas-opbtn[aria-expanded="true"] { background: var(--sheet-2); border-bottom-color: transparent; }
-.tf-oas-opbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-oas-opbtn { --focus-o: var(--focus-in); }
 .tf-oas-m { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; letter-spacing: .02em; color: var(--ink); }
 .tf-oas-path {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -135,7 +135,6 @@
 .tf-oas-caret svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .tf-oas-caret[aria-expanded="true"] svg { transform: rotate(90deg); }
 .tf-oas-caret:hover { color: var(--ink); background: var(--rule-2); }
-.tf-oas-caret:focus-visible { outline: 2px solid var(--focus); }
 .tf-oas-nocaret { cursor: default; }
 
 /* A ref: the schema's name in the code face, a link to it. */

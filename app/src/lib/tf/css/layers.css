@@ -11,7 +11,6 @@
   background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 4px;
 }
 .tf-menu:focus { outline: none; }
-.tf-menu :focus-visible { outline-offset: -2px; }
 .tf-menu button { flex: none; border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
 .tf-menu button:hover { background: var(--sheet-2); }
 .tf-menu hr { flex: none; border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }

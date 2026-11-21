@@ -264,6 +264,9 @@
   import {
     branchOptions,
     changedPaths,
+    workingChanges,
+    workingWhy,
+    compareHash,
     checkoutSentence,
     headLine,
     branchStanding,
@@ -297,7 +300,9 @@
   import TfRepoCompare from "./TfRepoCompare.svelte";
   import TfRepoCompareWorking from "./TfRepoCompareWorking.svelte";
   import { heardCheckout } from "./cloned-here.svelte";
-  import { isWorkingTree } from "../diff/address";
+  import { isWorkingTree, WORKING_TREE } from "../diff/address";
+  import { push } from "../../shell/toasts.svelte";
+  import { treeStanding } from "../code/code";
   import TfRepoPrs from "./TfRepoPrs.svelte";
   import TfRepoBuilds from "./TfRepoBuilds.svelte";
   import { latestOn, yoursOf } from "./repo-builds";
@@ -861,7 +866,11 @@
           (read) => {
             if (alive()) local = read;
           },
-          () => {},
+          // A list that could not be read is answered too: the working tree's Files draws `HEAD` with no marks rather
+          // than wait for ever (2026-11-21).
+          (error: unknown) => {
+            if (alive()) local = { status: "failed", reason: ipcErrorMessage(error) };
+          },
         );
       },
       () => {
@@ -913,11 +922,47 @@
   /** The branch picked this session, while the list has not answered or still holds it. */
   const picked = $derived.by((): BranchOption | null => {
     const held = repoId === null ? undefined : chosen[repoId];
-    if (held === undefined) return null;
+    if (held === undefined || held.name === WORKING_TREE) return null;
     if (known === null) return { name: held.name, entityId: held.entityId, isDefault: false };
     return known.find((option) => option.name === held.name && (option.entityId !== null || option.isDefault)) ?? null;
   });
-  const selected = $derived(picked ?? defaultBranch);
+  // ---- The working tree in the branch box (2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`;
+  // Björn: "I would like to be able to select the current work tree in the branch selection, not just the branches") ----
+  /** Why the working tree can't be chosen now, `null` where it can. */
+  const diskWhy = $derived(workingWhy(checkout));
+  /** The working tree is this session's choice for the repository. */
+  const wantsDisk = $derived(repoId !== null && chosen[repoId]?.name === WORKING_TREE);
+  /** The working tree is chosen and can be read. */
+  const onDisk = $derived(wantsDisk && diskWhy === null);
+  const diskTree = $derived(onDisk && checkout?.tree?.status === "read" ? checkout.tree : null);
+  /** The checkout's branch among the branches: what Commits, *History* and *New pull request* use on the working tree. */
+  const diskBranch = $derived(diskTree?.branch == null ? null : (known?.find((option) => option.name === diskTree.branch) ?? null));
+  /**
+   * What Files lays over the checkout's `HEAD`: git's uncommitted list (ADR-0026), held until it has answered, so the tree
+   * draws once. A clean tree has no list to wait for (`readCheckout` reads none).
+   */
+  const disk = $derived(
+    diskTree === null || diskTree.head === null || (local === null && diskTree.changed + diskTree.untracked > 0)
+      ? null
+      : {
+          head: diskTree.head,
+          marks: workingChanges(local),
+          stamp: local?.status === "read" ? (local.stamp ?? `${diskTree.changed}:${diskTree.untracked}`) : "",
+          branch: diskTree.branch,
+          standing: treeStanding(diskTree) || null,
+        },
+  );
+  // A held choice whose tree stops reading goes back to the default branch, as a deleted branch does, and says so once.
+  $effect(() => {
+    if (!wantsDisk || checkout === undefined || diskWhy === null || repoId === null) return;
+    const id = repoId;
+    const why = diskWhy;
+    untrack(() => {
+      delete chosen[id];
+      push({ text: `The working tree can't be read any more: ${why}. Showing ${defaultBranch?.name ?? "the default branch"}.` });
+    });
+  });
+  const selected = $derived(onDisk ? (diskBranch ?? defaultBranch) : (picked ?? defaultBranch));
   /**
    * The entity every tab reads at: the repository itself on its default
    * branch (or before the branches answer none), the branch on any other.
@@ -1225,6 +1270,7 @@
 
   function pick(event: Event) {
     if (repoId === null) return;
+    // The working tree is no branch of the list: it is held by its name, `~working-tree`, with no entity.
     const name = (event.currentTarget as HTMLSelectElement).value;
     const option = known?.find((candidate) => candidate.name === name);
     chosen[repoId] = { name, entityId: option?.entityId ?? null };
@@ -1392,18 +1438,36 @@
             <a class="tf-btn tf-primary" {href} onclick={(event) => pressNewPr(event, starting)}>New pull request</a>
           {/if}
           <label class="tf-bsel"
-            ><svg viewBox="0 0 16 16" aria-hidden="true"
+            >{#if wantsDisk}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 3.75h4.5l1.5 1.5h6.5v7h-12.5z" /></svg
+              >{:else}<svg viewBox="0 0 16 16" aria-hidden="true"
               ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
                 d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
               /></svg
-            ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={known === null || known.length === 0}>
+            >{/if}<select
+              aria-label="Branch"
+              title={wantsDisk ? `Working tree${checkout?.path ? ` at ${checkout.path}` : ""}${diskTree?.branch ? `, on ${diskTree.branch}` : ""}` : (branchName ?? undefined)}
+              value={wantsDisk ? WORKING_TREE : (branchName ?? "")}
+              onchange={pick}
+              disabled={(known === null || known.length === 0) && !wantsDisk}
+            >
+              <!-- The working tree first, under a rule, where the repository is cloned here (2026-11-21): its words never
+                   change, so no re-read resizes the box; a checkout that can't be read keeps it, disabled, saying why. -->
+              {#if checkout?.path != null || wantsDisk}
+                <option value={WORKING_TREE} disabled={!wantsDisk && diskWhy !== null} title={diskWhy ?? undefined}
+                  >{wantsDisk || diskWhy === null ? "Working tree" : `Working tree: ${diskWhy}`}</option
+                ><hr />
+              {/if}
+              <!-- Before the list is read, the shown name is its one option, so the box is as wide as that name from its first draw. -->
+              {#if known === null && branchName && !wantsDisk}<option value={branchName}>{branchName}</option>{/if}
               {#each known ?? [] as option (option.name)}
                 <!-- A branch knobas is making has nothing to read at until a read lists it: offered, but not to read at yet. -->
                 <option value={option.name} disabled={option.made !== undefined} title={option.made !== undefined ? `Being made on ${sourceName(source)}: it can be read once it is there` : undefined}
                   >{option.name}{option.made !== undefined ? ` (${option.made})` : ""}</option
                 >
               {/each}
-            </select></label
+            </select><svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+              ><path d="M4 6l4 4 4-4" /></svg
+            ></label
           >
         </span>
         <button
@@ -1426,7 +1490,8 @@
       {#each REPO_TABS as entry, n (entry.id)}
         {@const count = countOf(entry.id)}
         {#if n > 0 && REPO_TABS[n - 1]!.group !== entry.group}<span class="tf-tabgrp" aria-hidden="true"></span>{/if}
-        <a href={tabHref(held, repoId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
+        <!-- On the working tree, Compare opens with it as *From* (ADR-0049's page), or where the reader left it on it. -->
+        <a href={entry.id === "compare" && onDisk && !isWorkingTree(placeOf("compare").branch) ? compareHash(repoId, WORKING_TREE) : tabHref(held, repoId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn} class:tf-err={count.err === true} title={entry.id === "builds" && count.err === true ? `${count.n} failing on ${defaultBranch?.name ?? "the default branch"} or your branch` : undefined}>{count.n}</span
             >{:else if COUNTED.has(entry.id)}{" "}<span class="tf-count tf-hidden" aria-hidden="true"></span>{/if}</a
         >
@@ -1447,6 +1512,9 @@
             <TfRepoTab shown={one === slot}>
               <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} fileBytes={ports.fileBytes ?? null} piped={ports.piped ?? null} />
             </TfRepoTab>
+          {:else if one === "files" && wantsDisk && disk === null && (checkout === undefined || onDisk)}
+            <!-- The working tree waits for the checkout and git's list, so its tree draws once (2026-11-21). -->
+            <TfRepoTab shown={one === slot}><div class="tf-files"></div></TfRepoTab>
           {:else if at !== null && (branchName !== null || filesAtOnce(one))}
             <!-- The rest wait for the branch every tab reads at: the mirror's default, or the list's (#2243). Files
                  does not on a repository no branch was picked on, where it reads at the repository (`filesAtOnce`). -->
@@ -1474,6 +1542,7 @@
                   refusal={commitRefused}
                   treeSections={detail?.tree ?? null}
                   ondrew={() => treeDrew.tell()}
+                  {disk}
                 />
               {:else if one === "commit" && placeOf(one).commit !== null}
                 <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />

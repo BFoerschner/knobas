@@ -3,7 +3,7 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-long-paths`, `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, WorkingAt } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, LocalDir, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, ViewBlock, WorkingAt } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
 import { lineDiff } from "../../../tf/diff/line-diff";
 import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
@@ -213,6 +213,28 @@ function fakeDiffOf(view: ReturnType<typeof repoView>, local: boolean, ignoreWhi
     file.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === kind).map((line) => line.text.replace(/\s+/g, ""))).join("\n");
   const files = local && ignoreWhitespace ? block.files.filter((file) => bare(file, "add") !== bare(file, "del")) : block.files;
   return { files, truncated: block.truncated, range: block.range ?? null, read_at: local ? "checkout" : "source" };
+}
+
+/** The checkout's `HEAD`, where the fixture has one. */
+function fakeHead(entityId: string): string | null {
+  const tree = fakeCheckout(entityId).tree;
+  return tree?.status === "read" ? tree.head : null;
+}
+
+/** `entity_local_dir` at the checkout's `HEAD`: the source's listing of the folder; `null` at any other commit, as before. */
+function fakeHeadDir(entityId: string, commit: string | null, dir: string): LocalDir | null {
+  if (commit === null || commit !== fakeHead(entityId)) return null;
+  const block = repoView(entityId, dir === "" ? "files" : `files:${dir}`)?.sections[0]?.blocks[0];
+  if (block?.type !== "tree") return null;
+  const entries = block.entries.map((entry) => ({ path: dir === "" ? entry.name : `${dir}/${entry.name}`, kind: entry.kind, size: entry.size }));
+  return { commit, as_of: null, dir, entries, complete: true };
+}
+
+/** `entity_local_file` at the checkout's `HEAD`: the source's file. */
+function fakeHeadFile(entityId: string, commit: string | null, path: string): ViewBlock | null {
+  if (commit === null || commit !== fakeHead(entityId)) return null;
+  const block = repoView(entityId, `file:${path}`)?.sections[0]?.blocks[0];
+  return block?.type === "file" ? { ...block, commit } : null;
 }
 
 /** `entity_checkout`, including the refusal a non-repo kind gets. */
@@ -720,11 +742,13 @@ export function handlers(): Handlers {
     entity_commit_diff: (args) =>
       fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
-    // The demo has no checkout on disk to read a tree at (ADR-0041): Files reads the fake source, as before.
+    // The demo has no checkout on disk to read a tree at the mirror's tip (ADR-0041): Files reads the fake source, as before.
+    // At the checkout's own `HEAD` it answers with the source's tree, so the working tree in the branch box (2026-11-21)
+    // draws: `HEAD`'s tree with the fixture's uncommitted changes laid over it.
     entity_local_tree: () => null,
-    entity_local_dir: () => null,
+    entity_local_dir: (args) => fakeHeadDir(String(args["entityId"] ?? ""), (args["commit"] as string | null | undefined) ?? null, String(args["dir"] ?? "")),
     entity_local_paths: () => null,
-    entity_local_file: () => null,
+    entity_local_file: (args) => fakeHeadFile(String(args["entityId"] ?? ""), (args["commit"] as string | null | undefined) ?? null, String(args["path"] ?? "")),
     entity_source_range_diff: (args) =>
       fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),
     entity_range_files: (args) => {

@@ -251,7 +251,6 @@ select.tf-stg-in { padding-inline-start: 4px; }
   flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: 44px; line-height: 19px; padding: 3px 8px;
   overflow-y: auto; background: var(--sheet-2); border-radius: 4px;
 }
-.tf-apprun-box:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-apprun code { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-apppage .tf-phs { margin: 4px 0 6px; }
 /* *Try it on*'s *Finding more…* and *Clone one in Code* share one cell, each holding its room unseen while it doesn't apply, so a
@@ -261,7 +260,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-more > .tf-stg-done { visibility: hidden; }
 .tf-appremove { margin-left: auto; }
 /* Where a list lands back from an entry's page (2026-11-17): the entry's row, outlined inside the table's edge. */
-.tf-land:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-land:focus { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-in); }
 .tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 /* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
 .tf-stg-l small.tf-req { display: inline; margin-left: 4px; }

@@ -87,6 +87,8 @@
 .tf-prlist { display: flex; flex-direction: column; padding: 6px 0; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-prit { display: flex; align-items: center; gap: 8px; padding: 5px 12px; min-height: 32px; }
 .tf-prgrow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Room for the focus ring of the link it holds, given back outside, so nothing moves (design system, Motion and focus). */
+.tf-prgrow { padding: 4px; margin: -4px; }
 .tf-prreviewers > header > .tf-acts { margin-left: auto; }
 .tf-prreq { --fs: var(--size-ui); font: 600 calc(var(--t-2xs) * var(--fs)) var(--sans); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
 .tf-prnote { margin: 0; padding: 10px 12px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }

@@ -154,6 +154,7 @@
     BAND,
     bandFolder,
     checkoutListing,
+    diskListings,
     fileMeta,
     goToFile,
     graftedListings,
@@ -178,6 +179,8 @@
   import { folderRenderHash, pickMadeDefault, renderedHash, type FolderRenderAt } from "./repo";
   import { FolderRun } from "../../render/folder-run.svelte";
   import { thousands } from "../counted";
+  import { WORKING_TREE } from "../diff/address";
+  import type { WorkingMark } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -212,6 +215,7 @@
     folderMarks = folderRenderMarks,
     folderPorts = ipcFolderRenderPorts,
     madePorts = ipcMadePorts,
+    disk = null,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "archive" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -277,6 +281,13 @@
     folderPorts?: FolderRenderPorts;
     /** A generated folder's tree and files by its token (ADR-0046): the IPC, a fake in tests. */
     madePorts?: MadePorts;
+    /**
+     * The working tree chosen in the branch box (2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`):
+     * the checkout's tree at `head`, read from the checkout and never from the source, with `marks` (git's uncommitted
+     * list, ADR-0026) laid over it; a changed or added file read as it is on disk (ADR-0049). `stamp` is the list's,
+     * so a file read from disk is read again when it moves. `null` on a branch.
+     */
+    disk?: { head: string; marks: ReadonlyMap<string, WorkingMark>; stamp: string; branch: string | null; standing: string | null } | null;
   } = $props();
 
   /** The real file the address names; `null` inside a generated folder, whose path is its own (ADR-0046). */
@@ -404,8 +415,25 @@
   const LOCAL = "\u0001local\u0000";
   const localId = (commit: string, kind: "dir" | "file" | "paths", full: string) => `${LOCAL}${commit}\u0000${kind}\u0000${full}`;
   function parseLocal(section: string): { commit: string; kind: string; full: string } | null {
+    // A file read from disk (`diskId`) carries the uncommitted list's stamp after its path.
     const [commit, kind, full] = section.slice(LOCAL.length).split("\u0000");
     return commit === undefined || kind === undefined || full === undefined ? null : { commit, kind, full };
+  }
+
+  /** A file of the working tree read from disk (2026-11-21): its own kind, so its read never stands for `HEAD`'s blob. */
+  const diskId = (commit: string, full: string, stamp: string) => `${localId(commit, "disk" as "file", full)}\u0000${stamp}`;
+  /** The bytes knobas reads of a working file (ADR-0049) as the file block the tab draws: text where it is UTF-8, else binary. */
+  function diskBlock(full: string, bytes: Uint8Array): FileBlock {
+    let text = "";
+    let binary = bytes.includes(0);
+    if (!binary) {
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        binary = true;
+      }
+    }
+    return { type: "file", trail: [], path: full, text, language: null, size: bytes.length, truncated: bytes.length >= BYTES_CAP, binary, url: null, sha: null, commit: null } as FileBlock;
   }
 
   /** One folder of the checkout's tree as the listing the tab draws, its entries opened by sections the tab makes. */
@@ -420,6 +448,11 @@
     const named = parseLocal(section);
     if (named === null) return undefined;
     const wrap = (block: ViewBlock): ViewSection => ({ id: section, title: "Files", count: null, deferred: false, blocks: [block] });
+    if (named.kind === "disk") {
+      const read = ports.fileBytes;
+      if (read === undefined) throw new Error(`Your checkout could not read ${named.full}.`);
+      return wrap(diskBlock(named.full, await read(repoId, named.full, WORKING_TREE)));
+    }
     if (named.kind === "file") {
       const read = ports.localFile;
       const block = read === undefined ? null : await read(where, named.commit, named.full);
@@ -434,7 +467,10 @@
       return wrap({ type: "tree", trail: [], entries, truncated: answer.truncated, url: null });
     }
     const read = ports.localDir;
-    const answer = read === undefined ? null : await read(where, named.commit, named.full);
+    // A folder only the working tree has (its files untracked or added): `HEAD` lists nothing there, and the changes laid
+    // over the listings name its files.
+    const answer = read === undefined ? null : await read(where, named.commit, named.full).catch((error: unknown) => (disk !== null && named.full !== "" ? null : Promise.reject(error)));
+    if (answer === null && disk !== null && named.full !== "") return wrap({ type: "tree", trail: [], entries: [], truncated: false, url: null });
     if (answer === null) throw new Error(`Your checkout could not read ${named.full || "its top folder"}.`);
     if (!answer.complete) {
       // Past what the checkout's read holds: the source's listing of the folder, by the scheme it declares.
@@ -450,7 +486,7 @@
    */
   function readLocal(where: string, mine: number) {
     const read = ports.localDir;
-    if (read === undefined) return;
+    if (read === undefined || disk !== null) return;
     read(where, null, "").then(
       (top) => (top === null ? false : land(top, where, mine)),
       // No checkout's copy: the source's reads draw the tree, as before.
@@ -529,7 +565,7 @@
     const held = local;
     const read = ports.localDir;
     const [where, mine] = [at, generation];
-    if (held === null || read === undefined) return Promise.resolve();
+    if (held === null || read === undefined || disk !== null) return Promise.resolve();
     return read(where, null, "").then(
       (top) => {
         if (top === null || top.commit === held.commit || local?.commit !== held.commit || mine !== generation) return;
@@ -658,7 +694,7 @@
         listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
         if (block?.type === "tree" && block.read_alone) readAlone = true;
         if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
-        if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
+        if (dir === "") pathsSection = disk !== null ? localId(disk.head, "paths", "") : block?.type === "tree" ? (block.paths ?? null) : null;
       },
       (error) => {
         // The checkout's copy stands where the source cannot answer.
@@ -667,9 +703,11 @@
     );
   }
 
-  // A new branch is a new tree.
+  // A new branch is a new tree, and so is the working tree at another `HEAD`.
+  const diskHead = $derived(disk?.head ?? null);
   $effect(() => {
     void at;
+    void diskHead;
     generation += 1;
     sourceTop = null;
     sourceTopHeld = null;
@@ -690,6 +728,10 @@
     untrack(() => {
       // Rule 3 (ADR-0046): a new branch clears every graft; the address's comes back by rule 1.
       grafts.clear();
+      if (disk !== null) {
+        readDir("", localId(disk.head, "dir", ""));
+        return;
+      }
       readLocal(at, generation);
       readDir("", "files");
     });
@@ -1024,7 +1066,16 @@
     })),
   );
   /** The listings the tree draws: the real ones, with each graft's rows in its folder's place. */
-  const treeListings = $derived(grafts.size === 0 ? listings : graftedListings(listings, grafted));
+  const readListings = $derived(grafts.size === 0 ? listings : graftedListings(listings, grafted));
+  /** The working tree's changes laid over `HEAD`'s listings (`diskListings`): a new list re-lays them, nothing read again. */
+  const treeListings = $derived(
+    disk === null
+      ? readListings
+      : diskListings(readListings, disk.marks, (full) => diskId(disk.head, full, disk.stamp), (full) => localId(disk.head, "dir", full)),
+  );
+  /** How a path stands in the working tree, or `M` for a file the checkout changed while a branch is shown. */
+  const markOf = (full: string): WorkingMark | undefined => (disk !== null ? disk.marks.get(full) : changed.has(full) ? "M" : undefined);
+  const MARK_WORDS: Record<WorkingMark, string> = { M: "Changed in your checkout", A: "Added in your working tree", D: "Deleted in your working tree" };
   const bands = $derived(grafts.size === 0 ? undefined : new Set(grafts.keys()));
 
   // ---- A generated file (ADR-0046) ----
@@ -1665,6 +1716,8 @@
   const notEditable = $derived(
     file === null
       ? null
+      : disk !== null
+        ? `Edit commits to ${sourceName(source)}. Open the file in your editor to change it here`
       : file.binary
         ? "A binary file is not edited here"
         : file.truncated
@@ -1757,6 +1810,8 @@
    */
   function rereadTop(): Promise<unknown> {
     const mine = generation;
+    // The working tree is the checkout's `HEAD` and git's list over it: no source's top to read; a new list re-lays it.
+    if (disk !== null) return Promise.resolve();
     return readSection("files").then(
       (read) => {
         const block = read?.blocks[0];
@@ -1834,6 +1889,7 @@
    */
   function rereadTree(): Promise<unknown> {
     const mine = generation;
+    if (disk !== null) return Promise.resolve();
     const reads: Promise<unknown>[] = [rereadLocal(), rereadTop()];
     const byPath: Promise<readonly [string, TreeEntry[]] | null>[] = [];
     for (const dir of Object.keys(listings)) {
@@ -2133,11 +2189,13 @@
           data-path={full}
           data-made={row.made === undefined ? undefined : ""}
           class="tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}"
-          class:tf-changed={row.made === undefined && changed.has(full)}
+          class:tf-changed={row.made === undefined && markOf(full) === "M"}
+          class:tf-added={row.made === undefined && markOf(full) === "A"}
+          class:tf-deleted={row.made === undefined && markOf(full) === "D"}
           aria-current={full === shown && singleNow === null ? "true" : undefined}
           onpointerenter={() => restOn(full, row.section, "file")}
           onpointerleave={unrest}
-          title={changed.has(full) ? "Changed in your checkout" : undefined}
+          title={row.made === undefined && markOf(full) !== undefined ? MARK_WORDS[markOf(full)!] : undefined}
           {@attach treeRow(full)}>{@render icon("file")}{row.name}</a
         >
       {:else if row.kind === "band"}
@@ -2250,7 +2308,14 @@
     {/if}
   </aside>
   <div class="tf-fcol">
-  {#if path === null && singleNow === null && renderedNow === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
+  {#if path === null && singleNow === null && renderedNow === null && disk !== null}
+    <!-- The working tree's line in the last commit's room (2026-11-21): the source's last commit may not be `HEAD`'s. -->
+    <div class="tf-lastc tf-wtline">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 3.75h4.5l1.5 1.5h6.5v7h-12.5z" /></svg>
+      <span class="tf-wtwords">Working tree{#if disk.branch !== null}{" "}on <code class="tf-mono">{disk.branch}</code>{/if}{" "}at <code class="tf-mono">{disk.head.slice(0, 7)}</code>{#if disk.standing}, {disk.standing}{/if}</span>
+      <a class="tf-btn tf-sm tf-ghost tf-lastc-all" href={repoHash(repoId, "local")}>Local changes</a>
+    </div>
+  {:else if path === null && singleNow === null && renderedNow === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
   {#if singleNow !== null}
     {#if renderedBy !== null}
       <TfFolderRender
@@ -2397,7 +2462,12 @@
       {#if movedNote !== null}
         <div class="tf-banner tf-info" role="status">{movedNote}</div>
       {/if}
-      {#if fileMade === null && changed.has(file.path)}
+      {#if fileMade === null && disk !== null && markOf(file.path) !== undefined}
+        <div class="tf-banner tf-info">
+          {#if markOf(file.path) === "D"}Deleted in your working tree. This is the file at {disk.head.slice(0, 7)}.{:else}Shown as it is on disk, with your uncommitted change.{/if}
+          <span class="tf-trail"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>
+        </div>
+      {:else if fileMade === null && disk === null && changed.has(file.path)}
         <div class="tf-banner tf-warn">
           Your checkout has an uncommitted change to this file.
           <span class="tf-trail"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>

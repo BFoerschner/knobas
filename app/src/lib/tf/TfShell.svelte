@@ -92,6 +92,7 @@
   import { capturePlace, pressOpens, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
   import { installFocusKeep, installKeysHere } from "./focus-keep";
+  import { installInputModality } from "./input-modality";
   import { loadEveryFace } from "../shell/faces";
   import { warmDiffView } from "./diff/warm";
   import { warmDiagrams } from "../render/diagram";
@@ -1025,6 +1026,8 @@
   onMount(() => installExternalLinks());
   onMount(() => installFocusKeep());
   onMount(() => installKeysHere());
+  // A select rings after a key, not after a press (design system, Motion and focus).
+  onMount(() => installInputModality());
   onMount(() => installZoomInput(zoom));
   // So no page's first draw waits on a face and lays itself out again when it lands (the render-cost pass, 2026-11-14).
   onMount(() => loadEveryFace());

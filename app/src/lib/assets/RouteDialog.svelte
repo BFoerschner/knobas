@@ -559,8 +559,8 @@
 
   /* Inside the list, as `MoveDialog` draws it. */
   .opt:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: -2px;
+    outline: var(--focus-w) solid var(--focus-c, var(--focus));
+    outline-offset: var(--focus-in);
   }
 
   .opt {

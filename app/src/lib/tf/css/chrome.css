@@ -74,8 +74,8 @@
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
 }
 
-/* Inside a box that clips, a ring outside the element loses its sides: it draws inside. */
-:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc, .tf-picks, .tf-picklist, .tf-tbl) :focus-visible { outline-offset: -2px; }
+/* Inside a box that clips, a ring outside the element loses its sides: it draws inside (design system, Motion and focus). */
+:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc, .tf-picks, .tf-picklist, .tf-tbl, .tf-menu, .tf-dh-rows, .tf-ftree, .tf-flist, .tf-fence, .tf-editor) { --focus-o: var(--focus-in); }
 
 .tf-status {
   display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2);
@@ -245,6 +245,29 @@
 .tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: calc(var(--t-md) * var(--fs)); }
 
+/* The branch box (#2238 story 6; the focus pass, docs/decisions/2026-11-21-a-ring-takes-the-shape-of-what-it-rings.md;
+   Björn: "the box from branch switching kind of feels like it's different sized than the button above"): a select in a row
+   of buttons is a button that opens a list. The native select is the box itself, on the button's fill, height, padding and
+   radius, its name in the code face at the button's size and weight, *Open in*'s caret, as wide as its name up to 282 px
+   and then cut. The row is anchored at its end, so a pick grows it leftward and the buttons after it keep their place;
+   stacked from the page's edge, and in a WebView without `field-sizing`, it keeps its longest option's width. */
+.tf-bsel { position: relative; display: inline-flex; flex: none; color: var(--ink); }
+.tf-bsel select {
+  appearance: none; height: var(--control-h); max-width: 282px; padding: 0 29px 0 33px;
+  border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: inherit; cursor: pointer;
+  --fs: var(--size-code); font: 500 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  field-sizing: content; text-overflow: ellipsis; white-space: nowrap;
+}
+.tf-bsel select:hover { border-color: var(--ink-2); }
+/* It stands free in its row, so its ring is outside, as a button's is, not a field's border. */
+.tf .tf-bsel select:focus-visible { outline-offset: var(--focus-off); }
+.tf-bsel > svg { position: absolute; top: 50%; translate: 0 -50%; pointer-events: none; }
+.tf-bsel > svg:first-child { left: 11px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tf-bsel > .tf-caret { right: 11px; }
+.tf-bsel:has(select:disabled) { color: var(--muted); }
+.tf-bsel select:disabled { cursor: not-allowed; background: none; border-color: var(--rule-2); }
+.tf-repohold.tf-stacked .tf-bsel select { field-sizing: fixed; }
+
 /* Danger, one pair: red text starts a destructive action, filled red confirms it. */
 .tf-btn.tf-danger { color: var(--err); }
 .tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }
@@ -289,7 +312,7 @@
   :is(tr, li, .tf-r):has(.tf-rowacts):hover, tr:has(.tf-rowacts):hover > td { background: var(--sheet-2); }
 }
 /* A row takes focus when the row above it left (`focus-keep.ts`), its ring inside so its neighbours don't cut it. */
-:is(tr, li, [data-row], [data-entity], .tf-rowhost, .tf-ib, .tf-r, .tf-lk)[tabindex="-1"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+:is(tr, li, [data-row], [data-entity], .tf-rowhost, .tf-ib, .tf-r, .tf-lk)[tabindex="-1"] { --focus-o: var(--focus-in); }
 /* A page's heading takes focus after a move by key (`focus-keep.ts`), to start the next `Tab` there. It can't be pressed, so it draws no ring. */
 .tf-main h1[tabindex="-1"]:focus { outline: none; }
 /* What holds focus only so `Esc` has somewhere to step out to (`escape.ts`), the next `Tab` going back in, or so a press in it leaves the keys there (`focus-keep.ts`): it can't be pressed, so it draws no ring (F-653, F-649). */
@@ -344,7 +367,6 @@
 .tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }
 /* A button that is part of a chip's text, drawn as that text (design system, Controls: chip buttons). */
 .tf-chipbtn { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
-.tf-chipbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 2px; }
 /* A sign (`TfSign`, design system, Controls: the sign): a few words for what is too long for its line, outlined as a label
    is, one line of the subline tall, so it neither moves what is under it nor holds a path. The clone's sign says where a
    repository page reads from, *Local* and how the clone stands or *Remote*; the chain's sign a pipeline's step, *Step 64
@@ -356,7 +378,6 @@
   line-height: 16px; white-space: nowrap; cursor: pointer;
 }
 .tf-signbtn:hover, .tf-signbtn[aria-expanded="true"] { border-color: var(--ink-2); }
-.tf-signbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-signbtn svg { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
 .tf-sign-word { flex: none; color: var(--ink); font-weight: 600; }
 .tf-sign-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

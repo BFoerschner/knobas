@@ -332,7 +332,6 @@
 .tf-dh-row { display: block; padding: 8px 12px; border-top: 1px solid var(--rule-2); text-decoration: none; }
 .tf-dh-row:first-child { border-top: 0; }
 .tf-dh-row:hover { background: var(--sheet-2); }
-.tf-dh-rows :focus-visible { outline-offset: -2px; }
 .tf-dh-t { display: block; --fs: var(--size-read); font-family: var(--serif); font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; line-height: 1.3; letter-spacing: normal; word-spacing: normal; overflow-wrap: anywhere; }
 .tf-dh-row .tf-why { display: block; margin-top: 2px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-dh-rowt { padding: 6px 12px; }

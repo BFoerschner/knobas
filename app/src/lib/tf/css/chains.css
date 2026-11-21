@@ -15,7 +15,6 @@
   font: inherit; font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap; cursor: pointer;
 }
 .tf-chainfold:hover { border-color: var(--ink-2); color: var(--ink); }
-.tf-chainfold:focus-visible, .tf-chain > header button.tf-open:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-chain > header button.tf-open { border: 0; background: none; font: inherit; font-size: calc(var(--t-sm) * var(--fs)); cursor: pointer; }
 .tf-chainrow .tf-link.tf-ok { border-left-color: var(--ok); }
 .tf-chainrow .tf-link.tf-err { border-left-color: var(--err); }
@@ -67,7 +66,6 @@
 .tf-arow .tf-sz { text-align: right; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-arow.tf-dir { font-weight: 600; background: var(--sheet-2); }
 .tf-arow.tf-dir > button.tf-fold { all: unset; cursor: pointer; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tf-arow.tf-dir > button.tf-fold:focus-visible { outline: 2px solid var(--focus); }
 .tf-arow.tf-ad1 .tf-nm, .tf-arow.tf-ad1 > .tf-fold { padding-left: 18px; }
 .tf-arow.tf-ad2 .tf-nm, .tf-arow.tf-ad2 > .tf-fold { padding-left: 36px; }
 .tf-arow.tf-ad3 .tf-nm, .tf-arow.tf-ad3 > .tf-fold { padding-left: 54px; }
@@ -82,7 +80,6 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-arow > button.tf-aopen:hover { text-decoration: underline; text-underline-offset: 3px; }
-.tf-arow > button.tf-aopen:focus-visible { outline: 2px solid var(--focus); }
 .tf-tres { margin-top: 10px; }
 /* Fixed end columns: each row is its own grid, so `auto` put a failed row's time somewhere else. */
 .tf-trow > :nth-child(n + 3) { text-align: right; font-variant-numeric: tabular-nums; }
@@ -90,7 +87,6 @@
 .tf-trow:first-child { border-top: 0; }
 .tf-trow .tf-nm { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-sm) * var(--fs)); overflow-wrap: anywhere; }
 .tf-trow .tf-nm button { all: unset; cursor: pointer; }
-.tf-trow .tf-nm button:focus-visible { outline: 2px solid var(--focus); }
 .tf-trow .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-tdetail { padding: 4px 12px 10px 34px; }
 .tf-tdetail pre { margin: 0; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre-wrap; background: var(--sheet-2); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; }

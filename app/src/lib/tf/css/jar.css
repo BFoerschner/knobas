@@ -86,7 +86,7 @@
 }
 .tf-jar-rbtn:hover { background: var(--sheet-2); }
 .tf-jar-rbtn[aria-expanded="true"] { background: var(--sheet-2); }
-.tf-jar-rbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-jar-rbtn { --focus-o: var(--focus-in); }
 .tf-jar-caret { width: 10px; height: 10px; fill: none; stroke: var(--ink-2); stroke-width: 1.6; justify-self: center; }
 .tf-jar-caret.tf-jar-open { transform: rotate(90deg); }
 .tf-jar-nocaret { width: 10px; }

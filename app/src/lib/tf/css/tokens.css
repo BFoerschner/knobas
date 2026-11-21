@@ -156,12 +156,24 @@ a { color: var(--info); text-decoration: none; }
 /* No `.tf p { margin: 0 }` here: `* { margin: 0 }` above already does it, and that rule's weight beat every
    one-class margin on a heading or paragraph, so `.tf-md > * + *` and the like never applied. */
 
-/* Focus is always visible: 2px --focus, and --card-ink on a yellow card, where --focus is 1.22:1 in dark. */
-.tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-.tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
+/* Focus (design system, Motion and focus; docs/decisions/2026-11-21-a-ring-takes-the-shape-of-what-it-rings.md): a 2 px ring
+   in the surface's colour with no radius of its own, so it takes the shape of what it rings (a pill stays round, a square row
+   stays square). A control standing free wears it outside, `--focus-off`; a field, and anything in a box that clips, inside,
+   `--focus-in`, so a field's border becomes the ring and no parent cuts it. A container sets `--focus-o` or `--focus-c`; no
+   component writes an outline of its own. */
+:root { --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; }
+.tf { --focus-c: var(--focus); --focus-o: var(--focus-off); }
+.tf :focus-visible { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-o); }
+/* A field's ring is its own border, in `--focus` on the field's own fill wherever the field stands. */
+.tf :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible { outline-color: var(--focus); outline-offset: var(--focus-in); }
+/* A box that is the field, its input bare inside it. */
+.tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: var(--focus-in); }
+/* A select pressed with the mouse draws no ring, as a button pressed so draws none (`input-modality.ts` sets `data-input`). */
+:root[data-input="pointer"] .tf select:focus-visible { outline: none; }
+/* On a yellow card the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
+.tf .tf-card { --focus-c: var(--card-ink); }
 /* A ring drawn inside a fill is `--paper`: `--focus` on it is 1.10:1 in dark and 2.62:1 in light, `--paper` 8.48 and 13.23. */
-.tf :is(.tf-seg button[aria-pressed="true"], .tf-pi[aria-current="true"], .tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"]):focus-visible,
-.tf :is(.tf-rd-tree details > summary.tf-cur) :focus-visible { outline-color: var(--paper); }
+.tf :is(.tf-seg button[aria-pressed="true"], .tf-pi[aria-current="true"], .tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"]) { --focus-c: var(--paper); }
 /* `hidden` means hidden. A class that sets `display` beat the browser's own rule, which is how a dead tab kept its button. */
 .tf [hidden] { display: none !important; }
 

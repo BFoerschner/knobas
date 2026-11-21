@@ -5,7 +5,7 @@
  * so a token that drifts from the spec fails here.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliDecompressSync } from "node:zlib";
 
@@ -43,7 +43,9 @@ test("a field is on `--field`: `--paper` and `--sheet` read as disabled", () => 
     return selectors!
       .split(",")
       .map((selector) => selector.trim())
-      .filter((selector) => /(^|[\s>+~])(input|textarea|select)\b[^\s>+~]*$/.test(selector) && !/checkbox|radio/.test(selector));
+      .filter((selector) => /(^|[\s>+~])(input|textarea|select)\b[^\s>+~]*$/.test(selector) && !/checkbox|radio/.test(selector))
+      // The branch box is a select in a row of buttons, so it is a button, on the button's fill (2026-11-21, the focus pass).
+      .filter((selector) => selector !== ".tf-bsel select");
   });
   expect(onPage).toEqual([]);
 });
@@ -213,8 +215,62 @@ test("width comes from font-variation-settings, and font-stretch only as its twi
 });
 
 test("focus is 2px --focus, and --card-ink on a card surface", () => {
-  expect(block(code, ".tf :focus-visible")).toMatch(/outline: 2px solid var\(--focus\)/);
-  expect(code).toMatch(/\.tf \.tf-card:focus-visible, \.tf \.tf-card :focus-visible \{ outline-color: var\(--card-ink\); \}/);
+  expect(code).toMatch(/:root \{ --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; \}/);
+  expect(code).toMatch(/\.tf \{ --focus-c: var\(--focus\); --focus-o: var\(--focus-off\); \}/);
+  expect(block(code, ".tf :focus-visible")).toMatch(/outline: var\(--focus-w\) solid var\(--focus-c\); outline-offset: var\(--focus-o\);/);
+  expect(block(code, ".tf .tf-card")).toMatch(/--focus-c: var\(--card-ink\)/);
+});
+
+/**
+ * The ring takes the shape of what it rings (2026-11-21; Björn: "the blue selection outline around elements might seem
+ * weird"): the focus rule set `border-radius: 3px`, so a focused pill or switch went square and a square tab went round.
+ */
+test("no focus rule changes a control's shape: none sets a radius", () => {
+  const focusRules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => /:focus(-visible|-within)?\b/.test(selectors!));
+  expect(focusRules.length).toBeGreaterThan(20);
+  for (const [, selectors, body] of focusRules) expect(body, selectors!.trim()).not.toMatch(/border-radius/);
+});
+
+/**
+ * One place: a component sets `--focus-o` or `--focus-c`, and never writes the ring's literal width and colour. Every
+ * stylesheet is read, those a component imports itself (`jar.css`, `openapi.css`) too, and every component's `<style>`.
+ */
+test("no component writes a ring of its own: every focus outline is drawn from the tokens", () => {
+  const sheets = readdirSync(join(APP, "src/lib/tf/css"))
+    .filter((name) => name.endsWith(".css"))
+    .map((name) => [name, readFileSync(join(APP, "src/lib/tf/css", name), "utf8")] as const);
+  const components = (readdirSync(join(APP, "src/lib"), { recursive: true }) as string[])
+    .filter((name) => name.endsWith(".svelte"))
+    .map((name) => [name, readFileSync(join(APP, "src/lib", name), "utf8").match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ""] as const);
+  expect(sheets.length).toBeGreaterThan(30);
+  for (const [name, text] of [...sheets, ...components]) {
+    const body = text.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(body, name).not.toMatch(/outline:\s*2px solid var\(--focus\)/);
+    const focusRules = [...body.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => /:focus(-visible|-within)?\b/.test(selectors!));
+    for (const [, selectors, rule] of focusRules) expect(rule, `${name}: ${selectors!.trim()}`).not.toMatch(/outline(-offset|-width)?:[^;]*\dpx/);
+  }
+});
+
+test("a field rings inside, as its own border; a box that clips gives what it holds the inside ring", () => {
+  expect(code).toMatch(/\.tf :is\(textarea, select, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\]\)\):focus-visible \{ outline-color: var\(--focus\); outline-offset: var\(--focus-in\); \}/);
+  const clippers = /:is\(([^)]*)\) \{ --focus-o: var\(--focus-in\); \}/.exec(code);
+  expect(clippers).not.toBeNull();
+  for (const box of [".tf-nav", ".tf-tabs", ".tf-seg", ".tf-menu", ".tf-flist", ".tf-fence", ".tf-ftree", ".tf-tbl"]) expect(clippers![1]!.split(", ")).toContain(box);
+});
+
+test("a select pressed with the mouse draws no ring (`data-input`, input-modality.ts)", () => {
+  expect(code).toMatch(/:root\[data-input="pointer"\] \.tf select:focus-visible \{ outline: none; \}/);
+});
+
+/** The branch box is a button that opens a list (2026-11-21; Björn: "the box from branch switching … different sized than the button above"). */
+test("the branch box wears the button's face: height, fill, border, radius, padding, and as wide as its name", () => {
+  const box = block(code, ".tf-bsel select");
+  expect(box).toMatch(/appearance: none; height: var\(--control-h\); max-width: 282px; padding: 0 29px 0 33px;/);
+  expect(box).toMatch(/border: 1px solid var\(--rule\); border-radius: 4px; background: var\(--sheet\)/);
+  expect(box).toMatch(/font: 500 calc\(var\(--t-sm\) \* var\(--fs\)\) var\(--mono\)/);
+  expect(box).toMatch(/field-sizing: content/);
+  expect(block(code, ".tf-btn")).toMatch(/height: var\(--control-h\); padding: 0 11px; border: 1px solid var\(--rule\); border-radius: 4px;\s*background: var\(--sheet\)/);
+  expect(block(code, ".tf .tf-bsel select:focus-visible")).toMatch(/outline-offset: var\(--focus-off\)/);
 });
 
 test("a disabled icon-only button is dimmed like a disabled button (#2288)", () => {

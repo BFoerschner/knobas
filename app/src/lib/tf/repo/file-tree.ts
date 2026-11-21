@@ -327,3 +327,59 @@ export function authorOf(row: ViewRow): { author: string | null; when: string | 
   const lead = `${author} · `;
   return { author, when: row.meta?.startsWith(lead) ? row.meta.slice(lead.length) : row.meta };
 }
+
+// ---- The working tree (2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`) ----
+
+/** The order `checkoutListing` draws a folder in: folders first, then by name with case aside, then by bytes. */
+const listingOrder = (a: TreeEntry, b: TreeEntry) =>
+  Number(b.kind === "dir") - Number(a.kind === "dir") ||
+  a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
+  (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+/**
+ * The checkout's `HEAD` as the tab has read it (`listings`, a folder at a time), with the working tree's changes laid
+ * over it: a modified file is opened by `diskSection` (read from disk), an added or untracked one gets a row (and the
+ * folders above it that `HEAD` lacks get theirs), and a deleted one keeps its row, so nothing under it moves. Only the
+ * folders read so far, and the new folders an added file makes, are listed; a folder not read yet stays unread.
+ */
+export function diskListings(
+  listings: Readonly<Record<string, readonly TreeEntry[]>>,
+  marks: ReadonlyMap<string, "M" | "A" | "D">,
+  diskSection: (path: string) => string,
+  dirSection: (path: string) => string,
+): Record<string, TreeEntry[]> {
+  const out: Record<string, TreeEntry[]> = {};
+  for (const [dir, entries] of Object.entries(listings)) out[dir] = [...entries];
+  if (marks.size === 0) return out;
+  const parent = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+  const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+  const touched = new Set<string>();
+  const add = (dir: string, entry: TreeEntry) => {
+    const into = out[dir];
+    if (into === undefined) return;
+    if (into.some((held) => held.name === entry.name)) return;
+    into.push(entry);
+    touched.add(dir);
+  };
+  for (const [path, mark] of marks) {
+    if (mark === "M") {
+      const into = out[parent(path)];
+      const at = into?.findIndex((entry) => entry.name === name(path) && entry.kind !== "dir") ?? -1;
+      if (into !== undefined && at >= 0) into[at] = { ...into[at]!, section: diskSection(path) };
+      // A file git names changed that the folder read does not hold still gets its row: the list is what is on disk.
+      else add(parent(path), { name: name(path), kind: "file", size: null, section: diskSection(path) });
+      continue;
+    }
+    if (mark !== "A") continue;
+    // The folders above it that the tab has not listed: a new folder of the working tree is listed by its files alone.
+    const chain: string[] = [];
+    for (let dir = parent(path); dir !== ""; dir = parent(dir)) chain.unshift(dir);
+    for (const dir of chain) {
+      if (out[dir] === undefined && out[parent(dir)] !== undefined && !(listings[parent(dir)] ?? []).some((entry) => entry.name === name(dir))) out[dir] = [];
+      add(parent(dir), { name: name(dir), kind: "dir", size: null, section: dirSection(dir) });
+    }
+    add(parent(path), { name: name(path), kind: "file", size: null, section: diskSection(path) });
+  }
+  for (const dir of touched) out[dir]!.sort(listingOrder);
+  return out;
+}

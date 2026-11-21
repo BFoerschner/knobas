@@ -201,6 +201,8 @@ import { launch, screenOpener, sleep } from "./chrome.mjs";
 import { runQueue } from "./trip-runner.mjs";
 
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
+/** Picks *Working tree* in the repository header's branch box, as a pick in its list does (2026-11-21). */
+const CHOOSE_WORKING_TREE = `(() => { const box = document.querySelector(".tf-bsel select"); box.value = "~working-tree"; box.dispatchEvent(new Event("change", { bubbles: true })); })()`;
 /** In the page: why the menu `sel` doesn't fit (out of the window, or a row of it wider than it), or null. */
 const FITS = (sel) => String.raw`(() => {
   const menu = [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => e.getBoundingClientRect().width > 0);
@@ -450,6 +452,13 @@ const PAGES = [
     { id: "openin-browser-key", kind: "enter-twice", strict: true, finding: "open-on-gitea", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", starts: "Browser" }, returns: "Open in…" },
     { id: "openin-add-key", kind: "enter-twice", strict: true, finding: "apps-page", prep: [{ wait: 600 }, { click: ".tf-openin > button", starts: "Open in" }, { wait: 400 }], press: { sel: "[role=menuitem]", text: "Add an application" }, leaves: true },
     { id: "app-page-flow", kind: "app-page", strict: true, finding: "apps-page" },
+  ] },
+  // The working tree in the branch box (2026-11-21; Björn: "I would like to be able to select the current work tree in the
+  // branch selection, not just the branches"): chosen, Files is the checkout's `HEAD` with the changes laid over it. A row
+  // opens once by key, the changed file read from disk; Esc in its fields keeps focus.
+  { page: "The working tree in the branch box", route: `${REPO}/files/src/sepa/retry.rs`, trips: [
+    { id: "wt-row-key", kind: "enter-twice", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }], press: { sel: ".tf-ftree a[data-path='Cargo.toml']" }, leaves: true },
+    { id: "wt-fields", kind: "esc-sweep", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }] },
   ] },
   // Folder renderers (ADR-0044, ux17): every press they brought, twice by key and twice with the pointer still.
   { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, trips: [

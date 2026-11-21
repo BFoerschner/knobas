@@ -120,8 +120,7 @@
   }
 
   .acts :focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: 2px;
-    border-radius: 3px;
+    outline: var(--focus-w) solid var(--focus);
+    outline-offset: var(--focus-off);
   }
 </style>

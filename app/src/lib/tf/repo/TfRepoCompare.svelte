@@ -933,7 +933,7 @@
         >
           <option value={WORKING_TREE} disabled={checkout !== undefined && checkout.path === null}
             >{checkout !== undefined && checkout.path === null ? "Working tree: not cloned on this computer" : "Working tree"}</option
-          >
+          ><hr />
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
         {#if !openPr && sentFrom === undefined}

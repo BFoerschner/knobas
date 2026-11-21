@@ -61,7 +61,6 @@
   border: 0; outline: none; background: var(--field); color: var(--ink); font: inherit; padding: 8px 10px; resize: vertical;
   min-height: 420px; white-space: pre; overflow: auto; tab-size: 4;
 }
-.tf-editor textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tf-dialog.tf-cf-dialog { width: min(760px, calc(100vw - 32px)); }
 .tf-cf-dialog .tf-radio small input { margin-top: 4px; width: 100%; border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink); }
 @media (max-width: 900px) {

@@ -228,8 +228,8 @@
   /* Inside the list, which scrolls: a ring outside it is cut to a line along the row's edge (F-537). */
   .opts:focus-visible,
   .opt:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: -2px;
+    outline: var(--focus-w) solid var(--focus-c, var(--focus));
+    outline-offset: var(--focus-in);
   }
 
   .opt {
