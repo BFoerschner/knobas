@@ -2,7 +2,8 @@
 //! D15): `knobas-update-verify <file> <file>.sig` verifies the file with the keys this build
 //! trusts and checks that the signature's trusted comment names it. `knobas-update-verify --keys`
 //! prints the ids of those keys, one a line, which the script compares with the two committed
-//! `.pub` files, so a build that trusts a third key fails before upload.
+//! `.pub` files (`knobas-update-verify --id <file.pub>` prints a file's), so a build that trusts a
+//! third key fails before upload.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -20,6 +21,19 @@ fn main() -> ExitCode {
         }
     };
     match args.as_slice() {
+        [flag, file] if flag == "--id" => match std::fs::read_to_string(file)
+            .map_err(|error| error.to_string())
+            .and_then(|text| knobas_update::keys::decode(&text).map(|(_, id)| id))
+        {
+            Ok(id) => {
+                println!("{id}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("knobas-update-verify: {file}: {error}");
+                ExitCode::FAILURE
+            }
+        },
         [flag] if flag == "--keys" => {
             for key in keys.all() {
                 println!("{}\t{}", key.id, key.name);
@@ -54,7 +68,7 @@ fn main() -> ExitCode {
             }
         }
         _ => {
-            eprintln!("usage: knobas-update-verify <file> <file>.sig | --keys");
+            eprintln!("usage: knobas-update-verify <file> <file>.sig | --keys | --id <file.pub>");
             ExitCode::from(2)
         }
     }

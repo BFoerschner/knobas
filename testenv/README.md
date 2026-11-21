@@ -2978,6 +2978,17 @@ One script outside this folder belongs to the same family, since it measures the
 |---|---|
 | `scripts/keep-alive-budget.sh <slot>` | Keep-alive's budget and memory witness (#2250): `just keep-alive-budget <slot>`. Headless Chrome against the `?fake-ipc` dev server on `5300 + slot` (reused when one is up), debug port `9400 + slot`. Times the return to the repository page's Files tab, a 10,000-line file open (`?fake-file-lines=10000`), after Commits: 7 runs, exit 1 when the median is over 50 ms (`KEEP_ALIVE_RETURNS`, `KEEP_ALIVE_BUDGET_MS`). Then the JS heap after a forced garbage collection and the DOM node count with five pages held (that page, Inbox, Builds, Docs, Time), at *Pages kept open* 0 and 5 (`?fake-pages-kept-open=<n>`), twice each. It prints `scripts/machine-load.sh`'s line first: a timing on a machine that line calls over is quoted beside it. Starts no product; not part of `just check`. |
 
+## Updates in the harness
+
+A release build of knobas checks GitHub for an update 60 s after it starts and every 6 hours (ADR-0052). A harness that
+starts one with a scratch `HOME` sets `KNOBAS_UPDATE=off`, so agents starting knobas many times an hour never spend the
+API allowance Björn's own copy shares: `testenv/ui-checks/real-window.sh`, `testenv/live-shot.sh` and
+`scripts/single-instance-witness.sh` do, and so does a Windows boot check. A debug build and the `--demo` profile never
+check on their own anyway. To drive the updater itself, point it at a local feed with `KNOBAS_UPDATE_WEB` and
+`KNOBAS_UPDATE_API` (http to a loopback address is allowed) and build with `KNOBAS_UPDATE_EXTRA_PUBKEY` set to a
+throwaway public key (`docs/development.md`, *Update signing*). In the `?fake-ipc` fixture `?fake-update=<state>` picks
+the page's state and `fake-update-then=<state>&fake-update-after=<ms>` lands a second one (`app/src/lib/shell/dev/fake/update.ts`).
+
 ## UI checks
 
 `testenv/ui-checks/` holds the checks the UX polish loop (#2479) ran on every round. They caught regressions that the

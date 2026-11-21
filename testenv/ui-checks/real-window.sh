@@ -64,7 +64,7 @@ app_start() {
         want=live
         "$repo/target/debug/knobas-app" --demo >"$state/app.log" 2>&1 &
     else
-        KNOBAS_SECRET_STORE=memory "$repo/target/debug/knobas-app" --demo >"$state/app.log" 2>&1 &
+        KNOBAS_UPDATE=off KNOBAS_SECRET_STORE=memory "$repo/target/debug/knobas-app" --demo >"$state/app.log" 2>&1 &
     fi
     echo $! >"$state/app.pid"
     local r=""

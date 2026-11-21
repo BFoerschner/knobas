@@ -29,7 +29,7 @@ sock=/tmp/dev_knobas_desktop_si.sock
 [ -e "$sock" ] && { echo "refusing: $sock exists, a knobas is running" >&2; exit 2; }
 tmp=$(mktemp -d)
 mode=${1:-second}
-export HOME="$tmp" KNOBAS_DB_URL="postgres://x:x@127.0.0.1:1/x"
+export HOME="$tmp" KNOBAS_DB_URL="postgres://x:x@127.0.0.1:1/x" KNOBAS_UPDATE=off
 marker="using an externally managed postgres"
 first_pid="" ; second_pid=""
 # The --demo launch starts an embedded PostgreSQL on its own profile under the

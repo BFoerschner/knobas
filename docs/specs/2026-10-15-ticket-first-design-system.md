@@ -502,6 +502,21 @@ title stands anywhere but where a leaf's would. Appearance holds Code colours an
 fold and never closes it; a second on the open parent toggles; the chevron folds alone. A folded parent holding the open
 page carries the open row's fill as a 2 px edge, as Docs' tree does. The nav is one Tab stop and walks by arrow keys.
 
+### The update box
+
+Added 2026-11-21 (ADR-0052, `docs/decisions/2026-11-21-knobas-updates-itself.md`). Settings › Updates opens on one
+outlined box, `.tf-stg-run`'s border and ground: on the left the version on this computer, on the right the newest on
+the chosen channel, each a label, the version in the code face at `--t-2xl` (a version is an identifier, as a key is) and
+one grey line; between them a 4 px track with an arrowhead, which is the download's progress: empty with nowhere to go,
+an outline pointing right with somewhere to go, filling in `--info` while the download runs, whole when it is checked,
+`--err` where it failed. Under the track one reading; under a rule two lines of what the box says, their room kept;
+then two buttons at the right, the first "not now" in every state (*Cancel*, *Later*), the second the step forward.
+**Its rooms never change:** each button holds every word it ever says in one grid cell, the others hidden, so it is as
+wide as its longest word at the fonts in use, and is hidden with `visibility`, never removed. **A button that changes its
+meaning by itself** (*Downloading…* turning into *Restart to update*) takes no press for `BY_POINTER_MS` (700 ms) after
+the change, as the press rule's still pointer would. The only other mark is an 8 px `--info` dot laid over the Settings
+cog's own box, and the same dot on the Updates row of Settings' nav.
+
 ## Motion
 
 Motion answers something the person did, and there's very little of it.

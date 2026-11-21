@@ -522,6 +522,7 @@ witness-unit:
     scripts/gate-slot-test.sh
     scripts/machine-load-test.sh
     scripts/docs-check-test.sh
+    scripts/update-artifacts-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/seed-env-test.sh

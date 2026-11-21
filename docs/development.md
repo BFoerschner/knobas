@@ -146,6 +146,31 @@ you run `xattr -dr com.apple.quarantine /Applications/knobas.app`, and Windows
 shows a SmartScreen warning. The Linux artifacts carry the runner's glibc
 floor.
 
+### Update signing
+
+knobas updates itself from its releases (ADR-0052, `docs/decisions/2026-11-21-knobas-updates-itself.md`). A release
+it offers carries one minisign `.sig` beside each artifact, the Mac bundle as `knobas_<version>_aarch64.app.tar.gz`,
+and a `latest.json`, all written into the draft by `release.yml`: `scripts/pack-mac-update.sh`,
+`scripts/sign-update-artifacts.sh` (the Tauri CLI's signer, then `knobas-update-verify` against the two committed
+public keys) and the `manifest` job (`scripts/update-manifest.sh`). Those steps run only when the repository has the
+secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; without them a release builds and
+publishes as before and is never offered as an update.
+
+Publishing is what offers an update: a draft's files answer 404 without a token. `--draft=false --latest` reaches
+everyone on *Releases*, `--draft=false --prerelease --latest=false` everyone on *Pre-release builds*. A pre-release not
+meant for that channel stays a draft. A release published without `latest.json` is never offered.
+
+The two key pairs are Björn's, made by hand (`node app/node_modules/@tauri-apps/cli/tauri.js signer generate -w
+<file>`); the primary's private half and password are the two secrets, the spare's stays in his password manager, and
+both public halves are `crates/knobas-update/keys/primary.pub` and `spare.pub`. Until both are committed a build
+trusts no key and says updates aren't set up. A leaked or lost primary: put the spare into the two secrets, cut a
+release, and make a new spare for the next one.
+
+A release build started by hand or by an agent with a scratch `HOME` runs with `KNOBAS_UPDATE=off`, so it never spends
+the address's GitHub API allowance. `KNOBAS_UPDATE_WEB` and `KNOBAS_UPDATE_API` point the client at a local feed
+(https, or http to a loopback address), and `KNOBAS_UPDATE_EXTRA_PUBKEY` at compile time adds a test key to a local
+build; the release run refuses a build that trusts any key but the two committed ones.
+
 ## README screenshots
 
 Every picture in the README is generated. `docs/screenshots/shots.txt` lists
@@ -308,6 +333,7 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-secrets` | The OS-keychain credential store behind a trait, with an in-memory store for tests. No secret reaches Postgres or crosses the bridge. |
 | `knobas-site` | A source's own website shown inside knobas (ADR-0050): which addresses a site may show, the keys knobas takes from it and Esc twice, a site's states and lifetime, its session's place, the one script knobas runs in it, and the native view itself, made with raw wry as a child of the main window and given no IPC, scheme or script. Pure parts tested everywhere; the view on macOS and Windows. |
 | `knobas-search` | The launcher's read side: full-text search over the mirror in the `SearchQuery` to `SearchResponse` shape. |
+| `knobas-update` | knobas updates itself (ADR-0052): its own order of versions, the official updater's `latest.json`, the two compiled-in public keys and the minisign check, the *Releases* and *Pre-release builds* channels over `knobas-http`, the schedule, the download, the two files beside the profile and the Windows, Mac and AppImage installers. No Tauri; `knobas-app`'s `update.rs` wires it. Its bin `knobas-update-verify` is the release run's check. |
 | `knobas-sync` | The sync engine and scheduler: one run per transaction, cursors, backoff, credential health, the run log, and the write queue. |
 | `knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles and the IPC commands. |
 
