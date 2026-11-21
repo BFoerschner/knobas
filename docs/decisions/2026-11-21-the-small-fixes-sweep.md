@@ -76,3 +76,37 @@ and read nothing else.
 
 Also fixed: a run the deadline stopped counted as owed only the repositories it had not reached, dropping those it had
 cut on the way (`passed.owed` was set where it is added to).
+
+## A slow `entity_view` after a clone was Compare's read ahead
+
+**Found (the ux26 Windows boot check).** "One log line looks odd: `slow ipc command command=entity_view
+duration_ms=11294`, around the first Files open just after the clone." The tree had drawn and the README opened.
+
+**Measured** on Linux, with the windowless backend on a restored scale copy and the live Gitea: a sync, a clone of
+`scale-platform/runbooks` three seconds into it, then the repository's first Files open in the built front end, every
+command timed and, for that run only, every request's wait on the limiter and its send printed. The tree drew from the
+clone 135 ms after the open; `commits` answered in 23 ms, `branches` in 17, the README in 257 and `files` in 811 (the
+copy had no stored tree, so a read of the forge whose first request waited 754 ms on the quota). The one long call was
+`entity_view` with `behind` on the branch Compare reads ahead (`2026-11-20-compare-is-built-before-its-press.md`):
+3,543 ms. A read behind goes in the background lane, and the sync's requests there waited 1 to 3.8 s each beside it.
+Not the cause: the database (its queries took 1 to 3 ms, a pool connection under 2 ms), the runtime (a 50 ms ticker
+never ran late), the clone. The boot check's log is gone, so the 11.3 s call's arguments are inferred: the read ahead
+fires on the Files open, and a first start's tree pass keeps the sync's requests waiting the whole time.
+
+**Taken (Fable's rulings).** The Files page owed nothing: it draws at once and fills in, and nobody waits on a read
+behind. What the boot check flagged was the warning line, so that is what changed: `entity_view` with `behind` marks
+its command, and the slow-command line for it is at info with `behind=true`, not a warning
+(`a_slow_read_behind_is_logged_at_info_and_marked`, red before). A boot check's log now tells a read nobody waits on
+from one a person does.
+
+**Tried, not shown: a read behind ahead of the sync.** The origin's background requests have two places on the server,
+and a place given back goes to whichever waiter is polled first, so the read ahead's requests drew lots with the sync's.
+A rule that gave a waiting read behind the next place (and a sync holding none the one after) was built and timed,
+the old and the new binary alternated on the same copy. The read ahead took 4.3, 3.6, 3.6, 3.2, 7.7 and 2.7 s before,
+and 2.3, 2.7, 16.3, 5.2, 3.1, 2.8, 12.8, 2.7 and 2.6 s after: no improvement a rank test shows, and a heavier tail.
+Every section a page draws from what knobas held is read again behind as a task of its own, so the rule mostly made
+reads behind share one place among themselves. It was taken out. Reopen it only with a per-request trace that splits
+the read ahead's eight requests into the wait for a place, the wait on the quota, the standing aside and the send.
+
+**Owed on Windows:** the clone-then-open on the scale copy again, to see the boot check's call marked `behind=true`
+and shorter.

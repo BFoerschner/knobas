@@ -355,6 +355,28 @@ fn scrub_keyed(text: &str) -> String {
 
 struct Cmd(String);
 struct Started(Instant);
+/// On a command's run span: the call is a read behind ([`mark_read_behind`]).
+struct Behind;
+
+/// Mark the running IPC command as a read behind an answer a page already
+/// drew (`entity_view` with `behind`; the small-fixes sweep, 2026-11-21): it
+/// waits in the background lane and nobody waits on it, so when slow it is
+/// logged at info with `behind=true`, not warned about. The ux26 Windows
+/// boot check's `slow ipc command entity_view 11294` was most likely
+/// Compare's read ahead, logged like a read a person waits on.
+pub(crate) fn mark_read_behind() {
+    tracing::Span::current().with_subscriber(|(id, dispatch)| {
+        let registry = dispatch.downcast_ref::<tracing_subscriber::Registry>()?;
+        for span in registry.span(id)?.scope() {
+            let run = span.extensions().get::<Started>().is_some();
+            if run {
+                span.extensions_mut().insert(Behind);
+                return Some(());
+            }
+        }
+        None
+    });
+}
 
 thread_local! {
     /// The command whose `handler` span this thread opened last.
@@ -454,18 +476,21 @@ where
             let Some(span) = ctx.span(&id) else { return };
             let ext = span.extensions();
             match (ext.get::<Started>(), ext.get::<Cmd>()) {
-                (Some(started), Some(cmd)) if started.0.elapsed() > self.threshold => {
-                    Some((cmd.0.clone(), started.0.elapsed()))
-                }
+                (Some(started), Some(cmd)) if started.0.elapsed() > self.threshold => Some((
+                    cmd.0.clone(),
+                    started.0.elapsed(),
+                    ext.get::<Behind>().is_some(),
+                )),
                 _ => None,
             }
         };
-        if let Some((cmd, took)) = slow {
-            tracing::warn!(
-                command = %cmd,
-                duration_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
-                "slow ipc command"
-            );
+        if let Some((cmd, took, behind)) = slow {
+            let duration_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+            if behind {
+                tracing::info!(command = %cmd, duration_ms, behind = true, "slow ipc command");
+            } else {
+                tracing::warn!(command = %cmd, duration_ms, "slow ipc command");
+            }
         }
     }
 }
@@ -587,6 +612,43 @@ mod tests {
             .and_then(|n| n.parse().ok())
             .unwrap_or(0);
         assert!(ms >= 50, "{log}");
+    }
+
+    /// The small-fixes sweep (2026-11-21): a read behind that nobody waits
+    /// on is slow at info, marked `behind=true`; a command not marked is
+    /// still warned about. Red before: both were warnings.
+    #[test]
+    fn a_slow_read_behind_is_logged_at_info_and_marked() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Sink::new();
+        sink.attach(dir.path(), MAX_BYTES, KEEP_FILES).unwrap();
+        let sub = subscriber(&sink, false, "info", Duration::from_millis(20));
+        tracing::subscriber::with_default(sub, || {
+            for read_behind in [true, false] {
+                let handler = tracing::debug_span!("ipc::request::handler", cmd = "entity_view");
+                let _h = handler.enter();
+                let run = tracing::debug_span!("ipc::request::run");
+                let _r = run.enter();
+                if read_behind {
+                    mark_read_behind();
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+        });
+        let log = read_all(dir.path());
+        let lines: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains("slow ipc command"))
+            .collect();
+        assert_eq!(lines.len(), 2, "{log}");
+        assert!(
+            lines[0].contains("INFO") && lines[0].contains("behind=true"),
+            "{log}"
+        );
+        assert!(
+            lines[1].contains("WARN") && !lines[1].contains("behind"),
+            "{log}"
+        );
     }
 
     #[test]

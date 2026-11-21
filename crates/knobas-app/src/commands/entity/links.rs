@@ -347,6 +347,9 @@ pub async fn entity_view<R: tauri::Runtime>(
     behind: Option<bool>,
 ) -> Result<Option<crate::sources::live::ShownView>, IpcError> {
     let state = crate::sources::state(&app)?;
+    if behind == Some(true) {
+        crate::logging::mark_read_behind();
+    }
     let read = crate::sources::crud::shown(
         &state.pool,
         &state.secrets,
