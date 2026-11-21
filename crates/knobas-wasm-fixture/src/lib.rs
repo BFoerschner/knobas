@@ -95,6 +95,10 @@
 //!   writes than it implements: `write` performs every op it is handed,
 //!   declared or not, and answers a receipt naming it. What the host's own
 //!   refusal of an undeclared op is witnessed with (#1950).
+//! * **The tickets** (ADR-0054, [`tickets`]): with `"tickets": true` two berth
+//!   tickets follow the pages. The 1.5.0 build (`--features v1_5`) moves them
+//!   and offers no edits; the 1.6.0 build edits them too. Neither the 1.0.0
+//!   nor the 1.3.0 build has tickets.
 //! * **`translate-query`** (#1208) reads a payload's `"survey_query"`
 //!   string as one `label` condition and leaves nothing out; a payload
 //!   without one it does not translate (`none`).
@@ -103,6 +107,8 @@ mod builds;
 #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
 mod docs;
 mod fetch;
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+mod tickets;
 
 use chrono::{TimeZone, Utc};
 use knobas_adapter_sdk::log::{Level, log};
@@ -187,6 +193,9 @@ pub struct Fixture {
     /// How the pages break the docs contract, if they do (#2444).
     #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
     docs_breach: Option<String>,
+    /// Whether the corpus holds the berth tickets (ADR-0054).
+    #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
+    tickets: bool,
     /// The instance's address, where a page write is sent (#2443).
     #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
     base_url: String,
@@ -238,6 +247,7 @@ fn read_fault(value: &serde_json::Value) -> Result<Fault, String> {
             "deleted",
             "declares_refresh",
             "docs_breach",
+            "tickets",
             "mirror",
             "username",
         ]
@@ -331,6 +341,10 @@ impl Fixture {
         items.push(self.run(builds::RUN, "42"));
         #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
         items.extend(docs::pages(&self.id, self.docs_breach.as_deref()));
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        if self.tickets {
+            items.extend(tickets::TICKETS.iter().map(|t| tickets::item(&self.id, t)));
+        }
         items
     }
 
@@ -470,6 +484,10 @@ impl Adapter for Fixture {
                 .get("deleted")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
+            tickets: config
+                .get("tickets")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
             docs_breach: config
                 .get("docs_breach")
                 .and_then(serde_json::Value::as_str)
@@ -524,6 +542,9 @@ impl Adapter for Fixture {
             entity_kinds.push(docs::kind());
             payload_paths.push(docs::payload_paths());
             roles.push(docs::role());
+            entity_kinds.push(tickets::kind());
+            payload_paths.push(tickets::payload_paths());
+            roles.push(tickets::role());
         }
         SourceDescriptor {
             id: self.id.clone(),
@@ -544,14 +565,20 @@ impl Adapter for Fixture {
             auth_methods: vec![AuthMethod::Pat],
             accepts_account: false,
             min_sync_interval_secs: 60,
-            write_ops: if cfg!(any(feature = "v1_0", feature = "v1_3")) {
-                vec![SOURCE_ACTION.into()]
-            } else {
-                vec![
-                    SOURCE_ACTION.into(),
-                    "update_page".into(),
-                    "create_page".into(),
-                ]
+            write_ops: {
+                #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+                let mut ops: Vec<String> = if cfg!(any(feature = "v1_0", feature = "v1_3")) {
+                    vec![SOURCE_ACTION.into()]
+                } else {
+                    vec![
+                        SOURCE_ACTION.into(),
+                        "update_page".into(),
+                        "create_page".into(),
+                    ]
+                };
+                #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+                ops.extend(tickets::write_ops());
+                ops
             },
             entity_kinds,
             config_schema: serde_json::json!({
@@ -569,6 +596,7 @@ impl Adapter for Fixture {
                     "deleted": { "type": "string" },
                     "declares_refresh": { "type": "boolean" },
                     "docs_breach": { "type": "string" },
+                    "tickets": { "type": "boolean" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
@@ -676,12 +704,60 @@ impl Adapter for Fixture {
             }
             #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
             WriteOp::UpdatePage { .. } | WriteOp::CreatePage { .. } => self.send_page(&op),
+            #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+            WriteOp::Transition {
+                ref entity,
+                ref status,
+            } => match self.key(entity) {
+                Some(key) => tickets::transition(&self.base_url, key, status),
+                None => Err(refuse()),
+            },
+            #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+            WriteOp::EditTicket { ref entity, .. } => match self.key(entity) {
+                Some(key) => {
+                    let body = serde_json::to_value(&op).expect("a write op serializes");
+                    tickets::edit(&self.base_url, key, &body["EditTicket"])
+                }
+                None => Err(refuse()),
+            },
             _ => Err(refuse()),
         }
     }
 
-    fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
+    /// A berth ticket's workflow (ADR-0054); every other entity has none.
+    fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        if let Some(ticket) = self.key(entity).and_then(tickets::find) {
+            return Ok(tickets::reach(ticket.2)
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect());
+        }
+        let _ = entity;
         Err(self.no_workflow())
+    }
+
+    /// A berth ticket's fields (1.6.0, ADR-0054); `None` for any other id.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+    fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_adapter_sdk::spi::ticket::TicketFields>, SourceError> {
+        Ok(self.key(entity).and_then(tickets::fields).map(decoded))
+    }
+
+    /// The harbour's people and labels (1.6.0, ADR-0054).
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+    fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_adapter_sdk::spi::ticket::FieldOptions>, SourceError> {
+        Ok(self
+            .key(entity)
+            .and_then(|key| tickets::options(key, field, typed))
+            .map(decoded))
     }
 
     /// A survey's block view, the custom role's whole surface (ADR-0029):

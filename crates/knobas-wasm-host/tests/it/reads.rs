@@ -122,7 +122,13 @@ async fn a_survey_s_view_offers_its_declared_source_action_and_the_fixture_perfo
     // Beside its pages' writes (#2443), which are no source action.
     assert_eq!(
         declared.write_ops,
-        [SOURCE_ACTION, "update_page", "create_page"]
+        [
+            SOURCE_ACTION,
+            "update_page",
+            "create_page",
+            "transition",
+            "edit_ticket"
+        ]
     );
 
     let view = source

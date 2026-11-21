@@ -218,3 +218,23 @@ impl<A: Adapter> docs::Guest for A {
         A::body_from_text(&text)
     }
 }
+
+/// `tickets` (1.6.0, ADR-0054): free functions, as `query` is.
+#[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+impl<A: Adapter> crate::bindings::exports::knobas::adapter::tickets::Guest for A {
+    fn ticket_fields(
+        instance: wit::Instance,
+        entity: String,
+    ) -> Result<Option<String>, wit::SourceError> {
+        json_option(A::new(convert::instance(instance)).ticket_fields(&entity))
+    }
+
+    fn field_options(
+        instance: wit::Instance,
+        entity: String,
+        field: String,
+        typed: String,
+    ) -> Result<Option<String>, wit::SourceError> {
+        json_option(A::new(convert::instance(instance)).field_options(&entity, &field, &typed))
+    }
+}

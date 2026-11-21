@@ -90,8 +90,8 @@ async fn a_wiki_claim_without_the_docs_export_fails_the_export_check() {
     let adapter = load_fixture();
     let (descriptor, items) = synced(&adapter, json!({})).await;
     let without = WasmAdapter::from_bytes(&knobas_wasm_host::patched_fixture(
-        "knobas:adapter/docs@1.5.0",
-        "knobas:adapter/doxs@1.5.0",
+        "knobas:adapter/docs@1.6.0",
+        "knobas:adapter/doxs@1.6.0",
     ))
     .expect("the component without the export loads");
     let breach = docs_contract::check(&without, &descriptor, &items)

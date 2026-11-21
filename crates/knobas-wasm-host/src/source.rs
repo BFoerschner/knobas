@@ -265,6 +265,19 @@ macro_rules! call {
     };
 }
 
+/// A typed function's one-element result tuple, taken apart.
+trait OneResult {
+    type Ok;
+    fn one(self) -> Self::Ok;
+}
+
+impl<T> OneResult for (T,) {
+    type Ok = T;
+    fn one(self) -> T {
+        self.0
+    }
+}
+
 /// `downloads.download`'s parameters and results, as the host calls it.
 type DownloadParams<'a> = (&'a wit::Instance, &'a str, &'a str);
 type DownloadResults = (Result<bool, wit::SourceError>,);
@@ -787,6 +800,60 @@ impl WasmSource {
         item
     }
 
+    /// One call of an optional export at `index` on a fresh instance of the
+    /// component, within the adapter's deadline and memory cap and with its
+    /// HTTP allowance: the reads of `tickets` (1.6.0), typed `P` to `R`,
+    /// `params` building the arguments from the instance record.
+    async fn optional_read<P, R>(
+        &self,
+        index: ComponentExportIndex,
+        params: impl FnOnce(wit::Instance) -> P,
+    ) -> Result<R::Ok, SourceError>
+    where
+        P: ComponentNamedList + Lower + Send + Sync + 'static,
+        R: ComponentNamedList + Lift + Send + Sync + OneResult + 'static,
+        R::Ok: Send,
+    {
+        let params = params(self.instance.clone());
+        limits::bounded(&self.adapter, async {
+            let mut store = new_store(
+                &self.adapter,
+                &self.instance.id,
+                SinkSlot::none(),
+                Arc::clone(&self.policy),
+            );
+            let instance = self
+                .adapter
+                .inner
+                .pre
+                .instance_pre()
+                .instantiate_async(&mut store)
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            let func = instance
+                .get_typed_func::<P, R>(&mut store, index)
+                .map_err(|e| failed(&self.adapter, &e))?;
+            let answer = func
+                .call_async(&mut store, params)
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            Ok(answer.one())
+        })
+        .await
+    }
+
+    /// A `tickets` answer decoded as the SPI type `what` names, a failure to
+    /// decode naming the adapter (ADR-0054).
+    fn decode_named<T: serde::de::DeserializeOwned>(
+        &self,
+        answer: Option<String>,
+        what: &str,
+    ) -> Result<Option<T>, SourceError> {
+        Self::decode(answer, what).map_err(|error| {
+            SourceError::protocol(format!("{} adapter: {error}", self.adapter.kind()))
+        })
+    }
+
     /// The JSON answer of a read, decoded as the SPI type `what` names.
     fn decode<T: serde::de::DeserializeOwned>(
         answer: Option<String>,
@@ -1024,6 +1091,52 @@ impl Source for WasmSource {
         })
         .await?;
         Self::decode(answer, "query translation")
+    }
+
+    /// `tickets.ticket-fields` where the component exports it (1.6.0,
+    /// ADR-0054), and the trait's default, `None`, where it does not: a
+    /// component built against 1.5.0 or earlier offers no edits. Within the
+    /// adapter's deadline and memory cap, with its HTTP allowance (it reads
+    /// the source). An answer that does not decode as `TicketFields` fails
+    /// the read, naming the adapter.
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::ticket::TicketFields>, SourceError> {
+        let Some(index) = self.adapter.inner.ticket_fields else {
+            return Ok(None);
+        };
+        type Answer = (Result<Option<String>, wit::SourceError>,);
+        let answer = self
+            .optional_read::<(wit::Instance, String), Answer>(index, |instance| {
+                (instance, entity.to_owned())
+            })
+            .await?;
+        self.decode_named(answer.map_err(convert::error)?, "ticket fields")
+    }
+
+    /// `tickets.field-options`, as [`Self::ticket_fields`] calls its twin.
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        let Some(index) = self.adapter.inner.field_options else {
+            return Ok(None);
+        };
+        type Answer = (Result<Option<String>, wit::SourceError>,);
+        let answer = self
+            .optional_read::<(wit::Instance, String, String, String), Answer>(index, |instance| {
+                (
+                    instance,
+                    entity.to_owned(),
+                    field.to_owned(),
+                    typed.to_owned(),
+                )
+            })
+            .await?;
+        self.decode_named(answer.map_err(convert::error)?, "field options")
     }
 
     async fn artifact_preview(

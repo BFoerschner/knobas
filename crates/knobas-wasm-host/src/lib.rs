@@ -83,7 +83,7 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 5,
+    minor: 6,
     patch: 0,
 };
 
@@ -103,6 +103,14 @@ const REFRESH_EXPORT: &str = "knobas:adapter/refresh";
 /// The optional interface a 1.5.0 component exports the docs projection
 /// in (#2442).
 const DOCS_EXPORT: &str = "knobas:adapter/docs";
+
+/// The optional interface a 1.6.0 component exports a ticket's fields in
+/// (ADR-0054).
+const TICKETS_EXPORT: &str = "knobas:adapter/tickets";
+
+/// The write a component that exports [`TICKETS_EXPORT`] declares, and only
+/// such a component.
+const EDIT_TICKET: &str = "edit_ticket";
 
 /// The function `name` of the optional interface `interface` (without its
 /// version), or `None` when the component does not export the interface:
@@ -124,6 +132,25 @@ pub(crate) fn optional_export(
         .get_export_index(Some(&instance), name)
         .map(Some)
         .ok_or_else(|| LoadError::Link(format!("{interface} exports no {name}")))
+}
+
+/// The `tickets` export and the `edit_ticket` write are two signals for one
+/// fact (ADR-0054): a component that declares the write exports the
+/// interface its fields are read through, and one that exports it declares
+/// the write. Either alone is refused, naming both.
+fn check_tickets(template: &SourceDescriptor, exports: bool) -> Result<(), String> {
+    let declares = template.write_ops.iter().any(|op| op == EDIT_TICKET);
+    match (declares, exports) {
+        (true, false) => Err(format!(
+            "it declares the {EDIT_TICKET:?} write and exports no {TICKETS_EXPORT}, which a \
+             ticket's fields are read through"
+        )),
+        (false, true) => Err(format!(
+            "it exports {TICKETS_EXPORT} and does not declare the {EDIT_TICKET:?} write it \
+             goes with"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// A semver `major.minor.patch`, as a component's export names it.
@@ -208,6 +235,10 @@ struct Inner {
     /// that exports `docs` exports with `project` (1.5.0, #2443).
     edit_section: Option<ComponentExportIndex>,
     body_from_text: Option<ComponentExportIndex>,
+    /// `tickets.ticket-fields` and `tickets.field-options`, when the
+    /// component exports them (1.6.0, ADR-0054).
+    pub(crate) ticket_fields: Option<ComponentExportIndex>,
+    pub(crate) field_options: Option<ComponentExportIndex>,
 }
 
 impl std::fmt::Debug for WasmAdapter {
@@ -278,6 +309,8 @@ impl WasmAdapter {
         let project = optional_export(&component, DOCS_EXPORT, "project")?;
         let edit_section = optional_export(&component, DOCS_EXPORT, "edit-section")?;
         let body_from_text = optional_export(&component, DOCS_EXPORT, "body-from-text")?;
+        let ticket_fields = optional_export(&component, TICKETS_EXPORT, "ticket-fields")?;
+        let field_options = optional_export(&component, TICKETS_EXPORT, "field-options")?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
@@ -290,6 +323,8 @@ impl WasmAdapter {
                 project,
                 edit_section,
                 body_from_text,
+                ticket_fields,
+                field_options,
             }),
             hosts: Arc::from([]),
             limits: limits::Limits::default(),
@@ -305,6 +340,11 @@ impl WasmAdapter {
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
+        check_tickets(
+            &adapter.inner.template,
+            adapter.inner.ticket_fields.is_some(),
+        )
+        .map_err(LoadError::Link)?;
         if adapter.inner.download.is_some() {
             block_on(source::check_download(&adapter)).map_err(LoadError::Link)?;
         }
@@ -366,6 +406,13 @@ impl WasmAdapter {
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.inner.refresh.is_some()
+    }
+
+    /// Whether the component exports a ticket's fields (1.6.0, ADR-0054).
+    /// One that does not reads its tickets' fields as text in knobas.
+    #[must_use]
+    pub fn edits_tickets(&self) -> bool {
+        self.inner.ticket_fields.is_some()
     }
 
     /// Whether the component exports the docs projection (1.5.0, #2442).
@@ -720,6 +767,16 @@ fn assert_fixture_fresh(path: &Path) {
             );
         }
     }
+}
+
+/// The fixture built against the frozen 1.5.0 world, the minor before a
+/// ticket's fields, which `just wasm-fixture` keeps beside
+/// [`fixture_component`] (ADR-0054).
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn fixture_component_v1_5() -> std::path::PathBuf {
+    let current = fixture_component();
+    current.with_file_name("knobas_wasm_fixture_v1_5.wasm")
 }
 
 /// The fixture built against the frozen 1.0.0 world, which `just
