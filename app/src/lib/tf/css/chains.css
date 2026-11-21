@@ -37,13 +37,13 @@
 .tf-logbar .tf-lqn { font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap; }
 .tf-nav2 { display: flex; gap: 2px; }
 .tf-nav2 button { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); border-radius: 3px; cursor: pointer; width: 26px; height: 26px; }
-.tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: auto; }
+.tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.55) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: auto; }
 .tf-logv details { border-top: 1px solid var(--rule-2); }
 /* The log's rows are flat (#2211): a loose run's rule and padding are rows of their own, and the first row is marked, since a windowed list's first child is any row. */
 .tf-logv > .tf-l0 { border-top: 0; }
 .tf-logloose { border-top: 1px solid var(--rule-2); padding-top: 4px; }
 .tf-logloose-end { padding-bottom: 4px; }
-.tf-logv summary { list-style: none; cursor: pointer; padding: 6px 12px; display: flex; gap: 10px; align-items: center; --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-sm) * var(--fs)); background: var(--sheet-2); }
+.tf-logv summary { list-style: none; line-height: 1.55; cursor: pointer; padding: 6px 12px; display: flex; gap: 10px; align-items: center; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-sm) * var(--fs)); background: var(--sheet-2); }
 .tf-logv summary::-webkit-details-marker { display: none; }
 .tf-logv summary .tf-d { margin-left: auto; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-ll { display: grid; grid-template-columns: calc(52px * var(--size-code)) calc(70px * var(--size-code)) 1fr; white-space: pre; padding: 0 12px 0 0; }
@@ -89,7 +89,7 @@
 .tf-trow .tf-nm button { all: unset; cursor: pointer; }
 .tf-trow .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-tdetail { padding: 4px 12px 10px 34px; }
-.tf-tdetail pre { margin: 0; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre-wrap; background: var(--sheet-2); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; }
+.tf-tdetail pre { margin: 0; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.55) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre-wrap; background: var(--sheet-2); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; }
 .tf-tdetail .tf-tacts { display: flex; gap: var(--control-gap); margin-top: 6px; align-items: center; }
 .tf-tdetail .tf-tacts .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); }
 /* prototype-6 draws the Tests bar flat inside the run page: static, no frame. */

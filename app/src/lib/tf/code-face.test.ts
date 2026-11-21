@@ -175,14 +175,15 @@ const codeClasses = new Set([...CODE_CLASSES, ...sources.filter(({ file }) => fi
 
 test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are off until turned on", () => {
   const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
-  expect(tokens).toMatch(/--mono-bundled: "Cascadia Mono";/);
+  expect(tokens).toMatch(/--mono-bundled: "knobas Cascadia Mono";/);
   expect(tokens).toMatch(
     /--mono: var\(--mono-chosen, var\(--mono-bundled\)\), var\(--mono-bundled\), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;/,
   );
   expect(tokens).toMatch(/--mono-ligatures: none;/);
   // Both Cascadias at 105 %, and each stand-in a local face sized to its advance there, so nothing moves when one lands.
   const faces = readFileSync(join(ROOT, FACES), "utf8");
-  for (const [name, folder, file] of [["Cascadia Mono", "cascadia-mono", "CascadiaMono"], ["Cascadia Code", "cascadia-code", "CascadiaCode"]] as const) {
+  // Under names of their own (2026-11-21), so an installed font of the plain name never stands in for the bundled file.
+  for (const [name, folder, file] of [["knobas Cascadia Mono", "cascadia-mono", "CascadiaMono"], ["knobas Cascadia Code", "cascadia-code", "CascadiaCode"]] as const) {
     for (const [style, suffix] of [["normal", ""], ["italic", "Italic"]] as const) {
       expect(faces).toMatch(new RegExp(`@font-face \\{\\s*font-family: "${name}"; font-style: ${style};[^}]*src: url\\("\\./${folder}/${file}${suffix}\\.woff2"\\)[^}]*size-adjust: 105%;`));
     }
@@ -285,6 +286,8 @@ function roleOf(value: string): string | null {
 function shorthandSize(value: string): string | null {
   const parts = splitTop(value.trim(), /\s/).filter((part) => part !== "");
   for (const part of parts) {
+    // A role's weight leads the shorthand (`var(--wt-ui, 400)`, 2026-11-21): a weight, not a size.
+    if (/^var\(--wt-/.test(part)) continue;
     const size = splitTop(part, /\//)[0]!;
     if (/^(?:calc|round|var)\(|^[\d.]+(?:px|em|rem|%)$/.test(size)) return size;
   }
@@ -442,12 +445,126 @@ test("(l) a column of one line of text follows its role's size, and the job key 
 
 test("(m) a syntax role changes a token's colour, slant or weight and nothing else, so colours land without moving a line (ADR-0051)", () => {
   // The bundled Cascadia face keeps one advance in its italic and bold, so a comment's slant and a heading's weight
-  // never widen a line; a size, a family, spacing or a box would.
-  const allowed = new Set(["--hl", "color", "font-style", "font-weight"]);
+  // never widen a line; a size, a family, spacing or a box would. Whether a slant may be made up where a face has no
+  // italic (`--mono-synth`, the older Cascadia, 2026-11-21) changes no advance either.
+  const allowed = new Set(["--hl", "color", "font-style", "font-weight", "font-synthesis-style"]);
   const found: string[] = [];
   for (const { file, rules: all } of sheets)
     for (const { selectors, decls } of all)
       if (selectors.some((selector) => subjects(selector).some((subject) => /(?:^|[.\]])tf-hl-|\[class\*="tf-hl-"\]/.test(subject))))
         for (const [prop] of decls) if (!allowed.has(prop)) found.push(`${file} ${selectors.join(", ")}: ${prop}`);
   expect(found).toEqual([]);
+});
+
+
+/**
+ * The areas that stack code lines (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`): each draws its rows
+ * at `var(--code-lh, <its own>)`, so *Open* is today's number and *Joined* the face's own line, and its regular text at
+ * Code's weight. `tokens.css` gives the same areas Code's letter spacing.
+ */
+const CODE_AREAS: Record<string, string> = {
+  "lib/tf/css/branches.css .tf-editor": "1.6",
+  "lib/tf/css/builds.css .tf-problem pre": "1.5",
+  "lib/tf/css/chains.css .tf-logv": "1.55",
+  "lib/tf/css/chains.css .tf-tdetail pre": "1.55",
+  "lib/tf/css/code.css .tf-code": "1.6",
+  "lib/tf/css/code.css .tf-diff": "1.6",
+  "lib/tf/css/code.css .tf-was-hunk, .tf-pdfd-hunk": "1.6",
+  "lib/tf/css/code.css .tf-stepfail pre": "1.5",
+  "lib/tf/css/docs.css .tf-doc pre": "1.55",
+  "lib/tf/css/jar.css .tf-jar-bad pre, .tf-jar-pending pre": "1.6",
+  "lib/tf/css/markdown.css .tf-md .tf-fence .tf-stepfail pre": "1.5",
+  "lib/tf/css/markdown.css .tf-md .tf-fence pre": "1.6",
+  "lib/tf/css/openapi.css .tf-oas-bad pre": "1.6",
+  "lib/tf/css/openapi.css .tf-oas-ex pre": "1.6",
+  "lib/tf/css/pr.css .tf-log": "1.5",
+};
+
+test("(n) every area that stacks code lines draws its rows at Code's line spacing and its text at Code's weight", () => {
+  const found: Record<string, string> = {};
+  const wrong: string[] = [];
+  for (const { file, rules: all } of sheets)
+    for (const { selectors, decls } of all) {
+      const font = decls.find(([prop, value]) => prop === "font" && value.includes("var(--code-lh"));
+      if (!font) continue;
+      const key = `${file} ${selectors.join(", ")}`;
+      const open = /\/var\(--code-lh, ([\d.]+)\) var\(--mono\)/.exec(font[1]);
+      found[key] = open?.[1] ?? "not a number";
+      if (!font[1].startsWith("var(--wt-code, 400) ")) wrong.push(`${key}: not at Code's weight`);
+    }
+  expect(found).toEqual(CODE_AREAS);
+  expect(wrong).toEqual([]);
+  // No other rule draws stacked code at a number of its own; a source's run in flight is one line of status.
+  const LINES_OF_STATUS = new Set(["lib/tf/css/settings.css .tf-stg-run p"]);
+  const other: string[] = [];
+  for (const { file, rules: all } of sheets)
+    for (const { selectors, decls } of all)
+      for (const [prop, value] of decls)
+        if (prop === "font" && /\)\/1\.[56]5? var\(--mono\)/.test(value) && !LINES_OF_STATUS.has(`${file} ${selectors.join(", ")}`)) other.push(`${file} ${selectors.join(", ")}`);
+  expect(other).toEqual([]);
+  // The tokens: Joined is the face's own line, rounded to whole device pixels; the areas take Code's letter spacing,
+  // and their line numbers, a log's times and an editor's numbers keep their own.
+  const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
+  expect(tokens).toMatch(/--code-lh-face: 1\.2202;/);
+  expect(tokens).toMatch(/--code-lh: round\(calc\(var\(--code-lh-face\) \* 1em\), calc\(1px \/ var\(--dpr\)\)\);/);
+  const areas = /\n:is\(([^)]*(?:\([^)]*\))?[^)]*)\), :is\(\1\) > :is\(code, kbd, samp, tt\) \{ letter-spacing: var\(--ls-code, normal\); word-spacing: normal; \}/.exec(tokens);
+  expect(areas, "the areas' letter spacing rule").not.toBeNull();
+  const named = new Set(areas![1]!.split(",").map((selector) => selector.trim()));
+  for (const key of Object.keys(CODE_AREAS)) for (const selector of key.split(" ").slice(1).join(" ").split(", ")) expect(named, selector).toContain(selector);
+  expect(tokens).toMatch(/\.tf-code \.tf-l > span:first-child, \.tf-diff \.tf-no, \.tf-ll :is\(\.tf-no, \.tf-ts\), :is\(\.tf-was-hunk, \.tf-pdfd-hunk\) \.tf-no, \.tf-editor \.tf-nums \{ letter-spacing: normal; \}/);
+});
+
+test("(o) words inside a code area keep the line spacing they had: a file's head, a comment box, a banner, a log's step", () => {
+  const ratio = (file: string, selector: string) =>
+    sheets.find((sheet) => sheet.file === file)!.rules.find((rule) => rule.selectors.includes(selector))?.decls.find(([prop]) => prop === "line-height")?.[1];
+  expect(ratio("lib/tf/css/code.css", ".tf-diff .tf-fh")).toBe("1.6");
+  expect(ratio("lib/tf/css/code.css", ".tf-newc")).toBe("1.6");
+  expect(ratio("lib/tf/css/code.css", ".tf-diff > .tf-banner")).toBe("1.6");
+  expect(ratio("lib/tf/css/chains.css", ".tf-logv summary")).toBe("1.55");
+});
+
+test("(p) every rule that sets Interface's, Headings' or Reading's size takes its letter spacing, inherited as before while unset", () => {
+  const wrong: string[] = [];
+  let held = 0;
+  for (const { file, rules: all } of sheets) {
+    if (file === "unported.css") continue;
+    for (const { selectors, decls } of all) {
+      const fs = decls.find(([prop]) => prop === "--fs")?.[1];
+      const role = /^var\(--size-(ui|head|read)\)$/.exec(fs ?? "")?.[1];
+      // `:root` only starts `--fs` for the tokens; `.tf` and `body` draw the text.
+      if (!role || selectors.includes(":root")) continue;
+      held++;
+      const ls = decls.filter(([prop]) => prop === "letter-spacing").map(([, value]) => value);
+      // `var(--ls-<role>)` with no fallback: unset, the declaration is invalid when computed, so the spacing is inherited
+      // as before; `normal` where the rule set it; added to a spacing of the rule's own.
+      const ok =
+        ls.length > 0 &&
+        ls.every((value) => value === `var(--ls-${role})` || value === `var(--ls-${role}, normal)` || new RegExp(`^calc\\(-?[\\d.]+em \\+ var\\(--ls-${role}, 0em\\)\\)$`).test(value) || value === "inherit");
+      if (!ok) wrong.push(`${file} ${selectors.join(", ")}: ${ls.join(" ") || "none"}`);
+    }
+  }
+  expect(held).toBeGreaterThan(120);
+  expect(wrong).toEqual([]);
+});
+
+test("(q) the interface's regular text is drawn at its weight: no rule sets 400 by hand", () => {
+  const wrong: string[] = [];
+  for (const { file, rules: all } of sheets) {
+    if (file === "unported.css") continue;
+    for (const { selectors, decls } of all) {
+      const fs = decls.find(([prop]) => prop === "--fs")?.[1];
+      for (const [prop, value] of decls) {
+        if (prop === "font-weight" && /^(?:400|normal)$/.test(value) && fs !== "var(--size-code)") wrong.push(`${file} ${selectors.join(", ")}: font-weight ${value}`);
+        // A `font` shorthand in the interface's face with no weight resets it to 400; one with 400 sets it.
+        if (prop === "font" && value.includes("var(--sans)") && !/^(?:var\(--wt-ui, 400\)|[5-9]00) /.test(value)) wrong.push(`${file} ${selectors.join(", ")}: font ${value}`);
+      }
+    }
+  }
+  expect(wrong).toEqual([]);
+  const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
+  expect(tokens).toMatch(/\.tf \{[^}]*font: var\(--wt-ui, 400\) calc\(var\(--t-md\) \* var\(--fs\)\)\/1\.45 var\(--sans\);/);
+  // Reading's page takes Reading's weight and line spacing.
+  const doc = sheets.find((sheet) => sheet.file === "lib/tf/css/docs.css")!.rules.find((rule) => rule.selectors.includes(".tf-doc"))!.decls;
+  expect(doc).toContainEqual(["line-height", "var(--lh-read, 1.65)"]);
+  expect(doc).toContainEqual(["font-weight", "var(--wt-read, 400)"]);
 });

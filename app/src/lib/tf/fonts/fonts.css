@@ -22,6 +22,11 @@
   never subset or re-encoded. One variable file a style, weights 200 to 700; the italic draws comments. `--mono` names
   only the one the switch draws (`css/tokens.css`), so the other is never loaded.
 
+  The CSS names are "knobas Cascadia Mono" and "knobas Cascadia Code" (2026-11-21, Björn: "is it possible to have
+  knobas pick the bundled font over the installed one? Maybe have them as different fonts in the list"): a name of its
+  own, so the bundled file is drawn even where a font of the plain name is installed, and the plain name is the
+  installed one. Naming a face in CSS does not change the font: the files are still Microsoft's, byte for byte.
+
   `size-adjust: 105%`: Cascadia's lower case is .518 em, JetBrains Mono's was .55, so at the code role's sizes
   Cascadia drew a step smaller than the face it replaced. At 105 % it draws as tall (.544 em), which is the size Björn
   set Cascadia to by hand, and it is the code role's 100 % now. Only the glyphs grow: every code view's line height is
@@ -64,23 +69,43 @@
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 @font-face {
-  font-family: "Cascadia Mono"; font-style: normal; font-weight: 200 700; font-display: swap;
+  font-family: "knobas Cascadia Mono"; font-style: normal; font-weight: 200 700; font-display: swap;
   src: url("./cascadia-mono/CascadiaMono.woff2") format("woff2");
   size-adjust: 105%;
 }
 @font-face {
-  font-family: "Cascadia Mono"; font-style: italic; font-weight: 200 700; font-display: swap;
+  font-family: "knobas Cascadia Mono"; font-style: italic; font-weight: 200 700; font-display: swap;
   src: url("./cascadia-mono/CascadiaMonoItalic.woff2") format("woff2");
   size-adjust: 105%;
 }
 @font-face {
-  font-family: "Cascadia Code"; font-style: normal; font-weight: 200 700; font-display: swap;
+  font-family: "knobas Cascadia Code"; font-style: normal; font-weight: 200 700; font-display: swap;
   src: url("./cascadia-code/CascadiaCode.woff2") format("woff2");
   size-adjust: 105%;
 }
 @font-face {
-  font-family: "Cascadia Code"; font-style: italic; font-weight: 200 700; font-display: swap;
+  font-family: "knobas Cascadia Code"; font-style: italic; font-weight: 200 700; font-display: swap;
   src: url("./cascadia-code/CascadiaCodeItalic.woff2") format("woff2");
+  size-adjust: 105%;
+}
+
+/*
+  **Cascadia Mono and Cascadia Code 2009.22** (2026-11-21, Björn: "maybe include also the older version of cascadia code
+  then, I think that'd be interesting"; `docs/decisions/2026-11-21-fonts-you-can-tune.md`): Microsoft's woff2 files
+  from release v2009.22, unmodified (`cascadia-2009/SOURCE.md`), offered in Settings › Fonts › Code beside the current
+  release. Its box glyphs are taller (`│` 1.56 em, no `rclt` swap), so boxes join at any code row height. The same
+  metrics as 2407.24 to the unit, so it moves nothing; named apart, so neither release stands in for the other. Upright
+  only, as the release ships: comments stand upright while it draws (`--mono-synth`, `css/code.css`). `--mono` names it
+  only when chosen, and the idle loader leaves it alone, so it loads only then.
+*/
+@font-face {
+  font-family: "knobas Cascadia Mono 2009"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-2009/CascadiaMono.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
+  font-family: "knobas Cascadia Code 2009"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-2009/CascadiaCode.woff2") format("woff2");
   size-adjust: 105%;
 }
 

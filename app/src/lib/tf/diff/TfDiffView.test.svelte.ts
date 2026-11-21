@@ -931,12 +931,12 @@ test("a 3,000-line file shows Load diff, and loading it shows its lines", async 
   await Promise.resolve();
   flushSync();
   expect(card.querySelector(".tf-dfwhy")).toBeNull();
-  // Windowed: the first lines are drawn, and the rest is room below them, not cut.
+  // Windowed: the first lines are drawn, and the rest is room below them, not cut: 16 px a line, Joined (2026-11-21).
   const drawnRows = card.querySelectorAll(".tf-ln");
   expect(squash(drawnRows[0])).toBe("1+ row 1");
   expect(drawnRows.length).toBeGreaterThan(0);
   expect(drawnRows.length).toBeLessThan(3_000);
-  expect(parseFloat(card.querySelector<HTMLElement>(".tf-dbody")!.style.paddingBottom)).toBeGreaterThan(20 * (3_000 - drawnRows.length) - 1);
+  expect(parseFloat(card.querySelector<HTMLElement>(".tf-dbody")!.style.paddingBottom)).toBeGreaterThan(16 * (3_000 - drawnRows.length) - 1);
 });
 
 test("a diff the ceiling cut says so, naming the ceiling", () => {

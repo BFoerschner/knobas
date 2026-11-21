@@ -464,17 +464,22 @@
   }
   /**
    * A name's width as `.tf-stepsbar text` draws it: 12 px, or 11 px of code, times the role's size (Settings › Fonts,
-   * read here so the bar is fitted again when a size or a face changes); 0 with no canvas to measure on.
+   * read here so the bar is fitted again when a size or a face changes); 0 with no canvas to measure on. A step's name
+   * is the interface's text, so its weight and letter spacing are the interface's too (2026-11-21): the tracking comes
+   * after every character, as the browser draws it. A command keeps its face's own spacing.
    */
   function nameWidth(name: string, text = name): number {
-    const role = isCommand(name) ? "code" : "ui";
-    const px = ((isCommand(name) ? 11 : 12) * fonts.size(role)) / 100;
+    const command = isCommand(name);
+    const role = command ? "code" : "ui";
+    const px = ((command ? 11 : 12) * fonts.size(role)) / 100;
     void fonts.family(role);
+    const weight = command ? 400 : fonts.knob("ui", "wt");
+    const track = command ? 0 : (fonts.knob("ui", "ls") / 100) * px;
     pen ??= document.createElement("canvas").getContext("2d");
     if (pen === null) return 0;
-    const face = isCommand(name) ? "--mono" : "--sans";
-    pen.font = `400 ${px}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
-    return pen.measureText(text).width;
+    const face = command ? "--mono" : "--sans";
+    pen.font = `${weight} ${px}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
+    return pen.measureText(text).width + [...text].length * track;
   }
   /** What a label's inset takes from its segment: 10 px before it, 8 px after. */
   const STEP_INSET = 18;

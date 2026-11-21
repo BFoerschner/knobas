@@ -2,7 +2,9 @@
 
 What knobas ships of other people's code that asks to be named, with its licence's text. Added 2026-11-21 with the
 highlighters (ADR-0051; the highlighter re-ruling of that day). The faces knobas brings along carry their licences in
-Settings › Appearance › Fonts (`app/src/lib/tf/fonts/bundled-faces.ts`).
+Settings › Appearance › Fonts (`app/src/lib/tf/fonts/bundled-faces.ts`): Inter 4.1, Cascadia Mono and Cascadia Code
+2407.24, and Cascadia Mono and Cascadia Code 2009.22 (2026-11-21), each under the SIL Open Font License 1.1 in its
+folder under `app/src/lib/tf/fonts/` beside a `SOURCE.md` with its download and SHA-256.
 
 ## The highlighters
 

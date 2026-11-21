@@ -312,7 +312,15 @@ narrows: boolean,
  * .52), for *Even out*: the size that draws its lower case as tall as
  * the bundled face's. `None` when the face does not say.
  */
-x_height: number | null, };
+x_height: number | null, 
+/**
+ * The upright regular face's version, as its `name` table's version
+ * string gives it without the word *Version* and anything after a `;`
+ * (`2407.024` for Cascadia Mono 2407.24, and for a Nerd Fonts patch of
+ * it), so Settings › Fonts can tell an installed copy from the one knobas
+ * brings (2026-11-21). `None` when the face does not say.
+ */
+version: string | null, };
 
 /**
  * What the JAR view and Settings know about decompiling here.

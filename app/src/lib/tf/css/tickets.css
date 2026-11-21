@@ -36,7 +36,7 @@
 .tf-col { position: relative; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
-.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 6px 0 8px; }
+.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 6px 0 8px; }
 /* A lane's head stays in reach while the lanes scroll sideways together. */
 .tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
 /* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go
@@ -131,7 +131,7 @@
 .tf-row.tf-sel td:first-child { box-shadow: inset 2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-row.tf-sel td:last-child { box-shadow: inset -2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 /* A row's second line is words, even under a key: only a code value is mono. */
-.tf-tbl .tf-sub { display: block; --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
+.tf-tbl .tf-sub { display: block; --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); letter-spacing: calc(.006em + var(--ls-ui, 0em)); word-spacing: .06em; }
 .tf-tbl .tf-keycell { font-weight: 600; }
 .tf-tbl .tf-c-summary { font-weight: 500; }
 /* The List's columns stand still (F-151, F-144): a filter, a pill or a sort moves none of them, and each has its width here.
@@ -155,7 +155,7 @@
 .tf-list tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-list tbody td:is(.tf-c-summary, .tf-c-signals) { white-space: normal; overflow-wrap: anywhere; }
 .tf-list .tf-keycell .tf-sub { overflow: hidden; text-overflow: ellipsis; }
-.tf-tbl .tf-sub { font-weight: 400; }
+.tf-tbl .tf-sub { font-weight: var(--wt-ui, 400); }
 /* A row's title (design system, *Type*): the name you scan a list by. */
 .tf-tbl .tf-rowt { font-size: calc(var(--t-md) * var(--fs)); font-weight: 500; }
 .tf .tf-tbl td:first-child > a.tf-mono, .tf .tf-tbl td:first-child > .tf-crname > a.tf-mono { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 500; }

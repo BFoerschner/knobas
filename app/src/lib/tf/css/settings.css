@@ -30,7 +30,7 @@
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
-  font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
+  font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
 }
 .tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: calc(var(--t-md) * var(--fs)); max-width: 70ch; }
 /* A Settings page whose header carries actions: the title block on the left, `.tf-acts` on the right of its
@@ -38,7 +38,7 @@
 .tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
 .tf-stg-sec { margin-top: 26px; }
-.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
+.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
 .tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
 .tf-stg-gap { margin-top: 14px; }
 /* A control sits at the top of its row, its text on one line with its label's first, however long the description runs.
@@ -56,7 +56,7 @@
   .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 .tf-stg-l { font-weight: 500; }
-.tf-stg-l small { display: block; font-weight: 400; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
+.tf-stg-l small { display: block; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
 .tf-stg-c { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tf-stg-inl { flex-wrap: wrap; }
 .tf-stg-in {
@@ -208,7 +208,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 
 /* ---------- Appearance › State colours (#2466): six columns of state-word chips ---------- */
 .tf-sc { margin-top: 26px; }
-.tf-sc-title { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
+.tf-sc-title { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
 .tf-sc-kind { margin-top: 18px; }
 .tf-sc-kind .tf-ext-h { margin-bottom: 8px; }
 .tf-sc-kind h3 { font-size: calc(var(--t-xs) * var(--fs)); margin: 0; font-weight: 600; color: var(--ink-2); }
@@ -227,7 +227,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 }
 .tf-sc-chip { max-width: 100%; cursor: grab; gap: 2px 4px; flex-wrap: wrap; white-space: normal; }
 .tf-sc-word { overflow-wrap: anywhere; min-width: 0; text-align: left; }
-.tf-sc-chip .tf-sc-reset { margin-left: 6px; color: var(--muted); font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+.tf-sc-chip .tf-sc-reset { margin-left: 6px; color: var(--muted); font-weight: var(--wt-ui, 400); text-decoration: underline; text-underline-offset: 2px; }
 /* A press on a word opens its menu, so the word is a button by look as well as by role; a drag lifts the chip over the
    board and follows the pointer (`pointer-drag.ts`), and the column it would land in takes the drop's tint. Nothing in the
    board moves while a chip is lifted: the chip's own box stays where it was, only its picture travels. */
@@ -269,9 +269,11 @@ select.tf-stg-in { padding-inline-start: 4px; }
    the field, framed as the Source view frames a file, so what it shows is what the app will be. */
 .tf-cf-combo { width: min(420px, 100%); }
 .tf .tf-combo.tf-cf-combo .tf-opts { max-height: 280px; }
-.tf .tf-combo.tf-cf-combo .tf-opts [role="option"] { --fs: var(--size-ui); font: calc(var(--t-sm) * var(--fs)) var(--sans); padding: 5px 10px; }
+.tf .tf-combo.tf-cf-combo .tf-opts [role="option"] { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-sm) * var(--fs)) var(--sans); padding: 5px 10px; }
 .tf .tf-combo.tf-cf-combo .tf-opts [aria-selected="true"] { font-weight: 600; }
 .tf-cf-mh { padding: 8px 10px 3px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
+/* What follows a face's name in the list, dimmed: "with ligatures", an installed copy's version (2026-11-21). */
+.tf .tf-combo.tf-cf-combo .tf-opts [role="option"] .tf-fr-note { margin-left: 4px; font-weight: var(--wt-ui, 400); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-cf-spec {
   grid-column: 1 / -1; margin: 0; background: var(--sheet); --under: var(--sheet); border: 1px solid var(--rule);
   border-radius: 6px; overflow: hidden;
@@ -290,16 +292,23 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-fr-guide::before { top: 0; border-top: 1px dashed var(--focus); }
 .tf-fr-guide::after { bottom: 0; }
 .tf-fr-pw { position: relative; font-size: calc(var(--t-d1) * var(--fs)); line-height: 1.25; color: var(--ink); }
-.tf-fr-pw-ui { --fs: var(--size-ui); font-family: var(--sans); }
-.tf-fr-pw-head { --fs: var(--size-head); font-family: var(--head); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; }
-.tf-fr-pw-read { --fs: var(--size-read); font-family: var(--serif); }
+.tf-fr-pw-ui { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
+.tf-fr-pw-head { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-fr-pw-read { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); }
 .tf-fr-pw-code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-fr-proof figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* A role's row: the field and its *Use* on one line, the size under it, the specimen across the row. */
 .tf-stg-c.tf-fr-c { flex-direction: column; align-items: stretch; gap: 8px; }
 .tf-fr-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* A role's knobs, one a line (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`): its name in a column of
+   its own, so every slider of the pane starts at one edge, then the slider, the figure and *Back to* when off its default. */
+.tf-fr-knob { flex-wrap: nowrap; }
+.tf-fr-k { flex: none; width: 96px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-fr-knob .tf-fr-fig { min-width: 64px; }
+/* The hint under a line starts where the sliders do. */
+.tf-fr-knob + .tf-fr-hint { padding-left: 104px; }
 /* A font's name is typed in the interface's face, and in code's for Code, as the field always was. */
-.tf .tf-combo.tf-fr-combo input { --fs: var(--size-ui); font-family: var(--sans); }
+.tf .tf-combo.tf-fr-combo input { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 .tf .tf-fr-code .tf-combo.tf-fr-combo input { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* The size: ten notches on a line, 100 % taller, the chosen one a filled bar, the one that evens the face out ringed. */
 .tf-fr-scale { display: inline-flex; align-items: stretch; height: var(--control-h-sm); padding: 0 4px; border-radius: 4px; box-shadow: inset 0 -1px var(--rule-2); flex: none; cursor: pointer; }
@@ -313,14 +322,14 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-fr-hint { margin: 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 /* Each specimen is drawn by the rules the app draws its role with, the role's size included. */
 .tf-fr-sample { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; min-width: 0; }
-.tf-fr-sample-ui { --fs: var(--size-ui); font-family: var(--sans); }
+.tf-fr-sample-ui { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 .tf-fr-sample-ui b { font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; }
 .tf-fr-sample-ui > span { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-fr-sample-ui .tf-fr-chips { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--ink); }
 .tf-fr-sample-head { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
-.tf-fr-key { --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; letter-spacing: -.01em; }
-.tf-fr-h { --fs: var(--size-head); font-family: var(--head); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; font-size: calc(var(--t-lg) * var(--fs)); }
-.tf-fr-sample-read p { --fs: var(--size-read); font-family: var(--serif); font-size: calc(17.5px * var(--fs)); line-height: 1.65; max-width: 62ch; }
+.tf-fr-key { --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; letter-spacing: calc(-.01em + var(--ls-head, 0em)); }
+.tf-fr-h { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; font-size: calc(var(--t-lg) * var(--fs)); }
+.tf-fr-sample-read p { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); font-size: calc(17.5px * var(--fs)); line-height: var(--lh-read, 1.65); font-weight: var(--wt-read, 400); max-width: 62ch; }
 /* The faces knobas brings along (2026-11-20): a row each, its licence's text unfolding under it. The text is the
    licence file as written, line breaks and all, so it keeps them and wraps a long line. */
 .tf-fr-lics-note { margin: 0 0 8px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
@@ -384,18 +393,18 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-thm-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
 .tf-thm-slot { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
 .tf-thm-slot.tf-cur { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.tf-thm-slot h3 { --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); grid-column: 1 / -1; margin: 0; }
+.tf-thm-slot h3 { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); grid-column: 1 / -1; margin: 0; }
 .tf-thm-sel { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); padding: 0 8px; font-size: calc(var(--t-sm) * var(--fs)); min-width: 0; width: 100%; }
 .tf-thm-chips { display: flex; gap: 3px; grid-column: 1 / -1; margin-top: 4px; }
 .tf-thm-chips i { width: 18px; height: 6px; border-radius: 2px; }
 .tf-thm-ed { margin-top: 18px; display: grid; grid-template-columns: 446px minmax(0, 1fr); gap: 18px; align-items: start; }
 .tf-thm-edh { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); }
-.tf-thm-edh h2 { --fs: var(--size-head); font: 600 calc(var(--t-lg) * var(--fs)) var(--head); margin: 0; }
+.tf-thm-edh h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font: 600 calc(var(--t-lg) * var(--fs)) var(--head); margin: 0; }
 .tf-thm-edh .tf-thm-name { width: 260px; height: var(--control-h-sm); }
 .tf-thm-roles { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink); }
-.tf-thm-grp { display: flex; justify-content: space-between; padding: 7px 12px 5px; --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); background: var(--sheet-2); border-bottom: 1px solid var(--rule-2); }
+.tf-thm-grp { display: flex; justify-content: space-between; padding: 7px 12px 5px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); background: var(--sheet-2); border-bottom: 1px solid var(--rule-2); }
 .tf-thm-grp:first-child { border-radius: 6px 6px 0 0; }
-.tf-thm-grp small { font-weight: 400; }
+.tf-thm-grp small { font-weight: var(--wt-ui, 400); }
 .tf-thm-role { display: grid; grid-template-columns: 22px 148px minmax(0, 1fr) 62px 46px; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-thm-role:last-child { border-bottom: 0; }
 .tf-thm-sw { display: block; width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--rule); padding: 0; background: var(--sheet); }
@@ -423,7 +432,7 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-pre .tf-fileview > header { min-height: 34px; }
 .tf-thm-pre .tf-code, .tf-thm-pre .tf-diff .tf-dbody { overflow: hidden; }
 .tf-thm-pre .tf-diff .tf-fh { position: static; }
-.tf-thm-stat { font-weight: 400; }
+.tf-thm-stat { font-weight: var(--wt-ui, 400); }
 .tf-thm-doc { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 18px; }
 .tf-thm-doc p { margin: 0 0 10px; }
 .tf-thm-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: calc(var(--t-sm) * var(--fs)); }
@@ -459,7 +468,7 @@ button.tf-thm-sw { cursor: pointer; }
   font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; line-height: 28px; height: 28px; letter-spacing: -.01em; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.tf-upd-v.tf-quiet { color: var(--ink-2); font-weight: 400; }
+.tf-upd-v.tf-quiet { color: var(--ink-2); font-weight: var(--wt-ui, 400); }
 /* The way (its states are `tf-upd-*`: the app's `.tf-go` and `.tf-full` are layout classes): empty when there is nowhere to go, an outline with an arrowhead when there is, filling while the download
    runs, whole when it is checked. */
 .tf-upd-way { display: flex; flex-direction: column; padding-top: 30px; min-width: 0; }

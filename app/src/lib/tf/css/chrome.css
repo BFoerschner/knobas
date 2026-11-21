@@ -174,7 +174,7 @@
    Chromium restyle every row of a table on each row a scroll drew (`style-cost.test.ts`). */
 .tf-heldbelow { visibility: hidden; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
-.tf-fhead h1 { font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; }
+.tf-fhead h1 { font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
 .tf .tf-fhead h1.tf-mono { font-size: calc(var(--t-2xl) * var(--fs)); }
 /* A chip beside the title stays a chip, not a block the title's line height. */
@@ -184,7 +184,7 @@
 .tf-syncnow { align-self: flex-start; }
 
 /* The view's *Sync now* where a reader's header has no room for it: an item of *More*, not a button. */
-.tf-menu.tf-rd-m button.tf-syncnow { display: flex; width: 100%; height: auto; min-height: 0; justify-content: flex-start; border: 0; background: none; box-shadow: none; padding: 6px 10px; border-radius: 4px; font-weight: 400; }
+.tf-menu.tf-rd-m button.tf-syncnow { display: flex; width: 100%; height: auto; min-height: 0; justify-content: flex-start; border: 0; background: none; box-shadow: none; padding: 6px 10px; border-radius: 4px; font-weight: var(--wt-ui, 400); }
 .tf-menu.tf-rd-m button.tf-syncnow:hover { background: var(--sheet-2); }
 
 /* A fold's mark: one drawn chevron, so it is the same size and weight in every list. */
@@ -206,7 +206,7 @@
 .tf-nohere { padding-top: 72px; }
 
 /* The job key: the headings face (Inter's display cut) at weight 800, 64px, narrowed where the face can be. The identity of the app. */
-.tf-jobkey { font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d3) * var(--fs)); line-height: 1; letter-spacing: -.01em; }
+.tf-jobkey { font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d3) * var(--fs)); line-height: 1; letter-spacing: calc(-.01em + var(--ls-head, 0em)); }
 
 /* ---------- buttons: the design system's Controls section (#2238, #2280), drawn on `#/controls` ----------
    Three sizes, each a fixed height from its token and horizontal padding only, so a row of buttons is one
@@ -362,7 +362,7 @@
 }
 /* A code value (`TfKey.svelte`): 400 in a sentence, 600 where it leads a row, a card or a pane. On a chip it holds the
    chip's size and weight, so a key on a chip does not shrink a step under its neighbours. */
-.tf .tf-key { font-weight: 400; }
+.tf .tf-key { font-weight: var(--wt-ui, 400); }
 .tf .tf-key-lead { font-weight: 600; }
 /* A key in a button is part of its label, so it takes the label's weight. */
 .tf .tf-btn .tf-key { font-weight: inherit; }

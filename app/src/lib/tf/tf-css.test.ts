@@ -296,8 +296,8 @@ test("the faces are the app's own files, each beside its licence, as SOURCE.md s
   const faces = readFileSync(join(fonts, "fonts.css"), "utf8");
   expect(faces).not.toMatch(/https?:/);
   const files = [...faces.matchAll(/url\("\.\/([\w-]+)\/([\w-]+\.woff2)"\)/g)].map(([, folder, file]) => ({ folder: folder!, file: file! }));
-  expect(files.map(({ folder }) => folder).filter((folder, i, all) => all.indexOf(folder) === i)).toEqual(["inter", "cascadia-mono", "cascadia-code"]);
-  expect(files).toHaveLength(11);
+  expect(files.map(({ folder }) => folder).filter((folder, i, all) => all.indexOf(folder) === i)).toEqual(["inter", "cascadia-mono", "cascadia-code", "cascadia-2009"]);
+  expect(files).toHaveLength(13);
   for (const { folder, file } of files) {
     const bytes = readFileSync(join(fonts, folder, file));
     expect(bytes.subarray(0, 4).toString("latin1"), file).toBe("wOF2");
@@ -311,6 +311,7 @@ test("the faces are the app's own files, each beside its licence, as SOURCE.md s
   const notice = (folder: string) => readFileSync(join(fonts, folder, "OFL.txt"), "utf8").split("This Font Software is licensed")[0]!;
   expect(notice("cascadia-code")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
   expect(notice("cascadia-mono")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
+  expect(notice("cascadia-2009")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
   expect(notice("inter")).toMatch(/The Inter Project Authors/);
   expect(notice("inter")).not.toMatch(/Reserved Font Name/);
 });
@@ -331,6 +332,9 @@ test("the bundled Inter has its optical size and weight axes, Cascadia Mono and 
   expect(axes(font("cascadia-code/CascadiaCodeItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
   expect(axes(font("cascadia-mono/CascadiaMono.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
   expect(axes(font("cascadia-mono/CascadiaMonoItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  // The older release, 2009.22 (2026-11-21): its two upright files, the same axis.
+  expect(axes(font("cascadia-2009/CascadiaMono.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-2009/CascadiaCode.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
 });
 
 function axes(woff2: Buffer, tag: string): { tag: string; min: number; max: number }[] {

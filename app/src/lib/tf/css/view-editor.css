@@ -9,7 +9,7 @@
 .tf-vw-prev { overflow: auto; padding: 16px 18px; background: var(--paper); }
 .tf-vw-sec { padding: 14px 0; border-bottom: 1px solid var(--rule-2); }
 .tf-vw-sec:last-of-type { border-bottom: 0; }
-.tf-vw-sec h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 10px; }
+.tf-vw-sec h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 10px; }
 .tf-vw-sub { margin-top: 14px; }
 .tf-vw-sub h4 { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--ink-2); margin: 0 0 6px; }
 .tf-vw-sub > .tf-dim, .tf-vw-sec > .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); margin: 0 0 8px; }
@@ -25,7 +25,7 @@
 }
 .tf-vw-edit input.tf-vw-name-in { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; }
 /* A placeholder is a hint, not a value: it does not take the name's size and weight. */
-.tf-vw-edit input.tf-vw-name-in::placeholder { font-size: calc(var(--t-md) * var(--fs)); font-weight: 400; }
+.tf-vw-edit input.tf-vw-name-in::placeholder { font-size: calc(var(--t-md) * var(--fs)); font-weight: var(--wt-ui, 400); }
 .tf-vw-rules { display: flex; flex-direction: column; gap: 8px; }
 .tf-vw-rule {
   display: grid; grid-template-columns: 150px auto 1fr; gap: 6px 8px; align-items: center; padding: 8px;
@@ -74,7 +74,7 @@
 .tf-vw-all > .tf-dim { margin: 2px 0 0 19px; }
 .tf-vw-sec .tf-vw-warn, .tf-vw-prev .tf-vw-warn { font-size: calc(var(--t-sm) * var(--fs)); margin: 4px 0; }
 .tf-vw-n { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
-.tf-vw-n b { font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-variant-numeric: tabular-nums; }
+.tf-vw-n b { font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; font-weight: 800; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-variant-numeric: tabular-nums; }
 .tf-vw-n span { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 /* A head that needs two lines takes them, and its neighbours' cards still start level (`subgrid`). The board scrolls
    sideways inside itself once a column can't hold a word whole, as a real board does. */

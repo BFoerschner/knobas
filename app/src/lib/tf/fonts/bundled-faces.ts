@@ -46,6 +46,14 @@ export const BUNDLED_FACES: readonly BundledFace[] = [
     roles: "Code, with ligatures on",
     licence: () => import("./cascadia-code/OFL.txt?raw").then((text) => text.default),
   },
+  {
+    name: "Cascadia Mono and Cascadia Code",
+    folder: "cascadia-2009",
+    version: "2009.22",
+    by: "Microsoft Corporation",
+    roles: "Code, the older release",
+    licence: () => import("./cascadia-2009/OFL.txt?raw").then((text) => text.default),
+  },
 ];
 
 /** What every face here is licensed under. */

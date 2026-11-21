@@ -16,12 +16,22 @@ import {
   fontKey,
   LIGATURES_KEY,
   MONO_KEY,
-  onCodeSize,
+  codeRows,
+  BUNDLED_CODE,
+  CODE_LINES,
+  KNOBS,
+  knobSteps,
+  LINES_KEY,
+  MEASURE_KEY,
+  RELEASE_KEY,
   ROLES,
   sizeKey,
   sizeStep,
   SIZES,
-  unusedCodeFace,
+  unusedCodeFaces,
+  CASCADIA_CODE_CSS,
+  CASCADIA_MONO_CSS,
+  shownName,
   type RootStyle,
 } from "./fonts.svelte";
 import type { KeptStorage } from "./kept-value";
@@ -139,7 +149,7 @@ test("every role's family and size are kept across a restart and written on <htm
     "--size-head": "0.9",
     "--size-read": "1.25",
     "--size-code": "1.1",
-    "--mono-bundled": '"Cascadia Code"',
+    "--mono-bundled": '"knobas Cascadia Code"',
     "--mono-ligatures": "normal",
   };
   expect(Object.fromEntries(style.props)).toEqual(written);
@@ -154,6 +164,8 @@ test("every role's family and size are kept across a restart and written on <htm
     "knobas.code.size": "110",
     "knobas.code.ligatures": "on",
     "knobas.code.mono": "1",
+    // The chosen code face as measured when picked; jsdom lays nothing out, so it stands at Cascadia's line.
+    "knobas.code.measure": '{"family":"Fira Code","line":1.2202,"bar":null}',
   });
 
   // The next run: written as the module loads, so the first draw is already in it.
@@ -198,11 +210,11 @@ test("ligatures are off until turned on, kept as on, and on draws Cascadia Code 
   expect(fonts.ligatures).toBe(true);
   expect(fonts.bundled("code")).toBe("Cascadia Code");
   expect(kept.items.get(LIGATURES_KEY)).toBe("on");
-  expect(Object.fromEntries(style.props)).toEqual({ "--mono-bundled": '"Cascadia Code"', "--mono-ligatures": "normal" });
+  expect(Object.fromEntries(style.props)).toEqual({ "--mono-bundled": '"knobas Cascadia Code"', "--mono-ligatures": "normal" });
   // The next start keeps it on.
   const after = rootStyle();
   expect(createFonts(() => kept, () => after).ligatures).toBe(true);
-  expect(Object.fromEntries(after.props)).toEqual({ "--mono-bundled": '"Cascadia Code"', "--mono-ligatures": "normal" });
+  expect(Object.fromEntries(after.props)).toEqual({ "--mono-bundled": '"knobas Cascadia Code"', "--mono-ligatures": "normal" });
   fonts.setLigatures(false);
   expect(kept.items.has(LIGATURES_KEY)).toBe(false);
   expect([...style.props]).toEqual([]);
@@ -263,6 +275,42 @@ test("choosing Cascadia Code or Cascadia Mono by name is the bundled face, and s
   expect(fonts.family("ui")).toBe("Cascadia Mono");
 });
 
+test("an installed Cascadia is its own choice: a stored plain name, or the name with (installed) after it (2026-11-21)", () => {
+  const kept = storage();
+  kept.items.set(MONO_KEY, "1");
+  // Stored since the bundled faces have names of their own: the machine's font of that name.
+  kept.items.set(fontKey("code"), "Cascadia Code");
+  const style = rootStyle();
+  const fonts = createFonts(() => kept, () => style);
+  expect(fonts.family("code")).toBe("Cascadia Code");
+  expect(style.props.get("--mono-chosen")).toBe('"Cascadia Code"');
+  expect(fonts.ligatures).toBe(false);
+  // Picked from the list or typed with the suffix: the installed copy, and the switch is left as it is.
+  fonts.setFamily("code", null);
+  fonts.setFamily("code", "Cascadia Mono (installed)");
+  expect(fonts.family("code")).toBe("Cascadia Mono");
+  expect(kept.items.get(fontKey("code"))).toBe("Cascadia Mono");
+  expect(fonts.ligatures).toBe(false);
+  // Typed bare, or by its CSS name, it is the bundled face again.
+  fonts.setFamily("code", "knobas Cascadia Code");
+  expect(fonts.family("code")).toBeNull();
+  expect(fonts.ligatures).toBe(true);
+  expect(fonts.bundledCss("code")).toBe(CASCADIA_CODE_CSS);
+  fonts.setFamily("code", "Cascadia Mono");
+  expect(fonts.family("code")).toBeNull();
+  expect(fonts.bundledCss("code")).toBe(CASCADIA_MONO_CSS);
+});
+
+test.each([
+  ["Cascadia Mono", "Cascadia Mono (installed)"],
+  ["cascadia code", "cascadia code (installed)"],
+  ["Fira Code", "Fira Code"],
+  ["Cascadia Code NF", "Cascadia Code NF"],
+])("an installed %s shows as %s", (family, shown) => {
+  expect(shownName(family)).toBe(shown);
+  expect(familyName(shown)).toBe(family);
+});
+
 test("the switch turns to a face once it has landed, and the last press wins", async () => {
   const landed: Record<string, (() => void)[]> = {};
   const asked: string[] = [];
@@ -279,17 +327,17 @@ test("the switch turns to a face once it has landed, and the last press wins", a
   fonts.setLigatures(true);
   // The switch reads on at once; code turns to Cascadia Code when its files have loaded.
   expect(fonts.ligatures).toBe(true);
-  expect(asked).toEqual(["Cascadia Code"]);
+  expect(asked).toEqual(["knobas Cascadia Code"]);
   expect([...style.props]).toEqual([]);
-  await land("Cascadia Code");
-  expect(style.props.get("--mono-bundled")).toBe('"Cascadia Code"');
+  await land("knobas Cascadia Code");
+  expect(style.props.get("--mono-bundled")).toBe('"knobas Cascadia Code"');
   // Off, on and off again before either lands: Mono lands, then Code, which changes nothing.
   fonts.setLigatures(false);
   fonts.setLigatures(true);
   fonts.setLigatures(false);
-  await land("Cascadia Mono");
+  await land("knobas Cascadia Mono");
   expect([...style.props]).toEqual([]);
-  await land("Cascadia Code");
+  await land("knobas Cascadia Code");
   expect([...style.props]).toEqual([]);
 });
 
@@ -302,13 +350,14 @@ test("a face that fails to load still turns code to it, drawn in its stand-ins",
   expect(style.props.get("--mono-ligatures")).toBe("normal");
 });
 
-test("the idle loader leaves the Cascadia the switch does not draw", () => {
+test("the idle loader leaves the bundled Cascadias the release and the switch do not draw", () => {
   const fonts = createFonts(() => storage(), () => rootStyle());
-  expect(unusedCodeFace(fonts)).toBe("Cascadia Code");
+  expect(unusedCodeFaces(fonts)).toEqual(["knobas Cascadia Code", "knobas Cascadia Mono 2009", "knobas Cascadia Code 2009"]);
   fonts.setLigatures(true);
-  expect(unusedCodeFace(fonts)).toBe("Cascadia Mono");
+  expect(unusedCodeFaces(fonts)).toEqual(["knobas Cascadia Mono", "knobas Cascadia Mono 2009", "knobas Cascadia Code 2009"]);
+  fonts.setFamily("code", "Cascadia Mono 2009.22");
+  expect(unusedCodeFaces(fonts)).toEqual(["knobas Cascadia Mono", "knobas Cascadia Code", "knobas Cascadia Code 2009"]);
 });
-
 test.each([
   // Björn's: Cascadia installed and set to 105 % is the bundled Cascadia at its 100 % (and an installed Cascadia Mono at
   // 105 %, which Settings marked as the even step, is the bundled Mono at 100 %).
@@ -430,31 +479,235 @@ const source = (file: string) => readFileSync(join(process.cwd(), "src", file), 
 
 test("the lists of code's lines hear code's size, and the text measured in script takes its role's size", () => {
   // A run's log, a file's source and a diff's lines: rows that are line boxes, held at the new size (Fable's ruling 3).
-  for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/repo/TfRepoFiles.svelte", "lib/tf/diff/TfDiffCard.svelte"]) {
-    expect(source(file), file).toMatch(/new Windowed<\w+>\(\{[^}]*textSize: onCodeSize[^}]*\}\)/);
+  for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/repo/TfRepoFiles.svelte", "lib/tf/diff/TfDiffCard.svelte", "lib/tf/render/TfJarCode.svelte"]) {
+    expect(source(file), file).toMatch(/const rowsOf = codeRows\((13, 1\.6|12, 1\.55)\);\s*const win = new Windowed<\w+>\(\{[^}]*estimate: rowsOf\.estimate[^}]*textSize: rowsOf\.textSize[^}]*\}\)/);
   }
   // A run's step names and the day strip's labels are fitted by a canvas: at the role's size, again when it changes.
-  expect(source("lib/tf/builds/TfRun.svelte")).toMatch(/const px = \(\(isCommand\(name\) \? 11 : 12\) \* fonts\.size\(role\)\) \/ 100;\s*void fonts\.family\(role\);/);
+  expect(source("lib/tf/builds/TfRun.svelte")).toMatch(/const px = \(\(command \? 11 : 12\) \* fonts\.size\(role\)\) \/ 100;\s*void fonts\.family\(role\);/);
   expect(source("lib/tf/time/TfDay.svelte")).toMatch(/const scale = fonts\.size\(role\) \/ 100;\s*void fonts\.family\(role\);[\s\S]*getPropertyValue\("--t-2xs"\)\) \* scale/);
+  // And the interface's weight and letter spacing, after every character (2026-11-21).
+  expect(source("lib/tf/builds/TfRun.svelte")).toMatch(/const weight = command \? 400 : fonts\.knob\("ui", "wt"\);\s*const track = command \? 0 : \(fonts\.knob\("ui", "ls"\) \/ 100\) \* px;[\s\S]*measureText\(text\)\.width \+ \[\.\.\.text\]\.length \* track/);
+  expect(source("lib/tf/time/TfDay.svelte")).toMatch(/const track = plain \? \(fonts\.knob\("ui", "ls"\) \/ 100\) \* px : 0;[\s\S]*measureText\(text\)\.width \+ \[\.\.\.text\]\.length \* track/);
 });
 
-test("onCodeSize hears Code's size alone", () => {
+test("a list of code's lines hears its rows' height change with the new height over the old, and code's tracking at 1", () => {
   const fonts = createFonts(() => storage(), () => rootStyle());
-  const heard = vi.fn();
-  const stop = onCodeSize(heard, fonts);
+  const file = codeRows(13, 1.6, fonts);
+  const log = codeRows(12, 1.55, fonts);
+  // Joined: Cascadia's own line, rounded to whole pixels: 16 px at 13 px, 15 at 12.
+  expect(file.estimate).toBe(16);
+  expect(log.estimate).toBe(15);
+  const heardFile = vi.fn();
+  const heardLog = vi.fn();
+  const stop = file.textSize(heardFile);
+  log.textSize(heardLog);
   fonts.setSize("ui", 120);
-  fonts.setSize("read", 90);
-  expect(heard).not.toHaveBeenCalled();
+  fonts.setKnob("ui", "ls", 2);
+  expect(heardFile).not.toHaveBeenCalled();
+  // Open: each area's own number, 20.8 and 18.6, unrounded.
+  fonts.setLines("open");
+  expect(heardFile).toHaveBeenLastCalledWith(20.8 / 16);
+  expect(heardLog).toHaveBeenLastCalledWith(18.6 / 15);
   fonts.setSize("code", 125);
-  expect(heard).toHaveBeenCalledExactlyOnceWith(1.25);
+  expect(heardFile).toHaveBeenLastCalledWith(1.25);
+  // A notch is one ratio in every area, rounded: 1.40 at 16.25 px is 22.75, 23 px.
+  fonts.setLines(140);
+  expect(fonts.codeRow(13, 1.6)).toBe(23);
+  expect(heardFile).toHaveBeenLastCalledWith(23 / 26);
+  // Code's letter spacing: the same height, heard at 1 so wrapped rows are read again.
+  heardFile.mockClear();
+  fonts.setKnob("code", "ls", 3);
+  expect(heardFile).toHaveBeenCalledExactlyOnceWith(1);
   stop();
-  fonts.setSize("code", 100);
-  expect(heard).toHaveBeenCalledTimes(1);
+  fonts.setLines("joined");
+  expect(heardFile).toHaveBeenCalledTimes(1);
+  expect(heardLog).toHaveBeenLastCalledWith(Math.round(15 * 1.2202) / Math.round(15 * 1.4));
 });
-
 test("main.ts loads the fonts before it mounts, so the first draw is in the kept faces and sizes", () => {
   const main = source("main.ts");
   const loaded = main.indexOf('import "./lib/tf/fonts.svelte";');
   expect(loaded).toBeGreaterThan(-1);
   expect(loaded).toBeLessThan(main.indexOf("mount(App"));
+});
+
+test("each role's knobs are kept as whole numbers, written on <html> off their default, and put on their notches", () => {
+  const kept = storage();
+  const style = rootStyle();
+  const fonts = createFonts(() => kept, () => style);
+  // Every knob at its default writes nothing: a default draws what it drew.
+  expect([...style.props.keys()].filter((key) => /^--(ls|wt|lh)-/.test(key))).toEqual([]);
+  expect(KNOBS).toEqual({ ui: ["ls", "wt"], head: ["ls"], read: ["lh", "ls", "wt"], code: ["ls", "wt"] });
+  fonts.setKnob("ui", "ls", 2);
+  fonts.setKnob("head", "ls", -3);
+  fonts.setKnob("read", "lh", 181);
+  fonts.setKnob("read", "wt", 320);
+  fonts.setKnob("code", "wt", 470);
+  fonts.setKnob("code", "ls", 9);
+  // A knob a role does not have is no knob.
+  fonts.setKnob("head", "wt", 450);
+  expect(Object.fromEntries([...style.props].filter(([key]) => /^--(ls|wt|lh)-/.test(key)))).toEqual({
+    "--ls-ui": "0.02em",
+    "--ls-head": "-0.03em",
+    "--lh-read": "1.8",
+    "--wt-read": "350",
+    "--wt-code": "450",
+    "--ls-code": "0.06em",
+  });
+  expect(Object.fromEntries([...kept.items].filter(([key]) => /\.(ls|wt|lh)$/.test(key)))).toEqual({
+    "knobas.ui.ls": "2",
+    "knobas.head.ls": "-3",
+    "knobas.read.lh": "180",
+    "knobas.read.wt": "350",
+    "knobas.code.wt": "450",
+    "knobas.code.ls": "6",
+  });
+  const again = createFonts(() => kept, () => rootStyle());
+  expect(again.knob("read", "lh")).toBe(180);
+  expect(again.knob("head", "wt")).toBe(400);
+  // Back to the default: nothing kept, nothing written.
+  fonts.setKnob("ui", "ls", 0);
+  fonts.setKnob("read", "lh", 165);
+  expect(kept.items.has("knobas.ui.ls")).toBe(false);
+  expect(style.props.has("--ls-ui")).toBe(false);
+  expect(style.props.has("--lh-read")).toBe(false);
+  expect(knobSteps("ui", "wt")).toEqual([350, 400, 450]);
+  expect(knobSteps("code", "wt")).toEqual([300, 350, 400, 450, 500]);
+  expect(knobSteps("code", "ls")).toEqual([-3, -2, -1, 0, 1, 2, 3, 4, 5, 6]);
+  expect(knobSteps("read", "lh")).toEqual([140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190]);
+  fonts.reset();
+  expect([...style.props.keys()].filter((key) => /^--(ls|wt|lh)-/.test(key))).toEqual([]);
+});
+
+test("code's line spacing is Joined until chosen, kept as open or hundredths, and written as the line height drawn", () => {
+  const kept = storage();
+  const style = rootStyle();
+  const fonts = createFonts(() => kept, () => style);
+  expect(fonts.lines).toBe("joined");
+  expect(style.props.has("--code-lh")).toBe(false);
+  expect(style.props.has("--code-lh-face")).toBe(false);
+  fonts.setLines("open");
+  expect(style.props.get("--code-lh")).toBe("initial");
+  expect(kept.items.get(LINES_KEY)).toBe("open");
+  fonts.setLines(143);
+  expect(fonts.lines).toBe(145);
+  expect(kept.items.get(LINES_KEY)).toBe("145");
+  expect(style.props.has("--code-lh")).toBe(false);
+  expect(style.props.get("--code-lh-face")).toBe("1.45");
+  expect(CODE_LINES).toEqual([110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180]);
+  expect(createFonts(() => kept, () => rootStyle()).lines).toBe(145);
+  fonts.setLines("joined");
+  expect(kept.items.has(LINES_KEY)).toBe(false);
+  expect(style.props.has("--code-lh-face")).toBe(false);
+  // Anything else kept is Joined.
+  kept.items.set(LINES_KEY, "tall");
+  expect(createFonts(() => kept, () => rootStyle()).lines).toBe("joined");
+});
+
+test("an installed code face is measured once as it is picked, and Joined is its own line from then on", () => {
+  const kept = storage();
+  const style = rootStyle();
+  const measured: string[] = [];
+  const measure = (family: string) => (measured.push(family), family === "Menlo" ? { line: 1.17, bar: 1.3 } : null);
+  const fonts = createFonts(() => kept, () => style, () => null, measure);
+  const heard = vi.fn();
+  fonts.onCodeRows(heard);
+  fonts.setFamily("code", "Menlo");
+  expect(measured).toEqual(["Menlo"]);
+  expect(fonts.faceLine).toBe(1.17);
+  expect(style.props.get("--code-lh-face")).toBe("1.17");
+  expect(heard).toHaveBeenCalledExactlyOnceWith("rows");
+  expect(JSON.parse(kept.items.get(MEASURE_KEY)!)).toEqual({ family: "Menlo", line: 1.17, bar: 1.3 });
+  // Chosen again (the field left as it was chooses what it holds), it is not measured again.
+  fonts.setFamily("code", "Menlo");
+  expect(measured).toEqual(["Menlo"]);
+  // The next start draws from what was kept, and measures again only once the window is idle, for the start after.
+  const idle: (() => void)[] = [];
+  const again = createFonts(() => kept, () => rootStyle(), () => null, () => ({ line: 1.2, bar: 1.3 }), undefined, (go) => idle.push(go));
+  expect(again.faceLine).toBe(1.17);
+  idle.forEach((go) => go());
+  expect(again.faceLine).toBe(1.17);
+  expect(JSON.parse(kept.items.get(MEASURE_KEY)!).line).toBe(1.2);
+  // Another role's choice measures nothing; the bundled face is Cascadia's line, and its measure is gone.
+  fonts.setFamily("ui", "Menlo");
+  expect(measured).toEqual(["Menlo"]);
+  fonts.setFamily("code", null);
+  expect(fonts.faceLine).toBe(1.2202);
+  expect(style.props.has("--code-lh-face")).toBe(false);
+  expect(kept.items.has(MEASURE_KEY)).toBe(false);
+  // A face that cannot be measured stands at Cascadia's line.
+  fonts.setFamily("code", "Iosevka");
+  expect(fonts.faceLine).toBe(1.2202);
+  // A measure kept for another family is not this one's.
+  kept.items.set(fontKey("code"), "Fira Code");
+  expect(createFonts(() => kept, () => rootStyle(), () => null, () => null).faceLine).toBe(1.2202);
+});
+
+test("the ring is the tallest notch at which the drawn face's │ still joins, on this screen", () => {
+  const fonts = createFonts(() => storage(), () => rootStyle());
+  // 2407.24's │ is 1.246 of the size: 1.20 joins at 12, 13 and 14 px; 1.25 leaves 12 px a row of 15.
+  expect(fonts.joinsUpTo).toBe(120);
+  fonts.setFamily("code", "Cascadia Code 2009.22");
+  expect(fonts.joinsUpTo).toBe(160);
+  // An installed face whose │ was not measured has no ring.
+  const other = createFonts(() => storage(), () => rootStyle(), () => null, () => ({ line: 1.2, bar: null }));
+  other.setFamily("code", "Menlo");
+  expect(other.joinsUpTo).toBeNull();
+});
+
+test("the device scale rounds code rows to its pixels, written on <html> off 1", () => {
+  let now = 1;
+  const heard: (() => void)[] = [];
+  const style = rootStyle();
+  const fonts = createFonts(() => storage(), () => style, () => null, () => null, { now: () => now, on: (go) => (heard.push(go), () => {}) });
+  const rows = vi.fn();
+  fonts.onCodeRows(rows);
+  expect(style.props.has("--dpr")).toBe(false);
+  // 12 px at 1.2202 is 14.64: 15 px at 1x, 18 device pixels (14.4 px) at 1.25.
+  expect(fonts.codeRow(12, 1.55)).toBe(15);
+  now = 1.25;
+  heard.forEach((go) => go());
+  expect(style.props.get("--dpr")).toBe("1.25");
+  expect(fonts.codeRow(12, 1.55)).toBe(14.4);
+  expect(rows).toHaveBeenCalledExactlyOnceWith("scale");
+});
+
+test("the older Cascadia is picked by name: its release is kept, it loads alone, and comments stand upright in it", async () => {
+  const kept = storage();
+  const style = rootStyle();
+  const loads: string[] = [];
+  const fonts = createFonts(() => kept, () => style, (family) => (loads.push(family), Promise.resolve()));
+  expect(BUNDLED_CODE.map((face) => face.name)).toEqual(["Cascadia Mono", "Cascadia Code", "Cascadia Mono 2009.22", "Cascadia Code 2009.22"]);
+  expect(familyName("Cascadia Mono 2009.22")).toBeNull();
+  expect(familyName("knobas cascadia code 2009")).toBeNull();
+  fonts.setFamily("code", "Cascadia Mono 2009.22");
+  expect(fonts.release).toBe("2009.22");
+  expect(fonts.ligatures).toBe(false);
+  expect(fonts.family("code")).toBeNull();
+  expect(fonts.bundled("code")).toBe("Cascadia Mono 2009.22");
+  expect(loads).toEqual(["knobas Cascadia Mono 2009"]);
+  expect(kept.items.get(RELEASE_KEY)).toBe("2009.22");
+  // Drawn once it has landed.
+  expect(style.props.has("--mono-bundled")).toBe(false);
+  await Promise.resolve();
+  expect(style.props.get("--mono-bundled")).toBe('"knobas Cascadia Mono 2009"');
+  expect(style.props.get("--mono-synth")).toBe("none");
+  // The switch flips Mono and Code within the release.
+  fonts.setLigatures(true);
+  await Promise.resolve();
+  expect(style.props.get("--mono-bundled")).toBe('"knobas Cascadia Code 2009"');
+  expect(style.props.get("--mono-ligatures")).toBe("normal");
+  // The next start draws it at once.
+  const after = rootStyle();
+  createFonts(() => kept, () => after);
+  expect(after.props.get("--mono-bundled")).toBe('"knobas Cascadia Code 2009"');
+  expect(after.props.get("--mono-synth")).toBe("none");
+  // An installed face chosen over it draws its own slant; the current release is picked back by name.
+  fonts.setFamily("code", "Menlo");
+  expect(style.props.has("--mono-synth")).toBe(false);
+  fonts.setFamily("code", "Cascadia Mono");
+  await Promise.resolve();
+  expect(fonts.release).toBe("2407.24");
+  expect(kept.items.has(RELEASE_KEY)).toBe(false);
+  expect(style.props.has("--mono-bundled")).toBe(false);
+  expect(style.props.has("--mono-synth")).toBe(false);
 });

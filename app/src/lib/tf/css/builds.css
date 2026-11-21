@@ -72,7 +72,7 @@
 .tf-newruns { position: sticky; top: 55px; z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
 .tf-newruns button {
   pointer-events: auto; margin-top: 8px; height: var(--control-h-sm); padding: 0 14px; border: 0; border-radius: 13px;
-  background: var(--ink); color: var(--sheet); --fs: var(--size-ui); font: 600 calc(var(--t-sm) * var(--fs))/1 var(--sans); box-shadow: var(--shadow); cursor: pointer;
+  background: var(--ink); color: var(--sheet); --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-sm) * var(--fs))/1 var(--sans); box-shadow: var(--shadow); cursor: pointer;
 }
 .tf-newruns button:hover { background: var(--ink-2); }
 /* A run a read brought to the top after the list drew is lit once as it draws, so it is not missed. */
@@ -99,7 +99,7 @@
 }
 .tf-combo .tf-opts [role="option"] { display: flex; gap: 8px; padding: 6px 10px; cursor: pointer; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-combo .tf-opts [role="option"]:hover, .tf-combo .tf-opts .tf-act { background: var(--sheet-2); }
-.tf-combo .tf-opts .tf-dim { margin-left: auto; --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-2xs) * var(--fs)); }
+.tf-combo .tf-opts .tf-dim { margin-left: auto; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-2xs) * var(--fs)); }
 /* A parameter's name is long, so the Run dialog's label column is wider, and its other fields share it. */
 .tf-run-dialog { --tf-label: 180px; }
 .tf-run-add { align-self: flex-start; }
@@ -125,7 +125,7 @@
 .tf-sbseg.tf-wait { fill: var(--rule); }
 .tf-stepsbar text { fill: var(--ink); font-size: calc(var(--t-xs) * var(--fs)); pointer-events: none; }
 /* A command is code, a size down so its wider face holds the bar's line. `nameWidth` in `TfRun.svelte` measures both. */
-.tf-stepsbar text.tf-sbcmd { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-2xs) * var(--fs)); }
+.tf-stepsbar text.tf-sbcmd { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-2xs) * var(--fs)); letter-spacing: normal; }
 .tf-sbseg:is(.tf-err, .tf-run) ~ text { fill: var(--sheet); }
 .tf-sbseg.tf-wait ~ text { fill: var(--ink-2); }
 .tf-stepsbar a { cursor: pointer; }
@@ -138,8 +138,8 @@
   border: 1px solid var(--err); background: var(--err-bg); border-radius: 6px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 6px;
 }
-.tf-problem h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--err); overflow-wrap: anywhere; }
-.tf-problem pre { margin: 0; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-problem h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--err); overflow-wrap: anywhere; }
+.tf-problem pre { margin: 0; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.5) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-problem .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-problem .tf-dim { font-size: calc(var(--t-sm) * var(--fs)); }
 /* The box is the list's own: the heading stands above it, so its padding is the same on all four sides. */
@@ -209,7 +209,7 @@
    selected row's. */
 .tf-pi-nm, .tf-fold-nm { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-pi-nm.tf-bad { color: var(--err); font-weight: 600; }
-.tf-pi-pre { color: var(--ink-2); font-weight: 400; }
+.tf-pi-pre { color: var(--ink-2); font-weight: var(--wt-ui, 400); }
 .tf-pi-nm.tf-bad .tf-pi-pre, .tf-pi[aria-current="true"] .tf-pi-pre, .tf-pi[aria-current="true"] .tf-pi-nm.tf-bad { color: inherit; }
 /* *This job*'s reason has only the room the name leaves, so it gives way first. */
 .tf-pi-why { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
@@ -368,7 +368,7 @@
 /* A pipeline inside the tab: where it was opened from, its name (a title, not code), which runs, then its runs. */
 .tf-rb-back { font-size: calc(var(--t-sm) * var(--fs)); margin: 0 0 6px; }
 .tf-cbody .tf-rb-back a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
-.tf-rbp-h h2.tf-rbp-pl { --fs: var(--size-ui); font: 600 calc(var(--t-xl) * var(--fs)) var(--sans); }
+.tf-rbp-h h2.tf-rbp-pl { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-xl) * var(--fs)) var(--sans); }
 .tf-rbp > .tf-seg { margin: 0 0 12px; }
 .tf-rbt col.tf-rbt-no { width: 170px; }
 .tf-rbt col.tf-rbt-dur { width: 110px; }

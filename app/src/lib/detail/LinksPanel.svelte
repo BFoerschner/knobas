@@ -166,7 +166,7 @@
     margin-top: 6px;
     background: none;
     color: var(--ink-2);
-    --fs: var(--size-ui); font: calc(var(--t-xs) * var(--fs)) var(--sans);
+    --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-xs) * var(--fs)) var(--sans);
   }
 
   .links .row.hd span:empty {
@@ -205,7 +205,7 @@
     grid-row: 2;
     text-align: left;
     color: var(--ink-2);
-    --fs: var(--size-ui); font: calc(var(--t-xs) * var(--fs)) var(--sans);
+    --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-xs) * var(--fs)) var(--sans);
   }
 
   .wd {

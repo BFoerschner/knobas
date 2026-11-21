@@ -255,10 +255,13 @@
     const scale = fonts.size(role) / 100;
     void fonts.family(role);
     const style = getComputedStyle(stripEl);
-    const font = `600 ${Number.parseFloat(style.getPropertyValue("--t-2xs")) * scale}px ${style.getPropertyValue(plain ? "--sans" : "--mono").trim()}`;
+    const px = Number.parseFloat(style.getPropertyValue("--t-2xs")) * scale;
+    const font = `600 ${px}px ${style.getPropertyValue(plain ? "--sans" : "--mono").trim()}`;
+    // A plain label is the interface's text, with its letter spacing after every character (2026-11-21).
+    const track = plain ? (fonts.knob("ui", "ls") / 100) * px : 0;
     return (text) => {
       pen.font = font;
-      return pen.measureText(text).width;
+      return pen.measureText(text).width + [...text].length * track;
     };
   }
 

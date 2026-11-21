@@ -42,6 +42,12 @@ pub struct InstalledFont {
     /// .52), for *Even out*: the size that draws its lower case as tall as
     /// the bundled face's. `None` when the face does not say.
     pub x_height: Option<f32>,
+    /// The upright regular face's version, as its `name` table's version
+    /// string gives it without the word *Version* and anything after a `;`
+    /// (`2407.024` for Cascadia Mono 2407.24, and for a Nerd Fonts patch of
+    /// it), so Settings › Fonts can tell an installed copy from the one knobas
+    /// brings (2026-11-21). `None` when the face does not say.
+    pub version: Option<String>,
 }
 
 static FONTS: OnceCell<Vec<InstalledFont>> = OnceCell::const_new();
@@ -104,7 +110,7 @@ fn scan() -> Vec<InstalledFont> {
     families(faces.iter().map(|(name, monospace, condensed)| {
         let mut traits = traits
             .get(&name.to_lowercase())
-            .copied()
+            .cloned()
             .unwrap_or_default();
         traits.narrows |= condensed;
         (name.as_str(), *monospace || traits.even, traits)
@@ -112,13 +118,14 @@ fn scan() -> Vec<InstalledFont> {
 }
 
 /// What one face says of its family, read from its tables (no glyph drawn).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 struct Traits {
     /// `i`, `M`, `0`, `.` and a space at one advance ([`even_advances`]).
     even: bool,
     serif: bool,
     narrows: bool,
     x_height: Option<f32>,
+    version: Option<String>,
 }
 
 fn read_traits(data: &[u8], index: u32) -> Traits {
@@ -138,7 +145,25 @@ fn read_traits(data: &[u8], index: u32) -> Traits {
             .x_height()
             .filter(|height| *height > 0 && em > 0.0)
             .map(|height| f32::from(height) / em),
+        version: face
+            .names()
+            .into_iter()
+            .filter(|name| name.name_id == ttf_parser::name_id::VERSION)
+            .find_map(|name| name.to_string())
+            .and_then(|text| version_of(&text)),
     }
+}
+
+/// A `name` table's version string as a person reads it: `Version 2407.024;
+/// ttfautohint (v1.8.4);Nerd Fonts 3.4.0` is `2407.024`. `None` for an empty one.
+fn version_of(text: &str) -> Option<String> {
+    let head = text.split(';').next().unwrap_or("").trim();
+    let bare = head
+        .strip_prefix("Version")
+        .or_else(|| head.strip_prefix("version"))
+        .unwrap_or(head)
+        .trim();
+    (!bare.is_empty()).then(|| bare.to_owned())
 }
 
 /// Whether an `OS/2` table classes its face as a serif: `sFamilyClass`'s
@@ -226,6 +251,7 @@ fn families<'a>(faces: impl Iterator<Item = (&'a str, bool, Traits)>) -> Vec<Ins
                 serif: traits.serif || serif_name(name),
                 narrows: traits.narrows,
                 x_height: traits.x_height,
+                version: traits.version.clone(),
             });
     }
     let mut found: Vec<InstalledFont> = by_name.into_values().collect();
@@ -249,6 +275,7 @@ mod tests {
             serif: false,
             narrows: false,
             x_height: None,
+            version: None,
         }
     }
 
@@ -314,6 +341,29 @@ mod tests {
             ),
             ("Source Serif 4", true, false, Some(0.45))
         );
+    }
+
+    #[test]
+    fn a_version_is_the_name_table_s_number_alone() {
+        assert_eq!(version_of("Version 2407.024").as_deref(), Some("2407.024"));
+        assert_eq!(
+            version_of("Version 2407.024; ttfautohint (v1.8.4);Nerd Fonts 3.4.0").as_deref(),
+            Some("2407.024")
+        );
+        assert_eq!(version_of("version 1.30").as_deref(), Some("1.30"));
+        assert_eq!(version_of("2.304").as_deref(), Some("2.304"));
+        assert_eq!(version_of("Version ;x"), None);
+        assert_eq!(version_of(""), None);
+    }
+
+    #[test]
+    fn a_family_carries_its_regular_face_s_version() {
+        let cascadia = Traits {
+            version: Some("2407.024".to_owned()),
+            ..Traits::default()
+        };
+        let found = families([("Cascadia Mono", true, cascadia)].into_iter());
+        assert_eq!(found[0].version.as_deref(), Some("2407.024"));
     }
 
     #[test]

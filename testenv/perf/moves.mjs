@@ -99,6 +99,17 @@ const SWITCHED = (name, at, more = {}) => ({
   go: at, hash: at, away: CODE_COLOURS, track: CODE_LINES, ...more,
 });
 const COMMIT = `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`;
+/**
+ * Code's line spacing changed in Settings › Fonts, then a code area again by its address (ux29, 2026-11-21): *Open* pressed
+ * before the first open, *Joined* before the return, so each open draws rows of the other height and nothing may move after.
+ */
+const FONTS = "#/settings/appearance/fonts";
+const SPACING = (words) => ({ press: `${shown} .tf-fr-seg button`, text: words });
+const SPACED = (name, at, more = {}) => ({
+  name: `lines-${name}`, fixture: true, start: at, before: [{ go: FONTS }, SPACING("Open")], beforeReturn: [SPACING("Joined")],
+  go: at, hash: at, away: FONTS, track: CODE_LINES, ...more,
+});
+const FILE = `#/repo/${REPO}/files/src/payout/retry/RetryQueue.java`;
 /** The branch box's *Working tree* picked as its change event would: a scripted pick is no input, so it is a step, not the press. */
 const CHOOSE_WORKING_TREE = `(() => { const box = document.querySelector("${shown} .tf-bsel select"); box.value = "~working-tree"; box.dispatchEvent(new Event("change", { bubbles: true })); })()`;
 const HL_PLACES = [
@@ -111,6 +122,11 @@ const HL_PLACES = [
   SWITCHED("pr", "#/pr/mock%3Apayout-service%23142/diff"),
   SWITCHED("compare", `#/repo/${REPO}/compare/~working-tree`),
   SWITCHED("docs-code", "#/page/confluence%3Asepa"),
+  SPACED("file", FILE),
+  SPACED("diff", COMMIT),
+  SPACED("docs-code", "#/page/confluence%3Asepa"),
+  // The older Cascadia kept (ux29): it loads as the file draws, at the current one's metrics, so nothing moves when it lands.
+  { name: "older-cascadia-file", fixture: true, store: { "knobas.code.release": "2009.22" }, start: "#/time", go: FILE, hash: FILE, away: "#/time", track: CODE_LINES },
   ...["tanstack", "shiki", "pierre"].map((engine) => ({
     name: `hl-preview-${engine}`, fixture: true, once: true, start: CODE_COLOURS, ...(engine === "pierre" ? { store: { "knobas.highlighter": "shiki" } } : {}),
     ...RADIO(ENGINE[engine]), hash: null, ready: `${shown} input[name=tf-thm-engine][value=${engine}]:checked`, track: CODE_LINES, away: "#/settings",

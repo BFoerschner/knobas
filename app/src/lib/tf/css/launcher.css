@@ -166,7 +166,7 @@
 .tf-ln-fchip.tf-ln-set { background: var(--muted-bg); color: var(--ink); }
 .tf-ln-fchip.tf-ln-set.tf-ln-fail { background: var(--err-bg); color: var(--err); }
 /* Greyed and dashed: a filter that did nothing reads as present but inert. */
-.tf-ln-fchip.tf-ln-off { color: var(--ink-2); border: 1px dashed var(--rule); font-weight: 400; }
+.tf-ln-fchip.tf-ln-off { color: var(--ink-2); border: 1px dashed var(--rule); font-weight: var(--wt-ui, 400); }
 
 /* A result or recent row (#2421): three cells like a table, the monogram, the key cell and the title. */
 .tf .tf-ln-res {
@@ -176,7 +176,7 @@
 .tf-ln-res > :is(.tf-ln-mg, .tf-ln-k, .tf-ln-t, .tf-ln-chord, .tf-ln-src) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-ln-mg {
   display: inline-flex; align-items: center; justify-content: center; height: 20px; border: 1px solid var(--rule);
-  border-radius: 3px; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; letter-spacing: .04em; color: var(--ink-2); flex: none;
+  border-radius: 3px; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; letter-spacing: calc(.04em + var(--ls-ui, 0em)); color: var(--ink-2); flex: none;
 }
 .tf-ln-res .tf-ln-mg { width: 28px; }
 /* The state is the monogram's colour, in the chips' own tones (`.tf-chip.tf-ok` and its siblings). */

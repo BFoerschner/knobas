@@ -263,13 +263,15 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return keptOpen;
     },
     smooth_scrolling: () => smooth,
-    // A machine's families: two monospace ones first, as the backend sorts them.
+    // A machine's families: the monospace ones first, as the backend sorts them, among them an installed Cascadia Mono
+    // that is not the bundled one (2026-11-21: listed as "Cascadia Mono (installed)" with its version).
     installed_fonts: () => [
-      { family: "Fira Code", monospace: true, serif: false, narrows: false, x_height: 0.537 },
-      { family: "Menlo", monospace: true, serif: false, narrows: false, x_height: 0.547 },
-      { family: "Arial", monospace: false, serif: false, narrows: false, x_height: 0.519 },
-      { family: "Georgia", monospace: false, serif: true, narrows: false, x_height: 0.481 },
-      { family: "Skia", monospace: false, serif: false, narrows: true, x_height: 0.531 },
+      { family: "Cascadia Mono", monospace: true, serif: false, narrows: false, x_height: 0.518, version: "2407.024" },
+      { family: "Fira Code", monospace: true, serif: false, narrows: false, x_height: 0.537, version: "6.002" },
+      { family: "Menlo", monospace: true, serif: false, narrows: false, x_height: 0.547, version: "6.0d1e1" },
+      { family: "Arial", monospace: false, serif: false, narrows: false, x_height: 0.519, version: null },
+      { family: "Georgia", monospace: false, serif: true, narrows: false, x_height: 0.481, version: null },
+      { family: "Skia", monospace: false, serif: false, narrows: true, x_height: 0.531, version: null },
     ],
     set_smooth_scrolling: (args) => {
       smooth = args["on"] === true;

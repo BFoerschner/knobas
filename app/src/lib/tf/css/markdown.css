@@ -1,13 +1,13 @@
 /* The Markdown component (#2255), as the code-area mockup's `.md` (#2252). Every surface that draws Markdown draws it with these. */
-.tf-md { padding: 22px 32px 30px; --fs: var(--size-ui); font: 400 calc(var(--t-lg) * var(--fs))/1.6 var(--sans); overflow-wrap: anywhere; }
+.tf-md { padding: 22px 32px 30px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-lg) * var(--fs))/1.6 var(--sans); overflow-wrap: anywhere; }
 /* Each block after the first (`* + *` in other words, which `style-cost.test.ts` refuses). */
 .tf-md > :where(:not(:first-child)) { margin-top: 12px; }
 .tf-md > :first-child { margin-top: 0; }
 /* A file's headings sit under the page's own title, so they are a step below it. */
-.tf-md h1 { font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
-.tf-md h2 { font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
-.tf-md h3 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; margin-top: 20px; }
-.tf-md h4, .tf-md h5, .tf-md h6 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; margin-top: 16px; }
+.tf-md h1 { font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h2 { font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h3 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; margin-top: 20px; }
+.tf-md h4, .tf-md h5, .tf-md h6 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; margin-top: 16px; }
 .tf-md a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
 .tf-md a.tf-ext::after { content: " ↗"; font-size: calc(var(--t-2xs) * var(--fs)); }
 .tf-md code { --fs: var(--size-code); font: calc(.88em * var(--size-code) / var(--size-ui)) var(--mono); font-size: round(calc(.88em * var(--size-code) / var(--size-ui)), 1px); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
@@ -34,7 +34,7 @@
 .tf-md .tf-fence { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); }
 .tf-md .tf-fence > header { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 32px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); background: var(--sheet-2); }
 .tf-md .tf-fence > header .tf-fence-copy { margin-left: auto; }
-.tf-md .tf-fence pre { --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 10px 14px; overflow: auto; background: var(--paper); margin: 0; }
+.tf-md .tf-fence pre { --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-sm) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 10px 14px; overflow: auto; background: var(--paper); margin: 0; }
 .tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: var(--mono-ligatures); background: none; border: 0; padding: 0; }
 .tf-md .tf-md-noimg { display: inline-block; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); border: 1px dashed var(--rule); border-radius: 3px; padding: 2px 8px; }
 /* A ticket attachment the wiki drew inline (#2406), as the ticket-page mockup's `.tf-tkfig`: at most the panel's width, nothing under it. */
@@ -59,7 +59,7 @@
 .tf-md .tf-fence-body.tf-roomkept > .tf-diagram.tf-dcut::after { content: ""; position: absolute; inset: auto 0 0; height: min(28px, 40%); background: linear-gradient(to bottom, transparent, var(--sheet)); pointer-events: none; }
 .tf-md .tf-fence > header .tf-dfull { margin-left: auto; }
 .tf-md .tf-fence > header .tf-dfull + .tf-fence-copy { margin-left: 0; }
-.tf-md .tf-fence .tf-stepfail pre { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.5 var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 8px 10px; white-space: pre-wrap; }
+.tf-md .tf-fence .tf-stepfail pre { --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.5) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 8px 10px; white-space: pre-wrap; }
 /* Markdown inside a panel or a comment (#2261, the mockup's `.cmt .md`): the holder pads it, and the type is the panel's. */
 .tf-prdesc .tf-md, .tf-msg-body .tf-md, .tf-item-textp .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); }
 .tf-thread .tf-md { padding: 0; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; }

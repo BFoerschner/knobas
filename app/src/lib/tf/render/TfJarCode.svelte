@@ -8,6 +8,7 @@
   import { untrack } from "svelte";
 
   import { Windowed } from "../../shell/windowed.svelte";
+  import { codeRows } from "../fonts.svelte";
   import { renderPort, type LineTokens, type RenderPort } from "../../render/port";
 
   let {
@@ -33,7 +34,9 @@
   let tokensOf: (LineTokens | undefined)[] = [];
   let painted = $state(0);
 
-  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20, scrolls: true });
+  // A class's line is `.tf-code`'s, 13 px at its code row height (`codeRows`), and follows code's size and spacing.
+  const rowsOf = codeRows(13, 1.6);
+  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: rowsOf.estimate, scrolls: true, textSize: rowsOf.textSize });
 
   $effect(() => {
     const source = text;

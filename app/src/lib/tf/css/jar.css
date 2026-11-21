@@ -19,19 +19,19 @@
 .tf-jar-bad pre, .tf-jar-pending pre {
   margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--rule-2); border-left: 3px solid var(--err); border-radius: 4px;
   background: var(--err-bg); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
-  --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures);
 }
 
 /* The head: the artifact's name is the page's one title, its version the loud cut beside it. */
 .tf-jar-head { max-width: 980px; margin-bottom: 14px; }
 .tf-jar-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0; line-height: 1.2; }
 .tf-jar-name {
-  --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600;
+  --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600;
   font-variation-settings: "wdth" 85; font-stretch: 85%; overflow-wrap: anywhere;
 }
 .tf-jar-ver, .tf-jar-vers {
   --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%;
-  letter-spacing: .02em; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap;
+  letter-spacing: calc(.02em + var(--ls-head, 0em)); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap;
 }
 .tf-jar-ver { font-size: calc(var(--t-2xl) * var(--fs)); }
 /* A step up from the method column's `--t-sm`: digits in the narrow cut read smaller than capitals. */
@@ -118,7 +118,7 @@
 
 /* Text in the archive: Source's lines, in a box of its own that scrolls itself, its height its line count's. */
 .tf-jar-code .tf-code {
-  height: calc(var(--jar-rows, 12) * 1.6em + 12px); padding: 6px 0; box-sizing: border-box; overflow: auto;
+  height: calc(var(--jar-rows, 12) * var(--code-lh, 1.6em) + 12px); padding: 6px 0; box-sizing: border-box; overflow: auto;
   border: 1px solid var(--rule-2); border-radius: 4px; background: var(--under);
 }
 

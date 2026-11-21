@@ -7,6 +7,11 @@ like meant to be, yeah."
 
 Amends `2026-11-20-the-faces-knobas-brings.md` for code. Two calls went to Fable (xhigh), whose rulings are below.
 
+**Amended the same day** by `2026-11-21-fonts-you-can-tune.md`: code rows are the face's own line height (*Joined*) by
+default, Settings › Fonts lists the bundled Cascadias apart from installed ones under CSS names of their own ("knobas
+Cascadia Mono", "knobas Cascadia Code"), so "Both names are the bundled face" below holds for a name typed bare and
+"Cascadia Mono (installed)" is the machine's copy, and the older Cascadia 2009.22 comes along.
+
 ## What was decided
 
 - **Code is Cascadia Mono 2407.24**, from the release the bundled Cascadia Code came from

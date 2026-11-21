@@ -53,7 +53,7 @@
 .tf-ccommits .tf-crows { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--sheet); }
 /* The ticket link's room while the branch's key is looked up: drawn unseen, so the form's height is its final one. */
 .tf-compare .tf-cheld { visibility: hidden; }
-.tf-editor { display: grid; grid-template-columns: 48px 1fr; --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-editor { display: grid; grid-template-columns: 48px 1fr; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-sm) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-editor .tf-nums {
   color: var(--ink-2); text-align: right; padding: 8px 12px 8px 0; white-space: pre; user-select: none; background: var(--sheet-2);
 }

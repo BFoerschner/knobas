@@ -40,6 +40,7 @@ const font = (family: string, kind: Partial<InstalledFont> = {}): InstalledFont 
   serif: false,
   narrows: false,
   x_height: null,
+  version: null,
   ...kind,
 });
 
@@ -78,9 +79,9 @@ async function settle() {
   }
 }
 
-async function draw(role: Role = "code", read: () => Promise<InstalledFont[]> = () => Promise.resolve(FONTS)) {
+async function draw(role: Role = "code", read: () => Promise<InstalledFont[]> = () => Promise.resolve(FONTS), draws: (family: string) => boolean = () => false) {
   const installedFonts = vi.fn(read);
-  view = mount(TfFontRole, { target, props: { role, installedFonts, fonts } });
+  view = mount(TfFontRole, { target, props: { role, installedFonts, fonts, draws } });
   await settle();
   return installedFonts;
 }
@@ -90,7 +91,9 @@ const options = () => [...target.querySelectorAll('[role="option"]')].map((el) =
 const heads = () => [...target.querySelectorAll(".tf-cf-mh")].map((el) => el.textContent);
 const caption = () => target.querySelector(".tf-fr-spec figcaption")!.textContent!.replace(/\s+/g, " ").trim();
 const specimen = () => target.querySelector<HTMLElement>(".tf-fr-spec > :first-child")!;
-const slider = () => target.querySelector<HTMLElement>('[role="slider"]')!;
+const slider = (label?: string) => (label ? target.querySelector<HTMLElement>(`[role="slider"][aria-label="${label}"]`)! : target.querySelector<HTMLElement>('[role="slider"]')!);
+/** A slider's notches. */
+const notches = (label: string) => [...slider(label).querySelectorAll<HTMLButtonElement>(".tf-fr-notch")];
 const button = (text: string) => [...target.querySelectorAll("button")].find((b) => b.textContent === text);
 const key = (name: string, on: HTMLElement = field()) => {
   on.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
@@ -109,8 +112,9 @@ test("the list holds the machine's families, monospace first under their heading
   expect(target.querySelector('[role="listbox"]')).toBeNull();
   open();
   expect(target.querySelector('[role="listbox"]')?.getAttribute("aria-label")).toBe("Installed fonts");
-  expect(heads()).toEqual(["Monospace", "Other fonts"]);
-  expect(options()).toEqual(["Fira Code", "Menlo", "Arial", "Avenir Next Condensed", "Georgia"]);
+  // Code's list starts with the faces that come with knobas (2026-11-21).
+  expect(heads()).toEqual(["Comes with knobas", "Monospace", "Other fonts"]);
+  expect(options()).toEqual(["Cascadia Mono", "Cascadia Code with ligatures", "Cascadia Mono 2009.22 older release", "Cascadia Code 2009.22 older release, with ligatures", "Fira Code", "Menlo", "Arial", "Avenir Next Condensed", "Georgia"]);
   unmount(view!);
   view = null;
   const again = await draw();
@@ -132,8 +136,7 @@ test.each([
 test("the option under the keys draws in the specimen before it is chosen; Enter chooses it for the whole app", async () => {
   await draw();
   expect(caption()).toBe("Cascadia Mono, 100 %");
-  key("ArrowDown");
-  key("ArrowDown");
+  for (let i = 0; i < 6; i++) key("ArrowDown");
   expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"Menlo"/);
   expect(caption()).toBe("Menlo, 100 %");
   expect(fonts.family("code")).toBeNull();
@@ -157,6 +160,73 @@ test.each([
   open();
   key("ArrowDown");
   expect(specimen().style.getPropertyValue(property)).toMatch(new RegExp(`^"${pick}"`));
+});
+
+test("the faces that come with knobas are the switch's two places: picking one sets it, and the selected row follows it", async () => {
+  await draw();
+  open();
+  const selected = () => [...target.querySelectorAll('[role="option"][aria-selected="true"]')].map((el) => el.textContent!.trim());
+  expect(selected()).toEqual(["Cascadia Mono"]);
+  key("ArrowDown");
+  key("ArrowDown");
+  // Under the keys, the specimen draws the bundled Cascadia Code by its own name.
+  expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"knobas Cascadia Code"/);
+  expect(caption()).toBe("Cascadia Code, 100 %");
+  key("Enter");
+  expect(fonts.family("code")).toBeNull();
+  expect(fonts.ligatures).toBe(true);
+  expect(field().value).toBe("");
+  open();
+  expect(selected()).toEqual(["Cascadia Code with ligatures"]);
+  // The switch turned by hand moves the selected row back.
+  fonts.setLigatures(false);
+  flushSync();
+  expect(selected()).toEqual(["Cascadia Mono"]);
+});
+
+test("an installed Cascadia reads (installed) with its version, is chosen as the machine's copy, and stays chosen when the field is left", async () => {
+  await draw("code", () => Promise.resolve([font("Cascadia Mono", { monospace: true, x_height: 0.518, version: "2407.024" }), ...FONTS]));
+  open();
+  expect(options()).toEqual(["Cascadia Mono", "Cascadia Code with ligatures", "Cascadia Mono 2009.22 older release", "Cascadia Code 2009.22 older release, with ligatures", "Cascadia Mono (installed) 2407.024", "Fira Code", "Menlo", "Arial", "Avenir Next Condensed", "Georgia"]);
+  for (let i = 0; i < 5; i++) key("ArrowDown");
+  expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"Cascadia Mono"/);
+  expect(caption()).toBe("Cascadia Mono (installed), 100 %");
+  key("Enter");
+  expect(fonts.family("code")).toBe("Cascadia Mono");
+  expect(style.props.get("--mono-chosen")).toBe('"Cascadia Mono"');
+  expect(field().value).toBe("Cascadia Mono (installed)");
+  // Leaving the field as it is keeps the machine's copy; it is not read back as the bundled face.
+  field().dispatchEvent(new FocusEvent("blur"));
+  flushSync();
+  expect(fonts.family("code")).toBe("Cascadia Mono");
+  open();
+  const selected = [...target.querySelectorAll('[role="option"][aria-selected="true"]')].map((el) => el.textContent!.trim());
+  expect(selected).toEqual(["Cascadia Mono (installed) 2407.024"]);
+});
+
+test("a Cascadia the webview draws but the read missed (Windows Terminal's) is listed as installed, with no version", async () => {
+  const asked: string[] = [];
+  await draw("code", () => Promise.resolve(FONTS), (family) => (asked.push(family), family === "Cascadia Code"));
+  open();
+  expect(asked).toEqual(["Cascadia Mono", "Cascadia Code"]);
+  expect(options()).toEqual(["Cascadia Mono", "Cascadia Code with ligatures", "Cascadia Mono 2009.22 older release", "Cascadia Code 2009.22 older release, with ligatures", "Cascadia Code (installed)", "Fira Code", "Menlo", "Arial", "Avenir Next Condensed", "Georgia"]);
+  unmount(view!);
+  view = null;
+  // Interface's list is the read alone.
+  forgetInstalledFonts();
+  const other: string[] = [];
+  await draw("ui", () => Promise.resolve(FONTS), (family) => (other.push(family), true));
+  expect(other).toEqual([]);
+});
+
+test("Code's specimen shows a box, a tree and the pairs ligatures join, as a file's rows", async () => {
+  await draw();
+  const rows = [...specimen().querySelectorAll(".tf-l > span:last-child")].map((el) => el.textContent);
+  expect(rows.some((row) => /┌─+┐/.test(row!))).toBe(true);
+  expect(rows.some((row) => row!.startsWith("├── "))).toBe(true);
+  expect(rows.some((row) => row!.startsWith("│   └── "))).toBe(true);
+  for (const pair of ["->", "=>", ">=", "!=", "==="]) expect(rows.join("\n")).toContain(pair);
+  expect(specimen().classList.contains("tf-code")).toBe(true);
 });
 
 test("Esc puts the chosen family back and keeps the dialog under it open", async () => {
@@ -215,7 +285,8 @@ test("Use the bundled face goes back to it", async () => {
 test("the list failing to read leaves a field that still takes a name", async () => {
   await draw("code", () => Promise.reject(new Error("no fonts")));
   open();
-  expect(target.querySelector('[role="listbox"]')).toBeNull();
+  // The faces that come with knobas are listed whatever the read did.
+  expect(options()).toEqual(["Cascadia Mono", "Cascadia Code with ligatures", "Cascadia Mono 2009.22 older release", "Cascadia Code 2009.22 older release, with ligatures"]);
   field().value = "Menlo";
   field().dispatchEvent(new Event("input", { bubbles: true }));
   key("Enter");
@@ -227,7 +298,7 @@ test("the size is a slider of the ten steps: the arrows step it, Home and End go
   await draw("read");
   expect(slider().getAttribute("aria-label")).toBe("Reading size");
   expect(slider().getAttribute("aria-valuenow")).toBe("100");
-  expect(target.querySelectorAll(".tf-fr-notch")).toHaveLength(10);
+  expect(notches("Reading size")).toHaveLength(10);
   key("ArrowRight", slider());
   key("ArrowUp", slider());
   expect(fonts.size("read")).toBe(110);
@@ -289,7 +360,7 @@ test("Ligatures in code is a switch under Code alone, off until turned on, and o
   flushSync();
   expect(sw.getAttribute("aria-checked")).toBe("true");
   expect(style.props.get("--mono-ligatures")).toBe("normal");
-  expect(style.props.get("--mono-bundled")).toBe('"Cascadia Code"');
+  expect(style.props.get("--mono-bundled")).toBe('"knobas Cascadia Code"');
   // The row names the face drawn: the caption, the field's placeholder.
   expect(caption()).toBe("Cascadia Code, 100 %");
   expect(target.querySelector<HTMLInputElement>('[role="combobox"]')!.placeholder).toBe("Cascadia Code (comes with knobas)");
@@ -309,11 +380,21 @@ test("the Fonts section is the proof line and the four roles in order, one read 
     "Size evens a face out against the others; to make everything bigger, use Zoom in Appearance. A font this computer does not have draws in the one that comes with knobas. Kept on this computer.",
   );
   expect([...target.querySelectorAll(".tf-fr-pw")].map((el) => el.className.match(/tf-fr-pw-(\w+)/)![1])).toEqual(["ui", "head", "read", "code"]);
+  // Each role's size, then its knobs in one order: line spacing, letter spacing, text weight (Fable's ruling 6).
   expect([...target.querySelectorAll('[role="slider"]')].map((el) => el.getAttribute("aria-label"))).toEqual([
     "Interface size",
+    "Interface letter spacing",
+    "Interface text weight",
     "Headings size",
+    "Headings letter spacing",
     "Reading size",
+    "Reading line spacing",
+    "Reading letter spacing",
+    "Reading text weight",
     "Code size",
+    "Code line spacing",
+    "Code letter spacing",
+    "Code text weight",
   ]);
   expect(installedFonts).toHaveBeenCalledTimes(1);
 });
@@ -329,6 +410,7 @@ test("the faces that come with knobas are listed with their licences, each text 
     "Inter 4.1Interface, Headings, Reading© The Inter Project Authors",
     "Cascadia Mono 2407.24Code© Microsoft Corporation",
     "Cascadia Code 2407.24Code, with ligatures on© Microsoft Corporation",
+    "Cascadia Mono and Cascadia Code 2009.22Code, the older release© Microsoft Corporation",
   ]);
   const text = rows[1]!.querySelector("pre")!;
   expect(text.textContent).toBe("");
@@ -337,4 +419,91 @@ test("the faces that come with knobas are listed with their licences, each text 
   await vi.waitFor(() => expect(text.textContent).toContain("with Reserved Font Name Cascadia Code."));
   expect(text.textContent).toContain("SIL OPEN FONT LICENSE Version 1.1");
   expect(rows[0]!.querySelector("pre")!.textContent).toBe("");
+});
+
+test("each knob is a line of notches with its figure, the arrows step it, 0 goes home, and Back to shows off home", async () => {
+  await draw("read");
+  const lines = [...target.querySelectorAll(".tf-fr-knob .tf-fr-k")].map((el) => el.textContent);
+  expect(lines).toEqual(["Size", "Line spacing", "Letter spacing", "Text weight"]);
+  const lh = slider("Reading line spacing");
+  expect(notches("Reading line spacing")).toHaveLength(11);
+  expect(lh.querySelector(".tf-fr-home")).toBe(notches("Reading line spacing")[5]);
+  key("ArrowRight", lh);
+  key("ArrowRight", lh);
+  expect(fonts.knob("read", "lh")).toBe(175);
+  expect(style.props.get("--lh-read")).toBe("1.75");
+  expect(lh.getAttribute("aria-valuetext")).toBe("1.75");
+  expect(button("Back to 1.65")).toBeDefined();
+  key("0", lh);
+  expect(fonts.knob("read", "lh")).toBe(165);
+  expect(button("Back to 1.65")).toBeUndefined();
+  // Letter spacing reads in em, signed; a notch clicked sets it; Back to 0 puts it home.
+  notches("Reading letter spacing")[0]!.click();
+  flushSync();
+  expect(fonts.knob("read", "ls")).toBe(-3);
+  expect(style.props.get("--ls-read")).toBe("-0.03em");
+  const figures = [...target.querySelectorAll(".tf-fr-knob .tf-fr-fig")].map((el) => el.textContent);
+  expect(figures).toEqual(["100 %", "1.65", "−0.03 em", "400"]);
+  button("Back to 0")!.click();
+  flushSync();
+  expect(style.props.has("--ls-read")).toBe(false);
+  // The weight's three notches: 350, 400, 450.
+  key("End", slider("Reading text weight"));
+  expect(fonts.knob("read", "wt")).toBe(450);
+  expect(style.props.get("--wt-read")).toBe("450");
+});
+
+test("code's line spacing is Joined or Open, or a notch; the ring marks where boxes still join, and its note says what is drawn", async () => {
+  await draw("code");
+  const note = () => target.querySelector(".tf-fr-linesnote")!.textContent;
+  const pressed = () => [...target.querySelectorAll('.tf-fr-seg button[aria-pressed="true"]')].map((el) => el.textContent);
+  expect(pressed()).toEqual(["Joined"]);
+  expect(note()).toBe("Rows are as tall as Cascadia Mono itself, 1.22 times the size. Box lines and trees join.");
+  const lines = slider("Code line spacing");
+  // No notch filled with a preset pressed, none drawn taller, the ring at 1.20.
+  expect(lines.querySelector(".tf-fr-on")).toBeNull();
+  expect(lines.querySelector(".tf-fr-home")).toBeNull();
+  expect(lines.querySelector(".tf-fr-even")).toBe(notches("Code line spacing")[2]);
+  // An arrow steps from the drawn 1.22 to the next notch that way.
+  key("ArrowRight", lines);
+  expect(fonts.lines).toBe(125);
+  expect(pressed()).toEqual([]);
+  expect(note()).toBe("1.25 times the size. Cascadia Mono's box lines join up to the ring at 1.20.");
+  expect(target.querySelector(".tf-fr-lines .tf-fr-fig")!.textContent).toBe("1.25");
+  key("0", lines);
+  expect(fonts.lines).toBe("joined");
+  button("Open")!.click();
+  flushSync();
+  expect(fonts.lines).toBe("open");
+  expect(style.props.get("--code-lh")).toBe("initial");
+  expect(target.querySelector(".tf-fr-lines .tf-fr-fig")!.textContent).toBe("1.5 to 1.6");
+  expect(note()).toBe("The spacing before: 1.6 in files and diffs, 1.55 in logs, 1.5 in short logs. Cascadia Mono's box lines leave gaps.");
+  key("ArrowLeft", lines);
+  expect(fonts.lines).toBe(155);
+  button("Back to Joined")!.click();
+  flushSync();
+  expect(fonts.lines).toBe("joined");
+  // The older release's │ is taller: the ring moves to 1.60, and the same spacing is kept.
+  fonts.setFamily("code", "Cascadia Mono 2009.22");
+  flushSync();
+  expect(lines.querySelector(".tf-fr-even")).toBe(notches("Code line spacing")[10]);
+  expect(fonts.lines).toBe("joined");
+  // Code's letter spacing says what it costs.
+  expect([...target.querySelectorAll(".tf-fr-hint")].map((el) => el.textContent)).toContain("Ligatures draw only at 0. Above 0, box lines show gaps.");
+});
+
+test("the older Cascadia is two rows that come with knobas, and picking one sets the release and the switch", async () => {
+  await draw("code");
+  open();
+  for (let i = 0; i < 4; i++) key("ArrowDown");
+  expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"knobas Cascadia Code 2009"/);
+  expect(caption()).toBe("Cascadia Code 2009.22, 100 %");
+  key("Enter");
+  expect(fonts.release).toBe("2009.22");
+  expect(fonts.ligatures).toBe(true);
+  expect(fonts.family("code")).toBeNull();
+  expect(target.querySelector<HTMLInputElement>('[role="combobox"]')!.placeholder).toBe("Cascadia Code 2009.22 (comes with knobas)");
+  open();
+  const selected = [...target.querySelectorAll('[role="option"][aria-selected="true"]')].map((el) => el.textContent!.trim());
+  expect(selected).toEqual(["Cascadia Code 2009.22 older release, with ligatures"]);
 });

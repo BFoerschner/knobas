@@ -1,5 +1,5 @@
 /* ---------- the drawer's set groups (#867, R-6.2); the *Also on this job* bar went with #2399 ---------- */
-.tf-dbody h3 .tf-dedit { margin-left: auto; font-weight: 400; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-dbody h3 .tf-dedit { margin-left: auto; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-xs) * var(--fs)); }
 
 /* An item's page (#1201): the block view of an item no surface draws. */
 .tf-item-body { padding: 0 22px 22px; display: flex; flex-direction: column; gap: 12px; max-width: 90ch; }

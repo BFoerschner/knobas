@@ -11,7 +11,7 @@
 .tf-site-hist { display: flex; gap: 2px; flex: none; }
 /* The nameplate: whose site this is. A page title's cut, small. */
 .tf-site-name {
-  flex: none; --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 700; font-variation-settings: "wdth" 85; font-stretch: 85%; color: var(--ink);
+  flex: none; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 700; font-variation-settings: "wdth" 85; font-stretch: 85%; color: var(--ink);
   padding: 0 10px 0 4px; border-right: 1px solid var(--rule); line-height: 20px; white-space: nowrap;
 }
 /* The address: text, not a field. The host in ink, the rest cut at its end. */
@@ -23,7 +23,7 @@
 .tf-site-host { color: var(--ink); font-weight: 600; flex: none; }
 .tf-site-path { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tf-site-at.tf-foreign .tf-site-host { color: var(--warn); }
-.tf-site-at .tf-chip { margin-left: 8px; --fs: var(--size-ui); font-family: var(--sans); }
+.tf-site-at .tf-chip { margin-left: 8px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 .tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); padding: 1px 7px; border-radius: 3px; font-size: calc(var(--t-xs) * var(--fs)); flex: none; }
 .tf-site-acts { display: flex; align-items: center; gap: var(--control-gap); flex: none; }
 /* What the bar says, where the address is: one line, cut at the end. */
@@ -51,7 +51,7 @@
 .tf-site-room { position: relative; flex: 1 1 auto; min-height: 0; background: var(--paper); overflow: hidden; }
 .tf-veil { position: absolute; inset: 0; display: grid; place-items: center; background: var(--paper); text-align: center; padding: 24px; }
 .tf-veil-in { max-width: 560px; }
-.tf-veil h2 { margin: 0 0 6px; --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 700; font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); overflow-wrap: anywhere; }
+.tf-veil h2 { margin: 0 0 6px; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 700; font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); overflow-wrap: anywhere; }
 .tf-veil-at { --fs: var(--size-code); font-family: var(--mono); font-size: calc(var(--t-sm) * var(--fs)); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); overflow-wrap: anywhere; }
 .tf-veil-big { --fs: var(--size-code); font-family: var(--mono); font-weight: 600; font-size: calc(var(--t-xl) * var(--fs)); font-variant-ligatures: var(--mono-ligatures); margin: 10px 0 12px; color: var(--ink); overflow-wrap: anywhere; }
 .tf-veil p { margin: 8px 0 0; color: var(--ink-2); }

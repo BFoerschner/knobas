@@ -15,14 +15,21 @@ test("every face not yet loaded is loaded once the window is idle, and none befo
   expect(faces.map((f) => f.load.mock.calls.length)).toEqual([1, 0, 0, 1]);
 });
 
-test("the Cascadia the ligature switch does not draw is left unloaded (2026-11-21)", () => {
-  const faces = [face("unloaded", '"Cascadia Mono"'), face("unloaded", "Cascadia Code"), face("unloaded", '"Cascadia Code"'), face("unloaded")];
-  // The window's switch, off: Cascadia Code is the one no rule draws.
+test("the Cascadias the release and the ligature switch do not draw are left unloaded (2026-11-21)", () => {
+  const faces = [
+    face("unloaded", '"knobas Cascadia Mono"'),
+    face("unloaded", "knobas Cascadia Code"),
+    face("unloaded", '"knobas Cascadia Code"'),
+    face("unloaded", '"knobas Cascadia Mono 2009"'),
+    face("unloaded", '"knobas Cascadia Code 2009"'),
+    face("unloaded"),
+  ];
+  // The window's switch off and the current release: Cascadia Mono is the one drawn, the other three are not.
   loadEveryFace(faces, (go) => go());
-  expect(faces.map((f) => f.load.mock.calls.length)).toEqual([1, 0, 0, 1]);
-  const again = [face("unloaded", '"Cascadia Mono"'), face("unloaded", '"Cascadia Code"')];
-  loadEveryFace(again, (go) => go(), () => "Cascadia Mono");
-  expect(again.map((f) => f.load.mock.calls.length)).toEqual([0, 1]);
+  expect(faces.map((f) => f.load.mock.calls.length)).toEqual([1, 0, 0, 0, 0, 1]);
+  const again = [face("unloaded", '"knobas Cascadia Mono"'), face("unloaded", '"knobas Cascadia Code"'), face("unloaded", '"knobas Cascadia Mono 2009"')];
+  loadEveryFace(again, (go) => go(), () => ["knobas Cascadia Mono", "knobas Cascadia Mono 2009"]);
+  expect(again.map((f) => f.load.mock.calls.length)).toEqual([0, 1, 0]);
 });
 
 test("a face that fails to load is no error, and a page with no font set does nothing", async () => {

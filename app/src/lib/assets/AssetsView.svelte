@@ -3394,7 +3394,7 @@
     padding: 0 4px 0 14px;
     background: var(--sheet);
     border-bottom: 1px solid var(--rule);
-    --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs))/1.2 var(--sans);
+    --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-xs) * var(--fs))/1.2 var(--sans);
     color: var(--ink-2);
   }
 
@@ -3640,7 +3640,7 @@
     margin: 7px 0;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    --fs: var(--size-ui); font: 500 calc(var(--t-xs) * var(--fs))/1 var(--sans);
+    --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 500 calc(var(--t-xs) * var(--fs))/1 var(--sans);
     color: var(--ink-2);
     white-space: nowrap;
     overflow: hidden;

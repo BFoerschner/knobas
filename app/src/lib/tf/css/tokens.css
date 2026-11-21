@@ -35,9 +35,20 @@
      `--mono-bundled` to Cascadia Code, which draws `=>` and `->` as one sign, and `--mono-ligatures` to `normal`, so a
      chosen face draws its own. Only one of the two Cascadias is in the list, so the other is never loaded. Every rule
      that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
-  --mono-bundled: "Cascadia Mono";
+  --mono-bundled: "knobas Cascadia Mono";
   --mono: var(--mono-chosen, var(--mono-bundled)), var(--mono-bundled), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;
   --mono-ligatures: none;
+  /* A code row's height (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`): every area that stacks code
+     lines (a file, a diff, a hunk, a fence, the editor, a log, a Docs block, an OpenAPI or JAR block) draws its rows at
+     `var(--code-lh, <its own>)`, so with nothing set here they would be today's 1.6, 1.55 and 1.5 (*Open*). *Joined*,
+     the default, is the drawn face's own line height (`--code-lh-face`, its ascent and descent over its size: Cascadia's
+     2380 of 2048 at 105 %, or an installed face's, measured when picked), rounded to whole device pixels
+     (`--dpr`, which `fonts.svelte.ts` writes on <html> with each scale), so its box drawing joins from row to row: 16 px
+     at 13 px. A custom line height is written to `--code-lh-face` the same way; *Open* sets `--code-lh` to `initial`, so
+     each area's own number stands. The `1em` is the area's own font size: a custom property is substituted where used. */
+  --code-lh-face: 1.2202;
+  --dpr: 1;
+  --code-lh: round(calc(var(--code-lh-face) * 1em), calc(1px / var(--dpr)));
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
@@ -108,7 +119,7 @@
    no scroll behind the window, and the paper under it ---------- */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
-body { --fs: var(--size-ui); font: calc(var(--t-sm) * var(--fs))/1.45 var(--sans); -webkit-font-smoothing: antialiased; accent-color: var(--ink); }
+body { --fs: var(--size-ui); letter-spacing: var(--ls-ui, normal); font: var(--wt-ui, 400) calc(var(--t-sm) * var(--fs))/1.45 var(--sans); -webkit-font-smoothing: antialiased; accent-color: var(--ink); }
 /* Code is drawn in code's face wherever it appears: a fence, a macro's block, a `{noformat}`, an inline `code` or `tt`
    in any rendered text, a key. A rule that styles one names `--mono` too, or inherits this; at no specificity, so
    such a rule wins without a fight (`code-face.test.ts`). */
@@ -116,7 +127,14 @@ body { --fs: var(--size-ui); font: calc(var(--t-sm) * var(--fs))/1.45 var(--sans
 /* Code's size is applied once: code inside code (a `code` in a `pre`) is as big as what holds it. */
 :where(pre, code, kbd, samp, tt) :where(pre, code, kbd, samp, tt) { font-size: inherit; }
 /* Code keeps its columns, and the reading face its own fit. */
-:is(pre, code, kbd, samp, tt, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
+:is(pre, code, kbd, samp, tt, .tf-mono, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title) { letter-spacing: normal; word-spacing: normal; }
+/* A Docs page's text is the reading face's, with Reading's letter spacing (Settings › Fonts, 2026-11-21). */
+.tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd) { letter-spacing: var(--ls-read, normal); word-spacing: normal; }
+/* The areas that stack code lines take Code's letter spacing (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`),
+   and so does the `code` a block wraps its lines in; their line numbers and a log's times keep their own, so no gutter column changes. A key,
+   inline code and `.tf-mono` keep `normal`, from the rule above. Held by `code-face.test.ts`. */
+:is(.tf-code, .tf-diff, .tf-was-hunk, .tf-pdfd-hunk, .tf-stepfail pre, .tf-md .tf-fence pre, .tf-md .tf-fence .tf-stepfail pre, .tf-jar-bad pre, .tf-jar-pending pre, .tf-oas-bad pre, .tf-oas-ex pre, .tf-editor, .tf-logv, .tf-tdetail pre, .tf-problem pre, .tf-log, .tf-doc pre), :is(.tf-code, .tf-diff, .tf-was-hunk, .tf-pdfd-hunk, .tf-stepfail pre, .tf-md .tf-fence pre, .tf-md .tf-fence .tf-stepfail pre, .tf-jar-bad pre, .tf-jar-pending pre, .tf-oas-bad pre, .tf-oas-ex pre, .tf-editor, .tf-logv, .tf-tdetail pre, .tf-problem pre, .tf-log, .tf-doc pre) > :is(code, kbd, samp, tt) { letter-spacing: var(--ls-code, normal); word-spacing: normal; }
+.tf-code .tf-l > span:first-child, .tf-diff .tf-no, .tf-ll :is(.tf-no, .tf-ts), :is(.tf-was-hunk, .tf-pdfd-hunk) .tf-no, .tf-editor .tf-nums { letter-spacing: normal; }
 /* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. It is told from the words by its
    face, so it carries no underline until pointed at; a link made of words always does. */
 :is(span, a).tf-mono { white-space: nowrap; }
@@ -146,7 +164,7 @@ a { color: var(--info); text-decoration: none; }
      compositor only when the box's own background is opaque (PR #2479), so such a scroller paints `var(--under)`.
      A surface that holds one sets it to its own colour. */
   --under: var(--paper);
-  --fs: var(--size-ui); font: 400 calc(var(--t-md) * var(--fs))/1.45 var(--sans);
+  --fs: var(--size-ui); letter-spacing: var(--ls-ui, normal); font: var(--wt-ui, 400) calc(var(--t-md) * var(--fs))/1.45 var(--sans);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }

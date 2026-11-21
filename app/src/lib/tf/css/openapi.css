@@ -20,12 +20,12 @@
 .tf-oas-bad pre {
   margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--rule-2); border-left: 3px solid var(--err); border-radius: 4px;
   background: var(--err-bg); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
-  --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures);
 }
 
 /* The head: the API's name is the page's one title. */
 .tf-oas-head { max-width: 920px; margin-bottom: 14px; }
-.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; overflow-wrap: anywhere; }
+.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; overflow-wrap: anywhere; }
 .tf-oas-vers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 0; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-hdesc { margin-top: 10px; }
 /* A spec's Markdown (its description, an operation's) sits in the view's column at body size, not as a README's page. */
@@ -55,7 +55,7 @@
 .tf-oas-list > [data-k] { scroll-margin-top: 52px; }
 
 .tf-oas-group { display: flex; align-items: baseline; gap: 10px; padding: 18px 6px 6px; border-bottom: 1px solid var(--rule); min-width: 0; }
-.tf-oas-group h3 { margin: 0; flex: none; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-oas-group h3 { margin: 0; flex: none; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-oas-group h3.tf-oas-gcode { --fs: var(--size-code); font: 600 calc(var(--t-md) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-oas-gdesc { flex: 1; min-width: 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-oas-gcount { margin-left: auto; flex: none; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
@@ -69,7 +69,7 @@
 .tf-oas-opbtn:hover { background: var(--sheet-2); }
 .tf-oas-opbtn[aria-expanded="true"] { background: var(--sheet-2); border-bottom-color: transparent; }
 .tf-oas-opbtn { --focus-o: var(--focus-in); }
-.tf-oas-m { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; letter-spacing: .02em; color: var(--ink); }
+.tf-oas-m { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; letter-spacing: calc(.02em + var(--ls-head, 0em)); color: var(--ink); }
 .tf-oas-path {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures);
@@ -150,7 +150,7 @@
 .tf-oas-ex summary { cursor: pointer; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
 .tf-oas-ex pre {
   margin: 6px 0 0; padding: 8px 10px; max-height: 360px; overflow: auto; border: 1px solid var(--rule-2); border-radius: 4px;
-  background: var(--sheet); --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre;
+  background: var(--sheet); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre;
 }
 
 @media (prefers-reduced-motion: no-preference) {

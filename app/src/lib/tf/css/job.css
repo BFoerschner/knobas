@@ -127,7 +127,7 @@
 .tf-tkstack > summary { display: none; }
 .tf-tkcardtitle { display: none; }
 @media (max-width: 900px) {
-  .tf-tkcardtitle { display: block; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; color: inherit; overflow-wrap: anywhere; }
+  .tf-tkcardtitle { display: block; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; color: inherit; overflow-wrap: anywhere; }
   .tf-ticketcard p.tf-tkcardtitle { color: inherit; }
   .tf-tkread .tf-tkpagehead h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .tf-tkstack > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; list-style: none; }
@@ -154,10 +154,10 @@
 .tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
 .tf-tkread { max-width: 880px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
 .tf-tkread > section > header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; min-height: var(--control-h-sm); }
-.tf-tkread > section > header h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-tkread > section > header h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 /* The page's head: the title at the page-title step (`.tf-fhead`'s type), whole; a long title wraps. */
 .tf-tkpagehead { display: flex; align-items: flex-start; gap: 16px; margin-bottom: -8px; }
-.tf-tkpagehead h1 { flex: 1; min-width: 0; font-size: calc(var(--t-3xl) * var(--fs)); line-height: 1.15; font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; overflow-wrap: anywhere; }
+.tf-tkpagehead h1 { flex: 1; min-width: 0; font-size: calc(var(--t-3xl) * var(--fs)); line-height: 1.15; font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; overflow-wrap: anywhere; }
 .tf-tkpagehead .tf-acts { flex: none; margin-top: -2px; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 /* The description: the ticket's Markdown in a resting panel at body size, filling the panel. */
 .tf-tkdesc { padding: 14px 16px; }
@@ -174,7 +174,7 @@
    kind in mono, the name with who, when and how big under it; the row opens the preview. */
 .tf-tkread details.tf-tkfold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); margin-bottom: 10px; border-radius: 4px; }
 .tf-tkread details.tf-tkfold > summary::-webkit-details-marker { display: none; }
-.tf-tkread details.tf-tkfold > summary h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-tkread details.tf-tkfold > summary h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-tkread details.tf-tkfold > summary .tf-tkmark { width: 14px; height: 14px; color: var(--ink-2); transition: transform 120ms ease-out; }
 .tf-tkread details.tf-tkfold[open] > summary .tf-tkmark { transform: rotate(90deg); }
 .tf-tkread details.tf-tkfold > summary:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
@@ -218,7 +218,7 @@
 .tf-headed > :not(header) { background: var(--sheet); border: solid var(--rule); border-width: 0 1px; }
 .tf-headed > :where(:nth-child(2)):not(header) { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
 .tf-headed > :not(header):last-child { border-bottom-width: 1px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
-.tf-panel > header h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-panel > header h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-open {
   display: inline-flex; align-items: center; gap: 5px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2);
   text-decoration: none; padding: 3px 7px; border-radius: 3px; white-space: nowrap;
@@ -289,10 +289,10 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 /* A step's select shows its choice whole, and a value you cannot edit reads as words. */
 .tf-step select { width: auto; max-width: 100%; }
-.tf-step input[readonly] { background: none; border-color: transparent; border-left: 0; padding-left: 0; --fs: var(--size-ui); font-family: var(--sans); }
+.tf-step input[readonly] { background: none; border-color: transparent; border-left: 0; padding-left: 0; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 /* A step's fixed value as words, with its key in mono, as wide as a step's field so the notes beside them line up. */
 .tf-stepval { font-size: calc(var(--t-sm) * var(--fs)); padding: 4px 0; width: 100%; max-width: 400px; }
-.tf .tf-step input[aria-label="Open pull request"] { --fs: var(--size-ui); font-family: var(--sans); }
+.tf .tf-step input[aria-label="Open pull request"] { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 .tf-step .tf-state { grid-row: 1 / span 2; grid-column: 3; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-step .tf-swdetail { grid-column: 2; margin: 0; color: var(--ink-2); }
 /* The canonical footer (#2294): the note on the left, the primary on the right. */

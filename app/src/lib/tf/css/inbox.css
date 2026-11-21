@@ -46,7 +46,7 @@
 .tf-isnooze input { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--field); color: var(--ink); font: inherit; font-size: calc(var(--t-sm) * var(--fs)); }
 /* The fold is a heading over a sheet of rows in the list's shape, so its titles start on the list's edge. */
 .tf-ishelf.tf-collapse { border: 0; border-radius: 0; margin: 12px 0 0; }
-.tf-ishelf.tf-collapse > summary { padding: 0; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-ishelf.tf-collapse > summary { padding: 0; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-ishelf.tf-collapse > .tf-ishelf-rows { margin-top: 8px; padding: 0; }
 .tf-ishelf.tf-collapse > .tf-ishelf-rows > :last-child { margin-bottom: 0; }
 .tf-ifail { color: var(--err); font-size: calc(var(--t-sm) * var(--fs)); }

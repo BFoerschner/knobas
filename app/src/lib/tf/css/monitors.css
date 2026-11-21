@@ -8,7 +8,7 @@
    2026-11-19). The open monitor's one strip, 5 px a bar, keeps the mask that rounds each bar's ends. */
 .tf-mbar { display: inline-block; height: 14px; flex: none; vertical-align: middle; }
 .tf-mbar.tf-mbar-big { height: 22px; mask: url("strip-5.svg") 0 0 / 6px 22px repeat-x; }
-.tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 400; color: var(--ink-2); }
+.tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: var(--wt-ui, 400); color: var(--ink-2); }
 
 /* The body: the roster across the whole width, and the open monitor in a column of its own over the rows' end, where
    what they watch is, in a sidebar that drags. The roster keeps its width as a monitor opens, closes or is dragged
@@ -25,7 +25,7 @@
 .tf-mon-fig { white-space: nowrap; }
 .tf-mon-fig b {
   display: inline-block; min-width: 1.6em; margin-right: 5px; text-align: right;
-  --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%;
+  --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%;
   font-size: calc(var(--t-d1) * var(--fs)); line-height: 1; font-variant-numeric: tabular-nums; color: var(--ink-2);
 }
 .tf-mon-fig.tf-mon-figerr, .tf-mon-fig.tf-mon-figerr b { color: var(--err); }
@@ -78,7 +78,7 @@
 /* The row opens as a whole, so its name carries no underline until pointed at (design system, *Layout*). */
 .tf-mon-open { font-weight: inherit; text-align: left; cursor: pointer; }
 .tf-mon-open:hover { text-decoration: underline; text-underline-offset: 2px; }
-.tf-mon-type { margin-left: 2px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 400; color: var(--ink-2); }
+.tf-mon-type { margin-left: 2px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: var(--wt-ui, 400); color: var(--ink-2); }
 .tf-mon-state { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow: hidden; }
 /* Up, paused, no reading: a word, quiet, where a chip would make 200 healthy rows a wall of green. */
 .tf-mon-word { color: var(--ink-2); white-space: nowrap; }
@@ -93,12 +93,12 @@
 .tf-mon-paneled :is(.tf-mon-row, .tf-mon-head) > .tf-mon-watch { padding-right: calc(var(--side-monitor, 360px) + 22px - 12px); }
 /* A hidden monitor: after the roster, under its own line, every word in the second ink and no tone anywhere. */
 .tf-mon-row.tf-mon-hid { color: var(--ink-2); }
-.tf-mon-row.tf-mon-hid .tf-mon-name { font-weight: 400; }
+.tf-mon-row.tf-mon-hid .tf-mon-name { font-weight: var(--wt-ui, 400); }
 .tf-mon-hidhead {
   display: flex; gap: 8px; align-items: baseline; padding: 9px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
   font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--ink-2); white-space: nowrap; overflow: hidden;
 }
-.tf-mon-hidhead .tf-dim { font-weight: 400; }
+.tf-mon-hidhead .tf-dim { font-weight: var(--wt-ui, 400); }
 .tf-mon-hidn { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }
 /* The count keeps room for *, 1 hidden*, as `.tf-fcount` does for its own words: *Hide* wrapping the band would move the rows. */
 .tf-fend:has(> .tf-mon-hidn) { justify-content: flex-end; min-width: 146px; }
@@ -130,7 +130,7 @@
   max-height: calc(100vh - 140px); overflow-y: auto;
 }
 .tf-mon-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.tf-mon-panel h2 { --fs: var(--size-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.tf-mon-panel h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .tf-mon-pstate { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; min-height: var(--control-h-sm); }
 .tf-mon-pbar { display: grid; gap: 4px; justify-items: start; }
 .tf-mon-pbar .tf-mbar-axis { width: 287px; }

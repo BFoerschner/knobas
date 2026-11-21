@@ -26,7 +26,7 @@
 .tf-menu.tf-vw-m .tf-menu-danger { color: var(--err); }
 .tf-vw-none { font-size: calc(var(--t-sm) * var(--fs)); margin: 8px; }
 /* Jira views (#877): the groups' source note, the list's foot, View settings' Jira part. */
-.tf-vw-sync { font-weight: 400; color: var(--ink-2); }
+.tf-vw-sync { font-weight: var(--wt-ui, 400); color: var(--ink-2); }
 .tf-vw-foot { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); margin: 14px 8px 0; line-height: 1.4; }
 .tf-views .tf-vw-foot a { display: inline; padding: 0; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-views .tf-vw-foot a:hover { background: none; color: var(--ink); }
@@ -56,5 +56,5 @@
 .tf-vw-srcline code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); color: var(--ink); background: var(--sheet-2); padding: 0 4px; border-radius: 3px; font-variant-ligatures: var(--mono-ligatures); }
 .tf-vw-srcline a { color: var(--ink); }
 .tf-vw-srcline.tf-vw-warn { color: var(--warn); }
-.tf-lab { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 400; padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
+.tf-lab { font-size: calc(var(--t-xs) * var(--fs)); font-weight: var(--wt-ui, 400); padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
 .tf-vw-store { font-size: calc(var(--t-xs) * var(--fs)); align-self: center; }
