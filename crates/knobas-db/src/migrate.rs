@@ -56,6 +56,18 @@ pub async fn run(pool: &sqlx::PgPool) -> Result<(), crate::DbError> {
     run_with(&sqlx::migrate!("./migrations"), pool).await
 }
 
+/// The greatest migration version this build embeds: the schema it migrates a database to.
+/// The update page compares it with a release's `knobas.schema` to say whether that release
+/// changes the database (ADR-0052).
+#[must_use]
+pub fn newest() -> i64 {
+    sqlx::migrate!("./migrations")
+        .iter()
+        .map(|migration| migration.version)
+        .max()
+        .unwrap_or(0)
+}
+
 /// [`run`] with another set of migrations: what a test uses to stand for a
 /// build whose files had other line endings.
 ///
@@ -224,6 +236,21 @@ mod tests {
          with \"migration N was previously applied but has been modified\" (#2327). \
          Restore the file's released bytes (`git checkout <last release tag> -- <file>`) \
          and make the change in a new migration.";
+
+    /// `newest` is the greatest file number in `migrations/`, the number
+    /// `scripts/update-manifest.sh` writes into a release's `knobas.schema`.
+    #[test]
+    fn newest_is_the_greatest_file_number() {
+        let greatest = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
+            .unwrap()
+            .filter_map(|entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                name.split('_').next()?.parse::<i64>().ok()
+            })
+            .max()
+            .unwrap();
+        assert_eq!(super::newest(), greatest);
+    }
 
     /// One line of the list: version, checksum, file name.
     struct Pinned {

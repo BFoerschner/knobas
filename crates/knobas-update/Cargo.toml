@@ -1,0 +1,59 @@
+[package]
+name = "knobas-update"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# knobas updates itself (ADR-0052, docs/decisions/2026-11-21-knobas-updates-itself.md): the
+# version order, the official updater's `latest.json`, the two channels' discovery, the minisign
+# check against the compiled-in keys, the download, the two files beside the profile and the
+# three installers. No Tauri: the app wires this crate to its window, its quit and its backup.
+#
+# The format of what a release carries is `tauri-plugin-updater`'s own (MIT or Apache-2.0), and
+# the install steps follow its 2.14.1 source, so the plugin can take over the client half after
+# a Tauri bump without a change to any release.
+
+[[bin]]
+# The release run's check (`scripts/sign-update-artifacts.sh`): each signed artifact verified
+# with the keys this build trusts, and `--keys` printing their ids.
+name = "knobas-update-verify"
+path = "src/bin/knobas-update-verify.rs"
+
+[dependencies]
+# The minisign check of the Tauri CLI's signatures. MIT, no dependencies, 24 KB.
+minisign-verify = "=0.3.0"
+# Parsing a version; the order is knobas's own (`version::order`). The copy in the lockfile.
+semver = "=1.0.28"
+# The Mac's update artifact is the bundle as a tar.gz. The copies in the lockfile.
+tar = "0.4"
+flate2 = "=1.1.9"
+# The private folder an artifact is staged into before it is run or unpacked.
+tempfile = "3"
+# A `.sig` file and a `.pub` file are base64 of minisign's lines.
+base64 = "0.22"
+url = "2"
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+# Cancel stops a download mid-chunk. The copy the app already uses.
+tokio-util = { version = "0.7", default-features = false }
+async-trait.workspace = true
+tracing = "0.1"
+# The one HTTP stack: rustls with the system's roots, the system proxy, the limiter.
+knobas-http = { path = "../knobas-http" }
+knobas-source = { path = "../knobas-source" }
+# The channel and the standing cross the bridge in `knobas-app`'s `update.ts`.
+ts-rs.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# The Mac's one-step exchange of two bundles (`renameatx_np` with `RENAME_SWAP`), and Linux's
+# `RENAME_EXCHANGE`. The copy in the lockfile.
+rustix = { version = "1", features = ["fs"] }
+
+[dev-dependencies]
+# The loopback server the download and the channels are tested against. The copy the app's
+# tests use; it brings no reqwest of its own.
+wiremock = "0.6"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time", "test-util"] }
